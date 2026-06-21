@@ -1821,3 +1821,86 @@ function init() end
     parent.resync_state();
     assert_eq!(parent.state.get("received"), Some(serde_json::json!(42)));
 }
+
+#[test]
+fn refs_read_live_element_geometry_from_published_metrics() {
+    // `refs.<name>.<field>` reads the latest published metrics, so a handler sees
+    // the geometry of the most recent paint — and re-reads pick up new values
+    // without re-binding (a live reference, not a one-shot snapshot).
+    let mut ctx = ScriptContext::new("@test/refs", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+width = -1
+present = false
+function measure()
+    width = refs.panel.width
+    present = refs.panel.present
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.apply_element_metrics(&serde_json::json!({
+        "panel": { "width": 320.0, "height": 48.0 }
+    }));
+    ctx.call_handler("measure", &[]).unwrap();
+    assert_eq!(ctx.state.get("width"), Some(serde_json::json!(320)));
+    assert_eq!(ctx.state.get("present"), Some(serde_json::json!(true)));
+
+    // A new paint publishes new metrics; the same `refs.panel` reads the update.
+    ctx.apply_element_metrics(&serde_json::json!({
+        "panel": { "width": 200.0, "height": 48.0 }
+    }));
+    ctx.call_handler("measure", &[]).unwrap();
+    assert_eq!(ctx.state.get("width"), Some(serde_json::json!(200)));
+}
+
+#[test]
+fn refs_absent_element_reads_nil_and_reports_not_present() {
+    let mut ctx = ScriptContext::new("@test/refs-absent", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+width_state = "unknown"
+missing_present = true
+function probe()
+    width_state = refs.ghost.width == nil and "absent" or "present"
+    missing_present = refs.ghost.present
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.apply_element_metrics(&serde_json::json!({ "panel": { "width": 10.0 } }));
+    ctx.call_handler("probe", &[]).unwrap();
+
+    // A field on an element not in the current tree reads nil; `present` is false.
+    assert_eq!(ctx.state.get("width_state"), Some(serde_json::json!("absent")));
+    assert_eq!(ctx.state.get("missing_present"), Some(serde_json::json!(false)));
+}
+
+#[test]
+fn refs_methods_queue_element_actions_for_the_shell() {
+    // `refs.<name>:focus()` / `:blur()` enqueue imperative actions the shell
+    // drains and applies to the real widget tree — both call styles work.
+    let mut ctx = ScriptContext::new("@test/refs-actions", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+function activate()
+    refs.search_input:focus()
+    refs.search_input.blur()
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_handler("activate", &[]).unwrap();
+    let actions = ctx.drain_element_actions();
+    assert_eq!(actions.len(), 2);
+    assert_eq!(actions[0].target, "search_input");
+    assert_eq!(actions[0].action, "focus");
+    assert_eq!(actions[1].target, "search_input");
+    assert_eq!(actions[1].action, "blur");
+
+    // Draining is one-shot.
+    assert!(ctx.drain_element_actions().is_empty());
+}

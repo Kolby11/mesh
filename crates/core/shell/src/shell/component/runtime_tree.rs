@@ -523,6 +523,7 @@ pub(super) fn collect_element_metrics(
     offset_y: f32,
     elements: &mut serde_json::Map<String, serde_json::Value>,
     refs: &mut serde_json::Map<String, serde_json::Value>,
+    ref_keys: &mut HashMap<String, String>,
 ) {
     let metrics = element_snapshot_json(node, offset_x, offset_y);
     let scroll_x = metrics
@@ -534,20 +535,29 @@ pub(super) fn collect_element_metrics(
         .and_then(serde_json::Value::as_f64)
         .unwrap_or(0.0) as f32;
 
-    if let Some(key) = node.attributes.get("_mesh_key") {
+    let node_key = node.attributes.get("_mesh_key");
+    if let Some(key) = node_key {
         elements.insert(key.clone(), metrics.clone());
     }
+    // Map each `refs.<name>` to the node's runtime key so imperative element
+    // actions (focus/blur/…) can resolve a name back to the live widget node.
     if let Some(id) = node.attributes.get("id") {
         refs.insert(id.clone(), metrics.clone());
+        if let Some(key) = node_key {
+            ref_keys.insert(id.clone(), key.clone());
+        }
     }
     if let Some(reference) = node.attributes.get("ref") {
         refs.insert(reference.clone(), metrics);
+        if let Some(key) = node_key {
+            ref_keys.insert(reference.clone(), key.clone());
+        }
     }
 
     let child_offset_x = offset_x - scroll_x;
     let child_offset_y = offset_y - scroll_y;
     for child in &node.children {
-        collect_element_metrics(child, child_offset_x, child_offset_y, elements, refs);
+        collect_element_metrics(child, child_offset_x, child_offset_y, elements, refs, ref_keys);
     }
 }
 

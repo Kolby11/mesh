@@ -10,6 +10,7 @@ pub(super) use std::path::PathBuf;
 
 mod bind_live;
 mod debug;
+mod element_refs;
 mod quick_settings;
 mod real_surfaces;
 mod service;

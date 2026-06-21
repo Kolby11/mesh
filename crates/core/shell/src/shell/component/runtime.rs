@@ -495,6 +495,11 @@ impl FrontendSurfaceComponent {
             self.invalidate_script_state();
         }
 
+        // Execute imperative element actions the handler queued via live
+        // `refs.<name>` references (focus/blur), routed through the real focus path.
+        let mut element_requests = self.apply_element_actions()?;
+        events.append(&mut element_requests);
+
         Ok(events)
     }
 

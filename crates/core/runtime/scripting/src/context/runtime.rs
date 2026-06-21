@@ -2,6 +2,7 @@ use super::lookup::{
     interface_error_message, lookup_failure_reason, lua_err, lua_value_to_string, map_lua_error,
     record_lookup_diagnostic, record_lookup_diagnostic_lua,
 };
+use super::element_ref::{ElementAction, create_refs_proxy};
 use super::proxy::{create_event_channel, create_interface_proxy, interface_event_channel};
 use super::{PublishedEvent, ScriptDiagnostic, ScriptError, ScriptInterfaceImport, ScriptState};
 use crate::chunk_cache::ChunkCache;
@@ -108,6 +109,8 @@ pub struct ScriptContext {
     shared_published_events: Arc<Mutex<Vec<PublishedEvent>>>,
     diagnostics: Vec<ScriptDiagnostic>,
     shared_diagnostics: Arc<Mutex<Vec<ScriptDiagnostic>>>,
+    element_actions: Vec<ElementAction>,
+    shared_element_actions: Arc<Mutex<Vec<ElementAction>>>,
     storage: Arc<Mutex<ScopedStorage>>,
     tracked_storage_keys: Arc<Mutex<HashSet<String>>>,
     changed_storage_keys: Arc<Mutex<HashSet<String>>>,
@@ -196,6 +199,8 @@ impl ScriptContext {
             shared_published_events: Arc::new(Mutex::new(Vec::new())),
             diagnostics: storage_diagnostics,
             shared_diagnostics: Arc::new(Mutex::new(Vec::new())),
+            element_actions: Vec::new(),
+            shared_element_actions: Arc::new(Mutex::new(Vec::new())),
             storage: Arc::new(Mutex::new(storage)),
             tracked_storage_keys: Arc::new(Mutex::new(HashSet::new())),
             changed_storage_keys: Arc::new(Mutex::new(HashSet::new())),
@@ -288,6 +293,7 @@ impl ScriptContext {
         }
         self.shared_published_events.lock().unwrap().clear();
         self.shared_diagnostics.lock().unwrap().clear();
+        self.shared_element_actions.lock().unwrap().clear();
         self.changed_storage_keys.lock().unwrap().clear();
         self.clear_tracked_service_fields();
         self.clear_subscribed_interface_events();
@@ -350,6 +356,22 @@ impl ScriptContext {
             let _ = self.lua().globals().set("__mesh_locale_current", locale);
         }
         self.refresh_module_object();
+    }
+
+    /// Publish the latest per-paint element metrics so live `refs.<name>` reads
+    /// reflect the current frame's geometry/state.
+    ///
+    /// `metrics` is a `{ name -> fields }` object (the same shape the shell builds
+    /// from the painted tree). Stored on the shared realm's globals so every
+    /// component in the surface reads through `_ENV.__index -> globals`.
+    pub fn apply_element_metrics(&mut self, metrics: &Value) {
+        let _ = self.ensure_initialized();
+        if let Ok(lua_value) = self.lua().to_value(metrics) {
+            let _ = self
+                .lua()
+                .globals()
+                .set("__mesh_element_metrics", lua_value);
+        }
     }
 
     pub fn emit_interface_event(
@@ -762,6 +784,13 @@ impl ScriptContext {
         std::mem::take(&mut self.diagnostics)
     }
 
+    /// Drain imperative element actions (`refs.<name>:focus()`, …) queued by the
+    /// script so the shell can execute them against the real widget tree.
+    pub fn drain_element_actions(&mut self) -> Vec<ElementAction> {
+        self.sync_side_channels();
+        std::mem::take(&mut self.element_actions)
+    }
+
     pub fn flush_storage(&mut self) {
         let result = self.storage.lock().unwrap().flush_if_dirty();
         if let Err(error) = result {
@@ -1153,6 +1182,15 @@ impl ScriptContext {
             })
             .map_err(lua_err)?;
         globals.set("require", require).map_err(lua_err)?;
+
+        // `refs.<name>` is a live element-node reference: geometry/state fields
+        // read from the latest paint (`__mesh_element_metrics`, published by the
+        // shell each frame) and methods (`focus`, `blur`, …) enqueue element
+        // actions the shell executes against the real widget tree.
+        let refs_proxy =
+            create_refs_proxy(self.lua(), globals, Arc::clone(&self.shared_element_actions))
+                .map_err(lua_err)?;
+        globals.set("refs", refs_proxy).map_err(lua_err)?;
         Ok(())
     }
 
@@ -1309,6 +1347,12 @@ impl ScriptContext {
             let mut diagnostics = self.shared_diagnostics.lock().unwrap();
             if !diagnostics.is_empty() {
                 self.diagnostics.extend(diagnostics.drain(..));
+            }
+        }
+        {
+            let mut element_actions = self.shared_element_actions.lock().unwrap();
+            if !element_actions.is_empty() {
+                self.element_actions.extend(element_actions.drain(..));
             }
         }
         let changed_storage_keys = {

@@ -393,6 +393,11 @@ pub(super) struct FrontendSurfaceComponent {
     /// child is re-synced so values its parent mutated through the live proxy
     /// re-render. Refreshed every render by `bind_child_instance`.
     bound_children: RefCell<HashMap<String, Vec<(String, String)>>>,
+    /// `refs.<name>` -> live widget node key, rebuilt every paint by
+    /// `publish_element_metrics`. Lets imperative element actions
+    /// (`refs.<name>:focus()`) resolve a script-facing ref name back to the
+    /// retained node it targets.
+    ref_node_keys: RefCell<HashMap<String, String>>,
     transitions: TransitionAnimator,
     keyframe_animations: HashMap<String, mesh_core_animation::keyframes::ActiveKeyframeAnimation>,
     keyframe_rules: HashMap<String, mesh_core_animation::keyframes::KeyframeRule>,
@@ -519,6 +524,7 @@ impl FrontendSurfaceComponent {
             last_surface_states: HashMap::new(),
             portal_hidden_bindings: RefCell::new(HashMap::new()),
             bound_children: RefCell::new(HashMap::new()),
+            ref_node_keys: RefCell::new(HashMap::new()),
             transitions: TransitionAnimator::new(),
             keyframe_animations: HashMap::new(),
             keyframe_rules: HashMap::new(),

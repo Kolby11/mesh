@@ -41,13 +41,69 @@ impl FrontendSurfaceComponent {
     pub(super) fn publish_element_metrics(&self, tree: &WidgetNode) {
         let mut elements = serde_json::Map::new();
         let mut refs = serde_json::Map::new();
-        collect_element_metrics(tree, 0.0, 0.0, &mut elements, &mut refs);
+        let mut ref_keys = HashMap::new();
+        collect_element_metrics(tree, 0.0, 0.0, &mut elements, &mut refs, &mut ref_keys);
+        let refs = serde_json::Value::Object(refs);
 
         if let Some(root_runtime) = self.runtimes.lock().unwrap().get_mut(self.id()) {
-            let state = root_runtime.script_ctx.state_mut();
-            state.set_host_value("elements", serde_json::Value::Object(elements));
-            state.set_host_value("refs", serde_json::Value::Object(refs));
+            // `elements` and the `refs` snapshot stay in script state (templates can
+            // bind `{refs.x.width}`); `apply_element_metrics` additionally feeds the
+            // live `refs.<name>` proxy that scripts read, which also exposes
+            // imperative methods (`refs.x:focus()`).
+            root_runtime
+                .script_ctx
+                .state_mut()
+                .set_host_value("elements", serde_json::Value::Object(elements));
+            root_runtime
+                .script_ctx
+                .state_mut()
+                .set_host_value("refs", refs.clone());
+            root_runtime.script_ctx.apply_element_metrics(&refs);
         }
+        // Remember name -> node key so drained element actions resolve their target.
+        *self.ref_node_keys.borrow_mut() = ref_keys;
+    }
+
+    /// Execute imperative element actions queued by scripts through live
+    /// `refs.<name>` references (`focus`, `blur`, …), resolving each target to its
+    /// live widget node and routing through the real focus/interaction paths.
+    pub(super) fn apply_element_actions(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
+        let actions = match self.runtimes.lock().unwrap().get_mut(self.id()) {
+            Some(runtime) => runtime.script_ctx.drain_element_actions(),
+            None => Vec::new(),
+        };
+        if actions.is_empty() {
+            return Ok(Vec::new());
+        }
+        let Some(tree) = self.last_tree.clone() else {
+            return Ok(Vec::new());
+        };
+        let ref_keys = self.ref_node_keys.borrow().clone();
+
+        let mut requests = Vec::new();
+        for action in actions {
+            match action.action.as_str() {
+                "focus" => {
+                    if let Some(key) = ref_keys.get(&action.target) {
+                        requests.extend(self.set_focus_target(&tree, Some(key.clone()), true)?);
+                    }
+                }
+                "blur" => {
+                    // Only clear focus if the target currently holds it, so a stale
+                    // blur does not steal focus from an unrelated element.
+                    let holds_focus = ref_keys
+                        .get(&action.target)
+                        .is_some_and(|key| self.focused_key.as_deref() == Some(key));
+                    if holds_focus {
+                        requests.extend(self.set_focus_target(&tree, None, false)?);
+                    }
+                }
+                other => {
+                    tracing::debug!(action = %other, target = %action.target, "unhandled element action");
+                }
+            }
+        }
+        Ok(requests)
     }
 
     /// Remove hover, focus, and active targets that no longer exist in the final

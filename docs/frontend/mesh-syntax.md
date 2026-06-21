@@ -351,6 +351,38 @@ Available fields include `width`, `height`, `left`, `top`, `right`, `bottom`,
 `bounding_client_rect`. Runtime-generated keys are also available in
 `elements`, but `refs` is the stable author-facing API.
 
+`refs.<name>` is a **live element reference**, the closest analog to a DOM node
+handle. The reference is stable across renders and its fields always report the
+most recently painted layout (geometry is only known after layout, so a value
+read during `render` reflects the previous committed frame — the same rule as
+reading layout inside a DOM effect). `refs.<name>.present` (alias `exists`)
+reports whether the element is in the current tree, so a script can guard a
+conditionally rendered node.
+
+Live references also expose **imperative methods** that act on the real widget
+node — both `refs.x:focus()` (method) and `refs.x.focus()` (plain) call styles
+work:
+
+```lua
+function onSearchOpen()
+    if refs.search_input.present then
+        refs.search_input:focus()   -- move keyboard focus to the input
+    end
+end
+
+function onSearchClose()
+    refs.search_input:blur()        -- release focus if this element holds it
+end
+```
+
+| Method     | Effect                                                          |
+| ---------- | -------------------------------------------------------------- |
+| `:focus()` | Routes through the canonical focus path (fires `onfocus`).     |
+| `:blur()`  | Clears focus if this element currently holds it (fires `onblur`). |
+
+Method calls are queued and applied by the shell right after the handler
+returns, so they compose with the handler's other state changes in one frame.
+
 Common event attributes:
 
 | Attribute      | Fires when                 |
