@@ -14,11 +14,13 @@ impl FrontendSurfaceComponent {
         if previous_key != next_key {
             self.keyboard_button_press_activations.clear();
             if let Some(previous_key) = previous_key.as_deref() {
-                requests.extend(self.call_node_handler(tree, previous_key, "blur", &[])?);
+                let event = self.build_focus_event(tree, previous_key, "blur");
+                requests.extend(self.call_node_handler(tree, previous_key, "blur", &[event])?);
             }
             self.focused_key = next_key.clone();
             if let Some(next_key) = next_key.as_deref() {
-                requests.extend(self.call_node_handler(tree, next_key, "focus", &[])?);
+                let event = self.build_focus_event(tree, next_key, "focus");
+                requests.extend(self.call_node_handler(tree, next_key, "focus", &[event])?);
             }
         }
 

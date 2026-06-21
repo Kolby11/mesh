@@ -220,14 +220,14 @@ fn shipped_theme_selector_uses_left_anchored_content_measured_popover_layout() {
         "@mesh/theme-selector should stay content-measured like the other nav popovers"
     );
     assert_eq!(theme_selector.surface_layout.width, 112);
-    assert_eq!(theme_selector.surface_layout.height, 116);
+    assert_eq!(theme_selector.surface_layout.height, 92);
     assert_eq!(
         theme_selector.surface_layout.display_transition.show_ms,
         120
     );
     assert_eq!(
         theme_selector.surface_layout.display_transition.hide_ms,
-        120
+        180
     );
 }
 
@@ -239,9 +239,9 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
     theme_selector.visible = true;
     theme_selector.set_surface_exiting(false);
 
-    let mut buffer = PixelBuffer::new(112, 116);
+    let mut buffer = PixelBuffer::new(112, 92);
     theme_selector
-        .paint(&theme, 112, 116, &mut buffer, 1.0)
+        .paint(&theme, 112, 92, &mut buffer, 1.0)
         .unwrap();
     let entering_tree = theme_selector
         .last_tree
@@ -255,18 +255,28 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
         "first show paint should expose mesh-surface-entering for collapsed bubble positions"
     );
     let entering_bubble =
-        first_node_with_class_token(entering_tree, "theme-bubble").expect("entering theme bubble");
+        first_node_with_class_token(entering_tree, "bubble-option").expect("entering theme bubble");
     assert_eq!(
         entering_bubble.computed_style.transform.translate_x, 0.0,
-        "entering bubble should start at the trigger origin"
+        "button hit target should stay at its resting position during entrance"
     );
     assert_eq!(
-        entering_bubble.computed_style.transform.translate_y, -18.0,
-        "entering bubble should start tucked above the trigger origin"
+        entering_bubble.computed_style.transform.translate_y, 0.0,
+        "button hit target should stay at its resting position during entrance"
+    );
+    let entering_motion = first_node_with_class_token(entering_tree, "bubble-options-motion")
+        .expect("entering bubble motion wrapper");
+    assert_eq!(
+        entering_motion.computed_style.transform.translate_x, 46.0,
+        "motion wrapper should visually launch from the trigger origin"
+    );
+    assert_eq!(
+        entering_motion.computed_style.transform.translate_y, 4.0,
+        "motion wrapper should visually launch from the trigger origin"
     );
 
     theme_selector
-        .paint(&theme, 112, 116, &mut buffer, 1.0)
+        .paint(&theme, 112, 92, &mut buffer, 1.0)
         .unwrap();
     let launched_tree = theme_selector
         .last_tree
@@ -280,7 +290,7 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
         "second show paint should transition from entering state into resting bubble positions"
     );
     let launched_bubble =
-        first_node_with_class_token(launched_tree, "theme-bubble").expect("launched theme bubble");
+        first_node_with_class_token(launched_tree, "bubble-option").expect("launched theme bubble");
     assert!(
         launched_bubble.computed_style.transform.translate_x > -1.0,
         "launch transition should begin from the entering transform"
@@ -297,7 +307,7 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
     );
 
     theme_selector
-        .paint(&theme, 112, 116, &mut buffer, 1.0)
+        .paint(&theme, 112, 92, &mut buffer, 1.0)
         .unwrap();
     let replay_tree = theme_selector
         .last_tree
@@ -309,6 +319,139 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
             .get("class")
             .is_some_and(|class| class.contains("mesh-surface-entering")),
         "re-show should expose a fresh entering frame"
+    );
+}
+
+#[test]
+fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
+    let theme = default_theme();
+    let mut theme_selector =
+        real_frontend_module_component("@mesh/theme-selector", audio_network_catalog());
+    theme_selector.visible = true;
+    theme_selector.set_surface_exiting(false);
+
+    let mut buffer = PixelBuffer::new(112, 92);
+    theme_selector
+        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = theme_selector
+        .last_tree
+        .as_ref()
+        .expect("rendered theme selector entering frame");
+    assert!(
+        tree.attributes
+            .get("class")
+            .is_some_and(|class| class.contains("mesh-surface-entering")),
+        "test must click during the controlled entering frame"
+    );
+    let dark = first_node_with_attr(tree, "aria-label", "Default Dark").expect("dark theme button");
+    let click_x = dark.layout.x + dark.layout.width * 0.5;
+    let click_y = dark.layout.y + dark.layout.height * 0.5;
+
+    theme_selector
+        .handle_input(
+            &theme,
+            112,
+            92,
+            ComponentInput::PointerButton {
+                x: click_x,
+                y: click_y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    let requests = theme_selector
+        .handle_input(
+            &theme,
+            112,
+            92,
+            ComponentInput::PointerButton {
+                x: click_x,
+                y: click_y,
+                pressed: false,
+            },
+        )
+        .unwrap();
+
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::SetTheme { theme_id } if theme_id == "mesh-default-dark"
+        )),
+        "first entering-frame click should reach the theme handler: {requests:?}"
+    );
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::HideSurface { surface_id } if surface_id == "@mesh/theme-selector"
+        )),
+        "theme selection should still request the controlled hide: {requests:?}"
+    );
+}
+
+#[test]
+fn shipped_language_popover_cycles_three_bubble_options_on_scroll() {
+    let theme = default_theme();
+    let mut language =
+        real_frontend_module_component("@mesh/language-popover", audio_network_catalog());
+    language.visible = true;
+    language.set_surface_exiting(false);
+    language
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.locale".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({
+                "locale": "en",
+                "current": "en"
+            }),
+        })
+        .unwrap();
+
+    let mut buffer = PixelBuffer::new(112, 92);
+    language.paint(&theme, 112, 92, &mut buffer, 1.0).unwrap();
+    let tree = language
+        .last_tree
+        .as_ref()
+        .expect("rendered language bubble selector");
+    let mut labels = Vec::new();
+    collect_text_content(tree, &mut labels);
+    assert!(
+        labels.iter().any(|label| label == "HI"),
+        "initial centered English window should include previous locale"
+    );
+    assert!(
+        labels.iter().any(|label| label == "EN"),
+        "initial centered English window should include current locale"
+    );
+    assert!(
+        labels.iter().any(|label| label == "SK"),
+        "initial centered English window should include next locale"
+    );
+
+    language
+        .handle_input(
+            &theme,
+            112,
+            92,
+            ComponentInput::Scroll {
+                x: 56.0,
+                y: 46.0,
+                dx: 0.0,
+                dy: 1.0,
+            },
+        )
+        .unwrap();
+    language.paint(&theme, 112, 92, &mut buffer, 1.0).unwrap();
+    let tree = language
+        .last_tree
+        .as_ref()
+        .expect("rendered scrolled language bubble selector");
+    let mut labels = Vec::new();
+    collect_text_content(tree, &mut labels);
+    assert!(
+        labels.iter().any(|label| label == "DE"),
+        "scrolling over the bubble selector should advance the three visible options"
     );
 }
 

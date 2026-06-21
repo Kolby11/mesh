@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
+use mesh_core_elements::style::Dimension;
 use mesh_core_elements::WidgetNode;
 use mesh_core_frontend::FrontendCompositionResolver;
 use mesh_core_module::ModuleType;
@@ -74,7 +75,13 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             self.pending_surface_states
                 .borrow_mut()
                 .insert(module_id, !hidden);
-            return Some(WidgetNode::new("box"));
+            let mut placeholder = WidgetNode::new("box");
+            placeholder.computed_style.width = Dimension::Px(0.0);
+            placeholder.computed_style.height = Dimension::Px(0.0);
+            placeholder
+                .attributes
+                .insert("hidden".into(), "true".into());
+            return Some(placeholder);
         }
 
         let props_json: HashMap<String, serde_json::Value> = props

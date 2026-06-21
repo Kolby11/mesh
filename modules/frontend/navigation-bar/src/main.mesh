@@ -1,41 +1,22 @@
 <template>
-    <stack class="nav-root">
-        <row class="nav-shell">
-
-            <!-- Left: workspaces, active window, now playing -->
-            <row class="left-cluster">
-                <WorkspaceList />
-                <WindowTitle />
-                <NowPlaying />
-            </row>
-
-            <!-- Center: clock with date -->
-            <ClockButton />
-
-            <spacer class="nav-spacer" />
-
-            <!-- Right: brightness, audio, theme, language, battery, settings -->
-            <row class="right-cluster">
-                <BrightnessButton />
-                <row class="control-button-cell">
-                    <VolumeButton onMuteKeybind={onMuteShortcut} />
-                </row>
-                <row class="control-button-cell">
-                    <ThemeButton />
-                </row>
-                <row class="control-button-cell">
-                    <LanguageButton />
-                </row>
-                <row class="control-button-cell">
-                    <BatteryButton />
-                </row>
-                <row class="control-button-cell">
-                    <SettingsButton />
-                </row>
-            </row>
-
+    <row class="nav-shell">
+        <row class="status-cluster">
+            <WorkspaceList />
+            <WindowTitle />
+            <NowPlaying />
         </row>
-    </stack>
+
+        <ClockButton />
+
+        <row ref="control-cluster" class="right-cluster">
+            <BrightnessButton />
+            <VolumeButton onMuteKeybind={onMuteShortcut} />
+            <ThemeButton />
+            <LanguageButton />
+            <BatteryButton />
+            <SettingsButton />
+        </row>
+    </row>
 </template>
 
 <script lang="luau">
@@ -64,18 +45,11 @@ end
 </script>
 
 <style>
-    .nav-root {
-        display: flex;
-        justify-content: center;
-        width: 100%;
-        height: 100%;
-    }
-
     .nav-shell {
         width: 100%;
         height: 100%;
         container-type: inline-size;
-        justify-content: start;
+        justify-content: space-between;
         align-items: center;
         gap: var(--spacing-md);
         padding-inline: var(--spacing-lg);
@@ -89,16 +63,12 @@ end
         gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
     }
 
-    .left-cluster {
+    .status-cluster {
         align-items: center;
         gap: var(--spacing-sm);
         min-width: 0;
         flex-shrink: 1;
         transition: gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
-    }
-
-    .nav-spacer {
-        flex-grow: 1;
     }
 
     .right-cluster {
@@ -107,14 +77,6 @@ end
         align-items: center;
         gap: 2px;
         transition: gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
-    }
-
-    .control-button-cell {
-        height: 40px;
-        flex-shrink: 0;
-        align-items: center;
-        padding-inline: 1px;
-        padding-block: 0;
     }
 
     @container (max-width: 860px) {

@@ -712,6 +712,7 @@ fn is_event_handler_attribute(name: &str) -> bool {
             | "release"
             | "focus"
             | "blur"
+            | "scroll"
             | "keydown"
             | "keyup"
             | "keybind"

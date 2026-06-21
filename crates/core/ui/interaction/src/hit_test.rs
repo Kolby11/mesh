@@ -81,6 +81,10 @@ fn find_node_path_reversed(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<Vec<String>> {
+    if node_is_hidden(node) {
+        return None;
+    }
+
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
     let inside = layout_contains_with_offset(node, x, y, offset_x, offset_y);
     if !inside && node_clips_children(node) {
@@ -228,7 +232,7 @@ pub fn parse_namespaced_handler(handler: &str) -> Option<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mesh_core_elements::WidgetNode;
+    use mesh_core_elements::{LayoutRect, WidgetNode};
 
     #[test]
     fn phase87_tooltip_attribute_participates_in_inherited_tooltip_lookup() {
@@ -249,6 +253,54 @@ mod tests {
         assert_eq!(
             find_tooltip_by_key(&owner, "child"),
             Some(("owner".into(), "Open details".into()))
+        );
+    }
+
+    #[test]
+    fn hidden_portal_placeholder_does_not_block_previous_sibling_hit_target() {
+        let mut root = WidgetNode::new("stack");
+        root.attributes.insert("_mesh_key".into(), "root".into());
+        root.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 120.0,
+            height: 80.0,
+        };
+
+        let mut button = WidgetNode::new("button");
+        button
+            .attributes
+            .insert("_mesh_key".into(), "button".into());
+        button
+            .event_handlers
+            .insert("click".into(), "onClick".into());
+        button.layout = LayoutRect {
+            x: 10.0,
+            y: 10.0,
+            width: 40.0,
+            height: 40.0,
+        };
+
+        let mut placeholder = WidgetNode::new("box");
+        placeholder
+            .attributes
+            .insert("_mesh_key".into(), "portal".into());
+        placeholder
+            .attributes
+            .insert("hidden".into(), "true".into());
+        placeholder.layout = LayoutRect {
+            x: 10.0,
+            y: 10.0,
+            width: 40.0,
+            height: 40.0,
+        };
+
+        root.children.push(button);
+        root.children.push(placeholder);
+
+        assert_eq!(
+            find_node_path_at(&root, 30.0, 30.0),
+            Some(vec!["root".into(), "button".into()])
         );
     }
 }

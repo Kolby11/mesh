@@ -2,7 +2,7 @@
   <stack class="nav-button-shell">
     <button
       ref="language-button"
-      class="nav-button"
+      class="{trigger_class}"
       onclick={onLanguageToggle}
       title="{t('nav.language_menu')}"
       aria-label="{t('nav.language_menu')}"
@@ -20,6 +20,7 @@ local LanguagePopover = require("@mesh/language-popover")
 current_locale_label = "EN"
 language_surface_id = "@mesh/language-popover"
 language_surface_hidden = true
+trigger_class = "nav-button"
 
 local function locale_code()
     local locale = mesh.locale.current()
@@ -54,21 +55,33 @@ end
 
 function render(self)
     current_locale_label = locale_label(locale_code())
+    trigger_class = language_surface_hidden and "nav-button" or "nav-button nav-button-open"
 end
 
-function onLanguageToggle(event)
+local function show_language_selector(event)
     if language_surface_hidden then
+        local position = event.current_target.position or {}
+        local trigger_left = tonumber(position.margin_left) or 0
+        local trigger_width = tonumber(position.width) or 40
         mesh.events.publish("shell.position-surface", {
             surface_id = language_surface_id,
-            margin_top = 0,
-            margin_left = tonumber((event.current_target.position or {}).margin_left) or 0,
+            margin_top = -18,
+            margin_left = trigger_left + (trigger_width / 2) - 56,
         })
         local focus = event.trigger ~= nil and event.trigger.type == "keyboard"
         mesh.popover.activate(language_surface_id, event, { focus = focus })
         language_surface_hidden = false
+        trigger_class = "nav-button nav-button-open"
+    end
+end
+
+function onLanguageToggle(event)
+    if language_surface_hidden then
+        show_language_selector(event)
     else
         mesh.popover.hide(language_surface_id)
         language_surface_hidden = true
+        trigger_class = "nav-button"
     end
 end
 </script>
@@ -101,6 +114,13 @@ end
                 color var(--animation-duration-short) var(--animation-curves-bezier-standard),
                 border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
                 transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+}
+
+.nav-button-open {
+    background: var(--color-primary-container);
+    color: var(--color-on-primary-container);
+    border-color: var(--color-primary);
+    transform: translateY(-1px) scale(1.03);
 }
 
 .nav-button:hover {

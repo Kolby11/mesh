@@ -1,30 +1,77 @@
 <template>
-  <popover class="language-popover-shell">
-    <column class="language-popover">
-      <column class="language-popover-inner">
-        {#for locale in locales}
-        <button
-          class="{'language-option' .. (locale == selected_locale and ' language-option-selected' or '')}"
-          onclick={onSelectLocale(locale)}
-        >
-          <text class="language-option-text">{t('language.' .. locale)}</text>
-        </button>
-        {/for}
-      </column>
-    </column>
+  <popover class="language-popover-shell" onmouseleave={onSelectorLeave} aria-label="{t('language.choose')}">
+    <BubbleOptions
+      label="{t('language.choose')}"
+      item1_button_class="{item1_button_class}"
+      item1_core_class="{item1_core_class}"
+      item1_icon_class="bubble-option-icon bubble-option-hidden"
+      item1_icon="palette"
+      item1_text_class="bubble-option-text"
+      item1_text="{item1_text}"
+      item1_title="{item1_title}"
+      onfirst={onSelectFirst}
+      item2_button_class="{item2_button_class}"
+      item2_core_class="{item2_core_class}"
+      item2_icon_class="bubble-option-icon bubble-option-hidden"
+      item2_icon="palette"
+      item2_text_class="bubble-option-text"
+      item2_text="{item2_text}"
+      item2_title="{item2_title}"
+      onsecond={onSelectSecond}
+      item3_button_class="{item3_button_class}"
+      item3_core_class="{item3_core_class}"
+      item3_icon_class="bubble-option-icon bubble-option-hidden"
+      item3_icon="palette"
+      item3_text_class="bubble-option-text"
+      item3_text="{item3_text}"
+      item3_title="{item3_title}"
+      onthird={onSelectThird}
+      onscroll={onOptionScroll}
+    />
   </popover>
 </template>
 
 <script lang="luau">
 local t = import("mesh.i18n", "t")
+local BubbleOptions = require("../../shared/components/bubble-options.mesh")
 
 locales = { "en", "sk", "de", "fr", "es", "ja", "zh", "ko", "ar", "hi" }
 
 selected_locale = "en"
 surface_id = nil
+window_start = 1
+
+item1_button_class = "bubble-option bubble-option-left"
+item2_button_class = "bubble-option bubble-option-center"
+item3_button_class = "bubble-option bubble-option-right"
+item1_core_class = "bubble-option-core bubble-option-core-language"
+item2_core_class = "bubble-option-core bubble-option-core-language"
+item3_core_class = "bubble-option-core bubble-option-core-language"
+item1_text = "EN"
+item2_text = "SK"
+item3_text = "DE"
+item1_title = "English"
+item2_title = "Slovak"
+item3_title = "German"
 
 local function get_surface_id()
     return surface_id or "@mesh/language-popover"
+end
+
+local function normalize_index(index)
+    local count = #locales
+    return ((index - 1) % count) + 1
+end
+
+local function locale_at(offset)
+    return locales[normalize_index(window_start + offset)]
+end
+
+local function locale_label(locale)
+    if type(locale) ~= "string" or locale == "" then
+        return "??"
+    end
+    return string.upper(string.sub(locale, 1, 2))
 end
 
 local function apply_selection(locale)
@@ -49,8 +96,58 @@ local function stored_locale(storage)
     return nil
 end
 
+local function sync_window_to_locale(locale)
+    for index, valid in locales do
+        if valid == locale then
+            window_start = normalize_index(index - 1)
+            return
+        end
+    end
+end
+
+local function set_option(slot, locale)
+    local button_class = "bubble-option"
+    local core_class = "bubble-option-core bubble-option-core-language"
+    if slot == 1 then
+        button_class = button_class .. " bubble-option-left"
+    elseif slot == 2 then
+        button_class = button_class .. " bubble-option-center"
+    else
+        button_class = button_class .. " bubble-option-right"
+    end
+    if locale == selected_locale then
+        button_class = button_class .. " bubble-option-active"
+        core_class = core_class .. " bubble-option-core-active"
+    end
+
+    if slot == 1 then
+        item1_button_class = button_class
+        item1_core_class = core_class
+        item1_text = locale_label(locale)
+        item1_title = t("language." .. locale)
+    elseif slot == 2 then
+        item2_button_class = button_class
+        item2_core_class = core_class
+        item2_text = locale_label(locale)
+        item2_title = t("language." .. locale)
+    else
+        item3_button_class = button_class
+        item3_core_class = core_class
+        item3_text = locale_label(locale)
+        item3_title = t("language." .. locale)
+    end
+end
+
+local function sync_options()
+    set_option(1, locale_at(0))
+    set_option(2, locale_at(1))
+    set_option(3, locale_at(2))
+end
+
 local function select_locale(locale)
     apply_selection(locale)
+    sync_window_to_locale(locale)
+    sync_options()
     mesh.locale.set(locale)
     mesh.popover.hide(get_surface_id())
 end
@@ -66,21 +163,43 @@ end
 function render(self)
     surface_id = self and self.id or surface_id
     apply_selection(stored_locale(self.storage) or current_locale())
+    sync_window_to_locale(selected_locale)
+    sync_options()
 end
 
-function onSelectLocale(locale, event)
-    if locale then
-        select_locale(locale)
+function onSelectFirst()
+    select_locale(locale_at(0))
+end
+
+function onSelectSecond()
+    select_locale(locale_at(1))
+end
+
+function onSelectThird()
+    select_locale(locale_at(2))
+end
+
+function onOptionScroll(event)
+    local delta = event and event.delta or {}
+    local dy = tonumber(delta.y) or 0
+    if dy >= 0 then
+        window_start = normalize_index(window_start + 1)
+    else
+        window_start = normalize_index(window_start - 1)
     end
+    sync_options()
+end
+
+function onSelectorLeave()
+    mesh.popover.hide(get_surface_id())
 end
 </script>
 
 <style>
 .language-popover-shell {
     width: 100%;
-    height: fit-content;
-    max-height: 200px;
-    padding: var(--spacing-sm);
+    height: 100%;
+    padding: 0;
     background: transparent;
     opacity: 1;
     transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
@@ -88,69 +207,5 @@ end
 
 .language-popover-shell.mesh-surface-exiting {
     opacity: 0;
-}
-
-.language-popover {
-    width: 100%;
-    max-width: 260px;
-    overflow: hidden;
-    border-radius: var(--radius-lg);
-    background: var(--color-surface-container);
-    border-width: 1px;
-    border-style: solid;
-    border-color: var(--color-outline-variant);
-}
-
-.language-popover-inner {
-    width: 100%;
-    flex-direction: column;
-    overflow-y: auto;
-    overflow-x: hidden;
-    gap: var(--spacing-sm);
-    padding: var(--spacing-sm);
-}
-
-.language-option {
-    width: 100%;
-    flex-shrink: 0;
-    justify-content: start;
-    align-items: center;
-    text-wrap: none;
-    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
-}
-
-.language-option:hover {
-    background: var(--color-secondary-container);
-    color: var(--color-on-secondary-container);
-    border-radius: var(--radius-md);
-}
-
-.language-option:focus,
-.language-option:focus-visible {
-    background: var(--color-tertiary-container);
-    color: var(--color-on-tertiary-container);
-    border-radius: var(--radius-md);
-}
-
-.language-option:active {
-    background: var(--color-primary);
-    color: var(--color-on-primary);
-    border-color: var(--color-primary);
-    border-radius: var(--radius-full);
-}
-
-.language-option-selected {
-    background: var(--color-secondary-container);
-    color: var(--color-on-secondary-container);
-}
-
-.language-option-text {
-    font-size: var(--typography-size-sm);
-    font-weight: 700;
-    color: inherit;
-    text-wrap: none;
 }
 </style>

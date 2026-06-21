@@ -3,7 +3,6 @@
         <button
             class="{trigger_class}"
             onclick={onThemeToggle}
-            onmouseenter={onThemeEnter}
             aria-haspopup="true"
             title={t(theme_tooltip_key)}
             aria-label={t(theme_tooltip_key)}
@@ -66,17 +65,13 @@ local function show_theme_selector(event)
         local trigger_width = tonumber(position.width) or 40
         mesh.events.publish("shell.position-surface", {
             surface_id = theme_surface_id,
-            margin_top = -40,
+            margin_top = -18,
             margin_left = trigger_left + (trigger_width / 2) - 56,
         })
         mesh.popover.activate(theme_surface_id, event, { focus = false })
         theme_surface_hidden = false
         trigger_class = "nav-button nav-button-open"
     end
-end
-
-function onThemeEnter(event)
-    show_theme_selector(event)
 end
 
 function onThemeToggle(event)

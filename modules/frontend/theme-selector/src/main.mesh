@@ -1,47 +1,68 @@
 <template>
     <popover class="theme-float-shell" onmouseleave={onSelectorLeave} aria-label="Select theme">
-        <box class="theme-float-stage">
-            <button class="{dark_class}" onclick={onDark} aria-label="Default Dark">
-                <box class="theme-bubble-core theme-bubble-core-dark">
-                    <icon class="theme-bubble-icon" name="weather-clear-night" size="14" />
-                </box>
-            </button>
-            <button class="{light_class}" onclick={onLight} aria-label="Default Light">
-                <box class="theme-bubble-core theme-bubble-core-light">
-                    <icon class="theme-bubble-icon" name="weather-clear" size="14" />
-                </box>
-            </button>
-            <button class="{gruvbox_class}" onclick={onGruvbox} aria-label="Gruvbox">
-                <box class="theme-bubble-core theme-bubble-core-gruvbox">
-                    <icon class="theme-bubble-icon" name="palette" size="14" />
-                </box>
-            </button>
-        </box>
+        <BubbleOptions
+            label="Select theme"
+            item1_button_class="{dark_class}"
+            item1_core_class="{dark_core_class}"
+            item1_icon_class="bubble-option-icon"
+            item1_icon="weather-clear-night"
+            item1_text_class="bubble-option-text bubble-option-hidden"
+            item1_text=""
+            item1_title="Default Dark"
+            onfirst={onDark}
+            item2_button_class="{light_class}"
+            item2_core_class="{light_core_class}"
+            item2_icon_class="bubble-option-icon"
+            item2_icon="weather-clear"
+            item2_text_class="bubble-option-text bubble-option-hidden"
+            item2_text=""
+            item2_title="Default Light"
+            onsecond={onLight}
+            item3_button_class="{gruvbox_class}"
+            item3_core_class="{gruvbox_core_class}"
+            item3_icon_class="bubble-option-icon"
+            item3_icon="palette"
+            item3_text_class="bubble-option-text bubble-option-hidden"
+            item3_text=""
+            item3_title="Gruvbox"
+            onthird={onGruvbox}
+            onscroll={onThemeScroll}
+        />
     </popover>
 </template>
 
 <script lang="luau">
 local theme = require("mesh.theme")
+local BubbleOptions = require("../../shared/components/bubble-options.mesh")
 
-dark_class = "theme-bubble theme-bubble-dark"
-light_class = "theme-bubble theme-bubble-light"
-gruvbox_class = "theme-bubble theme-bubble-gruvbox"
+dark_class = "bubble-option bubble-option-left"
+light_class = "bubble-option bubble-option-center"
+gruvbox_class = "bubble-option bubble-option-right"
+dark_core_class = "bubble-option-core bubble-option-core-dark"
+light_core_class = "bubble-option-core bubble-option-core-light"
+gruvbox_core_class = "bubble-option-core bubble-option-core-gruvbox"
 
 local THEME_DARK = "mesh-default-dark"
 local THEME_LIGHT = "mesh-default-light"
 local THEME_GRUVBOX = "gruvbox-dark"
 
 local function sync_classes(current)
-    dark_class = "theme-bubble theme-bubble-dark"
-    light_class = "theme-bubble theme-bubble-light"
-    gruvbox_class = "theme-bubble theme-bubble-gruvbox"
+    dark_class = "bubble-option bubble-option-left"
+    light_class = "bubble-option bubble-option-center"
+    gruvbox_class = "bubble-option bubble-option-right"
+    dark_core_class = "bubble-option-core bubble-option-core-dark"
+    light_core_class = "bubble-option-core bubble-option-core-light"
+    gruvbox_core_class = "bubble-option-core bubble-option-core-gruvbox"
 
     if current == THEME_DARK then
-        dark_class = dark_class .. " theme-bubble-active"
+        dark_class = dark_class .. " bubble-option-active"
+        dark_core_class = dark_core_class .. " bubble-option-core-active"
     elseif current == THEME_LIGHT then
-        light_class = light_class .. " theme-bubble-active"
+        light_class = light_class .. " bubble-option-active"
+        light_core_class = light_core_class .. " bubble-option-core-active"
     elseif current == THEME_GRUVBOX then
-        gruvbox_class = gruvbox_class .. " theme-bubble-active"
+        gruvbox_class = gruvbox_class .. " bubble-option-active"
+        gruvbox_core_class = gruvbox_core_class .. " bubble-option-core-active"
     end
 end
 
@@ -61,11 +82,18 @@ end
 function onDark()
     apply_theme(THEME_DARK)
 end
+
 function onLight()
     apply_theme(THEME_LIGHT)
 end
+
 function onGruvbox()
     apply_theme(THEME_GRUVBOX)
+end
+
+function onThemeScroll(_event)
+    -- Theme currently has exactly three options, but the shared bubble control
+    -- supports scroll cycling for callers with larger option sets.
 end
 
 function onSelectorLeave()
@@ -85,147 +113,5 @@ end
 
     .theme-float-shell.mesh-surface-exiting {
         opacity: 0;
-    }
-
-    .theme-float-stage {
-        width: 112px;
-        height: 116px;
-        position: relative;
-        overflow: visible;
-    }
-
-    .theme-bubble {
-        position: absolute;
-        top: 40px;
-        left: 56px;
-        width: 36px;
-        height: 36px;
-        justify-content: center;
-        align-items: center;
-        padding: 0;
-        border-radius: var(--radius-full);
-        background: transparent;
-        border-width: 0;
-        opacity: 1;
-        transition: transform 360ms var(--animation-curves-bezier-emphasized-decelerate),
-        opacity 220ms var(--animation-curves-bezier-standard);
-    }
-
-    .theme-bubble-core {
-        width: 36px;
-        height: 36px;
-        justify-content: center;
-        align-items: center;
-        border-radius: var(--radius-full);
-        border-width: 2px;
-        border-style: solid;
-        border-color: transparent;
-        box-shadow: 0px 6px 18px rgba(0, 0, 0, 0.34);
-        color: var(--color-on-surface);
-        animation-duration: 2800ms;
-        animation-timing-function: ease-in-out;
-        animation-iteration-count: infinite;
-    }
-
-    .theme-bubble-dark {
-        transform: translate(-46px, 2px) scale(1);
-        transition-delay: 0ms;
-    }
-
-    .theme-bubble-light {
-        transform: translate(-18px, 26px) scale(1);
-        transition-delay: 45ms;
-    }
-
-    .theme-bubble-gruvbox {
-        transform: translate(10px, 2px) scale(1);
-        transition-delay: 90ms;
-    }
-
-    .theme-bubble.mesh-surface-entering {
-        transform: translate(0px, -18px) scale(0.12);
-        opacity: 0;
-    }
-
-    .theme-bubble.mesh-surface-exiting {
-        transform: translate(0px, -18px) scale(0.12);
-        opacity: 0;
-        animation-name: none;
-        transition: transform 160ms var(--animation-curves-bezier-emphasized-decelerate),
-        opacity 120ms var(--animation-curves-bezier-standard);
-    }
-
-    .theme-bubble-core.mesh-surface-exiting {
-        animation-name: none;
-    }
-
-    .theme-bubble-dark .theme-bubble-core {
-        background: #121821;
-        animation-name: theme-bubble-float-dark;
-        animation-delay: 360ms;
-    }
-
-    .theme-bubble-light .theme-bubble-core {
-        background: #f3ead7;
-        color: #443a2b;
-        animation-name: theme-bubble-float-light;
-        animation-delay: 430ms;
-    }
-
-    .theme-bubble-gruvbox .theme-bubble-core {
-        background: #5b4636;
-        color: #f2e5bc;
-        animation-name: theme-bubble-float-gruvbox;
-        animation-delay: 500ms;
-    }
-
-    .theme-bubble-active .theme-bubble-core {
-        border-color: var(--color-primary);
-    }
-
-    .theme-bubble:hover .theme-bubble-core {
-        border-color: var(--color-secondary);
-    }
-
-    .theme-bubble-icon {
-        width: 18px;
-        height: 18px;
-        color: inherit;
-    }
-
-    @keyframes theme-bubble-float-dark {
-        0% {
-            transform: translate(0px, 0px) scale(1);
-        }
-        54% {
-            transform: translate(-3px, -6px) scale(1.05);
-        }
-        100% {
-            transform: translate(0px, 0px) scale(1);
-        }
-    }
-
-    @keyframes theme-bubble-float-light {
-        0% {
-            transform: translate(0px, 0px) scale(1);
-        }
-        54% {
-            transform: translate(0px, -7px) scale(1.04);
-        }
-        100% {
-            transform: translate(0px, 0px) scale(1);
-        }
-    }
-
-    @keyframes theme-bubble-float-gruvbox {
-        0% {
-            transform: translate(0px, 0px) scale(1);
-        }
-        54% {
-            transform: translate(3px, -5px) scale(1.05);
-        }
-        100% {
-            transform: translate(0px, 0px) scale(1);
-        }
     }
 </style>

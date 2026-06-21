@@ -291,6 +291,8 @@ impl FrontendSurfaceComponent {
         let position = serde_json::json!({
             "margin_left": left.round() as i32,
             "margin_bottom": bottom.round() as i32,
+            "width": width.round() as i32,
+            "height": height.round() as i32,
         });
         let tag = target.map(|node| node.tag.clone()).unwrap_or_default();
         let mut current_target = target
@@ -325,6 +327,121 @@ impl FrontendSurfaceComponent {
             },
             "current_target": current_target
         })
+    }
+
+    pub(super) fn build_focus_event(
+        &self,
+        tree: &WidgetNode,
+        node_key: &str,
+        event_type: &str,
+    ) -> serde_json::Value {
+        let target = find_node_by_key(tree, node_key);
+        let (left, top, right, bottom) =
+            find_node_bounds_by_key(tree, node_key, 0.0, 0.0).unwrap_or((0.0, 0.0, 0.0, 0.0));
+        let width = (right - left).max(0.0);
+        let height = (bottom - top).max(0.0);
+        let bounds = serde_json::json!({
+            "left": left,
+            "top": top,
+            "right": right,
+            "bottom": bottom,
+            "width": width,
+            "height": height,
+        });
+        let position = serde_json::json!({
+            "margin_left": left.round() as i32,
+            "margin_bottom": bottom.round() as i32,
+            "width": width.round() as i32,
+            "height": height.round() as i32,
+        });
+        let tag = target.map(|node| node.tag.clone()).unwrap_or_default();
+        let mut current_target = target
+            .map(|node| element_snapshot_json(node, left - node.layout.x, top - node.layout.y))
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let Some(object) = current_target.as_object_mut() {
+            object.insert(
+                "key".into(),
+                serde_json::Value::String(node_key.to_string()),
+            );
+            object.insert("tag".into(), serde_json::Value::String(tag.clone()));
+            object.insert("bounds".into(), bounds.clone());
+            object.insert("position".into(), position.clone());
+        }
+
+        serde_json::json!({
+            "type": event_type,
+            "surface": {
+                "id": self.surface_id(),
+                "width": tree.layout.width,
+                "height": tree.layout.height,
+            },
+            "current": {
+                "key": node_key,
+                "tag": tag,
+                "bounds": bounds,
+                "position": position,
+            },
+            "current_target": current_target
+        })
+    }
+
+    pub(super) fn dispatch_scroll_handler(
+        &mut self,
+        tree: &WidgetNode,
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    ) -> Result<Option<Vec<CoreRequest>>, ComponentError> {
+        let Some(path) = find_node_path_at(tree, x, y) else {
+            return Ok(None);
+        };
+        let Some(node_key) = path
+            .into_iter()
+            .rev()
+            .find(|key| find_event_handler(tree, key, "scroll").is_some())
+        else {
+            return Ok(None);
+        };
+        let Some(handler) = find_event_handler(tree, &node_key, "scroll") else {
+            return Ok(None);
+        };
+        let target = find_node_by_key(tree, &node_key);
+        let (left, top, right, bottom) =
+            find_node_bounds_by_key(tree, &node_key, 0.0, 0.0).unwrap_or((0.0, 0.0, 0.0, 0.0));
+        let width = (right - left).max(0.0);
+        let height = (bottom - top).max(0.0);
+        let bounds = serde_json::json!({
+            "left": left,
+            "top": top,
+            "right": right,
+            "bottom": bottom,
+            "width": width,
+            "height": height,
+        });
+        let tag = target.map(|node| node.tag.clone()).unwrap_or_default();
+        let event = serde_json::json!({
+            "type": "scroll",
+            "pointer": {
+                "x": x,
+                "y": y,
+            },
+            "delta": {
+                "x": dx,
+                "y": dy,
+            },
+            "surface": {
+                "id": self.surface_id(),
+                "width": tree.layout.width,
+                "height": tree.layout.height,
+            },
+            "current": {
+                "key": node_key,
+                "tag": tag,
+                "bounds": bounds,
+            }
+        });
+        self.call_namespaced_handler(&handler, &[event]).map(Some)
     }
 
     pub(super) fn slider_step_value(

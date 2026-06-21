@@ -428,6 +428,7 @@ Common event attributes:
 | `onblur`       | element loses focus        |
 | `onmouseenter` | pointer enters element     |
 | `onmouseleave` | pointer leaves element     |
+| `onscroll`     | wheel/scroll over element  |
 
 Do not use `@click=` or `:on*=` — those are not valid MESH syntax.
 

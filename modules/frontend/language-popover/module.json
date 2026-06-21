@@ -15,10 +15,18 @@
       ]
     },
     "uses": {
+      "resources": {
+        "icons": ["@mesh/icons-material-symbols", "@mesh/icons-default"]
+      },
       "capabilities": [
         "shell.surface",
         "locale.read",
         "locale.write"
+      ]
+    },
+    "iconRequirements": {
+      "required": [
+        "palette"
       ]
     },
     "i18n": {
@@ -32,20 +40,20 @@
     "surface": {
       "anchor": "left",
       "layer": "overlay",
-      "width": 200,
-      "height": 520,
+      "width": 112,
+      "height": 92,
       "exclusive_zone": 0,
       "keyboard_mode": "on_demand",
       "visible_on_start": false,
       "size": "content_measured",
       "prefers_content_children_sizing": true,
-      "min_width": 160,
-      "max_width": 260,
-      "min_height": 120,
-      "max_height": 520,
+      "min_width": 112,
+      "max_width": 112,
+      "min_height": 92,
+      "max_height": 92,
       "display_transition": {
         "show_ms": 120,
-        "hide_ms": 120
+        "hide_ms": 180
       }
     },
     "provides": {

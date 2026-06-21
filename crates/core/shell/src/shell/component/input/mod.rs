@@ -256,6 +256,10 @@ impl FrontendSurfaceComponent {
                 }
             }
             ComponentInput::Scroll { x, y, dx, dy } => {
+                if let Some(requests) = self.dispatch_scroll_handler(&tree, x, y, dx, dy)? {
+                    return Ok(requests);
+                }
+
                 if let Some(scroll_key) = find_scrollable_at(&tree, x, y) {
                     if let Some(node) = find_node_by_key(&tree, &scroll_key) {
                         let (max_x, max_y) = scroll_limits(node);

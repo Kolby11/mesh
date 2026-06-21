@@ -606,7 +606,14 @@ pub(super) fn real_frontend_module_component(
             "/../../../modules/frontend/language-popover/src/main.mesh"
         )))
         .unwrap(),
-        local_components: HashMap::new(),
+        local_components: HashMap::from([(
+            "BubbleOptions".into(),
+            parse_component(include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../modules/frontend/shared/components/bubble-options.mesh"
+            )))
+            .unwrap(),
+        )]),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
     };
@@ -618,7 +625,14 @@ pub(super) fn real_frontend_module_component(
             "/../../../modules/frontend/theme-selector/src/main.mesh"
         )))
         .unwrap(),
-        local_components: HashMap::new(),
+        local_components: HashMap::from([(
+            "BubbleOptions".into(),
+            parse_component(include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../modules/frontend/shared/components/bubble-options.mesh"
+            )))
+            .unwrap(),
+        )]),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
     };

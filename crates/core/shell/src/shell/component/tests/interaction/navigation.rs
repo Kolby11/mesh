@@ -1901,10 +1901,25 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
             },
         )
         .unwrap();
-    assert!(matches!(
-        activation_requests.as_slice(),
-        [CoreRequest::SetTheme { theme_id }] if theme_id == "mesh-default-light"
-    ));
+    assert!(
+        activation_requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::PositionSurface {
+                surface_id,
+                margin_top: -18,
+                ..
+            } if surface_id == "@mesh/theme-selector"
+        )),
+        "keyboard activation should position the theme selector near the nav button: {activation_requests:?}"
+    );
+    assert!(
+        activation_requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ActivatePopover { surface_id, .. }
+                if surface_id == "@mesh/theme-selector"
+        )),
+        "keyboard activation should open the theme selector popover: {activation_requests:?}"
+    );
 
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -1932,14 +1947,17 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
             },
         )
         .unwrap();
-    assert!(matches!(
-        activation_requests.as_slice(),
-        [CoreRequest::SetTheme { theme_id }] if theme_id == "mesh-default-dark"
-    ));
+    assert!(
+        activation_requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::HideSurface { surface_id } if surface_id == "@mesh/theme-selector"
+        )),
+        "re-activating an already-open theme trigger should close the popover: {activation_requests:?}"
+    );
 }
 
 #[test]
-fn navigation_language_button_publishes_locale_request_on_real_surface() {
+fn navigation_language_button_opens_language_popover_on_real_surface() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
     let theme = default_theme();
@@ -1964,12 +1982,11 @@ fn navigation_language_button_publishes_locale_request_on_real_surface() {
         .last_tree
         .as_ref()
         .expect("rendered navigation tree");
-    let language_button =
-        first_node_with_attr(tree, "title", "Choose language").expect("language menu button");
-    assert_eq!(
-        language_button.attributes.get("title").map(String::as_str),
-        Some("Choose language")
-    );
+    let language_button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageToggle",
+    )
+    .expect("language menu button");
     let language_key = language_button
         .attributes
         .get("_mesh_key")
@@ -1989,26 +2006,30 @@ fn navigation_language_button_publishes_locale_request_on_real_surface() {
             },
         )
         .unwrap();
-    assert!(open_requests.is_empty());
-    component
-        .paint(&theme, width, height, &mut buffer, 1.0)
-        .unwrap();
+    assert!(
+        open_requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::PositionSurface {
+                surface_id,
+                margin_top: -18,
+                ..
+            } if surface_id == "@mesh/language-popover"
+        )),
+        "language trigger should position the popover near the nav button: {open_requests:?}"
+    );
+    assert!(
+        open_requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ActivatePopover {
+                surface_id,
+                focus: true,
+                ..
+            } if surface_id == "@mesh/language-popover"
+        )),
+        "keyboard activation should open the language popover with focus: {open_requests:?}"
+    );
 
-    let tree = component
-        .last_tree
-        .as_ref()
-        .expect("rendered navigation tree with language menu");
-    let slovak_option =
-        first_node_with_attr(tree, "title", "Slovak").expect("Slovak language option");
-    let slovak_key = slovak_option
-        .attributes
-        .get("_mesh_key")
-        .expect("Slovak option mesh key")
-        .clone();
-    component.focused_key = Some(slovak_key.clone());
-    component.focus_visible_key = Some(slovak_key);
-
-    let activation_requests = component
+    let close_requests = component
         .handle_input(
             &theme,
             width,
@@ -2019,10 +2040,13 @@ fn navigation_language_button_publishes_locale_request_on_real_surface() {
             },
         )
         .unwrap();
-    assert!(matches!(
-        activation_requests.as_slice(),
-        [CoreRequest::SetLocale { locale }] if locale == "sk"
-    ));
+    assert!(
+        close_requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::HideSurface { surface_id } if surface_id == "@mesh/language-popover"
+        )),
+        "re-activating an already-open language trigger should close the popover: {close_requests:?}"
+    );
 }
 
 #[test]
@@ -2213,16 +2237,12 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
         "navigation bar should paint visible Skia backgrounds, got only {visible_pixels} nontransparent pixels"
     );
     assert!(button.computed_style.transitions[0].duration_ms > 0);
-    assert!(
-        button.computed_style.transitions[0]
-            .properties
-            .animates_border_radius()
-    );
-    assert!(
-        button.computed_style.transitions[0]
-            .properties
-            .animates_transform()
-    );
+    assert!(button.computed_style.transitions[0]
+        .properties
+        .animates_border_radius());
+    assert!(button.computed_style.transitions[0]
+        .properties
+        .animates_transform());
 
     let hover_x = button.layout.x + button.layout.width * 0.5;
     let hover_y = button.layout.y + button.layout.height * 0.5;
@@ -2857,14 +2877,12 @@ fn navigation_bar_keyboard_audio_popover_slider_responds_to_arrow_keys() {
         )
         .unwrap();
     match requests.as_slice() {
-        [
-            CoreRequest::ServiceCommand {
-                interface,
-                command,
-                payload,
-                ..
-            },
-        ] => {
+        [CoreRequest::ServiceCommand {
+            interface,
+            command,
+            payload,
+            ..
+        }] => {
             assert_eq!(interface, "mesh.audio");
             assert_eq!(command, "set_volume");
             assert_eq!(payload["device_id"], serde_json::json!("default"));
@@ -2955,14 +2973,12 @@ fn audio_popover_volume_button_repeats_on_key_press_without_waiting_for_release(
 
 fn assert_volume_command(requests: &[CoreRequest], expected_volume: f64) {
     match requests {
-        [
-            CoreRequest::ServiceCommand {
-                interface,
-                command,
-                payload,
-                ..
-            },
-        ] => {
+        [CoreRequest::ServiceCommand {
+            interface,
+            command,
+            payload,
+            ..
+        }] => {
             assert_eq!(interface, "mesh.audio");
             assert_eq!(command, "set_volume");
             assert_eq!(payload["device_id"], serde_json::json!("default"));

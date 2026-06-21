@@ -1,0 +1,256 @@
+<template>
+    <box class="bubble-options-stage" onscroll={onscroll} aria-label="{label}">
+        <button class="{item1_button_class}" onclick={onfirst} title="{item1_title}" aria-label="{item1_title}">
+            <box class="bubble-options-motion bubble-options-motion-left">
+                <box class="{item1_core_class}">
+                    <icon class="{item1_icon_class}" name="{item1_icon}" size="14" />
+                    <text class="{item1_text_class}">{item1_text}</text>
+                </box>
+            </box>
+        </button>
+        <button class="{item2_button_class}" onclick={onsecond} title="{item2_title}" aria-label="{item2_title}">
+            <box class="bubble-options-motion bubble-options-motion-center">
+                <box class="{item2_core_class}">
+                    <icon class="{item2_icon_class}" name="{item2_icon}" size="14" />
+                    <text class="{item2_text_class}">{item2_text}</text>
+                </box>
+            </box>
+        </button>
+        <button class="{item3_button_class}" onclick={onthird} title="{item3_title}" aria-label="{item3_title}">
+            <box class="bubble-options-motion bubble-options-motion-right">
+                <box class="{item3_core_class}">
+                    <icon class="{item3_icon_class}" name="{item3_icon}" size="14" />
+                    <text class="{item3_text_class}">{item3_text}</text>
+                </box>
+            </box>
+        </button>
+    </box>
+</template>
+
+<script lang="luau">
+label = "Options"
+
+item1_button_class = "bubble-option bubble-option-left"
+item2_button_class = "bubble-option bubble-option-center"
+item3_button_class = "bubble-option bubble-option-right"
+
+item1_core_class = "bubble-option-core"
+item2_core_class = "bubble-option-core"
+item3_core_class = "bubble-option-core"
+
+item1_icon_class = "bubble-option-icon bubble-option-hidden"
+item2_icon_class = "bubble-option-icon bubble-option-hidden"
+item3_icon_class = "bubble-option-icon bubble-option-hidden"
+
+item1_text_class = "bubble-option-text"
+item2_text_class = "bubble-option-text"
+item3_text_class = "bubble-option-text"
+
+item1_icon = "palette"
+item2_icon = "palette"
+item3_icon = "palette"
+item1_text = ""
+item2_text = ""
+item3_text = ""
+item1_title = ""
+item2_title = ""
+item3_title = ""
+
+onfirst = nil
+onsecond = nil
+onthird = nil
+onscroll = nil
+</script>
+
+<style>
+    .bubble-options-stage {
+        width: 112px;
+        height: 92px;
+        position: relative;
+        overflow: visible;
+    }
+
+    .bubble-option {
+        position: absolute;
+        width: 36px;
+        height: 36px;
+        justify-content: center;
+        align-items: center;
+        padding: 0;
+        border-radius: var(--radius-full);
+        background: transparent;
+        border-width: 0;
+        opacity: 1;
+    }
+
+    .bubble-option-left {
+        top: 18px;
+        left: 10px;
+    }
+
+    .bubble-option-center {
+        top: 42px;
+        left: 38px;
+    }
+
+    .bubble-option-right {
+        top: 18px;
+        left: 66px;
+    }
+
+    .bubble-options-motion,
+    .bubble-option-core {
+        width: 36px;
+        height: 36px;
+        justify-content: center;
+        align-items: center;
+        border-radius: var(--radius-full);
+    }
+
+    .bubble-options-motion {
+        opacity: 1;
+        transform: translate(0px, 0px) scale(1);
+        transition: transform 360ms var(--animation-curves-bezier-emphasized-decelerate),
+        opacity 220ms var(--animation-curves-bezier-standard);
+    }
+
+    .bubble-options-motion-left {
+        transition-delay: 0ms;
+    }
+
+    .bubble-options-motion-center {
+        transition-delay: 45ms;
+    }
+
+    .bubble-options-motion-right {
+        transition-delay: 90ms;
+    }
+
+    .bubble-options-motion-left.mesh-surface-entering,
+    .bubble-options-motion-left.mesh-surface-exiting {
+        transform: translate(46px, 4px) scale(0.12);
+        opacity: 0;
+    }
+
+    .bubble-options-motion-center.mesh-surface-entering,
+    .bubble-options-motion-center.mesh-surface-exiting {
+        transform: translate(18px, -20px) scale(0.12);
+        opacity: 0;
+    }
+
+    .bubble-options-motion-right.mesh-surface-entering,
+    .bubble-options-motion-right.mesh-surface-exiting {
+        transform: translate(-10px, 4px) scale(0.12);
+        opacity: 0;
+    }
+
+    .bubble-options-motion.mesh-surface-exiting {
+        transition: transform 180ms var(--animation-curves-bezier-emphasized-decelerate),
+        opacity 140ms var(--animation-curves-bezier-standard);
+        transition-delay: 0ms;
+    }
+
+    .bubble-option-core {
+        border-width: 2px;
+        border-style: solid;
+        border-color: transparent;
+        box-shadow: 0px 6px 18px rgba(0, 0, 0, 0.34);
+        color: var(--color-on-surface);
+        animation-duration: 2800ms;
+        animation-timing-function: ease-in-out;
+        animation-iteration-count: infinite;
+    }
+
+    .bubble-option-core.mesh-surface-exiting {
+        animation-name: none;
+    }
+
+    .bubble-option-core-active {
+        border-color: var(--color-primary);
+    }
+
+    .bubble-option-core:hover {
+        border-color: var(--color-secondary);
+    }
+
+    .bubble-option-core-dark {
+        background: #121821;
+        animation-name: bubble-option-float-left;
+        animation-delay: 360ms;
+    }
+
+    .bubble-option-core-light {
+        background: #f3ead7;
+        color: #443a2b;
+        animation-name: bubble-option-float-center;
+        animation-delay: 430ms;
+    }
+
+    .bubble-option-core-gruvbox {
+        background: #5b4636;
+        color: #f2e5bc;
+        animation-name: bubble-option-float-right;
+        animation-delay: 500ms;
+    }
+
+    .bubble-option-core-language {
+        background: var(--color-surface-container-high);
+        color: var(--color-on-surface);
+        animation-name: bubble-option-float-center;
+        animation-delay: 420ms;
+    }
+
+    .bubble-option-icon {
+        width: 18px;
+        height: 18px;
+        color: inherit;
+    }
+
+    .bubble-option-text {
+        color: inherit;
+        font-size: var(--typography-size-sm);
+        font-weight: 700;
+        line-height: 1;
+        text-wrap: none;
+    }
+
+    .bubble-option-hidden {
+        display: none;
+    }
+
+    @keyframes bubble-option-float-left {
+        0% {
+            transform: translate(0px, 0px) scale(1);
+        }
+        54% {
+            transform: translate(-3px, -6px) scale(1.05);
+        }
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
+    }
+
+    @keyframes bubble-option-float-center {
+        0% {
+            transform: translate(0px, 0px) scale(1);
+        }
+        54% {
+            transform: translate(0px, -7px) scale(1.04);
+        }
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
+    }
+
+    @keyframes bubble-option-float-right {
+        0% {
+            transform: translate(0px, 0px) scale(1);
+        }
+        54% {
+            transform: translate(3px, -5px) scale(1.05);
+        }
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
+    }
+</style>
