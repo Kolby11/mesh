@@ -1144,6 +1144,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.invalidate_surface_config();
     }
 
+    fn set_popup_promoted(&mut self, promoted: bool) {
+        self.popup_promoted = promoted;
+    }
+
     fn debug_keybinds(&self) -> Vec<mesh_core_debug::DebugKeybindEntry> {
         self.debug_surface_keybinds()
     }

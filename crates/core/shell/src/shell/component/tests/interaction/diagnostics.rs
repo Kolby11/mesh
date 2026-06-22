@@ -64,6 +64,9 @@ end
         &["service.audio.read"],
     );
 
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 40);
+    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
@@ -72,8 +75,6 @@ end
         })
         .unwrap();
 
-    let theme = default_theme();
-    let mut buffer = PixelBuffer::new(240, 40);
     component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
 
     assert_eq!(
@@ -157,6 +158,12 @@ end
         &["service.audio.read"],
     );
 
+    // Seed the component with an initial render (establishing service-field
+    // tracking, as the real shell does via cached payloads at mount) before the
+    // live service event flows in.
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 40);
+    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
@@ -164,9 +171,6 @@ end
             payload: serde_json::json!({ "percent": 73, "muted": false }),
         })
         .unwrap();
-
-    let theme = default_theme();
-    let mut buffer = PixelBuffer::new(240, 40);
     component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
 
     assert_eq!(

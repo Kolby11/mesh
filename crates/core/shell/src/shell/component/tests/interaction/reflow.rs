@@ -795,9 +795,12 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         .paint(&dark, width, height, &mut buffer, 1.0)
         .unwrap();
 
+    // The shipped nav-shell background is now translucent (rgba(10,10,14,0.75)),
+    // so the immediate dark repaint resolves to this value rather than the old
+    // opaque surface color. The point is that it repaints dark (not stale light).
     assert_eq!(
         buffer_pixel(&buffer, 8, 8),
-        [0x1f, 0x1b, 0x1c, 0xff],
+        [14, 10, 10, 191],
         "already-painted navigation shell should repaint to dark surface immediately"
     );
     assert_eq!(

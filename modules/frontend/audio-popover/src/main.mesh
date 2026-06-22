@@ -11,7 +11,7 @@
         class="audio-slider"
         min="0"
         max="100"
-        value={slider_value or 0}
+        value="{slider_value}"
         orient="vertical"
         onchange={onVolumeChange}
         onrelease={onVolumeRelease

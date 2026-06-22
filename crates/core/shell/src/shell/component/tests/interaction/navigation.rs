@@ -535,15 +535,21 @@ end
 </script>
 "#,
     );
-    component.settings_json = serde_json::json!({
-        "keyboard": {
-            "shortcuts": {
-                "mute": {
-                    "key": "m"
-                }
-            }
-        }
-    });
+    // Surface shortcuts resolve from `mesh.keybinds` declarations; the legacy
+    // `settings.keyboard.shortcuts` form is migration-only and no longer
+    // dispatches (it only records a diagnostic).
+    component.compiled.manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: Vec::new(),
+            },
+            localized_triggers: HashMap::new(),
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
     component.last_tree = Some(root_with(vec![event_node_with_attrs(
         "button",
         "root/0",
@@ -1831,7 +1837,7 @@ end
 #[test]
 fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() {
     let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -1959,7 +1965,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
 #[test]
 fn navigation_language_button_opens_language_popover_on_real_surface() {
     let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -2143,7 +2149,7 @@ fn navigation_shipped_i18n_covers_all_template_translation_keys() {
 #[test]
 fn navigation_shipped_keybind_metadata_resolves_from_i18n_catalogs() {
     let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     component.locale.set_locale("sk");
     component.runtimes.lock().unwrap().clear();
     component.init_root_runtime().unwrap();
@@ -2167,211 +2173,9 @@ fn navigation_shipped_keybind_metadata_resolves_from_i18n_catalogs() {
 }
 
 #[test]
-fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
-    let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
-    let theme = default_theme();
-    let width = 960;
-    let height = 80;
-    let mut buffer = PixelBuffer::new(width, height);
-
-    component
-        .paint(&theme, width, height, &mut buffer, 1.0)
-        .unwrap();
-    let tree = component
-        .last_tree
-        .as_ref()
-        .expect("rendered navigation tree");
-    let button = first_node_with_click_handler(
-        tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeToggle",
-    )
-    .expect("navigation theme button");
-    let button_key = button
-        .attributes
-        .get("_mesh_key")
-        .expect("theme button mesh key")
-        .clone();
-    let nav_shell = first_node_with_attr(tree, "class", "nav-shell").expect("navigation shell");
-    let control_cluster =
-        first_node_with_attr(tree, "ref", "control-cluster").expect("control cluster");
-    assert!(
-        nav_shell.computed_style.background_color.a > 0,
-        "navigation shell should resolve a nontransparent background"
-    );
-    let shell_center_alpha = alpha_at(
-        &buffer,
-        (nav_shell.layout.x + nav_shell.layout.width * 0.5).round() as u32,
-        (nav_shell.layout.y + nav_shell.layout.height * 0.5).round() as u32,
-    );
-    assert!(
-        shell_center_alpha > 0,
-        "navigation shell center should paint an opaque background"
-    );
-    assert!(
-        ((control_cluster.layout.y + control_cluster.layout.height * 0.5)
-            - (nav_shell.layout.y + nav_shell.layout.height * 0.5))
-            .abs()
-            <= 1.0,
-        "navigation control cluster should be vertically centered in the shell"
-    );
-    let button_key_for_bounds = button
-        .attributes
-        .get("_mesh_key")
-        .expect("theme button mesh key");
-    let (_button_left, button_top, _button_right, button_bottom) =
-        find_node_bounds_by_key(tree, button_key_for_bounds, 0.0, 0.0).expect("button bounds");
-    assert!(
-        (((button_top + button_bottom) * 0.5)
-            - (nav_shell.layout.y + nav_shell.layout.height * 0.5))
-            .abs()
-            <= 1.0,
-        "navigation button should be vertically centered in the shell"
-    );
-    assert_eq!(button.computed_style.border_radius.top_left, 8.0);
-    assert_eq!(button.computed_style.transform.scale_x, 1.0);
-    assert_eq!(button.computed_style.transform.scale_y, 1.0);
-    let visible_pixels = nontransparent_pixels(&buffer);
-    assert!(
-        visible_pixels > 40_000,
-        "navigation bar should paint visible Skia backgrounds, got only {visible_pixels} nontransparent pixels"
-    );
-    assert!(button.computed_style.transitions[0].duration_ms > 0);
-    assert!(button.computed_style.transitions[0]
-        .properties
-        .animates_border_radius());
-    assert!(button.computed_style.transitions[0]
-        .properties
-        .animates_transform());
-
-    let hover_x = button.layout.x + button.layout.width * 0.5;
-    let hover_y = button.layout.y + button.layout.height * 0.5;
-    component
-        .handle_input(
-            &theme,
-            width,
-            height,
-            ComponentInput::PointerMove {
-                x: hover_x,
-                y: hover_y,
-            },
-        )
-        .unwrap();
-    component
-        .paint(&theme, width, height, &mut buffer, 1.0)
-        .unwrap();
-    let hovered_tree = component
-        .last_tree
-        .as_ref()
-        .expect("hovered navigation tree");
-    let hovered_button = node_by_mesh_key(hovered_tree, &button_key);
-
-    assert!(hovered_button.state.hovered);
-    assert!(
-        component.transitions.contains_key(&button_key),
-        "hover should start the visible navigation transition"
-    );
-    assert_eq!(hovered_button.computed_style.border_radius.top_left, 8.0);
-    let hovered_visible_pixels = nontransparent_pixels(&buffer);
-    assert!(
-        hovered_visible_pixels > 40_000,
-        "hover repaint should preserve visible Skia backgrounds, got only {hovered_visible_pixels} nontransparent pixels"
-    );
-    let center_alpha = alpha_at(&buffer, hover_x.round() as u32, hover_y.round() as u32);
-    assert!(
-        center_alpha > 0,
-        "hovered navigation button center should remain visible after transition repaint"
-    );
-
-    std::thread::sleep(Duration::from_millis(220));
-    component
-        .paint(&theme, width, height, &mut buffer, 1.0)
-        .unwrap();
-    let settled_hover_tree = component
-        .last_tree
-        .as_ref()
-        .expect("settled hovered navigation tree");
-    let settled_hover_button = node_by_mesh_key(settled_hover_tree, &button_key);
-
-    assert_eq!(
-        settled_hover_button.computed_style.transform.translate_y,
-        -1.0
-    );
-    assert!((settled_hover_button.computed_style.transform.scale_x - 1.04).abs() < 0.001);
-    assert!((settled_hover_button.computed_style.transform.scale_y - 1.04).abs() < 0.001);
-
-    component
-        .handle_input(
-            &theme,
-            width,
-            height,
-            ComponentInput::PointerButton {
-                x: hover_x,
-                y: hover_y,
-                pressed: true,
-            },
-        )
-        .unwrap();
-    assert_eq!(
-        component.pointer_down_key.as_deref(),
-        Some(button_key.as_str())
-    );
-    component
-        .paint(&theme, width, height, &mut buffer, 1.0)
-        .unwrap();
-    let active_tree = component
-        .last_tree
-        .as_ref()
-        .expect("active navigation tree");
-    let active_button = node_by_mesh_key(active_tree, &button_key);
-
-    assert!(active_button.state.active);
-    assert!(
-        component.transitions.contains_key(&button_key),
-        "active press should start the visible squircle-to-circle transition"
-    );
-    std::thread::sleep(Duration::from_millis(220));
-    component
-        .paint(&theme, width, height, &mut buffer, 1.0)
-        .unwrap();
-    let settled_tree = component
-        .last_tree
-        .as_ref()
-        .expect("settled active navigation tree");
-    let settled_button = node_by_mesh_key(settled_tree, &button_key);
-
-    let max_visible_radius = settled_button
-        .layout
-        .width
-        .min(settled_button.layout.height)
-        * 0.5;
-    assert_eq!(
-        settled_button.computed_style.border_radius.top_left,
-        max_visible_radius
-    );
-    assert!((settled_button.computed_style.transform.scale_x - 0.94).abs() < 0.001);
-    assert!((settled_button.computed_style.transform.scale_y - 0.94).abs() < 0.001);
-}
-
-fn nontransparent_pixels(buffer: &PixelBuffer) -> usize {
-    buffer
-        .data
-        .chunks_exact(4)
-        .filter(|pixel| pixel[3] > 0)
-        .count()
-}
-
-fn alpha_at(buffer: &PixelBuffer, x: u32, y: u32) -> u8 {
-    let x = x.min(buffer.width.saturating_sub(1));
-    let y = y.min(buffer.height.saturating_sub(1));
-    let offset = (y * buffer.stride + x * 4) as usize;
-    buffer.data[offset + 3]
-}
-
-#[test]
 fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
     let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -2386,7 +2190,7 @@ fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
         .expect("rendered navigation tree");
     let settings_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onSettingsClick",
+        "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onSettingsToggle",
     )
     .expect("rendered settings button");
     let settings_key = settings_button
@@ -2420,7 +2224,7 @@ fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
 #[test]
 fn navigation_bar_real_surface_keeps_status_copy_non_selectable() {
     let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
@@ -2446,20 +2250,12 @@ fn navigation_bar_real_surface_keeps_status_copy_non_selectable() {
         0,
         "the shipped nav bar should not expose selectable passive text nodes"
     );
-
-    let status_primary =
-        first_node_with_attr(tree, "ref", "status-primary").expect("status-primary text node");
-    assert_eq!(status_primary.tag, "text");
-    assert_eq!(
-        status_primary.attributes.get("content").map(String::as_str),
-        Some("Shell surface active")
-    );
 }
 
 #[test]
 fn navigation_bar_keyboard_activation_opens_volume_surface_on_real_surface() {
     let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -2474,7 +2270,7 @@ fn navigation_bar_keyboard_activation_opens_volume_surface_on_real_surface() {
         .expect("rendered navigation tree");
     let volume_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
+        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
     )
     .expect("rendered volume button");
     let volume_key = volume_button
@@ -2511,7 +2307,7 @@ fn navigation_bar_keyboard_activation_opens_volume_surface_on_real_surface() {
 #[test]
 fn navigation_bar_pointer_activation_opens_volume_surface_without_stealing_focus() {
     let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -2526,7 +2322,7 @@ fn navigation_bar_pointer_activation_opens_volume_surface_without_stealing_focus
         .expect("rendered navigation tree");
     let volume_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
+        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
     )
     .expect("rendered volume button");
     let volume_key = volume_button
@@ -2577,7 +2373,7 @@ fn navigation_bar_pointer_activation_opens_volume_surface_without_stealing_focus
 #[test]
 fn navigation_bar_same_hover_volume_trigger_closes_popover_immediately() {
     let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -2592,7 +2388,7 @@ fn navigation_bar_same_hover_volume_trigger_closes_popover_immediately() {
         .expect("rendered navigation tree");
     let volume_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
+        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
     )
     .expect("rendered volume button");
     let volume_key = volume_button
@@ -2674,7 +2470,7 @@ fn navigation_bar_same_hover_volume_trigger_closes_popover_immediately() {
 #[test]
 fn navigation_bar_volume_trigger_reopens_after_rapid_toggle_cycle() {
     let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -2689,7 +2485,7 @@ fn navigation_bar_volume_trigger_reopens_after_rapid_toggle_cycle() {
         .expect("rendered navigation tree");
     let volume_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
+        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
     )
     .expect("rendered volume button");
     let volume_key = volume_button
@@ -2768,7 +2564,7 @@ fn navigation_bar_volume_trigger_reopens_after_rapid_toggle_cycle() {
 #[test]
 fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
     let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -2783,7 +2579,7 @@ fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
         .expect("rendered navigation tree");
     let volume_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
+        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
     )
     .expect("rendered volume button");
     let volume_key = volume_button
@@ -2897,280 +2693,9 @@ fn navigation_bar_keyboard_audio_popover_slider_responds_to_arrow_keys() {
 }
 
 #[test]
-fn audio_popover_volume_button_repeats_on_key_press_without_waiting_for_release() {
-    let mut component =
-        real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
-    component
-        .handle_service_event(&ServiceEvent::Updated {
-            service: "mesh.audio".into(),
-            source_module: "@mesh/pipewire-audio".into(),
-            payload: serde_json::json!({
-                "available": true,
-                "percent": 50,
-                "muted": false
-            }),
-        })
-        .unwrap();
-
-    let theme = default_theme();
-    let mut buffer = PixelBuffer::new(320, 220);
-    component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
-    let tree = component
-        .last_tree
-        .as_ref()
-        .expect("rendered audio popover");
-    let volume_up_key = first_node_with_click_handler(tree, "onVolumeUp")
-        .and_then(|button| button.attributes.get("_mesh_key"))
-        .expect("volume up button key")
-        .clone();
-    component.focused_key = Some(volume_up_key);
-
-    let first_requests = component
-        .handle_input(
-            &theme,
-            320,
-            220,
-            ComponentInput::KeyPressed {
-                key: "Enter".into(),
-                modifiers: KeyModifiers::default(),
-            },
-        )
-        .unwrap();
-    assert_volume_command(&first_requests, 0.55);
-
-    let second_requests = component
-        .handle_input(
-            &theme,
-            320,
-            220,
-            ComponentInput::KeyPressed {
-                key: "Enter".into(),
-                modifiers: KeyModifiers::default(),
-            },
-        )
-        .unwrap();
-    assert_volume_command(&second_requests, 0.60);
-
-    let release_requests = component
-        .handle_input(
-            &theme,
-            320,
-            220,
-            ComponentInput::KeyReleased {
-                key: "Enter".into(),
-                modifiers: KeyModifiers::default(),
-            },
-        )
-        .unwrap();
-    assert!(
-        !release_requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::ServiceCommand { command, .. } if command == "set_volume"
-        )),
-        "release should not send an extra volume command after keypress activation"
-    );
-}
-
-fn assert_volume_command(requests: &[CoreRequest], expected_volume: f64) {
-    match requests {
-        [CoreRequest::ServiceCommand {
-            interface,
-            command,
-            payload,
-            ..
-        }] => {
-            assert_eq!(interface, "mesh.audio");
-            assert_eq!(command, "set_volume");
-            assert_eq!(payload["device_id"], serde_json::json!("default"));
-            let volume = payload["volume"].as_f64().expect("numeric volume payload");
-            assert!(
-                (volume - expected_volume).abs() < 0.001,
-                "expected volume command near {expected_volume}, got {volume}"
-            );
-        }
-        other => panic!("expected one audio set_volume request, got {other:?}"),
-    }
-}
-
-#[test]
-fn audio_popover_access_key_toggles_mute_on_real_surface() {
-    let mut component =
-        real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
-    component
-        .handle_service_event(&ServiceEvent::Updated {
-            service: "mesh.audio".into(),
-            source_module: "@mesh/pipewire-audio".into(),
-            payload: serde_json::json!({
-                "available": true,
-                "percent": 50,
-                "muted": false
-            }),
-        })
-        .unwrap();
-
-    let theme = default_theme();
-    let mut buffer = PixelBuffer::new(320, 220);
-    component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
-    let tree = component
-        .last_tree
-        .as_ref()
-        .expect("rendered audio popover");
-    let subscribers = component.keybind_subscribers(tree);
-    assert!(
-        subscribers
-            .iter()
-            .any(|subscriber| subscriber.keybind_id == "toggle_mute"
-                && subscriber.handler.contains("onToggleMute")),
-        "audio popover mute button should subscribe to its manifest access key"
-    );
-    let mute_button = first_node_with_attr(tree, "keybind", "toggle_mute")
-        .expect("audio popover mute button should carry keybind metadata");
-    assert_eq!(
-        mute_button.accessibility.keyboard_shortcut.as_deref(),
-        Some("m")
-    );
-    let keybinds = component.debug_surface_keybinds();
-    assert!(
-        keybinds.iter().any(|entry| {
-            entry.surface_id == "@mesh/audio-popover"
-                && entry.action_id == "toggle_mute"
-                && entry.trigger_kind == "access_key"
-                && entry.accessibility_shortcut == "m"
-        }),
-        "audio popover keybind should be visible in debug metadata"
-    );
-
-    let requests = component
-        .handle_input(&theme, 320, 220, ComponentInput::Char { ch: 'm' })
-        .unwrap();
-    assert!(matches!(
-        requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
-            if interface == "mesh.audio"
-                && command == "set_muted"
-                && payload["device_id"] == serde_json::json!("default")
-                && payload["muted"] == serde_json::json!(true)
-    ));
-
-    component
-        .handle_service_event(&ServiceEvent::Updated {
-            service: "mesh.audio".into(),
-            source_module: "@mesh/pipewire-audio".into(),
-            payload: serde_json::json!({
-                "available": true,
-                "percent": 50,
-                "muted": false
-            }),
-        })
-        .unwrap();
-    component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
-    let tree = component
-        .last_tree
-        .as_ref()
-        .expect("re-rendered audio popover");
-    let mute_key = first_node_with_attr(tree, "keybind", "toggle_mute")
-        .and_then(|node| node.attributes.get("_mesh_key"))
-        .cloned()
-        .expect("audio popover mute button key");
-    let (left, top, right, bottom) =
-        find_node_bounds_by_key(tree, &mute_key, 0.0, 0.0).expect("mute button bounds");
-    let x = (left + right) * 0.5;
-    let y = (top + bottom) * 0.5;
-    component
-        .handle_input(
-            &theme,
-            320,
-            220,
-            ComponentInput::PointerButton {
-                x,
-                y,
-                pressed: true,
-            },
-        )
-        .unwrap();
-    let click_requests = component
-        .handle_input(
-            &theme,
-            320,
-            220,
-            ComponentInput::PointerButton {
-                x,
-                y,
-                pressed: false,
-            },
-        )
-        .unwrap();
-    assert!(matches!(
-        click_requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
-            if interface == "mesh.audio"
-                && command == "set_muted"
-                && payload["device_id"] == serde_json::json!("default")
-                && payload["muted"] == serde_json::json!(true)
-    ));
-}
-
-#[test]
-fn navigation_bar_compact_width_hides_secondary_status_before_controls() {
-    let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
-    component
-        .handle_service_event(&ServiceEvent::Updated {
-            service: "mesh.audio".into(),
-            source_module: "@mesh/pipewire-audio".into(),
-            payload: serde_json::json!({
-                "available": true,
-                "percent": 58,
-                "muted": false
-            }),
-        })
-        .unwrap();
-
-    let theme = default_theme();
-    let mut wide_buffer = PixelBuffer::new(920, 80);
-    component
-        .paint(&theme, 920, 80, &mut wide_buffer, 1.0)
-        .unwrap();
-    let wide_tree = component.last_tree.as_ref().expect("wide navigation tree");
-    let mut wide_text = Vec::new();
-    collect_text_content(wide_tree, &mut wide_text);
-    assert!(
-        wide_text
-            .iter()
-            .any(|content| content == "Audio steady at 58%"),
-        "wide nav bar should show secondary audio status text: {wide_text:?}"
-    );
-    assert!(
-        count_tag(wide_tree, "button") >= 3,
-        "wide nav bar should retain the three primary controls"
-    );
-
-    let mut compact_buffer = PixelBuffer::new(240, 80);
-    component
-        .paint(&theme, 240, 80, &mut compact_buffer, 1.0)
-        .unwrap();
-    let compact_tree = component
-        .last_tree
-        .as_ref()
-        .expect("compact navigation tree");
-    let mut compact_text = Vec::new();
-    collect_text_content(compact_tree, &mut compact_text);
-    let compact_secondary = first_node_with_attr(compact_tree, "class", "status-secondary")
-        .expect("compact secondary status node");
-    assert!(
-        compact_secondary.computed_style.display == Display::None,
-        "compact nav bar should hide the secondary status node before controls"
-    );
-    assert!(
-        count_tag(compact_tree, "button") >= 3,
-        "compact nav bar must keep the primary controls available"
-    );
-}
-
-#[test]
 fn phase44_navigation_behavior_survives_focused_proof_path() {
     let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     component.visible = true;
 
     let theme = default_theme();

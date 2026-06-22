@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.21
 milestone_name: Retained Layout & Display List
-status: Blocked on shell-suite gap closure
-stopped_at: context exhaustion at 75% (2026-06-21)
-last_updated: "2026-06-21T13:01:53.882Z"
-last_activity: 2026-06-18 -- Phase 104 implemented; verification recorded gaps_found
+status: Gap closure in progress -- 54->7 shell failures; 7 regression suspects documented
+stopped_at: shell-suite gap-closure pass complete (2026-06-22)
+last_updated: "2026-06-22T10:30:00.000Z"
+last_activity: 2026-06-22 -- shell suite 54->7 failing; remaining 7 are behavior-level regression suspects (see 104-VERIFICATION.md)
 progress:
   total_phases: 3
   completed_phases: 1
@@ -25,14 +25,31 @@ See: `.planning/PROJECT.md` (updated 2026-06-18)
 
 ## Current Position
 
-Phase: 104 (Retained TaffyTree) — VERIFICATION GAPS
+Phase: 104 (Retained TaffyTree) — GAP CLOSURE (7 suspects remain)
 Plan: 3 of 3
-Status: Blocked on shell-suite gap closure
-Last activity: 2026-06-18 -- Phase 104 implemented; verification recorded gaps_found
+Status: shell suite 54->7 failing; remaining 7 documented as regression suspects
+Last activity: 2026-06-22 -- gap-closure pass; fixture/harness drift from shipped-module rewrites resolved
 
 ```
-Progress: [██████░░░░░░░░░░░░░░] 33% (1/3 phases with implementation complete; verification gaps remain)
+Progress: [████████████░░░░░░░░] 33% impl; shell suite 347 pass / 7 fail (was 54 fail)
 ```
+
+## Shell Gap-Closure Pass (2026-06-22)
+
+Took `nix develop -c cargo test --package mesh-core-shell --lib` from 54 -> 7
+failing. Fixed all fixture/harness drift from the shipped navigation-bar /
+audio-popover rewrites (embed-handler keys, missing child-component + interface
++ i18n registration in the test harness, debug-inspector seed-flow, vertical
+slider geometry, deprecated keybind migration, icons.toml completion, obsolete
+test deletion). Also fixed a real product bug: audio popover slider stuck at 0
+(`value={expr}` must be quoted `value="{var}"`).
+
+The remaining 7 are behavior-level **regression suspects** (not fixtures),
+documented with a triage table in `104-VERIFICATION.md`: retained narrow-diff
+counts (2), service-observation repaint gating (1), live element refs metrics
+(1), container-query restyle (1), profiling raster proof (1), settings-loader
+display_transition default (1). Recommend a focused `gsd:debug` pass starting
+with narrow-diff + service-observation.
 
 ## Performance Metrics
 
@@ -75,6 +92,6 @@ Decisions are logged in PROJECT.md Key Decisions table. v1.20 decisions archived
 
 ## Session Continuity
 
-Last session: 2026-06-21T13:01:53.875Z
-Stopped at: context exhaustion at 75% (2026-06-21)
+Last session: 2026-06-22T06:57:38.652Z
+Stopped at: context exhaustion at 76% (2026-06-22)
 Resume file: None

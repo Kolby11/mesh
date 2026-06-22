@@ -3,6 +3,15 @@ use super::*;
 #[test]
 fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_stages() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    // Paint once so the inspector's script reads (and thus tracks) its
+    // `mesh.debug` state fields before the first service event; otherwise the
+    // runtime does not yet observe the event. The real shell seeds cached
+    // service payloads at mount, which this direct-dispatch test bypasses.
+    {
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(360, 720);
+        component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    }
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.debug".into(),
@@ -130,6 +139,15 @@ fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_sta
 #[test]
 fn debug_inspector_surfaces_view_renders_retained_paint_filtering_counters() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    // Paint once so the inspector's script reads (and thus tracks) its
+    // `mesh.debug` state fields before the first service event; otherwise the
+    // runtime does not yet observe the event. The real shell seeds cached
+    // service payloads at mount, which this direct-dispatch test bypasses.
+    {
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(360, 720);
+        component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    }
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.debug".into(),
@@ -223,6 +241,11 @@ fn debug_inspector_surfaces_view_renders_retained_paint_filtering_counters() {
 #[test]
 fn debug_inspector_modules_view_renders_uses_provides_graph() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    {
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(360, 720);
+        component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    }
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.debug".into(),
@@ -403,6 +426,15 @@ fn debug_inspector_benchmark_view_renders_five_rows_when_profiling_off() {
 #[test]
 fn debug_inspector_benchmark_view_renders_waiting_rows_when_profiling_live_without_results() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    // Paint once so the inspector's script reads (and thus tracks) its
+    // `mesh.debug` state fields before the first service event; otherwise the
+    // runtime does not yet observe the event. The real shell seeds cached
+    // service payloads at mount, which this direct-dispatch test bypasses.
+    {
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(360, 720);
+        component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    }
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.debug".into(),
@@ -463,6 +495,15 @@ fn debug_inspector_benchmark_view_renders_waiting_rows_when_profiling_live_witho
 #[test]
 fn debug_inspector_benchmark_view_renders_populated_benchmark_result_rows() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    // Paint once so the inspector's script reads (and thus tracks) its
+    // `mesh.debug` state fields before the first service event; otherwise the
+    // runtime does not yet observe the event. The real shell seeds cached
+    // service payloads at mount, which this direct-dispatch test bypasses.
+    {
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(360, 720);
+        component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    }
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.debug".into(),

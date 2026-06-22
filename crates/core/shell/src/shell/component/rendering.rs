@@ -84,6 +84,12 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn render_layout(&self, surface: &mut dyn ShellSurface) {
+        // Promoted popovers are positioned entirely by their `xdg_positioner`;
+        // the layer-surface anchor/margin/size pokes below do not apply and the
+        // surface's `configure()` is skipped for popups anyway.
+        if self.popup_promoted {
+            return;
+        }
         surface.anchor(self.surface_layout.edge);
         surface.set_layer(self.surface_layout.layer);
         let (width, height) = self.requested_layout_size();

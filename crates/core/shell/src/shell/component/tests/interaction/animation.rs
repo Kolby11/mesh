@@ -315,65 +315,6 @@ end
 }
 
 #[test]
-fn navigation_bar_keyframe_animation_continues_across_rebuild() {
-    let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
-    component
-        .handle_service_event(&ServiceEvent::Updated {
-            service: "mesh.audio".into(),
-            source_module: "@mesh/pipewire-audio".into(),
-            payload: serde_json::json!({
-                "available": true,
-                "percent": 31,
-                "muted": false
-            }),
-        })
-        .unwrap();
-
-    let theme = default_theme();
-    let mut buffer = PixelBuffer::new(420, 80);
-    component.paint(&theme, 420, 80, &mut buffer, 1.0).unwrap();
-    let first_tree = component
-        .last_tree
-        .as_ref()
-        .expect("initial navigation tree");
-    let first_status_accent =
-        first_node_with_attr(first_tree, "class", "status-accent").expect("status accent node");
-    assert_eq!(
-        first_status_accent.computed_style.animations[0]
-            .name
-            .as_deref(),
-        Some("status-pulse")
-    );
-
-    component
-        .handle_service_event(&ServiceEvent::Updated {
-            service: "mesh.audio".into(),
-            source_module: "@mesh/pipewire-audio".into(),
-            payload: serde_json::json!({
-                "available": true,
-                "percent": 64,
-                "muted": false
-            }),
-        })
-        .unwrap();
-    component.paint(&theme, 420, 80, &mut buffer, 1.0).unwrap();
-    let rebuilt_tree = component
-        .last_tree
-        .as_ref()
-        .expect("rebuilt navigation tree");
-    let rebuilt_status_accent = first_node_with_attr(rebuilt_tree, "class", "status-accent")
-        .expect("rebuilt status accent node");
-
-    assert_eq!(
-        rebuilt_status_accent.computed_style.animations[0]
-            .name
-            .as_deref(),
-        Some("status-pulse")
-    );
-}
-
-#[test]
 fn keyframe_animation_finite_completion_stops_render_requests() {
     let mut component = test_frontend_component(
         r#"

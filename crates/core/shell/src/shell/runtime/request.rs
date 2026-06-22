@@ -263,8 +263,18 @@ impl Shell {
                 // current margin-left (set by the preceding shell.position-surface
                 // event), both of which are in the parent surface's coordinate
                 // space and available before the next render frame.
+                // A popover re-activates itself from its own `onpointerenter`
+                // (a keep-alive that cancels the trigger's pending close while
+                // the cursor travels onto it). That re-entrant call must not
+                // re-promote the popup: `trigger_surface` would be the popover
+                // itself, so it would be re-parented to itself and its
+                // anchor_rect (in the original parent's space) would be
+                // reinterpreted against the tiny popover surface, sliding it to
+                // a screen edge. Only promote when the trigger is a *different*
+                // surface (the real anchor).
                 if self.presentation_engine.popup_supported()
                     && !trigger_surface.is_empty()
+                    && trigger_surface != surface_id
                     && target_runtime_found
                 {
                     let trigger_exclusive_zone = self
@@ -286,8 +296,15 @@ impl Shell {
                                 trigger_exclusive_zone,
                             ),
                             size: (1, 1),
+                            // `popover_margin_left` is the popover's desired
+                            // left edge in the parent surface. Anchor at the
+                            // bottom-left corner of the rect and grow toward the
+                            // bottom-right so the popup's top-left corner lands
+                            // on that point — gravity BottomLeft would instead
+                            // put its top-right corner there, shifting the whole
+                            // popup left by its own width.
                             anchor: PopupAnchor::BottomLeft,
-                            gravity: PopupGravity::BottomLeft,
+                            gravity: PopupGravity::BottomRight,
                             constraint: PopupConstraint::default(),
                             offset: (0, 0),
                         },
@@ -299,6 +316,7 @@ impl Shell {
                             Some(trigger_surface.clone());
                         self.components[idx].popup_config = Some(popup_config);
                         self.components[idx].last_popup_size = None;
+                        self.components[idx].component.set_popup_promoted(true);
                     }
                     tracing::info!(
                         "ActivatePopover: promoting {surface_id} as xdg_popup child of {trigger_surface} anchor_x={popover_margin_left} bar_h={trigger_exclusive_zone}"
@@ -894,6 +912,7 @@ impl Shell {
                     runtime.popup_parent_surface = None;
                     runtime.popup_config = None;
                     runtime.last_popup_size = None;
+                    runtime.component.set_popup_promoted(false);
                     self.presentation_engine.destroy_popup(&surface_id);
                     tracing::info!("set_surface_visibility_now: destroyed xdg_popup for {surface_id}");
                 }

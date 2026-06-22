@@ -278,6 +278,10 @@ pub trait ShellComponent: Send {
     fn unregister_popover_trigger(&mut self, _popover_surface: &str) {}
     /// Override the surface's effective keyboard_mode at runtime.
     fn set_keyboard_mode_override(&mut self, _mode: Option<KeyboardMode>) {}
+    /// Mark the surface as promoted to (or demoted from) an `xdg_popup`. While
+    /// promoted, the surface is positioned by its `xdg_positioner`, so the
+    /// host skips the layer-surface anchor/margin/size configuration path.
+    fn set_popup_promoted(&mut self, _promoted: bool) {}
     fn debug_keybinds(&self) -> Vec<mesh_core_debug::DebugKeybindEntry> {
         Vec::new()
     }

@@ -69,4 +69,22 @@ battery-full = [
   "system:battery-full-symbolic",
   "system:battery",
 ]
+preferences-system = [
+  "system:preferences-system",
+  "system:preferences-system-symbolic",
+  "system:settings",
+]
+preferences-desktop-locale = [
+  "system:preferences-desktop-locale",
+  "system:preferences-desktop-locale-symbolic",
+  "system:language",
+]
+media-playback-start = [
+  "system:media-playback-start",
+  "system:media-playback-start-symbolic",
+]
+window-close = [
+  "system:window-close",
+  "system:window-close-symbolic",
+]
 missing-proof = ["system:no-such-icon"]

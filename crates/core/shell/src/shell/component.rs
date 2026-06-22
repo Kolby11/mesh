@@ -297,6 +297,12 @@ pub(super) struct FrontendSurfaceComponent {
     /// means use the configured value from the manifest. Cleared when the
     /// surface hides.
     pub(super) keyboard_mode_override: Option<KeyboardMode>,
+    /// True while this surface is promoted to an `xdg_popup`. Popups are placed
+    /// by their `xdg_positioner` (see `configure_popup`), so `render_layout`
+    /// must not poke anchor/margin/size onto the underlying surface — doing so
+    /// is harmless (the layer-surface `configure()` is skipped for popups) but
+    /// noisy. Set/cleared alongside the wrapper's `popup_config`.
+    pub(super) popup_promoted: bool,
     pub(super) frontend_catalog: FrontendCatalog,
     graph_i18n_catalogs: Vec<(String, String, PathBuf)>,
     pub(super) visible: bool,
@@ -482,6 +488,7 @@ impl FrontendSurfaceComponent {
             settings_json: settings_state.raw,
             surface_layout: settings_state.layout.clone(),
             keyboard_mode_override: None,
+            popup_promoted: false,
             frontend_catalog,
             graph_i18n_catalogs: Vec::new(),
             visible: settings_state.layout.visible_on_start,

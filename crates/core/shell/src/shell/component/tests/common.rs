@@ -174,6 +174,55 @@ pub(super) fn audio_network_power_catalog() -> InterfaceCatalog {
     catalog
 }
 
+/// Catalog covering every interface the shipped navigation-bar children
+/// `require(...)`: audio, network, theme, power, plus brightness, hyprland, and
+/// media. Without these the brightness/now-playing/etc. child components fail to
+/// resolve their interface and render wide error text, overflowing the bar so
+/// the right-cluster buttons land off-surface and become un-hit-testable.
+pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
+    let mut catalog = audio_network_power_catalog();
+    for (interface, base_module, provider_module, backend_name) in [
+        (
+            "mesh.brightness",
+            "@mesh/brightness-interface",
+            "@mesh/backlight-brightness",
+            "Backlight",
+        ),
+        (
+            "mesh.hyprland",
+            "@mesh/hyprland-interface",
+            "@mesh/hyprland-wm",
+            "Hyprland",
+        ),
+        (
+            "mesh.media",
+            "@mesh/media-interface",
+            "@mesh/mpris-media",
+            "MPRIS",
+        ),
+    ] {
+        catalog.register_contract(InterfaceContract {
+            interface: interface.into(),
+            version: parse_contract_version("1.0").unwrap(),
+            file_path: PathBuf::from("<test>"),
+            state_fields: Vec::new(),
+            methods: Vec::new(),
+            events: Vec::new(),
+            types: HashMap::new(),
+            capabilities: ContractCapabilities::default(),
+        });
+        catalog.register_provider(InterfaceProvider {
+            interface: interface.into(),
+            version: Some("1.0".into()),
+            base_module: Some(base_module.into()),
+            provider_module: provider_module.into(),
+            backend_name: backend_name.into(),
+            priority: 100,
+        });
+    }
+    catalog
+}
+
 pub(super) fn debug_catalog() -> InterfaceCatalog {
     let mut catalog = InterfaceCatalog::default();
     catalog.register_contract(InterfaceContract {
@@ -578,11 +627,52 @@ pub(super) fn real_frontend_module_component(
                 )))
                 .unwrap(),
             ),
+            (
+                "BrightnessButton".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/navigation-bar/src/components/brightness-button.mesh"
+                )))
+                .unwrap(),
+            ),
+            (
+                "ClockButton".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/navigation-bar/src/components/clock-button.mesh"
+                )))
+                .unwrap(),
+            ),
+            (
+                "NowPlaying".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/navigation-bar/src/components/now-playing.mesh"
+                )))
+                .unwrap(),
+            ),
+            (
+                "WindowTitle".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/navigation-bar/src/components/window-title.mesh"
+                )))
+                .unwrap(),
+            ),
+            (
+                "WorkspaceList".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/navigation-bar/src/components/workspace-list.mesh"
+                )))
+                .unwrap(),
+            ),
         ]),
         module_component_imports: HashMap::from([
             ("AudioPopover".into(), "@mesh/audio-popover".into()),
             ("LanguagePopover".into(), "@mesh/language-popover".into()),
             ("ThemeSelector".into(), "@mesh/theme-selector".into()),
+            ("QuickSettings".into(), "@mesh/quick-settings".into()),
         ]),
         watched_paths: Vec::new(),
     };
@@ -739,6 +829,34 @@ pub(super) fn real_frontend_module_component(
         slot_contributions: HashMap::new(),
     };
 
+    // Mirror the shell's graph i18n wiring so component `t(...)` calls resolve
+    // against each module's `config/i18n/<locale>.json`, including child
+    // components. Without this, `t("nav.volume_level")` would surface the raw
+    // key instead of the translated string. Built before the dirs are moved
+    // into the (compiled, module_dir) selection below.
+    let mut graph_i18n_catalogs: Vec<(String, String, PathBuf)> = Vec::new();
+    for (id, dir) in [
+        ("@mesh/navigation-bar", &navigation_dir),
+        ("@mesh/audio-popover", &audio_popover_dir),
+        ("@mesh/language-popover", &language_popover_dir),
+        ("@mesh/theme-selector", &theme_selector_dir),
+        ("@mesh/debug-inspector", &debug_inspector_dir),
+    ] {
+        let i18n_dir = dir.join("config/i18n");
+        let Ok(entries) = std::fs::read_dir(&i18n_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(locale) = path.file_stem().and_then(|stem| stem.to_str()) {
+                graph_i18n_catalogs.push((id.to_string(), locale.to_string(), path.clone()));
+            }
+        }
+    }
+
     let (compiled, module_dir) = if module_id == "@mesh/audio-popover" {
         (audio_popover_compiled, audio_popover_dir)
     } else if module_id == "@mesh/language-popover" {
@@ -752,7 +870,8 @@ pub(super) fn real_frontend_module_component(
     };
 
     let mut component =
-        FrontendSurfaceComponent::new(compiled, module_dir, catalog, interface_catalog);
+        FrontendSurfaceComponent::new(compiled, module_dir, catalog, interface_catalog)
+            .with_graph_i18n_catalogs(graph_i18n_catalogs);
     component
         .mount(ComponentContext {
             component_id: module_id.into(),

@@ -155,10 +155,15 @@ fn selection_fixture_module_is_disabled_in_local_graph() {
         .unwrap();
     let package = fs::read_to_string(root.join("config/module.json")).unwrap();
     let json: serde_json::Value = serde_json::from_str(&package).unwrap();
-    let module = &json["modules"]["@mesh/text-selection-proof"];
-    assert_eq!(module["kind"], "frontend");
-    assert_eq!(module["path"], "frontend/text-selection-proof");
-    assert_eq!(module["enabled"], false);
+    // The local config disables fixture modules by id in `mesh.disabled` rather
+    // than carrying a per-module enabled flag.
+    let disabled = json["mesh"]["disabled"]
+        .as_array()
+        .expect("mesh.disabled array");
+    assert!(
+        disabled.iter().any(|id| id == "@mesh/text-selection-proof"),
+        "text-selection-proof fixture should be disabled in the local graph, got {disabled:?}"
+    );
 }
 
 #[test]
