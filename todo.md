@@ -154,6 +154,124 @@ surface.
 
 ---
 
+## Codebase cleanup — 2026-06-22 audit
+
+Findings from a four-agent scan of the largest production files. Two batches
+already landed: **confirmed dead-code deletions** (commit `afc9a0d`) and
+**cross-crate/intra-crate dedup** (commit `a4125d7`). The items below are the
+remaining, deliberately-deferred findings (cheap quality wins + larger
+refactors). Each cites `file:line` as of the audit; reverify line numbers
+before editing.
+
+### Cheap quality wins (low risk, do next)
+
+- [ ] Extract `reset_render_caches(&mut self)` from the ~8 identical cache-reset
+      lines duplicated in `FrontendSurfaceComponent::theme_changed` and
+      `locale_changed` (`shell/component/shell_component.rs:~858` and `~885`).
+      Eliminates drift risk.
+- [ ] Collapse the `invalidate_surface_config` one-line wrapper into its only
+      implementation `invalidate_surface_config_only`
+      (`shell/component/component.rs:~635`); update the 7 call sites.
+- [ ] Rename `validate_phase87_attribute_value` → `validate_known_attribute_value`
+      (`ui/elements/src/element.rs:~1501`) — milestone codename leaking into the
+      production source tree (shows in stack traces/grep). Pure rename.
+- [ ] `request.rs`: extract the 4 identical `service_unavailable` error-JSON
+      literals in `dispatch_service_command` (`shell/runtime/request.rs:~504-550`)
+      into a named constant/helper.
+- [ ] `debug.rs`: `module_graph_entries` iterates `graph.contributed_themes()`
+      twice (themes + labels) — combine into one `filter_map`
+      (`shell/runtime/debug.rs:~240`).
+
+### Larger refactors (bigger diffs — best as separate reviewed PRs)
+
+- [ ] Split `FrontendSurfaceComponent::paint` (~486 lines,
+      `shell/component/shell_component.rs:365`). Extract at least
+      `compute_tooltip_state()` and `paint_pixel_regions()` (the clear+paint loop
+      repeats the same paint call three times). Hottest path in the system.
+- [ ] `StyleResolver::apply_declaration` is a ~480-line `match property` block
+      (`ui/elements/src/style/resolve.rs`). It is a manually-spelled table-driven
+      op; consider a table/macro so adding a CSS property is one entry. Note the
+      systematic `_with_diagnostics`/`_no_diagnostics` pairing (~200 dup lines) —
+      a deliberate hot-path optimization; only unify behind a const-generic/trait
+      if it stays zero-cost.
+- [ ] `installed_graph.rs`: `build_graph_diagnostics` (~570 lines) runs six
+      independent diagnostic passes in one function — extract each pass.
+- [ ] `install_host_api` splits: frontend (`scripting/context/runtime.rs:824`,
+      ~445 lines) and backend (`scripting/backend/runtime.rs:480`, ~200 lines).
+      Break per-subsystem (`install_popover_api`, `install_locale_api`,
+      `install_service_api`, `install_exec_api`, …). The frontend
+      `mesh.popover.activate` handler alone is ~75 lines.
+- [ ] `handle_component_input` (`shell/component/input/mod.rs`, ~500 lines):
+      extract `handle_key_pressed`/`handle_key_released` (the press/release arms
+      duplicate button/toggle activation logic).
+- [ ] `annotate_runtime_tree` (`shell/component/runtime_tree.rs:577`, ~180 lines,
+      11 args): introduce an annotation-context struct; split the slider logic.
+
+### Decisions / verify-then-act (judgment calls, don't blind-delete)
+
+- [ ] **`ComputedStyle::align_content` + `AlignContent`** are parsed, stored, and
+      hashed (`ui/elements/src/style/{types,resolve}.rs`, `runtime_tree.rs`) but
+      **never forwarded to Taffy or the painter** — a silent no-op CSS property.
+      Decide: wire it into `taffy_style_for_node` (it's a real flex property) or
+      remove the parse path. Left in place during cleanup because deleting it
+      would regress authors who write `align-content` (currently no-ops, doesn't
+      error).
+- [ ] **Element-diagnostics feature is unwired.** `collect_element_diagnostics`
+      (`frontend/compiler/src/render.rs:455`) is called once at `:360` and its
+      result is dropped (`let _element_diagnostics = …`); its only other callers
+      are `#[cfg(test)]`. Either attach the diagnostics to the built `WidgetNode`
+      / surface diagnostics, or remove the function + its phase87/phase88 tests.
+      (The underlying `validate_element_*` API in element.rs is used and stays.)
+- [ ] **Dead element compatibility tables.** `ElementContractDef::compatibility`,
+      `HTML_REF`/`QT_REF`/`FLUTTER_REF`, `ElementCompatibilityRef`, and `compat()`
+      (`ui/elements/src/element.rs`) are filled into every `ELEMENT_CONTRACT_DEFS`
+      entry but never read (verified zero reads). Removing the field slims ~70
+      table entries (~300+ lines) — a large mechanical edit deferred from the
+      safe-deletion batch; do as its own focused pass (build will catch misses).
+- [ ] Dead `StyleResolver` non-cached `restyle_subtree` / `restyle_subtree_children`
+      (`ui/elements/src/style/resolve.rs:~637,~661`) — only referenced by doc
+      comments; the `_cached`/`_for_keys` variants are used. Remove and fix the
+      doc-comment references in `events.rs:125` and `restyle/metrics.rs:10`.
+- [ ] Dead `PainterCommand::{DrawText,DrawPath}`, `PainterBlendMode::{Multiply,Screen}`,
+      `PainterPath`/`PainterPathElement` (`frontend/render/src/surface/painter/backend.rs`)
+      — never emitted in production (text goes through `TextRenderer`; non-SrcOver
+      blend + standalone blur are "deferred to migration" sentinels). Removing
+      them lets the `#[allow(dead_code)]` on the enums go and trims the
+      `execute_commands_on_canvas` match (~60 lines). Confirm the migration
+      sentinels are truly abandoned first.
+- [ ] `service_name_from_interface` duplicated `pub(super)` in
+      `shell/service.rs:85` and `scripting/context/proxy.rs:370`. Deferred from
+      the dedup batch: sharing it means a new cross-crate dependency (candidate
+      home `mesh-core-service`, near `canonical_interface_name`) for a 4-line fn —
+      only worth it if more shared interface-name helpers accumulate.
+- [ ] `draw_icon_resolution` shim + test-only `draw_named_icon_with_registry`
+      (`frontend/render/src/surface/icon.rs:~915,~937`) — minor; inline or
+      `#[cfg(test)]`-gate.
+
+### Migration tech-debt (flagged by project rules; verify before removing)
+
+- [ ] Five hand-written `.mesh`/`.luau` source mini-parsers in
+      `installed_graph.rs:~873-1051` (`extract_icon_names_from_mesh_source`,
+      `extract_t_keys_from_mesh_source`, `extract_mesh_event_publish_channels`,
+      `extract_backend_emit_event_names`, `extract_keybind_subscriptions_from_mesh_source`).
+      Project policy calls hand-rolled script string-parsing temporary migration
+      code; migrate to AST-based analysis when the parser matures. Note:
+      `extract_keybind_subscriptions_from_mesh_source` has a likely `tag_start`
+      `rfind` bug (computed against `remaining`, not the original slice).
+- [ ] Backend lifecycle `init`/`onRender` fallbacks
+      (`scripting/backend/runtime.rs:~179`, `context/runtime.rs:call_render_lifecycle`)
+      — all shipped modules use `start`/`render`; the legacy-name fallbacks are
+      compat for third-party modules. Confirm none remain before dropping (and
+      update `is_reserved_backend_hook`, which still lists `init`).
+- [ ] `BackendScriptContext` / `ScriptContext` constructor explosion: ~5 `new_*`
+      convenience constructors each chaining to the full one; production uses one.
+      Mark the test-only variants `#[cfg(test)]` or move to a builder.
+- [ ] `ModuleKind::{FontPack,Library} => ModuleType::Widget` lossy conversion
+      (`module/package/module_manifest.rs:~544`) — extend `ModuleType` or retire
+      the legacy enum once the canonical `module.json` path is the only one.
+
+---
+
 ## Performance — remaining open items
 
 Items owned by a milestone are listed with their milestone reference.
