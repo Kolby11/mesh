@@ -3,6 +3,7 @@ pub mod element;
 pub mod events;
 pub mod layout;
 pub mod lru;
+pub mod popover;
 pub mod style;
 /// Element model and UI algorithms for MESH.
 ///
@@ -32,6 +33,9 @@ pub use element::{
     validate_element_event,
 };
 pub use events::{EventDispatcher, InputState, Modifiers, RawInputEvent, UiEvent};
+pub use popover::{
+    PopoverAnchor, PopoverConstraintAdjustment, PopoverGravity, PopoverGrab, PopoverPlacement,
+};
 pub use layout::{
     IntrinsicLayoutCache, LayoutEngine, LayoutRect, PerSurfaceLayoutState, TextMeasurer,
 };

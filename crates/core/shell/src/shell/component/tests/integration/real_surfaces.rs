@@ -220,7 +220,7 @@ fn shipped_theme_selector_uses_left_anchored_content_measured_popover_layout() {
         "@mesh/theme-selector should stay content-measured like the other nav popovers"
     );
     assert_eq!(theme_selector.surface_layout.width, 112);
-    assert_eq!(theme_selector.surface_layout.height, 92);
+    assert_eq!(theme_selector.surface_layout.height, 74);
     assert_eq!(
         theme_selector.surface_layout.display_transition.show_ms,
         120

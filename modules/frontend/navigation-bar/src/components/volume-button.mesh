@@ -5,6 +5,8 @@
             class="nav-button"
             keybind="{this.keybinds.mute.id}"
             onclick={onAudioToggle}
+            onpointerenter={onAudioEnter}
+            onpointerleave={onAudioLeave}
             onkeybind={onMuteKeybind}
             title={t(audio_tooltip_key) .. audio_tooltip_value}
             aria-label={t('nav.open_audio')}
@@ -82,7 +84,7 @@ function render(self)
     update_audio_copy(percent, muted)
 end
 
-function onAudioToggle(event)
+local function show_audio_selector(event)
     if audio_surface_hidden then
         mesh.events.publish("shell.position-surface", {
             surface_id = audio_surface_id,
@@ -92,10 +94,33 @@ function onAudioToggle(event)
         local focus = event.trigger ~= nil and event.trigger.type == "keyboard"
         mesh.popover.activate(audio_surface_id, event, { focus = focus })
         audio_surface_hidden = false
-    else
+    end
+end
+
+local function hide_audio_selector()
+    if not audio_surface_hidden then
         mesh.popover.hide(audio_surface_id)
         audio_surface_hidden = true
     end
+end
+
+function onAudioToggle(event)
+    if audio_surface_hidden then
+        show_audio_selector(event)
+    else
+        hide_audio_selector()
+    end
+end
+
+-- Hover opens the audio popover; leaving the trigger starts its close. The
+-- popover keeps itself open while hovered and the hide transition bridges the
+-- gap between the button and the popover surface.
+function onAudioEnter(event)
+    show_audio_selector(event)
+end
+
+function onAudioLeave()
+    hide_audio_selector()
 end
 </script>
 

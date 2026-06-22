@@ -61,6 +61,14 @@ pub(super) struct State {
     pub(super) keyboard_repeat_info: RepeatInfo,
     pub(super) keyboard_repeat: Option<KeyboardRepeatState>,
     pub(super) events: Vec<DevWindowEvent>,
+    /// `xdg_shell` (`xdg_wm_base`) global, bound when available. Required to
+    /// create `xdg_positioner`/`xdg_popup` objects for promoted `<popover>`s.
+    pub(super) xdg_shell: Option<XdgShell>,
+    /// `surface_id`s of popups the compositor dismissed (e.g. outside-click on a
+    /// grabbed popup, or parent surface destroyed). Drained by the shell so it
+    /// can drop the matching popup target. Entries are removed from `surfaces`
+    /// immediately; this only carries the id outward.
+    pub(super) dismissed_popups: Vec<String>,
 }
 
 impl State {
@@ -134,13 +142,18 @@ impl State {
             return;
         }
 
+        // Keyboard interactivity is a layer-shell concept; popups never request
+        // OnDemand focus, so there is nothing to reapply for the popup role.
+        let Some(layer_surface) = entry.role.as_layer() else {
+            return;
+        };
         let effective_cfg = entry.cfg.with_keyboard_mode(effective_keyboard_mode);
         tracing::debug!(
             "[focus] layer_shell: reapplying keyboard mode for surface_id={surface_id} mode={:?}",
             effective_keyboard_mode
         );
-        apply_config(&entry.layer_surface, &effective_cfg);
-        entry.layer_surface.commit();
+        apply_config(layer_surface, &effective_cfg);
+        layer_surface.commit();
         entry.applied_keyboard_mode = effective_keyboard_mode;
         entry.config_fingerprint = surface_config_fingerprint(&entry.cfg, effective_keyboard_mode);
     }
@@ -180,12 +193,12 @@ impl State {
             && previous_surface_id != surface_id
             && let Some(previous_entry) = self.surfaces.get(previous_surface_id)
         {
-            grab.remove_surface(previous_entry.layer_surface.wl_surface());
+            grab.remove_surface(previous_entry.wl_surface());
         }
 
         if self.focus_grab_surface_id.as_deref() != Some(surface_id) {
             tracing::debug!("[focus] layer_shell: starting focus grab for surface_id={surface_id}");
-            grab.add_surface(entry.layer_surface.wl_surface());
+            grab.add_surface(entry.wl_surface());
             grab.commit();
             self.focus_grab_surface_id = Some(surface_id.to_string());
             self.focus_grab_requested_at = Some(Instant::now());
@@ -268,7 +281,7 @@ impl State {
             RequestData {
                 app_id: None,
                 seat_and_serial: Some((seat, serial)),
-                surface: Some(entry.layer_surface.wl_surface().clone()),
+                surface: Some(entry.wl_surface().clone()),
             },
         );
     }
@@ -287,7 +300,7 @@ impl State {
             tracing::debug!(
                 "[focus] layer_shell: releasing focus grab for surface_id={surface_id}"
             );
-            grab.remove_surface(entry.layer_surface.wl_surface());
+            grab.remove_surface(entry.wl_surface());
         }
         // Destroy is the protocol's hard release path: it removes an active
         // grab even if a compositor does not process an empty whitelist the way
@@ -304,7 +317,7 @@ impl State {
     ) -> Option<String> {
         self.surfaces
             .iter()
-            .find(|(_, entry)| entry.layer_surface.wl_surface() == surface)
+            .find(|(_, entry)| entry.wl_surface() == surface)
             .map(|(surface_id, _)| surface_id.clone())
     }
 

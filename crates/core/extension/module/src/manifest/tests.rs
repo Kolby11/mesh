@@ -81,6 +81,44 @@ fn parses_module_json_manifest() {
 }
 
 #[test]
+fn embeddable_component_has_export_and_no_surface() {
+    let exported = r#"
+{
+  "id": "@mesh/language-popover",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "entrypoints": { "main": "src/main.mesh" },
+  "exports": { "component": { "tag": "LanguagePopover" } }
+}
+"#;
+    let manifest = serde_json::from_str::<JsonManifest>(exported)
+        .unwrap()
+        .into_manifest();
+    assert!(!manifest.declares_surface());
+    assert!(manifest.is_embeddable_component());
+
+    // A module that both exports a component *and* declares a surface is a
+    // surface owner, not an embeddable-only module.
+    let surface_owner = r#"
+{
+  "id": "@mesh/navigation-bar",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "entrypoints": { "main": "src/main.mesh" },
+  "exports": { "component": { "tag": "NavRoot" } },
+  "surface_layout": { "anchor": "top", "layer": "top", "height": 56 }
+}
+"#;
+    let manifest = serde_json::from_str::<JsonManifest>(surface_owner)
+        .unwrap()
+        .into_manifest();
+    assert!(manifest.declares_surface());
+    assert!(!manifest.is_embeddable_component());
+}
+
+#[test]
 fn parses_module_json_keybind_declarations() {
     let content = r#"
 {

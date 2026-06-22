@@ -65,7 +65,7 @@ onscroll = nil
 <style>
     .bubble-options-stage {
         width: 112px;
-        height: 92px;
+        height: 74px;
         position: relative;
         overflow: visible;
     }
@@ -84,17 +84,17 @@ onscroll = nil
     }
 
     .bubble-option-left {
-        top: 18px;
+        top: 8px;
         left: 10px;
     }
 
     .bubble-option-center {
-        top: 42px;
+        top: 32px;
         left: 38px;
     }
 
     .bubble-option-right {
-        top: 18px;
+        top: 8px;
         left: 66px;
     }
 

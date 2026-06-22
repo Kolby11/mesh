@@ -675,3 +675,115 @@ end
         .unwrap();
     assert!((runtime_number(&component, "slider_seen") - 0.5).abs() < 0.001);
 }
+
+#[test]
+fn pointer_enter_and_leave_dispatch_hover_handlers() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+entered = false
+left = false
+function onHoverEnter() entered = true end
+function onHoverLeave() left = true end
+</script>
+"#,
+    );
+    let button = event_node(
+        "button",
+        "root/0",
+        10.0,
+        10.0,
+        40.0,
+        40.0,
+        &[
+            ("pointerenter", "onHoverEnter"),
+            ("pointerleave", "onHoverLeave"),
+        ],
+    );
+    component.last_tree = Some(root_with(vec![button]));
+
+    let theme = default_theme();
+    // Moving onto the button fires pointerenter, not pointerleave.
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerMove { x: 20.0, y: 20.0 },
+        )
+        .unwrap();
+    assert_eq!(
+        runtime_value(&component, "entered"),
+        Some(serde_json::json!(true))
+    );
+    assert_eq!(
+        runtime_value(&component, "left"),
+        Some(serde_json::json!(false))
+    );
+
+    // The pointer leaving the whole surface fires pointerleave.
+    component
+        .handle_input(&theme, 240, 160, ComponentInput::PointerLeave)
+        .unwrap();
+    assert_eq!(
+        runtime_value(&component, "left"),
+        Some(serde_json::json!(true))
+    );
+}
+
+#[test]
+fn mouse_enter_leave_aliases_dispatch_hover_handlers() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+entered = false
+left = false
+function onHoverEnter() entered = true end
+function onHoverLeave() left = true end
+</script>
+"#,
+    );
+    let button = event_node(
+        "button",
+        "root/0",
+        10.0,
+        10.0,
+        40.0,
+        40.0,
+        &[
+            ("mouseenter", "onHoverEnter"),
+            ("mouseleave", "onHoverLeave"),
+        ],
+    );
+    component.last_tree = Some(root_with(vec![button]));
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerMove { x: 20.0, y: 20.0 },
+        )
+        .unwrap();
+    assert_eq!(
+        runtime_value(&component, "entered"),
+        Some(serde_json::json!(true))
+    );
+
+    // Moving off the button (still inside the surface) fires mouseleave.
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerMove { x: 100.0, y: 100.0 },
+        )
+        .unwrap();
+    assert_eq!(
+        runtime_value(&component, "left"),
+        Some(serde_json::json!(true))
+    );
+}

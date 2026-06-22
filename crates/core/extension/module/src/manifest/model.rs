@@ -116,6 +116,25 @@ impl Manifest {
             .map(|component| component.tag.as_str())
     }
 
+    /// True when the module declares its own top-level surface (anchor, layer,
+    /// size, keyboard mode). A module that only exports an embeddable component
+    /// has no surface of its own.
+    pub fn declares_surface(&self) -> bool {
+        self.surface_layout.is_some()
+    }
+
+    /// True when the module is meant to be *embedded* into a host surface rather
+    /// than owning a standalone Wayland surface: it exports a component (so other
+    /// modules can `require` and instantiate it) and declares no `mesh.surface`
+    /// block. The shell must not create a layer surface for such a module; its
+    /// `<popover>`/content is promoted into a child surface of whatever host
+    /// embeds it. Kept explicit (export present *and* surface absent) rather than
+    /// inferred from a missing surface alone, so a frontend module that simply
+    /// forgot its surface block is not silently treated as embeddable.
+    pub fn is_embeddable_component(&self) -> bool {
+        self.exports.component.is_some() && !self.declares_surface()
+    }
+
     pub fn validate_keybinds(&self) -> Result<(), String> {
         self.keybinds.validate()
     }

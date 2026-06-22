@@ -1,5 +1,11 @@
 <template>
-  <popover bind:this={popover} class="audio-popover-shell" aria-label="Audio controls">
+  <popover
+    bind:this={popover}
+    class="audio-popover-shell"
+    onpointerenter={onPopoverEnter}
+    onpointerleave={onPopoverLeave}
+    aria-label="Audio controls"
+  >
     <column class="audio-popover">
       <slider
         class="audio-slider"
@@ -100,6 +106,19 @@ function onVolumeRelease(value)
     volume_dragging = false
     pending_slider_value = clamp_percent(value)
     last_sent_slider_value = nil
+end
+
+-- Hovering the popover cancels the trigger's pending close; leaving it closes.
+-- Never close mid-drag so the slider stays usable if the pointer strays.
+function onPopoverEnter(event)
+    mesh.popover.activate("@mesh/audio-popover", event, { focus = false })
+end
+
+function onPopoverLeave()
+    if volume_dragging then
+        return
+    end
+    mesh.popover.hide("@mesh/audio-popover")
 end
 </script>
 

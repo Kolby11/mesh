@@ -4,6 +4,8 @@
       ref="language-button"
       class="{trigger_class}"
       onclick={onLanguageToggle}
+      onpointerenter={onLanguageEnter}
+      onpointerleave={onLanguageLeave}
       title="{t('nav.language_menu')}"
       aria-label="{t('nav.language_menu')}"
     >
@@ -75,14 +77,31 @@ local function show_language_selector(event)
     end
 end
 
-function onLanguageToggle(event)
-    if language_surface_hidden then
-        show_language_selector(event)
-    else
+local function hide_language_selector()
+    if not language_surface_hidden then
         mesh.popover.hide(language_surface_id)
         language_surface_hidden = true
         trigger_class = "nav-button"
     end
+end
+
+function onLanguageToggle(event)
+    if language_surface_hidden then
+        show_language_selector(event)
+    else
+        hide_language_selector()
+    end
+end
+
+-- Hover opens; leaving the trigger starts the close transition. The popover
+-- keeps itself open while hovered, and the shell hide transition bridges the
+-- cursor's trip from the button to the popover.
+function onLanguageEnter(event)
+    show_language_selector(event)
+end
+
+function onLanguageLeave()
+    hide_language_selector()
 end
 </script>
 

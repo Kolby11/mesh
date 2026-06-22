@@ -1,5 +1,10 @@
 <template>
-    <popover class="theme-float-shell" onmouseleave={onSelectorLeave} aria-label="Select theme">
+    <popover
+        class="theme-float-shell"
+        onpointerenter={onSelectorEnter}
+        onpointerleave={onSelectorLeave}
+        aria-label="Select theme"
+    >
         <BubbleOptions
             label="Select theme"
             item1_button_class="{dark_class}"
@@ -94,6 +99,13 @@ end
 function onThemeScroll(_event)
     -- Theme currently has exactly three options, but the shared bubble control
     -- supports scroll cycling for callers with larger option sets.
+end
+
+-- Re-activating while the pointer is over the popover cancels the trigger's
+-- pending close (the shell's hide transition), so moving the cursor from the
+-- nav button onto the bubbles keeps the selector open.
+function onSelectorEnter(event)
+    mesh.popover.activate("@mesh/theme-selector", event, { focus = false })
 end
 
 function onSelectorLeave()

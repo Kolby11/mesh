@@ -3,6 +3,8 @@
     <button
       class="nav-button"
       onclick={onSettingsToggle}
+      onpointerenter={onSettingsEnter}
+      onpointerleave={onSettingsLeave}
       aria-haspopup="true"
       title="{t('nav.open_settings')}"
       aria-label="{t('nav.open_settings')}"
@@ -20,7 +22,7 @@ local QuickSettings = require("@mesh/quick-settings")
 settings_surface_id = "@mesh/quick-settings"
 settings_surface_hidden = true
 
-function onSettingsToggle(event)
+local function show_settings_selector(event)
     if settings_surface_hidden then
         mesh.events.publish("shell.position-surface", {
             surface_id = settings_surface_id,
@@ -30,10 +32,32 @@ function onSettingsToggle(event)
         local focus = event.trigger ~= nil and event.trigger.type == "keyboard"
         mesh.popover.activate(settings_surface_id, event, { focus = focus })
         settings_surface_hidden = false
-    else
+    end
+end
+
+local function hide_settings_selector()
+    if not settings_surface_hidden then
         mesh.popover.hide(settings_surface_id)
         settings_surface_hidden = true
     end
+end
+
+function onSettingsToggle(event)
+    if settings_surface_hidden then
+        show_settings_selector(event)
+    else
+        hide_settings_selector()
+    end
+end
+
+-- Hover opens quick settings; leaving the trigger starts its close. The panel
+-- keeps itself open while hovered and the hide transition bridges the gap.
+function onSettingsEnter(event)
+    show_settings_selector(event)
+end
+
+function onSettingsLeave()
+    hide_settings_selector()
 end
 </script>
 

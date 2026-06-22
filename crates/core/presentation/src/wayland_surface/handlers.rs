@@ -11,7 +11,7 @@ impl CompositorHandler for State {
         let Some(entry) = self
             .surfaces
             .values_mut()
-            .find(|entry| entry.layer_surface.wl_surface() == surface)
+            .find(|entry| entry.wl_surface() == surface)
         else {
             return;
         };
@@ -54,7 +54,7 @@ impl CompositorHandler for State {
         if let Some(entry) = self
             .surfaces
             .values_mut()
-            .find(|entry| entry.layer_surface.wl_surface() == surface)
+            .find(|entry| entry.wl_surface() == surface)
         {
             entry.frame_pending = false;
             entry.frame_pending_since = None;
@@ -109,7 +109,7 @@ impl LayerShellHandler for State {
         let id = self
             .surfaces
             .iter()
-            .find(|(_, entry)| entry.layer_surface.wl_surface() == layer.wl_surface())
+            .find(|(_, entry)| entry.wl_surface() == layer.wl_surface())
             .map(|(id, _)| id.clone());
         if let Some(id) = id {
             tracing::debug!(
@@ -131,7 +131,7 @@ impl LayerShellHandler for State {
         let entry = self
             .surfaces
             .values_mut()
-            .find(|entry| entry.layer_surface.wl_surface() == layer.wl_surface());
+            .find(|entry| entry.wl_surface() == layer.wl_surface());
         if let Some(entry) = entry {
             let (w, h) = configure.new_size;
             if w > 0 {
@@ -578,6 +578,50 @@ fn normalize_keysym_name(name: &str) -> String {
     }
 }
 
+impl PopupHandler for State {
+    fn configure(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        popup: &Popup,
+        config: PopupConfigure,
+    ) {
+        let target = popup.wl_surface().clone();
+        let Some(entry) = self
+            .surfaces
+            .values_mut()
+            .find(|entry| entry.wl_surface() == &target)
+        else {
+            return;
+        };
+        // The compositor decides the popup's final size (it may have constrained
+        // or resized the positioner request). Adopt it as the authoritative
+        // logical size, exactly as the layer-shell `configure` path does.
+        if config.width > 0 {
+            entry.width = config.width as u32;
+        }
+        if config.height > 0 {
+            entry.height = config.height as u32;
+        }
+        entry.configured = true;
+        entry.needs_full_redraw = true;
+    }
+
+    fn done(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, popup: &Popup) {
+        let target = popup.wl_surface().clone();
+        let dismissed = self
+            .surfaces
+            .iter()
+            .find(|(_, entry)| entry.wl_surface() == &target)
+            .map(|(id, _)| id.clone());
+        if let Some(id) = dismissed {
+            tracing::debug!("[popover] layer_shell: compositor dismissed popup surface_id={id}");
+            self.surfaces.remove(&id);
+            self.dismissed_popups.push(id);
+        }
+    }
+}
+
 delegate_activation!(State);
 delegate_compositor!(State);
 delegate_output!(State);
@@ -587,6 +631,34 @@ delegate_seat!(State);
 delegate_pointer!(State);
 delegate_keyboard!(State);
 delegate_registry!(State);
+delegate_xdg_popup!(State);
+
+// We use SCTK's `XdgShell` only for `xdg_wm_base` ping/pong and the
+// positioner/popup factory — not for toplevel windows. `delegate_xdg_shell!`
+// would also require a `WindowHandler` (for server-side window decorations),
+// so instead delegate just the two globals `XdgShell` needs to dispatch:
+// `xdg_wm_base` itself and the optional decoration manager bound by `bind()`.
+wayland_client::delegate_dispatch!(State: [
+    smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_wm_base::XdgWmBase: smithay_client_toolkit::globals::GlobalData
+] => smithay_client_toolkit::shell::xdg::XdgShell);
+
+// `XdgShell::bind` also binds the optional `zxdg_decoration_manager_v1` global,
+// which requires `State: Dispatch<ZxdgDecorationManagerV1, GlobalData>`. We never
+// use server-side decorations, so rather than pull in `WindowHandler` via
+// `delegate_xdg_shell!`, handle the manager directly — it is a pure factory with
+// no events.
+impl Dispatch<ZxdgDecorationManagerV1, GlobalData> for State {
+    fn event(
+        _: &mut State,
+        _: &ZxdgDecorationManagerV1,
+        _: zxdg_decoration_manager_v1::Event,
+        _: &GlobalData,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        unreachable!("zxdg_decoration_manager_v1 has no events");
+    }
+}
 
 impl Dispatch<WpViewport, ()> for State {
     fn event(

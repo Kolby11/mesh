@@ -75,8 +75,44 @@ pub(super) struct SurfaceShmBuffer {
     pending_damage: Option<DamageRect>,
 }
 
+/// The compositor-side role backing a [`SurfaceEntry`]. Layer surfaces own
+/// shell chrome (panels, launchers, overlays); popups are `xdg_popup` children
+/// promoted from a `<popover>`. Both expose a `wl_surface`, so the entire SHM
+/// buffer / present / scale / input path below is shared — only role creation,
+/// layer-shell config, and dismiss differ.
+pub(super) enum SurfaceRole {
+    Layer(LayerSurface),
+    Popup(PopupRole),
+}
+
+pub(super) struct PopupRole {
+    pub(super) popup: Popup,
+    /// `surface_id` of the parent (layer) surface this popup is a child of.
+    pub(super) parent_id: String,
+}
+
+impl SurfaceRole {
+    pub(super) fn wl_surface(&self) -> &wl_surface::WlSurface {
+        match self {
+            SurfaceRole::Layer(layer) => layer.wl_surface(),
+            SurfaceRole::Popup(role) => role.popup.wl_surface(),
+        }
+    }
+
+    pub(super) fn as_layer(&self) -> Option<&LayerSurface> {
+        match self {
+            SurfaceRole::Layer(layer) => Some(layer),
+            SurfaceRole::Popup(_) => None,
+        }
+    }
+
+    fn is_popup(&self) -> bool {
+        matches!(self, SurfaceRole::Popup(_))
+    }
+}
+
 pub(super) struct SurfaceEntry {
-    pub(super) layer_surface: LayerSurface,
+    pub(super) role: SurfaceRole,
     pub(super) cfg: LayerSurfaceConfig,
     pub(super) applied_keyboard_mode: KeyboardMode,
     pub(super) width: u32,
@@ -120,12 +156,12 @@ impl Hasher for SurfaceConfigHasher {
 
 impl SurfaceEntry {
     fn new(
-        layer_surface: LayerSurface,
+        role: SurfaceRole,
         cfg: LayerSurfaceConfig,
         applied_keyboard_mode: KeyboardMode,
     ) -> Self {
         Self {
-            layer_surface,
+            role,
             width: cfg.width.max(1),
             height: cfg.height.max(1),
             config_fingerprint: surface_config_fingerprint(&cfg, applied_keyboard_mode),
@@ -147,17 +183,27 @@ impl SurfaceEntry {
         }
     }
 
+    pub(super) fn wl_surface(&self) -> &wl_surface::WlSurface {
+        self.role.wl_surface()
+    }
+
     fn needs_reconfigure(&self, cfg: &LayerSurfaceConfig, keyboard_mode: KeyboardMode) -> bool {
         !self.configured
             || self.config_fingerprint != surface_config_fingerprint(cfg, keyboard_mode)
     }
 
     fn apply_config(&mut self, cfg: LayerSurfaceConfig, keyboard_mode: KeyboardMode) {
+        // Layer-shell config (anchor/layer/size/margins) only applies to layer
+        // surfaces. Popups are positioned by their `xdg_positioner`, never by
+        // these requests, so there is nothing to apply for the popup role.
+        let Some(layer_surface) = self.role.as_layer() else {
+            return;
+        };
         let requires_fresh_configure =
             surface_change_requires_fresh_configure(&self.cfg, &cfg, self.configured);
         let effective_cfg = cfg.with_keyboard_mode(keyboard_mode);
-        apply_config(&self.layer_surface, &effective_cfg);
-        self.layer_surface.commit();
+        apply_config(layer_surface, &effective_cfg);
+        layer_surface.commit();
         self.config_fingerprint = surface_config_fingerprint(&cfg, keyboard_mode);
         self.cfg = cfg;
         self.applied_keyboard_mode = keyboard_mode;
@@ -175,9 +221,9 @@ impl SurfaceEntry {
     fn hide(&mut self) {
         self.frame_pending = false;
         self.frame_pending_since = None;
-        let wl_surface = self.layer_surface.wl_surface();
+        let wl_surface = self.role.wl_surface();
         wl_surface.attach(None, 0, 0);
-        self.layer_surface.commit();
+        wl_surface.commit();
         // Wait for a fresh configure before attaching a buffer again after remap.
         self.configured = false;
     }
@@ -274,7 +320,7 @@ impl SurfaceEntry {
         scale: f32,
     ) {
         let buffer = &self.shm_buffers[index].buffer;
-        let wl_surface = self.layer_surface.wl_surface();
+        let wl_surface = self.role.wl_surface();
 
         // Scale damage rects from logical to physical coordinates
         let physical_damage: Vec<DamageRect> = damage_rects
@@ -336,9 +382,9 @@ impl SurfaceEntry {
 
         buffer.attach_to(wl_surface).ok();
         wl_surface.frame(qh, wl_surface.clone());
+        wl_surface.commit();
         self.frame_pending = true;
         self.frame_pending_since = Some(Instant::now());
-        self.layer_surface.commit();
         // Store logical dimensions (the authoritative size)
         self.width = logical_width;
         self.height = logical_height;
@@ -415,6 +461,11 @@ fn surface_change_requires_fresh_configure(
 }
 
 fn resolved_surface_size(entry: &SurfaceEntry, output_size: Option<(u32, u32)>) -> (u32, u32) {
+    // Popups are sized by their positioner / compositor configure, not by the
+    // layer-shell edge-stretch rules — report the configured size verbatim.
+    if entry.role.is_popup() {
+        return (entry.width.max(1), entry.height.max(1));
+    }
     resolved_surface_size_for_config(&entry.cfg, entry.width, entry.height, output_size)
 }
 
@@ -614,6 +665,16 @@ impl LayerShellBackend {
         let layer_shell = LayerShell::bind(&globals, &qh).map_err(|e| {
             PresentationError::ProtocolUnsupported(format!("zwlr_layer_shell_v1: {e}"))
         })?;
+        // xdg_wm_base backs the popup positioner primitive. It is optional: a
+        // compositor without it simply cannot promote `<popover>`s (the shell
+        // falls back to keeping them inline / clipped), so a missing global is
+        // not a hard failure for the rest of the shell.
+        let xdg_shell = XdgShell::bind(&globals, &qh).ok();
+        if xdg_shell.is_none() {
+            tracing::warn!(
+                "layer_shell: xdg_wm_base unavailable; <popover> surface promotion disabled"
+            );
+        }
         let activation_state = ActivationState::bind(&globals, &qh).ok();
         let focus_grab_manager = globals.bind(&qh, 1..=1, GlobalData).ok();
         let viewporter: Option<WpViewporter> = globals.bind(&qh, 1..=1, GlobalData).ok();
@@ -652,6 +713,8 @@ impl LayerShellBackend {
             keyboard_repeat_info: RepeatInfo::Disable,
             keyboard_repeat: None,
             events: Vec::new(),
+            xdg_shell,
+            dismissed_popups: Vec::new(),
         };
 
         Ok(Self {
@@ -708,7 +771,11 @@ impl LayerShellBackend {
                 );
                 self.state.surfaces.insert(
                     surface_id.to_string(),
-                    SurfaceEntry::new(layer_surface, cfg, effective_keyboard_mode),
+                    SurfaceEntry::new(
+                        SurfaceRole::Layer(layer_surface),
+                        cfg,
+                        effective_keyboard_mode,
+                    ),
                 );
                 if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
                     let cfg = entry.cfg.clone();
@@ -719,7 +786,7 @@ impl LayerShellBackend {
                     .state
                     .surfaces
                     .get(surface_id)
-                    .map(|entry| entry.layer_surface.wl_surface().clone());
+                    .map(|entry| entry.wl_surface().clone());
                 let qh = self.state.qh.clone();
                 if let Some(wl_surface) = wl_surface
                     && let Some(fs) =
@@ -732,7 +799,7 @@ impl LayerShellBackend {
                 // Create viewport for this surface (wp_viewporter for non-integer scale)
                 if let Some(ref viewporter) = self.state.viewporter {
                     if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
-                        let wl_surface = entry.layer_surface.wl_surface().clone();
+                        let wl_surface = entry.wl_surface().clone();
                         let qh = self.state.qh.clone();
                         entry.viewport = Some(viewporter.get_viewport(&wl_surface, &qh, ()));
                     }
@@ -741,13 +808,209 @@ impl LayerShellBackend {
                 // update_blur_region is called with a non-None region.
                 if let Some(ref manager) = self.state.blur_manager {
                     if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
-                        let wl_surface = entry.layer_surface.wl_surface().clone();
+                        let wl_surface = entry.wl_surface().clone();
                         let qh = self.state.qh.clone();
                         entry.kde_blur = Some(manager.create(&wl_surface, &qh, ()));
                     }
                 }
             }
         }
+    }
+
+    /// True when the compositor exposes `xdg_wm_base`, i.e. `<popover>` surface
+    /// promotion is available.
+    pub fn popup_supported(&self) -> bool {
+        self.state.xdg_shell.is_some()
+    }
+
+    /// Promote a component into an `xdg_popup` child of an existing layer
+    /// surface, or reposition it if `surface_id` already names a live popup.
+    ///
+    /// The popup shares the entire SHM/present/scale/input path with layer
+    /// surfaces — only creation and placement differ. Like a layer surface it
+    /// must not be painted until the compositor sends its first configure, which
+    /// flips `configured = true` via [`PopupHandler::configure`]; the existing
+    /// `present_with_damage` gate handles that automatically.
+    pub fn configure_popup(
+        &mut self,
+        surface_id: &str,
+        config: PopupConfig,
+    ) -> Result<(), PresentationError> {
+        // An existing popup is repositioned in place rather than recreated, so
+        // anchor moves (exclusive-zone/output changes) don't tear it down.
+        if self.state.surfaces.contains_key(surface_id) {
+            self.reposition_popup(surface_id, &config.placement);
+            return Ok(());
+        }
+
+        if self.state.xdg_shell.is_none() {
+            return Err(PresentationError::ProtocolUnsupported(
+                "xdg_wm_base unavailable; cannot promote popover".into(),
+            ));
+        }
+
+        // The popup's Wayland parent must be a layer surface owned by the
+        // backend. Nested popup-of-popup is not modeled yet.
+        let parent_layer = match self.state.surfaces.get(&config.parent_surface_id) {
+            Some(entry) => match entry.role.as_layer() {
+                Some(layer) => layer.clone(),
+                None => {
+                    return Err(PresentationError::SurfaceCreate(
+                        "popup parent must be a layer surface".into(),
+                    ));
+                }
+            },
+            None => {
+                return Err(PresentationError::SurfaceCreate(format!(
+                    "popup parent surface '{}' not found",
+                    config.parent_surface_id
+                )));
+            }
+        };
+
+        let qh = self.state.qh.clone();
+        // `XdgShell` is not `Clone`, so create the popup while holding an
+        // immutable borrow of `state`, then release it before the mutable
+        // `surfaces.insert` below.
+        let popup = {
+            let xdg_shell = self
+                .state
+                .xdg_shell
+                .as_ref()
+                .expect("xdg_shell presence checked above");
+            let positioner = build_positioner(xdg_shell, &config.placement)?;
+            let surface = Surface::new(&self.state.compositor_state, &qh)
+                .map_err(|e| PresentationError::SurfaceCreate(format!("popup surface: {e}")))?;
+            // Parent role is supplied below via `get_popup`, so the xdg_popup is
+            // created with no xdg parent (None) per the wlr-layer-shell contract.
+            let popup = Popup::from_surface(None, &positioner, &qh, surface, xdg_shell)
+                .map_err(|e| PresentationError::SurfaceCreate(format!("xdg_popup: {e}")))?;
+            parent_layer.get_popup(popup.xdg_popup());
+
+            // A grab is only valid in response to a recent input serial. Hover-open
+            // popovers pass `grab = false` and rely on the core hover-bridge.
+            if config.grab {
+                if let (Some(seat), Some(serial)) =
+                    (self.state.activation_seat.as_ref(), config.grab_serial)
+                {
+                    popup.xdg_popup().grab(seat, serial);
+                } else {
+                    tracing::debug!(
+                        "[popover] layer_shell: grab requested for {surface_id} but no seat/serial; opening without grab"
+                    );
+                }
+            }
+
+            // Initial commit (no buffer) maps the popup role and prompts the
+            // compositor's first configure.
+            popup.wl_surface().commit();
+            popup
+        };
+
+        let cfg = LayerSurfaceConfig {
+            width: config.placement.size.0,
+            height: config.placement.size.1,
+            ..LayerSurfaceConfig::default()
+        };
+        let entry = SurfaceEntry::new(
+            SurfaceRole::Popup(PopupRole {
+                popup,
+                parent_id: config.parent_surface_id.clone(),
+            }),
+            cfg,
+            KeyboardMode::None,
+        );
+        let wl_surface = entry.wl_surface().clone();
+        self.state.surfaces.insert(surface_id.to_string(), entry);
+
+        // Bind HiDPI protocols for the popup surface, mirroring the layer path.
+        if let Some(fs) =
+            self.state
+                .bind_fractional_scale(&wl_surface, &qh, surface_id.to_string())
+            && let Some(entry) = self.state.surfaces.get_mut(surface_id)
+        {
+            entry.fractional_scale = Some(fs);
+        }
+        if let Some(ref viewporter) = self.state.viewporter {
+            let viewport = viewporter.get_viewport(&wl_surface, &qh, ());
+            if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
+                entry.viewport = Some(viewport);
+            }
+        }
+
+        self.dispatch_pending()?;
+        Ok(())
+    }
+
+    fn reposition_popup(&mut self, surface_id: &str, placement: &PopupPlacement) {
+        let Some(xdg_shell) = self.state.xdg_shell.as_ref() else {
+            return;
+        };
+        let Ok(positioner) = build_positioner(xdg_shell, placement) else {
+            return;
+        };
+        if let Some(entry) = self.state.surfaces.get(surface_id)
+            && let SurfaceRole::Popup(role) = &entry.role
+        {
+            // `xdg_popup.reposition` requires xdg_wm_base v3+. The token is
+            // echoed back on the resulting reactive configure; 0 is fine since
+            // we don't correlate repositions yet.
+            role.popup.reposition(&positioner, 0);
+        }
+    }
+
+    /// Tear down a promoted popup. Dropping the [`SurfaceEntry`] drops the SCTK
+    /// `Popup`, whose `Drop` destroys the `xdg_popup`/`xdg_surface`/`wl_surface`;
+    /// the per-surface viewport/scale/blur objects are released explicitly since
+    /// popups are created and destroyed repeatedly.
+    pub fn destroy_popup(&mut self, surface_id: &str) {
+        let is_popup = self
+            .state
+            .surfaces
+            .get(surface_id)
+            .map(|entry| entry.role.is_popup())
+            .unwrap_or(false);
+        if !is_popup {
+            return;
+        }
+        if let Some(entry) = self.state.surfaces.remove(surface_id) {
+            if let Some(viewport) = entry.viewport.as_ref() {
+                viewport.destroy();
+            }
+            if let Some(fractional_scale) = entry.fractional_scale.as_ref() {
+                fractional_scale.destroy();
+            }
+            if let Some(blur) = entry.kde_blur.as_ref() {
+                blur.release();
+            }
+        }
+    }
+
+    /// Destroy every popup parented to `parent_surface_id`. The compositor
+    /// auto-dismisses popups when their parent surface is destroyed or hidden;
+    /// this keeps the backend's own bookkeeping in step (e.g. when the shell
+    /// hides the host bar) so stale popup entries are not presented or routed to.
+    pub fn destroy_popups_for_parent(&mut self, parent_surface_id: &str) {
+        let children: Vec<String> = self
+            .state
+            .surfaces
+            .iter()
+            .filter_map(|(id, entry)| match &entry.role {
+                SurfaceRole::Popup(role) if role.parent_id == parent_surface_id => {
+                    Some(id.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        for id in children {
+            self.destroy_popup(&id);
+        }
+    }
+
+    /// Drain the ids of popups the compositor dismissed since the last call so
+    /// the shell can drop the matching popup targets from its own bookkeeping.
+    pub fn take_dismissed_popups(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.state.dismissed_popups)
     }
 
     fn clamp_surface_config(&self, mut cfg: LayerSurfaceConfig) -> LayerSurfaceConfig {
@@ -965,7 +1228,7 @@ impl LayerShellBackend {
         let Some(entry) = self.state.surfaces.get(surface_id) else {
             return;
         };
-        let wl_surface = entry.layer_surface.wl_surface();
+        let wl_surface = entry.wl_surface();
 
         let Some(rect) = opaque_rect else {
             wl_surface.set_opaque_region(None);
@@ -999,7 +1262,7 @@ impl LayerShellBackend {
         let Some(entry) = self.state.surfaces.get(surface_id) else {
             return;
         };
-        let wl_surface = entry.layer_surface.wl_surface();
+        let wl_surface = entry.wl_surface();
 
         let Some(rect) = input_rect.filter(|r| r.width > 0 && r.height > 0) else {
             wl_surface.set_input_region(None);
@@ -1312,6 +1575,29 @@ impl LayerShellBackend {
             reason: wake_reason,
         })
     }
+}
+
+/// Build and configure an `xdg_positioner` from a [`PopupPlacement`]. Every
+/// field maps 1:1 onto a positioner request, so the compositor performs all the
+/// actual anchoring / flip-at-edge math (replacing the old hand-rolled margin
+/// positioning of the standalone popover layer surfaces).
+fn build_positioner(
+    xdg_shell: &XdgShell,
+    placement: &PopupPlacement,
+) -> Result<XdgPositioner, PresentationError> {
+    let positioner = XdgPositioner::new(xdg_shell)
+        .map_err(|e| PresentationError::SurfaceCreate(format!("xdg_positioner: {e}")))?;
+    let (ax, ay, aw, ah) = placement.anchor_rect;
+    positioner.set_anchor_rect(ax, ay, aw.max(1), ah.max(1));
+    positioner.set_size(
+        placement.size.0.max(1) as i32,
+        placement.size.1.max(1) as i32,
+    );
+    positioner.set_anchor(popup::map_anchor(placement.anchor));
+    positioner.set_gravity(popup::map_gravity(placement.gravity));
+    positioner.set_constraint_adjustment(popup::map_constraint(placement.constraint));
+    positioner.set_offset(placement.offset.0, placement.offset.1);
+    Ok(positioner)
 }
 
 pub(super) fn apply_config(layer_surface: &LayerSurface, cfg: &LayerSurfaceConfig) {

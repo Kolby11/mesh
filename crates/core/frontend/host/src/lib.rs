@@ -5,6 +5,7 @@ use mesh_core_capability::CapabilitySet;
 use mesh_core_debug::ProfilingStage;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::WidgetNode;
+pub use mesh_core_elements::PopoverPlacement;
 use mesh_core_locale::LocaleEngine;
 use mesh_core_render::{DamageRect, DisplayPaintCommand, PixelBuffer};
 use mesh_core_scripting::ScriptError;

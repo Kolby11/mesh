@@ -1,5 +1,10 @@
 <template>
-  <popover class="language-popover-shell" onmouseleave={onSelectorLeave} aria-label="{t('language.choose')}">
+  <popover
+    class="language-popover-shell"
+    onpointerenter={onSelectorEnter}
+    onpointerleave={onSelectorLeave}
+    aria-label="{t('language.choose')}"
+  >
     <BubbleOptions
       label="{t('language.choose')}"
       item1_button_class="{item1_button_class}"
@@ -188,6 +193,12 @@ function onOptionScroll(event)
         window_start = normalize_index(window_start - 1)
     end
     sync_options()
+end
+
+-- Re-activating while hovered cancels the trigger's pending close so the
+-- cursor can travel from the nav button onto the bubbles without dismissing.
+function onSelectorEnter(event)
+    mesh.popover.activate(get_surface_id(), event, { focus = false })
 end
 
 function onSelectorLeave()

@@ -7,7 +7,10 @@ use std::os::unix::io::BorrowedFd;
 use mesh_core_render::{DamageRect, PixelBuffer};
 
 pub use dev_window::{DevWindowEvent as WindowEvent, DevWindowKeyEvent as WindowKeyEvent, KeyMods};
-pub use wayland_surface::{LayerSurfaceConfig, LayerSurfaceSizePolicy};
+pub use wayland_surface::{
+    LayerSurfaceConfig, LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint,
+    PopupGravity, PopupPlacement,
+};
 
 use dev_window::DevWindowBackend;
 use wayland_surface::LayerShellBackend;
@@ -104,6 +107,53 @@ impl PresentationEngine {
     pub fn configure(&mut self, surface_id: &str, cfg: LayerSurfaceConfig) {
         if let Backend::WaylandSurface(bridge) = &mut self.backend {
             bridge.configure(surface_id, cfg);
+        }
+    }
+
+    /// True when the active backend can promote a `<popover>` into a compositor
+    /// `xdg_popup` (Wayland backend with `xdg_wm_base`). The dev-window backend
+    /// cannot, so callers should keep popover content inline there.
+    pub fn popup_supported(&self) -> bool {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.popup_supported(),
+            Backend::DevWindow(_) => false,
+        }
+    }
+
+    /// Promote `surface_id` into an `xdg_popup` child of `config.parent_surface_id`,
+    /// or reposition it if it already exists. No-op on the dev-window backend.
+    pub fn configure_popup(
+        &mut self,
+        surface_id: &str,
+        config: PopupConfig,
+    ) -> Result<(), PresentationError> {
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.configure_popup(surface_id, config),
+            Backend::DevWindow(_) => Ok(()),
+        }
+    }
+
+    /// Destroy a previously promoted popup surface. No-op on the dev-window backend.
+    pub fn destroy_popup(&mut self, surface_id: &str) {
+        if let Backend::WaylandSurface(bridge) = &mut self.backend {
+            bridge.destroy_popup(surface_id);
+        }
+    }
+
+    /// Destroy every popup parented to `parent_surface_id` (e.g. when the host
+    /// surface is hidden). No-op on the dev-window backend.
+    pub fn destroy_popups_for_parent(&mut self, parent_surface_id: &str) {
+        if let Backend::WaylandSurface(bridge) = &mut self.backend {
+            bridge.destroy_popups_for_parent(parent_surface_id);
+        }
+    }
+
+    /// Drain the ids of popups the compositor dismissed since the last call so
+    /// the shell can drop the matching popup targets. Always empty on dev-window.
+    pub fn take_dismissed_popups(&mut self) -> Vec<String> {
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.take_dismissed_popups(),
+            Backend::DevWindow(_) => Vec::new(),
         }
     }
 

@@ -201,6 +201,7 @@ impl FrontendSurfaceComponent {
                     self.hovered_key
                 );
                 if new_key != self.hovered_key || new_path != self.hovered_path {
+                    let previous_path = self.hovered_path.clone();
                     let previous_tooltip = self
                         .hovered_key
                         .as_ref()
@@ -215,7 +216,7 @@ impl FrontendSurfaceComponent {
                             previous_owner == next_owner
                         });
                     self.hovered_key = new_key.clone();
-                    self.hovered_path = new_path;
+                    self.hovered_path = new_path.clone();
                     // Store the hovered element's bounds for tooltip positioning.
                     // Use the tooltip owner's bounds when available; fall back to
                     // the hovered node itself.
@@ -239,9 +240,22 @@ impl FrontendSurfaceComponent {
                     // for a style-only repaint so paint() can reuse the cached
                     // widget tree instead of re-running Luau scripts.
                     self.invalidate_interaction_restyle();
+                    // Dispatch pointerenter/pointerleave to any script handlers on
+                    // the entered/left nodes (e.g. hover-to-open popovers).
+                    let hover_requests = self.dispatch_hover_transition_handlers(
+                        &tree,
+                        &previous_path,
+                        &new_path,
+                        x,
+                        y,
+                    )?;
+                    if !hover_requests.is_empty() {
+                        return Ok(hover_requests);
+                    }
                 }
             }
             ComponentInput::PointerLeave => {
+                let previous_path = self.hovered_path.clone();
                 if self.hovered_key.is_some()
                     || !self.hovered_path.is_empty()
                     || self.hover_start.is_some()
@@ -253,6 +267,13 @@ impl FrontendSurfaceComponent {
                     self.hovered_element_bounds = None;
                     self.tooltip_appeared_at = None;
                     self.invalidate_interaction_restyle();
+                }
+                // The pointer left the whole surface — fire pointerleave/mouseleave
+                // on everything that was hovered so popovers can close themselves.
+                let leave_requests =
+                    self.dispatch_hover_transition_handlers(&tree, &previous_path, &[], 0.0, 0.0)?;
+                if !leave_requests.is_empty() {
+                    return Ok(leave_requests);
                 }
             }
             ComponentInput::Scroll { x, y, dx, dy } => {
@@ -508,6 +529,58 @@ impl FrontendSurfaceComponent {
         }
 
         Ok(Vec::new())
+    }
+
+    /// Dispatch `pointerenter`/`pointerleave` (plus the `mouseenter`/`mouseleave`
+    /// aliases) script handlers for the delta between the previously hovered
+    /// node path and the new one: nodes only in `previous_path` get leave
+    /// handlers, nodes only in `new_path` get enter handlers. The event payload
+    /// mirrors a click event so handlers can read `event.current_target.position`
+    /// to position popovers, exactly as the `onclick` open path does.
+    fn dispatch_hover_transition_handlers(
+        &mut self,
+        tree: &WidgetNode,
+        previous_path: &[String],
+        new_path: &[String],
+        x: f32,
+        y: f32,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let mut requests = Vec::new();
+        for key in previous_path {
+            if new_path.contains(key) {
+                continue;
+            }
+            if find_event_handler(tree, key, "pointerleave").is_some()
+                || find_event_handler(tree, key, "mouseleave").is_some()
+            {
+                let event = self.build_click_event(tree, key, x, y);
+                requests.extend(self.call_node_handler(
+                    tree,
+                    key,
+                    "pointerleave",
+                    &[event.clone()],
+                )?);
+                requests.extend(self.call_node_handler(tree, key, "mouseleave", &[event])?);
+            }
+        }
+        for key in new_path {
+            if previous_path.contains(key) {
+                continue;
+            }
+            if find_event_handler(tree, key, "pointerenter").is_some()
+                || find_event_handler(tree, key, "mouseenter").is_some()
+            {
+                let event = self.build_click_event(tree, key, x, y);
+                requests.extend(self.call_node_handler(
+                    tree,
+                    key,
+                    "pointerenter",
+                    &[event.clone()],
+                )?);
+                requests.extend(self.call_node_handler(tree, key, "mouseenter", &[event])?);
+            }
+        }
+        Ok(requests)
     }
 }
 

@@ -6,9 +6,13 @@
 
 mod backend;
 mod handlers;
+mod popup;
 mod state;
 
 pub use backend::{LayerShellBackend, LayerSurfaceConfig, LayerSurfaceSizePolicy};
+pub use popup::{
+    PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement,
+};
 
 use crate::PresentationError;
 use crate::dev_window::{DevWindowEvent, DevWindowKeyEvent, KeyMods};
@@ -17,9 +21,9 @@ use mesh_core_wayland::{Edge, KeyboardMode, Layer as MeshLayer};
 use rustix::event::{PollFd, PollFlags, poll};
 use smithay_client_toolkit::{
     activation::{ActivationHandler, ActivationState, RequestData},
-    compositor::{CompositorHandler, CompositorState, Region},
+    compositor::{CompositorHandler, CompositorState, Region, Surface},
     delegate_activation, delegate_compositor, delegate_keyboard, delegate_layer, delegate_output,
-    delegate_pointer, delegate_registry, delegate_seat, delegate_shm,
+    delegate_pointer, delegate_registry, delegate_seat, delegate_shm, delegate_xdg_popup,
     globals::GlobalData,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
@@ -37,6 +41,10 @@ use smithay_client_toolkit::{
             Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
             LayerSurfaceConfigure,
         },
+        xdg::{
+            XdgShell, XdgPositioner,
+            popup::{Popup, PopupConfigure, PopupHandler},
+        },
     },
     shm::{
         Shm, ShmHandler,
@@ -53,12 +61,15 @@ use wayland_client::{
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
 };
+use wayland_protocols::xdg::decoration::zv1::client::zxdg_decoration_manager_v1::{
+    self, ZxdgDecorationManagerV1,
+};
 use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1, wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
     wp_fractional_scale_v1, wp_fractional_scale_v1::WpFractionalScaleV1,
 };
 use wayland_protocols::wp::viewporter::client::{
-    wp_viewport, wp_viewport::WpViewport, wp_viewporter, wp_viewporter::WpViewporter,
+    wp_viewport::WpViewport, wp_viewporter, wp_viewporter::WpViewporter,
 };
 use wayland_protocols_hyprland::focus_grab::v1::client::{
     hyprland_focus_grab_manager_v1, hyprland_focus_grab_manager_v1::HyprlandFocusGrabManagerV1,

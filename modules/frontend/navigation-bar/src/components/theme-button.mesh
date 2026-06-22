@@ -3,6 +3,8 @@
         <button
             class="{trigger_class}"
             onclick={onThemeToggle}
+            onpointerenter={onThemeEnter}
+            onpointerleave={onThemeLeave}
             aria-haspopup="true"
             title={t(theme_tooltip_key)}
             aria-label={t(theme_tooltip_key)}
@@ -74,14 +76,31 @@ local function show_theme_selector(event)
     end
 end
 
-function onThemeToggle(event)
-    if theme_surface_hidden then
-        show_theme_selector(event)
-    else
+local function hide_theme_selector()
+    if not theme_surface_hidden then
         mesh.popover.hide(theme_surface_id)
         theme_surface_hidden = true
         trigger_class = "nav-button"
     end
+end
+
+function onThemeToggle(event)
+    if theme_surface_hidden then
+        show_theme_selector(event)
+    else
+        hide_theme_selector()
+    end
+end
+
+-- Hover opens the selector; leaving the trigger starts its close transition.
+-- The popover keeps itself open while the pointer is over it, and the shell's
+-- hide transition bridges the gap as the cursor travels button -> popover.
+function onThemeEnter(event)
+    show_theme_selector(event)
+end
+
+function onThemeLeave()
+    hide_theme_selector()
 end
 </script>
 
