@@ -20,6 +20,7 @@ pub mod context;
 pub mod host_api;
 pub mod pool;
 pub mod storage;
+mod util;
 
 pub use backend::{
     BackendScriptContext, BackendScriptError, BackendScriptEvent, StreamLine, StreamState,

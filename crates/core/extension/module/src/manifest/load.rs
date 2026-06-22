@@ -84,7 +84,10 @@ fn load_mesh_toml(path: &Path) -> Result<LoadedManifest, ManifestError> {
     })
 }
 
-fn is_canonical_module_json(content: &str) -> Result<bool, serde_json::Error> {
+/// A JSON manifest is canonical when it carries both a `name` and a `mesh`
+/// section. Shared by the manifest loader and the installed-graph package
+/// loader so the canonical-format check can never drift between them.
+pub(crate) fn is_canonical_module_json(content: &str) -> Result<bool, serde_json::Error> {
     let value: serde_json::Value = serde_json::from_str(content)?;
     Ok(value.get("name").is_some() && value.get("mesh").is_some())
 }

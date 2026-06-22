@@ -15,6 +15,7 @@ use mesh_core_service::{InterfaceCatalog, InterfaceResolution};
 use mlua::{Error as LuaError, Function, Lua, LuaSerdeExt, Table, Value as LuaValue, Variadic};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use crate::util::{default_runtime_storage_root, is_named_event_channel};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -1473,13 +1474,6 @@ fn is_lifecycle_handler(name: &str) -> bool {
     matches!(name, "init" | "render" | "mount" | "unmount" | "onRender")
 }
 
-fn default_runtime_storage_root() -> PathBuf {
-    std::env::temp_dir()
-        .join("mesh")
-        .join("runtime-storage")
-        .join(std::process::id().to_string())
-}
-
 fn is_reserved_runtime_hook(name: &str) -> bool {
     is_lifecycle_handler(name)
 }
@@ -1490,15 +1484,6 @@ fn is_reserved_runtime_hook(name: &str) -> bool {
 /// sentinels installed before user script execution).
 fn is_denied_binding_key(key: &str, denylist: &HashSet<String>) -> bool {
     key.starts_with("__") || is_reserved_runtime_hook(key) || denylist.contains(key)
-}
-
-fn is_named_event_channel(name: &str) -> bool {
-    name.chars()
-        .next()
-        .is_some_and(|ch| ch.is_ascii_uppercase())
-        && name
-            .chars()
-            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 /// Resolve (or lazily create) a `self.<Event>` channel.

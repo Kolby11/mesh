@@ -1072,21 +1072,7 @@ fn is_declared_shell_event_channel(channel: &str) -> bool {
 }
 
 fn scan_mesh_files_recursive(dir: &Path) -> Vec<(std::path::PathBuf, String)> {
-    let mut results = Vec::new();
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return results;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            results.extend(scan_mesh_files_recursive(&path));
-        } else if path.extension().and_then(|e| e.to_str()) == Some("mesh") {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                results.push((path, content));
-            }
-        }
-    }
-    results
+    scan_files_recursive(dir, "mesh")
 }
 
 fn scan_files_recursive(dir: &Path, extension: &str) -> Vec<(std::path::PathBuf, String)> {
@@ -2233,9 +2219,11 @@ pub fn load_module_manifest(
                 path: module_json.clone(),
                 source,
             })?;
-        if is_canonical_module_json(&content).map_err(|source| ModuleManifestError::Json {
-            path: module_json.clone(),
-            source,
+        if crate::manifest::is_canonical_module_json(&content).map_err(|source| {
+            ModuleManifestError::Json {
+                path: module_json.clone(),
+                source,
+            }
         })? {
             let manifest = ModuleManifest::from_path(&module_json)?;
             let diagnostics = manifest.localized_text_diagnostics(&module_json);
@@ -2288,7 +2276,3 @@ pub fn load_module_manifest(
     )))
 }
 
-fn is_canonical_module_json(content: &str) -> Result<bool, serde_json::Error> {
-    let value: serde_json::Value = serde_json::from_str(content)?;
-    Ok(value.get("name").is_some() && value.get("mesh").is_some())
-}

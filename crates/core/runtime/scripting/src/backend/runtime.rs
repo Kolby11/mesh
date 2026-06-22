@@ -7,6 +7,7 @@ use crate::storage::{ScopedStorage, StorageManager, StorageScope, create_lua_sto
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value as JsonValue;
 use std::collections::HashSet;
+use crate::util::{default_runtime_storage_root, is_named_event_channel};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -743,21 +744,6 @@ fn is_reserved_backend_hook(name: &str) -> bool {
     matches!(name, "init" | "start" | "stop")
 }
 
-fn is_named_event_channel(name: &str) -> bool {
-    name.chars()
-        .next()
-        .is_some_and(|ch| ch.is_ascii_uppercase())
-        && name
-            .chars()
-            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-}
-
-fn default_runtime_storage_root() -> PathBuf {
-    std::env::temp_dir()
-        .join("mesh")
-        .join("runtime-storage")
-        .join(std::process::id().to_string())
-}
 
 fn create_backend_event_channel(
     lua: &Lua,
