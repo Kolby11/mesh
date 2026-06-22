@@ -85,7 +85,7 @@ fn resolve_component_target(
     ))
 }
 
-fn resolve_import_target(
+pub(crate) fn resolve_import_target(
     doc: &Document,
     target: &ComponentImportTarget,
     registry: &ModuleRegistry,

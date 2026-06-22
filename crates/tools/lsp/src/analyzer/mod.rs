@@ -18,7 +18,10 @@ fn try_upgrade_to_proxy_ctx(
     offset: usize,
     doc: &Document,
 ) -> ScriptContext {
-    if doc.interface_proxies.is_empty() && doc.element_ref_aliases.is_empty() {
+    if doc.interface_proxies.is_empty()
+        && doc.element_ref_aliases.is_empty()
+        && doc.component_instances.is_empty()
+    {
         return ctx;
     }
     let before = &block_content[..offset.min(block_content.len())];
@@ -63,6 +66,16 @@ fn try_upgrade_to_proxy_ctx(
         }
         if doc.interface_proxies.contains_key(var_name) {
             return ScriptContext::InterfaceProxy {
+                var_name: var_name.to_string(),
+                prefix: prefix.to_string(),
+            };
+        }
+        if doc
+            .component_instances
+            .iter()
+            .any(|instance| instance.var_name == var_name)
+        {
+            return ScriptContext::ComponentInstanceMember {
                 var_name: var_name.to_string(),
                 prefix: prefix.to_string(),
             };
@@ -201,6 +214,71 @@ popover.$0
     }
 
     #[test]
+    fn script_completion_on_bind_this_component_offers_base_fields_and_exported_members() {
+        // A mounted child component bound via `bind:this` should complete the
+        // MeshElement base fields plus the child's exported (public) variables
+        // and functions — but not its private locals or lifecycle hooks.
+        let dir = std::env::temp_dir().join(format!(
+            "mesh-lsp-bind-this-component-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("item-row.mesh"),
+            r#"<template>
+  <row />
+</template>
+
+<script lang="luau">
+selected_id = nil
+label_text = ""
+
+local private_state = 1
+
+function setSelected(id)
+end
+
+local function privateHelper()
+end
+
+function render(self)
+end
+</script>
+"#,
+        )
+        .unwrap();
+
+        let (source, position) = fixture_with_cursor(
+            r#"<template>
+  <ItemRow bind:this={item_row} />
+</template>
+
+<script lang="luau">
+local ItemRow = require("./item-row.mesh")
+
+item_row.$0
+</script>
+"#,
+        );
+        let uri = Url::from_file_path(dir.join("main.mesh")).unwrap();
+        let doc = Document::new(uri, source);
+        let labels = completion_labels(&doc, position);
+
+        std::fs::remove_dir_all(&dir).ok();
+
+        // Tier 1: inherited MeshElement base fields.
+        assert!(labels.contains(&"width".to_string()));
+        // Tier 2: exported variables and functions.
+        assert!(labels.contains(&"selected_id".to_string()));
+        assert!(labels.contains(&"label_text".to_string()));
+        assert!(labels.contains(&"setSelected".to_string()));
+        // Private locals and lifecycle hooks must not cross the boundary.
+        assert!(!labels.contains(&"private_state".to_string()));
+        assert!(!labels.contains(&"privateHelper".to_string()));
+        assert!(!labels.contains(&"render".to_string()));
+    }
+
+    #[test]
     fn template_completion_inside_attribute_value_brace_offers_script_members() {
         let (source, position) = fixture_with_cursor(
             r#"<template>
@@ -310,6 +388,26 @@ audio.$0
         // on_change is always offered for a bound interface proxy.
         let labels = completion_labels(&doc, position);
         assert!(labels.contains(&"on_change".to_string()));
+    }
+
+    #[test]
+    fn template_attr_completion_offers_bind_this_with_brace_value() {
+        let (source, position) = fixture_with_cursor(
+            r#"<template>
+  <box $0 />
+</template>
+"#,
+        );
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+        let items = complete(&doc, position, &ModuleRegistry::empty());
+
+        let bind_this = items
+            .iter()
+            .find(|item| item.label == "bind:this")
+            .expect("bind:this offered as an attribute");
+        // Instance bindings reference a script variable, so the value is a brace
+        // expression, not a quoted string.
+        assert_eq!(bind_this.insert_text.as_deref(), Some("bind:this={$1}"));
     }
 
     fn completion_labels(doc: &Document, position: Position) -> Vec<String> {

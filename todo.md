@@ -21,7 +21,7 @@ Attacks authoring friction on top of the shipped interface/provider/frontend spi
 
 - [x] **A — Base surface schema.** Core ships the canonical surface schema (anchor/layer/size/keyboard/visibility) for every `kind: "frontend"`; authors declare only deltas. Done 2026-06-19: compact `mesh.surface` block parses into the single typed `SurfaceLayoutSection`, `surface_layout_from_manifest` reads it (no more verbose `settings.schema.surface`), all 7 shipped frontend manifests migrated (~110-line blocks removed). Tests in `mesh-core-module` + `mesh-core-surface-config`.
 - [x] **B — One config block tagged by audience.** Done with A: `mesh.surface` is the single block; `mesh.surfaceLayout` + `provides.settings.schema.surface` collapsed into it. Fields documented as user-editable vs renderer-policy in `module-system.md`. Remaining for full B: generated settings UI consuming the editable subset (tracked under "Settings UI generated from contributed schemas").
-- [x] **C (reframed) — Prune redundant capabilities.** Done 2026-06-19: removed restated consumer capabilities (`service.*.read/control`) from all 4 shipped backends (pipewire/pulseaudio/upower/hyprland-wm). Inverted the graph check — the contract's `[capabilities]` are consumer-only; providers are no longer *required* to declare them, and declaring one now emits `provider_declares_consumer_capability` (replaces the old `missing_provider_required_capability`). Capabilities stay fully explicit; no inference. Test in `mesh-core-module`.
+- [x] **C (reframed) — Prune redundant capabilities.** Done 2026-06-19: removed restated consumer capabilities (`service.*.read/control`) from all 4 shipped backends (pipewire/pulseaudio/upower/hyprland-wm). Inverted the graph check — the contract's `[capabilities]` are consumer-only; providers are no longer _required_ to declare them, and declaring one now emits `provider_declares_consumer_capability` (replaces the old `missing_provider_required_capability`). Capabilities stay fully explicit; no inference. Test in `mesh-core-module`.
 - [x] **D (reframed) — Cheapen the single interface path.** Done 2026-06-19. Part 1: the graph auto-selects a provider when exactly one enabled backend implements an interface (`InstalledModuleGraph::from_parts`); shipped `config/module.json` now only names `mesh.audio` (2 implementers) — `mesh.power`/`mesh.hyprland` resolve automatically. Part 2: `mesh.interface.file` is now optional (contract inferred from emitted state), and a backend can implement an interface with no separate interface module at all — no `missing_interface_contract_file`/`missing_provider_interface_module_dependency` for that path. Tests in `mesh-core-module`.
 - [x] **F — Root-graph auto-discovery.** Auto-populate installed modules from `modulesDir`; `config/module.json` holds decisions only (active providers, disabled list, layout entrypoint, theme/locale/icon pack). Backlog sync 2026-06-20: `load_installed_module_graph()` now scans `modulesDir` when the root graph omits an explicit module inventory, and `InstalledModuleGraph::from_parts()` keeps provider/layout decisions in `config/module.json`.
 - [ ] **E (deferred) — Unify the 4 contribution schemas.** Theme/icons/i18n/keybinds under one `contributes` shape — only where they share honest structure; revisit after A/B land.
@@ -45,10 +45,11 @@ resource packs). Remaining open work:
 ### Embeddable popovers via `<popover>` surface promotion — 2026-06-21
 
 **Problem.** `language-popover` and `theme-selector` are each shipped as a
-*standalone frontend module that owns its own Wayland layer surface*, with
+_standalone frontend module that owns its own Wayland layer surface_, with
 hardcoded geometry (`width/height/min/max = 112×74`) and hand-computed
 positioning (`shell.position-surface` + `margin_top = -18` math). This is the
 root cause of three observed defects:
+
 1. **Not content-sized.** They declare `size: "content_measured"` but then pin
    `min == max`, cancelling it — forced because `bubble-options.mesh` lays its
    options out with `position: absolute` inside a `position: relative` stage,
@@ -64,9 +65,9 @@ root cause of three observed defects:
 `PixelBuffer::set_pixel` (`render/src/surface/buffer.rs:111`) drops every
 out-of-bounds pixel. `position: absolute` is layout-only — it cannot paint past
 the host surface's buffer. The 56px nav-bar surface (`exclusive_zone: 56`) has
-no pixels below the bar, so a below-bar popover *must* live in some surface that
+no pixels below the bar, so a below-bar popover _must_ live in some surface that
 extends there. Today that's a sibling **overlay layer surface** (manual
-position, hand-rolled dismiss). Dynamic-sized surfaces are *not* impossible —
+position, hand-rolled dismiss). Dynamic-sized surfaces are _not_ impossible —
 `content_measured` already resizes the launcher surface; the only impossibility
 is one surface drawing outside its own bounds.
 
@@ -82,74 +83,74 @@ top-level surfaces (bar, launcher, full quick-settings panel) keep owning a
 surface.
 
 - [x] **Presentation: add an `xdg_popup` promotion path.** Done 2026-06-21.
-  `SurfaceEntry.layer_surface` generalized into a `SurfaceRole { Layer | Popup }`
-  enum (`wayland_surface/backend.rs`) so popups reuse the entire SHM /
-  present / scale / HiDPI / input path — only creation, layer-config, and
-  dismiss differ. New `wayland_surface/popup.rs` carries a presentation-level
-  `PopupPlacement`/`PopupConfig` (anchor rect, size, anchor, gravity, constraint,
-  offset, grab+serial) that mirrors `mesh_core_elements::PopoverPlacement` but
-  stays independent of that crate; pure `map_anchor`/`map_gravity`/`map_constraint`
-  onto `xdg_positioner` enums are unit-tested. Backend binds `xdg_wm_base`
-  (`XdgShell`, optional), implements `PopupHandler` + `delegate_xdg_popup!`,
-  and exposes `configure_popup` (create or `xdg_popup.reposition`),
-  `destroy_popup`, `destroy_popups_for_parent`, `take_dismissed_popups`,
-  `popup_supported`, plumbed through `PresentationEngine`. Popup created via
-  `Popup::from_surface(None, …)` + `LayerSurface::get_popup` (parent role from the
-  layer surface); grab taken only with a click serial (hover popovers stay
-  no-grab). Compositor `done` removes the entry and queues the id for the shell.
-  (Subsurface rejected: not reliably allowed to exceed parent geometry.)
+      `SurfaceEntry.layer_surface` generalized into a `SurfaceRole { Layer | Popup }`
+      enum (`wayland_surface/backend.rs`) so popups reuse the entire SHM /
+      present / scale / HiDPI / input path — only creation, layer-config, and
+      dismiss differ. New `wayland_surface/popup.rs` carries a presentation-level
+      `PopupPlacement`/`PopupConfig` (anchor rect, size, anchor, gravity, constraint,
+      offset, grab+serial) that mirrors `mesh_core_elements::PopoverPlacement` but
+      stays independent of that crate; pure `map_anchor`/`map_gravity`/`map_constraint`
+      onto `xdg_positioner` enums are unit-tested. Backend binds `xdg_wm_base`
+      (`XdgShell`, optional), implements `PopupHandler` + `delegate_xdg_popup!`,
+      and exposes `configure_popup` (create or `xdg_popup.reposition`),
+      `destroy_popup`, `destroy_popups_for_parent`, `take_dismissed_popups`,
+      `popup_supported`, plumbed through `PresentationEngine`. Popup created via
+      `Popup::from_surface(None, …)` + `LayerSurface::get_popup` (parent role from the
+      layer surface); grab taken only with a click serial (hover popovers stay
+      no-grab). Compositor `done` removes the entry and queues the id for the shell.
+      (Subsurface rejected: not reliably allowed to exceed parent geometry.)
 - [ ] **Shell: one component → base surface + N popup targets.** A
-  `FrontendSurfaceComponent` currently maps 1:1 to a surface; popups make it
-  1:N. Generalize `SurfaceId`/presentation-handle bookkeeping, per-target paint
-  buffers in `runtime_tree.rs`, element-metrics publication, and input routing
-  so popup input routes back to the same VM with correct popup-local coords.
+      `FrontendSurfaceComponent` currently maps 1:1 to a surface; popups make it
+      1:N. Generalize `SurfaceId`/presentation-handle bookkeeping, per-target paint
+      buffers in `runtime_tree.rs`, element-metrics publication, and input routing
+      so popup input routes back to the same VM with correct popup-local coords.
 - [ ] **Determinism decision: `<popover open>` always promotes when shown** —
-  do **not** conditionally promote only when content overflows the host
-  (the "measure first, surface only if it spills" model). Conditional promotion
-  makes the same component render via two different paths (inline vs popup) with
-  divergent input/grab/coordinate behavior and nondeterministic feel. Keep
-  authoring inline; keep realization deterministic.
+      do **not** conditionally promote only when content overflows the host
+      (the "measure first, surface only if it spills" model). Conditional promotion
+      makes the same component render via two different paths (inline vs popup) with
+      divergent input/grab/coordinate behavior and nondeterministic feel. Keep
+      authoring inline; keep realization deterministic.
 - [ ] **Centralize the popover controller in core.** Replace per-component Lua
-  hover/keepalive (`onSelectorEnter` re-activate) with a core state machine that
-  owns: anchor rect, open/close, hover-bridge, dismiss, one-open-per-group
-  exclusivity, and grab acquisition. Declarative authoring target:
-  `<popover anchor={refs.language_button} open={open}>`. Keep `mesh.popover.*`
-  as the imperative escape hatch.
+      hover/keepalive (`onSelectorEnter` re-activate) with a core state machine that
+      owns: anchor rect, open/close, hover-bridge, dismiss, one-open-per-group
+      exclusivity, and grab acquisition. Declarative authoring target:
+      `<popover anchor={refs.language_button} open={open}>`. Keep `mesh.popover.*`
+      as the imperative escape hatch.
 - [ ] **Grab vs hover nuance.** An xdg_popup grab requires a recent input
-  *serial* (a click) — so grabbed (click-to-dismiss-outside) popups can't be
-  opened by pure hover. Decide per popover: hover-open menus stay no-grab (core
-  hover-bridge handles dismiss); click-open menus take the grab. Record the rule
-  rather than assuming grab everywhere.
+      _serial_ (a click) — so grabbed (click-to-dismiss-outside) popups can't be
+      opened by pure hover. Decide per popover: hover-open menus stay no-grab (core
+      hover-bridge handles dismiss); click-open menus take the grab. Record the rule
+      rather than assuming grab everywhere.
 - [ ] **Buffer padding + input region for shadows.** Popup buffer must include
-  padding for `box-shadow`/float animation overshoot, and the input region must
-  exclude that padding — reuse the tooltip buffer-padding / input-region masking
-  pattern (see Tooltip input dead-zone work). Needs an alpha buffer (popups,
-  like layer surfaces, already composite with alpha).
+      padding for `box-shadow`/float animation overshoot, and the input region must
+      exclude that padding — reuse the tooltip buffer-padding / input-region masking
+      pattern (see Tooltip input dead-zone work). Needs an alpha buffer (popups,
+      like layer surfaces, already composite with alpha).
 - [ ] **Content sizing + reposition.** Reuse `content_measured` to size the
-  popup from the measured `<popover>` subtree; use `xdg_popup.reposition`
-  (xdg_wm_base v3+) when the anchor moves (output/exclusive-zone change). Note
-  the v3 requirement and the configure→ack→paint sequencing.
+      popup from the measured `<popover>` subtree; use `xdg_popup.reposition`
+      (xdg_wm_base v3+) when the anchor moves (output/exclusive-zone change). Note
+      the v3 requirement and the configure→ack→paint sequencing.
 - [ ] **Keyboard/focus + a11y across the surface boundary.** `role="menu"`,
-  arrow-key option nav, and focus traversal must cross from parent surface into
-  the popup (via grab or parent keyboard routing). Lifecycle: Wayland
-  auto-dismisses popups when the parent surface is destroyed/hidden — clean up
-  the popup `SurfaceId`s in shell bookkeeping to match.
+      arrow-key option nav, and focus traversal must cross from parent surface into
+      the popup (via grab or parent keyboard routing). Lifecycle: Wayland
+      auto-dismisses popups when the parent surface is destroyed/hidden — clean up
+      the popup `SurfaceId`s in shell bookkeeping to match.
 - [ ] **Compositor support caveat.** layer-shell `get_popup` is supported on
-  wlroots/KDE/Hyprland but layer-shell itself is absent on GNOME — already
-  inside MESH's `wlr-layer-shell-v1` compatibility constraint; record as a known
-  non-goal boundary.
+      wlroots/KDE/Hyprland but layer-shell itself is absent on GNOME — already
+      inside MESH's `wlr-layer-shell-v1` compatibility constraint; record as a known
+      non-goal boundary.
 - [ ] **`module.json` rework — embeddable component, no surface geometry.**
-  An embeddable popover should not declare a `mesh.surface` block at all
-  (no anchor/layer/width/height/min/max). Decide the manifest shape for "a
-  module that exports an embeddable component consumed by another module":
-  either a new `mesh.kind` (e.g. `"component"`) or let a `frontend` module
-  declare a component **export** with no surface entrypoint. Surface geometry
-  stays only for true top-level surfaces; popover positioning becomes optional
-  *positioner hints* (anchor edge, gravity, offset) with sane defaults, not
-  pinned pixel sizes. Migrate `language-popover` + `theme-selector` to this
-  shape (they may stay independently downloadable, just embedded — not
-  surface-owning); fold `bubble-options.mesh` layout into in-flow or an
-  explicitly content-sized stage so measurement works.
+      An embeddable popover should not declare a `mesh.surface` block at all
+      (no anchor/layer/width/height/min/max). Decide the manifest shape for "a
+      module that exports an embeddable component consumed by another module":
+      either a new `mesh.kind` (e.g. `"component"`) or let a `frontend` module
+      declare a component **export** with no surface entrypoint. Surface geometry
+      stays only for true top-level surfaces; popover positioning becomes optional
+      _positioner hints_ (anchor edge, gravity, offset) with sane defaults, not
+      pinned pixel sizes. Migrate `language-popover` + `theme-selector` to this
+      shape (they may stay independently downloadable, just embedded — not
+      surface-owning); fold `bubble-options.mesh` layout into in-flow or an
+      explicitly content-sized stage so measurement works.
 
 ---
 

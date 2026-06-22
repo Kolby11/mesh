@@ -28,6 +28,17 @@ pub enum ElementRefAliasTarget {
     CurrentTarget,
 }
 
+/// A child component mounted with `bind:this={var}`. The bound variable is a
+/// live reference to the child instance, so `var.<member>` should complete the
+/// child's exported members (see `public_component_members`).
+#[derive(Debug, Clone)]
+pub struct ComponentInstance {
+    /// Local variable name from `bind:this={var_name}`.
+    pub var_name: String,
+    /// PascalCase component tag it is mounted from; matches an import alias.
+    pub component_tag: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ElementRefSource {
     Ref,
@@ -76,6 +87,8 @@ pub struct Document {
     /// Local variables bound to interface proxies via `require("mesh....")`.
     /// Maps variable name → canonical interface name (e.g. "audio" → "mesh.audio").
     pub interface_proxies: HashMap<String, String>,
+    /// Child component instances mounted with `bind:this={var}`.
+    pub component_instances: Vec<ComponentInstance>,
 }
 
 impl Document {
@@ -97,6 +110,10 @@ impl Document {
         let element_refs = parsed
             .as_ref()
             .map(extract_element_refs)
+            .unwrap_or_default();
+        let component_instances = parsed
+            .as_ref()
+            .map(extract_component_instances)
             .unwrap_or_default();
         let mut element_ref_aliases = element_ref_aliases;
         for element_ref in &element_refs {
@@ -129,6 +146,7 @@ impl Document {
             element_refs,
             element_ref_aliases,
             interface_proxies,
+            component_instances,
         }
     }
 }
@@ -183,6 +201,122 @@ fn collect_element_refs(node: &TemplateNode, refs: &mut Vec<ElementRef>) {
         }
         TemplateNode::Slot(_) | TemplateNode::Text(_) | TemplateNode::Expr(_) => {}
     }
+}
+
+fn extract_component_instances(parsed: &ComponentFile) -> Vec<ComponentInstance> {
+    let mut instances = Vec::new();
+    let Some(template) = &parsed.template else {
+        return instances;
+    };
+
+    for node in &template.root {
+        collect_component_instances(node, &mut instances);
+    }
+
+    instances
+}
+
+fn collect_component_instances(node: &TemplateNode, instances: &mut Vec<ComponentInstance>) {
+    match node {
+        TemplateNode::Component(component) => {
+            if let Some(var_name) = component_instance_binding(&component.props) {
+                if !instances
+                    .iter()
+                    .any(|existing| existing.var_name == var_name)
+                {
+                    instances.push(ComponentInstance {
+                        var_name,
+                        component_tag: component.name.clone(),
+                    });
+                }
+            }
+            for child in &component.children {
+                collect_component_instances(child, instances);
+            }
+        }
+        TemplateNode::Element(element) => {
+            for child in &element.children {
+                collect_component_instances(child, instances);
+            }
+        }
+        TemplateNode::If(if_node) => {
+            for child in &if_node.then_children {
+                collect_component_instances(child, instances);
+            }
+            for child in &if_node.else_children {
+                collect_component_instances(child, instances);
+            }
+        }
+        TemplateNode::For(for_node) => {
+            for child in &for_node.children {
+                collect_component_instances(child, instances);
+            }
+        }
+        TemplateNode::Slot(_) | TemplateNode::Text(_) | TemplateNode::Expr(_) => {}
+    }
+}
+
+/// The `bind:this={var}` instance binding on a component's props, if any.
+fn component_instance_binding(props: &[mesh_core_component::template::Attribute]) -> Option<String> {
+    props.iter().find_map(|attr| {
+        if attr.name != "bind:this" {
+            return None;
+        }
+        match &attr.value {
+            AttributeValue::InstanceBinding(value) if !value.is_empty() => Some(value.clone()),
+            _ => None,
+        }
+    })
+}
+
+/// The public members a child component exposes across a `bind:this` boundary:
+/// bare-assigned reactive variables and top-level `function` definitions. `local`
+/// privates and lifecycle hooks are excluded, mirroring the runtime rule in
+/// `ScriptContext::public_function_names` / `install_live_binding`. Returns
+/// `(variables, functions)`.
+pub fn public_component_members(source: &str) -> (Vec<String>, Vec<String>) {
+    let mut variables: Vec<String> = Vec::new();
+    let mut functions: Vec<String> = Vec::new();
+
+    let Some((script_start, script_end)) = block_content_range(source, "script") else {
+        return (variables, functions);
+    };
+    let script = &source[script_start..script_end];
+
+    for line in script.lines() {
+        let t = line.trim();
+
+        // Public function: `function Name(...)` — `local function` is private.
+        if let Some(rest) = t.strip_prefix("function ") {
+            if let Some(name) = rest.split('(').next() {
+                let name = name.trim();
+                if !name.is_empty()
+                    && !name.contains(['.', ':'])
+                    && !is_reserved_component_hook(name)
+                    && !functions.iter().any(|existing| existing == name)
+                {
+                    functions.push(name.to_string());
+                }
+            }
+            continue;
+        }
+
+        // Public reactive variable: bare `name = value` (rejects `local`,
+        // comparisons, and compound LHS — see `parse_public_assignment`).
+        if let Some(name) = parse_public_assignment(t) {
+            if !variables.contains(&name) {
+                variables.push(name);
+            }
+        }
+    }
+
+    (variables, functions)
+}
+
+/// Lifecycle hooks that stay host-private and do not cross `bind:this`.
+/// Mirrors `is_lifecycle_handler` in the scripting runtime.
+fn is_reserved_component_hook(name: &str) -> bool {
+    matches!(name, "init" | "render" | "mount" | "unmount" | "onRender")
 }
 
 fn instance_binding_value(

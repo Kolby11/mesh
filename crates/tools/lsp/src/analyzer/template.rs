@@ -85,6 +85,14 @@ fn complete_attrs(tag: &str, _doc: &Document) -> Vec<CompletionItem> {
         }
     }
 
+    // `bind:this` exposes a live reference to this element or mounted component
+    // instance to the script as `{var}`. Available on every tag. Uses brace
+    // (instance-binding) value syntax, not quotes.
+    items.push(instance_binding_completion_item(
+        "bind:this",
+        "Live reference: exposes this element/component instance to the script as {var}",
+    ));
+
     // Two-way binding prefix for input-like tags
     if matches!(
         tag,
@@ -107,6 +115,20 @@ fn complete_attrs(tag: &str, _doc: &Document) -> Vec<CompletionItem> {
     }
 
     items
+}
+
+/// A `bind:this` attribute completion. Inserts brace value syntax `name={$1}`
+/// because the instance binding references a script variable, not a string
+/// literal.
+fn instance_binding_completion_item(name: &str, description: &str) -> CompletionItem {
+    CompletionItem {
+        label: name.to_string(),
+        kind: Some(CompletionItemKind::FIELD),
+        detail: Some(description.to_string()),
+        insert_text: Some(format!("{name}={{$1}}")),
+        insert_text_format: Some(InsertTextFormat::SNIPPET),
+        ..Default::default()
+    }
 }
 
 fn attr_completion_item(name: &str, description: &str, is_handler: bool) -> CompletionItem {

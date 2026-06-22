@@ -38,6 +38,9 @@ pub fn complete(
         ScriptContext::InterfaceProxy { var_name, prefix } => {
             complete_interface_proxy(&var_name, &prefix, doc, registry)
         }
+        ScriptContext::ComponentInstanceMember { var_name, prefix } => {
+            complete_component_instance_members(&var_name, &prefix, doc, registry)
+        }
         ScriptContext::General => complete_state_vars(doc),
     }
 }
@@ -193,6 +196,101 @@ fn complete_interface_proxy(
     }
 
     items
+}
+
+/// Completions after `<var>.` where `var` is a `bind:this={var}` component
+/// instance. Offers, in order: the base fields inherited from the `MeshElement`
+/// type, then the child component's exported (public) variables and functions.
+/// Private `local`s and lifecycle hooks are excluded — they do not cross the
+/// `bind:this` boundary.
+fn complete_component_instance_members(
+    var_name: &str,
+    prefix: &str,
+    doc: &Document,
+    registry: &ModuleRegistry,
+) -> Vec<CompletionItem> {
+    let Some(instance) = doc
+        .component_instances
+        .iter()
+        .find(|instance| instance.var_name == var_name)
+    else {
+        return vec![];
+    };
+
+    let mut items: Vec<CompletionItem> = Vec::new();
+
+    // Tier 1: base fields inherited from the MeshElement type.
+    for field in BASE_ELEMENT_FIELDS {
+        if field.name.starts_with(prefix) {
+            items.push(field_completion_item(field, "MeshElement"));
+        }
+    }
+
+    // Tier 2: the child component's exported variables and functions.
+    if let Some((variables, functions)) =
+        resolve_component_public_members(doc, &instance.component_tag, registry)
+    {
+        for variable in variables {
+            if variable.starts_with(prefix) && !items.iter().any(|item| item.label == variable) {
+                items.push(component_member_variable_item(&variable, &instance.component_tag));
+            }
+        }
+        for function in functions {
+            if function.starts_with(prefix) && !items.iter().any(|item| item.label == function) {
+                items.push(component_member_function_item(&function, &instance.component_tag));
+            }
+        }
+    }
+
+    items
+}
+
+/// Resolve a mounted component tag to the public members exported by its source
+/// file. Returns `(variables, functions)`.
+fn resolve_component_public_members(
+    doc: &Document,
+    component_tag: &str,
+    registry: &ModuleRegistry,
+) -> Option<(Vec<String>, Vec<String>)> {
+    let import = doc
+        .imports
+        .iter()
+        .find(|import| import.alias == component_tag)?;
+    let path = crate::definition::resolve_import_target(doc, &import.target, registry)?;
+    let source = std::fs::read_to_string(path).ok()?;
+    Some(crate::document::public_component_members(&source))
+}
+
+fn component_member_variable_item(name: &str, component_tag: &str) -> CompletionItem {
+    CompletionItem {
+        label: name.to_string(),
+        kind: Some(CompletionItemKind::FIELD),
+        detail: Some(format!("public member of <{component_tag}>")),
+        documentation: Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: format!(
+                "**`{component_tag}.{name}`** — public reactive variable exported by the mounted component, read live through `bind:this`."
+            ),
+        })),
+        ..Default::default()
+    }
+}
+
+fn component_member_function_item(name: &str, component_tag: &str) -> CompletionItem {
+    CompletionItem {
+        label: name.to_string(),
+        kind: Some(CompletionItemKind::METHOD),
+        detail: Some(format!("public function of <{component_tag}>")),
+        insert_text: Some(format!("{name}($1)")),
+        insert_text_format: Some(Fmt::SNIPPET),
+        documentation: Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: format!(
+                "**`{component_tag}.{name}(...)`** — public function exported by the mounted component, called synchronously through `bind:this`."
+            ),
+        })),
+        ..Default::default()
+    }
 }
 
 fn complete_service_names(registry: &ModuleRegistry) -> Vec<CompletionItem> {

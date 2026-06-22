@@ -80,6 +80,15 @@ pub enum ScriptContext {
         /// Characters typed after the dot so far (may be empty).
         prefix: String,
     },
+    /// Cursor is after `<var>.` where `var` is a `bind:this={var}` component
+    /// instance. Completes the child's base element fields plus its exported
+    /// (public) variables and functions.
+    ComponentInstanceMember {
+        /// The Lua variable name bound to the mounted component instance.
+        var_name: String,
+        /// Characters typed after the dot so far (may be empty).
+        prefix: String,
+    },
     General,
 }
 
