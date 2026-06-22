@@ -1127,8 +1127,15 @@ fn opaque_pixels_in_bounds(
 /// without a system icon theme installed.
 #[test]
 fn shipped_navigation_icon_rasterizes_pixels_on_real_surface() {
+    // Provide every interface the navigation bar consumes (audio, network,
+    // power, brightness, hyprland, media). A missing interface makes the
+    // affected component render an unbounded error-string placeholder instead
+    // of its real content — and three ~700px error strings (workspaces, window
+    // title, battery) inflate the bar far past its intrinsic width and shove
+    // the right-aligned control cluster off-buffer. With the real content the
+    // bar fits a normal panel width, exactly as the shipped shell paints it.
     let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
@@ -1142,11 +1149,12 @@ fn shipped_navigation_icon_rasterizes_pixels_on_real_surface() {
         .unwrap();
     component.visible = true;
 
-    // Paint at a full-screen width so the right-aligned control cluster (which
-    // holds the volume button) lands on-buffer; the real shell paints the
-    // navigation bar at the output width, not a narrow box.
+    // Paint at a realistic laptop panel width — narrower than the bar's content
+    // overflowed to in the icon-fix follow-up note (x≈1978 on a 960px paint).
+    // With real component content the whole bar, including the right cluster,
+    // stays on-buffer here.
     let theme = default_theme();
-    let width = 2560;
+    let width = 1280;
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
@@ -1157,6 +1165,19 @@ fn shipped_navigation_icon_rasterizes_pixels_on_real_surface() {
         .last_tree
         .as_ref()
         .expect("rendered navigation bar");
+
+    // The right-aligned control cluster must fit entirely within the surface so
+    // its buttons (volume, theme, language, battery, settings) are visible and
+    // hittable — this is the invariant the follow-up note flagged.
+    let cluster = first_node_by_class(tree, "right-cluster").expect("control cluster node");
+    let cluster_right = cluster.layout.x + cluster.layout.width;
+    assert!(
+        cluster.layout.x >= 0.0 && cluster_right <= width as f32,
+        "right control cluster bounds [x={}, right={cluster_right}] should fall inside the \
+         {width}px surface so all of its controls stay visible",
+        cluster.layout.x
+    );
+
     let button = first_node_with_click_handler(
         tree,
         "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",

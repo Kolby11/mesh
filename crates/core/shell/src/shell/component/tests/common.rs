@@ -1023,6 +1023,21 @@ pub(super) fn first_node_by_tag<'a>(node: &'a WidgetNode, tag: &str) -> Option<&
         .find_map(|child| first_node_by_tag(child, tag))
 }
 
+/// First node whose `class` attribute contains `class` as a whitespace-
+/// separated token (matching CSS class semantics, not a substring match).
+pub(super) fn first_node_by_class<'a>(node: &'a WidgetNode, class: &str) -> Option<&'a WidgetNode> {
+    if node
+        .attributes
+        .get("class")
+        .is_some_and(|value| value.split_whitespace().any(|token| token == class))
+    {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .find_map(|child| first_node_by_class(child, class))
+}
+
 pub(super) fn first_node_with_click_handler<'a>(
     node: &'a WidgetNode,
     handler: &str,
