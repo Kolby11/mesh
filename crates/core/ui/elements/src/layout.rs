@@ -221,24 +221,6 @@ impl LayoutEngine {
         );
     }
 
-    /// Compute layout through Taffy and write the resulting rectangles back onto
-    /// the stable MESH `WidgetNode` tree.
-    pub fn compute_taffy_layout(
-        root: &mut WidgetNode,
-        available_width: f32,
-        available_height: f32,
-        measurer: Option<&dyn TextMeasurer>,
-    ) {
-        let mut intrinsic_cache = IntrinsicLayoutCache::default();
-        Self::compute_taffy_layout_with_cache(
-            root,
-            available_width,
-            available_height,
-            &mut intrinsic_cache,
-            measurer,
-        );
-    }
-
     fn compute_taffy_layout_with_cache(
         root: &mut WidgetNode,
         available_width: f32,

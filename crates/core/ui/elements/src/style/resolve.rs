@@ -215,16 +215,6 @@ impl StyleRuleIndex {
         self.rules_ptr == rules.as_ptr() as usize && self.rules_len == rules.len()
     }
 
-    pub fn candidate_rules<'a>(
-        &self,
-        rules: &'a [StyleRule],
-        attrs: &StyleNodeAttrs,
-    ) -> Vec<&'a StyleRule> {
-        let mut candidates = Vec::with_capacity(self.fallback.len().saturating_add(8));
-        self.for_each_candidate_rule(rules, attrs, |rule| candidates.push(rule));
-        candidates
-    }
-
     pub fn for_each_candidate_rule<'a>(
         &self,
         rules: &'a [StyleRule],
@@ -440,21 +430,6 @@ impl<'a> StyleResolver<'a> {
         variables: &HashMap<String, StyleValue>,
     ) -> f32 {
         parse_px(&self.resolve_value_with_variables(value, variables))
-    }
-
-    pub fn resolve_color(&self, value: &StyleValue) -> Color {
-        let resolved = self.resolve_value(value);
-        Color::from_hex(&resolved).unwrap_or(Color::TRANSPARENT)
-    }
-
-    pub fn resolve_number(&self, value: &StyleValue) -> f32 {
-        let resolved = self.resolve_value(value);
-        parse_px(&resolved)
-    }
-
-    pub fn resolve_time_ms(&self, value: &StyleValue) -> u32 {
-        let resolved = self.resolve_value(value);
-        parse_time_ms(&resolved)
     }
 
     pub fn resolve_node_style(

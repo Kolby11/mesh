@@ -234,35 +234,6 @@ impl TextRenderer {
         self.measure_styled(text, font_family, font_size, 400, 1.0, max_width)
     }
 
-    pub fn render(
-        &self,
-        text: &str,
-        font_family: &str,
-        font_size: f32,
-        font_weight: u16,
-        line_height: f32,
-        color: Color,
-        buffer: &mut PixelBuffer,
-        x: u32,
-        y: u32,
-    ) {
-        let clip = (0, 0, buffer.width, buffer.height);
-        self.render_clipped(
-            text,
-            font_family,
-            font_size,
-            font_weight,
-            line_height,
-            TextAlign::Left,
-            color,
-            buffer,
-            x,
-            y,
-            clip,
-            None,
-        );
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn render_clipped(
         &self,

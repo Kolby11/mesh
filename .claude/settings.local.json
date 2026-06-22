@@ -181,7 +181,9 @@
       "Bash(sed -n '335,360p' crates/core/shell/src/shell/component/tests/interaction/diagnostics.rs)",
       "Bash(sed -n '1,35p' crates/core/shell/src/shell/component/tests/invalidation/profiling.rs)",
       "Bash(sed -n '110,152p' crates/core/shell/src/shell/component/tests/restyle/metrics.rs)",
-      "Bash(sed -n '230,260p' crates/core/shell/src/shell/component/tests/interaction/reflow.rs)"
+      "Bash(sed -n '230,260p' crates/core/shell/src/shell/component/tests/interaction/reflow.rs)",
+      "Bash(awk '{printf \"%6d KB  %s\\\\n\", $1/1024, $2}')",
+      "Bash(awk *)"
     ]
   }
 }

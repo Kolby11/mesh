@@ -864,9 +864,6 @@ impl RetainedDisplayList {
         self.retained_tree_generation = retained_tree_generation;
         self.surface_size = Some((surface.width, surface.height));
         let (full_fallback_count, broad_dirty_fallback_count) = match decision {
-            LocalReuseDecision::FallbackFull { broad_dirty } if !self.entries.is_empty() => {
-                (1, u64::from(broad_dirty))
-            }
             LocalReuseDecision::FallbackFull { broad_dirty } => (1, u64::from(broad_dirty)),
             _ => (0, 0),
         };

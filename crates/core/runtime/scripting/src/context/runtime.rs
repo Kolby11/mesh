@@ -211,17 +211,6 @@ impl ScriptContext {
         })
     }
 
-    /// Create a new ScriptContext via the pool/cache integration point.
-    ///
-    /// Identical to `new()` — the constructor is already lazy (vm: None, env_table: None).
-    /// Named `new_lazy` as the documented integration contract for Phase 95 INT-01.
-    pub fn new_lazy(
-        module_id: impl Into<String>,
-        capabilities: CapabilitySet,
-    ) -> Result<Self, ScriptError> {
-        Self::new(module_id, capabilities)
-    }
-
     pub fn set_interface_catalog(&mut self, catalog: InterfaceCatalog) {
         self.interface_catalog = catalog;
     }
@@ -331,13 +320,6 @@ impl ScriptContext {
         // ChunkCache::remove(hash) to evict on .mesh file change.
         ChunkCache::get_or_insert(source);
         self.load_script_with_interface_imports(source, imports)
-    }
-
-    /// Compile and execute Luau source (no interface imports). See
-    /// `compile_and_execute` for the full variant.
-    pub fn compile_and_execute_simple(&mut self, source: &str) -> Result<(), ScriptError> {
-        ChunkCache::get_or_insert(source);
-        self.load_script(source)
     }
 
     /// Copy the latest service payload into the Lua runtime for proxy reads.

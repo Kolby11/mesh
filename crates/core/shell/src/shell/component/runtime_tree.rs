@@ -495,17 +495,6 @@ pub(super) fn collect_all_keys(node: &WidgetNode, keys: &mut HashSet<String>) {
     }
 }
 
-pub(super) fn collect_stateful_keys(node: &WidgetNode, keys: &mut HashSet<String>) {
-    if node.state != ElementState::default()
-        && let Some(key) = node.attributes.get("_mesh_key")
-    {
-        keys.insert(key.clone());
-    }
-    for child in &node.children {
-        collect_stateful_keys(child, keys);
-    }
-}
-
 pub(super) fn input_accepts_char(node: &WidgetNode, ch: char) -> bool {
     if ch.is_control() {
         return false;
