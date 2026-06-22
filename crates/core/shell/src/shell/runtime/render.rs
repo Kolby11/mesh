@@ -1,5 +1,6 @@
 use super::super::*;
 use mesh_core_elements::style::BackgroundPaint;
+use mesh_core_presentation::PopupConfig;
 use mesh_core_render::{DamageRect, DisplayPaintCommand};
 
 impl Shell {
@@ -123,8 +124,14 @@ impl Shell {
                     }
                     runtime.known_surface_size = None;
                     runtime.last_surface_config = None;
+                    runtime.last_popup_size = None;
                     break;
                 }
+
+                // Popup surfaces (xdg_popup) skip the layer-surface configure
+                // path entirely — they are created/repositioned via
+                // configure_popup() after the content size is resolved below.
+                let is_popup = self.components[index].popup_config.is_some();
 
                 // Compare all copy fields before cloning namespace (the only heap field).
                 let size_policy = self.components[index].surface_size_policy;
@@ -146,7 +153,7 @@ impl Shell {
                                 || last.margin_bottom != surface.margin_bottom
                                 || last.margin_left != surface.margin_left
                         });
-                if config_changed {
+                if config_changed && !is_popup {
                     let cfg = LayerSurfaceConfig {
                         edge: surface.edge,
                         layer,
@@ -188,6 +195,33 @@ impl Shell {
                     self.components[index]
                         .component
                         .surface_size_changed(width, height);
+                }
+
+                // For xdg_popup surfaces, call configure_popup with the
+                // resolved content size. This creates the surface on first
+                // show and repositions it when the size changes (e.g. the
+                // content grows or shrinks between opens).
+                if is_popup
+                    && self.components[index].last_popup_size != Some(resolved_size)
+                {
+                    self.components[index].last_popup_size = Some(resolved_size);
+                    let config = self.components[index]
+                        .popup_config
+                        .as_mut()
+                        .map(|c| {
+                            c.placement.size = resolved_size;
+                            c.clone()
+                        });
+                    if let Some(config) = config {
+                        if let Err(e) = self
+                            .presentation_engine
+                            .configure_popup(&surface_id, config)
+                        {
+                            tracing::warn!(
+                                "configure_popup for {surface_id} failed: {e}"
+                            );
+                        }
+                    }
                 }
 
                 scale = self.presentation_engine.surface_scale(&surface_id);

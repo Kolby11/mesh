@@ -1031,6 +1031,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.last_surface_size
     }
 
+    fn popover_margin_left(&self) -> i32 {
+        self.surface_layout.margin_left
+    }
+
     fn apply_position(&mut self, margin_top: i32, margin_left: i32) {
         self.surface_layout.edge = Edge::Left;
         self.surface_layout.margin_top = margin_top;

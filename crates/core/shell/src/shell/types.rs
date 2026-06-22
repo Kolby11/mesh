@@ -2,7 +2,10 @@ pub use mesh_core_frontend_host::{
     ComponentContext, ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent,
     CoreRequest, KeyModifiers, ServiceEvent, ShellComponent, SurfaceId, TabFocusTarget,
 };
-use mesh_core_presentation::{LayerSurfaceConfig, LayerSurfaceSizePolicy};
+use mesh_core_presentation::{
+    LayerSurfaceConfig, LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint,
+    PopupGravity, PopupPlacement,
+};
 use mesh_core_render::PixelBuffer;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -26,6 +29,14 @@ pub(super) struct ComponentRuntime {
     /// Last surface size resolved by shell/presentation without requiring a
     /// compositor roundtrip on every render or input event.
     pub(super) known_surface_size: Option<(u32, u32)>,
+    /// When set, this component is realized as an `xdg_popup` child of the
+    /// named parent surface rather than as a layer surface.
+    pub(super) popup_parent_surface: Option<String>,
+    /// Popup config built in `ActivatePopover`; `placement.size` is updated
+    /// each render frame to the measured content size.
+    pub(super) popup_config: Option<PopupConfig>,
+    /// Last size handed to `configure_popup`; used to skip redundant calls.
+    pub(super) last_popup_size: Option<(u32, u32)>,
 }
 
 impl ComponentRuntime {
@@ -58,6 +69,9 @@ impl ComponentRuntime {
             surface_size_policy,
             force_full_present: false,
             known_surface_size: None,
+            popup_parent_surface: None,
+            popup_config: None,
+            last_popup_size: None,
         }
     }
 }

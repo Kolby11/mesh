@@ -3,7 +3,9 @@ use crate::shell::types::TabFocusTarget;
 use mesh_core_debug::{
     BenchmarkScenarioId, BenchmarkScenarioStatus, DebugBenchmarkRunState, ProfilingBackendStage,
 };
-use mesh_core_presentation::LayerSurfaceSizePolicy;
+use mesh_core_presentation::{
+    LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement,
+};
 
 /// One main-loop tick (~60 Hz). Coalescable commands fire on the leading
 /// edge; further calls within the interval park as `pending` and are
@@ -254,6 +256,55 @@ impl Shell {
                 tracing::info!(
                     "apply_request ActivatePopover trigger_runtime_found={trigger_runtime_found} target_runtime_found={target_runtime_found}"
                 );
+
+                // Promote to xdg_popup when the compositor supports it and the
+                // trigger surface is known. The anchor rect is built from the
+                // trigger surface's exclusive-zone (bar height) and the popover's
+                // current margin-left (set by the preceding shell.position-surface
+                // event), both of which are in the parent surface's coordinate
+                // space and available before the next render frame.
+                if self.presentation_engine.popup_supported()
+                    && !trigger_surface.is_empty()
+                    && target_runtime_found
+                {
+                    let trigger_exclusive_zone = self
+                        .surfaces
+                        .get(&trigger_surface)
+                        .map(|s| s.exclusive_zone)
+                        .unwrap_or(40);
+                    let popover_margin_left = self
+                        .component_index_for_surface(&surface_id)
+                        .map(|idx| self.components[idx].component.popover_margin_left())
+                        .unwrap_or(0);
+                    let popup_config = PopupConfig {
+                        parent_surface_id: trigger_surface.clone(),
+                        placement: PopupPlacement {
+                            anchor_rect: (
+                                popover_margin_left,
+                                0,
+                                40,
+                                trigger_exclusive_zone,
+                            ),
+                            size: (1, 1),
+                            anchor: PopupAnchor::BottomLeft,
+                            gravity: PopupGravity::BottomLeft,
+                            constraint: PopupConstraint::default(),
+                            offset: (0, 0),
+                        },
+                        grab: false,
+                        grab_serial: None,
+                    };
+                    if let Some(idx) = self.component_index_for_surface(&surface_id) {
+                        self.components[idx].popup_parent_surface =
+                            Some(trigger_surface.clone());
+                        self.components[idx].popup_config = Some(popup_config);
+                        self.components[idx].last_popup_size = None;
+                    }
+                    tracing::info!(
+                        "ActivatePopover: promoting {surface_id} as xdg_popup child of {trigger_surface} anchor_x={popover_margin_left} bar_h={trigger_exclusive_zone}"
+                    );
+                }
+
                 let mut emitted = VecDeque::new();
                 emitted.push_back(CoreRequest::ShowSurface {
                     surface_id: surface_id.clone(),
@@ -837,6 +888,15 @@ impl Shell {
             {
                 runtime.component.set_keyboard_mode_override(None);
                 runtime.component.set_surface_exiting(false);
+                if runtime.popup_parent_surface.is_some() {
+                    // Tear down the xdg_popup surface so it can be recreated
+                    // fresh on the next ActivatePopover call.
+                    runtime.popup_parent_surface = None;
+                    runtime.popup_config = None;
+                    runtime.last_popup_size = None;
+                    self.presentation_engine.destroy_popup(&surface_id);
+                    tracing::info!("set_surface_visibility_now: destroyed xdg_popup for {surface_id}");
+                }
             }
             if let Some(previous_mode) = self.transfer_owned_keyboard_modes.remove(&surface_id) {
                 if let Some(surface) = self.surfaces.get_mut(&surface_id) {

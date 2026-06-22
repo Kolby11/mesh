@@ -333,6 +333,13 @@ pub trait ShellComponent: Send {
     }
     /// Override this surface's position for popover placement.
     fn apply_position(&mut self, _margin_top: i32, _margin_left: i32) {}
+    /// The margin-left currently stored in the surface layout (set by the most
+    /// recent `apply_position` call). Used to derive the `xdg_popup` anchor
+    /// rect's x-offset at `ActivatePopover` time, before the next render frame
+    /// updates the `StubSurface` via `render_layout`.
+    fn popover_margin_left(&self) -> i32 {
+        0
+    }
     /// Duration in milliseconds to keep a surface mapped while it exits.
     fn hide_transition_ms(&self) -> u64 {
         0
