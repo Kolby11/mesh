@@ -741,7 +741,7 @@ pub fn draw_named_icon(
     dest_h: i32,
     tint: Color,
 ) {
-    draw_icon_resolution(
+    draw_icon_resolution_with_axes(
         buffer,
         resolve_icon_result(name, size),
         dest_x,
@@ -749,6 +749,7 @@ pub fn draw_named_icon(
         dest_w,
         dest_h,
         tint,
+        GlyphAxes::default(),
     );
 }
 
@@ -923,29 +924,9 @@ fn draw_named_icon_with_registry(
     dest_h: i32,
     tint: Color,
 ) {
-    draw_icon_resolution(
-        buffer,
-        mesh_core_icon::resolve_icon_with_registry(registry, name, size),
-        dest_x,
-        dest_y,
-        dest_w,
-        dest_h,
-        tint,
-    );
-}
-
-fn draw_icon_resolution(
-    buffer: &mut PixelBuffer,
-    resolution: IconResolution,
-    dest_x: i32,
-    dest_y: i32,
-    dest_w: i32,
-    dest_h: i32,
-    tint: Color,
-) {
     draw_icon_resolution_with_axes(
         buffer,
-        resolution,
+        mesh_core_icon::resolve_icon_with_registry(registry, name, size),
         dest_x,
         dest_y,
         dest_w,
@@ -955,7 +936,7 @@ fn draw_icon_resolution(
     );
 }
 
-/// Like `draw_icon_resolution` but lets the caller supply variable-font
+/// Draws a resolved icon. Lets the caller supply variable-font
 /// axis values (parsed from CSS `--icon-*` custom properties). Axes are
 /// silently ignored for file targets and for font targets whose pack
 /// doesn't declare support for the requested axis.

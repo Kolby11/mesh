@@ -250,9 +250,11 @@ All five landed 2026-06-23 (single commit).
       the dedup batch: sharing it means a new cross-crate dependency (candidate
       home `mesh-core-service`, near `canonical_interface_name`) for a 4-line fn —
       only worth it if more shared interface-name helpers accumulate.
-- [ ] `draw_icon_resolution` shim + test-only `draw_named_icon_with_registry`
-      (`frontend/render/src/surface/icon.rs:~915,~937`) — minor; inline or
-      `#[cfg(test)]`-gate.
+- [x] `draw_icon_resolution` shim + test-only `draw_named_icon_with_registry`.
+      Done 2026-06-23: inlined the `draw_icon_resolution` shim (it only added
+      `GlyphAxes::default()` before delegating to
+      `draw_icon_resolution_with_axes`) into its two callers and removed it.
+      `draw_named_icon_with_registry` was already `#[cfg(test)]`-gated.
 
 ### Migration tech-debt (flagged by project rules; verify before removing)
 
