@@ -178,7 +178,6 @@ fn painter_command_classes(commands: &[PainterCommand]) -> Vec<&'static str> {
             PainterCommand::DrawRect { .. } => "draw_rect",
             PainterCommand::DrawRoundedRect { .. } => "draw_rounded_rect",
             PainterCommand::DrawPath { .. } => "draw_path",
-            PainterCommand::DrawText { .. } => "draw_text",
             PainterCommand::DrawImage { .. } => "draw_image",
             PainterCommand::DrawLinearGradient { .. } => "draw_linear_gradient",
             PainterCommand::DrawShadow { .. } => "draw_shadow",
@@ -265,13 +264,6 @@ fn painter_command_contract_constructs_required_command_set() {
             paint,
             clip,
         },
-        PainterCommand::DrawText {
-            text: "hello".into(),
-            x: 2.0,
-            y: 12.0,
-            paint,
-            clip,
-        },
         PainterCommand::DrawImage {
             image: PainterImage {
                 source: PainterImageSource::Path("img".into()),
@@ -309,7 +301,7 @@ fn painter_command_contract_constructs_required_command_set() {
         },
     ];
 
-    assert_eq!(commands.len(), 13);
+    assert_eq!(commands.len(), 12);
 }
 
 #[test]
@@ -343,13 +335,6 @@ fn painter_primitive_command_classes_record_helper_backed_rects() {
             path: PainterPath {
                 elements: vec![PainterPathElement::MoveTo(0.0, 0.0)],
             },
-            paint,
-            clip,
-        },
-        PainterCommand::DrawText {
-            text: "hello".into(),
-            x: 2.0,
-            y: 12.0,
             paint,
             clip,
         },
@@ -394,7 +379,6 @@ fn painter_primitive_command_classes_record_helper_backed_rects() {
             "draw_rect",
             "draw_rounded_rect",
             "draw_path",
-            "draw_text",
             "draw_image",
             "draw_linear_gradient",
             "draw_shadow",
@@ -1082,25 +1066,10 @@ fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose(
     assert!(capabilities.layers);
     assert!(capabilities.paths);
 
+    assert!(capabilities.blend_modes);
+
     let mut buffer = PixelBuffer::new(16, 16);
     let mut diagnostics = Vec::new();
-    backend.execute_commands(
-        &mut buffer,
-        &[PainterCommand::DrawText {
-            text: "hello".into(),
-            x: 1.0,
-            y: 10.0,
-            paint: PainterPaint::fill(Color::WHITE),
-            clip: full_clip(16, 16),
-        }],
-        &mut diagnostics,
-    );
-
-    assert_eq!(diagnostics.len(), 1);
-    assert_eq!(diagnostics[0].backend_id, "skia");
-    assert_eq!(diagnostics[0].feature, UnsupportedPainterFeature::Text);
-
-    diagnostics.clear();
     backend.execute_commands(
         &mut buffer,
         &[PainterCommand::ApplyFilter {
@@ -1112,6 +1081,7 @@ fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose(
         &mut diagnostics,
     );
     assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].backend_id, "skia");
     assert_eq!(diagnostics[0].feature, UnsupportedPainterFeature::Filter);
 }
 

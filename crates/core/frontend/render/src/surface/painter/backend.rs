@@ -229,13 +229,6 @@ pub(crate) enum PainterCommand {
         paint: PainterPaint,
         clip: ClipRect,
     },
-    DrawText {
-        text: String,
-        x: f32,
-        y: f32,
-        paint: PainterPaint,
-        clip: ClipRect,
-    },
     DrawImage {
         image: PainterImage,
         rect: ClipRect,
@@ -395,7 +388,6 @@ pub(crate) enum UnsupportedPainterFeature {
     ClipStack,
     LayerStack,
     Path,
-    Text,
     Image,
     Gradient,
     Filter,
@@ -541,14 +533,6 @@ impl SkiaPaintBackend {
                     self.diagnose_unsupported_paint(paint, diagnostics);
                     self.draw_path_command(canvas, path, paint, effective_clip(*clip, &clip_stack));
                 }
-                PainterCommand::DrawText { .. } => diagnostics.push(PainterDiagnostic {
-                    backend_id: self.id(),
-                    feature: UnsupportedPainterFeature::Text,
-                    message:
-                        "text commands are part of the contract but still handled by TextRenderer"
-                            .into(),
-                    source: None,
-                }),
                 PainterCommand::DrawImage {
                     image,
                     rect,

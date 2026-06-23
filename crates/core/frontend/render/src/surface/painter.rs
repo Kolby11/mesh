@@ -685,7 +685,6 @@ fn unsupported_painter_feature_label(feature: UnsupportedPainterFeature) -> &'st
         UnsupportedPainterFeature::ClipStack => "clip_stack",
         UnsupportedPainterFeature::LayerStack => "layer_stack",
         UnsupportedPainterFeature::Path => "path",
-        UnsupportedPainterFeature::Text => "text",
         UnsupportedPainterFeature::Image => "image",
         UnsupportedPainterFeature::Gradient => "gradient",
         UnsupportedPainterFeature::Filter => "filter",
