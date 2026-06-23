@@ -1397,7 +1397,7 @@ pub fn common_state_flags() -> &'static [ElementStateFlag] {
 
 pub fn validate_element_attribute(tag: &str, name: &str, value: &str) -> Option<ElementDiagnostic> {
     let contract = element_contract_for_tag(tag)?;
-    if let Some(diagnostic) = validate_phase87_attribute_value(tag, name, value) {
+    if let Some(diagnostic) = validate_known_attribute_value(tag, name, value) {
         return Some(diagnostic);
     }
     if contract.attributes.iter().any(|attr| attr.name == name)
@@ -1426,7 +1426,7 @@ pub fn validate_element_attribute(tag: &str, name: &str, value: &str) -> Option<
     })
 }
 
-fn validate_phase87_attribute_value(
+fn validate_known_attribute_value(
     tag: &str,
     name: &str,
     value: &str,

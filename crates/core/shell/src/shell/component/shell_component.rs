@@ -2,6 +2,22 @@ use super::*;
 use crate::shell::component::runtime::script_has_service_read;
 
 impl FrontendSurfaceComponent {
+    /// Drop every retained render/layout cache so the next paint rebuilds the
+    /// tree from scratch. Shared by `theme_changed` and `locale_changed`, which
+    /// both invalidate the entire retained pipeline.
+    fn reset_render_caches(&mut self) {
+        self.last_tree = None;
+        self.cached_restyle_rules = None;
+        self.cached_style_rule_index = None;
+        self.intrinsic_layout_cache = IntrinsicLayoutCache::default();
+        self.layout_state = PerSurfaceLayoutState::default();
+        self.retained_tree = RetainedWidgetTree::default();
+        self.retained_render_objects = RenderObjectTree::default();
+        self.retained_display_list = RetainedDisplayList::default();
+        self.focused_proof_snapshot = None;
+        self.last_visual_damage.clear();
+    }
+
     fn runtime_observes_service_event(
         runtime: &EmbeddedFrontendRuntime,
         event: &ServiceEvent,
@@ -615,7 +631,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             );
             if self.measured_size != Some(measured_size) {
                 self.measured_size = Some(measured_size);
-                self.invalidate_surface_config_only();
+                self.invalidate_surface_config();
             }
         }
         if self.scripts_use_element_metrics {
@@ -856,16 +872,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // cannot skip the present.
         tracing::debug!("theme_changed for component '{}'", self.id());
         self.active_theme_stale.set(true);
-        self.last_tree = None;
-        self.cached_restyle_rules = None;
-        self.cached_style_rule_index = None;
-        self.intrinsic_layout_cache = IntrinsicLayoutCache::default();
-        self.layout_state = PerSurfaceLayoutState::default();
-        self.retained_tree = RetainedWidgetTree::default();
-        self.retained_render_objects = RenderObjectTree::default();
-        self.retained_display_list = RetainedDisplayList::default();
-        self.focused_proof_snapshot = None;
-        self.last_visual_damage.clear();
+        self.reset_render_caches();
         // A theme swap is a global palette replacement, not a local CSS
         // transition. Drop transition state so stale light/dark colors cannot
         // paint over the newly active theme.
@@ -883,16 +890,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.locale.set_locale(locale.current());
         self.runtimes.lock().unwrap().clear();
         self.init_root_runtime()?;
-        self.last_tree = None;
-        self.cached_restyle_rules = None;
-        self.cached_style_rule_index = None;
-        self.intrinsic_layout_cache = IntrinsicLayoutCache::default();
-        self.layout_state = PerSurfaceLayoutState::default();
-        self.retained_tree = RetainedWidgetTree::default();
-        self.retained_render_objects = RenderObjectTree::default();
-        self.retained_display_list = RetainedDisplayList::default();
-        self.focused_proof_snapshot = None;
-        self.last_visual_damage.clear();
+        self.reset_render_caches();
         self.render_hooks_pending = true;
         self.surface_pixels_invalid = true;
         self.invalidate_script_state();

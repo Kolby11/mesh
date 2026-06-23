@@ -16,6 +16,16 @@ pub(in crate::shell) const COMMAND_THROTTLE_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(16);
 const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 
+/// Canonical failure payload when a service command cannot be delivered (no
+/// backend channel, send failure, or unregistered interface).
+fn service_unavailable_response() -> serde_json::Value {
+    serde_json::json!({
+        "ok": false,
+        "error": "service_unavailable",
+        "status": "service_unavailable",
+    })
+}
+
 impl Shell {
     fn clear_transfer_owned_keyboard_mode(
         &mut self,
@@ -503,16 +513,7 @@ impl Shell {
                     );
                     match self.send_service_command_message(interface, command, payload, coalesce) {
                         Some(Ok(())) => serde_json::json!({ "ok": true, "queued": true }),
-                        Some(Err(())) => serde_json::json!({
-                            "ok": false,
-                            "error": "service_unavailable",
-                            "status": "service_unavailable",
-                        }),
-                        None => serde_json::json!({
-                            "ok": false,
-                            "error": "service_unavailable",
-                            "status": "service_unavailable",
-                        }),
+                        Some(Err(())) | None => service_unavailable_response(),
                     }
                 } else {
                     let state =
@@ -528,25 +529,12 @@ impl Shell {
             } else {
                 match self.send_service_command_message(interface, command, payload, coalesce) {
                     Some(Ok(())) => serde_json::json!({ "ok": true, "queued": true }),
-                    Some(Err(())) => serde_json::json!({
-                        "ok": false,
-                        "error": "service_unavailable",
-                        "status": "service_unavailable",
-                    }),
-                    None => serde_json::json!({
-                        "ok": false,
-                        "error": "service_unavailable",
-                        "status": "service_unavailable",
-                    }),
+                    Some(Err(())) | None => service_unavailable_response(),
                 }
             }
         } else {
             tracing::debug!("no handler registered for service: {interface}");
-            serde_json::json!({
-                "ok": false,
-                "error": "service_unavailable",
-                "status": "service_unavailable",
-            })
+            service_unavailable_response()
         };
 
         if dispatch_result

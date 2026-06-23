@@ -165,22 +165,23 @@ before editing.
 
 ### Cheap quality wins (low risk, do next)
 
-- [ ] Extract `reset_render_caches(&mut self)` from the ~8 identical cache-reset
+All five landed 2026-06-23 (single commit).
+
+- [x] Extract `reset_render_caches(&mut self)` from the ~8 identical cache-reset
       lines duplicated in `FrontendSurfaceComponent::theme_changed` and
-      `locale_changed` (`shell/component/shell_component.rs:~858` and `~885`).
-      Eliminates drift risk.
-- [ ] Collapse the `invalidate_surface_config` one-line wrapper into its only
-      implementation `invalidate_surface_config_only`
-      (`shell/component/component.rs:~635`); update the 7 call sites.
-- [ ] Rename `validate_phase87_attribute_value` → `validate_known_attribute_value`
-      (`ui/elements/src/element.rs:~1501`) — milestone codename leaking into the
-      production source tree (shows in stack traces/grep). Pure rename.
-- [ ] `request.rs`: extract the 4 identical `service_unavailable` error-JSON
-      literals in `dispatch_service_command` (`shell/runtime/request.rs:~504-550`)
-      into a named constant/helper.
-- [ ] `debug.rs`: `module_graph_entries` iterates `graph.contributed_themes()`
-      twice (themes + labels) — combine into one `filter_map`
-      (`shell/runtime/debug.rs:~240`).
+      `locale_changed`. Done: shared helper drops the retained
+      tree/layout/render-object/display-list caches; both hooks call it.
+- [x] Collapse the `invalidate_surface_config` one-line wrapper into one
+      implementation. Done: kept the widely-used `invalidate_surface_config`
+      name (folded the `SURFACE_CONFIG` invalidation in), removed the
+      `invalidate_surface_config_only` variant and updated its lone call site.
+- [x] Rename `validate_phase87_attribute_value` → `validate_known_attribute_value`
+      (`ui/elements/src/element.rs`). Done — pure rename of the production fn.
+- [x] `request.rs`: extract the 4 identical `service_unavailable` error-JSON
+      literals in `dispatch_service_command` into a `service_unavailable_response()`
+      helper; collapsed the `Some(Err(()))`/`None` arms.
+- [x] `debug.rs`: `module_graph_entries` iterated `graph.contributed_themes()`
+      twice — combined into one `.map(...).unzip()`.
 
 ### Larger refactors (bigger diffs — best as separate reviewed PRs)
 

@@ -633,10 +633,6 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn invalidate_surface_config(&mut self) {
-        self.invalidate_surface_config_only();
-    }
-
-    pub(super) fn invalidate_surface_config_only(&mut self) {
         self.invalidate_style_path(ComponentDirtyFlags::SURFACE_CONFIG);
     }
 

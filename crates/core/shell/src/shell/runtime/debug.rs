@@ -237,22 +237,18 @@ impl Shell {
                     provides_interface_labels = pairs.into_iter().map(|(_, l)| l).collect();
                 }
 
-                let provides_themes: Vec<String> = graph
-                    .contributed_themes()
-                    .iter()
-                    .filter(|t| t.module_id == module.id)
-                    .map(|t| t.id.clone())
-                    .collect();
-                let provides_theme_labels: Vec<Option<String>> = graph
-                    .contributed_themes()
-                    .iter()
-                    .filter(|t| t.module_id == module.id)
-                    .map(|t| {
-                        t.label.as_ref().map(|label| {
-                            resolve_debug_manifest_text(&self.locale, &module.id, label).text
+                let (provides_themes, provides_theme_labels): (Vec<String>, Vec<Option<String>>) =
+                    graph
+                        .contributed_themes()
+                        .iter()
+                        .filter(|t| t.module_id == module.id)
+                        .map(|t| {
+                            let label = t.label.as_ref().map(|label| {
+                                resolve_debug_manifest_text(&self.locale, &module.id, label).text
+                            });
+                            (t.id.clone(), label)
                         })
-                    })
-                    .collect();
+                        .unzip();
 
                 let provides_settings = graph
                     .settings_schemas()
