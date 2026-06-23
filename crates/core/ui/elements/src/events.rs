@@ -122,7 +122,7 @@ pub enum RawInputEvent {
 /// Call `process` with each raw input event to update node state flags
 /// (hover, active, focus) on the widget tree and produce the resulting UI events.
 /// After `process` returns, any node whose `state` changed should have its
-/// computed style re-resolved via `StyleResolver::restyle_subtree`.
+/// computed style re-resolved via `StyleResolver::restyle_subtree_cached`.
 #[derive(Debug, Default)]
 pub struct InputState {
     hovered_node: Option<NodeId>,

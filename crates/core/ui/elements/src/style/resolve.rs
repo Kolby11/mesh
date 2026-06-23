@@ -609,19 +609,10 @@ impl<'a> StyleResolver<'a> {
         diagnostics
     }
 
-    pub fn restyle_subtree(
-        &self,
-        node: &mut crate::tree::WidgetNode,
-        rules: &[StyleRule],
-        context: StyleContext,
-    ) {
-        let index = StyleRuleIndex::new(rules);
-        self.restyle_subtree_with_index(node, rules, &index, context, None);
-    }
-
-    /// Like `restyle_subtree` but reuses a caller-provided index. The index
-    /// must have been built from the same `rules` slice; this is verified
-    /// with `is_for()` and the index is rebuilt in place if not.
+    /// Re-resolves the computed style of `node` and its descendants, reusing a
+    /// caller-provided index. The index must have been built from the same
+    /// `rules` slice; this is verified with `is_for()` and the index is rebuilt
+    /// in place if not.
     pub fn restyle_subtree_cached(
         &self,
         node: &mut crate::tree::WidgetNode,
@@ -633,20 +624,8 @@ impl<'a> StyleResolver<'a> {
         self.restyle_subtree_with_index(node, rules, index, context, None);
     }
 
-    pub fn restyle_subtree_children(
-        &self,
-        node: &mut crate::tree::WidgetNode,
-        rules: &[StyleRule],
-        context: StyleContext,
-    ) {
-        let index = StyleRuleIndex::new(rules);
-        let parent = ParentInheritedStyle::from(&node.computed_style);
-        for child in &mut node.children {
-            self.restyle_subtree_with_index(child, rules, &index, context, Some(&parent));
-        }
-    }
-
-    /// Like `restyle_subtree_children` but reuses a caller-provided index.
+    /// Re-resolves the computed style of every child of `node` (but not `node`
+    /// itself), reusing a caller-provided index.
     pub fn restyle_subtree_children_cached(
         &self,
         node: &mut crate::tree::WidgetNode,

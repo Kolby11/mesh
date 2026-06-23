@@ -7,7 +7,7 @@ use super::*;
 /// When a hover restyle changes an element's size (e.g., from 40px to 80px),
 /// the next pointer event must resolve against the updated layout, not the
 /// pre-restyle bounds. This proves that `build_tree` recomputes layout after
-/// `restyle_subtree`.
+/// `restyle_subtree_cached`.
 #[test]
 fn restyle_hit_test_uses_post_restyle_bounds() {
     // The button starts at width: 40px.  On hover the style rule widens it to 80px.

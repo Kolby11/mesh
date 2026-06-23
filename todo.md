@@ -233,10 +233,11 @@ All five landed 2026-06-23 (single commit).
       and the trailing compat arg from all 65 `contract!` invocations (regex).
       Net −98 lines in `element.rs`; workspace builds, elements tests pass
       (only the pre-existing audio-style baseline failure remains).
-- [ ] Dead `StyleResolver` non-cached `restyle_subtree` / `restyle_subtree_children`
-      (`ui/elements/src/style/resolve.rs:~637,~661`) — only referenced by doc
-      comments; the `_cached`/`_for_keys` variants are used. Remove and fix the
-      doc-comment references in `events.rs:125` and `restyle/metrics.rs:10`.
+- [x] Dead `StyleResolver` non-cached `restyle_subtree` / `restyle_subtree_children`.
+      Done 2026-06-23: confirmed only doc-comment references (the `_cached`
+      variants carry the four production call sites in `rendering.rs`); removed
+      both, folded their doc comments onto the `_cached` variants, and updated
+      the references in `events.rs` and `restyle/metrics.rs`.
 - [ ] Dead `PainterCommand::{DrawText,DrawPath}`, `PainterBlendMode::{Multiply,Screen}`,
       `PainterPath`/`PainterPathElement` (`frontend/render/src/surface/painter/backend.rs`)
       — never emitted in production (text goes through `TextRenderer`; non-SrcOver
