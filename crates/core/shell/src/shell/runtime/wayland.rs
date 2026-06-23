@@ -60,7 +60,7 @@ impl Shell {
                 Some((surface.width.max(1), surface.height.max(1)))
             };
             let _ = surface;
-            let surface_size = fixed_surface_size
+            let target_surface_size = fixed_surface_size
                 .or(self.components[index].target(target).known_surface_size)
                 .or_else(|| {
                     self.components[index]
@@ -74,7 +74,20 @@ impl Shell {
                         .surface_size_if_known(&target_surface_id)
                 })
                 .unwrap_or((1, 1));
-            self.components[index].target_mut(target).known_surface_size = Some(surface_size);
+            self.components[index].target_mut(target).known_surface_size =
+                Some(target_surface_size);
+            let component_surface_size = match target {
+                TargetRef::Parent => target_surface_size,
+                TargetRef::Child(_) => self.components[index]
+                    .parent
+                    .known_surface_size
+                    .or_else(|| {
+                        self.surfaces
+                            .get(&self.components[index].surface_id)
+                            .map(|surface| (surface.width.max(1), surface.height.max(1)))
+                    })
+                    .unwrap_or(target_surface_size),
+            };
 
             if let WindowEvent::Key {
                 event: WindowKeyEvent::Pressed(key, mods),
@@ -130,14 +143,6 @@ impl Shell {
                 }
                 WindowEvent::Char { ch, .. } => ComponentInput::Char { ch },
             };
-            let input = match target {
-                TargetRef::Parent => input,
-                TargetRef::Child(child_index) => {
-                    let anchor_rect = self.components[index].children[child_index].anchor_rect;
-                    translate_child_surface_input(input, anchor_rect)
-                }
-            };
-
             tracing::trace!(
                 "[hover] dispatch_wayland: routing event to surface_id={}",
                 target_surface_id
@@ -146,13 +151,25 @@ impl Shell {
                 let runtime = &mut self.components[index];
                 runtime
                     .component
-                    .surface_size_changed(surface_size.0, surface_size.1);
-                let emitted = runtime.component.handle_input(
-                    self.theme.active(),
-                    surface_size.0,
-                    surface_size.1,
-                    input,
-                )?;
+                    .surface_size_changed(component_surface_size.0, component_surface_size.1);
+                let emitted = match target {
+                    TargetRef::Parent => runtime.component.handle_input(
+                        self.theme.active(),
+                        component_surface_size.0,
+                        component_surface_size.1,
+                        input,
+                    )?,
+                    TargetRef::Child(child_index) => {
+                        let node_key = runtime.children[child_index].node_key.clone();
+                        runtime.component.handle_child_surface_input(
+                            &node_key,
+                            self.theme.active(),
+                            component_surface_size.0,
+                            component_surface_size.1,
+                            input,
+                        )?
+                    }
+                };
                 let interactive = runtime.component.hovered_target_is_interactive();
                 self.presentation_engine
                     .set_pointer_interactive(interactive);
@@ -160,16 +177,19 @@ impl Shell {
             }
             .map_err(ShellRunError::Component)?;
 
-            for request in emitted {
-                let mut pending = VecDeque::from([request]);
-                self.drain_requests(&mut pending)?;
-            }
             if let Some(started) = input_started {
-                self.record_shell_profiling_stage(
+                let component_id = self.components[index].component.id().to_string();
+                self.record_surface_profiling_stage(
+                    &target_surface_id,
+                    Some(component_id.as_str()),
                     mesh_core_debug::ProfilingStage::InputHandling,
                     started.elapsed(),
                     Some(trigger_kind),
                 );
+            }
+            for request in emitted {
+                let mut pending = VecDeque::from([request]);
+                self.drain_requests(&mut pending)?;
             }
         }
 
@@ -206,31 +226,5 @@ fn profiling_trigger_for_event(event: &WindowEvent) -> &'static str {
         WindowEvent::Scroll { .. } => "scroll",
         WindowEvent::Key { .. } => "key",
         WindowEvent::Char { .. } => "char",
-    }
-}
-
-fn translate_child_surface_input(
-    input: ComponentInput,
-    anchor_rect: (i32, i32, i32, i32),
-) -> ComponentInput {
-    let origin_x = anchor_rect.0 as f32;
-    let origin_y = anchor_rect.1 as f32;
-    match input {
-        ComponentInput::PointerMove { x, y } => ComponentInput::PointerMove {
-            x: x + origin_x,
-            y: y + origin_y,
-        },
-        ComponentInput::PointerButton { x, y, pressed } => ComponentInput::PointerButton {
-            x: x + origin_x,
-            y: y + origin_y,
-            pressed,
-        },
-        ComponentInput::Scroll { x, y, dx, dy } => ComponentInput::Scroll {
-            x: x + origin_x,
-            y: y + origin_y,
-            dx,
-            dy,
-        },
-        other => other,
     }
 }

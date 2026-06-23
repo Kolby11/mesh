@@ -270,6 +270,20 @@ pub trait ShellComponent: Send {
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         Ok(Vec::new())
     }
+    /// Handle input delivered to a promoted child surface using coordinates
+    /// local to that child surface. Implementations that paint keyed subtrees
+    /// into child surfaces can translate the local input back into their
+    /// retained tree before dispatch.
+    fn handle_child_surface_input(
+        &mut self,
+        _node_key: &str,
+        theme: &Theme,
+        width: u32,
+        height: u32,
+        input: ComponentInput,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        self.handle_input(theme, width, height, input)
+    }
     /// Whether the current pointer hover target should use an interactive cursor.
     fn hovered_target_is_interactive(&self) -> bool {
         false

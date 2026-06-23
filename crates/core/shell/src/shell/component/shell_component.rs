@@ -1009,6 +1009,28 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.handle_component_input(theme, width, height, input)
     }
 
+    fn handle_child_surface_input(
+        &mut self,
+        node_key: &str,
+        theme: &Theme,
+        width: u32,
+        height: u32,
+        input: ComponentInput,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(tree) = self.last_tree.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let Some(bounds) = find_node_bounds_by_key(tree, node_key, 0.0, 0.0) else {
+            return Ok(Vec::new());
+        };
+        self.handle_component_input(
+            theme,
+            width,
+            height,
+            translate_child_surface_input(input, bounds.0, bounds.1),
+        )
+    }
+
     fn hovered_target_is_interactive(&self) -> bool {
         let Some(tree) = self.last_tree.as_ref() else {
             return false;
@@ -1675,6 +1697,31 @@ fn bounds_to_i32_rect(bounds: (f32, f32, f32, f32)) -> (i32, i32, i32, i32) {
     (left, top, (right - left).max(1), (bottom - top).max(1))
 }
 
+fn translate_child_surface_input(
+    input: ComponentInput,
+    origin_x: f32,
+    origin_y: f32,
+) -> ComponentInput {
+    match input {
+        ComponentInput::PointerMove { x, y } => ComponentInput::PointerMove {
+            x: x + origin_x,
+            y: y + origin_y,
+        },
+        ComponentInput::PointerButton { x, y, pressed } => ComponentInput::PointerButton {
+            x: x + origin_x,
+            y: y + origin_y,
+            pressed,
+        },
+        ComponentInput::Scroll { x, y, dx, dy } => ComponentInput::Scroll {
+            x: x + origin_x,
+            y: y + origin_y,
+            dx,
+            dy,
+        },
+        other => other,
+    }
+}
+
 fn subtree_content_size(node: &WidgetNode) -> Option<(u32, u32)> {
     let bounds = subtree_content_bounds(node, 0.0, 0.0)?;
     let width = (bounds.2 - bounds.0).ceil().max(1.0) as u32;
@@ -1950,6 +1997,43 @@ mod tests {
         collect_child_surface_requests(&root, &root, &mut requests);
 
         assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn child_surface_input_is_translated_from_popup_local_coordinates() {
+        let input = translate_child_surface_input(
+            ComponentInput::PointerButton {
+                x: 8.0,
+                y: 12.0,
+                pressed: true,
+            },
+            20.0,
+            42.0,
+        );
+
+        match input {
+            ComponentInput::PointerButton { x, y, pressed } => {
+                assert_eq!((x, y, pressed), (28.0, 54.0, true));
+            }
+            other => panic!("expected pointer button input, got {other:?}"),
+        }
+
+        let scroll = translate_child_surface_input(
+            ComponentInput::Scroll {
+                x: 1.0,
+                y: 2.0,
+                dx: 0.0,
+                dy: -1.0,
+            },
+            20.0,
+            42.0,
+        );
+        match scroll {
+            ComponentInput::Scroll { x, y, dx, dy } => {
+                assert_eq!((x, y, dx, dy), (21.0, 44.0, 0.0, -1.0));
+            }
+            other => panic!("expected scroll input, got {other:?}"),
+        }
     }
 
     #[test]
