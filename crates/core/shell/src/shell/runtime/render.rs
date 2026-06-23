@@ -1,9 +1,17 @@
 use super::super::*;
+use crate::shell::types::{ChildSurface, ChildSurfaceKind, SurfaceTarget};
 use mesh_core_elements::style::BackgroundPaint;
+use mesh_core_elements::{PopoverAnchor, PopoverConstraintAdjustment, PopoverGrab, PopoverGravity};
+use mesh_core_presentation::{
+    LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement,
+};
 use mesh_core_render::{DamageRect, DisplayPaintCommand};
+use std::collections::HashSet;
 
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
+        self.drain_dismissed_child_popups();
+
         if self.debug.enabled {
             let mut debug_requests = self.publish_debug_snapshot()?;
             self.drain_requests(&mut debug_requests)?;
@@ -320,10 +328,259 @@ impl Shell {
                 components_want_render_after_frame |=
                     self.components[index].component.wants_render();
             }
+
+            let child_presented = self.reconcile_child_surface_requests(
+                index,
+                &component_id,
+                &surface_id,
+                scale,
+                total_render_started,
+            )?;
+            any_component_presented |= child_presented;
+            if child_presented {
+                components_want_render_after_frame |=
+                    self.components[index].component.wants_render();
+            }
         }
         self.components_want_render = components_want_render_after_frame;
         self.presented_last_frame = any_component_presented;
         Ok(())
+    }
+
+    fn reconcile_child_surface_requests(
+        &mut self,
+        index: usize,
+        component_id: &str,
+        parent_surface_id: &str,
+        parent_scale: f32,
+        total_render_started: Option<std::time::Instant>,
+    ) -> Result<bool, ShellRunError> {
+        let requests = self.components[index].component.child_surface_requests();
+        if requests.is_empty() || !self.presentation_engine.popup_supported() {
+            self.destroy_all_child_surfaces(index);
+            return Ok(false);
+        }
+
+        let requested_keys: HashSet<String> = requests
+            .iter()
+            .map(|request| request.node_key.clone())
+            .collect();
+        let mut child_index = 0;
+        while child_index < self.components[index].children.len() {
+            if requested_keys.contains(
+                self.components[index].children[child_index]
+                    .node_key
+                    .as_str(),
+            ) {
+                child_index += 1;
+            } else {
+                self.destroy_child_surface_at(index, child_index);
+            }
+        }
+
+        let mut any_presented = false;
+        for request in requests {
+            if !matches!(request.kind, ChildSurfaceKind::Popover) {
+                continue;
+            }
+            let child_surface_id = child_surface_id(parent_surface_id, &request.node_key);
+            let child_ref = if let Some(existing) = self.components[index]
+                .children
+                .iter()
+                .position(|child| child.node_key == request.node_key)
+            {
+                TargetRef::Child(existing)
+            } else {
+                let mut target =
+                    SurfaceTarget::new(child_surface_id.clone(), LayerSurfaceSizePolicy::Flexible);
+                target.popup_parent_surface = Some(parent_surface_id.to_string());
+                target.force_full_present = true;
+                self.components[index].children.push(ChildSurface {
+                    target,
+                    node_key: request.node_key.clone(),
+                    anchor_rect: request.anchor_rect,
+                });
+                self.rebuild_component_surface_index();
+                TargetRef::Child(self.components[index].children.len() - 1)
+            };
+
+            let TargetRef::Child(child_index) = child_ref else {
+                unreachable!("child reconcile only creates child targets");
+            };
+            self.components[index].children[child_index].anchor_rect = request.anchor_rect;
+            if self
+                .presentation_engine
+                .surface_waiting_for_frame_callback(&child_surface_id)
+            {
+                continue;
+            }
+
+            self.core
+                .surfaces
+                .entry(child_surface_id.clone())
+                .and_modify(|state| {
+                    state.visible = true;
+                    state.closing_until = None;
+                })
+                .or_insert(SurfaceState {
+                    visible: true,
+                    closing_until: None,
+                });
+            let surface = self.surfaces.entry(child_surface_id.clone()).or_default();
+            surface.visible = true;
+            surface.width = request.content_size.0.max(1);
+            surface.height = request.content_size.1.max(1);
+
+            let popup_config = PopupConfig {
+                parent_surface_id: parent_surface_id.to_string(),
+                placement: PopupPlacement {
+                    anchor_rect: request.anchor_rect,
+                    size: request.content_size,
+                    anchor: map_popover_anchor(request.placement.anchor),
+                    gravity: map_popover_gravity(request.placement.gravity),
+                    constraint: map_popover_constraint(request.placement.constraint_adjustment),
+                    offset: (request.placement.offset_x, request.placement.offset_y),
+                },
+                grab: request.placement.grab == PopoverGrab::Click,
+                grab_serial: None,
+            };
+
+            {
+                let child = &mut self.components[index].children[child_index];
+                child.target.popup_config = Some(popup_config.clone());
+                child.target.known_surface_size = Some(request.content_size);
+                if child.target.last_popup_size != Some(request.content_size) {
+                    child.target.last_popup_size = Some(request.content_size);
+                }
+            }
+            if let Err(error) = self
+                .presentation_engine
+                .configure_popup(&child_surface_id, popup_config)
+            {
+                tracing::warn!("configure_popup for child {child_surface_id} failed: {error}");
+                self.destroy_child_surface_at(index, child_index);
+                continue;
+            }
+
+            let scale = self.presentation_engine.surface_scale(&child_surface_id);
+            let scale = if scale > 0.0 { scale } else { parent_scale };
+            let width = request.content_size.0.max(1);
+            let height = request.content_size.1.max(1);
+            let physical_w = ((width as f32 * scale).ceil() as u32).max(1);
+            let physical_h = ((height as f32 * scale).ceil() as u32).max(1);
+
+            const MAX_BUFFER_BYTES: u64 = 512 * 1024 * 1024;
+            let requested_bytes = (physical_w as u64) * (physical_h as u64) * 4;
+            if requested_bytes > MAX_BUFFER_BYTES {
+                return Err(ShellRunError::BufferAlloc {
+                    surface_id: child_surface_id,
+                    logical_w: width,
+                    logical_h: height,
+                    physical_w,
+                    physical_h,
+                    scale,
+                    requested_bytes,
+                    max_bytes: MAX_BUFFER_BYTES,
+                });
+            }
+
+            {
+                let child = &mut self.components[index].children[child_index];
+                if child
+                    .target
+                    .paint_buffer
+                    .as_ref()
+                    .map(|buffer| buffer.width != physical_w || buffer.height != physical_h)
+                    .unwrap_or(true)
+                {
+                    child.target.paint_buffer = Some(PixelBuffer::new(physical_w, physical_h));
+                }
+            }
+
+            let painted = {
+                let runtime = &mut self.components[index];
+                let buffer = runtime.children[child_index]
+                    .target
+                    .paint_buffer
+                    .as_mut()
+                    .expect("child paint buffer initialised");
+                runtime
+                    .component
+                    .paint_child_surface(&request.node_key, buffer, scale)
+                    .map_err(ShellRunError::Component)?
+            };
+            if !painted {
+                self.destroy_child_surface_at(index, child_index);
+                continue;
+            }
+            self.components[index].children[child_index]
+                .target
+                .force_full_present = true;
+            self.presentation_engine.update_input_region(
+                &self.components[index].children[child_index]
+                    .target
+                    .surface_id,
+                Some(DamageRect {
+                    x: 0,
+                    y: 0,
+                    width,
+                    height,
+                }),
+            );
+            let presented = self.present_surface_target(
+                index,
+                TargetRef::Child(child_index),
+                component_id,
+                width,
+                height,
+                scale,
+                total_render_started,
+            )?;
+            any_presented |= presented;
+        }
+
+        Ok(any_presented)
+    }
+
+    fn drain_dismissed_child_popups(&mut self) {
+        for surface_id in self.presentation_engine.take_dismissed_popups() {
+            self.destroy_child_surface_by_id(&surface_id);
+        }
+    }
+
+    pub(in crate::shell) fn destroy_all_child_surfaces(&mut self, index: usize) {
+        while !self.components[index].children.is_empty() {
+            self.destroy_child_surface_at(index, 0);
+        }
+    }
+
+    pub(in crate::shell) fn destroy_child_surface_by_id(&mut self, surface_id: &str) {
+        let Some((index, TargetRef::Child(child_index))) =
+            self.component_target_for_surface(surface_id)
+        else {
+            return;
+        };
+        self.destroy_child_surface_at(index, child_index);
+    }
+
+    pub(in crate::shell) fn destroy_child_surface_at(&mut self, index: usize, child_index: usize) {
+        if child_index >= self.components[index].children.len() {
+            return;
+        }
+        let surface_id = self.components[index].children[child_index]
+            .target
+            .surface_id
+            .clone();
+        self.components[index].children.remove(child_index);
+        self.presentation_engine.destroy_popup(&surface_id);
+        self.core.surfaces.remove(&surface_id);
+        self.surfaces.remove(&surface_id);
+        self.component_by_surface.remove(&surface_id);
+        if self.keyboard_focus_surface.as_deref() == Some(surface_id.as_str()) {
+            self.keyboard_focus_surface = None;
+        }
+        self.transfer_owned_keyboard_modes.remove(&surface_id);
+        self.rebuild_component_surface_index();
     }
 
     /// Run the post-paint present pipeline for one surface target of a
@@ -501,6 +758,54 @@ impl Shell {
             self.components[index].parent.known_surface_size = Some(size);
         }
         Ok(size)
+    }
+}
+
+fn child_surface_id(parent_surface_id: &str, node_key: &str) -> String {
+    let mut encoded = String::with_capacity(node_key.len() * 2);
+    for byte in node_key.as_bytes() {
+        use std::fmt::Write;
+        let _ = write!(&mut encoded, "{byte:02x}");
+    }
+    format!("{parent_surface_id}::child::{encoded}")
+}
+
+fn map_popover_anchor(anchor: PopoverAnchor) -> PopupAnchor {
+    match anchor {
+        PopoverAnchor::Center => PopupAnchor::Center,
+        PopoverAnchor::Top => PopupAnchor::Top,
+        PopoverAnchor::Bottom => PopupAnchor::Bottom,
+        PopoverAnchor::Left => PopupAnchor::Left,
+        PopoverAnchor::Right => PopupAnchor::Right,
+        PopoverAnchor::TopLeft => PopupAnchor::TopLeft,
+        PopoverAnchor::TopRight => PopupAnchor::TopRight,
+        PopoverAnchor::BottomLeft => PopupAnchor::BottomLeft,
+        PopoverAnchor::BottomRight => PopupAnchor::BottomRight,
+    }
+}
+
+fn map_popover_gravity(gravity: PopoverGravity) -> PopupGravity {
+    match gravity {
+        PopoverGravity::Center => PopupGravity::Center,
+        PopoverGravity::Top => PopupGravity::Top,
+        PopoverGravity::Bottom => PopupGravity::Bottom,
+        PopoverGravity::Left => PopupGravity::Left,
+        PopoverGravity::Right => PopupGravity::Right,
+        PopoverGravity::TopLeft => PopupGravity::TopLeft,
+        PopoverGravity::TopRight => PopupGravity::TopRight,
+        PopoverGravity::BottomLeft => PopupGravity::BottomLeft,
+        PopoverGravity::BottomRight => PopupGravity::BottomRight,
+    }
+}
+
+fn map_popover_constraint(adjustment: PopoverConstraintAdjustment) -> PopupConstraint {
+    PopupConstraint {
+        flip_x: adjustment.flip_x,
+        flip_y: adjustment.flip_y,
+        slide_x: adjustment.slide_x,
+        slide_y: adjustment.slide_y,
+        resize_x: adjustment.resize_x,
+        resize_y: adjustment.resize_y,
     }
 }
 

@@ -46,12 +46,12 @@ impl Shell {
                 physical_surface_id
             };
 
-            let Some(index) = self.component_index_for_surface(&route_surface_id) else {
+            let Some((index, target)) = self.component_target_for_surface(&route_surface_id) else {
                 continue;
             };
 
-            let runtime_surface_id = self.components[index].surface_id.clone();
-            let Some(surface) = self.surfaces.get(&runtime_surface_id) else {
+            let target_surface_id = self.components[index].target(target).surface_id.clone();
+            let Some(surface) = self.surfaces.get(&target_surface_id) else {
                 continue;
             };
             let fixed_surface_size = if surface.width == 0 || surface.height == 0 {
@@ -61,20 +61,20 @@ impl Shell {
             };
             let _ = surface;
             let surface_size = fixed_surface_size
-                .or(self.components[index].parent.known_surface_size)
+                .or(self.components[index].target(target).known_surface_size)
                 .or_else(|| {
                     self.components[index]
-                        .parent
+                        .target(target)
                         .paint_buffer
                         .as_ref()
                         .map(|buffer| (buffer.width.max(1), buffer.height.max(1)))
                 })
                 .or_else(|| {
                     self.presentation_engine
-                        .surface_size_if_known(&runtime_surface_id)
+                        .surface_size_if_known(&target_surface_id)
                 })
                 .unwrap_or((1, 1));
-            self.components[index].parent.known_surface_size = Some(surface_size);
+            self.components[index].target_mut(target).known_surface_size = Some(surface_size);
 
             if let WindowEvent::Key {
                 event: WindowKeyEvent::Pressed(key, mods),
@@ -97,7 +97,7 @@ impl Shell {
                     pressed: true,
                     ..
                 } => {
-                    self.claim_keyboard_focus_for_surface(&runtime_surface_id);
+                    self.claim_keyboard_focus_for_surface(&target_surface_id);
                     ComponentInput::PointerButton {
                         x,
                         y,
@@ -130,10 +130,17 @@ impl Shell {
                 }
                 WindowEvent::Char { ch, .. } => ComponentInput::Char { ch },
             };
+            let input = match target {
+                TargetRef::Parent => input,
+                TargetRef::Child(child_index) => {
+                    let anchor_rect = self.components[index].children[child_index].anchor_rect;
+                    translate_child_surface_input(input, anchor_rect)
+                }
+            };
 
             tracing::trace!(
                 "[hover] dispatch_wayland: routing event to surface_id={}",
-                runtime_surface_id
+                target_surface_id
             );
             let emitted = {
                 let runtime = &mut self.components[index];
@@ -199,5 +206,31 @@ fn profiling_trigger_for_event(event: &WindowEvent) -> &'static str {
         WindowEvent::Scroll { .. } => "scroll",
         WindowEvent::Key { .. } => "key",
         WindowEvent::Char { .. } => "char",
+    }
+}
+
+fn translate_child_surface_input(
+    input: ComponentInput,
+    anchor_rect: (i32, i32, i32, i32),
+) -> ComponentInput {
+    let origin_x = anchor_rect.0 as f32;
+    let origin_y = anchor_rect.1 as f32;
+    match input {
+        ComponentInput::PointerMove { x, y } => ComponentInput::PointerMove {
+            x: x + origin_x,
+            y: y + origin_y,
+        },
+        ComponentInput::PointerButton { x, y, pressed } => ComponentInput::PointerButton {
+            x: x + origin_x,
+            y: y + origin_y,
+            pressed,
+        },
+        ComponentInput::Scroll { x, y, dx, dy } => ComponentInput::Scroll {
+            x: x + origin_x,
+            y: y + origin_y,
+            dx,
+            dy,
+        },
+        other => other,
     }
 }

@@ -887,25 +887,29 @@ impl Shell {
         visible: bool,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         if !visible {
-            if let Some(runtime) = self
+            if let Some(index) = self
                 .components
-                .iter_mut()
-                .find(|runtime| runtime.surface_id == surface_id.as_str())
+                .iter()
+                .position(|runtime| runtime.surface_id == surface_id.as_str())
             {
-                runtime.component.set_keyboard_mode_override(None);
-                runtime.component.set_surface_exiting(false);
-                if runtime.parent.popup_parent_surface.is_some() {
-                    // Tear down the xdg_popup surface so it can be recreated
-                    // fresh on the next ActivatePopover call.
-                    runtime.parent.popup_parent_surface = None;
-                    runtime.parent.popup_config = None;
-                    runtime.parent.last_popup_size = None;
-                    runtime.component.set_popup_promoted(false);
-                    self.presentation_engine.destroy_popup(&surface_id);
-                    tracing::info!(
-                        "set_surface_visibility_now: destroyed xdg_popup for {surface_id}"
-                    );
+                {
+                    let runtime = &mut self.components[index];
+                    runtime.component.set_keyboard_mode_override(None);
+                    runtime.component.set_surface_exiting(false);
+                    if runtime.parent.popup_parent_surface.is_some() {
+                        // Tear down the xdg_popup surface so it can be recreated
+                        // fresh on the next ActivatePopover call.
+                        runtime.parent.popup_parent_surface = None;
+                        runtime.parent.popup_config = None;
+                        runtime.parent.last_popup_size = None;
+                        runtime.component.set_popup_promoted(false);
+                        self.presentation_engine.destroy_popup(&surface_id);
+                        tracing::info!(
+                            "set_surface_visibility_now: destroyed xdg_popup for {surface_id}"
+                        );
+                    }
                 }
+                self.destroy_all_child_surfaces(index);
             }
             if let Some(previous_mode) = self.transfer_owned_keyboard_modes.remove(&surface_id) {
                 if let Some(surface) = self.surfaces.get_mut(&surface_id) {
