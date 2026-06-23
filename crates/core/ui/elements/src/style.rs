@@ -1946,6 +1946,7 @@ mod tests {
     gap: 6px;
     position: relative;
     overflow: hidden;
+    mix-blend-mode: multiply;
 }
 </style>
 "#;
@@ -1975,6 +1976,7 @@ mod tests {
         assert_eq!(style.position, Position::Relative);
         assert_eq!(style.overflow_x, Overflow::Hidden);
         assert_eq!(style.overflow_y, Overflow::Hidden);
+        assert_eq!(style.mix_blend_mode, BlendMode::Multiply);
     }
 
     #[test]

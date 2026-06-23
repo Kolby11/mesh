@@ -134,6 +134,7 @@ const SUPPORTED_CSS_PROPERTIES: &[&str] = &[
     "box-shadow",
     "filter",
     "backdrop-filter",
+    "mix-blend-mode",
     "tooltip-anchor",
     "tooltip-offset",
 ];
@@ -615,6 +616,11 @@ const STYLE_PROFILE_PROPERTIES: &[StyleProfileProperty] = &[
         status: StyleProfileStatus::Implemented,
     },
     StyleProfileProperty {
+        property: "mix-blend-mode",
+        category: "compositing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
         property: "border-style",
         category: "border",
         status: StyleProfileStatus::DiagnosticOnly,
@@ -752,6 +758,7 @@ pub struct ComputedStyle {
     pub box_shadow: BoxShadow,
     pub filter: VisualFilter,
     pub backdrop_filter: VisualFilter,
+    pub mix_blend_mode: BlendMode,
     pub transitions: Vec<TransitionStyle>,
     pub animations: Vec<AnimationStyle>,
     pub overflow_x: Overflow,
@@ -825,6 +832,7 @@ impl Default for ComputedStyle {
             box_shadow: BoxShadow::NONE,
             filter: VisualFilter::NONE,
             backdrop_filter: VisualFilter::NONE,
+            mix_blend_mode: BlendMode::Normal,
             transitions: vec![TransitionStyle::default()],
             animations: vec![AnimationStyle::default()],
             overflow_x: Overflow::Visible,
@@ -1632,6 +1640,17 @@ pub enum Position {
     Relative,
     Absolute,
     Fixed,
+}
+
+/// CSS `mix-blend-mode`: how an element's own painting is composited with the
+/// content already behind it. Only the modes the painter backend implements are
+/// represented; unknown values resolve to `Normal`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub enum BlendMode {
+    #[default]
+    Normal,
+    Multiply,
+    Screen,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

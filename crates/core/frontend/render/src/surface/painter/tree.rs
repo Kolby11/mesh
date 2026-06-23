@@ -718,6 +718,7 @@ impl FrontendRenderEngine {
                 style.background_color,
                 paint_clip,
                 style.filter,
+                PainterBlendMode::from_style(style.mix_blend_mode),
             );
         }
         push_background_paint_command(
@@ -871,6 +872,7 @@ fn append_display_node_self_paint_commands(
             style.background_color,
             paint_clip,
             style.filter,
+            PainterBlendMode::from_style(style.mix_blend_mode),
         );
     }
     push_background_paint_command(
@@ -936,8 +938,11 @@ fn push_fill_shape_command(
     color: Color,
     clip: ClipRect,
     filter: VisualFilter,
+    blend: PainterBlendMode,
 ) {
-    let paint = PainterPaint::fill(color).with_filter(filter);
+    let paint = PainterPaint::fill(color)
+        .with_filter(filter)
+        .with_blend_mode(blend);
     if radius > 0.5 {
         commands.push(PainterCommand::DrawRoundedRect {
             rect,

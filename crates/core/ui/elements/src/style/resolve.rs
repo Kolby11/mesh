@@ -1627,6 +1627,16 @@ fn apply_declaration(
             let v = resolver.resolve_value_with_variables(value, variables);
             style.z_index = v.trim().parse::<i32>().unwrap_or(0);
         }
+        "mix-blend-mode" => {
+            style.mix_blend_mode = match resolver
+                .resolve_value_with_variables(value, variables)
+                .trim()
+            {
+                "multiply" => BlendMode::Multiply,
+                "screen" => BlendMode::Screen,
+                _ => BlendMode::Normal,
+            };
+        }
         "top" => style.inset_top = Some(resolver.resolve_number_with_variables(value, variables)),
         "right" => {
             style.inset_right = Some(resolver.resolve_number_with_variables(value, variables))

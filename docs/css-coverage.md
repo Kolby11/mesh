@@ -28,6 +28,7 @@ Unsupported properties produce style diagnostics or parser errors instead of hid
 | transform | deferred | `transform-origin` is tracked in the matrix because it is accepted by the current support list, but full origin-aware painting is not a Phase 52 promise. |
 | shadow | implemented | `box-shadow` parses and resolves into backend-neutral shadow data. Skia-backed shadow execution belongs to a later painter phase. |
 | filter | implemented | `filter` and `backdrop-filter` parse and resolve into backend-neutral filter data. Skia-backed layer/filter execution belongs to a later painter phase. |
+| compositing | implemented | `mix-blend-mode` (`normal`, `multiply`, `screen`) resolves into `ComputedStyle` and is applied by the Skia painter when compositing an element's background fill with the backdrop. |
 | image | deferred | CSS image sources such as `background-image` are future painter-profile work and are not accepted as current supported shell CSS. |
 | gradient | deferred | CSS gradient syntax such as `linear-gradient(...)` is future painter-profile work and is not accepted as current supported shell CSS. |
 | animation | implemented | `animation` and its longhands store constrained animation metadata. Keyframes are percentage-only and limited to transition-safe visual properties. |

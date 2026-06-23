@@ -72,6 +72,74 @@ fn full_clip(width: i32, height: i32) -> ClipRect {
     }
 }
 
+#[test]
+fn blend_mode_multiply_and_screen_composite_with_backdrop() {
+    let red = Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let blue = Color {
+        r: 0,
+        g: 0,
+        b: 255,
+        a: 255,
+    };
+    let clip = full_clip(8, 8);
+    let rect = clip;
+
+    // Multiply: red (255,0,0) * blue (0,0,255) / 255 = black on every channel.
+    let mut buffer = PixelBuffer::new(8, 8);
+    let mut diagnostics = Vec::new();
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[
+            PainterCommand::DrawRect {
+                rect,
+                paint: PainterPaint::fill(red),
+                clip,
+            },
+            PainterCommand::DrawRect {
+                rect,
+                paint: PainterPaint::fill(blue).with_blend_mode(PainterBlendMode::Multiply),
+                clip,
+            },
+        ],
+        &mut diagnostics,
+    );
+    assert!(diagnostics.is_empty(), "blend modes must not diagnose");
+    let p = pixel(&buffer, 4, 4);
+    assert!(
+        p.r < 8 && p.g < 8 && p.b < 8,
+        "multiply over red should be black, got {p:?}"
+    );
+
+    // Screen: 255 - (255-dst)*(255-src)/255 → red over blue yields magenta.
+    let mut buffer = PixelBuffer::new(8, 8);
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[
+            PainterCommand::DrawRect {
+                rect,
+                paint: PainterPaint::fill(red),
+                clip,
+            },
+            PainterCommand::DrawRect {
+                rect,
+                paint: PainterPaint::fill(blue).with_blend_mode(PainterBlendMode::Screen),
+                clip,
+            },
+        ],
+        &mut Vec::new(),
+    );
+    let p = pixel(&buffer, 4, 4);
+    assert!(
+        p.r > 247 && p.g < 8 && p.b > 247,
+        "screen of red and blue should be magenta, got {p:?}"
+    );
+}
+
 #[derive(Default)]
 struct TestPaintBackend;
 
@@ -1135,26 +1203,30 @@ fn painter_effect_diagnostic_reports_missing_image() {
 }
 
 #[test]
-fn painter_effect_diagnostic_reports_unsupported_blend_mode() {
+fn painter_layer_blend_mode_is_supported_without_diagnostics() {
     let mut buffer = PixelBuffer::new(16, 16);
     let mut diagnostics = Vec::new();
 
     SkiaPaintBackend.execute_commands(
         &mut buffer,
-        &[PainterCommand::PushLayer(PainterLayer {
-            bounds: full_clip(16, 16),
-            opacity: 1.0,
-            blend_mode: PainterBlendMode::Multiply,
-            filter: PainterFilter::None,
-        })],
+        &[
+            PainterCommand::PushLayer(PainterLayer {
+                bounds: full_clip(16, 16),
+                opacity: 1.0,
+                blend_mode: PainterBlendMode::Multiply,
+                filter: PainterFilter::None,
+            }),
+            PainterCommand::PopLayer,
+        ],
         &mut diagnostics,
     );
 
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.feature == UnsupportedPainterFeature::BlendMode
-            && diagnostic.message.contains("non-SrcOver")
-            && diagnostic.source.is_none()
-    }));
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.feature == UnsupportedPainterFeature::BlendMode),
+        "blend modes are now applied, not diagnosed as unsupported"
+    );
 }
 
 #[test]

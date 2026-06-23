@@ -305,6 +305,22 @@ impl PainterPaint {
         self.filter = filter;
         self
     }
+
+    pub(crate) fn with_blend_mode(mut self, blend_mode: PainterBlendMode) -> Self {
+        self.blend_mode = blend_mode;
+        self
+    }
+}
+
+impl PainterBlendMode {
+    /// Maps the element-model `mix-blend-mode` to the painter's blend mode.
+    pub(crate) fn from_style(blend: mesh_core_elements::BlendMode) -> Self {
+        match blend {
+            mesh_core_elements::BlendMode::Normal => PainterBlendMode::SrcOver,
+            mesh_core_elements::BlendMode::Multiply => PainterBlendMode::Multiply,
+            mesh_core_elements::BlendMode::Screen => PainterBlendMode::Screen,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -478,14 +494,6 @@ impl SkiaPaintBackend {
                     clip_stack.pop();
                 }
                 PainterCommand::PushLayer(layer) => {
-                    if layer.blend_mode != PainterBlendMode::SrcOver {
-                        diagnostics.push(PainterDiagnostic {
-                            backend_id: self.id(),
-                            feature: UnsupportedPainterFeature::BlendMode,
-                            message: "non-SrcOver layer blend modes are not supported".into(),
-                            source: None,
-                        });
-                    }
                     if let PainterFilter::Blur(filter) = layer.filter
                         && self.diagnose_excessive_blur(filter, diagnostics)
                     {
@@ -636,7 +644,7 @@ impl SkiaPaintBackend {
 
         let mut paint = skia_safe::Paint::default();
         paint.set_alpha_f(layer.opacity.clamp(0.0, 1.0));
-        paint.set_blend_mode(skia_safe::BlendMode::SrcOver);
+        paint.set_blend_mode(blend_mode_to_skia(layer.blend_mode));
 
         if let PainterFilter::Blur(filter) = layer.filter
             && filter.blur_radius > 0.0
@@ -668,14 +676,6 @@ impl SkiaPaintBackend {
         paint: PainterPaint,
         diagnostics: &mut Vec<PainterDiagnostic>,
     ) {
-        if paint.blend_mode != PainterBlendMode::SrcOver {
-            diagnostics.push(PainterDiagnostic {
-                backend_id: self.id(),
-                feature: UnsupportedPainterFeature::BlendMode,
-                message: "non-SrcOver blend modes are deferred to blend-mode migration".into(),
-                source: None,
-            });
-        }
         self.diagnose_excessive_blur(paint.filter, diagnostics);
     }
 
@@ -991,6 +991,41 @@ impl SkiaPaintBackend {
         canvas.restore_to_count(save_count);
     }
 
+    /// Runs `draw` directly for the default `SrcOver` mode, or inside an
+    /// isolated `save_layer` whose compositing blend mode is `blend` otherwise.
+    /// A `save_layer` draws `draw` into an offscreen and composites the result
+    /// onto the backdrop with the requested blend mode (the correct semantics
+    /// for `mix-blend-mode`), so callers don't have to thread the mode through
+    /// every fill/stroke primitive.
+    fn draw_with_blend<F: FnOnce(&Self, &Canvas)>(
+        &self,
+        canvas: &Canvas,
+        blend: PainterBlendMode,
+        bounds: ClipRect,
+        clip: ClipRect,
+        draw: F,
+    ) {
+        if blend == PainterBlendMode::SrcOver {
+            draw(self, canvas);
+            return;
+        }
+        let region = intersect_clip(bounds, clip);
+        if region.width <= 0 || region.height <= 0 {
+            return;
+        }
+        let mut paint = skia_safe::Paint::default();
+        paint.set_blend_mode(blend_mode_to_skia(blend));
+        let rect = Rect::from_xywh(
+            region.x as f32,
+            region.y as f32,
+            region.width as f32,
+            region.height as f32,
+        );
+        let save_count = canvas.save_layer(&SaveLayerRec::default().bounds(&rect).paint(&paint));
+        draw(self, canvas);
+        canvas.restore_to_count(save_count);
+    }
+
     fn draw_rect_command(
         &self,
         canvas: &Canvas,
@@ -998,14 +1033,22 @@ impl SkiaPaintBackend {
         paint: PainterPaint,
         clip: ClipRect,
     ) {
-        match paint.style {
-            PainterPaintStyle::Fill => {
-                self.fill_shape(canvas, rect, 0.0, paint.color, clip, paint.filter)
+        self.draw_with_blend(canvas, paint.blend_mode, rect, clip, |this, canvas| {
+            match paint.style {
+                PainterPaintStyle::Fill => {
+                    this.fill_shape(canvas, rect, 0.0, paint.color, clip, paint.filter)
+                }
+                PainterPaintStyle::Stroke(stroke) => {
+                    this.stroke_rect_impl(
+                        canvas,
+                        rect,
+                        stroke.width.round() as i32,
+                        paint.color,
+                        clip,
+                    );
+                }
             }
-            PainterPaintStyle::Stroke(stroke) => {
-                self.stroke_rect_impl(canvas, rect, stroke.width.round() as i32, paint.color, clip);
-            }
-        }
+        });
     }
 
     fn draw_rounded_rect_command(
@@ -1016,21 +1059,23 @@ impl SkiaPaintBackend {
         paint: PainterPaint,
         clip: ClipRect,
     ) {
-        match paint.style {
-            PainterPaintStyle::Fill => {
-                self.fill_shape(canvas, rect, radius, paint.color, clip, paint.filter)
+        self.draw_with_blend(canvas, paint.blend_mode, rect, clip, |this, canvas| {
+            match paint.style {
+                PainterPaintStyle::Fill => {
+                    this.fill_shape(canvas, rect, radius, paint.color, clip, paint.filter)
+                }
+                PainterPaintStyle::Stroke(stroke) => {
+                    this.stroke_rounded_rect_impl(
+                        canvas,
+                        rect,
+                        radius,
+                        stroke.width.round() as i32,
+                        paint.color,
+                        clip,
+                    );
+                }
             }
-            PainterPaintStyle::Stroke(stroke) => {
-                self.stroke_rounded_rect_impl(
-                    canvas,
-                    rect,
-                    radius,
-                    stroke.width.round() as i32,
-                    paint.color,
-                    clip,
-                );
-            }
-        }
+        });
     }
 
     fn draw_path_command(
@@ -1058,6 +1103,7 @@ impl SkiaPaintBackend {
             true,
         );
         let mut skia_paint = skia_paint(paint.color, true);
+        skia_paint.set_blend_mode(blend_mode_to_skia(paint.blend_mode));
         match paint.style {
             PainterPaintStyle::Fill => {
                 skia_paint.set_style(PaintStyle::Fill);
@@ -1370,6 +1416,14 @@ fn skia_path(path: &PainterPath) -> Option<SkiaPath> {
         }
     }
     (!path.elements.is_empty()).then(|| builder.detach())
+}
+
+fn blend_mode_to_skia(blend: PainterBlendMode) -> skia_safe::BlendMode {
+    match blend {
+        PainterBlendMode::SrcOver => skia_safe::BlendMode::SrcOver,
+        PainterBlendMode::Multiply => skia_safe::BlendMode::Multiply,
+        PainterBlendMode::Screen => skia_safe::BlendMode::Screen,
+    }
 }
 
 fn blur_radius_to_sigma(radius: f32) -> f32 {

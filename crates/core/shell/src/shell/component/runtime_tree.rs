@@ -356,6 +356,7 @@ fn style_fingerprint(style: &ComputedStyle) -> u64 {
     style.flex_wrap.hash(&mut hasher);
     style.align_self.hash(&mut hasher);
     style.position.hash(&mut hasher);
+    style.mix_blend_mode.hash(&mut hasher);
     style.z_index.hash(&mut hasher);
     hash_option_f32(style.inset_top, &mut hasher);
     hash_option_f32(style.inset_right, &mut hasher);

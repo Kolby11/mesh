@@ -40,8 +40,9 @@ pub use layout::{
     IntrinsicLayoutCache, LayoutEngine, LayoutRect, PerSurfaceLayoutState, TextMeasurer,
 };
 pub use style::{
-    AlignContent, AlignItems, AlignSelf, BoxShadow, Color, ComputedStyle, Corners, Dimension,
-    Display, Edges, FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow, Position,
+    AlignContent, AlignItems, AlignSelf, BlendMode, BoxShadow, Color, ComputedStyle, Corners,
+    Dimension, Display, Edges, FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow,
+    Position,
     StepPosition, StyleContext, StyleResolver, TextAlign, TextDirection, TextOverflow, Transform2D,
     TransitionEasing, TransitionProperties, TransitionStyle, VisualFilter, WhiteSpace,
 };

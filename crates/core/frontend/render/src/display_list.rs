@@ -4,8 +4,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use mesh_core_elements::style::{
-    BackgroundPaint, Color, Display, Edges, Overflow, Position, TextAlign, TextDirection,
-    TextOverflow, Visibility,
+    BackgroundPaint, BlendMode, Color, Display, Edges, Overflow, Position, TextAlign,
+    TextDirection, TextOverflow, Visibility,
 };
 use mesh_core_elements::{BoxShadow, VisualFilter};
 use mesh_core_elements::{LayoutRect, NodeId, WidgetNode};
@@ -240,6 +240,7 @@ pub struct DisplayPaintStyle {
     pub box_shadow: BoxShadow,
     pub filter: VisualFilter,
     pub backdrop_filter: VisualFilter,
+    pub mix_blend_mode: BlendMode,
     pub icon_fill: Option<f32>,
     pub icon_weight: Option<f32>,
     pub icon_grade: Option<f32>,
@@ -1969,6 +1970,7 @@ fn build_paint_node(node: &WidgetNode, offset_x: f32, offset_y: f32) -> DisplayP
             box_shadow: node.computed_style.box_shadow,
             filter: node.computed_style.filter,
             backdrop_filter: node.computed_style.backdrop_filter,
+            mix_blend_mode: node.computed_style.mix_blend_mode,
             icon_fill: node.computed_style.icon_fill,
             icon_weight: node.computed_style.icon_weight,
             icon_grade: node.computed_style.icon_grade,
@@ -2335,6 +2337,7 @@ fn primitive_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
         .blur_radius
         .to_bits()
         .hash(&mut hasher);
+    node.computed_style.mix_blend_mode.hash(&mut hasher);
     node.computed_style.font_family.hash(&mut hasher);
     node.computed_style.font_size.to_bits().hash(&mut hasher);
     node.computed_style.font_weight.hash(&mut hasher);
