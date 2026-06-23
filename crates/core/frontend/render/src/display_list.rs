@@ -254,6 +254,22 @@ pub enum DisplayPaintContent {
     Input(DisplayInputPaint),
     Slider(DisplaySliderPaint),
     Icon(DisplayIconPaint),
+    Checkmark(DisplayCheckmarkPaint),
+}
+
+/// The selected-state glyph for a `checkbox`/`radio` element, painted as a
+/// vector path. Only emitted when the control is checked.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DisplayCheckmarkPaint {
+    pub kind: CheckmarkKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CheckmarkKind {
+    /// A check (tick) glyph — used by `checkbox`.
+    Check,
+    /// A filled dot — used by `radio`.
+    Dot,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2056,8 +2072,24 @@ fn build_paint_content(node: &WidgetNode) -> DisplayPaintContent {
                 .get("size")
                 .and_then(|value| value.parse::<u32>().ok()),
         }),
+        "checkbox" if node_is_checked(node) => {
+            DisplayPaintContent::Checkmark(DisplayCheckmarkPaint {
+                kind: CheckmarkKind::Check,
+            })
+        }
+        "radio" if node_is_checked(node) => DisplayPaintContent::Checkmark(DisplayCheckmarkPaint {
+            kind: CheckmarkKind::Dot,
+        }),
         _ => DisplayPaintContent::None,
     }
+}
+
+/// A `checkbox`/`radio` is checked when its `checked` attribute is present and
+/// not an explicit false value (`checked`, `checked="true"`, `checked="1"`).
+pub(crate) fn node_is_checked(node: &WidgetNode) -> bool {
+    node.attributes
+        .get("checked")
+        .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1" | "checked"))
 }
 
 fn build_text_selection(node: &WidgetNode) -> Option<DisplayTextSelectionPaint> {
@@ -2557,6 +2589,37 @@ mod tests {
             a: 255,
         };
         node
+    }
+
+    #[test]
+    fn checkbox_and_radio_emit_checkmark_content_only_when_checked() {
+        let mut checkbox = node(1, "checkbox", 0.0, 0.0, 18.0, 18.0);
+        checkbox
+            .attributes
+            .insert("checked".into(), "true".into());
+        assert_eq!(
+            build_paint_content(&checkbox),
+            DisplayPaintContent::Checkmark(DisplayCheckmarkPaint {
+                kind: CheckmarkKind::Check,
+            })
+        );
+
+        let mut radio = node(2, "radio", 0.0, 0.0, 18.0, 18.0);
+        radio.attributes.insert("checked".into(), "checked".into());
+        assert_eq!(
+            build_paint_content(&radio),
+            DisplayPaintContent::Checkmark(DisplayCheckmarkPaint {
+                kind: CheckmarkKind::Dot,
+            })
+        );
+
+        // Unchecked controls paint no mark.
+        let unchecked = node(3, "checkbox", 0.0, 0.0, 18.0, 18.0);
+        assert_eq!(build_paint_content(&unchecked), DisplayPaintContent::None);
+
+        let mut falsey = node(4, "checkbox", 0.0, 0.0, 18.0, 18.0);
+        falsey.attributes.insert("checked".into(), "false".into());
+        assert_eq!(build_paint_content(&falsey), DisplayPaintContent::None);
     }
 
     #[test]

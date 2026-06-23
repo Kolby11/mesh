@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use crate::display_list::{
-    DisplayListClip, DisplayPaintCommand, DisplayPaintCommandKind, DisplayPaintContent,
-    DisplayPaintNode, SelectedDisplayListPaint,
+    CheckmarkKind, DisplayCheckmarkPaint, DisplayListClip, DisplayPaintCommand,
+    DisplayPaintCommandKind, DisplayPaintContent, DisplayPaintNode, SelectedDisplayListPaint,
 };
 use mesh_core_elements::style::Edges;
 
@@ -662,6 +662,16 @@ impl FrontendRenderEngine {
             "input" => self.render_input_node(node, buffer, scale, x, y, node_clip),
             "slider" => self.render_slider_node(node, buffer, scale, x, y, w, h, node_clip),
             "icon" => self.render_icon_node(node, buffer, x, y, w, h, content_color, module_id),
+            "checkbox" | "radio" if crate::display_list::node_is_checked(node) => {
+                let kind = if node.tag == "radio" {
+                    CheckmarkKind::Dot
+                } else {
+                    CheckmarkKind::Check
+                };
+                if let Some(command) = checkmark_command(kind, bounds, content_color, node_clip) {
+                    self.execute_painter_commands(buffer, &[command]);
+                }
+            }
             _ => {}
         }
     }
@@ -756,9 +766,28 @@ impl FrontendRenderEngine {
             DisplayPaintContent::Icon(icon) => {
                 self.render_display_icon_node(node, icon, session, x, y, w, h, module_id);
             }
+            DisplayPaintContent::Checkmark(mark) => {
+                self.render_display_checkmark_node(node, *mark, session, bounds, node_clip);
+            }
             DisplayPaintContent::None => {}
         }
     }
+
+    /// Paints the selected-state glyph of a `checkbox`/`radio` as a vector
+    /// path tinted with the element's content color (session path).
+    fn render_display_checkmark_node(
+        &self,
+        node: &DisplayPaintNode,
+        mark: DisplayCheckmarkPaint,
+        session: &mut PixelCanvasSession<'_>,
+        bounds: ClipRect,
+        clip: ClipRect,
+    ) {
+        if let Some(command) = checkmark_command(mark.kind, bounds, node.style.color, clip) {
+            self.execute_painter_commands_in_session(session, &[command]);
+        }
+    }
+
     fn draw_border_clipped(
         &self,
         buffer: &mut PixelBuffer,
@@ -929,6 +958,59 @@ fn push_backdrop_filter_command(
         return;
     }
     // No-op: blur is offloaded to compositor or rendered flat.
+}
+
+/// Builds the vector-path draw command for a `checkbox` tick or `radio` dot
+/// within `bounds`, tinted `color`. Returns `None` for an empty box or fully
+/// transparent color.
+fn checkmark_command(
+    kind: CheckmarkKind,
+    bounds: ClipRect,
+    color: Color,
+    clip: ClipRect,
+) -> Option<PainterCommand> {
+    if color.a == 0 || bounds.width <= 0 || bounds.height <= 0 {
+        return None;
+    }
+    let x = bounds.x as f32;
+    let y = bounds.y as f32;
+    let w = bounds.width as f32;
+    let h = bounds.height as f32;
+    let min = w.min(h);
+    Some(match kind {
+        CheckmarkKind::Check => PainterCommand::DrawPath {
+            path: PainterPath {
+                elements: vec![
+                    PainterPathElement::MoveTo(x + w * 0.22, y + h * 0.52),
+                    PainterPathElement::LineTo(x + w * 0.42, y + h * 0.72),
+                    PainterPathElement::LineTo(x + w * 0.78, y + h * 0.28),
+                ],
+            },
+            paint: PainterPaint::stroke(color, (min * 0.14).max(1.5)),
+            clip,
+        },
+        CheckmarkKind::Dot => PainterCommand::DrawPath {
+            path: circle_path(x + w * 0.5, y + h * 0.5, min * 0.28),
+            paint: PainterPaint::fill(color),
+            clip,
+        },
+    })
+}
+
+/// Builds a closed circle path centered at (`cx`, `cy`) using the standard
+/// four-cubic-bezier approximation (control-point ratio kappa ≈ 0.5523).
+fn circle_path(cx: f32, cy: f32, r: f32) -> PainterPath {
+    let k = r * 0.552_284_8;
+    PainterPath {
+        elements: vec![
+            PainterPathElement::MoveTo(cx, cy - r),
+            PainterPathElement::CubicTo(cx + k, cy - r, cx + r, cy - k, cx + r, cy),
+            PainterPathElement::CubicTo(cx + r, cy + k, cx + k, cy + r, cx, cy + r),
+            PainterPathElement::CubicTo(cx - k, cy + r, cx - r, cy + k, cx - r, cy),
+            PainterPathElement::CubicTo(cx - r, cy - k, cx - k, cy - r, cx, cy - r),
+            PainterPathElement::Close,
+        ],
+    }
 }
 
 fn push_fill_shape_command(

@@ -140,6 +140,60 @@ fn blend_mode_multiply_and_screen_composite_with_backdrop() {
     );
 }
 
+#[test]
+fn checked_checkbox_rasterizes_checkmark_glyph() {
+    let layout = LayoutRect {
+        x: 0.0,
+        y: 0.0,
+        width: 24.0,
+        height: 24.0,
+    };
+    let bg = Color {
+        r: 10,
+        g: 20,
+        b: 30,
+        a: 255,
+    };
+    let white = Color {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
+
+    let count_light_pixels = |node: &WidgetNode| {
+        let engine = FrontendRenderEngine::new();
+        let mut buffer = PixelBuffer::new(24, 24);
+        engine.render_tree(node, &mut buffer, 1.0);
+        let mut light = 0;
+        for y in 0..24 {
+            for x in 0..24 {
+                let p = pixel(&buffer, x, y);
+                if p.r > 180 && p.g > 180 && p.b > 180 {
+                    light += 1;
+                }
+            }
+        }
+        light
+    };
+
+    let mut checked = node("checkbox", layout, bg);
+    checked.computed_style.color = white;
+    checked.attributes.insert("checked".into(), "true".into());
+    assert!(
+        count_light_pixels(&checked) > 0,
+        "a checked checkbox must rasterize a light checkmark over its dark box"
+    );
+
+    let mut unchecked = node("checkbox", layout, bg);
+    unchecked.computed_style.color = white;
+    assert_eq!(
+        count_light_pixels(&unchecked),
+        0,
+        "an unchecked checkbox paints no checkmark"
+    );
+}
+
 #[derive(Default)]
 struct TestPaintBackend;
 

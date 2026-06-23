@@ -335,7 +335,6 @@ pub(crate) struct PainterStroke {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
 pub(crate) struct PainterPath {
     pub elements: Vec<PainterPathElement>,
 }
@@ -376,7 +375,6 @@ pub(crate) enum PainterFilter {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum PainterBlendMode {
     SrcOver,
     Multiply,

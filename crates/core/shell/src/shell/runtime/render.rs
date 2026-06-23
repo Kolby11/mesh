@@ -577,6 +577,7 @@ mod tests {
                     box_shadow: BoxShadow::default(),
                     filter: VisualFilter::NONE,
                     backdrop_filter: VisualFilter { blur_radius },
+                    mix_blend_mode: mesh_core_elements::BlendMode::Normal,
                     icon_fill: None,
                     icon_weight: None,
                     icon_grade: None,
