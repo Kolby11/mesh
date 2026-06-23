@@ -210,19 +210,21 @@ All five landed 2026-06-23 (single commit).
 
 ### Decisions / verify-then-act (judgment calls, don't blind-delete)
 
-- [ ] **`ComputedStyle::align_content` + `AlignContent`** are parsed, stored, and
-      hashed (`ui/elements/src/style/{types,resolve}.rs`, `runtime_tree.rs`) but
-      **never forwarded to Taffy or the painter** — a silent no-op CSS property.
-      Decide: wire it into `taffy_style_for_node` (it's a real flex property) or
-      remove the parse path. Left in place during cleanup because deleting it
-      would regress authors who write `align-content` (currently no-ops, doesn't
-      error).
-- [ ] **Element-diagnostics feature is unwired.** `collect_element_diagnostics`
-      (`frontend/compiler/src/render.rs:455`) is called once at `:360` and its
-      result is dropped (`let _element_diagnostics = …`); its only other callers
-      are `#[cfg(test)]`. Either attach the diagnostics to the built `WidgetNode`
-      / surface diagnostics, or remove the function + its phase87/phase88 tests.
-      (The underlying `validate_element_*` API in element.rs is used and stays.)
+- [x] **`ComputedStyle::align_content` + `AlignContent`**. Done 2026-06-23:
+      wired into `taffy_style_for_node` (`ui/elements/src/layout.rs`) — it's a
+      real flex property, so the mapped value now forwards to Taffy. Added
+      `align_content_end_pushes_wrapped_lines_to_cross_end` regression test
+      proving wrapped lines respect the cross-axis distribution.
+- [x] **Element-diagnostics feature is unwired.** Done 2026-06-23 (removal path).
+      The dropped per-build call (`let _element_diagnostics = …`) ran
+      `collect_element_diagnostics` on every node build and discarded the result;
+      removing it orphaned `collect_element_diagnostics` + `attribute_static_value`
+      (build confirmed both dead, plus the LSP never used them). Removed both and
+      their three compiler-side tests (the two `frontend_element_diagnostics_*`
+      and the `phase87/phase88_collects_*` tests). The reusable
+      `validate_element_attribute`/`validate_element_event` primitives in
+      `element.rs` stay (exported from `mesh-core-elements`, own tests) as the
+      natural home if compile-time authoring diagnostics get surfaced later.
 - [ ] **Dead element compatibility tables.** `ElementContractDef::compatibility`,
       `HTML_REF`/`QT_REF`/`FLUTTER_REF`, `ElementCompatibilityRef`, and `compat()`
       (`ui/elements/src/element.rs`) are filled into every `ELEMENT_CONTRACT_DEFS`

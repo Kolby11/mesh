@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use crate::lru::LruCache;
 use crate::style::{
-    AlignItems, AlignSelf, Dimension, Display, Edges, FlexDirection, JustifyContent, Overflow,
-    Position, TextDirection,
+    AlignContent, AlignItems, AlignSelf, Dimension, Display, Edges, FlexDirection, JustifyContent,
+    Overflow, Position, TextDirection,
 };
 use crate::tree::{NodeId, WidgetNode};
 use taffy::TaffyTree;
@@ -508,6 +508,14 @@ fn taffy_style_for_node(node: &WidgetNode, report: &mut TaffyLayoutReport) -> ta
             AlignItems::End => taffy_style::AlignItems::FlexEnd,
             AlignItems::Center => taffy_style::AlignItems::Center,
             AlignItems::Stretch => taffy_style::AlignItems::Stretch,
+        }),
+        align_content: Some(match style.align_content {
+            AlignContent::Start => taffy_style::AlignContent::FlexStart,
+            AlignContent::End => taffy_style::AlignContent::FlexEnd,
+            AlignContent::Center => taffy_style::AlignContent::Center,
+            AlignContent::SpaceBetween => taffy_style::AlignContent::SpaceBetween,
+            AlignContent::SpaceAround => taffy_style::AlignContent::SpaceAround,
+            AlignContent::Stretch => taffy_style::AlignContent::Stretch,
         }),
         align_self: match style.align_self {
             AlignSelf::Auto => None,
@@ -1465,6 +1473,38 @@ mod tests {
         // Column direction is not affected by RTL — children still stack top-to-bottom.
         assert_eq!(root.children[0].layout.y, 0.0);
         assert_eq!(root.children[1].layout.y, 40.0);
+    }
+
+    #[test]
+    fn align_content_end_pushes_wrapped_lines_to_cross_end() {
+        use crate::style::{AlignContent, FlexWrap};
+
+        // Row container 100px wide, two 60px children wrap into two lines.
+        // The two 20px lines occupy 40px of the 100px cross axis, leaving 60px
+        // free. align-content: end must push both lines to the bottom.
+        let mut root = make_node("row", Dimension::Px(100.0), Dimension::Px(100.0));
+        root.computed_style.direction = FlexDirection::Row;
+        root.computed_style.flex_wrap = FlexWrap::Wrap;
+        root.computed_style.align_content = AlignContent::End;
+        root.computed_style.align_items = AlignItems::Start;
+
+        let a = make_node("a", Dimension::Px(60.0), Dimension::Px(20.0));
+        let b = make_node("b", Dimension::Px(60.0), Dimension::Px(20.0));
+        root.children = vec![a, b];
+        LayoutEngine::compute(&mut root, 100.0, 100.0);
+
+        // First line starts at y=60 (100 - 40 free space consumed at the start),
+        // second line at y=80. Without align-content wired they would sit at 0/20.
+        assert!(
+            (root.children[0].layout.y - 60.0).abs() < 0.5,
+            "a.y = {}",
+            root.children[0].layout.y
+        );
+        assert!(
+            (root.children[1].layout.y - 80.0).abs() < 0.5,
+            "b.y = {}",
+            root.children[1].layout.y
+        );
     }
 
     #[test]

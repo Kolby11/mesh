@@ -11,8 +11,7 @@ use mesh_core_component::template::{
 };
 use mesh_core_elements::accessibility::AccessibilityInfo;
 use mesh_core_elements::{
-    ComputedStyle, ElementDiagnostic, StyleContext, StyleResolver, VariableStore, WidgetNode,
-    element_contract_for_tag, validate_element_attribute, validate_element_event,
+    ComputedStyle, StyleContext, StyleResolver, VariableStore, WidgetNode, element_contract_for_tag,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
@@ -357,7 +356,6 @@ fn build_element_node(
 ) -> WidgetNode {
     let source_tag = element.tag.as_str();
     let tag = lower_source_tag(&element.tag_kind).as_str().to_string();
-    let _element_diagnostics = collect_element_diagnostics(element);
 
     // Per-node tracking: intercept service field reads for THIS node's attribute evaluation only.
     // Children each get their own tracker via the original `state` parameter below.
@@ -451,34 +449,6 @@ fn build_element_node(
         .collect();
 
     node
-}
-
-pub fn collect_element_diagnostics(element: &ElementNode) -> Vec<ElementDiagnostic> {
-    let tag = element.tag.as_str();
-    let mut diagnostics = Vec::new();
-    for attribute in &element.attributes {
-        if attribute.name == "class" || attribute.name == "id" || attribute.name == "bind:this" {
-            continue;
-        }
-        if is_event_handler_attribute(&attribute.name) {
-            let event_name = normalize_event_handler_name(&attribute.name);
-            if let Some(diagnostic) = validate_element_event(tag, &event_name) {
-                diagnostics.push(diagnostic);
-            }
-        } else if let Some(diagnostic) =
-            validate_element_attribute(tag, &attribute.name, attribute_static_value(attribute))
-        {
-            diagnostics.push(diagnostic);
-        }
-    }
-    diagnostics
-}
-
-fn attribute_static_value(attribute: &Attribute) -> &str {
-    match &attribute.value {
-        AttributeValue::Static(value) => value,
-        _ => "",
-    }
 }
 
 fn is_inline_template_node(node: &TemplateNode) -> bool {
@@ -794,7 +764,6 @@ fn number_attr(attributes: &BTreeMap<String, String>, name: &str) -> Option<f32>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mesh_core_elements::ElementDiagnosticKind;
 
     fn test_manifest() -> Manifest {
         Manifest {
@@ -954,46 +923,6 @@ mod tests {
     }
 
     #[test]
-    fn frontend_element_diagnostics_collect_unsupported_attribute() {
-        let element = ElementNode {
-            tag: "button".into(),
-            tag_kind: SourceTag::Button,
-            attributes: vec![Attribute {
-                name: "browser-form-action".into(),
-                value: AttributeValue::Static("submit".into()),
-            }],
-            children: vec![],
-        };
-
-        let diagnostics = collect_element_diagnostics(&element);
-
-        assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].tag, "button");
-        assert_eq!(diagnostics[0].name, "browser-form-action");
-    }
-
-    #[test]
-    fn frontend_element_diagnostics_preserve_shipped_pass_through_attributes() {
-        let element = ElementNode {
-            tag: "button".into(),
-            tag_kind: SourceTag::Button,
-            attributes: vec![
-                Attribute {
-                    name: "data-test-id".into(),
-                    value: AttributeValue::Static("ok".into()),
-                },
-                Attribute {
-                    name: "aria-label".into(),
-                    value: AttributeValue::Static("OK".into()),
-                },
-            ],
-            children: vec![],
-        };
-
-        assert!(collect_element_diagnostics(&element).is_empty());
-    }
-
-    #[test]
     fn phase87_layout_display_source_semantics_survive_lowering() {
         let component = mesh_core_component::parse_component(
             r#"
@@ -1054,39 +983,6 @@ mod tests {
         assert_eq!(progress.accessibility.state.value_max, Some(100.0));
     }
 
-    #[test]
-    fn phase87_collects_source_tag_diagnostics_before_lowering() {
-        let component = mesh_core_component::parse_component(
-            r#"
-<template>
-  <grid columns="1fr 2fr" />
-  <progress value="half" />
-</template>
-"#,
-        )
-        .unwrap();
-        let template = component.template.expect("template");
-        let diagnostics: Vec<_> = template
-            .root
-            .iter()
-            .filter_map(|node| match node {
-                TemplateNode::Element(element) => Some(collect_element_diagnostics(element)),
-                _ => None,
-            })
-            .flatten()
-            .collect();
-
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.tag == "grid"
-                && diagnostic.name == "columns"
-                && diagnostic.kind == ElementDiagnosticKind::InvalidAttributeValue
-        }));
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.tag == "progress"
-                && diagnostic.name == "value"
-                && diagnostic.kind == ElementDiagnosticKind::InvalidAttributeValue
-        }));
-    }
 
     #[test]
     fn phase88_button_aliases_preserve_source_semantics_without_icon_shortcuts() {
@@ -1203,40 +1099,6 @@ mod tests {
         assert_eq!(stepper.tag, "input");
         assert_eq!(stepper.attributes.get("type"), Some(&"number".to_string()));
         assert_eq!(stepper.attributes.get("step"), Some(&"1".to_string()));
-    }
-
-    #[test]
-    fn phase88_collects_button_and_numeric_source_diagnostics() {
-        let component = mesh_core_component::parse_component(
-            r#"
-<template>
-  <button name="media-playback-start" />
-  <number-input step="0" />
-</template>
-"#,
-        )
-        .unwrap();
-        let template = component.template.expect("template");
-        let diagnostics: Vec<_> = template
-            .root
-            .iter()
-            .filter_map(|node| match node {
-                TemplateNode::Element(element) => Some(collect_element_diagnostics(element)),
-                _ => None,
-            })
-            .flatten()
-            .collect();
-
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.tag == "button"
-                && diagnostic.name == "name"
-                && diagnostic.kind == ElementDiagnosticKind::InvalidAttributeValue
-        }));
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.tag == "number-input"
-                && diagnostic.name == "step"
-                && diagnostic.kind == ElementDiagnosticKind::InvalidAttributeValue
-        }));
     }
 
     #[test]
