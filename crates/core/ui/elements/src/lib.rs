@@ -25,7 +25,7 @@ pub use accessibility::{
 };
 pub use element::{
     BASE_ELEMENT_FIELDS, ELEMENT_CONTRACT_DEFS, ELEMENT_TYPE_DEFS, ElementAttributeDef,
-    ElementAttributeType, ElementCompatibilityRef, ElementContractDef, ElementDiagnostic,
+    ElementAttributeType, ElementContractDef, ElementDiagnostic,
     ElementDiagnosticKind, ElementEventDef, ElementFamily, ElementFieldDef, ElementFieldType,
     ElementKind, ElementRect, ElementSnapshot, ElementStateFlag, ElementStateSnapshot,
     ElementTypeDef, common_state_flags, element_contract_for_tag, element_contract_tags,

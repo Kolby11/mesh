@@ -202,13 +202,6 @@ pub struct ElementAccessibilityDef {
     pub label_required: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct ElementCompatibilityRef {
-    pub source: &'static str,
-    pub reference: &'static str,
-    pub note: &'static str,
-}
-
 #[derive(Debug, Clone)]
 pub struct ElementContractDef {
     pub kind: ElementKind,
@@ -220,7 +213,6 @@ pub struct ElementContractDef {
     pub events: &'static [ElementEventDef],
     pub accessibility: ElementAccessibilityDef,
     pub style_hooks: &'static [&'static str],
-    pub compatibility: &'static [ElementCompatibilityRef],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -732,24 +724,8 @@ static COMMON_STYLE_HOOKS: &[&str] = &[
     "tooltip",
 ];
 
-static HTML_REF: &[ElementCompatibilityRef] = &[compat(
-    "HTML",
-    "form and semantic elements",
-    "Coverage inspiration only; MESH does not implement browser form semantics.",
-)];
-static QT_REF: &[ElementCompatibilityRef] = &[compat(
-    "Qt Widgets/layouts",
-    "controls and layout categories",
-    "Coverage inspiration only; MESH owns retained rendering and diagnostics.",
-)];
-static FLUTTER_REF: &[ElementCompatibilityRef] = &[compat(
-    "Flutter",
-    "widget categories",
-    "Coverage inspiration only; MESH markup is not a Flutter compatibility layer.",
-)];
-
 macro_rules! contract {
-    ($kind:ident, $tag:literal, $family:ident, $role:expr, $focusable:expr, $compat:expr) => {
+    ($kind:ident, $tag:literal, $family:ident, $role:expr, $focusable:expr) => {
         ElementContractDef {
             kind: ElementKind::$kind,
             tag: $tag,
@@ -764,7 +740,6 @@ macro_rules! contract {
                 label_required: $focusable,
             },
             style_hooks: COMMON_STYLE_HOOKS,
-            compatibility: $compat,
         }
     };
 }
@@ -775,489 +750,428 @@ pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
         "box",
         Layout,
         AccessibilityRole::Region,
-        false,
-        HTML_REF
+        false
     ),
-    contract!(Row, "row", Layout, AccessibilityRole::Region, false, QT_REF),
+    contract!(Row, "row", Layout, AccessibilityRole::Region, false),
     contract!(
         Column,
         "column",
         Layout,
         AccessibilityRole::Region,
-        false,
-        QT_REF
+        false
     ),
     contract!(
         Grid,
         "grid",
         Layout,
         AccessibilityRole::Region,
-        false,
-        QT_REF
+        false
     ),
     contract!(
         Stack,
         "stack",
         Layout,
         AccessibilityRole::Region,
-        false,
-        FLUTTER_REF
+        false
     ),
     contract!(
         Spacer,
         "spacer",
         Layout,
         AccessibilityRole::Region,
-        false,
-        QT_REF
+        false
     ),
     contract!(
         Divider,
         "divider",
         Layout,
         AccessibilityRole::Separator,
-        false,
-        HTML_REF
+        false
     ),
     contract!(
         Separator,
         "separator",
         Layout,
         AccessibilityRole::Separator,
-        false,
-        QT_REF
+        false
     ),
     contract!(
         ScrollArea,
         "scroll-area",
         Layout,
         AccessibilityRole::Region,
-        false,
-        QT_REF
+        false
     ),
     contract!(
         Section,
         "section",
         Layout,
         AccessibilityRole::Region,
-        false,
-        HTML_REF
+        false
     ),
     contract!(
         Header,
         "header",
         Layout,
         AccessibilityRole::Region,
-        false,
-        HTML_REF
+        false
     ),
     contract!(
         Footer,
         "footer",
         Layout,
         AccessibilityRole::Region,
-        false,
-        HTML_REF
+        false
     ),
     contract!(
         Group,
         "group",
         Layout,
         AccessibilityRole::Region,
-        false,
-        HTML_REF
+        false
     ),
     contract!(
         FormRow,
         "form-row",
         Layout,
         AccessibilityRole::Region,
-        false,
-        QT_REF
+        false
     ),
     contract!(
         Text,
         "text",
         Display,
         AccessibilityRole::Label,
-        false,
-        HTML_REF
+        false
     ),
     contract!(
         Icon,
         "icon",
         Display,
         AccessibilityRole::Image,
-        false,
-        HTML_REF
+        false
     ),
     contract!(
         Image,
         "image",
         Display,
         AccessibilityRole::Image,
-        false,
-        HTML_REF
+        false
     ),
     contract!(
         Badge,
         "badge",
         Display,
         AccessibilityRole::Status,
-        false,
-        FLUTTER_REF
+        false
     ),
     contract!(
         Progress,
         "progress",
         Display,
         AccessibilityRole::ProgressBar,
-        false,
-        HTML_REF
+        false
     ),
     contract!(
         Meter,
         "meter",
         Display,
         AccessibilityRole::ProgressBar,
-        false,
-        HTML_REF
+        false
     ),
     contract!(
         Tooltip,
         "tooltip",
         Display,
         AccessibilityRole::Alert,
-        false,
-        HTML_REF
+        false
     ),
     contract!(
         Avatar,
         "avatar",
         Display,
         AccessibilityRole::Image,
-        false,
-        FLUTTER_REF
+        false
     ),
     contract!(
         Shortcut,
         "shortcut",
         Display,
         AccessibilityRole::Label,
-        false,
-        QT_REF
+        false
     ),
     contract!(
         Button,
         "button",
         Action,
         AccessibilityRole::Button,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         IconButton,
         "icon-button",
         Action,
         AccessibilityRole::Button,
-        true,
-        FLUTTER_REF
+        true
     ),
     contract!(
         ToggleButton,
         "toggle-button",
         Action,
         AccessibilityRole::Button,
-        true,
-        QT_REF
+        true
     ),
     contract!(
         CommandButton,
         "command-button",
         Action,
         AccessibilityRole::Button,
-        true,
-        QT_REF
+        true
     ),
     contract!(
         LinkButton,
         "link-button",
         Action,
         AccessibilityRole::Button,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         Input,
         "input",
         TextInput,
         AccessibilityRole::TextInput,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         TextArea,
         "textarea",
         TextInput,
         AccessibilityRole::TextInput,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         Search,
         "search",
         TextInput,
         AccessibilityRole::TextInput,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         Password,
         "password",
         TextInput,
         AccessibilityRole::TextInput,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         NumberInput,
         "number-input",
         TextInput,
         AccessibilityRole::TextInput,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         Stepper,
         "stepper",
         TextInput,
         AccessibilityRole::TextInput,
-        true,
-        QT_REF
+        true
     ),
     contract!(
         Select,
         "select",
         ChoiceMenu,
         AccessibilityRole::Menu,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         Option,
         "option",
         ChoiceMenu,
         AccessibilityRole::MenuItem,
-        false,
-        HTML_REF
+        false
     ),
     contract!(
         Checkbox,
         "checkbox",
         ChoiceMenu,
         AccessibilityRole::Checkbox,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         Switch,
         "switch",
         ChoiceMenu,
         AccessibilityRole::Switch,
-        true,
-        FLUTTER_REF
+        true
     ),
     contract!(
         Radio,
         "radio",
         ChoiceMenu,
         AccessibilityRole::Checkbox,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         RadioGroup,
         "radio-group",
         ChoiceMenu,
         AccessibilityRole::Region,
-        false,
-        HTML_REF
+        false
     ),
     contract!(
         SegmentedControl,
         "segmented-control",
         ChoiceMenu,
         AccessibilityRole::Toolbar,
-        true,
-        QT_REF
+        true
     ),
     contract!(
         Menu,
         "menu",
         ChoiceMenu,
         AccessibilityRole::Menu,
-        true,
-        QT_REF
+        true
     ),
     contract!(
         MenuItem,
         "menu-item",
         ChoiceMenu,
         AccessibilityRole::MenuItem,
-        true,
-        QT_REF
+        true
     ),
     contract!(
         CommandItem,
         "command-item",
         ChoiceMenu,
         AccessibilityRole::MenuItem,
-        true,
-        QT_REF
+        true
     ),
     contract!(
         PreferenceRow,
         "preference-row",
         ChoiceMenu,
         AccessibilityRole::Region,
-        true,
-        QT_REF
+        true
     ),
     contract!(
         Panel,
         "panel",
         Container,
         AccessibilityRole::Region,
-        false,
-        QT_REF
+        false
     ),
     contract!(
         Popover,
         "popover",
         Container,
         AccessibilityRole::Dialog,
-        true,
-        FLUTTER_REF
+        true
     ),
     contract!(
         Dialog,
         "dialog",
         Container,
         AccessibilityRole::Dialog,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         Sheet,
         "sheet",
         Container,
         AccessibilityRole::Dialog,
-        true,
-        FLUTTER_REF
+        true
     ),
     contract!(
         Tabs,
         "tabs",
         Container,
         AccessibilityRole::Toolbar,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         Tab,
         "tab",
         Container,
         AccessibilityRole::Tab,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         Accordion,
         "accordion",
         Container,
         AccessibilityRole::Region,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         Details,
         "details",
         Container,
         AccessibilityRole::Region,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         List,
         "list",
         Collection,
         AccessibilityRole::List,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         ListItem,
         "list-item",
         Collection,
         AccessibilityRole::ListItem,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         Table,
         "table",
         Collection,
         AccessibilityRole::Region,
-        true,
-        HTML_REF
+        true
     ),
     contract!(
         Cell,
         "cell",
         Collection,
         AccessibilityRole::Region,
-        false,
-        HTML_REF
+        false
     ),
     contract!(
         Tree,
         "tree",
         Collection,
         AccessibilityRole::Region,
-        true,
-        QT_REF
+        true
     ),
     contract!(
         EmptyState,
         "empty-state",
         Collection,
         AccessibilityRole::Status,
-        false,
-        FLUTTER_REF
+        false
     ),
     contract!(
         Slot,
         "slot",
         Shell,
         AccessibilityRole::Region,
-        false,
-        FLUTTER_REF
+        false
     ),
     contract!(
         Surface,
         "surface",
         Shell,
         AccessibilityRole::Region,
-        false,
-        QT_REF
+        false
     ),
     contract!(
         Widget,
         "widget",
         Shell,
         AccessibilityRole::Region,
-        false,
-        FLUTTER_REF
+        false
     ),
 ];
 
@@ -1347,18 +1261,6 @@ const fn event(
         name,
         payload,
         description,
-    }
-}
-
-const fn compat(
-    source: &'static str,
-    reference: &'static str,
-    note: &'static str,
-) -> ElementCompatibilityRef {
-    ElementCompatibilityRef {
-        source,
-        reference,
-        note,
     }
 }
 

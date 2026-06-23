@@ -225,12 +225,14 @@ All five landed 2026-06-23 (single commit).
       `validate_element_attribute`/`validate_element_event` primitives in
       `element.rs` stay (exported from `mesh-core-elements`, own tests) as the
       natural home if compile-time authoring diagnostics get surfaced later.
-- [ ] **Dead element compatibility tables.** `ElementContractDef::compatibility`,
-      `HTML_REF`/`QT_REF`/`FLUTTER_REF`, `ElementCompatibilityRef`, and `compat()`
-      (`ui/elements/src/element.rs`) are filled into every `ELEMENT_CONTRACT_DEFS`
-      entry but never read (verified zero reads). Removing the field slims ~70
-      table entries (~300+ lines) — a large mechanical edit deferred from the
-      safe-deletion batch; do as its own focused pass (build will catch misses).
+- [x] **Dead element compatibility tables.** Done 2026-06-23: verified zero
+      reads of `ElementContractDef::compatibility` (the two `.compatibility`
+      hits were the unrelated module-manifest field), then removed the field,
+      the `ElementCompatibilityRef` struct, the `compat()` const fn, the three
+      `HTML_REF`/`QT_REF`/`FLUTTER_REF` statics, the macro's `$compat` param,
+      and the trailing compat arg from all 65 `contract!` invocations (regex).
+      Net −98 lines in `element.rs`; workspace builds, elements tests pass
+      (only the pre-existing audio-style baseline failure remains).
 - [ ] Dead `StyleResolver` non-cached `restyle_subtree` / `restyle_subtree_children`
       (`ui/elements/src/style/resolve.rs:~637,~661`) — only referenced by doc
       comments; the `_cached`/`_for_keys` variants are used. Remove and fix the
