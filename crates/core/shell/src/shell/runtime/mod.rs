@@ -28,32 +28,49 @@ impl Shell {
 
     pub(in crate::shell) fn rebuild_component_surface_index(&mut self) {
         self.component_by_surface.clear();
-        self.component_by_surface.reserve(self.components.len());
+        // A component owns its parent surface plus any auto-derived child
+        // surfaces, so map *every* target's surface id back to the component.
         for (index, runtime) in self.components.iter().enumerate() {
-            self.component_by_surface
-                .insert(runtime.surface_id.clone(), index);
+            for target in runtime.targets() {
+                self.component_by_surface
+                    .insert(target.surface_id.clone(), index);
+            }
         }
+    }
+
+    /// Resolve a surface id to the owning component and which of its surface
+    /// targets (parent or a child popup) it refers to. Rebuilds the index
+    /// lazily on a miss or a stale mapping (e.g. after hot reload or after a
+    /// child surface was added/removed), so the map may hold more entries than
+    /// there are components.
+    pub(in crate::shell) fn component_target_for_surface(
+        &mut self,
+        surface_id: &str,
+    ) -> Option<(usize, TargetRef)> {
+        if let Some(index) = self.component_by_surface.get(surface_id).copied()
+            && let Some(target) = self
+                .components
+                .get(index)
+                .and_then(|runtime| runtime.target_ref_for_surface(surface_id))
+        {
+            return Some((index, target));
+        }
+
+        self.rebuild_component_surface_index();
+        let index = self.component_by_surface.get(surface_id).copied()?;
+        let target = self
+            .components
+            .get(index)?
+            .target_ref_for_surface(surface_id)?;
+        Some((index, target))
     }
 
     pub(in crate::shell) fn component_index_for_surface(
         &mut self,
         surface_id: &str,
     ) -> Option<usize> {
-        if self.component_by_surface.len() != self.components.len() {
-            self.rebuild_component_surface_index();
-        }
-
-        if let Some(index) = self.component_by_surface.get(surface_id).copied()
-            && self
-                .components
-                .get(index)
-                .is_some_and(|runtime| runtime.surface_id == surface_id)
-        {
-            return Some(index);
-        }
-
-        self.rebuild_component_surface_index();
-        self.component_by_surface.get(surface_id).copied()
+        self.component_target_for_surface(surface_id)
+            .map(|(index, _)| index)
     }
 
     pub(in crate::shell) fn next_runtime_sleep(
@@ -134,11 +151,15 @@ impl Shell {
             if !runtime.component.wants_render() {
                 return false;
             }
-            let surface_id = runtime.surface_id.as_str();
-            self.surface_is_effectively_visible(surface_id)
-                && !self
-                    .presentation_engine
-                    .surface_waiting_for_frame_callback(surface_id)
+            // A component drives its parent surface plus any child popups from
+            // one VM; it has ready work if any of its targets can present now.
+            runtime.targets().any(|target| {
+                let surface_id = target.surface_id.as_str();
+                self.surface_is_effectively_visible(surface_id)
+                    && !self
+                        .presentation_engine
+                        .surface_waiting_for_frame_callback(surface_id)
+            })
         })
     }
 

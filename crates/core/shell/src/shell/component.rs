@@ -3,8 +3,9 @@ use super::surface_layout::{
     SurfaceLayoutSettings, SurfaceSizePolicy, load_frontend_module_settings,
 };
 use super::types::{
-    ComponentContext, ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent,
-    CoreRequest, KeyModifiers, ServiceEvent, ShellComponent, TabFocusTarget,
+    ChildSurfaceKind, ChildSurfaceRequest, ComponentContext, ComponentError, ComponentInput,
+    ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers, ServiceEvent, ShellComponent,
+    TabFocusTarget,
 };
 use mesh_core_interaction::{
     annotate_overflow_tree, collect_focus_traversal, find_click_handler, find_event_handler,
@@ -40,8 +41,8 @@ use mesh_core_component::template::{AttributeValue, TemplateNode};
 use mesh_core_config::TooltipSettings;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::{
-    IntrinsicLayoutCache, LayoutEngine, NodeId, PerSurfaceLayoutState, StyleContext, StyleResolver,
-    VariableStore, WidgetNode, element_snapshot_json,
+    IntrinsicLayoutCache, LayoutEngine, NodeId, PerSurfaceLayoutState, PopoverPlacement,
+    StyleContext, StyleResolver, VariableStore, WidgetNode, element_snapshot_json,
 };
 use mesh_core_frontend::{
     CompiledFrontendModule, FrontendRenderMode, compile_frontend_module, root_accessibility_role,

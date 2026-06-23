@@ -1,6 +1,5 @@
 use super::super::*;
 use mesh_core_elements::style::BackgroundPaint;
-use mesh_core_presentation::PopupConfig;
 use mesh_core_render::{DamageRect, DisplayPaintCommand};
 
 impl Shell {
@@ -19,8 +18,8 @@ impl Shell {
             }
             let visible = self.surface_is_effectively_visible(&surface_id);
             if !visible
-                && self.components[index].last_surface_config.is_none()
-                && self.components[index].known_surface_size.is_none()
+                && self.components[index].parent.last_surface_config.is_none()
+                && self.components[index].parent.known_surface_size.is_none()
             {
                 continue;
             }
@@ -45,8 +44,8 @@ impl Shell {
             };
             if let Some((width, height)) = surface_size {
                 let resolved_size = (width, height);
-                if self.components[index].known_surface_size != Some(resolved_size) {
-                    self.components[index].known_surface_size = Some(resolved_size);
+                if self.components[index].parent.known_surface_size != Some(resolved_size) {
+                    self.components[index].parent.known_surface_size = Some(resolved_size);
                     self.components[index]
                         .component
                         .surface_size_changed(width, height);
@@ -115,44 +114,45 @@ impl Shell {
                     // appear to fly toward the default screen position.
                     let runtime = &mut self.components[index];
                     if runtime
+                        .parent
                         .paint_buffer
                         .as_ref()
                         .map(|buffer| buffer.width != 1 || buffer.height != 1)
                         .unwrap_or(true)
                     {
-                        runtime.paint_buffer = Some(PixelBuffer::new(1, 1));
+                        runtime.parent.paint_buffer = Some(PixelBuffer::new(1, 1));
                     }
-                    runtime.known_surface_size = None;
-                    runtime.last_surface_config = None;
-                    runtime.last_popup_size = None;
+                    runtime.parent.known_surface_size = None;
+                    runtime.parent.last_surface_config = None;
+                    runtime.parent.last_popup_size = None;
                     break;
                 }
 
                 // Popup surfaces (xdg_popup) skip the layer-surface configure
                 // path entirely — they are created/repositioned via
                 // configure_popup() after the content size is resolved below.
-                let is_popup = self.components[index].popup_config.is_some();
+                let is_popup = self.components[index].parent.popup_config.is_some();
 
                 // Compare all copy fields before cloning namespace (the only heap field).
-                let size_policy = self.components[index].surface_size_policy;
+                let size_policy = self.components[index].parent.surface_size_policy;
                 let layer = surface.layer.unwrap_or(Layer::Top);
-                let config_changed =
-                    self.components[index]
-                        .last_surface_config
-                        .as_ref()
-                        .map_or(true, |last| {
-                            last.edge != surface.edge
-                                || last.layer != layer
-                                || last.size_policy != size_policy
-                                || last.width != surface.width
-                                || last.height != surface.height
-                                || last.exclusive_zone != surface.exclusive_zone
-                                || last.keyboard_mode != surface.keyboard_mode
-                                || last.margin_top != surface.margin_top
-                                || last.margin_right != surface.margin_right
-                                || last.margin_bottom != surface.margin_bottom
-                                || last.margin_left != surface.margin_left
-                        });
+                let config_changed = self.components[index]
+                    .parent
+                    .last_surface_config
+                    .as_ref()
+                    .map_or(true, |last| {
+                        last.edge != surface.edge
+                            || last.layer != layer
+                            || last.size_policy != size_policy
+                            || last.width != surface.width
+                            || last.height != surface.height
+                            || last.exclusive_zone != surface.exclusive_zone
+                            || last.keyboard_mode != surface.keyboard_mode
+                            || last.margin_top != surface.margin_top
+                            || last.margin_right != surface.margin_right
+                            || last.margin_bottom != surface.margin_bottom
+                            || last.margin_left != surface.margin_left
+                    });
                 if config_changed && !is_popup {
                     let cfg = LayerSurfaceConfig {
                         edge: surface.edge,
@@ -169,7 +169,7 @@ impl Shell {
                         margin_left: surface.margin_left,
                     };
                     self.presentation_engine.configure(&surface_id, cfg.clone());
-                    self.components[index].last_surface_config = Some(cfg);
+                    self.components[index].parent.last_surface_config = Some(cfg);
                 }
 
                 let inner_requested_width = surface.width;
@@ -190,8 +190,8 @@ impl Shell {
                     inner_requested_height.max(1)
                 };
                 let resolved_size = (width, height);
-                if self.components[index].known_surface_size != Some(resolved_size) {
-                    self.components[index].known_surface_size = Some(resolved_size);
+                if self.components[index].parent.known_surface_size != Some(resolved_size) {
+                    self.components[index].parent.known_surface_size = Some(resolved_size);
                     self.components[index]
                         .component
                         .surface_size_changed(width, height);
@@ -201,11 +201,11 @@ impl Shell {
                 // resolved content size. This creates the surface on first
                 // show and repositions it when the size changes (e.g. the
                 // content grows or shrinks between opens).
-                if is_popup
-                    && self.components[index].last_popup_size != Some(resolved_size)
+                if is_popup && self.components[index].parent.last_popup_size != Some(resolved_size)
                 {
-                    self.components[index].last_popup_size = Some(resolved_size);
+                    self.components[index].parent.last_popup_size = Some(resolved_size);
                     let config = self.components[index]
+                        .parent
                         .popup_config
                         .as_mut()
                         .map(|c| {
@@ -217,9 +217,7 @@ impl Shell {
                             .presentation_engine
                             .configure_popup(&surface_id, config)
                         {
-                            tracing::warn!(
-                                "configure_popup for {surface_id} failed: {e}"
-                            );
+                            tracing::warn!("configure_popup for {surface_id} failed: {e}");
                         }
                     }
                 }
@@ -246,12 +244,13 @@ impl Shell {
 
                 let runtime = &mut self.components[index];
                 if runtime
+                    .parent
                     .paint_buffer
                     .as_ref()
                     .map(|buffer| buffer.width != physical_w || buffer.height != physical_h)
                     .unwrap_or(true)
                 {
-                    runtime.paint_buffer = Some(PixelBuffer::new(physical_w, physical_h));
+                    runtime.parent.paint_buffer = Some(PixelBuffer::new(physical_w, physical_h));
                 }
                 runtime
                     .component
@@ -260,6 +259,7 @@ impl Shell {
                         width,
                         height,
                         runtime
+                            .parent
                             .paint_buffer
                             .as_mut()
                             .expect("paint buffer initialised"),
@@ -277,8 +277,8 @@ impl Shell {
                 rerender_attempts += 1;
             }
 
-            let visible = self.surface_is_effectively_visible(&surface_id);
-
+            // Component(VM)-level profiling + invalidation are recorded once,
+            // regardless of how many surface targets the component drives.
             for record in component_stage_records {
                 let module_id = record
                     .module_id
@@ -304,134 +304,18 @@ impl Shell {
                 );
             }
 
-            if visible {
-                let commands = self.components[index]
-                    .component
-                    .display_list_paint_commands();
-                if let Some((surface_w, surface_h)) = self.components[index].known_surface_size {
-                    let opaque_rect = compute_opaque_rect_for_root(commands, surface_w, surface_h);
-                    self.presentation_engine
-                        .update_opaque_region(&surface_id, opaque_rect);
-                }
-                // The surface buffer is padded (TOOLTIP_OVERLAY_*) so tooltips can render
-                // outside the content box, but `known_surface_size` reflects that inflated
-                // size. Restrict pointer input to the component's true content rect so
-                // clicks over the padding pass through to the windows beneath instead of
-                // hitting a dead zone below the bar.
-                if let Some((content_w, content_h)) =
-                    self.components[index].component.content_input_size()
-                {
-                    self.presentation_engine.update_input_region(
-                        &surface_id,
-                        Some(DamageRect {
-                            x: 0,
-                            y: 0,
-                            width: content_w,
-                            height: content_h,
-                        }),
-                    );
-                }
-                // Compute and set blur region from display list backdrop-filter nodes
-                let blur_region = compute_blur_region(commands);
-                self.presentation_engine
-                    .update_blur_region(&surface_id, blur_region);
-            }
-
-            let mut present_damage: Vec<DamageRect> =
-                self.components[index].component.take_present_damage();
-            // Scale change or explicit force-full triggers full-buffer present (per HDPI-04)
-            let mut force_full = false;
-            if visible
-                && self
-                    .presentation_engine
-                    .surface_needs_full_redraw(&surface_id)
-            {
-                force_full = true;
-                self.presentation_engine
-                    .clear_surface_needs_full_redraw(&surface_id);
-                tracing::debug!(
-                    surface_id = surface_id.as_str(),
-                    "scale change triggered full-buffer present"
-                );
-            }
-            if visible && self.components[index].force_full_present {
-                force_full = true;
-                self.components[index].force_full_present = false;
-            }
-            if force_full {
-                // Emit full damage in logical coordinates (attach_shm_buffer scales to physical)
-                present_damage = vec![DamageRect {
-                    x: 0,
-                    y: 0,
-                    width: width.max(1),
-                    height: height.max(1),
-                }];
-            }
-            if visible && self.debug.show_layout_bounds {
-                let runtime = &mut self.components[index];
-                if let Some(tree) = runtime.component.last_widget_tree() {
-                    let buffer = runtime
-                        .paint_buffer
-                        .as_mut()
-                        .expect("paint buffer initialised");
-                    self.debug_overlay.paint_layout_bounds(tree, buffer, scale);
-                    present_damage = vec![DamageRect {
-                        x: 0,
-                        y: 0,
-                        width: width.max(1),
-                        height: height.max(1),
-                    }];
-                }
-            }
-
-            let mut presented = false;
-            let present_started = self.profiling_enabled().then(std::time::Instant::now);
-            // An empty `present_damage` Vec means paint produced no changed pixels,
-            // so skip the present entirely. This mirrors the old `is_some()` gate
-            // (None -> skip) but works with the multi-rect type.
-            if !visible || !present_damage.is_empty() {
-                self.presentation_engine
-                    .present_with_damage(
-                        &surface_id,
-                        self.components[index].component.id(),
-                        visible,
-                        self.components[index]
-                            .paint_buffer
-                            .as_ref()
-                            .expect("paint buffer initialised"),
-                        &present_damage,
-                    )
-                    .map_err(ShellRunError::Presentation)?;
-                presented = true;
-                any_component_presented = true;
-            }
-            if let Some(started) = present_started
-                && presented
-            {
-                self.record_surface_profiling_stage(
-                    &surface_id,
-                    Some(component_id.as_str()),
-                    mesh_core_debug::ProfilingStage::PresentCommit,
-                    started.elapsed(),
-                    Some("present"),
-                );
-            }
-            if let Some(started) = total_render_started {
-                self.record_surface_profiling_stage(
-                    &surface_id,
-                    Some(component_id.as_str()),
-                    mesh_core_debug::ProfilingStage::TotalSurfaceRender,
-                    started.elapsed(),
-                    Some("rebuild"),
-                );
-            }
-            if visible && presented {
-                self.record_surface_redraw(
-                    &surface_id,
-                    Some(component_id.as_str()),
-                    Some("present"),
-                );
-            }
+            // Present the component's parent surface. Child popup targets paint
+            // their own subtree and are presented separately during reconcile.
+            let presented = self.present_surface_target(
+                index,
+                TargetRef::Parent,
+                &component_id,
+                width,
+                height,
+                scale,
+                total_render_started,
+            )?;
+            any_component_presented |= presented;
             if presented {
                 components_want_render_after_frame |=
                     self.components[index].component.wants_render();
@@ -442,16 +326,171 @@ impl Shell {
         Ok(())
     }
 
+    /// Run the post-paint present pipeline for one surface target of a
+    /// component — its parent surface, or (later) a child popup. Computes
+    /// opaque/input/blur regions, resolves present damage (handling force-full
+    /// and scale-change full redraws), paints the debug layout overlay, commits
+    /// the buffer, and records profiling. Returns whether a present was issued.
+    ///
+    /// Region and debug-overlay computation is parent-only for now; child popup
+    /// targets supply their own subtree damage when reconciled.
+    fn present_surface_target(
+        &mut self,
+        index: usize,
+        target: TargetRef,
+        component_id: &str,
+        width: u32,
+        height: u32,
+        scale: f32,
+        total_render_started: Option<std::time::Instant>,
+    ) -> Result<bool, ShellRunError> {
+        let surface_id = self.components[index].target(target).surface_id.clone();
+        let visible = self.surface_is_effectively_visible(&surface_id);
+        let is_parent = matches!(target, TargetRef::Parent);
+
+        if visible && is_parent {
+            let commands = self.components[index]
+                .component
+                .display_list_paint_commands();
+            if let Some((surface_w, surface_h)) =
+                self.components[index].target(target).known_surface_size
+            {
+                let opaque_rect = compute_opaque_rect_for_root(commands, surface_w, surface_h);
+                self.presentation_engine
+                    .update_opaque_region(&surface_id, opaque_rect);
+            }
+            // The surface buffer is padded (TOOLTIP_OVERLAY_*) so tooltips can render
+            // outside the content box, but `known_surface_size` reflects that inflated
+            // size. Restrict pointer input to the component's true content rect so
+            // clicks over the padding pass through to the windows beneath instead of
+            // hitting a dead zone below the bar.
+            if let Some((content_w, content_h)) =
+                self.components[index].component.content_input_size()
+            {
+                self.presentation_engine.update_input_region(
+                    &surface_id,
+                    Some(DamageRect {
+                        x: 0,
+                        y: 0,
+                        width: content_w,
+                        height: content_h,
+                    }),
+                );
+            }
+            // Compute and set blur region from display list backdrop-filter nodes
+            let blur_region = compute_blur_region(commands);
+            self.presentation_engine
+                .update_blur_region(&surface_id, blur_region);
+        }
+
+        let mut present_damage: Vec<DamageRect> = if is_parent {
+            self.components[index].component.take_present_damage()
+        } else {
+            Vec::new()
+        };
+        // Scale change or explicit force-full triggers full-buffer present (per HDPI-04)
+        let mut force_full = false;
+        if visible
+            && self
+                .presentation_engine
+                .surface_needs_full_redraw(&surface_id)
+        {
+            force_full = true;
+            self.presentation_engine
+                .clear_surface_needs_full_redraw(&surface_id);
+            tracing::debug!(
+                surface_id = surface_id.as_str(),
+                "scale change triggered full-buffer present"
+            );
+        }
+        if visible && self.components[index].target(target).force_full_present {
+            force_full = true;
+            self.components[index].target_mut(target).force_full_present = false;
+        }
+        if force_full {
+            // Emit full damage in logical coordinates (attach_shm_buffer scales to physical)
+            present_damage = vec![DamageRect {
+                x: 0,
+                y: 0,
+                width: width.max(1),
+                height: height.max(1),
+            }];
+        }
+        if visible && is_parent && self.debug.show_layout_bounds {
+            let runtime = &mut self.components[index];
+            if let Some(tree) = runtime.component.last_widget_tree() {
+                let buffer = runtime
+                    .parent
+                    .paint_buffer
+                    .as_mut()
+                    .expect("paint buffer initialised");
+                self.debug_overlay.paint_layout_bounds(tree, buffer, scale);
+                present_damage = vec![DamageRect {
+                    x: 0,
+                    y: 0,
+                    width: width.max(1),
+                    height: height.max(1),
+                }];
+            }
+        }
+
+        let mut presented = false;
+        let present_started = self.profiling_enabled().then(std::time::Instant::now);
+        // An empty `present_damage` Vec means paint produced no changed pixels,
+        // so skip the present entirely. This mirrors the old `is_some()` gate
+        // (None -> skip) but works with the multi-rect type.
+        if !visible || !present_damage.is_empty() {
+            self.presentation_engine
+                .present_with_damage(
+                    &surface_id,
+                    self.components[index].component.id(),
+                    visible,
+                    self.components[index]
+                        .target(target)
+                        .paint_buffer
+                        .as_ref()
+                        .expect("paint buffer initialised"),
+                    &present_damage,
+                )
+                .map_err(ShellRunError::Presentation)?;
+            presented = true;
+        }
+        if let Some(started) = present_started
+            && presented
+        {
+            self.record_surface_profiling_stage(
+                &surface_id,
+                Some(component_id),
+                mesh_core_debug::ProfilingStage::PresentCommit,
+                started.elapsed(),
+                Some("present"),
+            );
+        }
+        if let Some(started) = total_render_started {
+            self.record_surface_profiling_stage(
+                &surface_id,
+                Some(component_id),
+                mesh_core_debug::ProfilingStage::TotalSurfaceRender,
+                started.elapsed(),
+                Some("rebuild"),
+            );
+        }
+        if visible && presented {
+            self.record_surface_redraw(&surface_id, Some(component_id), Some("present"));
+        }
+        Ok(presented)
+    }
+
     fn resolve_dynamic_surface_size(
         &mut self,
         index: usize,
         surface_id: &str,
     ) -> Result<Option<(u32, u32)>, ShellRunError> {
         if let Some(size) = self.presentation_engine.surface_size_if_known(surface_id) {
-            self.components[index].known_surface_size = Some(size);
+            self.components[index].parent.known_surface_size = Some(size);
             return Ok(Some(size));
         }
-        if let Some(size) = self.components[index].known_surface_size {
+        if let Some(size) = self.components[index].parent.known_surface_size {
             return Ok(Some(size));
         }
         let size = self
@@ -459,7 +498,7 @@ impl Shell {
             .surface_size(surface_id)
             .map_err(ShellRunError::Presentation)?;
         if let Some(size) = size {
-            self.components[index].known_surface_size = Some(size);
+            self.components[index].parent.known_surface_size = Some(size);
         }
         Ok(size)
     }

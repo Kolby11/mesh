@@ -1021,6 +1021,45 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.last_tree.as_ref()
     }
 
+    fn child_surface_requests(&self) -> Vec<ChildSurfaceRequest> {
+        let Some(tree) = self.last_tree.as_ref() else {
+            return Vec::new();
+        };
+
+        let mut requests = Vec::new();
+        collect_child_surface_requests(tree, tree, &mut requests);
+        requests
+    }
+
+    fn paint_child_surface(
+        &self,
+        node_key: &str,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+    ) -> Result<bool, ComponentError> {
+        let Some(tree) = self.last_tree.as_ref() else {
+            return Ok(false);
+        };
+        let Some(node) = find_node_by_key(tree, node_key) else {
+            return Ok(false);
+        };
+        let Some(bounds) = find_node_bounds_by_key(tree, node_key, 0.0, 0.0) else {
+            return Ok(false);
+        };
+
+        buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
+        mesh_core_render::paint_frontend_tree_at_for_module(
+            node,
+            buffer,
+            scale,
+            -bounds.0,
+            -bounds.1,
+            None,
+            Some(self.compiled.manifest.package.id.as_str()),
+        );
+        Ok(true)
+    }
+
     fn content_input_size(&self) -> Option<(u32, u32)> {
         // `last_surface_size` is the logical content size (from the component's own
         // `requested_layout_size`), NOT the tooltip-inflated surface size the shell's
@@ -1593,6 +1632,106 @@ fn collect_visual_damage_rects_into(
     }
 }
 
+fn collect_child_surface_requests(
+    root: &WidgetNode,
+    node: &WidgetNode,
+    requests: &mut Vec<ChildSurfaceRequest>,
+) {
+    if source_element_tag(node) == "popover"
+        && popover_is_open(node)
+        && let Some(node_key) = node.attributes.get("_mesh_key")
+        && let Some(anchor) = find_node_bounds_by_key(root, node_key, 0.0, 0.0)
+    {
+        let content = subtree_content_size(node).unwrap_or((
+            node.layout.width.ceil().max(1.0) as u32,
+            node.layout.height.ceil().max(1.0) as u32,
+        ));
+        requests.push(ChildSurfaceRequest {
+            node_key: node_key.clone(),
+            kind: ChildSurfaceKind::Popover,
+            anchor_rect: bounds_to_i32_rect(anchor),
+            content_size: content,
+            placement: PopoverPlacement::from_node(node),
+        });
+    }
+
+    for child in &node.children {
+        collect_child_surface_requests(root, child, requests);
+    }
+}
+
+fn popover_is_open(node: &WidgetNode) -> bool {
+    node.attributes.get("open").is_some_and(|value| {
+        let value = value.trim().to_ascii_lowercase();
+        !matches!(value.as_str(), "" | "false" | "0" | "none")
+    })
+}
+
+fn bounds_to_i32_rect(bounds: (f32, f32, f32, f32)) -> (i32, i32, i32, i32) {
+    let left = bounds.0.floor() as i32;
+    let top = bounds.1.floor() as i32;
+    let right = bounds.2.ceil() as i32;
+    let bottom = bounds.3.ceil() as i32;
+    (left, top, (right - left).max(1), (bottom - top).max(1))
+}
+
+fn subtree_content_size(node: &WidgetNode) -> Option<(u32, u32)> {
+    let bounds = subtree_content_bounds(node, 0.0, 0.0)?;
+    let width = (bounds.2 - bounds.0).ceil().max(1.0) as u32;
+    let height = (bounds.3 - bounds.1).ceil().max(1.0) as u32;
+    Some((width, height))
+}
+
+fn subtree_content_bounds(
+    node: &WidgetNode,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<(f32, f32, f32, f32)> {
+    let offset_x = offset_x + node.computed_style.transform.translate_x;
+    let offset_y = offset_y + node.computed_style.transform.translate_y;
+    let own = (
+        node.layout.x + offset_x,
+        node.layout.y + offset_y,
+        node.layout.x + offset_x + node.layout.width.max(0.0),
+        node.layout.y + offset_y + node.layout.height.max(0.0),
+    );
+    let scroll_x = node
+        .attributes
+        .get("_mesh_scroll_x")
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0);
+    let scroll_y = node
+        .attributes
+        .get("_mesh_scroll_y")
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0);
+    let child_offset_x = offset_x - scroll_x;
+    let child_offset_y = offset_y - scroll_y;
+
+    let mut bounds = Some(own);
+    for child in &node.children {
+        if let Some(child_bounds) = subtree_content_bounds(child, child_offset_x, child_offset_y) {
+            bounds = Some(union_content_bounds(bounds, child_bounds));
+        }
+    }
+    bounds
+}
+
+fn union_content_bounds(
+    existing: Option<(f32, f32, f32, f32)>,
+    next: (f32, f32, f32, f32),
+) -> (f32, f32, f32, f32) {
+    match existing {
+        Some((min_x, min_y, max_x, max_y)) => (
+            min_x.min(next.0),
+            min_y.min(next.1),
+            max_x.max(next.2),
+            max_y.max(next.3),
+        ),
+        None => next,
+    }
+}
+
 fn damage_rects_from_options_into(
     rects: impl IntoIterator<Item = Option<DamageRect>>,
     surface: DamageRect,
@@ -1766,6 +1905,51 @@ mod tests {
             surface_area,
             ..Default::default()
         }
+    }
+
+    fn keyed_node(tag: &str, key: &str, x: f32, y: f32, width: f32, height: f32) -> WidgetNode {
+        let mut node = WidgetNode::new(tag);
+        node.attributes.insert("_mesh_key".into(), key.into());
+        node.layout.x = x;
+        node.layout.y = y;
+        node.layout.width = width;
+        node.layout.height = height;
+        node
+    }
+
+    #[test]
+    fn open_popover_nodes_derive_child_surface_requests() {
+        let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 40.0);
+        let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 80.0, 10.0);
+        popover.attributes.insert("open".into(), "true".into());
+        popover.attributes.insert("anchor".into(), "bottom".into());
+        popover.attributes.insert("offset-y".into(), "6".into());
+        let child = keyed_node("button", "root/menu/option", 20.0, 54.0, 96.0, 24.0);
+        popover.children.push(child);
+        root.children.push(popover);
+
+        let mut requests = Vec::new();
+        collect_child_surface_requests(&root, &root, &mut requests);
+
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].node_key, "root/menu");
+        assert_eq!(requests[0].kind, ChildSurfaceKind::Popover);
+        assert_eq!(requests[0].anchor_rect, (20, 42, 80, 10));
+        assert_eq!(requests[0].content_size, (96, 36));
+        assert_eq!(requests[0].placement.offset_y, 6);
+    }
+
+    #[test]
+    fn closed_popover_nodes_stay_inline() {
+        let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 40.0);
+        let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 80.0, 10.0);
+        popover.attributes.insert("open".into(), "false".into());
+        root.children.push(popover);
+
+        let mut requests = Vec::new();
+        collect_child_surface_requests(&root, &root, &mut requests);
+
+        assert!(requests.is_empty());
     }
 
     #[test]

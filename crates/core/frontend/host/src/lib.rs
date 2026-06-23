@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use mesh_core_capability::CapabilitySet;
 use mesh_core_debug::ProfilingStage;
 use mesh_core_diagnostics::Diagnostics;
-use mesh_core_elements::WidgetNode;
 pub use mesh_core_elements::PopoverPlacement;
+use mesh_core_elements::WidgetNode;
 use mesh_core_locale::LocaleEngine;
 use mesh_core_render::{DamageRect, DisplayPaintCommand, PixelBuffer};
 use mesh_core_scripting::ScriptError;
@@ -13,6 +13,21 @@ use mesh_core_theme::Theme;
 use mesh_core_wayland::{KeyboardMode, ShellSurface};
 
 pub type SurfaceId = String;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChildSurfaceRequest {
+    pub node_key: String,
+    pub kind: ChildSurfaceKind,
+    pub anchor_rect: (i32, i32, i32, i32),
+    pub content_size: (u32, u32),
+    pub placement: PopoverPlacement,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildSurfaceKind {
+    Popover,
+    Overflow,
+}
 
 #[derive(Debug, Clone)]
 pub struct ComponentContext {
@@ -334,6 +349,22 @@ pub trait ShellComponent: Send {
     /// Return the last widget tree built by `paint`, for the debug layout inspector.
     fn last_widget_tree(&self) -> Option<&WidgetNode> {
         None
+    }
+    /// Return child surfaces that should be auto-derived from the last painted
+    /// tree. Authors still write normal inline UI; the shell uses these
+    /// requests to realize escape-bounds nodes as compositor child surfaces.
+    fn child_surface_requests(&self) -> Vec<ChildSurfaceRequest> {
+        Vec::new()
+    }
+    /// Paint a keyed subtree into a child-surface buffer at local origin.
+    /// Returns `true` when the node existed and pixels were painted.
+    fn paint_child_surface(
+        &self,
+        _node_key: &str,
+        _buffer: &mut PixelBuffer,
+        _scale: f32,
+    ) -> Result<bool, ComponentError> {
+        Ok(false)
     }
     /// Override this surface's position for popover placement.
     fn apply_position(&mut self, _margin_top: i32, _margin_left: i32) {}

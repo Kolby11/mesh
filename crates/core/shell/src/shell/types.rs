@@ -1,17 +1,82 @@
 pub use mesh_core_frontend_host::{
-    ComponentContext, ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent,
-    CoreRequest, KeyModifiers, ServiceEvent, ShellComponent, SurfaceId, TabFocusTarget,
+    ChildSurfaceKind, ChildSurfaceRequest, ComponentContext, ComponentError, ComponentInput,
+    ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers, ServiceEvent, ShellComponent,
+    SurfaceId, TabFocusTarget,
 };
-use mesh_core_presentation::{
-    LayerSurfaceConfig, LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint,
-    PopupGravity, PopupPlacement,
-};
+use mesh_core_presentation::{LayerSurfaceConfig, LayerSurfaceSizePolicy, PopupConfig};
 use mesh_core_render::PixelBuffer;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+/// Identifies which surface owned by a [`ComponentRuntime`] a piece of work
+/// refers to: the component's primary (parent) surface, or one of its
+/// auto-derived child surfaces (xdg_popups) by index into `children`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TargetRef {
+    Parent,
+    Child(usize),
+}
+
+/// Per-surface render state. A component owns one of these for its parent
+/// surface plus one per auto-derived child surface (see [`ChildSurface`]).
+/// Splitting this out is what lets a single component VM drive N Wayland
+/// surfaces (parent + popups) instead of the old 1:1 component↔surface model.
+pub(super) struct SurfaceTarget {
+    pub(super) surface_id: SurfaceId,
+    pub(super) paint_buffer: Option<PixelBuffer>,
+    pub(super) last_surface_config: Option<LayerSurfaceConfig>,
+    pub(super) surface_size_policy: LayerSurfaceSizePolicy,
+    /// Last surface size resolved by shell/presentation without requiring a
+    /// compositor roundtrip on every render or input event.
+    pub(super) known_surface_size: Option<(u32, u32)>,
+    pub(super) force_full_present: bool,
+    /// When set, this surface is realized as an `xdg_popup` child of the
+    /// named parent surface rather than as a layer surface.
+    pub(super) popup_parent_surface: Option<String>,
+    /// Popup config; `placement.size` is updated each render frame to the
+    /// measured content size before being handed to `configure_popup`.
+    pub(super) popup_config: Option<PopupConfig>,
+    /// Last size handed to `configure_popup`; used to skip redundant calls.
+    pub(super) last_popup_size: Option<(u32, u32)>,
+}
+
+impl SurfaceTarget {
+    pub(super) fn new(surface_id: SurfaceId, surface_size_policy: LayerSurfaceSizePolicy) -> Self {
+        Self {
+            surface_id,
+            paint_buffer: None,
+            last_surface_config: None,
+            surface_size_policy,
+            known_surface_size: None,
+            force_full_present: false,
+            popup_parent_surface: None,
+            popup_config: None,
+            last_popup_size: None,
+        }
+    }
+}
+
+/// A child surface auto-derived from an in-tree escape-bounds node (today a
+/// `<popover open>`). Realized as an `xdg_popup` child of the component's
+/// parent surface and painted from the *same* component VM. Keyed by the
+/// originating node's stable retained key so it survives re-renders.
+pub(super) struct ChildSurface {
+    pub(super) target: SurfaceTarget,
+    // `node_key` and `anchor_rect` are written when a child surface is derived
+    // and consumed by the child reconcile/positioner pass (popup placement +
+    // re-matching a node to its surface across re-renders), which is not yet
+    // wired — allow until that lands.
+    #[allow(dead_code)]
+    /// Stable `_mesh_key` of the originating `WidgetNode`.
+    pub(super) node_key: String,
+    #[allow(dead_code)]
+    /// Anchor rectangle in the parent surface's coordinate space.
+    pub(super) anchor_rect: (i32, i32, i32, i32),
+}
+
 pub(super) struct ComponentRuntime {
+    /// Immutable identity of the component, equal to its parent surface id.
     pub(super) surface_id: SurfaceId,
     pub(super) component: Box<dyn ShellComponent>,
     /// Every `.mesh` source path that contributes to this component
@@ -22,21 +87,11 @@ pub(super) struct ComponentRuntime {
     pub(super) source_paths: Vec<(PathBuf, Option<SystemTime>)>,
     pub(super) module_settings_path: Option<PathBuf>,
     pub(super) module_settings_modified_at: Option<SystemTime>,
-    pub(super) paint_buffer: Option<PixelBuffer>,
-    pub(super) last_surface_config: Option<LayerSurfaceConfig>,
-    pub(super) surface_size_policy: LayerSurfaceSizePolicy,
-    pub(super) force_full_present: bool,
-    /// Last surface size resolved by shell/presentation without requiring a
-    /// compositor roundtrip on every render or input event.
-    pub(super) known_surface_size: Option<(u32, u32)>,
-    /// When set, this component is realized as an `xdg_popup` child of the
-    /// named parent surface rather than as a layer surface.
-    pub(super) popup_parent_surface: Option<String>,
-    /// Popup config built in `ActivatePopover`; `placement.size` is updated
-    /// each render frame to the measured content size.
-    pub(super) popup_config: Option<PopupConfig>,
-    /// Last size handed to `configure_popup`; used to skip redundant calls.
-    pub(super) last_popup_size: Option<(u32, u32)>,
+    /// Render state for the component's primary (parent) surface.
+    pub(super) parent: SurfaceTarget,
+    /// Auto-derived child surfaces (xdg_popups), reconciled from the painted
+    /// tree each frame. Empty for components with no open escape-bounds nodes.
+    pub(super) children: Vec<ChildSurface>,
 }
 
 impl ComponentRuntime {
@@ -59,19 +114,44 @@ impl ComponentRuntime {
             .collect();
         let module_settings_path = component.module_settings_path().map(PathBuf::from);
         Self {
+            parent: SurfaceTarget::new(surface_id.clone(), surface_size_policy),
+            children: Vec::new(),
             surface_id,
             component,
             source_paths,
             module_settings_path,
             module_settings_modified_at: None,
-            paint_buffer: None,
-            last_surface_config: None,
-            surface_size_policy,
-            force_full_present: false,
-            known_surface_size: None,
-            popup_parent_surface: None,
-            popup_config: None,
-            last_popup_size: None,
+        }
+    }
+
+    /// Iterate every surface target this component owns: parent first, then
+    /// each child surface in `children` order.
+    pub(super) fn targets(&self) -> impl Iterator<Item = &SurfaceTarget> {
+        std::iter::once(&self.parent).chain(self.children.iter().map(|child| &child.target))
+    }
+
+    /// Resolve a surface id owned by this component to its [`TargetRef`].
+    pub(super) fn target_ref_for_surface(&self, surface_id: &str) -> Option<TargetRef> {
+        if self.parent.surface_id == surface_id {
+            return Some(TargetRef::Parent);
+        }
+        self.children
+            .iter()
+            .position(|child| child.target.surface_id == surface_id)
+            .map(TargetRef::Child)
+    }
+
+    pub(super) fn target(&self, target: TargetRef) -> &SurfaceTarget {
+        match target {
+            TargetRef::Parent => &self.parent,
+            TargetRef::Child(index) => &self.children[index].target,
+        }
+    }
+
+    pub(super) fn target_mut(&mut self, target: TargetRef) -> &mut SurfaceTarget {
+        match target {
+            TargetRef::Parent => &mut self.parent,
+            TargetRef::Child(index) => &mut self.children[index].target,
         }
     }
 }

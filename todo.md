@@ -104,6 +104,41 @@ surface.
       1:N. Generalize `SurfaceId`/presentation-handle bookkeeping, per-target paint
       buffers in `runtime_tree.rs`, element-metrics publication, and input routing
       so popup input routes back to the same VM with correct popup-local coords.
+      **Reframed 2026-06-23 (web-like composition):** surfaces are *containers*, not
+      authoring units — one parent surface holds a component tree; in-tree
+      escape-bounds nodes (`<popover open>`, later `<tooltip>`/dropdowns) are
+      *transparently* promoted to child `xdg_popup` surfaces fed by the same VM.
+      Explicit new-surface authoring (sidebar/panel) stays a rare, deferred opt-in.
+      Authors should not need to think about surfaces for ordinary layout:
+      if inline UI uses `position: absolute` or another escape-bounds pattern and
+      the runtime cannot physically paint it inside the parent buffer, the shell
+      should derive the needed child surface automatically rather than requiring
+      manifest geometry or user-managed surface IDs.
+      **Foundation landed 2026-06-23 (plumbing first, no behavior change):**
+      per-surface render state extracted into `SurfaceTarget`; `ComponentRuntime` now
+      owns `parent: SurfaceTarget` + `children: Vec<ChildSurface>` (keyed by node
+      `_mesh_key`) with `targets()`/`target_ref_for_surface`/`target_mut`
+      (`shell/types.rs`); `component_target_for_surface` + every-target surface index
+      with lazy rebuild-on-miss (`runtime/mod.rs`); the per-surface present pipeline
+      extracted into `present_surface_target(index, TargetRef, …)` and the parent
+      routed through it (`runtime/render.rs`); legacy separate-module `ActivatePopover`
+      promotion still works (parent-only runtime). Proof:
+      `component_runtime_resolves_parent_and_child_surface_targets`. Existing shell
+      suite preserved at the 347-passed/7-known-failing baseline.
+      **Consumer pass progress 2026-06-23:** `ShellComponent` now exposes
+      `ChildSurfaceRequest` + `ChildSurfaceKind::{Popover, Overflow}` and
+      `paint_child_surface(node_key, …)`; `FrontendSurfaceComponent` derives
+      requests from the last painted tree for open in-tree `<popover>` nodes
+      and can paint a keyed subtree into a child buffer at local origin. Tests:
+      `open_popover_nodes_derive_child_surface_requests`,
+      `closed_popover_nodes_stay_inline`.
+      **Remaining (consumer pass):** `ShellComponent::child_surface_requests` +
+      `ChildSurfaceRequest` needs shell consumption and later automatic
+      `Overflow` derivation beyond explicit `<popover>`; shell reconcile of
+      `children` (create/update/destroy child surfaces, register/tear down in
+      `self.surfaces`/`self.core.surfaces`, build `PopupConfig`, drain
+      `take_dismissed_popups`); call `present_surface_target(Child)` after `paint_child`;
+      per-child element metrics + child-surface input routing with popup-local coords.
 - [ ] **Determinism decision: `<popover open>` always promotes when shown** —
       do **not** conditionally promote only when content overflows the host
       (the "measure first, surface only if it spills" model). Conditional promotion

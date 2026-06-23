@@ -4354,8 +4354,75 @@ fn set_theme_forces_full_present_on_existing_components() {
     shell.apply_set_theme("test-light-present").unwrap();
 
     assert!(
-        shell.components[0].force_full_present,
+        shell.components[0].parent.force_full_present,
         "theme changes must force a full present for already-painted surfaces"
+    );
+}
+
+#[test]
+fn component_runtime_resolves_parent_and_child_surface_targets() {
+    // Proves the one-VM → parent + N child-surface plumbing: a single
+    // ComponentRuntime owns a parent surface plus a synthetically injected
+    // child popup surface, and the shell resolves *both* surface ids back to
+    // the same component while distinguishing which target each names.
+    let mut shell = Shell::new();
+    let seen_events = Arc::new(Mutex::new(Vec::new()));
+    shell
+        .components
+        .push(super::types::ComponentRuntime::new(Box::new(
+            RecordingComponent::new(seen_events),
+        )));
+
+    let parent_id = "@test/recording".to_string();
+    let child_id = "@test/recording#popover:0".to_string();
+
+    // The parent target alone resolves before any child exists.
+    assert_eq!(
+        shell.component_target_for_surface(&parent_id),
+        Some((0, super::types::TargetRef::Parent))
+    );
+    assert_eq!(shell.component_target_for_surface(&child_id), None);
+
+    // Inject an auto-derived child surface (what the popover reconcile builds).
+    shell.components[0]
+        .children
+        .push(super::types::ChildSurface {
+            target: super::types::SurfaceTarget::new(
+                child_id.clone(),
+                mesh_core_presentation::LayerSurfaceSizePolicy::Flexible,
+            ),
+            node_key: "root/0/popover".to_string(),
+            anchor_rect: (12, 0, 40, 56),
+        });
+
+    // Both surface ids now map to the same component, each tagged with its
+    // target; targets() enumerates parent first, then the child.
+    assert_eq!(
+        shell.component_target_for_surface(&parent_id),
+        Some((0, super::types::TargetRef::Parent))
+    );
+    assert_eq!(
+        shell.component_target_for_surface(&child_id),
+        Some((0, super::types::TargetRef::Child(0)))
+    );
+    let target_ids: Vec<&str> = shell.components[0]
+        .targets()
+        .map(|target| target.surface_id.as_str())
+        .collect();
+    assert_eq!(target_ids, vec![parent_id.as_str(), child_id.as_str()]);
+
+    // The child carries the originating node key + anchor rect used by the
+    // popup reconcile/positioner.
+    assert_eq!(shell.components[0].children[0].node_key, "root/0/popover");
+    assert_eq!(shell.components[0].children[0].anchor_rect, (12, 0, 40, 56));
+
+    // The child target is independently addressable for per-surface state.
+    shell.components[0]
+        .target_mut(super::types::TargetRef::Child(0))
+        .force_full_present = true;
+    assert!(
+        shell.components[0].children[0].target.force_full_present,
+        "target_mut(Child) must address the child's own render state"
     );
 }
 

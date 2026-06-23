@@ -56,7 +56,7 @@ impl Shell {
                 .component
                 .theme_changed()
                 .map_err(ShellRunError::Component)?;
-            runtime.force_full_present = true;
+            runtime.parent.force_full_present = true;
         }
         // Broadcast event so script-side subscribers can react. Painter-level
         // invalidation is handled by `theme_changed()` above; the event is
@@ -204,7 +204,7 @@ impl Shell {
                 .component
                 .locale_changed(&locale)
                 .map_err(ShellRunError::Component)?;
-            runtime.force_full_present = true;
+            runtime.parent.force_full_present = true;
         }
         let _ = self.broadcast_core_event(CoreEvent::LocaleChanged { locale: locale_id })?;
         Ok(())

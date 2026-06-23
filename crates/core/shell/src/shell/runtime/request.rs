@@ -62,7 +62,7 @@ impl Shell {
     ) {
         let size_policy = self
             .component_index_for_surface(surface_id)
-            .map(|index| self.components[index].surface_size_policy)
+            .map(|index| self.components[index].parent.surface_size_policy)
             .unwrap_or(LayerSurfaceSizePolicy::Fixed);
 
         let (surface, visible) = match self.surfaces.get(surface_id) {
@@ -112,7 +112,7 @@ impl Shell {
 
         self.presentation_engine.configure(surface_id, cfg.clone());
         if let Some(index) = self.component_index_for_surface(surface_id) {
-            self.components[index].last_surface_config = Some(cfg);
+            self.components[index].parent.last_surface_config = Some(cfg);
         }
     }
 
@@ -299,12 +299,7 @@ impl Shell {
                     let popup_config = PopupConfig {
                         parent_surface_id: trigger_surface.clone(),
                         placement: PopupPlacement {
-                            anchor_rect: (
-                                popover_margin_left,
-                                0,
-                                40,
-                                trigger_exclusive_zone,
-                            ),
+                            anchor_rect: (popover_margin_left, 0, 40, trigger_exclusive_zone),
                             size: (1, 1),
                             // `popover_margin_left` is the popover's desired
                             // left edge in the parent surface. Anchor at the
@@ -321,11 +316,16 @@ impl Shell {
                         grab: false,
                         grab_serial: None,
                     };
+                    // Legacy path: this promotes a *separate* popover module's
+                    // own parent surface into an xdg_popup. The newer model
+                    // (auto-derived child surfaces from in-tree `<popover open>`
+                    // nodes of a single component VM) supersedes this; kept for
+                    // shipped separate-module popovers during the transition.
                     if let Some(idx) = self.component_index_for_surface(&surface_id) {
-                        self.components[idx].popup_parent_surface =
+                        self.components[idx].parent.popup_parent_surface =
                             Some(trigger_surface.clone());
-                        self.components[idx].popup_config = Some(popup_config);
-                        self.components[idx].last_popup_size = None;
+                        self.components[idx].parent.popup_config = Some(popup_config);
+                        self.components[idx].parent.last_popup_size = None;
                         self.components[idx].component.set_popup_promoted(true);
                     }
                     tracing::info!(
@@ -894,15 +894,17 @@ impl Shell {
             {
                 runtime.component.set_keyboard_mode_override(None);
                 runtime.component.set_surface_exiting(false);
-                if runtime.popup_parent_surface.is_some() {
+                if runtime.parent.popup_parent_surface.is_some() {
                     // Tear down the xdg_popup surface so it can be recreated
                     // fresh on the next ActivatePopover call.
-                    runtime.popup_parent_surface = None;
-                    runtime.popup_config = None;
-                    runtime.last_popup_size = None;
+                    runtime.parent.popup_parent_surface = None;
+                    runtime.parent.popup_config = None;
+                    runtime.parent.last_popup_size = None;
                     runtime.component.set_popup_promoted(false);
                     self.presentation_engine.destroy_popup(&surface_id);
-                    tracing::info!("set_surface_visibility_now: destroyed xdg_popup for {surface_id}");
+                    tracing::info!(
+                        "set_surface_visibility_now: destroyed xdg_popup for {surface_id}"
+                    );
                 }
             }
             if let Some(previous_mode) = self.transfer_owned_keyboard_modes.remove(&surface_id) {

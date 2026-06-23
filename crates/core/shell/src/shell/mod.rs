@@ -53,7 +53,7 @@ use sounds::{SoundKind, play_shell_sound};
 use surface_layout::{default_surface_visibility, load_active_theme};
 use types::{
     CommandThrottleState, ComponentRuntime, LatestServiceState, ServiceCommandMsg,
-    SettingsWatchState, ShellCoreState, ShellMessage, SurfaceState, ThemeWatchState,
+    SettingsWatchState, ShellCoreState, ShellMessage, SurfaceState, TargetRef, ThemeWatchState,
 };
 pub use types::{
     ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, KeyModifiers,
