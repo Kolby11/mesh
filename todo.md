@@ -238,13 +238,21 @@ All five landed 2026-06-23 (single commit).
       variants carry the four production call sites in `rendering.rs`); removed
       both, folded their doc comments onto the `_cached` variants, and updated
       the references in `events.rs` and `restyle/metrics.rs`.
-- [ ] Dead `PainterCommand::{DrawText,DrawPath}`, `PainterBlendMode::{Multiply,Screen}`,
-      `PainterPath`/`PainterPathElement` (`frontend/render/src/surface/painter/backend.rs`)
-      — never emitted in production (text goes through `TextRenderer`; non-SrcOver
-      blend + standalone blur are "deferred to migration" sentinels). Removing
-      them lets the `#[allow(dead_code)]` on the enums go and trims the
-      `execute_commands_on_canvas` match (~60 lines). Confirm the migration
-      sentinels are truly abandoned first.
+- [x] `PainterCommand::{DrawText,DrawPath}`, `PainterBlendMode::{Multiply,Screen}`,
+      `PainterPath`/`PainterPathElement`. Resolved 2026-06-23 — investigation showed
+      MESH already renders via Skia (`skia-safe`), so these were test-only *unwired*
+      capabilities, not an alternate backend. Per product decision: **dropped
+      `DrawText`** (text stays in `TextRenderer`) and **hooked up the rest** rather
+      than deleting:
+      - `mix-blend-mode` CSS (`normal/multiply/screen`) → `ComputedStyle` → painter
+        applies it to an element's background fill via an isolated `save_layer`
+        (`draw_with_blend`), on path paints, and on pushed layers. Removed the old
+        "unsupported blend mode" diagnostics. New "compositing" row in
+        `css-coverage.md`.
+      - `DrawPath` now has a real producer: checked `checkbox`/`radio` paint a
+        vector checkmark/dot (`DisplayPaintContent::Checkmark`), wired into both the
+        session and buffer render paths. `#[allow(dead_code)]` removed from
+        `PainterPath`/`PainterBlendMode`. Pixel-level tests cover both.
 - [ ] `service_name_from_interface` duplicated `pub(super)` in
       `shell/service.rs:85` and `scripting/context/proxy.rs:370`. Deferred from
       the dedup batch: sharing it means a new cross-crate dependency (candidate
