@@ -2594,9 +2594,7 @@ mod tests {
     #[test]
     fn checkbox_and_radio_emit_checkmark_content_only_when_checked() {
         let mut checkbox = node(1, "checkbox", 0.0, 0.0, 18.0, 18.0);
-        checkbox
-            .attributes
-            .insert("checked".into(), "true".into());
+        checkbox.attributes.insert("checked".into(), "true".into());
         assert_eq!(
             build_paint_content(&checkbox),
             DisplayPaintContent::Checkmark(DisplayCheckmarkPaint {

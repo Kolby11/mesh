@@ -9,13 +9,13 @@ use crate::chunk_cache::ChunkCache;
 use crate::host_api::{HostApiManifest, InterfaceProxy};
 use crate::pool;
 use crate::storage::{ScopedStorage, StorageManager, StorageScope, create_lua_storage_table};
+use crate::util::{default_runtime_storage_root, is_named_event_channel};
 use mesh_core_capability::CapabilitySet;
 use mesh_core_elements::VariableStore;
 use mesh_core_service::{InterfaceCatalog, InterfaceResolution};
 use mlua::{Error as LuaError, Function, Lua, LuaSerdeExt, Table, Value as LuaValue, Variadic};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use crate::util::{default_runtime_storage_root, is_named_event_channel};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -1286,7 +1286,9 @@ impl ScriptContext {
                 // script's own `require("mesh.x")` then returns nil via the lazy
                 // path. Leave the alias unbound so it falls through to nil.
                 if self.optional_interfaces.contains(&canonical) {
-                    globals.set(import.alias.as_str(), LuaValue::Nil).map_err(lua_err)?;
+                    globals
+                        .set(import.alias.as_str(), LuaValue::Nil)
+                        .map_err(lua_err)?;
                     continue;
                 }
                 let reason = lookup_failure_reason(&self.interface_catalog, &resolution);

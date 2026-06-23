@@ -356,15 +356,18 @@ impl Shell {
         total_render_started: Option<std::time::Instant>,
     ) -> Result<bool, ShellRunError> {
         let requests = self.components[index].component.child_surface_requests();
+        let requested_keys: HashSet<String> = requests
+            .iter()
+            .map(|request| request.node_key.clone())
+            .collect();
+        self.components[index]
+            .dismissed_child_node_keys
+            .retain(|node_key| requested_keys.contains(node_key));
         if requests.is_empty() || !self.presentation_engine.popup_supported() {
             self.destroy_all_child_surfaces(index);
             return Ok(false);
         }
 
-        let requested_keys: HashSet<String> = requests
-            .iter()
-            .map(|request| request.node_key.clone())
-            .collect();
         let mut child_index = 0;
         while child_index < self.components[index].children.len() {
             if requested_keys.contains(
@@ -381,6 +384,12 @@ impl Shell {
         let mut any_presented = false;
         for request in requests {
             if !matches!(request.kind, ChildSurfaceKind::Popover) {
+                continue;
+            }
+            if self.components[index]
+                .dismissed_child_node_keys
+                .contains(&request.node_key)
+            {
                 continue;
             }
             let child_surface_id = child_surface_id(parent_surface_id, &request.node_key);
@@ -544,7 +553,23 @@ impl Shell {
 
     fn drain_dismissed_child_popups(&mut self) {
         for surface_id in self.presentation_engine.take_dismissed_popups() {
+            let dismissed =
+                self.component_target_for_surface(&surface_id)
+                    .and_then(|(index, target)| match target {
+                        TargetRef::Child(child_index) => Some((
+                            index,
+                            self.components[index].children[child_index]
+                                .node_key
+                                .clone(),
+                        )),
+                        TargetRef::Parent => None,
+                    });
             self.destroy_child_surface_by_id(&surface_id);
+            if let Some((index, node_key)) = dismissed
+                && let Some(runtime) = self.components.get_mut(index)
+            {
+                runtime.dismissed_child_node_keys.insert(node_key);
+            }
         }
     }
 

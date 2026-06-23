@@ -232,12 +232,18 @@ fn complete_component_instance_members(
     {
         for variable in variables {
             if variable.starts_with(prefix) && !items.iter().any(|item| item.label == variable) {
-                items.push(component_member_variable_item(&variable, &instance.component_tag));
+                items.push(component_member_variable_item(
+                    &variable,
+                    &instance.component_tag,
+                ));
             }
         }
         for function in functions {
             if function.starts_with(prefix) && !items.iter().any(|item| item.label == function) {
-                items.push(component_member_function_item(&function, &instance.component_tag));
+                items.push(component_member_function_item(
+                    &function,
+                    &instance.component_tag,
+                ));
             }
         }
     }
@@ -328,11 +334,18 @@ fn complete_import_specifier(prefix: &str, registry: &ModuleRegistry) -> Vec<Com
         .collect();
 
     for name in registry.service_names() {
-        if BUILTIN_IMPORT_SPECIFIERS.iter().any(|(spec, _)| *spec == name) {
+        if BUILTIN_IMPORT_SPECIFIERS
+            .iter()
+            .any(|(spec, _)| *spec == name)
+        {
             continue;
         }
-        if let Some(item) = specifier_item(name, prefix, "service interface", CompletionItemKind::INTERFACE)
-        {
+        if let Some(item) = specifier_item(
+            name,
+            prefix,
+            "service interface",
+            CompletionItemKind::INTERFACE,
+        ) {
             items.push(item);
         }
     }
@@ -355,7 +368,14 @@ fn complete_import_member(
     if canonical == "mesh.i18n" {
         return ["t"]
             .into_iter()
-            .filter_map(|m| member_item(m, prefix, "i18n.t(key) -> string", CompletionItemKind::METHOD))
+            .filter_map(|m| {
+                member_item(
+                    m,
+                    prefix,
+                    "i18n.t(key) -> string",
+                    CompletionItemKind::METHOD,
+                )
+            })
             .collect();
     }
 
@@ -407,9 +427,12 @@ fn complete_import_member(
                 items.push(item);
             }
         }
-        if let Some(item) =
-            member_item("on_change", prefix, "register change handler", CompletionItemKind::METHOD)
-        {
+        if let Some(item) = member_item(
+            "on_change",
+            prefix,
+            "register change handler",
+            CompletionItemKind::METHOD,
+        ) {
             items.push(item);
         }
         return items;

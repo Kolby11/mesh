@@ -425,7 +425,11 @@ mod scroll_into_view_tests {
         assert_eq!(updates.len(), 1);
         // Reveal the leading edge → offset aligns the item top to the viewport top
         // at 400.
-        assert!((updates[0].1.y - 400.0).abs() < 0.01, "got {}", updates[0].1.y);
+        assert!(
+            (updates[0].1.y - 400.0).abs() < 0.01,
+            "got {}",
+            updates[0].1.y
+        );
     }
 
     #[test]
@@ -469,11 +473,13 @@ mod scroll_into_view_tests {
         // layout.x/y). outer viewport [0,200]; inner box at abs y 300 (its own
         // viewport [300,400]); item at abs y 380 (inside inner's viewport already).
         let item = node("root/0/0/0", "box", 0.0, 380.0, 40.0, 20.0);
-        let mut inner =
-            scrollable(node("root/0/0", "column", 0.0, 300.0, 100.0, 100.0), 0.0, 200.0);
+        let mut inner = scrollable(
+            node("root/0/0", "column", 0.0, 300.0, 100.0, 100.0),
+            0.0,
+            200.0,
+        );
         inner.children.push(item);
-        let mut outer =
-            scrollable(node("root/0", "column", 0.0, 0.0, 100.0, 200.0), 0.0, 400.0);
+        let mut outer = scrollable(node("root/0", "column", 0.0, 0.0, 100.0, 200.0), 0.0, 400.0);
         outer.children.push(inner);
         let mut root = node("root", "box", 0.0, 0.0, 100.0, 200.0);
         root.children.push(outer);
@@ -483,7 +489,10 @@ mod scroll_into_view_tests {
         // Inner: item [380,400] fits its viewport [300,400] → no inner scroll. Outer:
         // item screen-top 380 is below the 200-tall outer viewport → outer scrolls by
         // 200 to align the trailing edge.
-        assert!(!by_key.contains_key("root/0/0"), "inner should not move: {by_key:?}");
+        assert!(
+            !by_key.contains_key("root/0/0"),
+            "inner should not move: {by_key:?}"
+        );
         let outer = by_key.get("root/0").expect("outer should scroll");
         assert!((outer.y - 200.0).abs() < 0.01, "got {}", outer.y);
     }

@@ -1031,8 +1031,12 @@ impl SkiaPaintBackend {
         paint: PainterPaint,
         clip: ClipRect,
     ) {
-        self.draw_with_blend(canvas, paint.blend_mode, rect, clip, |this, canvas| {
-            match paint.style {
+        self.draw_with_blend(
+            canvas,
+            paint.blend_mode,
+            rect,
+            clip,
+            |this, canvas| match paint.style {
                 PainterPaintStyle::Fill => {
                     this.fill_shape(canvas, rect, 0.0, paint.color, clip, paint.filter)
                 }
@@ -1045,8 +1049,8 @@ impl SkiaPaintBackend {
                         clip,
                     );
                 }
-            }
-        });
+            },
+        );
     }
 
     fn draw_rounded_rect_command(
@@ -1057,8 +1061,12 @@ impl SkiaPaintBackend {
         paint: PainterPaint,
         clip: ClipRect,
     ) {
-        self.draw_with_blend(canvas, paint.blend_mode, rect, clip, |this, canvas| {
-            match paint.style {
+        self.draw_with_blend(
+            canvas,
+            paint.blend_mode,
+            rect,
+            clip,
+            |this, canvas| match paint.style {
                 PainterPaintStyle::Fill => {
                     this.fill_shape(canvas, rect, radius, paint.color, clip, paint.filter)
                 }
@@ -1072,8 +1080,8 @@ impl SkiaPaintBackend {
                         clip,
                     );
                 }
-            }
-        });
+            },
+        );
     }
 
     fn draw_path_command(

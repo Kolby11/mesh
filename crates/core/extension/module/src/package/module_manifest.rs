@@ -728,15 +728,13 @@ impl MeshDependencies {
                 version: Some(version),
                 required: true,
             })
-            .chain(
-                self.optional_backend
-                    .into_iter()
-                    .map(|(name, version)| manifest::InterfaceDependency {
-                        name,
-                        version: Some(version),
-                        required: false,
-                    }),
-            )
+            .chain(self.optional_backend.into_iter().map(|(name, version)| {
+                manifest::InterfaceDependency {
+                    name,
+                    version: Some(version),
+                    required: false,
+                }
+            }))
             .collect();
         manifest::DependenciesSection {
             modules: self.modules,

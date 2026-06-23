@@ -206,6 +206,11 @@ impl RetainedWidgetTree {
             if flags.contains(RetainedNodeDirtyFlags::CHILDREN) {
                 return None; // structural change
             }
+            let ancestor_only_flags =
+                RetainedNodeDirtyFlags::LAYOUT | RetainedNodeDirtyFlags::ATTRIBUTES;
+            if !fresh.child_ids.is_empty() && flags.difference(ancestor_only_flags).is_empty() {
+                continue;
+            }
             affected.insert(node_id);
         }
         Some((affected, total))
@@ -373,6 +378,9 @@ fn attributes_fingerprint(node: &WidgetNode) -> u64 {
     let mut hasher = RuntimeTreeHasher::default();
     node.tag.hash(&mut hasher);
     for (key, value) in &node.attributes {
+        if key == "content" && !node.children.is_empty() {
+            continue;
+        }
         key.hash(&mut hasher);
         value.hash(&mut hasher);
     }

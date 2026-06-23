@@ -4,10 +4,10 @@ use super::exec_stream::{StreamState, spawn_stream};
 use super::logging::log_message;
 use super::{BackendScriptError, MIN_POLL_INTERVAL_MS};
 use crate::storage::{ScopedStorage, StorageManager, StorageScope, create_lua_storage_table};
+use crate::util::{default_runtime_storage_root, is_named_event_channel};
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value as JsonValue;
 use std::collections::HashSet;
-use crate::util::{default_runtime_storage_root, is_named_event_channel};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -743,7 +743,6 @@ impl BackendScriptContext {
 fn is_reserved_backend_hook(name: &str) -> bool {
     matches!(name, "init" | "start" | "stop")
 }
-
 
 fn create_backend_event_channel(
     lua: &Lua,

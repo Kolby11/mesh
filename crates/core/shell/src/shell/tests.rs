@@ -393,6 +393,10 @@ impl super::types::ShellComponent for FocusRecordingComponent {
         &self.surface_id
     }
 
+    fn initial_visibility(&self) -> Option<bool> {
+        Some(true)
+    }
+
     fn mount(
         &mut self,
         _ctx: super::types::ComponentContext,
@@ -475,6 +479,175 @@ impl super::types::ShellComponent for FocusRecordingComponent {
             .unwrap()
             .keyboard_mode_overrides
             .push(mode);
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PopoverHarnessState {
+    open: bool,
+    node_key: String,
+    anchor_rect: (i32, i32, i32, i32),
+    content_size: (u32, u32),
+    painted_nodes: Vec<String>,
+    child_inputs: Vec<(String, ComponentInput)>,
+    profiling_enabled: Vec<bool>,
+}
+
+impl Default for PopoverHarnessState {
+    fn default() -> Self {
+        Self {
+            open: true,
+            node_key: "root/popover".into(),
+            anchor_rect: (8, 10, 40, 16),
+            content_size: (72, 32),
+            painted_nodes: Vec::new(),
+            child_inputs: Vec::new(),
+            profiling_enabled: Vec::new(),
+        }
+    }
+}
+
+struct PopoverHarnessComponent {
+    surface_id: String,
+    state: Arc<Mutex<PopoverHarnessState>>,
+}
+
+impl PopoverHarnessComponent {
+    fn new(state: Arc<Mutex<PopoverHarnessState>>) -> Self {
+        Self {
+            surface_id: "@test/popover-host".into(),
+            state,
+        }
+    }
+}
+
+impl super::types::ShellComponent for PopoverHarnessComponent {
+    fn id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn surface_id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn initial_visibility(&self) -> Option<bool> {
+        Some(true)
+    }
+
+    fn mount(
+        &mut self,
+        _ctx: super::types::ComponentContext,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_core_event(
+        &mut self,
+        _event: &super::types::CoreEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_service_event(
+        &mut self,
+        _event: &ServiceEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn tick(&mut self) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn wants_render(&self) -> bool {
+        true
+    }
+
+    fn wants_immediate_rerender(&self) -> bool {
+        false
+    }
+
+    fn render(
+        &mut self,
+        surface: &mut dyn mesh_core_wayland::ShellSurface,
+    ) -> Result<(), super::types::ComponentError> {
+        surface.set_size(120, 36);
+        Ok(())
+    }
+
+    fn paint(
+        &mut self,
+        _theme: &mesh_core_theme::Theme,
+        _width: u32,
+        _height: u32,
+        buffer: &mut mesh_core_render::PixelBuffer,
+        _scale: f32,
+    ) -> Result<(), super::types::ComponentError> {
+        buffer.clear(mesh_core_elements::style::Color {
+            r: 8,
+            g: 8,
+            b: 8,
+            a: 255,
+        });
+        Ok(())
+    }
+
+    fn theme_changed(&mut self) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn child_surface_requests(&self) -> Vec<super::types::ChildSurfaceRequest> {
+        let state = self.state.lock().unwrap();
+        if !state.open {
+            return Vec::new();
+        }
+        vec![super::types::ChildSurfaceRequest {
+            node_key: state.node_key.clone(),
+            kind: super::types::ChildSurfaceKind::Popover,
+            anchor_rect: state.anchor_rect,
+            content_size: state.content_size,
+            placement: mesh_core_elements::PopoverPlacement::default(),
+        }]
+    }
+
+    fn paint_child_surface(
+        &self,
+        node_key: &str,
+        buffer: &mut mesh_core_render::PixelBuffer,
+        _scale: f32,
+    ) -> Result<bool, super::types::ComponentError> {
+        self.state
+            .lock()
+            .unwrap()
+            .painted_nodes
+            .push(node_key.to_string());
+        buffer.clear(mesh_core_elements::style::Color {
+            r: 24,
+            g: 48,
+            b: 96,
+            a: 255,
+        });
+        Ok(true)
+    }
+
+    fn handle_child_surface_input(
+        &mut self,
+        node_key: &str,
+        _theme: &mesh_core_theme::Theme,
+        _width: u32,
+        _height: u32,
+        input: ComponentInput,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        self.state
+            .lock()
+            .unwrap()
+            .child_inputs
+            .push((node_key.to_string(), input));
+        Ok(Vec::new())
+    }
+
+    fn set_profiling_enabled(&mut self, enabled: bool) {
+        self.state.lock().unwrap().profiling_enabled.push(enabled);
     }
 }
 
@@ -4424,6 +4597,165 @@ fn component_runtime_resolves_parent_and_child_surface_targets() {
         shell.components[0].children[0].target.force_full_present,
         "target_mut(Child) must address the child's own render state"
     );
+}
+
+#[test]
+fn child_surface_reconcile_creates_popup_and_paints_subtree() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+
+    shell.render_components().unwrap();
+
+    assert_eq!(shell.components[0].children.len(), 1);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    let config = shell
+        .presentation_engine
+        .testing_popup_config(&child_id)
+        .expect("child popover should configure an xdg_popup");
+    assert_eq!(config.parent_surface_id, "@test/popover-host");
+    assert_eq!(config.placement.anchor_rect, (8, 10, 40, 16));
+    assert_eq!(config.placement.size, (72, 32));
+    assert!(
+        shell
+            .presentation_engine
+            .testing_presented_surfaces()
+            .iter()
+            .any(|surface| surface == &child_id),
+        "child popup subtree should be presented separately"
+    );
+    assert_eq!(
+        state.lock().unwrap().painted_nodes.as_slice(),
+        ["root/popover"]
+    );
+}
+
+#[test]
+fn child_surface_reconcile_removes_closed_popover() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+
+    shell.render_components().unwrap();
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    state.lock().unwrap().open = false;
+    shell.render_components().unwrap();
+
+    assert!(shell.components[0].children.is_empty());
+    assert!(
+        shell
+            .presentation_engine
+            .testing_destroyed_popups()
+            .contains(&child_id)
+    );
+    assert!(!shell.core.surfaces.contains_key(&child_id));
+    assert!(shell.component_target_for_surface(&child_id).is_none());
+}
+
+#[test]
+fn dismissed_popup_drain_removes_child_surface() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+
+    shell.render_components().unwrap();
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    shell
+        .presentation_engine
+        .testing_push_dismissed_popup(child_id.clone());
+    shell.render_components().unwrap();
+
+    assert!(shell.components[0].children.is_empty());
+    assert!(!shell.core.surfaces.contains_key(&child_id));
+    assert!(shell.component_target_for_surface(&child_id).is_none());
+
+    {
+        let mut state = state.lock().unwrap();
+        state.open = false;
+    }
+    shell.render_components().unwrap();
+    {
+        let mut state = state.lock().unwrap();
+        state.open = true;
+    }
+    shell.render_components().unwrap();
+    assert_eq!(
+        shell.components[0].children.len(),
+        1,
+        "a later close/open cycle should create a fresh popup"
+    );
+}
+
+#[test]
+fn child_surface_input_routes_to_local_child_handler_and_profiles() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    shell.render_components().unwrap();
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+
+    shell
+        .presentation_engine
+        .testing_push_event(mesh_core_presentation::WindowEvent::Scroll {
+            surface_id: child_id.clone(),
+            x: 6.0,
+            y: 7.0,
+            dx: 0.0,
+            dy: -1.0,
+        });
+    shell.presentation_engine.testing_push_event(
+        mesh_core_presentation::WindowEvent::PointerButton {
+            surface_id: child_id.clone(),
+            x: 10.0,
+            y: 12.0,
+            pressed: true,
+        },
+    );
+    shell.dispatch_wayland().unwrap();
+
+    let inputs = &state.lock().unwrap().child_inputs;
+    assert_eq!(inputs.len(), 2);
+    assert_eq!(inputs[0].0, "root/popover");
+    assert!(matches!(
+        inputs[0].1,
+        ComponentInput::Scroll {
+            x: 6.0,
+            y: 7.0,
+            dx: 0.0,
+            dy: -1.0
+        }
+    ));
+    assert_eq!(inputs[1].0, "root/popover");
+    assert!(matches!(
+        inputs[1].1,
+        ComponentInput::PointerButton {
+            x: 10.0,
+            y: 12.0,
+            pressed: true
+        }
+    ));
+    let snapshot = shell.build_debug_snapshot();
+    let child_surface = snapshot
+        .profiling
+        .expect("profiling should be enabled")
+        .surfaces
+        .into_iter()
+        .find(|surface| surface.surface_id == child_id)
+        .expect("child input should be profiled against the popup surface");
+    assert!(child_surface.stages.iter().any(|stage| {
+        stage.stage == mesh_core_debug::ProfilingStage::InputHandling && stage.sample_count >= 2
+    }));
 }
 
 #[test]

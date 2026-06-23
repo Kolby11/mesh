@@ -2673,12 +2673,14 @@ fn navigation_bar_keyboard_audio_popover_slider_responds_to_arrow_keys() {
         )
         .unwrap();
     match requests.as_slice() {
-        [CoreRequest::ServiceCommand {
-            interface,
-            command,
-            payload,
-            ..
-        }] => {
+        [
+            CoreRequest::ServiceCommand {
+                interface,
+                command,
+                payload,
+                ..
+            },
+        ] => {
             assert_eq!(interface, "mesh.audio");
             assert_eq!(command, "set_volume");
             assert_eq!(payload["device_id"], serde_json::json!("default"));

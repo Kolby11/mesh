@@ -139,6 +139,9 @@ pub fn load_frontend_module_settings(
     };
 
     let mut layout = surface_layout_from_manifest(manifest);
+    if let Some(display_transition) = settings_schema_display_transition_default(manifest) {
+        layout.display_transition = display_transition;
+    }
     let surface = raw.get("surface");
 
     if let Some(anchor) = surface
@@ -234,6 +237,18 @@ pub fn load_frontend_module_settings(
     }
 
     FrontendModuleSettingsState { raw, layout }
+}
+
+fn settings_schema_display_transition_default(
+    manifest: &Manifest,
+) -> Option<SurfaceDisplayTransition> {
+    let schema = manifest.settings.as_ref()?.inline_schema.as_ref()?;
+    schema
+        .get("surface")
+        .and_then(|value| value.get("properties"))
+        .and_then(|value| value.get("display_transition"))
+        .and_then(|value| value.get("default"))
+        .and_then(parse_display_transition)
 }
 
 fn parse_display_transition(value: &serde_json::Value) -> Option<SurfaceDisplayTransition> {

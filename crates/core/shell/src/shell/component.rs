@@ -700,14 +700,108 @@ fn scripts_reference_element_metrics(compiled: &CompiledFrontendModule) -> bool 
         .script
         .as_ref()
         .is_some_and(|script| uses_metrics(&script.source))
+        || template_references_element_metrics(&compiled.component.template, &uses_metrics)
+        || template_declares_element_refs(&compiled.component.template)
         || template_uses_bind_this(&compiled.component.template)
         || compiled.local_components.values().any(|component| {
             component
                 .script
                 .as_ref()
                 .is_some_and(|script| uses_metrics(&script.source))
+                || template_references_element_metrics(&component.template, &uses_metrics)
+                || template_declares_element_refs(&component.template)
                 || template_uses_bind_this(&component.template)
         })
+}
+
+fn template_references_element_metrics(
+    template: &Option<mesh_core_component::template::TemplateBlock>,
+    uses_metrics: &impl Fn(&str) -> bool,
+) -> bool {
+    template
+        .as_ref()
+        .is_some_and(|template| nodes_reference_element_metrics(&template.root, uses_metrics))
+}
+
+fn nodes_reference_element_metrics(
+    nodes: &[TemplateNode],
+    uses_metrics: &impl Fn(&str) -> bool,
+) -> bool {
+    nodes.iter().any(|node| match node {
+        TemplateNode::Element(element) => {
+            element
+                .attributes
+                .iter()
+                .any(|attribute| attribute_value_references_metrics(&attribute.value, uses_metrics))
+                || nodes_reference_element_metrics(&element.children, uses_metrics)
+        }
+        TemplateNode::Component(component) => {
+            component
+                .props
+                .iter()
+                .any(|attribute| attribute_value_references_metrics(&attribute.value, uses_metrics))
+                || nodes_reference_element_metrics(&component.children, uses_metrics)
+        }
+        TemplateNode::If(if_node) => {
+            nodes_reference_element_metrics(&if_node.then_children, uses_metrics)
+                || nodes_reference_element_metrics(&if_node.else_children, uses_metrics)
+        }
+        TemplateNode::For(for_node) => {
+            nodes_reference_element_metrics(&for_node.children, uses_metrics)
+        }
+        TemplateNode::Text(text) => uses_metrics(&text.content),
+        TemplateNode::Expr(expr) => uses_metrics(&expr.expression),
+        TemplateNode::Slot(_) => false,
+    })
+}
+
+fn attribute_value_references_metrics(
+    value: &AttributeValue,
+    uses_metrics: &impl Fn(&str) -> bool,
+) -> bool {
+    match value {
+        AttributeValue::Static(value)
+        | AttributeValue::Binding(value)
+        | AttributeValue::TwoWayBinding(value)
+        | AttributeValue::InstanceBinding(value)
+        | AttributeValue::EventHandler(value) => uses_metrics(value),
+        AttributeValue::EventHandlerCall { handler, args } => {
+            uses_metrics(handler) || args.iter().any(|arg| uses_metrics(arg))
+        }
+    }
+}
+
+fn template_declares_element_refs(
+    template: &Option<mesh_core_component::template::TemplateBlock>,
+) -> bool {
+    template
+        .as_ref()
+        .is_some_and(|template| nodes_declare_element_refs(&template.root))
+}
+
+fn nodes_declare_element_refs(nodes: &[TemplateNode]) -> bool {
+    nodes.iter().any(|node| match node {
+        TemplateNode::Element(element) => {
+            element
+                .attributes
+                .iter()
+                .any(|attribute| matches!(attribute.name.as_str(), "ref" | "id"))
+                || nodes_declare_element_refs(&element.children)
+        }
+        TemplateNode::Component(component) => {
+            component
+                .props
+                .iter()
+                .any(|attribute| matches!(attribute.name.as_str(), "ref" | "id"))
+                || nodes_declare_element_refs(&component.children)
+        }
+        TemplateNode::If(if_node) => {
+            nodes_declare_element_refs(&if_node.then_children)
+                || nodes_declare_element_refs(&if_node.else_children)
+        }
+        TemplateNode::For(for_node) => nodes_declare_element_refs(&for_node.children),
+        TemplateNode::Slot(_) | TemplateNode::Text(_) | TemplateNode::Expr(_) => false,
+    })
 }
 
 fn template_uses_bind_this(

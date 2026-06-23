@@ -433,7 +433,10 @@ fn common_whitespace_prefix(lines: &[String]) -> String {
         if line.trim().is_empty() {
             continue;
         }
-        let ws: String = line.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+        let ws: String = line
+            .chars()
+            .take_while(|c| *c == ' ' || *c == '\t')
+            .collect();
         prefix = Some(match prefix {
             None => ws,
             Some(existing) => {
@@ -472,7 +475,8 @@ mod tests {
 
     #[test]
     fn reindents_template_nesting() {
-        let src = "<template>\n<box>\n<button>\n<icon name=\"x\" />\n</button>\n</box>\n</template>\n";
+        let src =
+            "<template>\n<box>\n<button>\n<icon name=\"x\" />\n</button>\n</box>\n</template>\n";
         let expected = "\
 <template>
     <box>

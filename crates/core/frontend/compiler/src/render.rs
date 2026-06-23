@@ -983,7 +983,6 @@ mod tests {
         assert_eq!(progress.accessibility.state.value_max, Some(100.0));
     }
 
-
     #[test]
     fn phase88_button_aliases_preserve_source_semantics_without_icon_shortcuts() {
         let component = mesh_core_component::parse_component(

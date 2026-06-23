@@ -73,6 +73,17 @@ pub struct PresentationEngine {
 enum Backend {
     WaylandSurface(Box<LayerShellBackend>),
     DevWindow(DevWindowBackend),
+    Testing(TestingBackend),
+}
+
+#[derive(Default)]
+struct TestingBackend {
+    popup_supported: bool,
+    popup_configs: HashMap<String, PopupConfig>,
+    destroyed_popups: Vec<String>,
+    dismissed_popups: Vec<String>,
+    events: Vec<WindowEvent>,
+    presented: Vec<String>,
 }
 
 impl PresentationEngine {
@@ -104,6 +115,54 @@ impl PresentationEngine {
         Self { backend }
     }
 
+    #[doc(hidden)]
+    pub fn testing_with_popup_support(popup_supported: bool) -> Self {
+        Self {
+            backend: Backend::Testing(TestingBackend {
+                popup_supported,
+                ..TestingBackend::default()
+            }),
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_popup_config(&self, surface_id: &str) -> Option<&PopupConfig> {
+        match &self.backend {
+            Backend::Testing(backend) => backend.popup_configs.get(surface_id),
+            _ => None,
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_destroyed_popups(&self) -> &[String] {
+        match &self.backend {
+            Backend::Testing(backend) => &backend.destroyed_popups,
+            _ => &[],
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_presented_surfaces(&self) -> &[String] {
+        match &self.backend {
+            Backend::Testing(backend) => &backend.presented,
+            _ => &[],
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_push_dismissed_popup(&mut self, surface_id: impl Into<String>) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            backend.dismissed_popups.push(surface_id.into());
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_push_event(&mut self, event: WindowEvent) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            backend.events.push(event);
+        }
+    }
+
     pub fn configure(&mut self, surface_id: &str, cfg: LayerSurfaceConfig) {
         if let Backend::WaylandSurface(bridge) = &mut self.backend {
             bridge.configure(surface_id, cfg);
@@ -117,6 +176,7 @@ impl PresentationEngine {
         match &self.backend {
             Backend::WaylandSurface(bridge) => bridge.popup_supported(),
             Backend::DevWindow(_) => false,
+            Backend::Testing(backend) => backend.popup_supported,
         }
     }
 
@@ -130,21 +190,44 @@ impl PresentationEngine {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.configure_popup(surface_id, config),
             Backend::DevWindow(_) => Ok(()),
+            Backend::Testing(backend) => {
+                backend.popup_configs.insert(surface_id.to_string(), config);
+                Ok(())
+            }
         }
     }
 
     /// Destroy a previously promoted popup surface. No-op on the dev-window backend.
     pub fn destroy_popup(&mut self, surface_id: &str) {
-        if let Backend::WaylandSurface(bridge) = &mut self.backend {
-            bridge.destroy_popup(surface_id);
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.destroy_popup(surface_id),
+            Backend::DevWindow(_) => {}
+            Backend::Testing(backend) => {
+                backend.popup_configs.remove(surface_id);
+                backend.destroyed_popups.push(surface_id.to_string());
+            }
         }
     }
 
     /// Destroy every popup parented to `parent_surface_id` (e.g. when the host
     /// surface is hidden). No-op on the dev-window backend.
     pub fn destroy_popups_for_parent(&mut self, parent_surface_id: &str) {
-        if let Backend::WaylandSurface(bridge) = &mut self.backend {
-            bridge.destroy_popups_for_parent(parent_surface_id);
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.destroy_popups_for_parent(parent_surface_id),
+            Backend::DevWindow(_) => {}
+            Backend::Testing(backend) => {
+                let ids = backend
+                    .popup_configs
+                    .iter()
+                    .filter_map(|(id, config)| {
+                        (config.parent_surface_id == parent_surface_id).then_some(id.clone())
+                    })
+                    .collect::<Vec<_>>();
+                for id in ids {
+                    backend.popup_configs.remove(&id);
+                    backend.destroyed_popups.push(id);
+                }
+            }
         }
     }
 
@@ -154,6 +237,7 @@ impl PresentationEngine {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.take_dismissed_popups(),
             Backend::DevWindow(_) => Vec::new(),
+            Backend::Testing(backend) => std::mem::take(&mut backend.dismissed_popups),
         }
     }
 
@@ -189,6 +273,12 @@ impl PresentationEngine {
                 bridge.present_with_damage(surface_id, title, visible, buffer, damage)
             }
             Backend::DevWindow(bridge) => bridge.present(surface_id, title, visible, buffer),
+            Backend::Testing(backend) => {
+                if visible {
+                    backend.presented.push(surface_id.to_string());
+                }
+                Ok(())
+            }
         }
     }
 
@@ -225,6 +315,7 @@ impl PresentationEngine {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.surface_size(surface_id),
             Backend::DevWindow(_) => Ok(None),
+            Backend::Testing(_) => Ok(None),
         }
     }
 
@@ -232,6 +323,7 @@ impl PresentationEngine {
         match &self.backend {
             Backend::WaylandSurface(bridge) => bridge.surface_size_if_known(surface_id),
             Backend::DevWindow(_) => None,
+            Backend::Testing(_) => None,
         }
     }
 
@@ -241,6 +333,7 @@ impl PresentationEngine {
                 bridge.surface_waiting_for_frame_callback(surface_id)
             }
             Backend::DevWindow(_) => false,
+            Backend::Testing(_) => false,
         }
     }
 
@@ -248,6 +341,7 @@ impl PresentationEngine {
         match &self.backend {
             Backend::WaylandSurface(bridge) => bridge.surface_scale(surface_id),
             Backend::DevWindow(_) => 1.0,
+            Backend::Testing(_) => 1.0,
         }
     }
 
@@ -255,6 +349,7 @@ impl PresentationEngine {
         match &self.backend {
             Backend::WaylandSurface(bridge) => bridge.surface_needs_full_redraw(surface_id),
             Backend::DevWindow(_) => false,
+            Backend::Testing(_) => false,
         }
     }
 
@@ -268,6 +363,7 @@ impl PresentationEngine {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.pump(),
             Backend::DevWindow(bridge) => bridge.pump(),
+            Backend::Testing(_) => {}
         }
     }
 
@@ -275,6 +371,7 @@ impl PresentationEngine {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.poll_events(),
             Backend::DevWindow(bridge) => bridge.poll_events(),
+            Backend::Testing(backend) => std::mem::take(&mut backend.events),
         }
     }
 
@@ -297,6 +394,7 @@ impl PresentationEngine {
         match &self.backend {
             Backend::WaylandSurface(_) => false,
             Backend::DevWindow(bridge) => bridge.needs_polling_dispatch(),
+            Backend::Testing(_) => false,
         }
     }
 
@@ -313,6 +411,7 @@ impl PresentationEngine {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.wait_for_events(timeout, eventfd_fd),
             Backend::DevWindow(_) => Ok(WaitResult::deadline_expired()),
+            Backend::Testing(_) => Ok(WaitResult::deadline_expired()),
         }
     }
 }

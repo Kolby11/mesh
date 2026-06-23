@@ -180,9 +180,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             std::mem::take(&mut *runtimes)
         };
         for runtime in runtimes.values_mut() {
-            if !Self::runtime_observes_service_event(runtime, event) {
-                continue;
-            }
+            let observes_event = Self::runtime_observes_service_event(runtime, event);
             let capabilities = &runtime.script_ctx.capabilities;
             let has_read = capabilities.is_granted(&caps.read)
                 || caps
@@ -193,6 +191,9 @@ impl ShellComponent for FrontendSurfaceComponent {
                     .locale
                     .as_ref()
                     .is_some_and(|capability| capabilities.is_granted(capability));
+            if !has_read && !observes_event {
+                continue;
+            }
             // Always apply the Lua-level service payload so interface
             // proxies can read state fields even when the runtime lacks
             // the canonical SERVICE_NAME.read capability.
@@ -1662,7 +1663,7 @@ fn collect_child_surface_requests(
     if source_element_tag(node) == "popover"
         && popover_is_open(node)
         && let Some(node_key) = node.attributes.get("_mesh_key")
-        && let Some(anchor) = find_node_bounds_by_key(root, node_key, 0.0, 0.0)
+        && let Some(anchor) = popover_anchor_bounds(root, node, node_key)
     {
         let content = subtree_content_size(node).unwrap_or((
             node.layout.width.ceil().max(1.0) as u32,
@@ -1680,6 +1681,106 @@ fn collect_child_surface_requests(
     for child in &node.children {
         collect_child_surface_requests(root, child, requests);
     }
+}
+
+fn popover_anchor_bounds(
+    root: &WidgetNode,
+    popover: &WidgetNode,
+    popover_key: &str,
+) -> Option<(f32, f32, f32, f32)> {
+    popover_anchor_reference(popover)
+        .and_then(|reference| find_node_bounds_by_reference(root, reference, 0.0, 0.0))
+        .or_else(|| find_node_bounds_by_key(root, popover_key, 0.0, 0.0))
+}
+
+fn popover_anchor_reference(popover: &WidgetNode) -> Option<&str> {
+    for name in ["anchor-ref", "anchor-target", "anchor-element", "target"] {
+        if let Some(value) = non_empty_attr(popover, name) {
+            return Some(value);
+        }
+    }
+
+    let anchor = non_empty_attr(popover, "anchor")?;
+    if mesh_core_elements::PopoverPlacement::from_node(popover).anchor
+        == mesh_core_elements::PopoverPlacement::from_attributes(&Default::default()).anchor
+        && !matches!(
+            anchor.trim().to_ascii_lowercase().as_str(),
+            "center"
+                | "top"
+                | "bottom"
+                | "left"
+                | "right"
+                | "top-left"
+                | "top_left"
+                | "top-right"
+                | "top_right"
+                | "bottom-left"
+                | "bottom_left"
+                | "bottom-right"
+                | "bottom_right"
+        )
+    {
+        return Some(anchor);
+    }
+    None
+}
+
+fn non_empty_attr<'a>(node: &'a WidgetNode, name: &str) -> Option<&'a str> {
+    node.attributes
+        .get(name)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+}
+
+fn find_node_bounds_by_reference(
+    node: &WidgetNode,
+    reference: &str,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<(f32, f32, f32, f32)> {
+    if node
+        .attributes
+        .get("_mesh_key")
+        .is_some_and(|key| key == reference)
+        || node
+            .attributes
+            .get("ref")
+            .is_some_and(|value| value == reference)
+        || node
+            .attributes
+            .get("id")
+            .is_some_and(|value| value == reference)
+        || node
+            .attributes
+            .get("bind:this")
+            .is_some_and(|value| value == reference)
+    {
+        return Some((
+            node.layout.x + offset_x,
+            node.layout.y + offset_y,
+            node.layout.x + offset_x + node.layout.width,
+            node.layout.y + offset_y + node.layout.height,
+        ));
+    }
+
+    let scroll_x = node
+        .attributes
+        .get("_mesh_scroll_x")
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0);
+    let scroll_y = node
+        .attributes
+        .get("_mesh_scroll_y")
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0);
+    let offset_x = offset_x + node.layout.x - scroll_x;
+    let offset_y = offset_y + node.layout.y - scroll_y;
+    for child in &node.children {
+        if let Some(bounds) = find_node_bounds_by_reference(child, reference, offset_x, offset_y) {
+            return Some(bounds);
+        }
+    }
+    None
 }
 
 fn popover_is_open(node: &WidgetNode) -> bool {
@@ -1984,6 +2085,29 @@ mod tests {
         assert_eq!(requests[0].anchor_rect, (20, 42, 80, 10));
         assert_eq!(requests[0].content_size, (96, 36));
         assert_eq!(requests[0].placement.offset_y, 6);
+    }
+
+    #[test]
+    fn open_popover_anchor_ref_uses_trigger_bounds() {
+        let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 80.0);
+        let mut trigger = keyed_node("button", "root/trigger", 12.0, 8.0, 44.0, 20.0);
+        trigger
+            .attributes
+            .insert("ref".into(), "menu_button".into());
+        let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 80.0, 10.0);
+        popover.attributes.insert("open".into(), "true".into());
+        popover
+            .attributes
+            .insert("anchor-ref".into(), "menu_button".into());
+        popover.attributes.insert("gravity".into(), "bottom".into());
+        root.children.push(trigger);
+        root.children.push(popover);
+
+        let mut requests = Vec::new();
+        collect_child_surface_requests(&root, &root, &mut requests);
+
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].anchor_rect, (12, 8, 44, 20));
     }
 
     #[test]

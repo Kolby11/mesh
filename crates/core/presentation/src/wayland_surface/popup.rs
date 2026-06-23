@@ -156,9 +156,7 @@ pub(super) fn map_gravity(gravity: PopupGravity) -> xdg_positioner::Gravity {
 
 /// Map a [`PopupConstraint`] onto the Wayland `xdg_positioner`
 /// constraint-adjustment bitflags.
-pub(super) fn map_constraint(
-    constraint: PopupConstraint,
-) -> xdg_positioner::ConstraintAdjustment {
+pub(super) fn map_constraint(constraint: PopupConstraint) -> xdg_positioner::ConstraintAdjustment {
     use xdg_positioner::ConstraintAdjustment;
     let mut adjustment = ConstraintAdjustment::None;
     if constraint.slide_x {
@@ -188,8 +186,14 @@ mod tests {
 
     #[test]
     fn anchor_maps_to_wayland_enum() {
-        assert_eq!(map_anchor(PopupAnchor::Bottom), xdg_positioner::Anchor::Bottom);
-        assert_eq!(map_anchor(PopupAnchor::Center), xdg_positioner::Anchor::None);
+        assert_eq!(
+            map_anchor(PopupAnchor::Bottom),
+            xdg_positioner::Anchor::Bottom
+        );
+        assert_eq!(
+            map_anchor(PopupAnchor::Center),
+            xdg_positioner::Anchor::None
+        );
         assert_eq!(
             map_anchor(PopupAnchor::TopRight),
             xdg_positioner::Anchor::TopRight
@@ -230,6 +234,9 @@ mod tests {
             resize_x: false,
             resize_y: false,
         };
-        assert_eq!(map_constraint(none), xdg_positioner::ConstraintAdjustment::None);
+        assert_eq!(
+            map_constraint(none),
+            xdg_positioner::ConstraintAdjustment::None
+        );
     }
 }

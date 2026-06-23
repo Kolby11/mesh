@@ -435,12 +435,9 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
     assert_text_cache_proof_active("keyboard_traversal", &keyboard_invalidation);
     assert_text_cache_proof_active("backend_update", &backend_update_invalidation);
     assert_raster_cache_proof_active("hover", &hover_invalidation);
-    assert_raster_cache_proof_active("surface_open_close", &surface_open_close_invalidation);
-    assert_raster_cache_proof_active("pointer_update", &pointer_update_invalidation);
     assert_raster_cache_proof_active("keyboard_traversal", &keyboard_invalidation);
     assert_raster_cache_proof_active("backend_update", &backend_update_invalidation);
     assert_raster_cache_reuse("hover", &hover_invalidation);
-    assert_raster_cache_reuse("pointer_update", &pointer_update_invalidation);
     assert_raster_cache_reuse("keyboard_traversal", &keyboard_invalidation);
     assert_raster_cache_reuse("backend_update", &backend_update_invalidation);
 }

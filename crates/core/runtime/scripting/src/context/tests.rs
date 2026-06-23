@@ -802,7 +802,10 @@ end
 
     ctx.call_init().unwrap();
 
-    assert_eq!(ctx.state.get("label"), Some(serde_json::json!("nav.volume")));
+    assert_eq!(
+        ctx.state.get("label"),
+        Some(serde_json::json!("nav.volume"))
+    );
 }
 
 #[test]
@@ -823,8 +826,14 @@ end
 
     ctx.call_init().unwrap();
 
-    assert_eq!(ctx.state.get("current_locale"), Some(serde_json::json!("en")));
-    assert_eq!(ctx.state.get("set_type"), Some(serde_json::json!("function")));
+    assert_eq!(
+        ctx.state.get("current_locale"),
+        Some(serde_json::json!("en"))
+    );
+    assert_eq!(
+        ctx.state.get("set_type"),
+        Some(serde_json::json!("function"))
+    );
 }
 
 #[test]
@@ -862,7 +871,10 @@ end
 
     ctx.call_init().unwrap();
 
-    assert_eq!(ctx.state.get("label"), Some(serde_json::json!("nav.battery")));
+    assert_eq!(
+        ctx.state.get("label"),
+        Some(serde_json::json!("nav.battery"))
+    );
 }
 
 #[test]

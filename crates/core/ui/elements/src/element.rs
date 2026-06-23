@@ -745,42 +745,12 @@ macro_rules! contract {
 }
 
 pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
-    contract!(
-        Box,
-        "box",
-        Layout,
-        AccessibilityRole::Region,
-        false
-    ),
+    contract!(Box, "box", Layout, AccessibilityRole::Region, false),
     contract!(Row, "row", Layout, AccessibilityRole::Region, false),
-    contract!(
-        Column,
-        "column",
-        Layout,
-        AccessibilityRole::Region,
-        false
-    ),
-    contract!(
-        Grid,
-        "grid",
-        Layout,
-        AccessibilityRole::Region,
-        false
-    ),
-    contract!(
-        Stack,
-        "stack",
-        Layout,
-        AccessibilityRole::Region,
-        false
-    ),
-    contract!(
-        Spacer,
-        "spacer",
-        Layout,
-        AccessibilityRole::Region,
-        false
-    ),
+    contract!(Column, "column", Layout, AccessibilityRole::Region, false),
+    contract!(Grid, "grid", Layout, AccessibilityRole::Region, false),
+    contract!(Stack, "stack", Layout, AccessibilityRole::Region, false),
+    contract!(Spacer, "spacer", Layout, AccessibilityRole::Region, false),
     contract!(
         Divider,
         "divider",
@@ -802,34 +772,10 @@ pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
         AccessibilityRole::Region,
         false
     ),
-    contract!(
-        Section,
-        "section",
-        Layout,
-        AccessibilityRole::Region,
-        false
-    ),
-    contract!(
-        Header,
-        "header",
-        Layout,
-        AccessibilityRole::Region,
-        false
-    ),
-    contract!(
-        Footer,
-        "footer",
-        Layout,
-        AccessibilityRole::Region,
-        false
-    ),
-    contract!(
-        Group,
-        "group",
-        Layout,
-        AccessibilityRole::Region,
-        false
-    ),
+    contract!(Section, "section", Layout, AccessibilityRole::Region, false),
+    contract!(Header, "header", Layout, AccessibilityRole::Region, false),
+    contract!(Footer, "footer", Layout, AccessibilityRole::Region, false),
+    contract!(Group, "group", Layout, AccessibilityRole::Region, false),
     contract!(
         FormRow,
         "form-row",
@@ -837,34 +783,10 @@ pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
         AccessibilityRole::Region,
         false
     ),
-    contract!(
-        Text,
-        "text",
-        Display,
-        AccessibilityRole::Label,
-        false
-    ),
-    contract!(
-        Icon,
-        "icon",
-        Display,
-        AccessibilityRole::Image,
-        false
-    ),
-    contract!(
-        Image,
-        "image",
-        Display,
-        AccessibilityRole::Image,
-        false
-    ),
-    contract!(
-        Badge,
-        "badge",
-        Display,
-        AccessibilityRole::Status,
-        false
-    ),
+    contract!(Text, "text", Display, AccessibilityRole::Label, false),
+    contract!(Icon, "icon", Display, AccessibilityRole::Image, false),
+    contract!(Image, "image", Display, AccessibilityRole::Image, false),
+    contract!(Badge, "badge", Display, AccessibilityRole::Status, false),
     contract!(
         Progress,
         "progress",
@@ -879,20 +801,8 @@ pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
         AccessibilityRole::ProgressBar,
         false
     ),
-    contract!(
-        Tooltip,
-        "tooltip",
-        Display,
-        AccessibilityRole::Alert,
-        false
-    ),
-    contract!(
-        Avatar,
-        "avatar",
-        Display,
-        AccessibilityRole::Image,
-        false
-    ),
+    contract!(Tooltip, "tooltip", Display, AccessibilityRole::Alert, false),
+    contract!(Avatar, "avatar", Display, AccessibilityRole::Image, false),
     contract!(
         Shortcut,
         "shortcut",
@@ -900,13 +810,7 @@ pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
         AccessibilityRole::Label,
         false
     ),
-    contract!(
-        Button,
-        "button",
-        Action,
-        AccessibilityRole::Button,
-        true
-    ),
+    contract!(Button, "button", Action, AccessibilityRole::Button, true),
     contract!(
         IconButton,
         "icon-button",
@@ -977,13 +881,7 @@ pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
         AccessibilityRole::TextInput,
         true
     ),
-    contract!(
-        Select,
-        "select",
-        ChoiceMenu,
-        AccessibilityRole::Menu,
-        true
-    ),
+    contract!(Select, "select", ChoiceMenu, AccessibilityRole::Menu, true),
     contract!(
         Option,
         "option",
@@ -1026,13 +924,7 @@ pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
         AccessibilityRole::Toolbar,
         true
     ),
-    contract!(
-        Menu,
-        "menu",
-        ChoiceMenu,
-        AccessibilityRole::Menu,
-        true
-    ),
+    contract!(Menu, "menu", ChoiceMenu, AccessibilityRole::Menu, true),
     contract!(
         MenuItem,
         "menu-item",
@@ -1054,13 +946,7 @@ pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
         AccessibilityRole::Region,
         true
     ),
-    contract!(
-        Panel,
-        "panel",
-        Container,
-        AccessibilityRole::Region,
-        false
-    ),
+    contract!(Panel, "panel", Container, AccessibilityRole::Region, false),
     contract!(
         Popover,
         "popover",
@@ -1068,34 +954,10 @@ pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
         AccessibilityRole::Dialog,
         true
     ),
-    contract!(
-        Dialog,
-        "dialog",
-        Container,
-        AccessibilityRole::Dialog,
-        true
-    ),
-    contract!(
-        Sheet,
-        "sheet",
-        Container,
-        AccessibilityRole::Dialog,
-        true
-    ),
-    contract!(
-        Tabs,
-        "tabs",
-        Container,
-        AccessibilityRole::Toolbar,
-        true
-    ),
-    contract!(
-        Tab,
-        "tab",
-        Container,
-        AccessibilityRole::Tab,
-        true
-    ),
+    contract!(Dialog, "dialog", Container, AccessibilityRole::Dialog, true),
+    contract!(Sheet, "sheet", Container, AccessibilityRole::Dialog, true),
+    contract!(Tabs, "tabs", Container, AccessibilityRole::Toolbar, true),
+    contract!(Tab, "tab", Container, AccessibilityRole::Tab, true),
     contract!(
         Accordion,
         "accordion",
@@ -1110,13 +972,7 @@ pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
         AccessibilityRole::Region,
         true
     ),
-    contract!(
-        List,
-        "list",
-        Collection,
-        AccessibilityRole::List,
-        true
-    ),
+    contract!(List, "list", Collection, AccessibilityRole::List, true),
     contract!(
         ListItem,
         "list-item",
@@ -1124,27 +980,9 @@ pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
         AccessibilityRole::ListItem,
         true
     ),
-    contract!(
-        Table,
-        "table",
-        Collection,
-        AccessibilityRole::Region,
-        true
-    ),
-    contract!(
-        Cell,
-        "cell",
-        Collection,
-        AccessibilityRole::Region,
-        false
-    ),
-    contract!(
-        Tree,
-        "tree",
-        Collection,
-        AccessibilityRole::Region,
-        true
-    ),
+    contract!(Table, "table", Collection, AccessibilityRole::Region, true),
+    contract!(Cell, "cell", Collection, AccessibilityRole::Region, false),
+    contract!(Tree, "tree", Collection, AccessibilityRole::Region, true),
     contract!(
         EmptyState,
         "empty-state",
@@ -1152,27 +990,9 @@ pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
         AccessibilityRole::Status,
         false
     ),
-    contract!(
-        Slot,
-        "slot",
-        Shell,
-        AccessibilityRole::Region,
-        false
-    ),
-    contract!(
-        Surface,
-        "surface",
-        Shell,
-        AccessibilityRole::Region,
-        false
-    ),
-    contract!(
-        Widget,
-        "widget",
-        Shell,
-        AccessibilityRole::Region,
-        false
-    ),
+    contract!(Slot, "slot", Shell, AccessibilityRole::Region, false),
+    contract!(Surface, "surface", Shell, AccessibilityRole::Region, false),
+    contract!(Widget, "widget", Shell, AccessibilityRole::Region, false),
 ];
 
 pub static ELEMENT_TYPE_DEFS: &[ElementTypeDef] = &[
@@ -1328,11 +1148,7 @@ pub fn validate_element_attribute(tag: &str, name: &str, value: &str) -> Option<
     })
 }
 
-fn validate_known_attribute_value(
-    tag: &str,
-    name: &str,
-    value: &str,
-) -> Option<ElementDiagnostic> {
+fn validate_known_attribute_value(tag: &str, name: &str, value: &str) -> Option<ElementDiagnostic> {
     match (tag, name) {
         ("grid", "columns" | "rows") => validate_grid_tracks(tag, name, value),
         ("progress", "min" | "max" | "value") => validate_number_attribute(tag, name, value),

@@ -2275,4 +2275,3 @@ pub fn load_module_manifest(
         module_dir.display()
     )))
 }
-

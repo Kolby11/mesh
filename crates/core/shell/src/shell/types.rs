@@ -5,7 +5,7 @@ pub use mesh_core_frontend_host::{
 };
 use mesh_core_presentation::{LayerSurfaceConfig, LayerSurfaceSizePolicy, PopupConfig};
 use mesh_core_render::PixelBuffer;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -92,6 +92,10 @@ pub(super) struct ComponentRuntime {
     /// Auto-derived child surfaces (xdg_popups), reconciled from the painted
     /// tree each frame. Empty for components with no open escape-bounds nodes.
     pub(super) children: Vec<ChildSurface>,
+    /// Child node keys that the compositor dismissed while the component still
+    /// reported them open. Suppress immediate recreation until the request is
+    /// absent for a frame, then allow a future open to create a fresh popup.
+    pub(super) dismissed_child_node_keys: HashSet<String>,
 }
 
 impl ComponentRuntime {
@@ -116,6 +120,7 @@ impl ComponentRuntime {
         Self {
             parent: SurfaceTarget::new(surface_id.clone(), surface_size_policy),
             children: Vec::new(),
+            dismissed_child_node_keys: HashSet::new(),
             surface_id,
             component,
             source_paths,

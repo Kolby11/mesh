@@ -1060,8 +1060,7 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     let inherited_handler =
         find_click_handler(tree, &button_key).expect("button should own a click handler");
     assert_eq!(
-        inherited_handler,
-        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
+        inherited_handler, "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
         "icon click should bubble to the VolumeButton toggle handler"
     );
 

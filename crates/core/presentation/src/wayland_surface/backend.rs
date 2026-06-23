@@ -924,9 +924,9 @@ impl LayerShellBackend {
         self.state.surfaces.insert(surface_id.to_string(), entry);
 
         // Bind HiDPI protocols for the popup surface, mirroring the layer path.
-        if let Some(fs) =
-            self.state
-                .bind_fractional_scale(&wl_surface, &qh, surface_id.to_string())
+        if let Some(fs) = self
+            .state
+            .bind_fractional_scale(&wl_surface, &qh, surface_id.to_string())
             && let Some(entry) = self.state.surfaces.get_mut(surface_id)
         {
             entry.fractional_scale = Some(fs);
@@ -996,9 +996,7 @@ impl LayerShellBackend {
             .surfaces
             .iter()
             .filter_map(|(id, entry)| match &entry.role {
-                SurfaceRole::Popup(role) if role.parent_id == parent_surface_id => {
-                    Some(id.clone())
-                }
+                SurfaceRole::Popup(role) if role.parent_id == parent_surface_id => Some(id.clone()),
                 _ => None,
             })
             .collect();

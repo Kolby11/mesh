@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
-use mesh_core_elements::style::Dimension;
 use mesh_core_elements::WidgetNode;
+use mesh_core_elements::style::Dimension;
 use mesh_core_frontend::FrontendCompositionResolver;
 use mesh_core_module::ModuleType;
 

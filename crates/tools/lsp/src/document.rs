@@ -257,7 +257,9 @@ fn collect_component_instances(node: &TemplateNode, instances: &mut Vec<Componen
 }
 
 /// The `bind:this={var}` instance binding on a component's props, if any.
-fn component_instance_binding(props: &[mesh_core_component::template::Attribute]) -> Option<String> {
+fn component_instance_binding(
+    props: &[mesh_core_component::template::Attribute],
+) -> Option<String> {
     props.iter().find_map(|attr| {
         if attr.name != "bind:this" {
             return None;

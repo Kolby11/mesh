@@ -427,9 +427,13 @@ impl FrontendSurfaceComponent {
             return false;
         }
         self.last_surface_size = Some(size);
+        self.last_tree = None;
         self.surface_pixels_invalid = true;
         self.invalidate(
-            ComponentDirtyFlags::LAYOUT | ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS,
+            ComponentDirtyFlags::STYLE
+                | ComponentDirtyFlags::LAYOUT
+                | ComponentDirtyFlags::PAINT
+                | ComponentDirtyFlags::METRICS,
         );
         true
     }

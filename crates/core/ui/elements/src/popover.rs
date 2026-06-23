@@ -216,14 +216,16 @@ fn parse_constraint(value: &str) -> PopoverConstraintAdjustment {
     };
     for token in value.split([' ', ',']).filter(|t| !t.is_empty()) {
         match token.trim().to_ascii_lowercase().as_str() {
-            "none" => return PopoverConstraintAdjustment {
-                flip_x: false,
-                flip_y: false,
-                slide_x: false,
-                slide_y: false,
-                resize_x: false,
-                resize_y: false,
-            },
+            "none" => {
+                return PopoverConstraintAdjustment {
+                    flip_x: false,
+                    flip_y: false,
+                    slide_x: false,
+                    slide_y: false,
+                    resize_x: false,
+                    resize_y: false,
+                };
+            }
             "flip" => {
                 adjust.flip_x = true;
                 adjust.flip_y = true;

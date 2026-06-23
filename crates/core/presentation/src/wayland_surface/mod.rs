@@ -10,9 +10,7 @@ mod popup;
 mod state;
 
 pub use backend::{LayerShellBackend, LayerSurfaceConfig, LayerSurfaceSizePolicy};
-pub use popup::{
-    PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement,
-};
+pub use popup::{PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement};
 
 use crate::PresentationError;
 use crate::dev_window::{DevWindowEvent, DevWindowKeyEvent, KeyMods};
@@ -42,7 +40,7 @@ use smithay_client_toolkit::{
             LayerSurfaceConfigure,
         },
         xdg::{
-            XdgShell, XdgPositioner,
+            XdgPositioner, XdgShell,
             popup::{Popup, PopupConfigure, PopupHandler},
         },
     },
@@ -61,15 +59,15 @@ use wayland_client::{
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
 };
-use wayland_protocols::xdg::decoration::zv1::client::zxdg_decoration_manager_v1::{
-    self, ZxdgDecorationManagerV1,
-};
 use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1, wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
     wp_fractional_scale_v1, wp_fractional_scale_v1::WpFractionalScaleV1,
 };
 use wayland_protocols::wp::viewporter::client::{
     wp_viewport::WpViewport, wp_viewporter, wp_viewporter::WpViewporter,
+};
+use wayland_protocols::xdg::decoration::zv1::client::zxdg_decoration_manager_v1::{
+    self, ZxdgDecorationManagerV1,
 };
 use wayland_protocols_hyprland::focus_grab::v1::client::{
     hyprland_focus_grab_manager_v1, hyprland_focus_grab_manager_v1::HyprlandFocusGrabManagerV1,
