@@ -132,25 +132,53 @@ surface.
       and can paint a keyed subtree into a child buffer at local origin. Tests:
       `open_popover_nodes_derive_child_surface_requests`,
       `closed_popover_nodes_stay_inline`.
-      **Remaining (consumer pass):** `ShellComponent::child_surface_requests` +
-      `ChildSurfaceRequest` needs shell consumption and later automatic
-      `Overflow` derivation beyond explicit `<popover>`; shell reconcile of
-      `children` (create/update/destroy child surfaces, register/tear down in
-      `self.surfaces`/`self.core.surfaces`, build `PopupConfig`, drain
-      `take_dismissed_popups`); call `present_surface_target(Child)` after `paint_child`;
-      per-child element metrics + child-surface input routing with popup-local coords.
-- [ ] **Determinism decision: `<popover open>` always promotes when shown** —
+      **Shell consumption progress 2026-06-24:** reconciles open popover requests
+      into child `xdg_popup` surfaces, registers/tears down `self.surfaces` and
+      `self.core.surfaces`, builds `PopupConfig`, drains compositor dismissals,
+      paints/presents child targets through `present_surface_target(Child)`, routes
+      child-surface input back to the same VM with popup-local coords, records child
+      profiling, and paints debug layout overlays from child-local debug trees.
+      Tests: `child_surface_reconcile_creates_popup_and_paints_subtree`,
+      `child_surface_reconcile_removes_closed_popover`,
+      `dismissed_popup_drain_removes_child_surface`,
+      `child_surface_input_routes_to_local_child_handler_and_profiles`,
+      `child_surface_debug_tree_offsets_layout_to_local_origin`.
+      **Remaining (consumer pass):** later automatic `Overflow` derivation beyond
+      explicit `<popover>` and production migration from legacy separate popover
+      modules to in-tree popover nodes.
+- [x] **Determinism decision: `<popover open>` always promotes when shown** —
       do **not** conditionally promote only when content overflows the host
       (the "measure first, surface only if it spills" model). Conditional promotion
       makes the same component render via two different paths (inline vs popup) with
       divergent input/grab/coordinate behavior and nondeterministic feel. Keep
-      authoring inline; keep realization deterministic.
+      authoring inline; keep realization deterministic. Done 2026-06-24:
+      `FrontendSurfaceComponent::child_surface_requests` derives every open in-tree
+      `<popover>` as a child-surface request; there is no inline-vs-popup overflow
+      branch for shown popovers.
 - [ ] **Centralize the popover controller in core.** Replace per-component Lua
       hover/keepalive (`onSelectorEnter` re-activate) with a core state machine that
       owns: anchor rect, open/close, hover-bridge, dismiss, one-open-per-group
       exclusivity, and grab acquisition. Declarative authoring target:
       `<popover anchor={refs.language_button} open={open}>`. Keep `mesh.popover.*`
-      as the imperative escape hatch.
+      as the imperative escape hatch. Progress 2026-06-24: shell now owns a
+      hover-bridge controller for promoted popovers through `HidePopover {
+      defer_for_hover_bridge }`, `pending_popover_hides`, scheduler deadlines,
+      pointer-enter cancellation, and pointer-leave scheduling from promoted popup
+      surfaces. `mesh.popover.hide(id, { bridge = true })` emits the new request,
+      and `quick-settings` no longer carries popover-side `onpointerenter` /
+      `onpointerleave` keepalive handlers. Core also enforces one-open-per-trigger
+      for promoted sibling popovers and synchronizes compositor outside-dismiss
+      (`xdg_popup.done`) back into shell visibility for both auto-derived child
+      popups and legacy promoted popover modules. Remaining: migrate audio once
+      drag/capture state is represented in core, then broaden the exclusivity
+      policy beyond same-trigger siblings if needed.
+      Follow-up 2026-06-24: language/theme options can still close while the
+      pointer crosses into the promoted popup. Likely cause: Wayland
+      `PointerEventKind::Enter` updates backend pointer focus but does not emit
+      a shell-visible `WindowEvent`, so pending hover-bridge hide cancellation
+      depends on a later `PointerMove`. Planned fix: emit a `PointerMove`
+      equivalent on pointer enter for the popup surface so
+      `cancel_pending_popover_hide` runs immediately.
 - [ ] **Grab vs hover nuance.** An xdg_popup grab requires a recent input
       _serial_ (a click) — so grabbed (click-to-dismiss-outside) popups can't be
       opened by pure hover. Decide per popover: hover-open menus stay no-grab (core

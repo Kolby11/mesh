@@ -402,12 +402,15 @@ fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
         )),
         "first entering-frame click should reach the theme handler: {requests:?}"
     );
+    // Selecting a theme no longer closes the popover: it stays open so the user
+    // can keep choosing, and only closes on pointer/focus leave (the shell's
+    // hover-bridge). So a selection click must NOT request a hide.
     assert!(
-        requests.iter().any(|request| matches!(
+        !requests.iter().any(|request| matches!(
             request,
             CoreRequest::HideSurface { surface_id } if surface_id == "@mesh/theme-selector"
         )),
-        "theme selection should still request the controlled hide: {requests:?}"
+        "theme selection should keep the popover open (no hide request): {requests:?}"
     );
 }
 

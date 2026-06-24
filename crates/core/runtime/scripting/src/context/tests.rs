@@ -1617,6 +1617,33 @@ end
 }
 
 #[test]
+fn mesh_popover_hide_can_request_hover_bridge_deferral() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@test/popover", caps).unwrap();
+    ctx.load_script(
+        r#"
+function init()
+    mesh.popover.hide("@test/popover", { bridge = true })
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    let published = ctx.drain_published_events();
+    assert_eq!(published.len(), 1);
+    assert_eq!(published[0].channel, "shell.hide-popover");
+    assert_eq!(
+        published[0].payload,
+        serde_json::json!({
+            "surface_id": "@test/popover",
+            "defer_for_hover_bridge": true,
+        })
+    );
+}
+
+#[test]
 fn interface_proxy_method_returns_queued_result() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("service.audio.read"));

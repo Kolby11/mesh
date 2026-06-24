@@ -51,6 +51,22 @@ impl Shell {
             };
 
             let target_surface_id = self.components[index].target(target).surface_id.clone();
+            if matches!(
+                event,
+                WindowEvent::PointerMove { .. }
+                    | WindowEvent::PointerButton { .. }
+                    | WindowEvent::Scroll { .. }
+            ) {
+                self.cancel_pending_popover_hide(&target_surface_id);
+            } else if matches!(event, WindowEvent::PointerLeave { .. })
+                && self.components[index]
+                    .target(target)
+                    .popup_parent_surface
+                    .is_some()
+            {
+                let mut pending = self.hide_popover(target_surface_id.clone(), true)?;
+                self.drain_requests(&mut pending)?;
+            }
             let Some(surface) = self.surfaces.get(&target_surface_id) else {
                 continue;
             };
@@ -77,7 +93,10 @@ impl Shell {
             self.components[index].target_mut(target).known_surface_size =
                 Some(target_surface_size);
             let component_surface_size = match target {
-                TargetRef::Parent => target_surface_size,
+                TargetRef::Parent => self.components[index]
+                    .component
+                    .content_input_size()
+                    .unwrap_or(target_surface_size),
                 TargetRef::Child(_) => self.components[index]
                     .parent
                     .known_surface_size

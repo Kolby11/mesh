@@ -114,6 +114,18 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
                 .map(|id| CoreRequest::HideSurface {
                     surface_id: id.to_string(),
                 }),
+            "shell.hide-popover" => {
+                let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
+                let defer_for_hover_bridge = event
+                    .payload
+                    .get("defer_for_hover_bridge")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                Some(CoreRequest::HidePopover {
+                    surface_id: surface_id.to_string(),
+                    defer_for_hover_bridge,
+                })
+            }
             "shell.toggle-surface" => event
                 .payload
                 .get("surface_id")
@@ -331,6 +343,32 @@ mod tests {
                 assert!(!focus);
             }
             other => panic!("expected ActivatePopover request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn script_events_to_requests_maps_popover_hover_bridge_hide() {
+        let requests = script_events_to_requests(vec![PublishedEvent {
+            channel: "shell.hide-popover".into(),
+            payload: serde_json::json!({
+                "surface_id": "@mesh/quick-settings",
+                "defer_for_hover_bridge": true,
+            }),
+            source_module_id: "@mesh/quick-settings".into(),
+            source_capabilities: mesh_core_capability::CapabilitySet::new(),
+        }]);
+
+        match requests.as_slice() {
+            [
+                CoreRequest::HidePopover {
+                    surface_id,
+                    defer_for_hover_bridge,
+                },
+            ] => {
+                assert_eq!(surface_id, "@mesh/quick-settings");
+                assert!(*defer_for_hover_bridge);
+            }
+            other => panic!("expected HidePopover request, got {other:?}"),
         }
     }
 

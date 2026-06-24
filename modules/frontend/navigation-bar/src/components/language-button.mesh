@@ -6,7 +6,8 @@
       onclick={onLanguageToggle}
       onpointerenter={onLanguageEnter}
       onpointerleave={onLanguageLeave}
-      title="{t('nav.language_menu')}"
+      data-tooltip-disabled="{language_tooltip_disabled}"
+      title="{language_tooltip}"
       aria-label="{t('nav.language_menu')}"
     >
       <label class="language-label">{current_locale_label}</label>
@@ -22,6 +23,8 @@ local LanguagePopover = require("@mesh/language-popover")
 current_locale_label = "EN"
 language_surface_id = "@mesh/language-popover"
 language_surface_hidden = true
+language_tooltip = ""
+language_tooltip_disabled = "false"
 trigger_class = "nav-button"
 
 local function locale_code()
@@ -55,16 +58,42 @@ function init(self)
     current_locale_label = locale_label(locale or locale_code())
 end
 
+local function sync_trigger_state()
+    trigger_class = language_surface_hidden and "nav-button" or "nav-button nav-button-open"
+    if language_surface_hidden then
+        language_tooltip = t("nav.language_menu")
+        language_tooltip_disabled = "false"
+    else
+        language_tooltip = ""
+        language_tooltip_disabled = "true"
+    end
+end
+
+local function target_bounds(event)
+    local current = event and (event.current_target or event.current) or {}
+    return current.bounds or {}
+end
+
+local function target_left_and_width(event)
+    local bounds = target_bounds(event)
+    local left = tonumber(bounds.left)
+    local width = tonumber(bounds.width)
+    if left == nil or width == nil then
+        local position = (event and event.current_target and event.current_target.position) or {}
+        left = tonumber(position.margin_left) or 0
+        width = tonumber(position.width) or 40
+    end
+    return left, width
+end
+
 function render(self)
     current_locale_label = locale_label(locale_code())
-    trigger_class = language_surface_hidden and "nav-button" or "nav-button nav-button-open"
+    sync_trigger_state()
 end
 
 local function show_language_selector(event)
     if language_surface_hidden then
-        local position = event.current_target.position or {}
-        local trigger_left = tonumber(position.margin_left) or 0
-        local trigger_width = tonumber(position.width) or 40
+        local trigger_left, trigger_width = target_left_and_width(event)
         mesh.events.publish("shell.position-surface", {
             surface_id = language_surface_id,
             margin_top = -18,
@@ -73,35 +102,44 @@ local function show_language_selector(event)
         local focus = event.trigger ~= nil and event.trigger.type == "keyboard"
         mesh.popover.activate(language_surface_id, event, { focus = focus })
         language_surface_hidden = false
-        trigger_class = "nav-button nav-button-open"
+        sync_trigger_state()
     end
 end
 
-local function hide_language_selector()
+-- `bridge` defers the close through the core hover-bridge controller so the
+-- cursor can travel from the trigger onto the promoted popup without it
+-- closing underneath. Keyboard close passes false for an immediate hide.
+local function hide_language_selector(bridge)
     if not language_surface_hidden then
-        mesh.popover.hide(language_surface_id)
+        mesh.popover.hide(language_surface_id, { bridge = bridge == true })
         language_surface_hidden = true
-        trigger_class = "nav-button"
+        sync_trigger_state()
     end
 end
 
+-- Mouse interaction is hover-only (see onLanguageEnter/onLanguageLeave); a
+-- click should never be required to open. Only keyboard activation toggles,
+-- which also transfers focus into the popover so it closes on focus leave.
 function onLanguageToggle(event)
+    local keyboard = event ~= nil and event.trigger ~= nil and event.trigger.type == "keyboard"
+    if not keyboard then
+        return
+    end
     if language_surface_hidden then
         show_language_selector(event)
     else
-        hide_language_selector()
+        hide_language_selector(false)
     end
 end
 
--- Hover opens; leaving the trigger starts the close transition. The popover
--- keeps itself open while hovered, and the shell hide transition bridges the
--- cursor's trip from the button to the popover.
+-- Hover opens the selector; leaving the trigger starts a core-owned hover
+-- bridge so the pointer can cross into the promoted popup before it closes.
 function onLanguageEnter(event)
     show_language_selector(event)
 end
 
 function onLanguageLeave()
-    hide_language_selector()
+    hide_language_selector(true)
 end
 </script>
 
@@ -109,9 +147,11 @@ end
 .nav-button-shell {
     width: 40px;
     height: 40px;
+    position: relative;
     flex-shrink: 0;
     justify-content: center;
     align-items: center;
+    overflow: visible;
 }
 
 .nav-button {

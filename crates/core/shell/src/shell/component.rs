@@ -408,11 +408,15 @@ pub(super) struct FrontendSurfaceComponent {
     pending_surface_states: RefCell<HashMap<String, bool>>,
     /// Last visibility state emitted for each surface portal, to avoid redundant requests.
     last_surface_states: HashMap<String, bool>,
-    /// `surface_id -> state variable` for portals declared as
-    /// `<ImportedSurface hidden={some_state} />`. Used when the shell hides
-    /// a popover through keyboard navigation so the owner script does not
-    /// immediately re-show it from stale state.
-    portal_hidden_bindings: RefCell<HashMap<String, String>>,
+    /// `surface_id -> (owner_instance_key, state variable)` for portals
+    /// declared as `<ImportedSurface hidden={some_state} />`. Used when the
+    /// shell hides a popover through keyboard navigation so the owner script
+    /// does not immediately re-show it from stale state. The owner instance
+    /// key identifies which component runtime owns the bound variable — the
+    /// portal may be declared inside a nested child component (e.g. a
+    /// navigation-bar button), not the surface's root component, so the
+    /// write-back must target that child's `_ENV`, not the root's.
+    portal_hidden_bindings: RefCell<HashMap<String, (String, String)>>,
     /// `parent_instance_key -> [(binding, child_instance_key)]` for live
     /// `bind:this` references. After a parent event handler runs, each linked
     /// child is re-synced so values its parent mutated through the live proxy

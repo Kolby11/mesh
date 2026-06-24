@@ -1055,6 +1055,7 @@ fn is_declared_shell_event_channel(channel: &str) -> bool {
         channel,
         "shell.show-surface"
             | "shell.hide-surface"
+            | "shell.hide-popover"
             | "shell.toggle-surface"
             | "shell.position-surface"
             | "shell.activate-popover"

@@ -14,6 +14,7 @@ use mesh_core_presentation::{
 /// throttle, so dragging stays smooth.
 pub(in crate::shell) const COMMAND_THROTTLE_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(16);
+const POPOVER_HOVER_BRIDGE_DELAY: std::time::Duration = std::time::Duration::from_millis(180);
 const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 
 /// Canonical failure payload when a service command cannot be delivered (no
@@ -213,8 +214,13 @@ impl Shell {
                 self.set_surface_visibility(surface_id, true)
             }
             CoreRequest::HideSurface { surface_id } => {
+                self.pending_popover_hides.remove(&surface_id);
                 self.set_surface_visibility(surface_id, false)
             }
+            CoreRequest::HidePopover {
+                surface_id,
+                defer_for_hover_bridge,
+            } => self.hide_popover(surface_id, defer_for_hover_bridge),
             CoreRequest::PublishDiagnostics { message } => {
                 tracing::info!("diagnostic: {message}");
                 Ok(VecDeque::new())
@@ -247,25 +253,16 @@ impl Shell {
                 trigger_key,
                 focus,
             } => {
-                tracing::info!(
-                    "apply_request ActivatePopover surface_id={surface_id} trigger_surface={trigger_surface} trigger_key={trigger_key} focus={focus}"
-                );
-                let trigger_runtime_found = self
-                    .component_index_for_surface(&trigger_surface)
-                    .map(|index| {
-                        let runtime = &mut self.components[index];
-                        if !trigger_key.is_empty() {
-                            runtime
-                                .component
-                                .register_popover_trigger(trigger_key.clone(), surface_id.clone());
-                        }
-                        true
-                    })
-                    .unwrap_or(false);
+                self.cancel_pending_popover_hide(&surface_id);
+                if let Some(index) = self.component_index_for_surface(&trigger_surface) {
+                    let runtime = &mut self.components[index];
+                    if !trigger_key.is_empty() {
+                        runtime
+                            .component
+                            .register_popover_trigger(trigger_key.clone(), surface_id.clone());
+                    }
+                }
                 let target_runtime_found = self.component_index_for_surface(&surface_id).is_some();
-                tracing::info!(
-                    "apply_request ActivatePopover trigger_runtime_found={trigger_runtime_found} target_runtime_found={target_runtime_found}"
-                );
 
                 // Promote to xdg_popup when the compositor supports it and the
                 // trigger surface is known. The anchor rect is built from the
@@ -292,24 +289,42 @@ impl Shell {
                         .get(&trigger_surface)
                         .map(|s| s.exclusive_zone)
                         .unwrap_or(40);
-                    let popover_margin_left = self
-                        .component_index_for_surface(&surface_id)
-                        .map(|idx| self.components[idx].component.popover_margin_left())
-                        .unwrap_or(0);
+                    // Anchor the popup to the trigger element's *real* rect in
+                    // the parent surface, then let the compositor center it
+                    // (anchor = bottom-center of the trigger, gravity = down).
+                    // This is width-agnostic: the popover may measure wider than
+                    // any value the component could predict, and the compositor
+                    // keeps it centered and on-screen (flip/slide) as it grows.
+                    // The component must NOT compute its own left edge from an
+                    // assumed popover width — that hardcoding caused near-edge
+                    // popovers to overflow and get slid sideways once their
+                    // measured size exceeded the assumption.
+                    let trigger_rect = self
+                        .component_index_for_surface(&trigger_surface)
+                        .and_then(|idx| {
+                            self.components[idx].component.node_bounds_by_key(&trigger_key)
+                        });
+                    let (anchor_x, anchor_w) = match trigger_rect {
+                        Some((left, _top, right, _bottom)) => {
+                            (left.round() as i32, ((right - left).round() as i32).max(1))
+                        }
+                        // Fall back to the component-reported margin-left (the
+                        // legacy single-edge anchor) when the trigger rect is
+                        // unavailable, e.g. activation without an event.
+                        None => (
+                            self.component_index_for_surface(&surface_id)
+                                .map(|idx| self.components[idx].component.popover_margin_left())
+                                .unwrap_or(0),
+                            1,
+                        ),
+                    };
                     let popup_config = PopupConfig {
                         parent_surface_id: trigger_surface.clone(),
                         placement: PopupPlacement {
-                            anchor_rect: (popover_margin_left, 0, 40, trigger_exclusive_zone),
+                            anchor_rect: (anchor_x, 0, anchor_w, trigger_exclusive_zone),
                             size: (1, 1),
-                            // `popover_margin_left` is the popover's desired
-                            // left edge in the parent surface. Anchor at the
-                            // bottom-left corner of the rect and grow toward the
-                            // bottom-right so the popup's top-left corner lands
-                            // on that point — gravity BottomLeft would instead
-                            // put its top-right corner there, shifting the whole
-                            // popup left by its own width.
-                            anchor: PopupAnchor::BottomLeft,
-                            gravity: PopupGravity::BottomRight,
+                            anchor: PopupAnchor::Bottom,
+                            gravity: PopupGravity::Bottom,
                             constraint: PopupConstraint::default(),
                             offset: (0, 0),
                         },
@@ -329,11 +344,11 @@ impl Shell {
                         self.components[idx].component.set_popup_promoted(true);
                     }
                     tracing::info!(
-                        "ActivatePopover: promoting {surface_id} as xdg_popup child of {trigger_surface} anchor_x={popover_margin_left} bar_h={trigger_exclusive_zone}"
+                        "ActivatePopover: promoting {surface_id} as xdg_popup child of {trigger_surface} trigger_rect=({anchor_x},{anchor_w}) bar_h={trigger_exclusive_zone}"
                     );
                 }
 
-                let mut emitted = VecDeque::new();
+                let mut emitted = self.sibling_popover_hides(&surface_id, &trigger_surface);
                 emitted.push_back(CoreRequest::ShowSurface {
                     surface_id: surface_id.clone(),
                 });
@@ -809,6 +824,7 @@ impl Shell {
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         tracing::info!("set_surface_visibility surface_id={surface_id} visible={visible}");
         if visible {
+            self.pending_popover_hides.remove(&surface_id);
             if let Some(state) = self.core.surfaces.get_mut(&surface_id) {
                 state.closing_until = None;
             }
@@ -881,7 +897,73 @@ impl Shell {
         self.set_surface_visibility_now(surface_id, false)
     }
 
-    fn set_surface_visibility_now(
+    fn sibling_popover_hides(
+        &self,
+        surface_id: &str,
+        trigger_surface: &str,
+    ) -> VecDeque<CoreRequest> {
+        if trigger_surface.is_empty() {
+            return VecDeque::new();
+        }
+        self.components
+            .iter()
+            .filter(|runtime| {
+                runtime.surface_id != surface_id
+                    && runtime.parent.popup_parent_surface.as_deref() == Some(trigger_surface)
+                    && self.surface_is_effectively_visible(runtime.surface_id.as_str())
+            })
+            .map(|runtime| CoreRequest::HidePopover {
+                surface_id: runtime.surface_id.clone(),
+                defer_for_hover_bridge: false,
+            })
+            .collect()
+    }
+
+    pub(in crate::shell) fn hide_popover(
+        &mut self,
+        surface_id: SurfaceId,
+        defer_for_hover_bridge: bool,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        if defer_for_hover_bridge && self.surface_is_promoted_popover(&surface_id) {
+            self.pending_popover_hides.insert(
+                surface_id.clone(),
+                std::time::Instant::now() + POPOVER_HOVER_BRIDGE_DELAY,
+            );
+            if let Some(state) = self.core.surfaces.get_mut(&surface_id) {
+                state.visible = true;
+                state.closing_until = None;
+            }
+            if let Some(index) = self.component_index_for_surface(&surface_id) {
+                self.components[index].component.set_surface_exiting(false);
+            }
+            return Ok(VecDeque::new());
+        }
+
+        self.pending_popover_hides.remove(&surface_id);
+        self.set_surface_visibility(surface_id, false)
+    }
+
+    pub(in crate::shell) fn cancel_pending_popover_hide(&mut self, surface_id: &str) -> bool {
+        let cancelled = self.pending_popover_hides.remove(surface_id).is_some();
+        if cancelled {
+            if let Some(state) = self.core.surfaces.get_mut(surface_id) {
+                state.closing_until = None;
+                state.visible = true;
+            }
+            if let Some(index) = self.component_index_for_surface(surface_id) {
+                self.components[index].component.set_surface_exiting(false);
+            }
+        }
+        cancelled
+    }
+
+    fn surface_is_promoted_popover(&mut self, surface_id: &str) -> bool {
+        self.component_index_for_surface(surface_id)
+            .and_then(|index| self.components.get(index))
+            .is_some_and(|runtime| runtime.parent.popup_parent_surface.is_some())
+    }
+
+    pub(in crate::shell) fn set_surface_visibility_now(
         &mut self,
         surface_id: SurfaceId,
         visible: bool,
@@ -945,6 +1027,11 @@ impl Shell {
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let now = std::time::Instant::now();
+        let due_popovers: Vec<_> = self
+            .pending_popover_hides
+            .iter()
+            .filter_map(|(surface_id, hide_at)| (*hide_at <= now).then(|| surface_id.clone()))
+            .collect();
         let due: Vec<_> = self
             .core
             .surfaces
@@ -957,6 +1044,10 @@ impl Shell {
             })
             .collect();
         let mut emitted = VecDeque::new();
+        for surface_id in due_popovers {
+            self.pending_popover_hides.remove(&surface_id);
+            emitted.extend(self.set_surface_visibility(surface_id, false)?);
+        }
         for surface_id in due {
             emitted.extend(self.set_surface_visibility_now(surface_id, false)?);
         }
@@ -970,6 +1061,7 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::ToggleSurface { .. } => "toggle_surface",
         CoreRequest::ShowSurface { .. } => "show_surface",
         CoreRequest::HideSurface { .. } => "hide_surface",
+        CoreRequest::HidePopover { .. } => "hide_popover",
         CoreRequest::PublishDiagnostics { .. } => "publish_diagnostics",
         CoreRequest::ServiceCommand { .. } => "service_command",
         CoreRequest::WriteClipboard { .. } => "write_clipboard",

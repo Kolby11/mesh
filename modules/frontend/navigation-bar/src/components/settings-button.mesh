@@ -35,9 +35,9 @@ local function show_settings_selector(event)
     end
 end
 
-local function hide_settings_selector()
+local function hide_settings_selector(bridge)
     if not settings_surface_hidden then
-        mesh.popover.hide(settings_surface_id)
+        mesh.popover.hide(settings_surface_id, { bridge = bridge == true })
         settings_surface_hidden = true
     end
 end
@@ -46,18 +46,18 @@ function onSettingsToggle(event)
     if settings_surface_hidden then
         show_settings_selector(event)
     else
-        hide_settings_selector()
+        hide_settings_selector(false)
     end
 end
 
--- Hover opens quick settings; leaving the trigger starts its close. The panel
--- keeps itself open while hovered and the hide transition bridges the gap.
+-- Hover opens quick settings; leaving the trigger starts a core-owned hover
+-- bridge so the pointer can cross into the promoted popup.
 function onSettingsEnter(event)
     show_settings_selector(event)
 end
 
 function onSettingsLeave()
-    hide_settings_selector()
+    hide_settings_selector(true)
 end
 </script>
 

@@ -6,7 +6,8 @@
             onpointerenter={onThemeEnter}
             onpointerleave={onThemeLeave}
             aria-haspopup="true"
-            title={t(theme_tooltip_key)}
+            data-tooltip-disabled="{theme_tooltip_disabled}"
+            title="{theme_tooltip}"
             aria-label={t(theme_tooltip_key)}
         >
             <icon class="nav-button-glyph" name="{theme_icon}" size="18" />
@@ -22,6 +23,8 @@ local ThemeSelector = require("@mesh/theme-selector")
 
 theme_icon = "weather-clear-night"
 theme_tooltip_key = "nav.select_theme"
+theme_tooltip = ""
+theme_tooltip_disabled = "false"
 theme_is_dark = true
 theme_surface_id = "@mesh/theme-selector"
 theme_surface_hidden = true
@@ -48,6 +51,34 @@ local function read_theme_is_dark()
     return theme_is_dark
 end
 
+local function sync_trigger_state()
+    trigger_class = theme_surface_hidden and "nav-button" or "nav-button nav-button-open"
+    if theme_surface_hidden then
+        theme_tooltip = t(theme_tooltip_key)
+        theme_tooltip_disabled = "false"
+    else
+        theme_tooltip = ""
+        theme_tooltip_disabled = "true"
+    end
+end
+
+local function target_bounds(event)
+    local current = event and (event.current_target or event.current) or {}
+    return current.bounds or {}
+end
+
+local function target_left_and_width(event)
+    local bounds = target_bounds(event)
+    local left = tonumber(bounds.left)
+    local width = tonumber(bounds.width)
+    if left == nil or width == nil then
+        local position = (event and event.current_target and event.current_target.position) or {}
+        left = tonumber(position.margin_left) or 0
+        width = tonumber(position.width) or 40
+    end
+    return left, width
+end
+
 function render(self)
     theme_is_dark = read_theme_is_dark()
     if theme_is_dark then
@@ -57,50 +88,58 @@ function render(self)
         theme_icon = "weather-clear"
         theme_tooltip_key = "nav.select_theme"
     end
-    trigger_class = theme_surface_hidden and "nav-button" or "nav-button nav-button-open"
+    sync_trigger_state()
 end
 
 local function show_theme_selector(event)
     if theme_surface_hidden then
-        local position = event.current_target.position or {}
-        local trigger_left = tonumber(position.margin_left) or 0
-        local trigger_width = tonumber(position.width) or 40
+        local trigger_left, trigger_width = target_left_and_width(event)
         mesh.events.publish("shell.position-surface", {
             surface_id = theme_surface_id,
             margin_top = -18,
             margin_left = trigger_left + (trigger_width / 2) - 56,
         })
-        mesh.popover.activate(theme_surface_id, event, { focus = false })
+        local focus = event ~= nil and event.trigger ~= nil and event.trigger.type == "keyboard"
+        mesh.popover.activate(theme_surface_id, event, { focus = focus })
         theme_surface_hidden = false
-        trigger_class = "nav-button nav-button-open"
+        sync_trigger_state()
     end
 end
 
-local function hide_theme_selector()
+-- `bridge` defers the close through the core hover-bridge controller so the
+-- cursor can travel from the trigger onto the promoted popup without it
+-- closing underneath. Keyboard close passes false for an immediate hide.
+local function hide_theme_selector(bridge)
     if not theme_surface_hidden then
-        mesh.popover.hide(theme_surface_id)
+        mesh.popover.hide(theme_surface_id, { bridge = bridge == true })
         theme_surface_hidden = true
-        trigger_class = "nav-button"
+        sync_trigger_state()
     end
 end
 
+-- Mouse interaction is hover-only (see onThemeEnter/onThemeLeave); a click
+-- should never be required to open. Only keyboard activation toggles, which
+-- also transfers focus into the popover so it closes on focus leave.
 function onThemeToggle(event)
+    local keyboard = event ~= nil and event.trigger ~= nil and event.trigger.type == "keyboard"
+    if not keyboard then
+        return
+    end
     if theme_surface_hidden then
         show_theme_selector(event)
     else
-        hide_theme_selector()
+        hide_theme_selector(false)
     end
 end
 
--- Hover opens the selector; leaving the trigger starts its close transition.
--- The popover keeps itself open while the pointer is over it, and the shell's
--- hide transition bridges the gap as the cursor travels button -> popover.
+-- Hover opens the selector; leaving the trigger starts a core-owned hover
+-- bridge so the pointer can cross into the promoted popup before it closes.
 function onThemeEnter(event)
     show_theme_selector(event)
 end
 
 function onThemeLeave()
-    hide_theme_selector()
+    hide_theme_selector(true)
 end
 </script>
 

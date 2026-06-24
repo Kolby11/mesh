@@ -400,6 +400,7 @@ pub struct Shell {
     latest_service_state: HashMap<String, LatestServiceState>,
     pending_audio_muted: Option<bool>,
     command_throttle: HashMap<(String, String), CommandThrottleState>,
+    pending_popover_hides: HashMap<SurfaceId, std::time::Instant>,
     profiling: runtime::profiling::ProfilingRuntimeState,
 }
 

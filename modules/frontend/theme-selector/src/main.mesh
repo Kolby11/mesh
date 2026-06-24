@@ -1,8 +1,6 @@
 <template>
     <popover
         class="theme-float-shell"
-        onpointerenter={onSelectorEnter}
-        onpointerleave={onSelectorLeave}
         aria-label="Select theme"
     >
         <BubbleOptions
@@ -78,10 +76,11 @@ function render(self)
     end
 end
 
+-- Selecting a theme does not close the popover: it stays open so the user can
+-- keep choosing. It closes on pointer leave (onPopoverLeave) or, for keyboard
+-- activation, on focus leave.
 local function apply_theme(id)
-    sync_classes(id)
     mesh.events.publish("shell.set-theme", { theme_id = id })
-    mesh.popover.hide("@mesh/theme-selector")
 end
 
 function onDark()
@@ -101,16 +100,6 @@ function onThemeScroll(_event)
     -- supports scroll cycling for callers with larger option sets.
 end
 
--- Re-activating while the pointer is over the popover cancels the trigger's
--- pending close (the shell's hide transition), so moving the cursor from the
--- nav button onto the bubbles keeps the selector open.
-function onSelectorEnter(event)
-    mesh.popover.activate("@mesh/theme-selector", event, { focus = false })
-end
-
-function onSelectorLeave()
-    mesh.popover.hide("@mesh/theme-selector")
-end
 </script>
 
 <style>

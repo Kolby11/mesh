@@ -109,6 +109,10 @@ pub enum CoreRequest {
     HideSurface {
         surface_id: SurfaceId,
     },
+    HidePopover {
+        surface_id: SurfaceId,
+        defer_for_hover_bridge: bool,
+    },
     /// Reposition a surface to appear below a trigger element.
     /// Uses top-left anchor; margin_left/top position the surface precisely.
     PositionSurface {
@@ -364,6 +368,11 @@ pub trait ShellComponent: Send {
     fn last_widget_tree(&self) -> Option<&WidgetNode> {
         None
     }
+    /// Return a child-surface subtree normalized to child-local coordinates,
+    /// for debug layout overlays on promoted popups.
+    fn child_surface_debug_tree(&self, _node_key: &str) -> Option<WidgetNode> {
+        None
+    }
     /// Return child surfaces that should be auto-derived from the last painted
     /// tree. Authors still write normal inline UI; the shell uses these
     /// requests to realize escape-bounds nodes as compositor child surfaces.
@@ -379,6 +388,28 @@ pub trait ShellComponent: Send {
         _scale: f32,
     ) -> Result<bool, ComponentError> {
         Ok(false)
+    }
+    /// Best-known logical content size for surface sizing: the measured content
+    /// size once a paint has produced one, otherwise the manifest-declared
+    /// width/height. Never returns a zero/`1x1` placeholder, so popup creation
+    /// can size the surface correctly on first open before any paint exists.
+    fn declared_or_measured_size(&self) -> (u32, u32) {
+        (0, 0)
+    }
+    /// True for a content-measured surface that has not yet produced a measured
+    /// size from a paint. The shell uses this to defer creating a promoted
+    /// popover's `xdg_popup` by one render iteration — letting the loop's first
+    /// real paint measure the content — so the popup is created at its true size
+    /// instead of a declared placeholder that grows on the next open.
+    fn needs_content_measure(&self) -> bool {
+        false
+    }
+    /// Bounds `(left, top, right, bottom)` of a node in this surface's last
+    /// painted tree, in surface-local logical coordinates. Used to anchor a
+    /// promoted popover to its real trigger rect so the compositor can center
+    /// and constrain it without the component hardcoding its own width.
+    fn node_bounds_by_key(&self, _key: &str) -> Option<(f32, f32, f32, f32)> {
+        None
     }
     /// Override this surface's position for popover placement.
     fn apply_position(&mut self, _margin_top: i32, _margin_left: i32) {}

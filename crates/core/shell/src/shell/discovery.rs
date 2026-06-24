@@ -116,6 +116,7 @@ impl Shell {
             latest_service_state: HashMap::new(),
             pending_audio_muted: None,
             command_throttle: HashMap::new(),
+            pending_popover_hides: HashMap::new(),
             profiling: runtime::profiling::ProfilingRuntimeState::default(),
         }
     }

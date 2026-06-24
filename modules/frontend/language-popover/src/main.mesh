@@ -1,8 +1,6 @@
 <template>
   <popover
     class="language-popover-shell"
-    onpointerenter={onSelectorEnter}
-    onpointerleave={onSelectorLeave}
     aria-label="{t('language.choose')}"
   >
     <BubbleOptions
@@ -149,12 +147,14 @@ local function sync_options()
     set_option(3, locale_at(2))
 end
 
+-- Selecting a locale does not close the popover: it stays open so the user can
+-- keep choosing. It closes on pointer leave (onPopoverLeave) or, for keyboard
+-- activation, on focus leave.
 local function select_locale(locale)
     apply_selection(locale)
     sync_window_to_locale(locale)
     sync_options()
     mesh.locale.set(locale)
-    mesh.popover.hide(get_surface_id())
 end
 
 function init(self)
@@ -195,15 +195,6 @@ function onOptionScroll(event)
     sync_options()
 end
 
--- Re-activating while hovered cancels the trigger's pending close so the
--- cursor can travel from the nav button onto the bubbles without dismissing.
-function onSelectorEnter(event)
-    mesh.popover.activate(get_surface_id(), event, { focus = false })
-end
-
-function onSelectorLeave()
-    mesh.popover.hide(get_surface_id())
-end
 </script>
 
 <style>

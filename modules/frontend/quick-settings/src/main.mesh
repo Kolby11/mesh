@@ -1,8 +1,6 @@
 <template>
   <popover
     class="qs-shell"
-    onpointerenter={onPopoverEnter}
-    onpointerleave={onPopoverLeave}
     aria-label="Quick Settings"
   >
     <column class="qs-panel">
@@ -181,15 +179,6 @@ function onLangSk()
 end
 
 function onClose()
-    mesh.popover.hide("@mesh/quick-settings")
-end
-
--- Hovering the panel cancels the trigger's pending close; leaving it closes.
-function onPopoverEnter(event)
-    mesh.popover.activate("@mesh/quick-settings", event, { focus = false })
-end
-
-function onPopoverLeave()
     mesh.popover.hide("@mesh/quick-settings")
 end
 </script>

@@ -373,6 +373,7 @@ struct FocusRecordingState {
 struct FocusRecordingComponent {
     surface_id: String,
     state: Arc<Mutex<FocusRecordingState>>,
+    popover_margin_left: i32,
 }
 
 impl FocusRecordingComponent {
@@ -380,6 +381,19 @@ impl FocusRecordingComponent {
         Self {
             surface_id: surface_id.to_string(),
             state,
+            popover_margin_left: 0,
+        }
+    }
+
+    fn with_popover_margin_left(
+        surface_id: &str,
+        state: Arc<Mutex<FocusRecordingState>>,
+        popover_margin_left: i32,
+    ) -> Self {
+        Self {
+            surface_id: surface_id.to_string(),
+            state,
+            popover_margin_left,
         }
     }
 }
@@ -479,6 +493,10 @@ impl super::types::ShellComponent for FocusRecordingComponent {
             .unwrap()
             .keyboard_mode_overrides
             .push(mode);
+    }
+
+    fn popover_margin_left(&self) -> i32 {
+        self.popover_margin_left
     }
 }
 
@@ -750,6 +768,191 @@ impl super::types::ShellComponent for TransitionRecordingComponent {
 
     fn set_surface_exiting(&mut self, exiting: bool) {
         self.state.lock().unwrap().exiting.push(exiting);
+    }
+}
+
+#[derive(Default)]
+struct InputSizeRecordingState {
+    sizes: Vec<(u32, u32)>,
+}
+
+struct InputSizeRecordingComponent {
+    state: Arc<Mutex<InputSizeRecordingState>>,
+    content_size: (u32, u32),
+}
+
+impl InputSizeRecordingComponent {
+    fn new(state: Arc<Mutex<InputSizeRecordingState>>, content_size: (u32, u32)) -> Self {
+        Self {
+            state,
+            content_size,
+        }
+    }
+}
+
+impl super::types::ShellComponent for InputSizeRecordingComponent {
+    fn id(&self) -> &str {
+        "@test/input-size"
+    }
+
+    fn surface_id(&self) -> &str {
+        "@test/input-size"
+    }
+
+    fn initial_visibility(&self) -> Option<bool> {
+        Some(true)
+    }
+
+    fn mount(
+        &mut self,
+        _ctx: super::types::ComponentContext,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_core_event(
+        &mut self,
+        _event: &super::types::CoreEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_service_event(
+        &mut self,
+        _event: &ServiceEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn tick(&mut self) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn wants_render(&self) -> bool {
+        false
+    }
+
+    fn render(
+        &mut self,
+        _surface: &mut dyn mesh_core_wayland::ShellSurface,
+    ) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn paint(
+        &mut self,
+        _theme: &mesh_core_theme::Theme,
+        _width: u32,
+        _height: u32,
+        _buffer: &mut mesh_core_render::PixelBuffer,
+        _scale: f32,
+    ) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn theme_changed(&mut self) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn handle_input(
+        &mut self,
+        _theme: &mesh_core_theme::Theme,
+        width: u32,
+        height: u32,
+        _input: ComponentInput,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        self.state.lock().unwrap().sizes.push((width, height));
+        Ok(Vec::new())
+    }
+
+    fn content_input_size(&self) -> Option<(u32, u32)> {
+        Some(self.content_size)
+    }
+}
+
+struct PopupGeometryRecordingComponent {
+    surface_id: String,
+    declared_size: (u32, u32),
+    stale_surface_size: (u32, u32),
+}
+
+impl PopupGeometryRecordingComponent {
+    fn new(surface_id: &str, declared_size: (u32, u32), stale_surface_size: (u32, u32)) -> Self {
+        Self {
+            surface_id: surface_id.to_string(),
+            declared_size,
+            stale_surface_size,
+        }
+    }
+}
+
+impl super::types::ShellComponent for PopupGeometryRecordingComponent {
+    fn id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn surface_id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn initial_visibility(&self) -> Option<bool> {
+        Some(false)
+    }
+
+    fn mount(
+        &mut self,
+        _ctx: super::types::ComponentContext,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_core_event(
+        &mut self,
+        _event: &super::types::CoreEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_service_event(
+        &mut self,
+        _event: &ServiceEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn tick(&mut self) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn wants_render(&self) -> bool {
+        true
+    }
+
+    fn render(
+        &mut self,
+        surface: &mut dyn mesh_core_wayland::ShellSurface,
+    ) -> Result<(), super::types::ComponentError> {
+        surface.set_size(self.stale_surface_size.0, self.stale_surface_size.1);
+        Ok(())
+    }
+
+    fn paint(
+        &mut self,
+        _theme: &mesh_core_theme::Theme,
+        _width: u32,
+        _height: u32,
+        _buffer: &mut mesh_core_render::PixelBuffer,
+        _scale: f32,
+    ) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn theme_changed(&mut self) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn declared_or_measured_size(&self) -> (u32, u32) {
+        self.declared_size
     }
 }
 
@@ -3780,6 +3983,362 @@ fn activate_popover_can_immediately_enter_focus_chain() {
 }
 
 #[test]
+fn activate_popover_uses_exact_left_edge_anchor_rect() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let trigger_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    let popover_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/navigation-bar",
+        trigger_state,
+    )));
+    shell.register_component(Box::new(FocusRecordingComponent::with_popover_margin_left(
+        "@mesh/language-popover",
+        popover_state,
+        724,
+    )));
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::ActivatePopover {
+            surface_id: "@mesh/language-popover".into(),
+            trigger_surface: "@mesh/navigation-bar".into(),
+            trigger_key: "language-button".into(),
+            focus: false,
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+
+    let config = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.surface_id == "@mesh/language-popover")
+        .and_then(|runtime| runtime.parent.popup_config.as_ref())
+        .expect("legacy language popover should be marked for xdg_popup promotion");
+    assert_eq!(config.placement.anchor_rect.0, 724);
+    assert_eq!(config.placement.anchor_rect.2, 1);
+}
+
+#[test]
+fn promoted_popover_config_uses_content_size_not_stale_surface_size() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let trigger_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/navigation-bar",
+        trigger_state,
+    )));
+    shell.register_component(Box::new(PopupGeometryRecordingComponent::new(
+        "@mesh/theme-selector",
+        (112, 74),
+        (240, 154),
+    )));
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::ActivatePopover {
+            surface_id: "@mesh/theme-selector".into(),
+            trigger_surface: "@mesh/navigation-bar".into(),
+            trigger_key: "theme-button".into(),
+            focus: false,
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+
+    shell.render_components().unwrap();
+
+    let config = shell
+        .presentation_engine
+        .testing_popup_config("@mesh/theme-selector")
+        .expect("promoted popover should be configured");
+    assert_eq!(
+        config.placement.size,
+        (112, 74),
+        "popup positioner geometry must use content size, not tooltip-padded surface size"
+    );
+}
+
+#[test]
+fn hover_bridge_hide_defers_promoted_popover_close_until_deadline() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let trigger_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    let popover_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/navigation-bar",
+        trigger_state,
+    )));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/quick-settings",
+        popover_state,
+    )));
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::ActivatePopover {
+            surface_id: "@mesh/quick-settings".into(),
+            trigger_surface: "@mesh/navigation-bar".into(),
+            trigger_key: "settings-button".into(),
+            focus: false,
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+
+    let emitted = shell
+        .apply_request(CoreRequest::HidePopover {
+            surface_id: "@mesh/quick-settings".into(),
+            defer_for_hover_bridge: true,
+        })
+        .unwrap();
+    assert!(emitted.is_empty());
+    assert!(
+        shell
+            .pending_popover_hides
+            .contains_key("@mesh/quick-settings")
+    );
+    assert!(
+        shell
+            .core
+            .surfaces
+            .get("@mesh/quick-settings")
+            .is_some_and(|state| state.visible)
+    );
+
+    shell.pending_popover_hides.insert(
+        "@mesh/quick-settings".into(),
+        Instant::now() - Duration::from_millis(1),
+    );
+    let emitted = shell.complete_due_surface_transitions().unwrap();
+    assert!(emitted.is_empty());
+    assert!(
+        !shell
+            .pending_popover_hides
+            .contains_key("@mesh/quick-settings")
+    );
+    assert!(
+        shell
+            .core
+            .surfaces
+            .get("@mesh/quick-settings")
+            .is_some_and(|state| !state.visible)
+    );
+}
+
+#[test]
+fn pointer_enter_cancels_hover_bridge_popover_hide() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let trigger_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    let popover_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/navigation-bar",
+        trigger_state,
+    )));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/quick-settings",
+        popover_state,
+    )));
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::ActivatePopover {
+            surface_id: "@mesh/quick-settings".into(),
+            trigger_surface: "@mesh/navigation-bar".into(),
+            trigger_key: "settings-button".into(),
+            focus: false,
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell
+        .apply_request(CoreRequest::HidePopover {
+            surface_id: "@mesh/quick-settings".into(),
+            defer_for_hover_bridge: true,
+        })
+        .unwrap();
+    assert!(
+        shell
+            .pending_popover_hides
+            .contains_key("@mesh/quick-settings")
+    );
+
+    shell.presentation_engine.testing_push_event(
+        mesh_core_presentation::WindowEvent::PointerMove {
+            surface_id: "@mesh/quick-settings".into(),
+            x: 8.0,
+            y: 8.0,
+        },
+    );
+    shell.dispatch_wayland().unwrap();
+
+    assert!(
+        !shell
+            .pending_popover_hides
+            .contains_key("@mesh/quick-settings")
+    );
+    assert!(
+        shell
+            .core
+            .surfaces
+            .get("@mesh/quick-settings")
+            .is_some_and(|state| state.visible)
+    );
+}
+
+#[test]
+fn pointer_leave_from_promoted_popover_schedules_hover_bridge_hide() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let trigger_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    let popover_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/navigation-bar",
+        trigger_state,
+    )));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/quick-settings",
+        popover_state,
+    )));
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::ActivatePopover {
+            surface_id: "@mesh/quick-settings".into(),
+            trigger_surface: "@mesh/navigation-bar".into(),
+            trigger_key: "settings-button".into(),
+            focus: false,
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+
+    shell.presentation_engine.testing_push_event(
+        mesh_core_presentation::WindowEvent::PointerLeave {
+            surface_id: "@mesh/quick-settings".into(),
+        },
+    );
+    shell.dispatch_wayland().unwrap();
+
+    assert!(
+        shell
+            .pending_popover_hides
+            .contains_key("@mesh/quick-settings")
+    );
+    assert!(
+        shell
+            .core
+            .surfaces
+            .get("@mesh/quick-settings")
+            .is_some_and(|state| state.visible)
+    );
+}
+
+#[test]
+fn activating_popover_closes_promoted_sibling_from_same_trigger_surface() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let trigger_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    let quick_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    let language_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/navigation-bar",
+        trigger_state,
+    )));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/quick-settings",
+        quick_state,
+    )));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/language-popover",
+        language_state,
+    )));
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::ActivatePopover {
+            surface_id: "@mesh/quick-settings".into(),
+            trigger_surface: "@mesh/navigation-bar".into(),
+            trigger_key: "settings-button".into(),
+            focus: false,
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+
+    let emitted = shell
+        .apply_request(CoreRequest::ActivatePopover {
+            surface_id: "@mesh/language-popover".into(),
+            trigger_surface: "@mesh/navigation-bar".into(),
+            trigger_key: "language-button".into(),
+            focus: false,
+        })
+        .unwrap();
+
+    assert!(emitted.iter().any(|request| matches!(
+        request,
+        CoreRequest::HidePopover {
+            surface_id,
+            defer_for_hover_bridge: false,
+        } if surface_id == "@mesh/quick-settings"
+    )));
+    assert!(emitted.iter().any(|request| matches!(
+        request,
+        CoreRequest::ShowSurface { surface_id } if surface_id == "@mesh/language-popover"
+    )));
+}
+
+#[test]
+fn dismissed_legacy_promoted_popover_hides_surface_state() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let trigger_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    let popover_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/navigation-bar",
+        trigger_state,
+    )));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/quick-settings",
+        popover_state,
+    )));
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::ActivatePopover {
+            surface_id: "@mesh/quick-settings".into(),
+            trigger_surface: "@mesh/navigation-bar".into(),
+            trigger_key: "settings-button".into(),
+            focus: false,
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    assert!(
+        shell
+            .core
+            .surfaces
+            .get("@mesh/quick-settings")
+            .is_some_and(|state| state.visible)
+    );
+
+    shell
+        .presentation_engine
+        .testing_push_dismissed_popup("@mesh/quick-settings");
+    shell.render_components().unwrap();
+
+    assert!(
+        shell
+            .core
+            .surfaces
+            .get("@mesh/quick-settings")
+            .is_some_and(|state| !state.visible)
+    );
+    let runtime = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.surface_id == "@mesh/quick-settings")
+        .expect("quick settings runtime should remain registered");
+    assert!(runtime.parent.popup_parent_surface.is_none());
+    assert!(runtime.parent.popup_config.is_none());
+}
+
+#[test]
 fn leaving_popover_keeps_return_surface_as_keyboard_owner() {
     let mut shell = Shell::new();
     let trigger_state = Arc::new(Mutex::new(FocusRecordingState::default()));
@@ -6219,6 +6778,39 @@ fn hide_surface_without_transition_unmaps_immediately() {
     assert!(!surface.visible);
     assert!(surface.closing_until.is_none());
     assert_eq!(state.lock().unwrap().exiting, vec![false]);
+}
+
+#[test]
+fn wayland_parent_input_uses_content_size_not_tooltip_inflated_surface_size() {
+    let state = Arc::new(Mutex::new(InputSizeRecordingState::default()));
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(InputSizeRecordingComponent::new(
+        Arc::clone(&state),
+        (100, 50),
+    )));
+    let surface = shell
+        .surfaces
+        .get_mut("@test/input-size")
+        .expect("registered test surface");
+    surface.width = 100;
+    surface.height = 350;
+
+    shell.presentation_engine.testing_push_event(
+        mesh_core_presentation::WindowEvent::PointerMove {
+            surface_id: "@test/input-size".into(),
+            x: 20.0,
+            y: 25.0,
+        },
+    );
+    shell.dispatch_wayland().unwrap();
+
+    assert_eq!(
+        state.lock().unwrap().sizes,
+        vec![(100, 50)],
+        "parent input must rebuild/hit-test against the real content size, not the tooltip-padded buffer"
+    );
 }
 
 #[test]

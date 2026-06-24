@@ -111,14 +111,18 @@ impl ShellComponent for FrontendSurfaceComponent {
                         .borrow()
                         .get(surface_id)
                         .cloned();
-                    if let Some(binding) = binding {
-                        let component_id = self.id().to_string();
+                    if let Some((owner_instance_key, binding)) = binding {
+                        // Target the runtime that actually owns the bound
+                        // variable. For a portal declared inside a nested child
+                        // component this is the child's instance key, not the
+                        // surface root's `self.id()`.
+                        let component_id = owner_instance_key;
                         let mut state_dirty = false;
                         if let Some(runtime) = self.runtimes.lock().unwrap().get_mut(&component_id)
                         {
                             runtime
                                 .script_ctx
-                                .set_global_state(&binding, serde_json::json!(!*visible))
+                                .set_member_state(&binding, serde_json::json!(!*visible))
                                 .map_err(|source| ComponentError::Script {
                                     component_id: component_id.clone(),
                                     source,
@@ -146,6 +150,15 @@ impl ShellComponent for FrontendSurfaceComponent {
                 } else if !was_visible {
                     self.surface_exiting = false;
                     self.surface_pixels_invalid = true;
+                    // Hiding shrinks the paint buffer to 1x1 and clears
+                    // `known_surface_size` (see runtime/render.rs). A style-only
+                    // repaint would reuse that stale 1x1 tree/buffer, so a
+                    // surface re-shown without any intervening script change
+                    // (e.g. a static language/theme popover with no service
+                    // polling to dirty it) would present nothing on its first
+                    // frame. Force a full tree rebuild + pixel repaint so the
+                    // first shown frame is painted at the real surface size.
+                    self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
                     if self.surface_layout.keyboard_mode != KeyboardMode::None {
                         self.pending_auto_focus = true;
                     }
@@ -1044,6 +1057,15 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.last_tree.as_ref()
     }
 
+    fn child_surface_debug_tree(&self, node_key: &str) -> Option<WidgetNode> {
+        let tree = self.last_tree.as_ref()?;
+        let node = find_node_by_key(tree, node_key)?;
+        let bounds = find_node_bounds_by_key(tree, node_key, 0.0, 0.0)?;
+        let mut child_tree = node.clone();
+        offset_widget_tree_layout(&mut child_tree, -bounds.0, -bounds.1);
+        Some(child_tree)
+    }
+
     fn child_surface_requests(&self) -> Vec<ChildSurfaceRequest> {
         let Some(tree) = self.last_tree.as_ref() else {
             return Vec::new();
@@ -1089,6 +1111,20 @@ impl ShellComponent for FrontendSurfaceComponent {
         // StubSurface reports. Confining pointer input to this rect keeps clicks over
         // the tooltip padding falling through to the windows beneath.
         self.last_surface_size
+    }
+
+    fn declared_or_measured_size(&self) -> (u32, u32) {
+        self.requested_layout_size()
+    }
+
+    fn needs_content_measure(&self) -> bool {
+        self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured
+            && self.measured_size.is_none()
+    }
+
+    fn node_bounds_by_key(&self, key: &str) -> Option<(f32, f32, f32, f32)> {
+        let tree = self.last_tree.as_ref()?;
+        find_node_bounds_by_key(tree, key, 0.0, 0.0)
     }
 
     fn popover_margin_left(&self) -> i32 {
@@ -1823,6 +1859,14 @@ fn translate_child_surface_input(
     }
 }
 
+fn offset_widget_tree_layout(node: &mut WidgetNode, offset_x: f32, offset_y: f32) {
+    node.layout.x += offset_x;
+    node.layout.y += offset_y;
+    for child in &mut node.children {
+        offset_widget_tree_layout(child, offset_x, offset_y);
+    }
+}
+
 fn subtree_content_size(node: &WidgetNode) -> Option<(u32, u32)> {
     let bounds = subtree_content_bounds(node, 0.0, 0.0)?;
     let width = (bounds.2 - bounds.0).ceil().max(1.0) as u32;
@@ -2158,6 +2202,24 @@ mod tests {
             }
             other => panic!("expected scroll input, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn child_surface_debug_tree_offsets_layout_to_local_origin() {
+        let mut root = WidgetNode::new("popover");
+        root.layout.x = 48.0;
+        root.layout.y = 72.0;
+        let mut child = WidgetNode::new("button");
+        child.layout.x = 60.0;
+        child.layout.y = 84.0;
+        root.children.push(child);
+
+        offset_widget_tree_layout(&mut root, -48.0, -72.0);
+
+        assert_eq!(root.layout.x, 0.0);
+        assert_eq!(root.layout.y, 0.0);
+        assert_eq!(root.children[0].layout.x, 12.0);
+        assert_eq!(root.children[0].layout.y, 12.0);
     }
 
     #[test]

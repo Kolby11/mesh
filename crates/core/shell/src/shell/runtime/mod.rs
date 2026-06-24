@@ -123,6 +123,13 @@ impl Shell {
             next_deadline = next_deadline.min(closing_until);
         }
 
+        for hide_at in self.pending_popover_hides.values() {
+            if *hide_at <= now {
+                return Duration::ZERO;
+            }
+            next_deadline = next_deadline.min(*hide_at);
+        }
+
         for runtime in &self.components {
             if !self.surface_is_effectively_visible(runtime.surface_id.as_str()) {
                 continue;

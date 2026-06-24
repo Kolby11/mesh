@@ -117,6 +117,14 @@ pub fn node_tooltip_text(node: &WidgetNode) -> Option<String> {
 }
 
 fn node_tooltip_text_ref(node: &WidgetNode) -> Option<&str> {
+    if node
+        .attributes
+        .get("data-tooltip-disabled")
+        .is_some_and(|value| value == "true" || value == "1")
+    {
+        return None;
+    }
+
     for key in [
         "title",
         "tooltip",
@@ -254,6 +262,19 @@ mod tests {
             find_tooltip_by_key(&owner, "child"),
             Some(("owner".into(), "Open details".into()))
         );
+    }
+
+    #[test]
+    fn tooltip_disabled_attribute_suppresses_title_and_accessible_label() {
+        let mut node = WidgetNode::new("button");
+        node.attributes.insert("_mesh_key".into(), "button".into());
+        node.attributes.insert("title".into(), "Open".into());
+        node.attributes.insert("aria-label".into(), "Open".into());
+        node.attributes
+            .insert("data-tooltip-disabled".into(), "true".into());
+
+        assert_eq!(node_tooltip_text(&node), None);
+        assert_eq!(find_tooltip_text_by_key(&node, "button"), None);
     }
 
     #[test]

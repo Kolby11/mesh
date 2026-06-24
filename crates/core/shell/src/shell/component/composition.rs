@@ -70,7 +70,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             {
                 self.portal_hidden_bindings
                     .borrow_mut()
-                    .insert(module_id.clone(), binding);
+                    .insert(module_id.clone(), (host_instance_key.to_string(), binding));
             }
             self.pending_surface_states
                 .borrow_mut()

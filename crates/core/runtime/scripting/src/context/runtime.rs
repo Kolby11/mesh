@@ -400,6 +400,23 @@ impl ScriptContext {
         Ok(())
     }
 
+    /// Set a public script member on *this component's* `_ENV`, where the
+    /// script's own bare assignments live. A bare `foo = ...` in a component
+    /// shadows any `globals()` fallthrough, so writing back through
+    /// [`set_global_state`] would not be observed by the script's own handlers
+    /// or `render`. Use this when the shell needs to push a value into a member
+    /// the component declared itself — e.g. syncing a portal `hidden={...}`
+    /// binding back to `false`/`true` after the shell shows/hides the bound
+    /// surface through a path the trigger script never ran.
+    pub fn set_member_state(&mut self, name: &str, value: Value) -> Result<(), ScriptError> {
+        self.ensure_initialized()?;
+        let lua_value = self.lua().to_value(&value).map_err(lua_err)?;
+        self.env().set(name, lua_value).map_err(map_lua_error)?;
+        self.state.set(name.to_string(), value);
+        self.refresh_module_object();
+        Ok(())
+    }
+
     pub fn tracked_service_fields(&self) -> HashMap<String, HashSet<String>> {
         self.tracked_service_fields.lock().unwrap().clone()
     }
@@ -1056,13 +1073,36 @@ impl ScriptContext {
             .set(
                 "hide",
                 self.lua()
-                    .create_function(move |_lua, surface_id: String| {
+                    .create_function(move |_lua, args: Variadic<LuaValue>| {
+                        let Some(LuaValue::String(surface_id)) = args.first() else {
+                            return Err(LuaError::FromLuaConversionError {
+                                from: "nil",
+                                to: "String".to_string(),
+                                message: Some("mesh.popover.hide expects a surface id".into()),
+                            });
+                        };
+                        let surface_id = surface_id.to_str()?.to_string();
+                        let defer_for_hover_bridge = match args.get(1) {
+                            Some(LuaValue::Table(table)) => table
+                                .get::<Option<bool>>("bridge")?
+                                .or_else(|| {
+                                    table
+                                        .get::<Option<bool>>("defer_for_hover_bridge")
+                                        .ok()
+                                        .flatten()
+                                })
+                                .unwrap_or(false),
+                            _ => false,
+                        };
                         published_events_for_popover
                             .lock()
                             .unwrap()
                             .push(PublishedEvent {
-                                channel: "shell.hide-surface".to_string(),
-                                payload: serde_json::json!({ "surface_id": surface_id }),
+                                channel: "shell.hide-popover".to_string(),
+                                payload: serde_json::json!({
+                                    "surface_id": surface_id,
+                                    "defer_for_hover_bridge": defer_for_hover_bridge,
+                                }),
                                 source_module_id: module_id_for_popover.clone(),
                                 source_capabilities: capabilities_for_popover.clone(),
                             });

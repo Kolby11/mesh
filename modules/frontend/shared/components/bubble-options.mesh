@@ -1,6 +1,6 @@
 <template>
     <box class="bubble-options-stage" onscroll={onscroll} aria-label="{label}">
-        <button class="{item1_button_class}" onclick={onfirst} title="{item1_title}" aria-label="{item1_title}">
+        <button class="{item1_button_class}" onclick={onfirst} data-tooltip-disabled="true" title="{item1_title}" aria-label="{item1_title}">
             <box class="bubble-options-motion bubble-options-motion-left">
                 <box class="{item1_core_class}">
                     <icon class="{item1_icon_class}" name="{item1_icon}" size="14" />
@@ -8,7 +8,7 @@
                 </box>
             </box>
         </button>
-        <button class="{item2_button_class}" onclick={onsecond} title="{item2_title}" aria-label="{item2_title}">
+        <button class="{item2_button_class}" onclick={onsecond} data-tooltip-disabled="true" title="{item2_title}" aria-label="{item2_title}">
             <box class="bubble-options-motion bubble-options-motion-center">
                 <box class="{item2_core_class}">
                     <icon class="{item2_icon_class}" name="{item2_icon}" size="14" />
@@ -16,7 +16,7 @@
                 </box>
             </box>
         </button>
-        <button class="{item3_button_class}" onclick={onthird} title="{item3_title}" aria-label="{item3_title}">
+        <button class="{item3_button_class}" onclick={onthird} data-tooltip-disabled="true" title="{item3_title}" aria-label="{item3_title}">
             <box class="bubble-options-motion bubble-options-motion-right">
                 <box class="{item3_core_class}">
                     <icon class="{item3_icon_class}" name="{item3_icon}" size="14" />

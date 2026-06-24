@@ -1893,6 +1893,8 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         .get("_mesh_key")
         .expect("theme button mesh key")
         .clone();
+    let expected_theme_margin_left =
+        (theme_button.layout.x + theme_button.layout.width * 0.5 - 56.0) as i32;
     component.focused_key = Some(theme_key.clone());
     component.focus_visible_key = Some(theme_key);
 
@@ -1913,8 +1915,9 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
             CoreRequest::PositionSurface {
                 surface_id,
                 margin_top: -18,
-                ..
+                margin_left,
             } if surface_id == "@mesh/theme-selector"
+                && *margin_left == expected_theme_margin_left
         )),
         "keyboard activation should position the theme selector near the nav button: {activation_requests:?}"
     );
@@ -1956,7 +1959,10 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     assert!(
         activation_requests.iter().any(|request| matches!(
             request,
-            CoreRequest::HideSurface { surface_id } if surface_id == "@mesh/theme-selector"
+            CoreRequest::HidePopover {
+                surface_id,
+                defer_for_hover_bridge: false,
+            } if surface_id == "@mesh/theme-selector"
         )),
         "re-activating an already-open theme trigger should close the popover: {activation_requests:?}"
     );
@@ -1998,6 +2004,8 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         .get("_mesh_key")
         .expect("language menu button mesh key")
         .clone();
+    let expected_language_margin_left =
+        (language_button.layout.x + language_button.layout.width * 0.5 - 56.0) as i32;
     component.focused_key = Some(language_key.clone());
     component.focus_visible_key = Some(language_key);
 
@@ -2018,8 +2026,9 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
             CoreRequest::PositionSurface {
                 surface_id,
                 margin_top: -18,
-                ..
+                margin_left,
             } if surface_id == "@mesh/language-popover"
+                && *margin_left == expected_language_margin_left
         )),
         "language trigger should position the popover near the nav button: {open_requests:?}"
     );
@@ -2049,7 +2058,10 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
     assert!(
         close_requests.iter().any(|request| matches!(
             request,
-            CoreRequest::HideSurface { surface_id } if surface_id == "@mesh/language-popover"
+            CoreRequest::HidePopover {
+                surface_id,
+                defer_for_hover_bridge: false,
+            } if surface_id == "@mesh/language-popover"
         )),
         "re-activating an already-open language trigger should close the popover: {close_requests:?}"
     );
@@ -2461,7 +2473,10 @@ fn navigation_bar_same_hover_volume_trigger_closes_popover_immediately() {
     assert!(
         close_requests.iter().any(|request| matches!(
             request,
-            CoreRequest::HideSurface { surface_id } if surface_id == "@mesh/audio-popover"
+            CoreRequest::HidePopover {
+                surface_id,
+                defer_for_hover_bridge: false,
+            } if surface_id == "@mesh/audio-popover"
         )),
         "second click at the same hovered coordinates should hide immediately: {close_requests:?}"
     );
@@ -2543,7 +2558,10 @@ fn navigation_bar_volume_trigger_reopens_after_rapid_toggle_cycle() {
             assert!(
                 requests.iter().any(|request| matches!(
                     request,
-                    CoreRequest::HideSurface { surface_id } if surface_id == "@mesh/audio-popover"
+                    CoreRequest::HidePopover {
+                        surface_id,
+                        defer_for_hover_bridge: false,
+                    } if surface_id == "@mesh/audio-popover"
                 )),
                 "expected rapid click to hide the audio popover: {requests:?}"
             );
@@ -2559,6 +2577,116 @@ fn navigation_bar_volume_trigger_reopens_after_rapid_toggle_cycle() {
             .paint(&theme, width, height, &mut buffer, 1.0)
             .unwrap();
     }
+}
+
+/// A popover opened from a nested child-component trigger can be dismissed by
+/// a route that never runs the trigger's own close handler — selecting an
+/// option inside the popover, clicking away, or the compositor dismissing the
+/// xdg_popup. In all those cases the shell emits `SurfaceVisibilityChanged`
+/// with `visible = false`, and the trigger's `*_surface_hidden` portal binding
+/// must be written back into the *child* component's runtime (not the surface
+/// root's), or the next click hits the dead hide-branch and the popover only
+/// re-opens on the click after that. Regression test for that desync.
+#[test]
+fn navigation_bar_volume_trigger_reopens_after_external_close() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    let theme = default_theme();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree");
+    let volume_button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
+    )
+    .expect("rendered volume button");
+    let volume_key = volume_button
+        .attributes
+        .get("_mesh_key")
+        .expect("volume button mesh key")
+        .clone();
+    let (left, top, right, bottom) =
+        find_node_bounds_by_key(tree, &volume_key, 0.0, 0.0).expect("volume bounds");
+    let x = (left + right) * 0.5;
+    let y = (top + bottom) * 0.5;
+
+    let click = |component: &mut FrontendSurfaceComponent| {
+        component
+            .handle_input(
+                &theme,
+                width,
+                height,
+                ComponentInput::PointerButton {
+                    x,
+                    y,
+                    pressed: true,
+                },
+            )
+            .unwrap();
+        component
+            .handle_input(
+                &theme,
+                width,
+                height,
+                ComponentInput::PointerButton {
+                    x,
+                    y,
+                    pressed: false,
+                },
+            )
+            .unwrap()
+    };
+
+    // First click opens the popover.
+    let requests = click(&mut component);
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ActivatePopover { surface_id, .. }
+                if surface_id == "@mesh/audio-popover"
+        )),
+        "expected first click to open the audio popover: {requests:?}"
+    );
+    component
+        .handle_core_event(&CoreEvent::SurfaceVisibilityChanged {
+            surface_id: "@mesh/audio-popover".into(),
+            visible: true,
+        })
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    // Popover is dismissed externally (option select / click-away / popup
+    // dismiss) — the trigger's own close handler never ran.
+    component
+        .handle_core_event(&CoreEvent::SurfaceVisibilityChanged {
+            surface_id: "@mesh/audio-popover".into(),
+            visible: false,
+        })
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    // The very next click must re-open, not no-op on a stale "open" flag.
+    let requests = click(&mut component);
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ActivatePopover { surface_id, .. }
+                if surface_id == "@mesh/audio-popover"
+        )),
+        "expected click after external close to re-open the popover, got: {requests:?}"
+    );
 }
 
 #[test]

@@ -10,7 +10,7 @@ use std::collections::HashSet;
 
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
-        self.drain_dismissed_child_popups();
+        self.drain_dismissed_popups()?;
 
         if self.debug.enabled {
             let mut debug_requests = self.publish_debug_snapshot()?;
@@ -182,21 +182,49 @@ impl Shell {
 
                 let inner_requested_width = surface.width;
                 let inner_requested_height = surface.height;
-                let dynamic_size = if inner_requested_width == 0 || inner_requested_height == 0 {
-                    self.resolve_dynamic_surface_size(index, &surface_id)?
+                // A content-measured popup has no real size until its first
+                // paint measures the content. Defer creating the `xdg_popup`
+                // until the loop's immediate-rerender pass below, so it is
+                // created at the measured size instead of a placeholder that
+                // visibly grows on the next open.
+                let defer_popup_create =
+                    is_popup && self.components[index].component.needs_content_measure();
+                if is_popup {
+                    // A popup's size must come from the component's own
+                    // CSS-measured content size, NOT the presentation surface
+                    // size. The presentation/shell-surface size can be unknown
+                    // before first creation, compositor-reported after creation,
+                    // or a stale layer-surface render-buffer size that includes
+                    // transparent tooltip padding. `render` runs the loop's
+                    // first paint, which populates `measured_size`; the loop's
+                    // immediate-rerender pass then reaches this point with the
+                    // real measured size and creates/repositions the popup to
+                    // that geometry within the same frame. (Layer surfaces keep
+                    // their own `set_size`/`resolve_dynamic_surface_size` path
+                    // below; it feeds `measured_size` to the compositor via
+                    // `render_layout`, which is skipped for promoted popups.)
+                    let (measured_w, measured_h) =
+                        self.components[index].component.declared_or_measured_size();
+                    width = measured_w.max(1);
+                    height = measured_h.max(1);
                 } else {
-                    None
-                };
-                width = if inner_requested_width == 0 {
-                    dynamic_size.map(|(w, _)| w).unwrap_or(1)
-                } else {
-                    inner_requested_width.max(1)
-                };
-                height = if inner_requested_height == 0 {
-                    dynamic_size.map(|(_, h)| h).unwrap_or(1)
-                } else {
-                    inner_requested_height.max(1)
-                };
+                    let dynamic_size =
+                        if inner_requested_width == 0 || inner_requested_height == 0 {
+                            self.resolve_dynamic_surface_size(index, &surface_id)?
+                        } else {
+                            None
+                        };
+                    width = if inner_requested_width == 0 {
+                        dynamic_size.map(|(w, _)| w).unwrap_or(1)
+                    } else {
+                        inner_requested_width.max(1)
+                    };
+                    height = if inner_requested_height == 0 {
+                        dynamic_size.map(|(_, h)| h).unwrap_or(1)
+                    } else {
+                        inner_requested_height.max(1)
+                    };
+                }
                 let resolved_size = (width, height);
                 if self.components[index].parent.known_surface_size != Some(resolved_size) {
                     self.components[index].parent.known_surface_size = Some(resolved_size);
@@ -209,7 +237,9 @@ impl Shell {
                 // resolved content size. This creates the surface on first
                 // show and repositions it when the size changes (e.g. the
                 // content grows or shrinks between opens).
-                if is_popup && self.components[index].parent.last_popup_size != Some(resolved_size)
+                if is_popup
+                    && !defer_popup_create
+                    && self.components[index].parent.last_popup_size != Some(resolved_size)
                 {
                     self.components[index].parent.last_popup_size = Some(resolved_size);
                     let config = self.components[index]
@@ -276,7 +306,13 @@ impl Shell {
                     .map_err(ShellRunError::Component)?;
                 component_stage_records.extend(runtime.component.take_profiling_records());
 
-                if !self.components[index].component.wants_immediate_rerender()
+                // When popup creation was deferred to measure the content, the
+                // paint above has now populated `measured_size`; force one more
+                // iteration so the `xdg_popup` is created at the measured size
+                // (the immediate-rerender gate alone returns false for a
+                // surface-config-only change).
+                if (!self.components[index].component.wants_immediate_rerender()
+                    && !defer_popup_create)
                     || rerender_attempts >= 1
                 {
                     break;
@@ -551,41 +587,35 @@ impl Shell {
         Ok(any_presented)
     }
 
-    fn drain_dismissed_child_popups(&mut self) {
+    fn drain_dismissed_popups(&mut self) -> Result<(), ShellRunError> {
         for surface_id in self.presentation_engine.take_dismissed_popups() {
-            let dismissed =
-                self.component_target_for_surface(&surface_id)
-                    .and_then(|(index, target)| match target {
-                        TargetRef::Child(child_index) => Some((
-                            index,
-                            self.components[index].children[child_index]
-                                .node_key
-                                .clone(),
-                        )),
-                        TargetRef::Parent => None,
-                    });
-            self.destroy_child_surface_by_id(&surface_id);
-            if let Some((index, node_key)) = dismissed
-                && let Some(runtime) = self.components.get_mut(index)
-            {
-                runtime.dismissed_child_node_keys.insert(node_key);
+            match self.component_target_for_surface(&surface_id) {
+                Some((index, TargetRef::Child(child_index))) => {
+                    let node_key = self.components[index].children[child_index]
+                        .node_key
+                        .clone();
+                    self.destroy_child_surface_at(index, child_index);
+                    if let Some(runtime) = self.components.get_mut(index) {
+                        runtime.dismissed_child_node_keys.insert(node_key);
+                    }
+                }
+                Some((index, TargetRef::Parent))
+                    if self.components[index].parent.popup_parent_surface.is_some() =>
+                {
+                    self.pending_popover_hides.remove(&surface_id);
+                    let mut pending = self.set_surface_visibility_now(surface_id, false)?;
+                    self.drain_requests(&mut pending)?;
+                }
+                _ => {}
             }
         }
+        Ok(())
     }
 
     pub(in crate::shell) fn destroy_all_child_surfaces(&mut self, index: usize) {
         while !self.components[index].children.is_empty() {
             self.destroy_child_surface_at(index, 0);
         }
-    }
-
-    pub(in crate::shell) fn destroy_child_surface_by_id(&mut self, surface_id: &str) {
-        let Some((index, TargetRef::Child(child_index))) =
-            self.component_target_for_surface(surface_id)
-        else {
-            return;
-        };
-        self.destroy_child_surface_at(index, child_index);
     }
 
     pub(in crate::shell) fn destroy_child_surface_at(&mut self, index: usize, child_index: usize) {
@@ -698,15 +728,25 @@ impl Shell {
                 height: height.max(1),
             }];
         }
-        if visible && is_parent && self.debug.show_layout_bounds {
-            let runtime = &mut self.components[index];
-            if let Some(tree) = runtime.component.last_widget_tree() {
-                let buffer = runtime
-                    .parent
+        if visible && self.debug.show_layout_bounds {
+            let debug_tree = match target {
+                TargetRef::Parent => self.components[index].component.last_widget_tree().cloned(),
+                TargetRef::Child(child_index) => {
+                    let node_key = self.components[index].children[child_index]
+                        .node_key
+                        .clone();
+                    self.components[index]
+                        .component
+                        .child_surface_debug_tree(&node_key)
+                }
+            };
+            if let Some(tree) = debug_tree {
+                let buffer = self.components[index]
+                    .target_mut(target)
                     .paint_buffer
                     .as_mut()
                     .expect("paint buffer initialised");
-                self.debug_overlay.paint_layout_bounds(tree, buffer, scale);
+                self.debug_overlay.paint_layout_bounds(&tree, buffer, scale);
                 present_damage = vec![DamageRect {
                     x: 0,
                     y: 0,
