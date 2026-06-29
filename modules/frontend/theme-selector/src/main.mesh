@@ -1,7 +1,13 @@
 <template>
     <popover
+        open={open}
         class="theme-float-shell"
         aria-label="Select theme"
+        anchor-ref="theme-button"
+        anchor="bottom"
+        gravity="bottom"
+        onpointerenter={onPopoverEnter}
+        onpointerleave={onPopoverLeave}
     >
         <BubbleOptions
             label="Select theme"
@@ -38,6 +44,7 @@
 local theme = require("mesh.theme")
 local BubbleOptions = require("../../shared/components/bubble-options.mesh")
 
+open = false
 dark_class = "bubble-option bubble-option-left"
 light_class = "bubble-option bubble-option-center"
 gruvbox_class = "bubble-option bubble-option-right"
@@ -98,6 +105,15 @@ end
 function onThemeScroll(_event)
     -- Theme currently has exactly three options, but the shared bubble control
     -- supports scroll cycling for callers with larger option sets.
+end
+
+function onPopoverEnter(event)
+    self.PopoverEnter:fire(event)
+end
+
+function onPopoverLeave()
+    open = false
+    self.PopoverLeave:fire()
 end
 
 </script>

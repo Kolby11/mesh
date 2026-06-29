@@ -12,7 +12,7 @@
     >
       <label class="language-label">{current_locale_label}</label>
     </button>
-    <LanguagePopover hidden={language_surface_hidden} />
+    <LanguagePopover bind:this={lang_popover} />
   </stack>
 </template>
 
@@ -21,11 +21,17 @@ local t = import("mesh.i18n", "t")
 local LanguagePopover = require("@mesh/language-popover")
 
 current_locale_label = "EN"
-language_surface_id = "@mesh/language-popover"
 language_surface_hidden = true
 language_tooltip = ""
 language_tooltip_disabled = "false"
 trigger_class = "nav-button"
+
+local lang_popover = nil
+local lang_popover_connected = false
+-- Script-side hover bridge: set when trigger leave fires; cleared by PopoverEnter.
+-- render() checks elapsed time and closes if bridge expires without entry.
+local close_after = nil
+local BRIDGE_DELAY = 0.15
 
 local function locale_code()
     local locale = mesh.locale.current()
@@ -69,77 +75,67 @@ local function sync_trigger_state()
     end
 end
 
-local function target_bounds(event)
-    local current = event and (event.current_target or event.current) or {}
-    return current.bounds or {}
+local function do_open()
+    if lang_popover and language_surface_hidden then
+        lang_popover.open = true
+        language_surface_hidden = false
+        close_after = nil
+        sync_trigger_state()
+    end
 end
 
-local function target_left_and_width(event)
-    local bounds = target_bounds(event)
-    local left = tonumber(bounds.left)
-    local width = tonumber(bounds.width)
-    if left == nil or width == nil then
-        local position = (event and event.current_target and event.current_target.position) or {}
-        left = tonumber(position.margin_left) or 0
-        width = tonumber(position.width) or 40
+local function do_close()
+    if lang_popover and not language_surface_hidden then
+        lang_popover.open = false
+        language_surface_hidden = true
+        close_after = nil
+        sync_trigger_state()
     end
-    return left, width
 end
 
 function render(self)
     current_locale_label = locale_label(locale_code())
     sync_trigger_state()
-end
 
-local function show_language_selector(event)
-    if language_surface_hidden then
-        local trigger_left, trigger_width = target_left_and_width(event)
-        mesh.events.publish("shell.position-surface", {
-            surface_id = language_surface_id,
-            margin_top = -18,
-            margin_left = trigger_left + (trigger_width / 2) - 56,
-        })
-        local focus = event.trigger ~= nil and event.trigger.type == "keyboard"
-        mesh.popover.activate(language_surface_id, event, { focus = focus })
-        language_surface_hidden = false
-        sync_trigger_state()
+    -- Subscribe to popover events once the bound instance is available.
+    if lang_popover ~= nil and not lang_popover_connected then
+        lang_popover_connected = true
+        lang_popover.PopoverEnter:on(function()
+            close_after = nil
+        end)
+        lang_popover.PopoverLeave:on(function()
+            do_close()
+        end)
+    end
+
+    -- Hover bridge: close when delay expires without PopoverEnter cancelling.
+    if close_after ~= nil and os.clock() >= close_after then
+        do_close()
     end
 end
 
--- `bridge` defers the close through the core hover-bridge controller so the
--- cursor can travel from the trigger onto the promoted popup without it
--- closing underneath. Keyboard close passes false for an immediate hide.
-local function hide_language_selector(bridge)
-    if not language_surface_hidden then
-        mesh.popover.hide(language_surface_id, { bridge = bridge == true })
-        language_surface_hidden = true
-        sync_trigger_state()
-    end
-end
-
--- Mouse interaction is hover-only (see onLanguageEnter/onLanguageLeave); a
--- click should never be required to open. Only keyboard activation toggles,
--- which also transfers focus into the popover so it closes on focus leave.
+-- Keyboard-only toggle; hover opens/closes.
 function onLanguageToggle(event)
     local keyboard = event ~= nil and event.trigger ~= nil and event.trigger.type == "keyboard"
     if not keyboard then
         return
     end
     if language_surface_hidden then
-        show_language_selector(event)
+        do_open()
     else
-        hide_language_selector(false)
+        do_close()
     end
 end
 
--- Hover opens the selector; leaving the trigger starts a core-owned hover
--- bridge so the pointer can cross into the promoted popup before it closes.
 function onLanguageEnter(event)
-    show_language_selector(event)
+    do_open()
 end
 
+-- Start the hover bridge: give the pointer time to reach the popup before closing.
 function onLanguageLeave()
-    hide_language_selector(true)
+    if not language_surface_hidden then
+        close_after = os.clock() + BRIDGE_DELAY
+    end
 end
 </script>
 
