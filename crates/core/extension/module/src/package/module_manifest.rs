@@ -517,6 +517,10 @@ pub enum ModuleKind {
     LanguagePack,
     Interface,
     Library,
+    /// Embeddable component module — has an entry `.mesh` file consumed by other
+    /// modules via `require("@scope/name")` but owns no shell surface of its own.
+    /// No `mesh.surface` block is required or allowed.
+    Component,
 }
 
 impl From<ModuleType> for ModuleKind {
@@ -541,7 +545,7 @@ impl From<ModuleKind> for ModuleType {
             ModuleKind::IconPack => Self::IconPack,
             ModuleKind::LanguagePack => Self::LanguagePack,
             ModuleKind::Interface => Self::Interface,
-            ModuleKind::FontPack | ModuleKind::Library => Self::Widget,
+            ModuleKind::FontPack | ModuleKind::Library | ModuleKind::Component => Self::Widget,
         }
     }
 }

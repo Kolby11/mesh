@@ -236,6 +236,12 @@ impl PointerHandler for State {
                             "[hover] layer_shell: failed to set cursor on enter: {error}"
                         );
                     }
+                    // Emit a synthetic PointerMove at the entry coordinates so the shell
+                    // cancels any pending hover-bridge hide immediately on entry rather
+                    // than waiting for the first motion event.
+                    let (x, y) = (event.position.0 as f32, event.position.1 as f32);
+                    self.events
+                        .push(DevWindowEvent::PointerMove { surface_id, x, y });
                 }
                 PointerEventKind::Leave { .. } => {
                     tracing::debug!("[hover] layer_shell: pointer leave surface_id={surface_id}");

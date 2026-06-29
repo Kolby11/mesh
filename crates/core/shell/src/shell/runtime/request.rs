@@ -950,7 +950,11 @@ impl Shell {
                 state.closing_until = None;
                 state.visible = true;
             }
-            if let Some(index) = self.component_index_for_surface(surface_id) {
+            // Only clear surface_exiting on top-level promoted surfaces; in-tree child
+            // surfaces don't have their own ComponentRuntime so calling set_surface_exiting
+            // on the parent would incorrectly affect the parent surface's animation state.
+            let target = self.component_target_for_surface(surface_id);
+            if let Some((index, crate::shell::types::TargetRef::Parent)) = target {
                 self.components[index].component.set_surface_exiting(false);
             }
         }
@@ -958,9 +962,20 @@ impl Shell {
     }
 
     fn surface_is_promoted_popover(&mut self, surface_id: &str) -> bool {
-        self.component_index_for_surface(surface_id)
-            .and_then(|index| self.components.get(index))
-            .is_some_and(|runtime| runtime.parent.popup_parent_surface.is_some())
+        let Some((index, target)) = self.component_target_for_surface(surface_id) else {
+            return false;
+        };
+        match target {
+            crate::shell::types::TargetRef::Parent => {
+                self.components[index].parent.popup_parent_surface.is_some()
+            }
+            crate::shell::types::TargetRef::Child(child_index) => {
+                self.components[index].children[child_index]
+                    .target
+                    .popup_parent_surface
+                    .is_some()
+            }
+        }
     }
 
     pub(in crate::shell) fn set_surface_visibility_now(
