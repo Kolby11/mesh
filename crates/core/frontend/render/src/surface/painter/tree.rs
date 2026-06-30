@@ -346,7 +346,7 @@ impl FrontendRenderEngine {
         }
 
         let style = &node.computed_style;
-        if style.display == Display::None {
+        if node_is_explicitly_hidden(node) {
             return;
         }
 
@@ -581,7 +581,7 @@ impl FrontendRenderEngine {
         module_id: Option<&str>,
     ) {
         let style = &node.computed_style;
-        if style.display == Display::None {
+        if node_is_explicitly_hidden(node) {
             return;
         }
 
@@ -1122,4 +1122,20 @@ fn fixed_child_offsets(
     } else {
         (child_offset_x, child_offset_y, child_clip)
     }
+}
+
+fn node_is_explicitly_hidden(node: &WidgetNode) -> bool {
+    node.computed_style.display == Display::None
+        || matches!(
+            node.computed_style.visibility,
+            Visibility::Hidden | Visibility::Collapse
+        )
+        || node
+            .attributes
+            .get("hidden")
+            .is_some_and(|value| truthy_attribute(value))
+}
+
+fn truthy_attribute(value: &str) -> bool {
+    matches!(value, "" | "true" | "1" | "hidden" | "disabled" | "checked")
 }

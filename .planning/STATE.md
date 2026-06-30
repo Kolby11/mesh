@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.21
 milestone_name: Retained Layout & Display List
-status: Gap closure in progress -- 54->7 shell failures; 7 regression suspects documented
-stopped_at: shell-suite gap-closure pass complete (2026-06-22)
-last_updated: "2026-06-22T10:30:00.000Z"
-last_activity: 2026-06-22 -- shell suite 54->7 failing; remaining 7 are behavior-level regression suspects (see 104-VERIFICATION.md)
+status: shell suite 374 pass / 9 fail; fixing regressions from inline-popover migration commit
+stopped_at: context exhaustion at 76% (2026-06-29)
+last_updated: "2026-06-29T21:20:00.000Z"
+last_activity: 2026-06-29 -- fixed InstanceBinding validation + closed-popover placeholder; 9 nav/theme failures remain
 progress:
   total_phases: 3
   completed_phases: 1
@@ -39,7 +39,9 @@ Progress: [████████████░░░░░░░░] 33% imp
 Took `nix develop -c cargo test --package mesh-core-shell --lib` from 54 -> 7
 failing. Fixed all fixture/harness drift from the shipped navigation-bar /
 audio-popover rewrites (embed-handler keys, missing child-component + interface
+
 + i18n registration in the test harness, debug-inspector seed-flow, vertical
+
 slider geometry, deprecated keybind migration, icons.toml completion, obsolete
 test deletion). Also fixed a real product bug: audio popover slider stuck at 0
 (`value={expr}` must be quoted `value="{var}"`).
@@ -92,6 +94,6 @@ Decisions are logged in PROJECT.md Key Decisions table. v1.20 decisions archived
 
 ## Session Continuity
 
-Last session: 2026-06-22T06:57:38.652Z
-Stopped at: context exhaustion at 76% (2026-06-22)
+Last session: 2026-06-29T20:42:17.055Z
+Stopped at: context exhaustion at 75% (2026-06-29)
 Resume file: None

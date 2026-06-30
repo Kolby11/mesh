@@ -67,6 +67,12 @@ use mesh_core_render::{
 const TOOLTIP_OVERLAY_WIDTH: u32 = 240;
 const TOOLTIP_OVERLAY_HEIGHT: u32 = 80;
 
+/// Marker attribute set on an embedded `<popover>` wrapper that is promoted to a
+/// child surface. `finalize_tree` re-applies the out-of-flow collapse to nodes
+/// carrying this after each restyle pass (restyle re-resolves `computed_style`
+/// from CSS and would otherwise drop imperatively-set geometry).
+pub(super) const PROMOTED_POPOVER_MARKER: &str = "_mesh_promoted_popover";
+
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
     pub(super) struct ComponentDirtyFlags: u16 {

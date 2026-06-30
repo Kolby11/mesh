@@ -26,7 +26,7 @@ language_tooltip = ""
 language_tooltip_disabled = "false"
 trigger_class = "nav-button"
 
-local lang_popover = nil
+lang_popover = nil
 local lang_popover_connected = false
 -- Script-side hover bridge: set when trigger leave fires; cleared by PopoverEnter.
 -- render() checks elapsed time and closes if bridge expires without entry.

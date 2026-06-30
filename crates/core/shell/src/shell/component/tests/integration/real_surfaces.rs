@@ -42,6 +42,14 @@ fn assert_layout_contains(parent: &WidgetNode, child: &WidgetNode, label: &str) 
     );
 }
 
+fn i32_rect(bounds: (f32, f32, f32, f32)) -> (i32, i32, i32, i32) {
+    let left = bounds.0.floor() as i32;
+    let top = bounds.1.floor() as i32;
+    let right = bounds.2.ceil() as i32;
+    let bottom = bounds.3.ceil() as i32;
+    (left, top, (right - left).max(1), (bottom - top).max(1))
+}
+
 fn first_node_with_class_token<'a>(node: &'a WidgetNode, token: &str) -> Option<&'a WidgetNode> {
     if node
         .attributes
@@ -53,6 +61,20 @@ fn first_node_with_class_token<'a>(node: &'a WidgetNode, token: &str) -> Option<
     node.children
         .iter()
         .find_map(|child| first_node_with_class_token(child, token))
+}
+
+fn parent_of_node_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a WidgetNode> {
+    if node.children.iter().any(|child| {
+        child
+            .attributes
+            .get("_mesh_key")
+            .is_some_and(|candidate| candidate == key)
+    }) {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .find_map(|child| parent_of_node_key(child, key))
 }
 
 #[test]
@@ -226,30 +248,28 @@ fn shipped_audio_popover_content_measured_surface_contains_volume_slider() {
 }
 
 #[test]
-fn shipped_theme_selector_uses_left_anchored_content_measured_popover_layout() {
-    let theme_selector =
-        real_frontend_module_component("@mesh/theme-selector", audio_network_catalog());
+fn shipped_tiny_nav_popovers_are_embeddable_components_without_surface_geometry() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap();
 
-    assert_eq!(
-        theme_selector.surface_layout.edge,
-        Edge::Left,
-        "@mesh/theme-selector should use the shell's popover positioning anchor"
-    );
-    assert_eq!(
-        theme_selector.surface_layout.size_policy,
-        SurfaceSizePolicy::ContentMeasured,
-        "@mesh/theme-selector should stay content-measured like the other nav popovers"
-    );
-    assert_eq!(theme_selector.surface_layout.width, 112);
-    assert_eq!(theme_selector.surface_layout.height, 74);
-    assert_eq!(
-        theme_selector.surface_layout.display_transition.show_ms,
-        120
-    );
-    assert_eq!(
-        theme_selector.surface_layout.display_transition.hide_ms,
-        180
-    );
+    for module in ["language-popover", "theme-selector"] {
+        let manifest =
+            mesh_core_module::manifest::load_manifest(&root.join("modules/frontend").join(module))
+                .unwrap_or_else(|err| panic!("{module} manifest should load: {err}"))
+                .manifest;
+
+        assert_eq!(
+            manifest.package.module_type,
+            mesh_core_module::ModuleType::Widget,
+            "{module} should be an embeddable component, not a standalone surface"
+        );
+        assert!(
+            manifest.surface_layout.is_none(),
+            "{module} should not declare surface geometry in module.json"
+        );
+    }
 }
 
 #[test]
@@ -1214,6 +1234,158 @@ fn shipped_navigation_icon_rasterizes_pixels_on_real_surface() {
          (themed icon or built-in missing-icon fallback), but its bounds \
          [{left},{top},{right},{bottom}] were fully transparent"
     );
+}
+
+#[test]
+fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    component.visible = true;
+
+    let theme = default_theme();
+    let width = 1280;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation bar");
+    let theme_button =
+        first_node_with_attr(tree, "aria-label", "Select theme").expect("theme button");
+    let theme_button_key = theme_button
+        .attributes
+        .get("_mesh_key")
+        .expect("theme button key")
+        .clone();
+    let (theme_left, theme_top, theme_right, theme_bottom) =
+        find_node_bounds_by_key(tree, &theme_button_key, 0.0, 0.0).expect("theme button bounds");
+    let theme_center_x = (theme_left + theme_right) / 2.0;
+    let theme_center_y = (theme_top + theme_bottom) / 2.0;
+    let cluster_before =
+        first_node_by_class(tree, "right-cluster").expect("control cluster before");
+    let cluster_width_before = cluster_before.layout.width;
+
+    let enter_handler = theme_button
+        .event_handlers
+        .get("pointerenter")
+        .unwrap_or_else(|| {
+            panic!(
+                "theme button should expose pointerenter handler, got {:?}",
+                theme_button.event_handlers
+            )
+        })
+        .clone();
+    component
+        .call_namespaced_handler(
+            &enter_handler,
+            &[serde_json::json!({
+                "surface": { "id": "@mesh/navigation-bar" },
+                "current_target": {
+                    "key": theme_button_key,
+                    "position": {
+                        "margin_left": theme_center_x as i64,
+                        "margin_bottom": theme_center_y as i64
+                    }
+                }
+            })],
+        )
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    let requests = component.child_surface_requests();
+    assert_eq!(
+        requests.len(),
+        1,
+        "hover-opened theme selector should be promoted to one child popup request: {requests:?}"
+    );
+    assert_eq!(requests[0].content_size, (112, 74));
+    assert_eq!(
+        requests[0].anchor_rect,
+        i32_rect((theme_left, theme_top, theme_right, theme_bottom)),
+        "promoted popover should anchor to the trigger rect, not its own CSS box"
+    );
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation bar with open popover");
+    let popover = find_node_by_key(tree, &requests[0].node_key).expect("promoted popover node");
+    assert!(
+        !popover.attributes.contains_key("hidden"),
+        "promoted popover node itself must stay paintable for the child popup"
+    );
+    let embedded_wrapper =
+        parent_of_node_key(tree, &requests[0].node_key).expect("embedded popover wrapper");
+    assert_eq!(
+        embedded_wrapper
+            .attributes
+            .get("hidden")
+            .map(String::as_str),
+        Some("true"),
+        "embedded wrapper should be hidden so promoted content is not painted inline"
+    );
+    let cluster_after = first_node_by_class(tree, "right-cluster").expect("control cluster after");
+    assert!(
+        (cluster_after.layout.width - cluster_width_before).abs() <= 1.0,
+        "opening promoted popover must not expand the parent nav control cluster \
+         from {cluster_width_before} to {}",
+        cluster_after.layout.width
+    );
+    assert!(
+        cluster_after.layout.x + cluster_after.layout.width <= width as f32,
+        "open promoted popover must not push controls off the nav surface"
+    );
+}
+
+#[test]
+fn shipped_navigation_resting_control_buttons_do_not_overlap() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    component.visible = true;
+
+    let theme = default_theme();
+    let width = 1280;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation bar");
+
+    // The audio, theme, and language controls each embed a `<popover>` as the
+    // resting (closed) child of their trigger button. A collapsed popover must
+    // stay out of flow: if its full-size content leaked into layout it would push
+    // the trigger row's siblings into overlap (the audio/theme/language buttons
+    // landing on top of each other). Verify the three trigger buttons tile
+    // left-to-right without overlapping.
+    let mut triggers: Vec<(f32, f32)> = ["Open audio controls", "Select theme", "Choose language"]
+        .into_iter()
+        .map(|label| {
+            let button = first_node_with_attr(tree, "aria-label", label)
+                .unwrap_or_else(|| panic!("{label} button"));
+            (button.layout.x, button.layout.x + button.layout.width)
+        })
+        .collect();
+    triggers.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    for pair in triggers.windows(2) {
+        let (left_x, left_right) = (pair[0].0, pair[0].1);
+        let next_x = pair[1].0;
+        assert!(
+            next_x >= left_right - 0.5,
+            "resting popover trigger buttons must not overlap: a button at \
+             x={left_x}..{left_right} overlaps the next at x={next_x}"
+        );
+    }
 }
 
 #[test]

@@ -20,6 +20,7 @@ pub(crate) use backend::{
 };
 use mesh_core_elements::style::{
     BackgroundPaint, Color, Display, Overflow, Position, TextAlign, TextDirection, TextOverflow,
+    Visibility,
 };
 use mesh_core_elements::tree::WidgetNode;
 use mesh_core_elements::{BoxShadow, VisualFilter};

@@ -53,9 +53,9 @@ window_start = 1
 item1_button_class = "bubble-option bubble-option-left"
 item2_button_class = "bubble-option bubble-option-center"
 item3_button_class = "bubble-option bubble-option-right"
-item1_core_class = "bubble-option-core bubble-option-core-language"
-item2_core_class = "bubble-option-core bubble-option-core-language"
-item3_core_class = "bubble-option-core bubble-option-core-language"
+item1_core_class = "bubble-option-core bubble-option-core-language bubble-option-core-language-left"
+item2_core_class = "bubble-option-core bubble-option-core-language bubble-option-core-language-center"
+item3_core_class = "bubble-option-core bubble-option-core-language bubble-option-core-language-right"
 item1_text = "EN"
 item2_text = "SK"
 item3_text = "DE"
@@ -112,14 +112,18 @@ end
 
 local function set_option(slot, locale)
     local button_class = "bubble-option"
-    local core_class = "bubble-option-core bubble-option-core-language"
+    local slot_anim_class
     if slot == 1 then
         button_class = button_class .. " bubble-option-left"
+        slot_anim_class = "bubble-option-core-language-left"
     elseif slot == 2 then
         button_class = button_class .. " bubble-option-center"
+        slot_anim_class = "bubble-option-core-language-center"
     else
         button_class = button_class .. " bubble-option-right"
+        slot_anim_class = "bubble-option-core-language-right"
     end
+    local core_class = "bubble-option-core bubble-option-core-language " .. slot_anim_class
     if locale == selected_locale then
         button_class = button_class .. " bubble-option-active"
         core_class = core_class .. " bubble-option-core-active"
@@ -208,8 +212,8 @@ end
 
 <style>
 .language-popover-shell {
-    width: 100%;
-    height: 100%;
+    width: 112px;
+    height: 74px;
     padding: 0;
     background: transparent;
     opacity: 1;

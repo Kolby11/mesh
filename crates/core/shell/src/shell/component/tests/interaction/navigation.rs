@@ -1,6 +1,14 @@
 use super::*;
 use mesh_core_frontend_host::ShellComponent;
 
+fn rect_matches_bounds(rect: (i32, i32, i32, i32), bounds: (f32, f32, f32, f32)) -> bool {
+    let left = bounds.0.floor() as i32;
+    let top = bounds.1.floor() as i32;
+    let right = bounds.2.ceil() as i32;
+    let bottom = bounds.3.ceil() as i32;
+    rect == (left, top, (right - left).max(1), (bottom - top).max(1))
+}
+
 #[test]
 fn keyboard_activation_focused_input_backspace_edits_value() {
     let mut component = test_frontend_component(
@@ -1893,8 +1901,8 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         .get("_mesh_key")
         .expect("theme button mesh key")
         .clone();
-    let expected_theme_margin_left =
-        (theme_button.layout.x + theme_button.layout.width * 0.5 - 56.0) as i32;
+    let theme_bounds =
+        find_node_bounds_by_key(tree, &theme_key, 0.0, 0.0).expect("theme button bounds");
     component.focused_key = Some(theme_key.clone());
     component.focus_visible_key = Some(theme_key);
 
@@ -1910,24 +1918,24 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         )
         .unwrap();
     assert!(
-        activation_requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::PositionSurface {
-                surface_id,
-                margin_top: -18,
-                margin_left,
-            } if surface_id == "@mesh/theme-selector"
-                && *margin_left == expected_theme_margin_left
-        )),
-        "keyboard activation should position the theme selector near the nav button: {activation_requests:?}"
+        activation_requests.is_empty(),
+        "embedded theme selector should open through component state, not legacy surface requests: {activation_requests:?}"
     );
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    let child_requests = component.child_surface_requests();
+    assert_eq!(
+        child_requests.len(),
+        1,
+        "keyboard activation should derive one promoted theme selector popup: {child_requests:?}"
+    );
+    assert_eq!(child_requests[0].content_size, (112, 74));
     assert!(
-        activation_requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::ActivatePopover { surface_id, .. }
-                if surface_id == "@mesh/theme-selector"
-        )),
-        "keyboard activation should open the theme selector popover: {activation_requests:?}"
+        rect_matches_bounds(child_requests[0].anchor_rect, theme_bounds),
+        "theme selector popup should anchor to the theme trigger bounds {:?}, got {:?}",
+        theme_bounds,
+        child_requests[0].anchor_rect
     );
 
     component
@@ -1957,14 +1965,15 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         )
         .unwrap();
     assert!(
-        activation_requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::HidePopover {
-                surface_id,
-                defer_for_hover_bridge: false,
-            } if surface_id == "@mesh/theme-selector"
-        )),
-        "re-activating an already-open theme trigger should close the popover: {activation_requests:?}"
+        activation_requests.is_empty(),
+        "embedded theme selector should close through component state, not legacy hide requests: {activation_requests:?}"
+    );
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    assert!(
+        component.child_surface_requests().is_empty(),
+        "re-activating an already-open theme trigger should close the derived popup"
     );
 }
 
@@ -2004,8 +2013,8 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         .get("_mesh_key")
         .expect("language menu button mesh key")
         .clone();
-    let expected_language_margin_left =
-        (language_button.layout.x + language_button.layout.width * 0.5 - 56.0) as i32;
+    let language_bounds =
+        find_node_bounds_by_key(tree, &language_key, 0.0, 0.0).expect("language button bounds");
     component.focused_key = Some(language_key.clone());
     component.focus_visible_key = Some(language_key);
 
@@ -2021,27 +2030,24 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         )
         .unwrap();
     assert!(
-        open_requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::PositionSurface {
-                surface_id,
-                margin_top: -18,
-                margin_left,
-            } if surface_id == "@mesh/language-popover"
-                && *margin_left == expected_language_margin_left
-        )),
-        "language trigger should position the popover near the nav button: {open_requests:?}"
+        open_requests.is_empty(),
+        "embedded language popover should open through component state, not legacy surface requests: {open_requests:?}"
     );
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    let child_requests = component.child_surface_requests();
+    assert_eq!(
+        child_requests.len(),
+        1,
+        "keyboard activation should derive one promoted language popup: {child_requests:?}"
+    );
+    assert_eq!(child_requests[0].content_size, (112, 74));
     assert!(
-        open_requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::ActivatePopover {
-                surface_id,
-                focus: true,
-                ..
-            } if surface_id == "@mesh/language-popover"
-        )),
-        "keyboard activation should open the language popover with focus: {open_requests:?}"
+        rect_matches_bounds(child_requests[0].anchor_rect, language_bounds),
+        "language popup should anchor to the language trigger bounds {:?}, got {:?}",
+        language_bounds,
+        child_requests[0].anchor_rect
     );
 
     let close_requests = component
@@ -2056,14 +2062,103 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         )
         .unwrap();
     assert!(
-        close_requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::HidePopover {
-                surface_id,
-                defer_for_hover_bridge: false,
-            } if surface_id == "@mesh/language-popover"
-        )),
-        "re-activating an already-open language trigger should close the popover: {close_requests:?}"
+        close_requests.is_empty(),
+        "embedded language popover should close through component state, not legacy hide requests: {close_requests:?}"
+    );
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    assert!(
+        component.child_surface_requests().is_empty(),
+        "re-activating an already-open language trigger should close the derived popup"
+    );
+}
+
+#[test]
+fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    let theme = default_theme();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.locale".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({ "locale": "en", "current": "en" }),
+        })
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = component.last_tree.as_ref().expect("rendered navigation tree");
+    let language_button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageToggle",
+    )
+    .expect("language menu button");
+    let language_key = language_button
+        .attributes
+        .get("_mesh_key")
+        .expect("language menu button mesh key")
+        .clone();
+    component.focused_key = Some(language_key.clone());
+    component.focus_visible_key = Some(language_key);
+
+    // Open the popover.
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    let child_requests = component.child_surface_requests();
+    assert_eq!(child_requests.len(), 1, "popover should be open: {child_requests:?}");
+    let node_key = child_requests[0].node_key.clone();
+    let (cw, ch) = child_requests[0].content_size;
+
+    // Pointer moves into the promoted popup (cancels the trigger's close bridge).
+    component
+        .handle_child_surface_input(
+            &node_key,
+            &theme,
+            cw,
+            ch,
+            ComponentInput::PointerMove {
+                x: cw as f32 / 2.0,
+                y: ch as f32 / 2.0,
+            },
+        )
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    assert_eq!(
+        component.child_surface_requests().len(),
+        1,
+        "popover must stay open while the pointer is over the promoted popup"
+    );
+
+    // Pointer leaves the promoted popup — the popover must close itself.
+    component
+        .handle_child_surface_input(&node_key, &theme, cw, ch, ComponentInput::PointerLeave)
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    assert!(
+        component.child_surface_requests().is_empty(),
+        "language popover must close when the pointer leaves the promoted popup"
     );
 }
 

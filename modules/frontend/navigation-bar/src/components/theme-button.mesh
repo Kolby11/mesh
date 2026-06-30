@@ -30,7 +30,7 @@ theme_is_dark = true
 theme_surface_hidden = true
 trigger_class = "nav-button"
 
-local theme_popover = nil
+theme_popover = nil
 local theme_popover_connected = false
 local close_after = nil
 local BRIDGE_DELAY = 0.15

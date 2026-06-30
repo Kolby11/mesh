@@ -3,9 +3,10 @@ use std::collections::{BTreeMap, HashMap};
 use mesh_core_elements::WidgetNode;
 use mesh_core_elements::style::Dimension;
 use mesh_core_frontend::FrontendCompositionResolver;
+use mesh_core_interaction::source_element_tag;
 use mesh_core_module::ModuleType;
 
-use super::FrontendSurfaceComponent;
+use super::{FrontendSurfaceComponent, PROMOTED_POPOVER_MARKER};
 
 impl FrontendCompositionResolver for FrontendSurfaceComponent {
     fn render_import(
@@ -103,6 +104,27 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         if let Some(binding) = bind_this.and_then(|value| simple_state_binding(&value)) {
             self.bind_child_instance(host_instance_key, &binding, &instance_key);
         }
+        // Inline component modules whose root element is a `<popover>` are never
+        // painted inline: the popover is realized as a promoted child `xdg_popup`
+        // surface. Mark the embedded wrapper as hidden (so it is skipped by parent
+        // painting and hit-testing) and tag it for out-of-flow collapse. The actual
+        // `position: absolute` geometry is applied in `finalize_tree` AFTER the
+        // restyle pass, because restyle re-resolves `computed_style` purely from CSS
+        // and would otherwise wipe any geometry set here. Taking the wrapper out of
+        // flow keeps its (full-size) popover subtree intact for
+        // `collect_child_surface_requests()` and child-surface painting while
+        // preventing it from contributing to the trigger row's layout — otherwise
+        // the resting popover would widen the control cluster and overlap
+        // neighbouring buttons. Open and closed popovers collapse identically so
+        // toggling a hover popover never relayouts its trigger; only open popovers
+        // are additionally promoted to a child surface.
+        if embedded_root_is_popover(&node) {
+            let mut node = node;
+            node.attributes.insert("hidden".into(), "true".into());
+            node.attributes
+                .insert(PROMOTED_POPOVER_MARKER.into(), "true".into());
+            return Some(node);
+        }
         Some(node)
     }
 
@@ -169,6 +191,17 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
 
         nodes
     }
+}
+
+/// Returns true when an embedded component's rendered tree has a `<popover>` as its
+/// top-level content, regardless of open state. The root node from
+/// `build_tree_with_state` is always a "surface" wrapper, so the actual element is the
+/// first child. The popover element paints as a generic `box`, carrying its identity on
+/// `data-mesh-element`, so match on `source_element_tag` rather than the raw render tag.
+fn embedded_root_is_popover(node: &WidgetNode) -> bool {
+    node.children
+        .first()
+        .is_some_and(|child| source_element_tag(child) == "popover")
 }
 
 fn simple_state_binding(binding: &str) -> Option<String> {

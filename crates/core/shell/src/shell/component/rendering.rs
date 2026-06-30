@@ -52,6 +52,32 @@ impl FrontendSurfaceComponent {
                     rules.extend(style.rules.iter().cloned());
                 }
             }
+            let mut imported_module_ids: Vec<_> = self
+                .compiled
+                .module_component_imports
+                .values()
+                .filter(|module_id| module_id.as_str() != self.id())
+                .cloned()
+                .collect();
+            imported_module_ids.sort();
+            imported_module_ids.dedup();
+            for module_id in imported_module_ids {
+                let Some(entry) = self.frontend_catalog.modules.get(&module_id) else {
+                    continue;
+                };
+                if let Some(style) = entry.compiled.component.style.as_ref() {
+                    rules.extend(style.rules.iter().cloned());
+                }
+                let mut aliases: Vec<_> = entry.compiled.local_components.keys().cloned().collect();
+                aliases.sort();
+                for alias in aliases {
+                    if let Some(component) = entry.compiled.local_components.get(&alias)
+                        && let Some(style) = component.style.as_ref()
+                    {
+                        rules.extend(style.rules.iter().cloned());
+                    }
+                }
+            }
             rules.sort_by_key(|rule| selector_contains_state(&rule.selector));
 
             self.cached_restyle_rules = Some(rules);
@@ -348,6 +374,13 @@ impl FrontendSurfaceComponent {
             tree.computed_style.height = mesh_core_elements::Dimension::Px(height as f32);
         }
 
+        // Re-apply the out-of-flow collapse for promoted `<popover>` wrappers. The
+        // restyle pass above re-resolves `computed_style` from CSS only, dropping
+        // the `position: absolute` set when the wrapper was composed. Without this,
+        // a promoted (but hidden) popover's full-size subtree would lay out inline
+        // and push its trigger row's siblings into overlap. Must run before layout.
+        collapse_promoted_popover_wrappers(tree);
+
         let layout_work_required = !reused_retained_layout || !self.layout_state.valid;
         // Enter the retained layout path on every finalized tree. On
         // VISUAL_REPAINT-only frames `compute_incremental` updates retained
@@ -515,6 +548,28 @@ fn merge_runtime_primitive_defaults(node: &mut WidgetNode) {
     }
     for child in &mut node.children {
         merge_runtime_primitive_defaults(child);
+    }
+}
+
+/// Collapses promoted `<popover>` wrappers to a zero-size, overflow-visible box so
+/// their (still full-size) popover subtree does not push trigger-row siblings around.
+/// A zero flex-basis contributes nothing to the parent's layout, while the overflowing
+/// popover content keeps its real size and stays anchored at the wrapper's in-flow
+/// position — which child-surface paint and input translation rely on to locate the
+/// promoted subtree. (Out-of-flow `position: absolute` would instead relocate the
+/// subtree's layout coordinates, breaking that translation.) See
+/// [`PROMOTED_POPOVER_MARKER`].
+fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
+    if node.attributes.contains_key(PROMOTED_POPOVER_MARKER) {
+        node.computed_style.width = mesh_core_elements::Dimension::Px(0.0);
+        node.computed_style.height = mesh_core_elements::Dimension::Px(0.0);
+        node.computed_style.min_width = Some(0.0);
+        node.computed_style.min_height = Some(0.0);
+        node.computed_style.overflow_x = mesh_core_elements::style::Overflow::Visible;
+        node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Visible;
+    }
+    for child in &mut node.children {
+        collapse_promoted_popover_wrappers(child);
     }
 }
 

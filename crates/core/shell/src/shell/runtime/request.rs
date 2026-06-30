@@ -299,11 +299,13 @@ impl Shell {
                     // assumed popover width — that hardcoding caused near-edge
                     // popovers to overflow and get slid sideways once their
                     // measured size exceeded the assumption.
-                    let trigger_rect = self
-                        .component_index_for_surface(&trigger_surface)
-                        .and_then(|idx| {
-                            self.components[idx].component.node_bounds_by_key(&trigger_key)
-                        });
+                    let trigger_rect =
+                        self.component_index_for_surface(&trigger_surface)
+                            .and_then(|idx| {
+                                self.components[idx]
+                                    .component
+                                    .node_bounds_by_key(&trigger_key)
+                            });
                     let (anchor_x, anchor_w) = match trigger_rect {
                         Some((left, _top, right, _bottom)) => {
                             (left.round() as i32, ((right - left).round() as i32).max(1))
@@ -969,12 +971,11 @@ impl Shell {
             crate::shell::types::TargetRef::Parent => {
                 self.components[index].parent.popup_parent_surface.is_some()
             }
-            crate::shell::types::TargetRef::Child(child_index) => {
-                self.components[index].children[child_index]
-                    .target
-                    .popup_parent_surface
-                    .is_some()
-            }
+            crate::shell::types::TargetRef::Child(child_index) => self.components[index].children
+                [child_index]
+                .target
+                .popup_parent_surface
+                .is_some(),
         }
     }
 

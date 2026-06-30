@@ -892,7 +892,15 @@ fn shipped_module_graph_loads_repo_module_fixture() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();
 
-    assert_eq!(graph.frontend_modules().len(), 5);
+    assert_eq!(graph.frontend_modules().len(), 3);
+    let component_ids: std::collections::HashSet<_> = graph
+        .modules_by_kind(ModuleKind::Component)
+        .into_iter()
+        .map(|module| module.id.as_str())
+        .collect();
+    assert_eq!(component_ids.len(), 2);
+    assert!(component_ids.contains("@mesh/language-popover"));
+    assert!(component_ids.contains("@mesh/theme-selector"));
     assert_eq!(
         graph
             .module("@mesh/navigation-bar")

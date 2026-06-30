@@ -196,8 +196,21 @@ onscroll = nil
     .bubble-option-core-language {
         background: var(--color-surface-container-high);
         color: var(--color-on-surface);
+    }
+
+    .bubble-option-core-language-left {
+        animation-name: bubble-option-float-left;
+        animation-delay: 360ms;
+    }
+
+    .bubble-option-core-language-center {
         animation-name: bubble-option-float-center;
-        animation-delay: 420ms;
+        animation-delay: 430ms;
+    }
+
+    .bubble-option-core-language-right {
+        animation-name: bubble-option-float-right;
+        animation-delay: 500ms;
     }
 
     .bubble-option-icon {

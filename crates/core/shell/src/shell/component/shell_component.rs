@@ -1034,15 +1034,27 @@ impl ShellComponent for FrontendSurfaceComponent {
         let Some(tree) = self.last_tree.as_ref() else {
             return Ok(Vec::new());
         };
+        let Some(node) = find_node_by_key(tree, node_key) else {
+            return Ok(Vec::new());
+        };
         let Some(bounds) = find_node_bounds_by_key(tree, node_key, 0.0, 0.0) else {
             return Ok(Vec::new());
         };
-        self.handle_component_input(
-            theme,
-            width,
-            height,
-            translate_child_surface_input(input, bounds.0, bounds.1),
-        )
+        // The promoted popover is laid out in-flow under its trigger (often extending
+        // off the parent surface), but presented as a separate popup. Hit-testing the
+        // parent tree would clip the off-surface content and is blocked by the popover's
+        // `hidden` wrapper, so instead run input against the popover subtree in isolation
+        // — offset to local origin exactly like `paint_child_surface` — using the
+        // popup-local coordinates directly. Node `_mesh_key`s are identical to the real
+        // tree, so the hover state and dispatched handlers (`onpointerenter` /
+        // `onpointerleave`, option clicks) stay consistent after the real tree is
+        // restored.
+        let mut subtree = node.clone();
+        offset_widget_tree_layout(&mut subtree, -bounds.0, -bounds.1);
+        let saved_tree = self.last_tree.replace(subtree);
+        let result = self.handle_component_input(theme, width, height, input);
+        self.last_tree = saved_tree;
+        result
     }
 
     fn hovered_target_is_interactive(&self) -> bool {
@@ -1701,10 +1713,10 @@ fn collect_child_surface_requests(
         && let Some(node_key) = node.attributes.get("_mesh_key")
         && let Some(anchor) = popover_anchor_bounds(root, node, node_key)
     {
-        let content = subtree_content_size(node).unwrap_or((
+        let content = (
             node.layout.width.ceil().max(1.0) as u32,
             node.layout.height.ceil().max(1.0) as u32,
-        ));
+        );
         requests.push(ChildSurfaceRequest {
             node_key: node_key.clone(),
             kind: ChildSurfaceKind::Popover,
@@ -1774,6 +1786,12 @@ fn find_node_bounds_by_reference(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<(f32, f32, f32, f32)> {
+    // `node.layout` already stores absolute surface coordinates, so the accumulated
+    // offset only carries scroll *deltas* from ancestors. Adding `node.layout.x` per
+    // level (as an earlier version did) double-counts and pushes the resolved anchor
+    // far off-screen. Transient CSS transforms (a trigger's hover/focus translate
+    // bounce) are intentionally ignored so a promoted popup anchors to the trigger's
+    // stable layout box and does not jitter with the 1px decorative offset.
     if node
         .attributes
         .get("_mesh_key")
@@ -1809,10 +1827,12 @@ fn find_node_bounds_by_reference(
         .get("_mesh_scroll_y")
         .and_then(|value| value.parse::<f32>().ok())
         .unwrap_or(0.0);
-    let offset_x = offset_x + node.layout.x - scroll_x;
-    let offset_y = offset_y + node.layout.y - scroll_y;
+    let child_offset_x = offset_x - scroll_x;
+    let child_offset_y = offset_y - scroll_y;
     for child in &node.children {
-        if let Some(bounds) = find_node_bounds_by_reference(child, reference, offset_x, offset_y) {
+        if let Some(bounds) =
+            find_node_bounds_by_reference(child, reference, child_offset_x, child_offset_y)
+        {
             return Some(bounds);
         }
     }
@@ -1834,6 +1854,7 @@ fn bounds_to_i32_rect(bounds: (f32, f32, f32, f32)) -> (i32, i32, i32, i32) {
     (left, top, (right - left).max(1), (bottom - top).max(1))
 }
 
+#[cfg(test)]
 fn translate_child_surface_input(
     input: ComponentInput,
     origin_x: f32,
@@ -1864,63 +1885,6 @@ fn offset_widget_tree_layout(node: &mut WidgetNode, offset_x: f32, offset_y: f32
     node.layout.y += offset_y;
     for child in &mut node.children {
         offset_widget_tree_layout(child, offset_x, offset_y);
-    }
-}
-
-fn subtree_content_size(node: &WidgetNode) -> Option<(u32, u32)> {
-    let bounds = subtree_content_bounds(node, 0.0, 0.0)?;
-    let width = (bounds.2 - bounds.0).ceil().max(1.0) as u32;
-    let height = (bounds.3 - bounds.1).ceil().max(1.0) as u32;
-    Some((width, height))
-}
-
-fn subtree_content_bounds(
-    node: &WidgetNode,
-    offset_x: f32,
-    offset_y: f32,
-) -> Option<(f32, f32, f32, f32)> {
-    let offset_x = offset_x + node.computed_style.transform.translate_x;
-    let offset_y = offset_y + node.computed_style.transform.translate_y;
-    let own = (
-        node.layout.x + offset_x,
-        node.layout.y + offset_y,
-        node.layout.x + offset_x + node.layout.width.max(0.0),
-        node.layout.y + offset_y + node.layout.height.max(0.0),
-    );
-    let scroll_x = node
-        .attributes
-        .get("_mesh_scroll_x")
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0);
-    let scroll_y = node
-        .attributes
-        .get("_mesh_scroll_y")
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0);
-    let child_offset_x = offset_x - scroll_x;
-    let child_offset_y = offset_y - scroll_y;
-
-    let mut bounds = Some(own);
-    for child in &node.children {
-        if let Some(child_bounds) = subtree_content_bounds(child, child_offset_x, child_offset_y) {
-            bounds = Some(union_content_bounds(bounds, child_bounds));
-        }
-    }
-    bounds
-}
-
-fn union_content_bounds(
-    existing: Option<(f32, f32, f32, f32)>,
-    next: (f32, f32, f32, f32),
-) -> (f32, f32, f32, f32) {
-    match existing {
-        Some((min_x, min_y, max_x, max_y)) => (
-            min_x.min(next.0),
-            min_y.min(next.1),
-            max_x.max(next.2),
-            max_y.max(next.3),
-        ),
-        None => next,
     }
 }
 
@@ -2112,7 +2076,7 @@ mod tests {
     #[test]
     fn open_popover_nodes_derive_child_surface_requests() {
         let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 40.0);
-        let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 80.0, 10.0);
+        let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 96.0, 36.0);
         popover.attributes.insert("open".into(), "true".into());
         popover.attributes.insert("anchor".into(), "bottom".into());
         popover.attributes.insert("offset-y".into(), "6".into());
@@ -2126,7 +2090,7 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].node_key, "root/menu");
         assert_eq!(requests[0].kind, ChildSurfaceKind::Popover);
-        assert_eq!(requests[0].anchor_rect, (20, 42, 80, 10));
+        assert_eq!(requests[0].anchor_rect, (20, 42, 96, 36));
         assert_eq!(requests[0].content_size, (96, 36));
         assert_eq!(requests[0].placement.offset_y, 6);
     }

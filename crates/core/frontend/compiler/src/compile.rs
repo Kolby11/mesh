@@ -392,11 +392,11 @@ fn validate_attributes(
 ) -> Result<(), CompileFrontendError> {
     for attr in attrs {
         match &attr.value {
-            AttributeValue::Binding(expr)
-            | AttributeValue::TwoWayBinding(expr)
-            | AttributeValue::InstanceBinding(expr) => {
+            AttributeValue::Binding(expr) | AttributeValue::TwoWayBinding(expr) => {
                 validate_expression(expr, path, allowed_symbols, loop_locals)?;
             }
+            // bind:this targets a local variable by design — skip public-symbol validation.
+            AttributeValue::InstanceBinding(_) => {}
             AttributeValue::EventHandler(handler) => {
                 validate_identifier(handler, path, allowed_symbols, loop_locals)?;
             }

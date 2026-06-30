@@ -2257,6 +2257,37 @@ fn painter_clips_children_when_overflow_hidden() {
 }
 
 #[test]
+fn direct_tree_painter_omits_explicitly_hidden_descendants() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 24.0,
+            height: 24.0,
+        },
+        Color::TRANSPARENT,
+    );
+    let mut hidden = node(
+        "box",
+        LayoutRect {
+            x: 4.0,
+            y: 4.0,
+            width: 12.0,
+            height: 12.0,
+        },
+        Color::from_hex("#00ff00").unwrap(),
+    );
+    hidden.attributes.insert("hidden".into(), "true".into());
+    root.children.push(hidden);
+
+    let mut buffer = PixelBuffer::new(24, 24);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+    assert_eq!(pixel(&buffer, 8, 8), Color::TRANSPARENT);
+}
+
+#[test]
 fn painter_orders_children_by_z_index() {
     let mut root = node(
         "box",

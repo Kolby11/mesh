@@ -208,12 +208,12 @@ impl Shell {
                     width = measured_w.max(1);
                     height = measured_h.max(1);
                 } else {
-                    let dynamic_size =
-                        if inner_requested_width == 0 || inner_requested_height == 0 {
-                            self.resolve_dynamic_surface_size(index, &surface_id)?
-                        } else {
-                            None
-                        };
+                    let dynamic_size = if inner_requested_width == 0 || inner_requested_height == 0
+                    {
+                        self.resolve_dynamic_surface_size(index, &surface_id)?
+                    } else {
+                        None
+                    };
                     width = if inner_requested_width == 0 {
                         dynamic_size.map(|(w, _)| w).unwrap_or(1)
                     } else {

@@ -120,8 +120,8 @@ end
 
 <style>
     .theme-float-shell {
-        width: 100%;
-        height: 100%;
+        width: 112px;
+        height: 74px;
         padding: 0;
         background: transparent;
         opacity: 1;
