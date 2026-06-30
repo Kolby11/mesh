@@ -12,5 +12,7 @@
   "audio.mute_audio": "Stlmit zvuk",
   "audio.unmute_audio": "Zrusit stlmenie zvuku",
   "audio.lower_volume": "Znizit hlasitost",
-  "audio.raise_volume": "Zvysit hlasitost"
+  "audio.raise_volume": "Zvysit hlasitost",
+  "var.track_width": "Sirka posuvnika",
+  "var.track_height": "Vyska posuvnika"
 }

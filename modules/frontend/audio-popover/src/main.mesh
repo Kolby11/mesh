@@ -1,3 +1,8 @@
+<props>
+  track_width:  { type: "size", default: "20px", label: t("var.track_width") }
+  track_height: { type: "size", default: "100px", label: t("var.track_height") }
+</props>
+
 <template>
   <popover
     bind:this={popover}
@@ -146,8 +151,8 @@ end
 }
 
 .audio-slider {
-    width: 20px;
-    height: 100px;
+    width: prop(track_width);
+    height: prop(track_height);
 }
 
 .audio-slider:focus-visible {

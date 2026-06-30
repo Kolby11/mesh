@@ -12,5 +12,7 @@
   "audio.mute_audio": "Mute audio",
   "audio.unmute_audio": "Unmute audio",
   "audio.lower_volume": "Lower volume",
-  "audio.raise_volume": "Raise volume"
+  "audio.raise_volume": "Raise volume",
+  "var.track_width": "Slider width",
+  "var.track_height": "Slider height"
 }

@@ -248,6 +248,44 @@ fn shipped_audio_popover_content_measured_surface_contains_volume_slider() {
 }
 
 #[test]
+fn shipped_audio_popover_slider_sizes_from_props() {
+    // Phase 2 reference proof: the shipped @mesh/audio-popover declares its
+    // slider track size in a `<props>` block (`track_width` / `track_height`,
+    // both `size`) and references them via `prop(...)` in `<style>`. Painting
+    // the real module must resolve those props into the slider's computed size,
+    // matching the previous hard-coded 20x100 CSS.
+    let theme = default_theme();
+    let mut audio = real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    audio
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+
+    let mut buffer = PixelBuffer::new(280, 164);
+    audio.paint(&theme, 280, 164, &mut buffer, 1.0).unwrap();
+
+    let tree = audio.last_tree.as_ref().expect("rendered audio popover");
+    let slider = first_node_by_tag(tree, "slider").expect("audio popover volume slider");
+    assert_eq!(
+        slider.computed_style.width,
+        mesh_core_elements::Dimension::Px(20.0),
+        "prop(track_width) should resolve the shipped 20px default"
+    );
+    assert_eq!(
+        slider.computed_style.height,
+        mesh_core_elements::Dimension::Px(100.0),
+        "prop(track_height) should resolve the shipped 100px default"
+    );
+}
+
+#[test]
 fn shipped_tiny_nav_popovers_are_embeddable_components_without_surface_geometry() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
