@@ -127,6 +127,14 @@ the `self` plus Lua public/private member model above.
 
 ## Module Manifest Shape
 
+> **Direction:** per-component configuration (sizing, customizable values, user
+> settings) is moving out of the manifest into a `<props>` block authored in the
+> `.mesh` file. `mesh.surface` sizing fields and the standalone `mesh.settings`
+> schema are slated for removal in favor of that single declaration. See
+> [Component Configuration Model](component-configuration.md). The manifest keeps
+> packaging concerns: identity, kind, capabilities, dependencies, interfaces,
+> top-level surface *placement*, and resource provides.
+
 Use `module.json` for every new module:
 
 `module.json` is the author-facing manifest. Top-level fields should identify

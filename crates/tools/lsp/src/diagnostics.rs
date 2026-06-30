@@ -50,6 +50,15 @@ fn diagnostics_from_error(err: &ParseError, source: &str) -> Vec<Diagnostic> {
             DiagnosticSeverity::ERROR,
         )],
 
+        ParseError::InvalidProps { message } => vec![make_diag(
+            source,
+            "props",
+            0,
+            0,
+            format!("Props error: {message}"),
+            DiagnosticSeverity::ERROR,
+        )],
+
         ParseError::InvalidI18n(msg) => vec![make_diag(
             source,
             "i18n",

@@ -1,7 +1,7 @@
 use super::parse::*;
 use super::*;
 use crate::tree::ElementState;
-use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
+use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue, prop_variable_key};
 use mesh_core_theme::{Theme, TokenValue};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -47,6 +47,10 @@ impl From<&ComputedStyle> for ParentInheritedStyle {
 /// Resolves style values against a theme's design tokens.
 pub struct StyleResolver<'a> {
     theme: &'a Theme,
+    /// Per-instance resolved component-prop values, keyed by `prop_variable_key`
+    /// (`--mesh-prop-<name>`). Seeded into the variable scratch so `prop(name)`
+    /// references resolve. Empty for components without a `<props>` block.
+    props: HashMap<String, StyleValue>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -325,7 +329,17 @@ fn ensure_index<'cache>(
 
 impl<'a> StyleResolver<'a> {
     pub fn new(theme: &'a Theme) -> Self {
-        Self { theme }
+        Self {
+            theme,
+            props: HashMap::new(),
+        }
+    }
+
+    /// Attach per-instance component-prop values. `props` is keyed by
+    /// `prop_variable_key(name)` and holds the resolved value for each prop.
+    pub fn with_props(mut self, props: HashMap<String, StyleValue>) -> Self {
+        self.props = props;
+        self
     }
 
     pub fn resolve_value(&self, value: &StyleValue) -> String {
@@ -364,6 +378,16 @@ impl<'a> StyleResolver<'a> {
                     self.resolve_theme_reference(name, strict_animation_tokens)
                         .unwrap_or_default()
                 }),
+            StyleValue::Prop(name) => variables
+                .get(&prop_variable_key(name))
+                .map(|value| {
+                    self.resolve_value_with_variables_mode(
+                        value,
+                        variables,
+                        strict_animation_tokens,
+                    )
+                })
+                .unwrap_or_default(),
         }
     }
 
@@ -412,6 +436,10 @@ impl<'a> StyleResolver<'a> {
                         Ok(())
                     }
                 }),
+            StyleValue::Prop(name) => variables
+                .get(&prop_variable_key(name))
+                .map(|value| self.validate_animation_value_with_variables(value, variables))
+                .unwrap_or(Ok(())),
         }
     }
 
@@ -534,6 +562,7 @@ impl<'a> StyleResolver<'a> {
                 attrs.module_id(),
                 &mut variables,
             );
+            self.seed_prop_variables(&mut variables);
 
             index.for_each_candidate_rule(rules, attrs, |rule| {
                 if rule_matches_attrs(rule, attrs, context) {
@@ -545,6 +574,14 @@ impl<'a> StyleResolver<'a> {
         });
 
         style
+    }
+
+    /// Publish resolved prop values into the variable scratch so `prop(name)`
+    /// references resolve through the same lookup as `var(--…)`.
+    fn seed_prop_variables(&self, variables: &mut HashMap<String, StyleValue>) {
+        for (key, value) in &self.props {
+            variables.insert(key.clone(), value.clone());
+        }
     }
 
     fn resolve_node_style_with_attrs_indexed(
@@ -569,6 +606,7 @@ impl<'a> StyleResolver<'a> {
             &mut diagnostics,
             &mut variables,
         );
+        self.seed_prop_variables(&mut variables);
 
         index.for_each_candidate_rule(rules, attrs, |rule| {
             if rule_matches_attrs(rule, attrs, context) {
@@ -1034,7 +1072,7 @@ fn is_strict_animation_property(property: &str) -> bool {
 fn contains_deprecated_token_reference(value: &StyleValue) -> bool {
     match value {
         StyleValue::Literal(value) => value.contains("token("),
-        StyleValue::Var(_) => false,
+        StyleValue::Var(_) | StyleValue::Prop(_) => false,
     }
 }
 
@@ -1765,6 +1803,12 @@ fn style_value_to_string(
     match value {
         StyleValue::Literal(value) => {
             resolve_embedded_references(value, theme, variables, strict_animation_tokens)
+        }
+        StyleValue::Prop(name) => {
+            if let Some(value) = variables.get(&prop_variable_key(name)) {
+                return style_value_to_string(value, theme, variables, strict_animation_tokens);
+            }
+            Ok(String::new())
         }
         StyleValue::Var(name) => {
             if let Some(value) = variables.get(name) {

@@ -49,6 +49,46 @@ mod tests {
     }
 
     #[test]
+    fn resolves_prop_reference_from_resolver_props() {
+        use mesh_core_component::style::prop_variable_key;
+        let theme = mesh_core_theme::default_theme();
+        let mut props = std::collections::HashMap::new();
+        props.insert(
+            prop_variable_key("track_width"),
+            StyleValue::Literal("20px".to_string()),
+        );
+        let resolver = StyleResolver::new(&theme).with_props(props);
+        let rules = parse_fixture_style(
+            r#"
+<style>
+.slider { width: prop(track_width); }
+</style>
+"#,
+        );
+        let (style, diagnostics) = resolve_class(&resolver, &rules, "slider");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(style.width, crate::Dimension::Px(20.0));
+    }
+
+    #[test]
+    fn unresolved_prop_reference_is_empty() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = parse_fixture_style(
+            r#"
+<style>
+.slider { width: prop(track_width); }
+</style>
+"#,
+        );
+        let (style, _) = resolve_class(&resolver, &rules, "slider");
+        // No props attached → prop() resolves to empty → 0px (not the 20px above).
+        // In practice every declared prop carries a default, so the resolver always
+        // seeds a value; this only covers the unseeded edge.
+        assert_eq!(style.width, crate::Dimension::Px(0.0));
+    }
+
+    #[test]
     fn parse_hex_colors() {
         assert_eq!(
             Color::from_hex("#fff"),

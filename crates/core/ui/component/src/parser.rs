@@ -2,11 +2,13 @@
 ///
 /// Splits the source into top-level blocks (`<template>`, `<script>`, `<style>`,
 mod markup;
+mod props;
 mod script;
 mod styles;
 
 use crate::{ComponentFile, ComponentImportTarget};
 use markup::parse_markup;
+use props::parse_props;
 use script::{extract_imports, parse_script};
 use std::collections::HashMap;
 use styles::parse_style;
@@ -24,6 +26,9 @@ pub enum ParseError {
 
     #[error("invalid style syntax at line {line}: {message}")]
     InvalidStyle { message: String, line: usize },
+
+    #[error("invalid props block: {message}")]
+    InvalidProps { message: String },
 
     #[error("invalid i18n block: {0}")]
     InvalidI18n(String),
@@ -58,8 +63,11 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
 
     let style = blocks.get("style").map(|s| parse_style(s)).transpose()?;
 
+    let props = blocks.get("props").map(|s| parse_props(s)).transpose()?;
+
     Ok(ComponentFile {
         imports,
+        props,
         template,
         script,
         style,
@@ -68,7 +76,7 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
 
 fn extract_blocks(source: &str) -> Result<HashMap<String, String>, ParseError> {
     let mut blocks = HashMap::new();
-    let known_tags = ["template", "script", "style", "i18n"];
+    let known_tags = ["props", "template", "script", "style", "i18n"];
 
     let mut remaining = source;
     let mut line_offset = 1;
@@ -140,6 +148,37 @@ mod tests {
         assert!(file.template.is_some());
         assert!(file.script.is_none());
         assert!(file.style.is_none());
+        assert!(file.props.is_none());
+    }
+
+    #[test]
+    fn parse_props_block_through_component() {
+        use crate::{PropType, PropValue};
+        let source = r#"
+<props>
+  track_width: { type: "size", default: "20px", label: t("var.track_width") }
+  anim_ms:     { type: "duration", default: 120, min: 0, max: 600 }
+</props>
+
+<template>
+  <slider class="audio-slider"/>
+</template>
+
+<style>
+.audio-slider { width: prop(track_width); }
+</style>
+"#;
+        let file = parse_component(source).unwrap();
+        let props = file.props.expect("props block parsed");
+        assert_eq!(props.props.len(), 2);
+        assert_eq!(props.props[0].name, "track_width");
+        assert_eq!(props.props[0].ty, PropType::Size);
+        assert_eq!(
+            props.props[0].default,
+            Some(PropValue::String("20px".into()))
+        );
+        assert_eq!(props.props[1].ty, PropType::Duration);
+        assert_eq!(props.props[1].max, Some(600.0));
     }
 
     #[test]
@@ -218,6 +257,43 @@ button {
             }
             _ => panic!("expected element"),
         }
+    }
+
+    #[test]
+    fn classifies_standalone_prop_reference() {
+        let source = r#"
+<style>
+.mixer {
+    width: prop(track_width);
+    height: var(--track-height);
+    padding: calc(prop(gap) * 2);
+}
+</style>
+"#;
+        let file = parse_component(source).unwrap();
+        let decls = &file.style.unwrap().rules[0].declarations;
+        // Standalone prop(name) -> StyleValue::Prop.
+        assert!(matches!(&decls[0].value, StyleValue::Prop(name) if name == "track_width"));
+        // var() unaffected.
+        assert!(matches!(&decls[1].value, StyleValue::Var(name) if name == "--track-height"));
+        // prop() embedded in calc() stays Literal for later substitution.
+        assert!(
+            matches!(&decls[2].value, StyleValue::Literal(value) if value.contains("prop(gap)"))
+        );
+    }
+
+    #[test]
+    fn rejects_prop_reference_in_keyframes() {
+        let source = r#"
+<style>
+@keyframes grow {
+    0% { width: prop(track_width); }
+    100% { opacity: 1; }
+}
+</style>
+"#;
+        let err = parse_component(source).unwrap_err().to_string();
+        assert!(err.contains("cannot use var() references"), "{err}");
     }
 
     #[test]

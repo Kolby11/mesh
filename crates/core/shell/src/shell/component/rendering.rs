@@ -148,6 +148,21 @@ impl FrontendSurfaceComponent {
         }
     }
 
+    /// The surface root's resolved CSS prop map (`prop(name)` → resolved value).
+    ///
+    /// Built from this surface component's own `<props>` and script state, so the
+    /// restyle and animation passes resolve `prop()` references identically to the
+    /// initial `build_tree_with_state` pass. (Embedded child components with their
+    /// own `<props>` are resolved during build; the flat restyle pass uses the
+    /// surface root's props — full per-instance restyle is future work.)
+    pub(super) fn surface_css_props(
+        &self,
+    ) -> std::collections::HashMap<String, mesh_core_component::style::StyleValue> {
+        let state = self.runtime_state(self.id()).unwrap_or_default();
+        let bound = LocaleBoundState::new(&state, &self.locale);
+        mesh_core_frontend::resolve_css_props(self.compiled.component.props.as_ref(), Some(&bound))
+    }
+
     pub(super) fn build_tree(&mut self, theme: &Theme, width: u32, height: u32) -> WidgetNode {
         if self.render_hooks_pending {
             self.call_render_hooks();
@@ -273,7 +288,7 @@ impl FrontendSurfaceComponent {
         // The cache survives across paints — we only pay the clone cost on
         // source reload (when `cached_restyle_rules` is reset).
         self.module_restyle_rules();
-        let resolver = StyleResolver::new(theme);
+        let resolver = StyleResolver::new(theme).with_props(self.surface_css_props());
         let context = StyleContext {
             container_width: width as f32,
             container_height: height as f32,

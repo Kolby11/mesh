@@ -142,9 +142,16 @@ MESH core elements and other components.
 
 Conceptual blocks:
 
+- `<props>` (target config model; see below)
 - `<template>`
 - `<script lang="luau">`
 - `<style>`
+
+The `<props>` block is the planned single declaration for typed, defaulted,
+localized component configuration. One entry auto-projects to a `prop(name)` CSS
+reference, a reactive `props.name` Lua field, and a generated settings UI row —
+replacing scattered `mesh.surface` sizing and `mesh.settings`. This is a **design
+spec, not yet implemented**: see `docs/component-configuration.md`.
 
 ## Core package types
 

@@ -177,6 +177,7 @@ impl FrontendSurfaceComponent {
         for (key, value) in props {
             script_ctx.state_mut().set(key.clone(), value.clone());
         }
+        publish_resolved_props(&mut script_ctx, component, props);
         for (service_name, payload) in &self.cached_service_payloads {
             let interface = format!("mesh.{service_name}");
             // Always seed the Lua-level service payload so interface proxies
@@ -586,6 +587,48 @@ pub(in crate::shell::component) struct ResolvedManifestText {
     pub(in crate::shell::component) text: String,
     pub(in crate::shell::component) key: Option<String>,
     pub(in crate::shell::component) fallback: Option<String>,
+}
+
+/// Publish each declared prop's precedence-resolved value under `props.<name>`
+/// in script state. The compiler reads these to project `prop(name)` into CSS,
+/// and scripts read them as `props.name`. Precedence applied here: declared
+/// default, overridden by an instance prop passed at the embed site.
+///
+/// User-settings layers (global / per-instance) fold into this same map once the
+/// settings projection lands; the funnel key (`props.<name>`) stays the same.
+pub(super) fn publish_resolved_props(
+    script_ctx: &mut ScriptContext,
+    component: &mesh_core_component::ComponentFile,
+    instance_props: &HashMap<String, serde_json::Value>,
+) {
+    let Some(block) = &component.props else {
+        return;
+    };
+    let mut props = serde_json::Map::new();
+    for def in &block.props {
+        let resolved = instance_props
+            .get(&def.name)
+            .cloned()
+            .or_else(|| def.default.as_ref().map(prop_default_to_json));
+        if let Some(value) = resolved {
+            props.insert(def.name.clone(), value);
+        }
+    }
+    // Publish one reactive `props` table: readable as `props.name` in script and,
+    // via `state["props"]`, projected into CSS `prop(name)`. `set_member_state`
+    // installs it on the component's own `_ENV`, so script writes (`props.x = y`)
+    // round-trip back through `sync_state_from_lua` and repaint.
+    if let Err(err) = script_ctx.set_member_state("props", serde_json::Value::Object(props)) {
+        tracing::warn!("failed to publish component props: {err}");
+    }
+}
+
+fn prop_default_to_json(value: &mesh_core_component::PropValue) -> serde_json::Value {
+    match value {
+        mesh_core_component::PropValue::String(s) => serde_json::Value::String(s.clone()),
+        mesh_core_component::PropValue::Number(n) => serde_json::json!(n),
+        mesh_core_component::PropValue::Bool(b) => serde_json::Value::Bool(*b),
+    }
 }
 
 pub(super) fn script_has_service_read(

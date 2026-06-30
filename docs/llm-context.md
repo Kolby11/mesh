@@ -162,10 +162,17 @@ Surface layout defaults live in `module.json`, **not** in Rust. `mesh-core-shell
 ### `.mesh` single-file component structure
 
 ```
+<props>      ← typed, defaulted, localized component config (design spec; see below)
 <template>   ← XHTML-like markup with core elements, {expressions}, and component tags
 <script lang="luau">   ← Luau scripting (state, lifecycle, event handlers)
 <style>      ← CSS-like styling with var(--...) theme references and @container queries
 ```
+
+The `<props>` block is the **target** configuration model: one typed declaration
+auto-projects to a `prop(name)` CSS reference, a reactive `props.name` Lua field,
+and a generated settings UI row, replacing scattered `mesh.surface` sizing +
+`mesh.settings`. It is a **design spec, not yet implemented** — see
+[Component Configuration Model](component-configuration.md).
 
 Components are reusable authoring units. They should be made from MESH core
 elements (`button`, `icon`, `input`, etc.) or other components. Do not call a
@@ -233,6 +240,7 @@ backend module (`module.json` with `mesh.implements`)
 | Add a CSS property             | `crates/core/ui/component/src/style.rs` / parser modules (parse), `crates/core/ui/elements/src/style.rs` (computed style), `crates/core/frontend/render/src/surface/painter.rs` (paint) |
 | Add a new frontend module      | Create `modules/frontend/<name>/`, `module.json` with `mesh.kind = "frontend"`, `src/main.mesh`                                  |
 | Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core-shell/src/shell.rs`; manifest's `mesh.surfaceLayout` section                      |
+| Configure/customize a component | Target model: the `<props>` block — see [Component Configuration Model](component-configuration.md) (design spec; replaces `mesh.surface` sizing + `mesh.settings`) |
 | Add a backend provider module  | Create `modules/backend/<name>/`, `module.json` with `mesh.kind = "backend"` and `mesh.implements`, plus `src/main.luau`         |
 | Add a new CoreRequest action   | `CoreRequest` enum in `crates/core/shell/src/shell/types.rs` plus request handling under `crates/core/shell/src/shell/runtime/request.rs` |
 | Add a theme value              | `config/themes/<theme-id>/theme.css`, then reference with `var(--group-name)` in `.mesh`                                        |

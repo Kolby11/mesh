@@ -144,6 +144,16 @@ pub struct KeyframeStop {
     pub declarations: Vec<Declaration>,
 }
 
+/// Reserved variable-store key prefix under which resolved component-prop values
+/// are published, so `StyleValue::Prop(name)` resolves through the same variable
+/// map as `var(--…)`. See `docs/component-configuration.md`.
+pub const PROP_VAR_PREFIX: &str = "--mesh-prop-";
+
+/// The variable-store key that holds the resolved value of prop `name`.
+pub fn prop_variable_key(name: &str) -> String {
+    format!("{PROP_VAR_PREFIX}{name}")
+}
+
 /// A style value that may reference local or theme CSS variables.
 #[derive(Debug, Clone)]
 pub enum StyleValue {
@@ -151,6 +161,9 @@ pub enum StyleValue {
     Literal(String),
     /// A variable reference: `var(--custom-prop)`.
     Var(String),
+    /// A component-prop reference: `prop(name)`. Resolved against the per-instance
+    /// prop value map (published under `prop_variable_key(name)`).
+    Prop(String),
 }
 
 pub fn is_transition_safe_keyframe_property(property: &str) -> bool {

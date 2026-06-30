@@ -520,14 +520,28 @@ fn classify_style_value(value: &str) -> StyleValue {
     let value = value.trim();
     if value.starts_with("var(") && value.ends_with(')') {
         StyleValue::Var(value[4..value.len() - 1].trim().to_string())
+    } else if let Some(name) = standalone_prop_reference(value) {
+        StyleValue::Prop(name)
     } else {
         StyleValue::Literal(value.to_string())
     }
 }
 
+/// Match a value that is *exactly* one `prop(name)` reference. Embedded uses
+/// (inside `calc()` or a shorthand) stay `Literal` and are substituted later.
+fn standalone_prop_reference(value: &str) -> Option<String> {
+    let inner = value.strip_prefix("prop(")?.strip_suffix(')')?;
+    // Reject multi-function values like `prop(a) prop(b)`: the inner must hold a
+    // single identifier with no nested parens.
+    if inner.contains('(') || inner.contains(')') {
+        return None;
+    }
+    Some(inner.trim().to_string())
+}
+
 fn contains_keyframe_value_reference(value: &StyleValue) -> bool {
     match value {
-        StyleValue::Var(_) => true,
-        StyleValue::Literal(value) => value.contains("var("),
+        StyleValue::Var(_) | StyleValue::Prop(_) => true,
+        StyleValue::Literal(value) => value.contains("var(") || value.contains("prop("),
     }
 }

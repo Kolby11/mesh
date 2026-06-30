@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 pub use accessibility::root_accessibility_role;
 pub use compile::{CompileFrontendError, compile_frontend_module, is_frontend_module};
-pub use render::build_widget_tree_from_component;
+pub use render::{build_widget_tree_from_component, props_settings_schema, resolve_css_props};
 pub use style::merge_missing_defaults;
 pub use tags::UiTag;
 
@@ -151,7 +151,8 @@ impl CompiledFrontendModule {
             root.accessibility.description = accessibility.description.clone();
         }
 
-        let resolver = StyleResolver::new(theme);
+        let resolver = StyleResolver::new(theme)
+            .with_props(render::resolve_css_props(self.component.props.as_ref(), state));
         let rules = self
             .component
             .style

@@ -6,9 +6,11 @@ use crate::style::{
 use crate::tags::lower_source_tag;
 use crate::{FrontendCompositionResolver, LayeredStore};
 
+use mesh_core_component::style::{StyleValue, prop_variable_key};
 use mesh_core_component::template::{
     Attribute, AttributeValue, ComponentRef, ElementNode, SourceTag, TemplateNode,
 };
+use mesh_core_component::{PropValue, PropsBlock};
 use mesh_core_elements::accessibility::AccessibilityInfo;
 use mesh_core_elements::{
     ComputedStyle, StyleContext, StyleResolver, VariableStore, WidgetNode, element_contract_for_tag,
@@ -17,7 +19,142 @@ use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
 use serde_json;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+
+/// Build the per-instance CSS prop map consumed by `StyleResolver::with_props`.
+///
+/// Each declared prop resolves to a single value: a `props.<name>` entry in the
+/// script `state` (where the shell funnels the precedence-resolved value —
+/// default → user setting → instance prop → script write) overrides the declared
+/// default. The map is keyed by `prop_variable_key(name)` so `prop(name)`
+/// references in `<style>` resolve through the same lookup as `var(--…)`.
+pub fn resolve_css_props(
+    block: Option<&PropsBlock>,
+    state: Option<&dyn VariableStore>,
+) -> HashMap<String, StyleValue> {
+    let mut map = HashMap::new();
+    let Some(block) = block else {
+        return map;
+    };
+    // The shell publishes one `props` table in script state (the precedence-
+    // resolved value per name); script writes round-trip back into it.
+    let props_state = state.and_then(|s| s.get("props"));
+    for def in &block.props {
+        let value = props_state
+            .as_ref()
+            .and_then(|obj| obj.get(&def.name))
+            .map(|value| json_value_to_css_string(value.clone()))
+            .or_else(|| def.default.as_ref().map(prop_default_to_css_string));
+        if let Some(value) = value {
+            map.insert(prop_variable_key(&def.name), StyleValue::Literal(value));
+        }
+    }
+    map
+}
+
+/// Derive a settings schema from a component's `<props>` — the third projection
+/// (alongside the CSS `prop()` map and the reactive Lua `props` table). The shape
+/// mirrors the manifest `inline_schema` object so a generated settings UI can
+/// consume it directly. Only `expose`d props are included; returns `None` when
+/// the component declares no exposable props.
+pub fn props_settings_schema(block: Option<&PropsBlock>) -> Option<serde_json::Value> {
+    let block = block?;
+    let mut properties = serde_json::Map::new();
+    for def in &block.props {
+        if !def.expose {
+            continue;
+        }
+        let mut field = serde_json::Map::new();
+        field.insert("type".into(), serde_json::Value::String(def.ty.as_str().into()));
+        if let Some(default) = &def.default {
+            field.insert("default".into(), prop_value_to_json(default));
+        }
+        if let Some(label) = &def.label {
+            field.insert("label".into(), localized_label_to_json(label));
+        }
+        if let Some(description) = &def.description {
+            field.insert("description".into(), localized_label_to_json(description));
+        }
+        if !def.options.is_empty() {
+            field.insert(
+                "enum".into(),
+                serde_json::Value::Array(
+                    def.options
+                        .iter()
+                        .map(|option| serde_json::Value::String(option.clone()))
+                        .collect(),
+                ),
+            );
+        }
+        if let Some(min) = def.min {
+            field.insert("minimum".into(), serde_json::json!(min));
+        }
+        if let Some(max) = def.max {
+            field.insert("maximum".into(), serde_json::json!(max));
+        }
+        if let Some(step) = def.step {
+            field.insert("step".into(), serde_json::json!(step));
+        }
+        if let Some(unit) = &def.unit {
+            field.insert("unit".into(), serde_json::Value::String(unit.clone()));
+        }
+        properties.insert(def.name.clone(), serde_json::Value::Object(field));
+    }
+    if properties.is_empty() {
+        return None;
+    }
+    Some(serde_json::json!({ "type": "object", "properties": properties }))
+}
+
+fn prop_value_to_json(value: &PropValue) -> serde_json::Value {
+    match value {
+        PropValue::String(s) => serde_json::Value::String(s.clone()),
+        PropValue::Number(n) => serde_json::json!(n),
+        PropValue::Bool(b) => serde_json::Value::Bool(*b),
+    }
+}
+
+fn localized_label_to_json(label: &mesh_core_component::LocalizedLabel) -> serde_json::Value {
+    match label {
+        mesh_core_component::LocalizedLabel::Literal(text) => {
+            serde_json::Value::String(text.clone())
+        }
+        mesh_core_component::LocalizedLabel::Translation { key, fallback } => {
+            let mut obj = serde_json::Map::new();
+            obj.insert("t".into(), serde_json::Value::String(key.clone()));
+            if let Some(fallback) = fallback {
+                obj.insert("fallback".into(), serde_json::Value::String(fallback.clone()));
+            }
+            serde_json::Value::Object(obj)
+        }
+    }
+}
+
+fn prop_default_to_css_string(value: &PropValue) -> String {
+    match value {
+        PropValue::String(s) => s.clone(),
+        PropValue::Number(n) => format_css_number(*n),
+        PropValue::Bool(b) => if *b { "1" } else { "0" }.to_string(),
+    }
+}
+
+fn json_value_to_css_string(value: serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s,
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => if b { "1" } else { "0" }.to_string(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+fn format_css_number(n: f64) -> String {
+    if n.fract() == 0.0 {
+        format!("{}", n as i64)
+    } else {
+        n.to_string()
+    }
+}
 
 struct TrackingVariableStore<'a> {
     inner: &'a dyn VariableStore,
@@ -90,7 +227,8 @@ pub fn build_widget_tree_from_component(
     state: Option<&dyn VariableStore>,
     host_rules: &[mesh_core_component::style::StyleRule],
 ) -> WidgetNode {
-    let resolver = StyleResolver::new(theme);
+    let resolver =
+        StyleResolver::new(theme).with_props(resolve_css_props(component.props.as_ref(), state));
     let component_rules: &[mesh_core_component::style::StyleRule] = component
         .style
         .as_ref()
@@ -857,6 +995,105 @@ mod tests {
             slider.event_handlers.get("release"),
             Some(&"onSliderRelease".into())
         );
+    }
+
+    const PROP_COMPONENT: &str = r#"
+<props>
+  track_width: { type: "size", default: "20px" }
+</props>
+<template>
+  <box>
+    <slider class="audio-slider"/>
+  </box>
+</template>
+<style>
+.audio-slider { width: prop(track_width); }
+</style>
+"#;
+
+    #[test]
+    fn prop_default_projects_into_painted_width() {
+        let component = mesh_core_component::parse_component(PROP_COMPONENT).unwrap();
+        let manifest = test_manifest();
+        let theme = mesh_core_theme::default_theme();
+
+        let tree = build_widget_tree_from_component(
+            &component, &manifest, &theme, 200.0, 80.0, None, "root", None, &[],
+        );
+
+        let slider = find_tag(&tree, "slider").expect("slider node");
+        assert_eq!(
+            slider.computed_style.width,
+            mesh_core_elements::Dimension::Px(20.0)
+        );
+    }
+
+    #[test]
+    fn prop_state_override_beats_default() {
+        let component = mesh_core_component::parse_component(PROP_COMPONENT).unwrap();
+        let manifest = test_manifest();
+        let theme = mesh_core_theme::default_theme();
+        let state = MapStore(std::collections::HashMap::from([(
+            "props".to_string(),
+            serde_json::json!({ "track_width": "36px" }),
+        )]));
+
+        let tree = build_widget_tree_from_component(
+            &component,
+            &manifest,
+            &theme,
+            200.0,
+            80.0,
+            None,
+            "root",
+            Some(&state),
+            &[],
+        );
+
+        let slider = find_tag(&tree, "slider").expect("slider node");
+        assert_eq!(
+            slider.computed_style.width,
+            mesh_core_elements::Dimension::Px(36.0)
+        );
+    }
+
+    #[test]
+    fn props_settings_schema_projects_typed_fields() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<props>
+  width:   { type: "size", default: "fit-content", label: t("var.width") }
+  density: { type: "enum", options: ["compact", "cozy"], default: "cozy" }
+  hidden:  { type: "size", default: "10px", expose: false }
+</props>
+<template><box/></template>
+"#,
+        )
+        .unwrap();
+
+        let schema = props_settings_schema(component.props.as_ref()).expect("schema");
+        let props = &schema["properties"];
+        // Exposed fields present; expose:false omitted.
+        assert_eq!(props["width"]["type"], "size");
+        assert_eq!(props["width"]["default"], "fit-content");
+        assert_eq!(props["width"]["label"]["t"], "var.width");
+        assert_eq!(props["density"]["enum"][0], "compact");
+        assert!(props.get("hidden").is_none());
+    }
+
+    #[test]
+    fn props_settings_schema_is_none_without_exposed_props() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<props>
+  internal: { type: "size", default: "1px", expose: false }
+</props>
+<template><box/></template>
+"#,
+        )
+        .unwrap();
+        assert!(props_settings_schema(component.props.as_ref()).is_none());
+        assert!(props_settings_schema(None).is_none());
     }
 
     #[test]
