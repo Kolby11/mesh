@@ -221,7 +221,7 @@ pub struct Attribute {
 pub enum AttributeValue {
     /// Static string: `class="container"`.
     Static(String),
-    /// Dynamic binding: `title="{audio.tooltip}"` — expression resolved from script state.
+    /// Dynamic binding: `title={audio.tooltip}` — expression resolved from script state.
     Binding(String),
     /// Two-way binding: `bind:value="volume"` — reads from and writes back to script state.
     TwoWayBinding(String),

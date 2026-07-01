@@ -1,10 +1,10 @@
 <template>
-  <row class="brightness-row" title="{t('nav.brightness')} {brightness_label}">
+  <row class="brightness-row" title={t('nav.brightness') .. ' ' .. brightness_label}>
     <button
       class="brightness-ctrl"
       onclick={onBrightnessDown}
-      title="{t('nav.brightness_down')}"
-      aria-label="{t('nav.brightness_down')}"
+      title={t('nav.brightness_down')}
+      aria-label={t('nav.brightness_down')}
     >
       <icon class="ctrl-icon-sm" name="weather-few-clouds" size="12" />
     </button>
@@ -12,8 +12,8 @@
     <button
       class="brightness-ctrl"
       onclick={onBrightnessUp}
-      title="{t('nav.brightness_up')}"
-      aria-label="{t('nav.brightness_up')}"
+      title={t('nav.brightness_up')}
+      aria-label={t('nav.brightness_up')}
     >
       <icon class="ctrl-icon-lg" name="weather-clear" size="18" />
     </button>

@@ -9,7 +9,9 @@ pub fn from_document(doc: &Document) -> Vec<Diagnostic> {
         return diagnostics_from_error(err, &doc.source);
     }
 
-    diagnostics_from_script_refs(doc)
+    let mut diagnostics = diagnostics_from_script_refs(doc);
+    diagnostics.extend(diagnostics_from_quoted_expression_attrs(doc));
+    diagnostics
 }
 
 fn diagnostics_from_error(err: &ParseError, source: &str) -> Vec<Diagnostic> {
@@ -247,6 +249,103 @@ fn diagnostics_from_script_refs(doc: &Document) -> Vec<Diagnostic> {
     diagnostics
 }
 
+fn diagnostics_from_quoted_expression_attrs(doc: &Document) -> Vec<Diagnostic> {
+    let Some((template_start, template_end)) = block_content_range(&doc.source, "template") else {
+        return vec![];
+    };
+    let template = &doc.source[template_start..template_end];
+    let mut diagnostics = Vec::new();
+    let mut offset = 0usize;
+
+    while let Some(relative) = template[offset..].find("=\"") {
+        let equals = offset + relative;
+        let value_start = equals + 2;
+        let Some(value_end) = find_string_end(template, value_start, b'"') else {
+            break;
+        };
+        let value = &template[value_start..value_end];
+
+        if is_exact_brace_expr(value) && is_inside_template_tag(template, equals) {
+            diagnostics.push(Diagnostic {
+                range: byte_range_to_lsp_range(
+                    &doc.source,
+                    template_start + equals,
+                    template_start + value_end + 1,
+                ),
+                severity: Some(DiagnosticSeverity::WARNING),
+                message: "Quoted expression attribute can be written as `attr={expr}` instead of `attr=\"{expr}\"`.".to_string(),
+                source: Some("mesh-tools-lsp".to_string()),
+                ..Default::default()
+            });
+        }
+
+        offset = value_end + 1;
+    }
+
+    diagnostics
+}
+
+fn find_string_end(source: &str, start: usize, quote: u8) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut i = start;
+    while i < bytes.len() {
+        if bytes[i] == quote && (i == 0 || bytes[i - 1] != b'\\') {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn is_inside_template_tag(template: &str, offset: usize) -> bool {
+    let before = &template[..offset];
+    let last_lt = before.rfind('<');
+    let last_gt = before.rfind('>');
+    matches!((last_lt, last_gt), (Some(lt), Some(gt)) if lt > gt)
+        || matches!((last_lt, last_gt), (Some(_), None))
+}
+
+fn is_exact_brace_expr(value: &str) -> bool {
+    let trimmed = value.trim();
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') || trimmed.len() < 2 {
+        return false;
+    }
+
+    let bytes = trimmed.as_bytes();
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut quote = b'"';
+
+    for (i, b) in bytes.iter().copied().enumerate() {
+        if in_string {
+            if b == quote && (i == 0 || bytes[i - 1] != b'\\') {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if b == b'"' || b == b'\'' {
+            in_string = true;
+            quote = b;
+            continue;
+        }
+
+        if b == b'{' {
+            depth += 1;
+        } else if b == b'}' {
+            depth -= 1;
+            if depth == 0 && i != bytes.len() - 1 {
+                return false;
+            }
+            if depth < 0 {
+                return false;
+            }
+        }
+    }
+
+    depth == 0
+}
+
 fn parse_identifier_at(source: &str, start: usize) -> Option<(&str, usize)> {
     let bytes = source.as_bytes();
     let first = *bytes.get(start)?;
@@ -369,5 +468,26 @@ popover.notReal
             diags.iter().any(|diag| diag.message.contains("notReal")),
             "unknown direct bind:this member should be diagnosed"
         );
+    }
+
+    #[test]
+    fn warns_for_quoted_expression_attrs() {
+        let source = r#"
+<template>
+  <button title="{t('nav.open')}" class="chip {active}" onclick="{onTap}" />
+</template>
+
+<script lang="luau">
+function onTap() end
+</script>
+"#;
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source.to_string());
+        let diags = from_document(&doc);
+
+        let messages = diags
+            .iter()
+            .filter(|diag| diag.message.contains("Quoted expression attribute"))
+            .count();
+        assert_eq!(messages, 2);
     }
 }

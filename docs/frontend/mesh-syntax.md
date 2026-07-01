@@ -114,7 +114,7 @@ Action controls use one native `button` behavior. Put visual content inside the
 button, including dedicated `icon` elements:
 
 ```xml
-<button onclick={toggle_audio} pressed="{audio_open}">
+<button onclick={toggle_audio} pressed={audio_open}>
   <icon name="audio-volume-high" />
   <text>Audio</text>
 </button>
@@ -128,7 +128,7 @@ Choice controls use shared value and change semantics. Author selects with
 static child options:
 
 ```xml
-<select value="{language}" onchange={onLanguageChange} aria-label="Language">
+<select value={language} onchange={onLanguageChange} aria-label="Language">
   <option value="en">English</option>
   <option value="sk">Slovak</option>
 </select>
@@ -145,15 +145,15 @@ Container and collection elements preserve shell-native source semantics. Use
 
 ```xml
 <tabs label="Debug views">
-  <tab selected="{current_view == 'overview'}" onactivate={showOverview}>Overview</tab>
-  <tab selected="{current_view == 'surfaces'}" onactivate={showSurfaces}>Surfaces</tab>
+  <tab selected={current_view == 'overview'} onactivate={showOverview}>Overview</tab>
+  <tab selected={current_view == 'surfaces'} onactivate={showSurfaces}>Surfaces</tab>
 </tabs>
 
 <list label="Surfaces">
-  <list-item selected="{is_active}" onactivate={openSurface}>
+  <list-item selected={is_active} onactivate={openSurface}>
     <text>{surface_id}</text>
   </list-item>
-  <empty-state hidden="{has_rows}">No rows</empty-state>
+  <empty-state hidden={has_rows}>No rows</empty-state>
 </list>
 ```
 
@@ -176,7 +176,7 @@ Imported components are definitions, not mounted instances. Markup creates the
 instance:
 
 ```xml
-<VolumeBar device_id="{active_device}" bind:this={volume_bar} />
+<VolumeBar device_id={active_device} bind:this={volume_bar} />
 ```
 
 Markup attributes become public fields on the mounted instance. `bind:this`
@@ -226,7 +226,7 @@ Write static attributes as XML-style name/value pairs:
 Use `{}` to bind an expression to any attribute value:
 
 ```xml
-<button title="{volume_tooltip}" aria-label="{volume_aria_label}">
+<button title={volume_tooltip} aria-label={volume_aria_label}>
   <text>{volume_icon_name}</text>
 </button>
 
@@ -261,7 +261,7 @@ component tag. Attribute names map to public fields on the mounted component
 instance:
 
 ```xml
-<WifiItem network_id="{network.id}" network_name="{network.name}" />
+<WifiItem network_id={network.id} network_name={network.name} />
 ```
 
 Inside `WifiItem`, those fields are normal public script members:
@@ -645,7 +645,7 @@ on the animation shorthand itself, for example
       <button
         class="volume-widget"
         onclick={onVolumeClick}
-        title="{volume_tooltip}"
+        title={volume_tooltip}
         aria-label="Open audio controls"
       >
         <text class="volume-glyph" aria-hidden="true">{volume_icon_name}</text>
@@ -736,7 +736,7 @@ end
 | ------------------ | ------------------------ |
 | Static text         | `<text>Hello</text>`      |
 | Dynamic text        | `<text>{variable}</text>` |
-| Dynamic attribute   | `title="{expr}"`          |
+| Dynamic attribute   | `title={expr}`            |
 | Two-way bind        | `bind:value="variable"`   |
 | Event handler       | `onclick={handler}`       |
 | Selectable text     | `selectable="true"`       |

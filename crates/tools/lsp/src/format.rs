@@ -173,7 +173,11 @@ fn format_template(lines: &[String], unit: &str) -> Vec<String> {
             match find_tag_end(t) {
                 Some(gt) => {
                     // The `>` / `/>` closing the multi-line tag aligns with the tag.
-                    out.push(format!("{}{}", indent(tag_base.max(1) as usize, unit), t));
+                    out.push(format!(
+                        "{}{}",
+                        indent(tag_base.max(1) as usize, unit),
+                        canonicalize_template_attrs(t)
+                    ));
                     let self_closing = t[..gt].trim_end().ends_with('/');
                     depth = if self_closing { tag_base } else { tag_base + 1 };
                     tag_header = None;
@@ -183,7 +187,7 @@ fn format_template(lines: &[String], unit: &str) -> Vec<String> {
                     out.push(format!(
                         "{}{}",
                         indent((tag_base + 1).max(1) as usize, unit),
-                        t
+                        canonicalize_template_attrs(t)
                     ));
                 }
             }
@@ -196,7 +200,11 @@ fn format_template(lines: &[String], unit: &str) -> Vec<String> {
         } else {
             depth.max(1)
         };
-        out.push(format!("{}{}", indent(line_level as usize, unit), t));
+        out.push(format!(
+            "{}{}",
+            indent(line_level as usize, unit),
+            canonicalize_template_attrs(t)
+        ));
 
         if scan.opens_multiline_tag {
             tag_header = Some(depth);
@@ -206,6 +214,90 @@ fn format_template(lines: &[String], unit: &str) -> Vec<String> {
     }
 
     out
+}
+
+/// Prefer expression attribute syntax without string quotes:
+/// `title="{t('nav.open')}"` -> `title={t('nav.open')}`.
+///
+/// Mixed static/dynamic strings such as `class="chip {active}"` stay quoted.
+fn canonicalize_template_attrs(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let bytes = line.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        if bytes[i] == b'=' && bytes.get(i + 1) == Some(&b'"') {
+            let value_start = i + 2;
+            if let Some(value_end) = find_string_end(line, value_start, b'"') {
+                let value = &line[value_start..value_end];
+                if is_exact_brace_expr(value) {
+                    out.push_str("={");
+                    out.push_str(value[1..value.len() - 1].trim());
+                    out.push('}');
+                    i = value_end + 1;
+                    continue;
+                }
+            }
+        }
+
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+
+    out
+}
+
+fn find_string_end(source: &str, start: usize, quote: u8) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut i = start;
+    while i < bytes.len() {
+        if bytes[i] == quote && (i == 0 || bytes[i - 1] != b'\\') {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn is_exact_brace_expr(value: &str) -> bool {
+    let trimmed = value.trim();
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') || trimmed.len() < 2 {
+        return false;
+    }
+
+    let bytes = trimmed.as_bytes();
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut quote = b'"';
+
+    for (i, b) in bytes.iter().copied().enumerate() {
+        if in_string {
+            if b == quote && (i == 0 || bytes[i - 1] != b'\\') {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if b == b'"' || b == b'\'' {
+            in_string = true;
+            quote = b;
+            continue;
+        }
+
+        if b == b'{' {
+            depth += 1;
+        } else if b == b'}' {
+            depth -= 1;
+            if depth == 0 && i != bytes.len() - 1 {
+                return false;
+            }
+            if depth < 0 {
+                return false;
+            }
+        }
+    }
+
+    depth == 0
 }
 
 struct TagScan {
@@ -499,6 +591,19 @@ mod tests {
         onclick={f}
     >
         <icon name=\"x\" />
+    </button>
+</template>
+";
+        assert_eq!(fmt(src), expected);
+    }
+
+    #[test]
+    fn canonicalizes_quoted_expression_attrs() {
+        let src = "<template>\n<button title=\"{t('nav.open')}\" class=\"chip {active}\" onclick=\"{onTap}\">\n<text>{label}</text>\n</button>\n</template>\n";
+        let expected = "\
+<template>
+    <button title={t('nav.open')} class=\"chip {active}\" onclick={onTap}>
+        <text>{label}</text>
     </button>
 </template>
 ";

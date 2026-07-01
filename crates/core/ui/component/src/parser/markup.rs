@@ -180,7 +180,7 @@ fn xml_attr_escape(s: &str) -> String {
 /// Convert unquoted brace attribute values to quoted form so quick_xml can parse them.
 ///
 /// `onclick={handler}` → `onclick="{handler}"`
-/// `value="{expr}"` is left unchanged (already quoted).
+/// `value={expr}` follows the same preprocessing path before XML parsing.
 fn preprocess_template(source: &str) -> String {
     let mut out = String::with_capacity(source.len() + 32);
     let bytes = source.as_bytes();
@@ -374,7 +374,7 @@ fn parse_xml_attributes(
             // bind:value="variable" — two-way binding.
             (var.to_string(), AttributeValue::TwoWayBinding(value))
         } else if is_event_attr(&name) {
-            // onclick="handler" or onclick="{handler}" — strip braces if present.
+            // onclick={handler}, onclick="handler", or onclick="{handler}" — strip braces if present.
             let handler = extract_brace_expr(&value).unwrap_or(value);
             if let Some((fn_name, fn_args)) = parse_handler_call(&handler) {
                 (
@@ -388,7 +388,7 @@ fn parse_xml_attributes(
                 (name, AttributeValue::EventHandler(handler))
             }
         } else if let Some(expr) = extract_brace_expr(&value) {
-            // title="{expr}" — dynamic binding, expression inside braces.
+            // title={expr} or title="{expr}" — dynamic binding, expression inside braces.
             (name, AttributeValue::Binding(expr))
         } else {
             (name, AttributeValue::Static(value))
