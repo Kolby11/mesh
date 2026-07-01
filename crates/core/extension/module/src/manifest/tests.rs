@@ -762,7 +762,6 @@ fn manifest_with_dependencies(
             settings_ui: None,
         },
         accessibility: None,
-        settings: None,
         keybinds: KeybindsSection::default(),
         i18n: None,
         theme: None,

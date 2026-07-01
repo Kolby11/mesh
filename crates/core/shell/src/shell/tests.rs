@@ -23,7 +23,7 @@ use mesh_core_module::ModuleInstance;
 use mesh_core_module::manifest::{
     CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
     ExportsSection, Manifest, ManifestSource, ModuleSection, ModuleType, ProvidedInterface,
-    SettingsSection, SurfaceLayoutSection,
+    SurfaceLayoutSection,
 };
 use mesh_core_module::package::{
     InstalledModuleGraph, LoadedModuleManifest, ModuleManifest, ModuleManifestSource,
@@ -100,7 +100,6 @@ fn minimal_manifest(id: &str) -> Manifest {
         capabilities: CapabilitiesSection::default(),
         entrypoints: EntrypointsSection::default(),
         accessibility: None,
-        settings: None,
         keybinds: mesh_core_module::KeybindsSection::default(),
         i18n: None,
         theme: None,

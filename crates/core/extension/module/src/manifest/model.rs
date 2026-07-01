@@ -19,8 +19,6 @@ pub struct Manifest {
     #[serde(default)]
     pub accessibility: Option<AccessibilitySection>,
     #[serde(default)]
-    pub settings: Option<SettingsSection>,
-    #[serde(default)]
     pub keybinds: KeybindsSection,
     #[serde(default)]
     pub i18n: Option<I18nSection>,
@@ -398,16 +396,6 @@ pub struct EntrypointsSection {
     pub main: Option<String>,
     #[serde(default)]
     pub settings_ui: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SettingsSection {
-    #[serde(default)]
-    pub namespace: Option<String>,
-    #[serde(default)]
-    pub schema_path: Option<String>,
-    #[serde(default)]
-    pub inline_schema: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

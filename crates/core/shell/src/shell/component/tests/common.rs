@@ -373,7 +373,6 @@ pub(super) fn minimal_test_manifest(id: &str) -> Manifest {
             settings_ui: None,
         },
         accessibility: None,
-        settings: None,
         keybinds: mesh_core_module::KeybindsSection::default(),
         i18n: None,
         theme: None,

@@ -2,7 +2,7 @@ use super::{
     AccessibilitySection, AssetsSection, CapabilitiesSection, CompatibilitySection,
     DependenciesSection, DependencySpec, EntrypointsSection, ExportsSection, ExtensionSection,
     I18nSection, IconPackSection, IconRequirementsSection, IconsSection, InterfaceSection,
-    KeybindsSection, Manifest, ModuleSection, ProvidedInterface, ServiceSection, SettingsSection,
+    KeybindsSection, Manifest, ModuleSection, ProvidedInterface, ServiceSection,
     SlotContribution, SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
 };
 use mesh_core_theme::TokenValue;
@@ -22,8 +22,6 @@ pub(super) struct TomlManifest {
     entrypoints: EntrypointsSection,
     #[serde(default)]
     accessibility: Option<AccessibilitySection>,
-    #[serde(default)]
-    settings: Option<TomlSettingsSection>,
     #[serde(default)]
     keybinds: KeybindsSection,
     #[serde(default)]
@@ -70,7 +68,6 @@ impl TomlManifest {
             capabilities: self.capabilities,
             entrypoints: self.entrypoints,
             accessibility: self.accessibility,
-            settings: self.settings.map(TomlSettingsSection::into_settings),
             keybinds: self.keybinds,
             i18n: self.i18n.map(TomlI18nSection::into_i18n),
             theme: self.theme.map(TomlThemeSection::into_theme),
@@ -91,29 +88,6 @@ impl TomlManifest {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct TomlSettingsSection {
-    #[serde(default)]
-    namespace: Option<String>,
-    #[serde(default)]
-    schema: Option<toml::Value>,
-}
-
-impl TomlSettingsSection {
-    fn into_settings(self) -> SettingsSection {
-        let (schema_path, inline_schema) = match self.schema {
-            Some(toml::Value::String(path)) => (Some(path), None),
-            Some(other) => (None, serde_json::to_value(other).ok()),
-            None => (None, None),
-        };
-
-        SettingsSection {
-            namespace: self.namespace,
-            schema_path,
-            inline_schema,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Deserialize)]
 struct TomlI18nSection {

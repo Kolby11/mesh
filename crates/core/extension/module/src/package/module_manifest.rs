@@ -74,15 +74,6 @@ impl ModuleManifest {
     pub fn into_runtime_manifest(self) -> Manifest {
         let mut mesh = self.mesh;
         mesh.normalize();
-        let settings =
-            mesh.contributes
-                .settings
-                .clone()
-                .map(|settings| manifest::SettingsSection {
-                    namespace: Some(settings.namespace),
-                    schema_path: None,
-                    inline_schema: Some(settings.schema),
-                });
         let i18n = mesh
             .contributes
             .i18n
@@ -162,7 +153,6 @@ impl ModuleManifest {
                 settings_ui: mesh.entrypoints.settings_ui,
             },
             accessibility: mesh.accessibility,
-            settings,
             keybinds: mesh.keybinds,
             i18n,
             theme: manifest_theme,

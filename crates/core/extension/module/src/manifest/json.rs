@@ -3,7 +3,7 @@ use super::{
     CompatibilitySection, DependenciesSection, DependencySpec, EntrypointsSection, ExportsSection,
     ExtensionSection, FontDependency, I18nSection, IconPackSection, IconRequirementsSection,
     IconsSection, InterfaceDependency, InterfaceSection, KeybindsSection, Manifest, ModuleSection,
-    ModuleType, NativeDependency, OptionalDependencyGroup, ProvidedInterface, SettingsSection,
+    ModuleType, NativeDependency, OptionalDependencyGroup, ProvidedInterface,
     SlotContribution, SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
 };
 use mesh_core_theme::TokenValue;
@@ -37,8 +37,6 @@ pub(super) struct JsonManifest {
     entrypoints: EntrypointsSection,
     #[serde(default)]
     accessibility: Option<AccessibilitySection>,
-    #[serde(default)]
-    settings: Option<JsonSettingsSection>,
     #[serde(default)]
     keybinds: KeybindsSection,
     #[serde(default)]
@@ -90,7 +88,6 @@ impl JsonManifest {
             capabilities: self.capabilities,
             entrypoints: self.entrypoints,
             accessibility: self.accessibility,
-            settings: self.settings.map(JsonSettingsSection::into_settings),
             keybinds: self.keybinds,
             i18n: self.i18n.map(JsonI18nSection::into_i18n),
             theme: self.theme.map(JsonThemeSection::into_theme),
@@ -142,24 +139,6 @@ impl JsonDependenciesSection {
             native_libs: self.native_libs,
             binaries: self.binaries,
             fonts: self.fonts,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct JsonSettingsSection {
-    #[serde(default)]
-    namespace: Option<String>,
-    #[serde(default)]
-    schema: Option<serde_json::Value>,
-}
-
-impl JsonSettingsSection {
-    fn into_settings(self) -> SettingsSection {
-        SettingsSection {
-            namespace: self.namespace,
-            schema_path: None,
-            inline_schema: self.schema,
         }
     }
 }
