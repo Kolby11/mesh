@@ -280,8 +280,7 @@ manifest:
     },
     "surface": {
       "anchor": "top",
-      "height": 56,
-      "size": "fixed"
+      "exclusive_zone": 56
     },
     "accessibility": { "role": "toolbar" }
   }
@@ -308,38 +307,33 @@ guess.
 
 #### Surface configuration (`mesh.surface`)
 
-Core ships the canonical surface schema and its defaults; a frontend declares
-**only the fields it wants to override** in one compact `mesh.surface` block.
-There is no need to hand-write a `settings.schema.surface` properties block or a
-separate `mesh.surfaceLayout` section — both are replaced by `mesh.surface`.
+`mesh.surface` carries **placement only** — the layer-shell concerns the
+component's CSS cannot express. A frontend declares **only the fields it wants
+to override**; anything omitted falls back to the core default.
 
 ```json
 "surface": {
   "anchor": "top",
   "layer": "top",
-  "width": 0,
-  "height": 56,
   "exclusive_zone": 56,
   "keyboard_mode": "none",
-  "visible_on_start": true,
-  "size": "fixed"
+  "visible_on_start": true
 }
 ```
 
-Fields split by audience, but they live in one place:
+The full field set is `anchor`, `layer`, `exclusive_zone`, `keyboard_mode`,
+`visible_on_start`, and `margins`. User `config/settings.json` `surface.*`
+overrides apply on top.
 
-- **User-editable defaults:** `anchor`, `layer`, `width`, `height`,
-  `exclusive_zone`, `keyboard_mode`, `visible_on_start`, `margins`,
-  `display_transition`. The shell can generate settings UI for these from the
-  core base schema, and user `config/settings.json` `surface.*` overrides apply
-  on top.
-- **Renderer policy (not user-editable):** `size` (`fixed` |
-  `content_measured`), `prefers_content_children_sizing`, and the
-  `min_*`/`max_*` clamps.
-
-Any field the author omits falls back to the core default. `mesh.surfaceLayout`
-remains accepted as a legacy alias so older manifests still parse, but new
-modules should use `mesh.surface`.
+**Surface sizing is not declared here.** Every surface is sized by CSS content
+measurement of its component root: `width: 100%` spans the anchored edge, a
+fixed length pins it, and `fit-content`/`min-content`/`max-content` shrink to
+content, with `min-*`/`max-*` clamps applied by the layout engine. The show/hide
+transition is likewise a CSS `transition` on the surface root (the shell delays
+unmapping by the resolved opacity-transition duration). The old
+`width`/`height`/`size`/`size_policy`/`prefers_content_children_sizing`/
+`min_*`/`max_*`/`display_transition` fields and the separate `mesh.surfaceLayout`
+section have been removed — there is no compatibility alias.
 
 ### Backend Provider
 
@@ -662,13 +656,13 @@ provided catalogs are concrete files available in this package.
 Frontend authoring remains one `module.json` contract, not a separate settings
 file per concern. Use `mesh.entry` or `mesh.entrypoints.main` for the `.mesh`
 surface entrypoint, `mesh.provides.settings` for the settings schema namespace,
-`mesh.surfaceLayout` for non-user sizing/layout policy, and
+`mesh.surface` for surface placement, and
 `mesh.accessibility` for the root role and label. The graph keeps these fields
 as a single frontend surface record while preserving the existing typed indexes
 for interfaces, icon requirements, i18n catalogs, keybinds, settings schemas,
 and component-module dependencies.
 
-`mesh.surfaceLayout.keyboard_mode` declares the module default keyboard
+`mesh.surface.keyboard_mode` declares the module default keyboard
 interactivity policy: `none`, `on_demand`, or `exclusive`. User settings may
 override that default per module, and temporary runtime focus transfers may
 override it while a popover owns focus. The durable manifest/settings contract

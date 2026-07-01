@@ -494,7 +494,14 @@ generated settings schema reflects it — end-to-end for `size` only.
 - Verify content-measure + clamp + show/hide animation still match current
   behavior (40×200-equivalent).
 
-### Phase 3 — narrow the manifest, delete old fields (no compat)
+### Phase 3 — narrow the manifest, delete old fields (no compat) ✅ landed
+
+Implemented: `SurfaceLayoutSection` and `SurfaceLayoutSettings` carry placement
+only; surface size is `measure_content_size()` reading the component root's CSS
+box; the show/hide transition is a CSS `transition` on the root read by
+`hide_transition_ms()`; `SettingsSection`/`mesh.settings` is removed; the five
+shipped surfaces and the LSP manifest schema are updated. The `size` type's
+`prop()` projection is Phase 1; the remaining prop types are Phase 4.
 
 - `crates/core/extension/module/src/manifest/model.rs`: remove `width`, `height`,
   `size_policy`/`size`, `prefers_content_children_sizing`, `min_*`/`max_*`,

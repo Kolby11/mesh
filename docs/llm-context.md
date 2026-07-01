@@ -93,7 +93,7 @@ mesh-tools-cli
 | `mesh-core-frontend-host` | `ShellComponent`, `CoreRequest`, `CoreEvent`, `ServiceEvent`, `ComponentInput`, `ComponentContext`, `ComponentError`, `SurfaceId`         |
 | `mesh-core-animation` | `Easing`, `Interpolate`, `AnimatableStyle`, `KeyframeRule`, `ActiveKeyframeAnimation`                                                            |
 | `mesh-core-interaction` | `find_node_path_at`, `find_focusable_at`, `collect_focus_traversal`, `annotate_overflow_tree`, `ScrollOffsetState`                             |
-| `mesh-core-surface-config` | `SurfaceLayoutSettings`, `SurfaceSizePolicy`, `load_frontend_module_settings()`                                                            |
+| `mesh-core-surface-config` | `SurfaceLayoutSettings` (placement only), `load_frontend_module_settings()`                                                            |
 | `mesh-core-render`    | `PixelBuffer`, `FrontendRenderEngine`, `DebugOverlay`, `SharedTextMeasurer`, `TextRenderer`                                                      |
 | `mesh-core-presentation` | `PresentationEngine`, `PresentationError`, `WindowEvent`, `LayerSurfaceConfig`                                                                |
 | `mesh-core-backend`   | `spawn_backend_service`, `BackendServiceCommand`, `BackendServiceUpdate`                                                                         |
@@ -152,8 +152,7 @@ Every frontend module is a complete feature module. It declares in its
 canonical author-facing manifest, `module.json`:
 - `mesh.kind`: `"frontend"` for frontend modules
 - `mesh.entrypoints.main`: path to the `.mesh` single-file component
-- `mesh.contributes.settings.schema.surface.properties`: layout defaults (anchor, layer, width, height, etc.) — **user-editable**
-- `mesh.surfaceLayout`: non-user renderer hints (`size_policy`, `prefers_content_children_sizing`, clamp bounds)
+- `mesh.surface`: surface **placement only** — `anchor`, `layer`, `exclusive_zone`, `keyboard_mode`, `visible_on_start`, `margins`. Surface **sizing** and the show/hide transition are CSS on the component root, not manifest fields (see `docs/component-configuration.md` §5).
 - `mesh.capabilities.required`: permission gates (`shell.surface`, `theme.read`, etc.)
 - `mesh.dependencies.modules`: module IDs this module depends on
 
@@ -210,7 +209,7 @@ capabilities, manifests, and one or more components.
 ### Settings flow
 
 ```
-module.json mesh.contributes.settings.schema.surface.properties[field].default
+module.json mesh.surface (placement: anchor/layer/exclusive_zone/keyboard_mode/…)
   ↓  (baseline)
 surface_layout_from_manifest()
   ↓  + user overrides
@@ -220,6 +219,8 @@ FrontendSurfaceComponent.surface_layout / settings_json
   ↓
 ScriptContext state["settings"]  ←  Luau reads {settings.surface.anchor}
 ```
+Surface **size** is not in this flow — it is measured from the component
+root's CSS every paint (`measure_content_size()`), independent of settings.
 
 ### Service/interface flow
 
@@ -239,7 +240,8 @@ backend module (`module.json` with `mesh.implements`)
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | Add a CSS property             | `crates/core/ui/component/src/style.rs` / parser modules (parse), `crates/core/ui/elements/src/style.rs` (computed style), `crates/core/frontend/render/src/surface/painter.rs` (paint) |
 | Add a new frontend module      | Create `modules/frontend/<name>/`, `module.json` with `mesh.kind = "frontend"`, `src/main.mesh`                                  |
-| Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core-shell/src/shell.rs`; manifest's `mesh.surfaceLayout` section                      |
+| Change surface placement | `surface_layout_from_manifest()` in `mesh-core-surface-config`; manifest's `mesh.surface` block (placement only) |
+| Change surface sizing | CSS `width`/`height`/`min-*`/`max-*` on the component root (`fit-content` measures, `100%` spans); measured in `measure_content_size()` |
 | Configure/customize a component | Target model: the `<props>` block — see [Component Configuration Model](component-configuration.md) (design spec; replaces `mesh.surface` sizing + `mesh.settings`) |
 | Add a backend provider module  | Create `modules/backend/<name>/`, `module.json` with `mesh.kind = "backend"` and `mesh.implements`, plus `src/main.luau`         |
 | Add a new CoreRequest action   | `CoreRequest` enum in `crates/core/shell/src/shell/types.rs` plus request handling under `crates/core/shell/src/shell/runtime/request.rs` |
@@ -590,5 +592,5 @@ LSP completions for `audio.` derive state fields and commands by analyzing the b
 - **Frontend modules are compiled at startup**, not interpreted at runtime. Hot-reload is supported via file watching (`reload_module_settings`, `source_path()` watching).
 - **Public/private script members.** Any non-local assigned in `<script>` is a public reactive member. Templates bind to `{variable_name}`. `local` variables/functions are private. Runtime hooks receive `self`; current-instance metadata and persistent storage live at `self.meta` and `self.storage`.
 - **Surface layout is user-configurable.** Any surface can have its anchor, layer, size, keyboard mode overridden via `config/settings.json` inside the module directory.
-- **`SurfaceSizePolicy::ContentMeasured`** means the surface resizes itself to fit its content. Declared in `module.json` as `mesh.surfaceLayout.size_policy = "content_measured"`. Only the launcher uses this currently.
+- **Surface sizing is CSS content measurement.** Every surface's size is the laid-out box of its component root — `width: 100%` spans the anchored edge, a fixed length pins it, `fit-content` shrinks to content, with `min-*`/`max-*` clamps applied by the layout engine (`measure_content_size()` in `mesh-core-interaction`). There is no `size_policy` manifest field.
 - **Test location:** unit tests live in `#[cfg(test)]` modules at the bottom of each source file.
