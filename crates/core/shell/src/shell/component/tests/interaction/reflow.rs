@@ -141,7 +141,7 @@ input:checked {
 </template>
 <script lang="luau">
 render_count = 0
-function onRender()
+function render()
     render_count = render_count + 1
 end
 </script>
@@ -231,7 +231,7 @@ text {
 </template>
 <script lang="luau">
 render_count = 0
-function onRender()
+function render()
     render_count = render_count + 1
 end
 </script>
@@ -431,7 +431,7 @@ local function update_audio_copy(percent, muted)
     end
 end
 
-function onRender()
+function render()
     if not audio_ok or not audio then
         icon_name = "audio-volume-muted"
         audio_tooltip = "Audio service unavailable"
@@ -466,7 +466,7 @@ end
             "audio",
             &serde_json::json!({ "percent": 20, "muted": false }),
         );
-        runtime.script_ctx.call_handler("onRender", &[]).unwrap();
+        runtime.script_ctx.call_handler("render", &[]).unwrap();
     }
     component.render_hooks_pending = false;
 

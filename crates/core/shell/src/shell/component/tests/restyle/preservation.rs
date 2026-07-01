@@ -10,7 +10,7 @@ fn state_preservation_restyle_service_payload_survives_hover_restyle() {
 <script lang="luau">
 -- Track whenever a reactive global is updated to detect accidental wipes.
 vol_pct = -1
-function onRender()
+function render()
     -- Read directly from the service state table if it exists.
     if __mesh_svc_audio then
         vol_pct = __mesh_svc_audio.percent or -1
@@ -34,12 +34,12 @@ end
         runtime
             .script_ctx
             .apply_service_payload("audio", &serde_json::json!({ "percent": 72 }));
-        // Mark render hooks pending so onRender fires on next paint.
+        // Mark render hooks pending so render fires on next paint.
     }
     component.render_hooks_pending = true;
     component.dirty = true;
 
-    // First paint with the service payload — onRender fires, vol_pct == 72.
+    // First paint with the service payload — render fires, vol_pct == 72.
     component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
     let pct_after_payload = runtime_number(&component, "vol_pct");
     assert!(

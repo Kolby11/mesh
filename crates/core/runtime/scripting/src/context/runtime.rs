@@ -684,21 +684,13 @@ impl ScriptContext {
         Ok(())
     }
 
-    /// Call the canonical render lifecycle if present, otherwise fall back to
-    /// the legacy handler name used by existing shipped surfaces.
+    /// Call the canonical `render(self)` lifecycle handler if present.
     pub fn call_render_lifecycle(&mut self) -> Result<bool, ScriptError> {
         self.ensure_initialized()?;
         if self.has_handler("render") {
             self.clear_tracked_storage_keys();
             *self.tracking_storage_reads.lock().unwrap() = true;
             let result = self.call_handler("render", &[]);
-            *self.tracking_storage_reads.lock().unwrap() = false;
-            result?;
-            Ok(true)
-        } else if self.has_handler("onRender") {
-            self.clear_tracked_storage_keys();
-            *self.tracking_storage_reads.lock().unwrap() = true;
-            let result = self.call_handler("onRender", &[]);
             *self.tracking_storage_reads.lock().unwrap() = false;
             result?;
             Ok(true)

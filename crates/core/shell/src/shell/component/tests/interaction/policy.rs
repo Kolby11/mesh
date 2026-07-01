@@ -17,7 +17,7 @@ local theme_ok, theme = pcall(function()
 end)
 if not theme_ok then theme = nil end
 
-function onRender()
+function render()
     if theme and theme.is_dark == false then
         theme_label = "light"
     else
@@ -89,7 +89,7 @@ text {
     component.paint(&light, 160, 48, &mut buffer, 1.0).unwrap();
     assert!(
         component.wants_immediate_rerender(),
-        "onRender state sync should request the same-frame rerender that used to erase damage"
+        "render state sync should request the same-frame rerender that used to erase damage"
     );
     component.paint(&light, 160, 48, &mut buffer, 1.0).unwrap();
 

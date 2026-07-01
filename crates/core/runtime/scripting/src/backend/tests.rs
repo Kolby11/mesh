@@ -32,7 +32,7 @@ fn bundled_backend_script(path: &str) -> String {
 #[test]
 fn loads_poll_interval_from_script() {
     let mut ctx = BackendScriptContext::new("@test/backend");
-    ctx.load_script("function init()\nmesh.service.set_poll_interval(250)\nend")
+    ctx.load_script("function start()\nmesh.service.set_poll_interval(250)\nend")
         .unwrap();
     ctx.call_init().unwrap();
     assert_eq!(ctx.poll_interval_ms(), 250);
@@ -232,7 +232,7 @@ fn backend_public_function_inspection_excludes_lifecycle_hooks() {
 #[test]
 fn poll_interval_below_minimum_is_clamped() {
     let mut ctx = BackendScriptContext::new("@test/backend");
-    ctx.load_script("function init()\nmesh.service.set_poll_interval(10)\nend")
+    ctx.load_script("function start()\nmesh.service.set_poll_interval(10)\nend")
         .unwrap();
     ctx.call_init().unwrap();
     assert_eq!(ctx.poll_interval_ms(), 50);
@@ -241,7 +241,7 @@ fn poll_interval_below_minimum_is_clamped() {
 #[test]
 fn poll_interval_at_minimum_is_accepted() {
     let mut ctx = BackendScriptContext::new("@test/backend");
-    ctx.load_script("function init()\nmesh.service.set_poll_interval(50)\nend")
+    ctx.load_script("function start()\nmesh.service.set_poll_interval(50)\nend")
         .unwrap();
     ctx.call_init().unwrap();
     assert_eq!(ctx.poll_interval_ms(), 50);
@@ -251,7 +251,7 @@ fn poll_interval_at_minimum_is_accepted() {
 fn registers_handlers_from_script() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\n\
+        "function start()\nend\n\
          function on_poll()\nmesh.log.info(\"polling\")\nend\n\
          function on_command_volume_up()\nmesh.log.info(\"up\")\nend",
     )
@@ -274,7 +274,7 @@ fn registers_handlers_from_script() {
 fn mesh_service_emit_remains_compatibility_state_setter() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nmesh.service.emit({ available = true, percent = 65 })\nend",
+        "function start()\nend\nfunction on_poll()\nmesh.service.emit({ available = true, percent = 65 })\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -289,7 +289,7 @@ fn mesh_service_emit_remains_compatibility_state_setter() {
 fn mesh_service_emit_overrides_exported_state_for_current_callback() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "state = { percent = 10 }\nfunction init()\nend\nfunction on_poll()\nmesh.service.emit({ percent = 65 })\nend",
+        "state = { percent = 10 }\nfunction start()\nend\nfunction on_poll()\nmesh.service.emit({ percent = 65 })\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -300,7 +300,7 @@ fn mesh_service_emit_overrides_exported_state_for_current_callback() {
 fn emit_unavailable_stores_unavailable_payload() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nmesh.service.emit_unavailable()\nend",
+        "function start()\nend\nfunction on_poll()\nmesh.service.emit_unavailable()\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -318,7 +318,7 @@ fn emit_unavailable_stores_unavailable_payload() {
 fn mesh_service_emit_event_buffers_typed_interface_event() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nmesh.service.emit_event(\"VolumeChanged\", { device_id = \"default\", level = 67 })\nend",
+        "function start()\nend\nfunction on_poll()\nmesh.service.emit_event(\"VolumeChanged\", { device_id = \"default\", level = 67 })\nend",
     )
     .unwrap();
 
@@ -363,7 +363,7 @@ end
 fn command_handler_reads_payload_via_api() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_command_set_volume()\nlocal p = mesh.service.payload()\nmesh.service.emit({ percent = p.percent })\nend",
+        "function start()\nend\nfunction on_command_set_volume()\nlocal p = mesh.service.payload()\nmesh.service.emit({ percent = p.percent })\nend",
     )
     .unwrap();
     let result = ctx.run_command("set-volume", &serde_json::json!({ "percent": 50 }));
@@ -376,7 +376,7 @@ fn backend_state_snapshot_reads_top_level_state() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
         "state = { available = false }\n\
-         function init()\nstate = { available = true, percent = 65 }\nend",
+         function start()\nstate = { available = true, percent = 65 }\nend",
     )
     .unwrap();
 
@@ -394,7 +394,7 @@ fn backend_state_snapshot_updates_after_poll() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
         "state = { tick = 0 }\n\
-         function init()\nend\n\
+         function start()\nend\n\
          function on_poll()\nstate = { tick = state.tick + 1 }\nend",
     )
     .unwrap();
@@ -410,7 +410,7 @@ fn backend_state_snapshot_updates_after_command() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
         "state = { percent = 0 }\n\
-         function init()\nend\n\
+         function start()\nend\n\
          function on_command_set_volume()\n\
            local payload = mesh.service.payload()\n\
            state = { percent = payload.percent }\n\
@@ -644,7 +644,7 @@ fn emit_json_accepts_explicit_string() {
     let mut ctx =
         BackendScriptContext::new_with_capabilities("@test/backend", ["exec.printf".into()]);
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nlocal r = mesh.exec(\"printf\", {\"{\\\"available\\\":true,\\\"percent\\\":65}\"})\nmesh.service.emit_json(r.stdout)\nend",
+        "function start()\nend\nfunction on_poll()\nlocal r = mesh.exec(\"printf\", {\"{\\\"available\\\":true,\\\"percent\\\":65}\"})\nmesh.service.emit_json(r.stdout)\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -659,7 +659,7 @@ fn emit_json_accepts_explicit_string() {
 fn emit_json_accepts_lua_table() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nmesh.service.emit_json({ available = true, percent = 65 })\nend",
+        "function start()\nend\nfunction on_poll()\nmesh.service.emit_json({ available = true, percent = 65 })\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -674,7 +674,7 @@ fn emit_json_accepts_lua_table() {
 fn emit_json_nil_uses_current_command_payload() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_command_echo_current()\nmesh.service.emit_json(nil)\nend",
+        "function start()\nend\nfunction on_command_echo_current()\nmesh.service.emit_json(nil)\nend",
     )
     .unwrap();
     let payload = ctx.run_command(
@@ -689,7 +689,7 @@ fn emit_json_nil_uses_current_command_payload() {
 #[test]
 fn emit_json_rejects_invalid_json_string() {
     let mut ctx = BackendScriptContext::new("@test/backend");
-    ctx.load_script("function init()\nend").unwrap();
+    ctx.load_script("function start()\nend").unwrap();
 
     let globals = ctx.ensure_lua().globals();
     let mesh = globals.get::<mlua::Table>("mesh").unwrap();
@@ -704,7 +704,7 @@ fn emit_json_rejects_invalid_json_string() {
 fn bad_emit_json_does_not_emit_stale_state() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nmesh.service.emit({ ok = true })\nend\nfunction on_command_bad_emit_json()\nmesh.service.emit_json('{not-json}')\nend",
+        "function start()\nend\nfunction on_poll()\nmesh.service.emit({ ok = true })\nend\nfunction on_command_bad_emit_json()\nmesh.service.emit_json('{not-json}')\nend",
     )
     .unwrap();
     let first_payload = ctx.run_poll().unwrap().unwrap();
@@ -721,7 +721,7 @@ fn bad_emit_json_does_not_emit_stale_state() {
 fn emit_resolves_lua_table_payloads() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nmesh.service.emit({ percent = 42, muted = false })\nend",
+        "function start()\nend\nfunction on_poll()\nmesh.service.emit({ percent = 42, muted = false })\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -733,7 +733,7 @@ fn emit_resolves_lua_table_payloads() {
 fn command_handler_can_read_payload_table() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_command_set_volume()\nlocal payload = mesh.service.payload()\nmesh.service.emit({ percent = payload.percent })\nend",
+        "function start()\nend\nfunction on_command_set_volume()\nlocal payload = mesh.service.payload()\nmesh.service.emit({ percent = payload.percent })\nend",
     )
     .unwrap();
     let payload = ctx.run_command("set-volume", &serde_json::json!({ "percent": 55 }));
@@ -751,7 +751,7 @@ fn command_handler_can_read_payload_table() {
 fn command_handler_can_use_direct_function_name() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction set_volume()\nmesh.service.emit({ ok = true })\nend",
+        "function start()\nend\nfunction set_volume()\nmesh.service.emit({ ok = true })\nend",
     )
     .unwrap();
     let payload = ctx.run_command("set-volume", &serde_json::json!({}));
@@ -770,7 +770,7 @@ fn backend_command_handler_return_table_becomes_result() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
         "state = { percent = 0 }\n\
-         function init()\nend\n\
+         function start()\nend\n\
          function on_command_set_volume()\n\
            local payload = mesh.service.payload()\n\
            state = { percent = payload.percent }\n\
@@ -805,7 +805,7 @@ fn backend_command_handler_return_table_becomes_result() {
 #[test]
 fn backend_command_handler_nil_defaults_to_ok_result() {
     let mut ctx = BackendScriptContext::new("@test/backend");
-    ctx.load_script("function init()\nend\nfunction on_command_ping()\nend")
+    ctx.load_script("function start()\nend\nfunction on_command_ping()\nend")
         .unwrap();
 
     let outcome = ctx
@@ -821,7 +821,7 @@ fn backend_command_handler_nil_defaults_to_ok_result() {
 fn backend_command_handler_error_becomes_failed_result() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_command_fail()\nerror(\"command boom\")\nend",
+        "function start()\nend\nfunction on_command_fail()\nerror(\"command boom\")\nend",
     )
     .unwrap();
 
@@ -869,7 +869,7 @@ fn exec_returns_structured_result() {
     let mut ctx =
         BackendScriptContext::new_with_capabilities("@test/backend", ["exec.printf".into()]);
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ ok = result.success, stdout = result.stdout })\nend",
+        "function start()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ ok = result.success, stdout = result.stdout })\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -885,7 +885,7 @@ fn exec_accepts_program_and_args() {
     let mut ctx =
         BackendScriptContext::new_with_capabilities("@test/backend", ["exec.printf".into()]);
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ success = result.success, stdout = result.stdout, code = result.code })\nend",
+        "function start()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ success = result.success, stdout = result.stdout, code = result.code })\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -902,7 +902,7 @@ fn exec_rejects_single_string_command_form() {
     let mut ctx =
         BackendScriptContext::new_with_capabilities("@test/backend", ["exec.printf hello".into()]);
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nlocal ok = pcall(function()\nmesh.exec(\"printf hello\")\nend)\nmesh.service.emit({ rejected = not ok })\nend",
+        "function start()\nend\nfunction on_poll()\nlocal ok = pcall(function()\nmesh.exec(\"printf hello\")\nend)\nmesh.service.emit({ rejected = not ok })\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -917,7 +917,7 @@ fn exec_missing_program_returns_failure_table() {
     let mut ctx =
         BackendScriptContext::new_with_capabilities("@test/backend", ["exec.command".into()]);
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"__mesh_missing_command_for_test__\", {})\nmesh.service.emit({ success = result.success, stdout = result.stdout, stderr = result.stderr, code = result.code })\nend",
+        "function start()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"__mesh_missing_command_for_test__\", {})\nmesh.service.emit({ success = result.success, stdout = result.stdout, stderr = result.stderr, code = result.code })\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -939,7 +939,7 @@ fn exec_missing_program_returns_failure_table() {
 fn exec_nonzero_exit_returns_failure_table() {
     let mut ctx = BackendScriptContext::new_with_capabilities("@test/backend", ["exec.sh".into()]);
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"sh\", {\"-c\", \"printf err >&2; exit 7\"})\nmesh.service.emit({ success = result.success, stdout = result.stdout, stderr = result.stderr, code = result.code })\nend",
+        "function start()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"sh\", {\"-c\", \"printf err >&2; exit 7\"})\nmesh.service.emit({ success = result.success, stdout = result.stdout, stderr = result.stderr, code = result.code })\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -956,7 +956,7 @@ fn exec_nonzero_exit_returns_failure_table() {
 fn exec_without_program_capability_returns_denied_result() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ success = result.success, stderr = result.stderr, code = result.code })\nend",
+        "function start()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ success = result.success, stderr = result.stderr, code = result.code })\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -986,7 +986,7 @@ fn config_returns_backend_settings() {
         }),
     );
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nlocal cfg = mesh.config()\nmesh.service.emit({ enabled = cfg.enabled, name = cfg.nested.name, first_feature = cfg.nested.features[1] })\nend",
+        "function start()\nend\nfunction on_poll()\nlocal cfg = mesh.config()\nmesh.service.emit({ enabled = cfg.enabled, name = cfg.nested.name, first_feature = cfg.nested.features[1] })\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -1002,7 +1002,7 @@ fn config_returns_backend_settings() {
 fn log_level_function_and_aliases_are_callable() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nmesh.log(\"debug\", \"polling\")\nmesh.log.debug(\"polling\")\nmesh.log(\"info\", \"polling\")\nmesh.log.info(\"polling\")\nmesh.log(\"warn\", \"polling\")\nmesh.log.warn(\"polling\")\nmesh.log(\"error\", \"polling\")\nmesh.log.error(\"polling\")\nmesh.log(\"warning\", \"polling\")\nmesh.service.emit({ ok = true })\nend",
+        "function start()\nend\nfunction on_poll()\nmesh.log(\"debug\", \"polling\")\nmesh.log.debug(\"polling\")\nmesh.log(\"info\", \"polling\")\nmesh.log.info(\"polling\")\nmesh.log(\"warn\", \"polling\")\nmesh.log.warn(\"polling\")\nmesh.log(\"error\", \"polling\")\nmesh.log.error(\"polling\")\nmesh.log(\"warning\", \"polling\")\nmesh.service.emit({ ok = true })\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -1013,7 +1013,7 @@ fn log_level_function_and_aliases_are_callable() {
 fn invalid_log_level_is_non_fatal() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nmesh.log(\"trace\", \"not public\")\nmesh.service.emit({ ok = true })\nend",
+        "function start()\nend\nfunction on_poll()\nmesh.log(\"trace\", \"not public\")\nmesh.service.emit({ ok = true })\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -1024,7 +1024,7 @@ fn invalid_log_level_is_non_fatal() {
 fn bad_emit_payload_does_not_emit_stale_state() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nmesh.service.emit({ ok = true })\nend\nfunction on_command_bad_emit()\nmesh.service.emit(function() end)\nend",
+        "function start()\nend\nfunction on_poll()\nmesh.service.emit({ ok = true })\nend\nfunction on_command_bad_emit()\nmesh.service.emit(function() end)\nend",
     )
     .unwrap();
     let first_payload = ctx.run_poll().unwrap().unwrap();
@@ -1044,7 +1044,7 @@ fn capabilities_are_visible_to_backend_scripts() {
         vec!["service.network.control".to_string()],
     );
     ctx.load_script(
-        "function init()\nend\nfunction on_poll()\nmesh.service.emit({ allowed = mesh.service.has_capability(\"service.network.control\") })\nend",
+        "function start()\nend\nfunction on_poll()\nmesh.service.emit({ allowed = mesh.service.has_capability(\"service.network.control\") })\nend",
     )
     .unwrap();
     let payload = ctx.run_poll().unwrap().unwrap();
@@ -1062,7 +1062,7 @@ fn rejects_backend_script_without_init_entrypoint() {
 #[test]
 fn backend_poll_handler_error_returns_runtime_error() {
     let mut ctx = BackendScriptContext::new("@test/backend");
-    ctx.load_script("function init()\nend\nfunction on_poll()\nerror(\"boom\")\nend")
+    ctx.load_script("function start()\nend\nfunction on_poll()\nerror(\"boom\")\nend")
         .unwrap();
 
     let err = ctx.run_poll().unwrap_err();
@@ -1074,7 +1074,7 @@ fn backend_poll_handler_error_returns_runtime_error() {
 fn backend_command_handler_error_returns_runtime_error() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\nfunction on_command_fail()\nerror(\"command boom\")\nend",
+        "function start()\nend\nfunction on_command_fail()\nerror(\"command boom\")\nend",
     )
     .unwrap();
 
@@ -1084,8 +1084,8 @@ fn backend_command_handler_error_returns_runtime_error() {
 }
 
 #[test]
-fn backend_missing_init_entrypoint_is_reported() {
-    // A script without an init() function must produce MissingEntrypoint — not a generic
+fn backend_missing_start_entrypoint_is_reported() {
+    // A script without a start() function must produce MissingEntrypoint — not a generic
     // Runtime error — so the shell can emit an InitFailed event with a clear message.
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script("function on_poll()\nend").unwrap();
@@ -1106,7 +1106,7 @@ fn backend_state_snapshot_failure_is_reported() {
     // SnapshotFailed, not a generic Runtime error, so the shell can bucket it correctly.
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\n\
+        "function start()\n\
            state = function() end\n\
          end",
     )
@@ -1114,7 +1114,7 @@ fn backend_state_snapshot_failure_is_reported() {
     ctx.call_init().unwrap_err(); // init sets state, snapshot taken after init call fails
     // Directly set up the state as non-serializable after init loads
     let mut ctx2 = BackendScriptContext::new("@test/backend");
-    ctx2.load_script("function init()\nend").unwrap();
+    ctx2.load_script("function start()\nend").unwrap();
     ctx2.call_init().unwrap();
     // Inject a non-serializable value into state
     ctx2.ensure_lua()
@@ -1141,7 +1141,7 @@ fn backend_command_result_conversion_failure_is_reported() {
     // CommandResultConversionFailed so the shell can distinguish it from handler errors.
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\n\
+        "function start()\nend\n\
          function on_command_bad_result()\n\
            return function() end\n\
          end",
@@ -1170,7 +1170,7 @@ fn backend_command_runtime_error_becomes_failed_result() {
     // and a populated error field — it does NOT return Err from run_command_with_result.
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function init()\nend\n\
+        "function start()\nend\n\
          function on_command_fail()\n\
            error(\"handler exploded\")\n\
          end",

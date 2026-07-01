@@ -51,7 +51,7 @@ if not audio_ok then audio = nil end
 
 audio_tooltip = "Volume unavailable"
 
-function onRender()
+function render()
     if not audio_ok or not audio then
         audio_tooltip = "Audio service unavailable"
         return
@@ -145,7 +145,7 @@ if not audio_ok then audio = nil end
 
 volumeLevel = 0
 
-function onRender()
+function render()
     if not audio_ok or not audio then
         volumeLevel = 0
         return
@@ -200,7 +200,7 @@ if not audio_ok then audio = nil end
 
 volumeLevel = 0
 
-function onRender()
+function render()
     if audio_ok and audio then
         volumeLevel = audio.state.percent or 0
     end
@@ -262,7 +262,7 @@ fn pcall_service_lookup_diagnostic_reaches_component_diagnostics() {
         r#"
 <template><box /></template>
 <script lang="luau">
-function onRender()
+function render()
     pcall(require, "mesh.missing@>=1.0")
 end
 </script>

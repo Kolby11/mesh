@@ -78,8 +78,7 @@ impl FrontendSurfaceComponent {
         diagnostics: &Option<Diagnostics>,
         runtime: &mut EmbeddedFrontendRuntime,
     ) -> bool {
-        if !runtime.script_ctx.has_handler("render") && !runtime.script_ctx.has_handler("onRender")
-        {
+        if !runtime.script_ctx.has_handler("render") {
             return false;
         }
 

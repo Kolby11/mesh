@@ -174,13 +174,16 @@ surface.
       popups and legacy promoted popover modules. Remaining: migrate audio once
       drag/capture state is represented in core, then broaden the exclusivity
       policy beyond same-trigger siblings if needed.
-      Follow-up 2026-06-24: language/theme options can still close while the
-      pointer crosses into the promoted popup. Likely cause: Wayland
-      `PointerEventKind::Enter` updates backend pointer focus but does not emit
-      a shell-visible `WindowEvent`, so pending hover-bridge hide cancellation
-      depends on a later `PointerMove`. Planned fix: emit a `PointerMove`
-      equivalent on pointer enter for the popup surface so
-      `cancel_pending_popover_hide` runs immediately.
+      Follow-up 2026-06-24, fixed 2026-06-29 (`2425c33a`): language/theme
+      options could still close while the pointer crossed into the promoted
+      popup, because `PointerEventKind::Enter` updated backend pointer focus
+      but emitted no shell-visible `WindowEvent`, so pending hover-bridge hide
+      cancellation depended on a later `PointerMove`. Fixed by emitting a
+      synthetic `PointerMove` at the entry coordinates on pointer enter
+      (`presentation/src/wayland_surface/handlers.rs`), plus fixing
+      `surface_is_promoted_popover` to detect in-tree child (xdg_popup)
+      surfaces and `cancel_pending_popover_hide` to not call
+      `set_surface_exiting` on the parent when cancelling a child hide.
 - [x] **Grab vs hover nuance.** An xdg_popup grab requires a recent input
       _serial_ (a click) — so grabbed (click-to-dismiss-outside) popups can't be
       opened by pure hover. Decide per popover: hover-open menus stay no-grab (core
@@ -343,11 +346,23 @@ All five landed 2026-06-23 (single commit).
       fixed 2026-07-01: `extract_keybind_subscriptions_from_mesh_source` now scans
       tag boundaries quote-aware, so `<`/`>` inside other attributes no longer
       hide `onkeybind`; AST-based migration remains open.
-- [ ] Backend lifecycle `init`/`onRender` fallbacks
-      (`scripting/backend/runtime.rs:~179`, `context/runtime.rs:call_render_lifecycle`)
-      — all shipped modules use `start`/`render`; the legacy-name fallbacks are
-      compat for third-party modules. Confirm none remain before dropping (and
-      update `is_reserved_backend_hook`, which still lists `init`).
+- [x] Backend lifecycle `init`/`onRender` fallbacks. Done 2026-07-02: confirmed
+      every shipped backend (`modules/backend/*/src/main.luau`) already used
+      `start(self)`, and found one shipped frontend straggler still on
+      `onRender` (`modules/frontend/debug-inspector/src/main.mesh`) — migrated
+      it to `render()`. Dropped the legacy-name fallback branch from
+      `BackendScriptContext::call_init` (`scripting/backend/runtime.rs`, now
+      requires `start`) and from `ScriptContext::call_render_lifecycle`
+      (`scripting/context/runtime.rs`, now only recognizes `render`); updated
+      `crate::shell::component::runtime::call_runtime_render_hook`'s
+      `has_handler` gate to match. `is_reserved_backend_hook` still lists
+      `"init"` defensively (keeps a stray `init` out of the public-function
+      diagnostics listing even though it's no longer callable). Full
+      workspace test suite passes at the pre-existing baseline (only the
+      known `shipped_audio_style_fixture_resolves_painter_relevant_values`
+      failure remains, plus `mesh-core-animation` unit tests which don't
+      compile against current `ComputedStyle`/`AnimatableStyle` — both
+      pre-existing, unrelated to this change).
 - [ ] `BackendScriptContext` / `ScriptContext` constructor explosion: ~5 `new_*`
       convenience constructors each chaining to the full one; production uses one.
       Mark the test-only variants `#[cfg(test)]` or move to a builder.

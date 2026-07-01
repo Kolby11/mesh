@@ -1071,7 +1071,7 @@ function runBackendUpdateBenchmark()
     runBenchmarkScenario("backend_update")
 end
 
-function onRender()
+function render()
     if not debug_service then
         session_status = "Debug service unavailable"
         profiling_badge = "Unavailable"

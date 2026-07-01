@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 /// Executes a backend module's Luau script.
 ///
 /// Exposes these host APIs to scripts:
-/// - `init()` — required backend entrypoint called once after script load
+/// - `start(self)` — required backend entrypoint called once after script load
 /// - `mesh.service.set_poll_interval(ms)` — set polling interval
 /// - `mesh.exec("program", {"arg1", "arg2"})` — run a system command
 /// - `mesh.config()` — return the full module settings Lua table
@@ -170,19 +170,11 @@ impl BackendScriptContext {
         Ok(())
     }
 
-    /// Call the backend script's startup entrypoint once after load.
-    ///
-    /// Canonical v1.14 scripts use `start(self)`. Legacy `init()` remains a
-    /// compatibility fallback and receives the same current-provider context.
+    /// Call the backend script's `start(self)` startup entrypoint once after load.
     pub fn call_init(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
         self.reset_for_call(JsonValue::Null);
         let globals = self.ensure_lua().globals();
-        let entrypoint_name = if globals.get::<Function>("start").is_ok() {
-            "start"
-        } else {
-            "init"
-        };
-        let entrypoint = globals.get::<Function>(entrypoint_name).map_err(|_| {
+        let entrypoint = globals.get::<Function>("start").map_err(|_| {
             BackendScriptError::MissingEntrypoint {
                 module_id: self.module_id.clone(),
                 name: "start".to_string(),

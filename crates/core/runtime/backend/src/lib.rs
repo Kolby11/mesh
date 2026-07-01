@@ -570,7 +570,7 @@ mod tests {
                 "label": "demo",
                 "nested": { "enabled": true }
             }),
-            "function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+            "function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function on_poll()\nlocal cfg = mesh.config()\nmesh.service.emit({ label = cfg.label, enabled = cfg.nested.enabled })\nend".to_string(),
             update_tx,
             cmd_rx,
@@ -607,7 +607,7 @@ mod tests {
             Vec::new(),
             serde_json::json!({}),
             "state = { available = false }\n\
-             function init()\n\
+             function start()\n\
                mesh.service.set_poll_interval(1000)\n\
                state = { available = true, percent = 65 }\n\
              end"
@@ -647,7 +647,7 @@ mod tests {
             Vec::new(),
             serde_json::json!({}),
             "state = { available = true, percent = 40 }\n\
-             function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+             function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function on_command_set_volume()\n\
                local payload = mesh.service.payload()\n\
                mesh.service.emit_event(\"VolumeChanged\", { device_id = payload.device_id, level = payload.volume })\n\
@@ -694,7 +694,7 @@ mod tests {
             Vec::new(),
             serde_json::json!({}),
             "state = { tick = 0 }\n\
-             function init()\nmesh.service.set_poll_interval(50)\nend\n\
+             function start()\nmesh.service.set_poll_interval(50)\nend\n\
              function on_poll()\nstate = { tick = state.tick + 1 }\nend"
                 .to_string(),
             update_tx,
@@ -729,7 +729,7 @@ mod tests {
             Vec::new(),
             serde_json::json!({}),
             "state = { percent = 0 }\n\
-             function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+             function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function on_command_set_volume()\n\
                local payload = mesh.service.payload()\n\
                state = { percent = payload.percent }\n\
@@ -778,7 +778,7 @@ mod tests {
             Vec::new(),
             serde_json::json!({}),
             "local tick = 0\n\
-             function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+             function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function on_poll()\n\
                tick = tick + 1\n\
                if tick == 1 then\n\
@@ -824,7 +824,7 @@ mod tests {
             Vec::new(),
             serde_json::json!({}),
             "local tick = 0\n\
-             function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+             function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function on_poll()\n\
                tick = tick + 1\n\
                mesh.service.emit({ event = \"poll\", tick = tick })\n\
@@ -949,7 +949,7 @@ mod tests {
             "audio".to_string(),
             Vec::new(),
             serde_json::json!({}),
-            "function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+            "function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function on_command_set_volume()\n\
                local payload = mesh.service.payload()\n\
                mesh.service.emit({ device_id = payload.device_id, volume = payload.volume })\n\
@@ -1003,7 +1003,7 @@ mod tests {
             "audio".to_string(),
             Vec::new(),
             serde_json::json!({}),
-            "function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+            "function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function on_command_fail()\nerror(\"command boom\")\nend"
                 .to_string(),
             event_tx,
@@ -1137,7 +1137,7 @@ mod tests {
             "audio".to_string(),
             Vec::new(),
             serde_json::json!({}),
-            "function init()\nerror(\"init boom\")\nend\n\
+            "function start()\nerror(\"init boom\")\nend\n\
              function on_poll()\nmesh.service.emit({ polled = true })\nend\n\
              function on_command_ping()\nmesh.service.emit({ command = true })\nend"
                 .to_string(),
@@ -1187,7 +1187,7 @@ mod tests {
             "audio".to_string(),
             Vec::new(),
             serde_json::json!({}),
-            "function init()\nmesh.service.set_poll_interval(1000)\nend".to_string(),
+            "function start()\nmesh.service.set_poll_interval(1000)\nend".to_string(),
             event_tx,
             cmd_rx,
         ));
@@ -1261,7 +1261,7 @@ mod tests {
             serde_json::json!({}),
             // The handler sets state to a function, which cannot be serialized to JSON.
             // run_command_with_result -> take_service_state_snapshot -> SnapshotFailed.
-            "function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+            "function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function on_command_bad_state()\n\
                state = function() end\n\
              end"
@@ -1319,7 +1319,7 @@ mod tests {
             "audio".to_string(),
             Vec::new(),
             serde_json::json!({}),
-            "function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+            "function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function on_command_fail()\nerror(\"handler boom\")\nend"
                 .to_string(),
             event_tx,
@@ -1390,7 +1390,7 @@ mod tests {
             "audio".to_string(),
             Vec::new(),
             serde_json::json!({}),
-            "function init()\nmesh.service.set_poll_interval(50)\nend\n\
+            "function start()\nmesh.service.set_poll_interval(50)\nend\n\
              function on_poll()\nerror(\"poll boom\")\nend"
                 .to_string(),
             event_tx,

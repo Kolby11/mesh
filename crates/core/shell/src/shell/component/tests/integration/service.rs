@@ -103,7 +103,7 @@ fn frontend_proxy_update_reaches_panel_or_quick_settings_render_state() {
 volumeIcon = "audio-volume-muted"
 volumeLevel = 0
 
-function onRender()
+function render()
     local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
     if not audio_ok or not audio then return end
     local pct = audio.percent or 0
@@ -130,7 +130,7 @@ end
     );
 
     // The runtime calls the script's render handler on each rerender.
-    ctx.call_handler("onRender", &[]).unwrap();
+    ctx.call_handler("render", &[]).unwrap();
 
     // Verify that the template-visible reactive globals reflect the emitted payload,
     // proving rerender-visible service state without any callback registration.
@@ -238,7 +238,7 @@ volumeLevel = "0"
 volumeIcon = "audio-volume-muted"
 batteryText = "N/A"
 
-function onRender()
+function render()
     local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
     if not audio_ok or not audio then
         volumeLevel = "0"
@@ -254,7 +254,7 @@ end
     .unwrap();
 
     // No service payload applied — provider is absent.
-    ctx.call_handler("onRender", &[]).unwrap();
+    ctx.call_handler("render", &[]).unwrap();
 
     // Template-visible globals must be non-empty explanatory copy.
     assert_eq!(
@@ -287,7 +287,7 @@ audio_backend = "Unavailable"
 audio_tooltip = "Volume unavailable"
 icon_name = "audio-volume-muted"
 
-function onRender()
+function render()
     if not audio_ok or not audio or audio.available == false then
         audio_label = "Audio unavailable"
         audio_backend = "Unavailable"
@@ -330,7 +330,7 @@ end
         }),
     );
 
-    ctx.call_handler("onRender", &[]).unwrap();
+    ctx.call_handler("render", &[]).unwrap();
 
     assert_eq!(ctx.state.get("audio_label"), Some(serde_json::json!("42%")));
     assert_eq!(
@@ -469,7 +469,7 @@ if not network_ok then network = nil end
 audio_status = ""
 network_status = ""
 
-function onRender()
+function render()
     if not audio_ok or not audio or audio.available == false then
         audio_status = "Audio unavailable"
     end
@@ -481,7 +481,7 @@ end
     )
     .unwrap();
 
-    ctx.call_handler("onRender", &[]).unwrap();
+    ctx.call_handler("render", &[]).unwrap();
 
     assert_eq!(
         ctx.state.get("audio_status"),

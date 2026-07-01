@@ -179,7 +179,7 @@ count = 1
 module.exports.visible = true
 module.exports.label = "Audio"
 
-function onRender()
+function render()
     count = count + 1
     latest_count = module.state.count
     exported_label = module.exports.label
@@ -193,7 +193,7 @@ end
         Some(serde_json::json!({ "visible": true, "label": "Audio" }))
     );
 
-    ctx.call_handler("onRender", &[]).unwrap();
+    ctx.call_handler("render", &[]).unwrap();
 
     assert_eq!(ctx.state.get("count"), Some(serde_json::json!(2)));
     assert_eq!(ctx.state.get("latest_count"), Some(serde_json::json!(1)));
@@ -420,7 +420,7 @@ end
 }
 
 #[test]
-fn legacy_on_render_remains_render_lifecycle_fallback() {
+fn legacy_on_render_is_not_a_render_lifecycle_fallback() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/legacy-component", caps).unwrap();
     ctx.load_script(
@@ -439,10 +439,10 @@ end
     .unwrap();
 
     ctx.call_init().unwrap();
-    assert!(ctx.call_render_lifecycle().unwrap());
+    assert!(!ctx.call_render_lifecycle().unwrap());
 
     assert_eq!(ctx.state.get("initialized"), Some(serde_json::json!(true)));
-    assert_eq!(ctx.state.get("render_count"), Some(serde_json::json!(1)));
+    assert_eq!(ctx.state.get("render_count"), Some(serde_json::json!(0)));
 }
 
 #[test]
@@ -464,7 +464,7 @@ end
 function render(self)
 end
 
-function onRender()
+function render()
 end
 "#,
     )
