@@ -2,33 +2,24 @@ use mesh_core_module::Manifest;
 use mesh_core_wayland::{Edge, KeyboardMode, Layer};
 use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SurfaceSizePolicy {
-    Fixed,
-    ContentMeasured,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct SurfaceDisplayTransition {
-    pub show_ms: u64,
-    pub hide_ms: u64,
-}
-
+/// Surface **placement**, resolved from the manifest and user settings.
+///
+/// Sizing is no longer part of this struct: every surface is sized by CSS
+/// content measurement of its component root (`width`/`height`/`min-*`/`max-*`
+/// on the surface root, resolved by the layout engine) and the show/hide
+/// transition is a CSS `transition` on that root. See
+/// `docs/component-configuration.md` §5.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SurfaceLayoutSettings {
     pub edge: Edge,
     pub layer: Layer,
-    pub width: u32,
-    pub height: u32,
     pub exclusive_zone: i32,
     pub keyboard_mode: KeyboardMode,
     pub visible_on_start: bool,
-    pub size_policy: SurfaceSizePolicy,
     pub margin_top: i32,
     pub margin_right: i32,
     pub margin_bottom: i32,
     pub margin_left: i32,
-    pub display_transition: SurfaceDisplayTransition,
 }
 
 #[derive(Debug, Clone)]
@@ -45,17 +36,13 @@ pub fn generic_surface_layout_fallback() -> SurfaceLayoutSettings {
     SurfaceLayoutSettings {
         edge: Edge::Top,
         layer: Layer::Top,
-        width: 480,
-        height: 240,
         exclusive_zone: 0,
         keyboard_mode: KeyboardMode::None,
         visible_on_start: false,
-        size_policy: SurfaceSizePolicy::Fixed,
         margin_top: 0,
         margin_right: 0,
         margin_bottom: 0,
         margin_left: 0,
-        display_transition: SurfaceDisplayTransition::default(),
     }
 }
 
@@ -79,12 +66,6 @@ pub fn surface_layout_from_manifest(manifest: &Manifest) -> SurfaceLayoutSetting
     if let Some(layer) = surface.layer.as_deref().and_then(parse_surface_layer) {
         layout.layer = layer;
     }
-    if let Some(width) = surface.width {
-        layout.width = width;
-    }
-    if let Some(height) = surface.height {
-        layout.height = height;
-    }
     if let Some(zone) = surface.exclusive_zone {
         layout.exclusive_zone = zone;
     }
@@ -104,17 +85,6 @@ pub fn surface_layout_from_manifest(manifest: &Manifest) -> SurfaceLayoutSetting
         layout.margin_bottom = margins.bottom;
         layout.margin_left = margins.left;
     }
-    if let Some(transition) = &surface.display_transition {
-        layout.display_transition = SurfaceDisplayTransition {
-            show_ms: transition.show_ms,
-            hide_ms: transition.hide_ms,
-        };
-    }
-
-    layout.size_policy = match surface.size_policy.as_deref() {
-        Some("content_measured") => SurfaceSizePolicy::ContentMeasured,
-        _ => SurfaceSizePolicy::Fixed,
-    };
 
     layout
 }
@@ -139,9 +109,6 @@ pub fn load_frontend_module_settings(
     };
 
     let mut layout = surface_layout_from_manifest(manifest);
-    if let Some(display_transition) = settings_schema_display_transition_default(manifest) {
-        layout.display_transition = display_transition;
-    }
     let surface = raw.get("surface");
 
     if let Some(anchor) = surface
@@ -158,24 +125,6 @@ pub fn load_frontend_module_settings(
         .and_then(parse_surface_layer)
     {
         layout.layer = layer;
-    }
-
-    if let Some(width) = surface
-        .and_then(|value| value.get("width"))
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|value| u32::try_from(value).ok())
-    {
-        layout.width = width;
-        layout.size_policy = SurfaceSizePolicy::Fixed;
-    }
-
-    if let Some(height) = surface
-        .and_then(|value| value.get("height"))
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|value| u32::try_from(value).ok())
-    {
-        layout.height = height;
-        layout.size_policy = SurfaceSizePolicy::Fixed;
     }
 
     if let Some(zone) = surface
@@ -229,39 +178,8 @@ pub fn load_frontend_module_settings(
     {
         layout.margin_left = v;
     }
-    if let Some(display_transition) = surface
-        .and_then(|value| value.get("display_transition"))
-        .and_then(parse_display_transition)
-    {
-        layout.display_transition = display_transition;
-    }
 
     FrontendModuleSettingsState { raw, layout }
-}
-
-fn settings_schema_display_transition_default(
-    manifest: &Manifest,
-) -> Option<SurfaceDisplayTransition> {
-    let schema = manifest.settings.as_ref()?.inline_schema.as_ref()?;
-    schema
-        .get("surface")
-        .and_then(|value| value.get("properties"))
-        .and_then(|value| value.get("display_transition"))
-        .and_then(|value| value.get("default"))
-        .and_then(parse_display_transition)
-}
-
-fn parse_display_transition(value: &serde_json::Value) -> Option<SurfaceDisplayTransition> {
-    let object = value.as_object()?;
-    let show_ms = object
-        .get("show_ms")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or_default();
-    let hide_ms = object
-        .get("hide_ms")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or_default();
-    Some(SurfaceDisplayTransition { show_ms, hide_ms })
 }
 
 pub fn parse_surface_edge(value: &str) -> Option<Edge> {
@@ -341,22 +259,18 @@ mod tests {
     #[test]
     fn manifest_surface_layout_sets_keyboard_mode_default() {
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
-            size_policy: Some("content_measured".into()),
             keyboard_mode: Some("on_demand".into()),
-            prefers_content_children_sizing: Some(true),
             ..Default::default()
         });
 
         let layout = surface_layout_from_manifest(&manifest);
 
-        assert_eq!(layout.size_policy, SurfaceSizePolicy::ContentMeasured);
         assert_eq!(layout.keyboard_mode, KeyboardMode::OnDemand);
     }
 
     #[test]
     fn user_settings_override_manifest_keyboard_mode_default() {
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
-            size_policy: Some("fixed".into()),
             keyboard_mode: Some("on_demand".into()),
             ..Default::default()
         });
@@ -382,12 +296,9 @@ mod tests {
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
             anchor: Some("bottom".into()),
             layer: Some("overlay".into()),
-            width: Some(0),
-            height: Some(48),
             exclusive_zone: Some(48),
             visible_on_start: Some(true),
             keyboard_mode: Some("none".into()),
-            size_policy: Some("fixed".into()),
             ..Default::default()
         });
 
@@ -395,12 +306,9 @@ mod tests {
 
         assert_eq!(layout.edge, Edge::Bottom);
         assert_eq!(layout.layer, Layer::Overlay);
-        assert_eq!(layout.width, 0);
-        assert_eq!(layout.height, 48);
         assert_eq!(layout.exclusive_zone, 48);
         assert!(layout.visible_on_start);
         assert_eq!(layout.keyboard_mode, KeyboardMode::None);
-        assert_eq!(layout.size_policy, SurfaceSizePolicy::Fixed);
     }
 
     #[test]

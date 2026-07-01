@@ -86,13 +86,12 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn requested_layout_size(&self) -> (u32, u32) {
-        let (width, height) = match self.surface_layout.size_policy {
-            SurfaceSizePolicy::Fixed => (self.surface_layout.width, self.surface_layout.height),
-            SurfaceSizePolicy::ContentMeasured => self
-                .measured_size
-                .unwrap_or((self.surface_layout.width, self.surface_layout.height)),
-        };
-        (width, height)
+        // Every surface is CSS content-measured now. Until the first paint
+        // populates `measured_size`, report `(0, 0)`: zero flows through the
+        // render loop's dynamic-size / span resolution and `paint`'s
+        // available-size fallback, so a spanning bar still spans and a popover
+        // waits for its measured content size.
+        self.measured_size.unwrap_or((0, 0))
     }
 
     pub(super) fn tooltip_overlay_extra_for_content(width: u32, height: u32) -> (u32, u32) {
@@ -476,6 +475,12 @@ impl FrontendSurfaceComponent {
         }
         self.last_surface_size = Some(size);
         self.last_tree = None;
+        // A new available size means the CSS content measurement must be redone:
+        // clear the cached measurement so the next paint re-measures the root
+        // against the new available space (e.g. a `width: 100%` root re-spans, a
+        // container query re-evaluates). Without this the stale measured size
+        // would feed back into `content_width` and pin the old dimensions.
+        self.measured_size = None;
         self.surface_pixels_invalid = true;
         self.invalidate(
             ComponentDirtyFlags::STYLE

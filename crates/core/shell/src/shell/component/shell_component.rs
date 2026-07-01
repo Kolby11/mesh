@@ -635,14 +635,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         } else {
             effective_damage.rect
         };
-        if self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured {
-            let surface_layout_manifest = self.compiled.manifest.surface_layout.as_ref();
-            let measured_size = measure_content_size(
-                &tree,
-                content_width,
-                content_height,
-                surface_layout_manifest,
-            );
+        {
+            let measured_size = measure_content_size(&tree, content_width, content_height);
             if self.measured_size != Some(measured_size) {
                 self.measured_size = Some(measured_size);
                 self.invalidate_surface_config();
@@ -1130,8 +1124,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn needs_content_measure(&self) -> bool {
-        self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured
-            && self.measured_size.is_none()
+        self.measured_size.is_none()
     }
 
     fn node_bounds_by_key(&self, key: &str) -> Option<(f32, f32, f32, f32)> {
@@ -1151,7 +1144,27 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn hide_transition_ms(&self) -> u64 {
-        self.surface_layout.display_transition.hide_ms
+        // The show/hide transition is a CSS `transition` on the surface root
+        // (replacing the old manifest `display_transition`). Read the resolved
+        // opacity transition duration from the last painted root style; the
+        // shell delays unmapping the surface by this long so the exit animation
+        // (typically `opacity -> 0` under `.mesh-surface-exiting`) can play.
+        // `last_tree`'s root is the synthetic `surface` wrapper; the component's
+        // own template root (which carries the `transition`) is its first child.
+        let Some(root) = self
+            .last_tree
+            .as_ref()
+            .and_then(|tree| tree.children.first())
+        else {
+            return 0;
+        };
+        root.computed_style
+            .transitions
+            .iter()
+            .filter(|transition| transition.properties.all || transition.properties.opacity)
+            .map(|transition| u64::from(transition.duration_ms))
+            .max()
+            .unwrap_or(0)
     }
 
     fn set_surface_exiting(&mut self, exiting: bool) {
@@ -1175,7 +1188,8 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn allows_shrink_to_fit(&self) -> bool {
-        self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured
+        // All surfaces are CSS content-measured, so shrink-to-fit always applies.
+        true
     }
 
     fn set_profiling_enabled(&mut self, enabled: bool) {

@@ -129,12 +129,16 @@ end
 
 <style>
 .audio-popover-shell {
-    width: 100%;
-    height: 100%;
+    width: fit-content;
+    height: fit-content;
+    min-width: 36px;
+    max-width: 48px;
+    min-height: 180px;
+    max-height: 260px;
     padding: 0 var(--spacing-sm) var(--spacing-sm) var(--spacing-sm);
     background: transparent;
     opacity: 1;
-    transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    transition: opacity 120ms var(--animation-curves-bezier-standard);
 }
 
 .audio-popover-shell.mesh-surface-exiting {

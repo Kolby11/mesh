@@ -1198,7 +1198,7 @@ end
 
 <style>
 .inspector-shell {
-    width: 100%;
+    width: 320px;
     height: 100%;
     padding: var(--spacing-sm);
     background: transparent;

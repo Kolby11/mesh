@@ -807,15 +807,11 @@ fn interface_node() -> Node {
 }
 
 fn surface_layout_node() -> Node {
-    let size_policy = |doc: &'static str| Node {
-        doc,
-        type_hint: "enum",
-        kind: Kind::Enum(&["fixed", "content_measured"]),
-    };
     obj(
-        "Surface layout for a frontend module. User-editable defaults (anchor, \
-         layer, width, height, ...) plus non-user renderer policy (size_policy, \
-         clamps).",
+        "Surface placement for a frontend module: anchor, layer, exclusive_zone, \
+         keyboard_mode, visible_on_start, and margins. Surface sizing and the \
+         show/hide transition are CSS concerns on the component root, not manifest \
+         fields.",
         vec![
             field(
                 "anchor",
@@ -834,22 +830,6 @@ fn surface_layout_node() -> Node {
                     type_hint: "enum",
                     kind: Kind::Enum(&["background", "bottom", "top", "overlay"]),
                 },
-            ),
-            field(
-                "width",
-                false,
-                scalar(
-                    "Surface width in px; 0 means span / content-measured.",
-                    "number",
-                ),
-            ),
-            field(
-                "height",
-                false,
-                scalar(
-                    "Surface height in px; 0 means span / content-measured.",
-                    "number",
-                ),
             ),
             field(
                 "exclusive_zone",
@@ -882,55 +862,6 @@ fn surface_layout_node() -> Node {
                         field("left", false, scalar("Left margin.", "number")),
                     ],
                 ),
-            ),
-            field(
-                "display_transition",
-                false,
-                obj(
-                    "Map/unmap transition durations.",
-                    vec![
-                        field("show_ms", false, scalar("Show duration (ms).", "number")),
-                        field("hide_ms", false, scalar("Hide duration (ms).", "number")),
-                    ],
-                ),
-            ),
-            field(
-                "size",
-                false,
-                size_policy("Compact alias of `size_policy`."),
-            ),
-            field(
-                "size_policy",
-                false,
-                size_policy("How the surface is sized."),
-            ),
-            field(
-                "prefers_content_children_sizing",
-                false,
-                scalar(
-                    "Measure content children bounds rather than the root.",
-                    "boolean",
-                ),
-            ),
-            field(
-                "min_width",
-                false,
-                scalar("Minimum width clamp (px).", "number"),
-            ),
-            field(
-                "max_width",
-                false,
-                scalar("Maximum width clamp (px).", "number"),
-            ),
-            field(
-                "min_height",
-                false,
-                scalar("Minimum height clamp (px).", "number"),
-            ),
-            field(
-                "max_height",
-                false,
-                scalar("Maximum height clamp (px).", "number"),
             ),
         ],
     )

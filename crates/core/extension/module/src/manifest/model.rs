@@ -738,12 +738,13 @@ pub struct SlotContribution {
 /// override. The same struct also backs the legacy `mesh.surfaceLayout` key —
 /// `mesh.surface` simply replaces it during manifest normalization.
 ///
-/// Fields split by audience:
-/// - user-editable defaults: `anchor`, `layer`, `width`, `height`,
-///   `exclusive_zone`, `keyboard_mode`, `visible_on_start`, `margins`,
-///   `display_transition`.
-/// - renderer policy (not user-editable): `size_policy`,
-///   `prefers_content_children_sizing`, and the `min_*`/`max_*` clamps.
+/// This section carries **placement only** — `anchor`, `layer`,
+/// `exclusive_zone`, `keyboard_mode`, `visible_on_start`, and `margins`. Surface
+/// **sizing** (width/height, content-measure policy, clamps) and the show/hide
+/// transition are no longer authored here: they are expressed in the
+/// component's CSS (`width`/`height`/`min-*`/`max-*` on the surface root, a CSS
+/// `transition` on the root) and measured at paint time. See
+/// `docs/component-configuration.md` §5.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SurfaceLayoutSection {
     /// Screen edge: "top" | "bottom" | "left" | "right"
@@ -752,12 +753,6 @@ pub struct SurfaceLayoutSection {
     /// Layer-shell stacking layer: "background" | "bottom" | "top" | "overlay"
     #[serde(default)]
     pub layer: Option<String>,
-    /// Surface width in pixels; 0 means span/content-measured per size policy.
-    #[serde(default)]
-    pub width: Option<u32>,
-    /// Surface height in pixels; 0 means span/content-measured per size policy.
-    #[serde(default)]
-    pub height: Option<u32>,
     /// Reserved compositor space in pixels.
     #[serde(default)]
     pub exclusive_zone: Option<i32>,
@@ -767,26 +762,9 @@ pub struct SurfaceLayoutSection {
     /// Per-edge surface margins.
     #[serde(default)]
     pub margins: Option<SurfaceMargins>,
-    /// Display transition durations for mapping/unmapping the surface.
-    #[serde(default)]
-    pub display_transition: Option<SurfaceDisplayTransitionSpec>,
     /// "none" | "on_demand" | "exclusive" (durable default; runtime may override)
     #[serde(default)]
     pub keyboard_mode: Option<String>,
-    /// "fixed" | "content_measured". The compact block authors this as `size`.
-    #[serde(default, alias = "size")]
-    pub size_policy: Option<String>,
-    /// Use content-children bounds (vs root bounds) when measuring size.
-    #[serde(default)]
-    pub prefers_content_children_sizing: Option<bool>,
-    #[serde(default)]
-    pub min_width: Option<u32>,
-    #[serde(default)]
-    pub max_width: Option<u32>,
-    #[serde(default)]
-    pub min_height: Option<u32>,
-    #[serde(default)]
-    pub max_height: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -799,14 +777,6 @@ pub struct SurfaceMargins {
     pub bottom: i32,
     #[serde(default)]
     pub left: i32,
-}
-
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
-pub struct SurfaceDisplayTransitionSpec {
-    #[serde(default)]
-    pub show_ms: u64,
-    #[serde(default)]
-    pub hide_ms: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

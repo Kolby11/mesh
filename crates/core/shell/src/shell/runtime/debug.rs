@@ -324,9 +324,9 @@ impl Shell {
                     surface_accessibility_label: frontend_surface
                         .and_then(|surface| surface.accessibility.as_ref())
                         .and_then(|accessibility| accessibility.label.clone()),
-                    surface_size_policy: frontend_surface
-                        .and_then(|surface| surface.surface_layout.as_ref())
-                        .and_then(|layout| layout.size_policy.clone()),
+                    // Surface sizing is CSS content-measured for every surface
+                    // now; there is no manifest size-policy to report.
+                    surface_size_policy: None,
                     surface_layout_label: surface_layout_label
                         .as_ref()
                         .map(|resolved| resolved.text.clone()),

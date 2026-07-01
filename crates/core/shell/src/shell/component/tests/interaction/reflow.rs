@@ -237,8 +237,6 @@ end
 </script>
 "#,
     );
-    component.surface_layout.width = 0;
-    component.surface_layout.height = 0;
     component
         .input_values
         .insert("root/0/0".into(), "local".into());
@@ -270,6 +268,12 @@ end
         Some("local")
     );
 
+    // Every surface content-measures now; the wide paint recorded measured_size
+    // and requested one surface-config settle frame. Paint again so it stabilises
+    // before asserting the component has quiesced.
+    component
+        .paint(&theme, 420, 160, &mut wide_buffer, 1.0)
+        .unwrap();
     component.dirty = false;
     assert!(
         !component.surface_size_changed(420, 160),

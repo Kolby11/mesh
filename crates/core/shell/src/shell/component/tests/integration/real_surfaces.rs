@@ -913,6 +913,11 @@ fn shipped_navigation_volume_button_publishes_immediate_audio_popover_show() {
 fn shipped_navigation_audio_popover_transition_delay_stays_bounded() {
     let mut component =
         real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(320, 220);
+    // The hide transition is now a CSS `transition` on the surface root, read
+    // from the last painted root style, so paint once before querying it.
+    component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
     assert_eq!(
         component.hide_transition_ms(),
         120,
@@ -920,8 +925,6 @@ fn shipped_navigation_audio_popover_transition_delay_stays_bounded() {
     );
 
     component.set_surface_exiting(true);
-    let theme = default_theme();
-    let mut buffer = PixelBuffer::new(320, 220);
     component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
     let tree = component
         .last_tree

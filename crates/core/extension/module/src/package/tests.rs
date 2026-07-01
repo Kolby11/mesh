@@ -172,18 +172,17 @@ fn compact_surface_block_normalizes_into_surface_layout() {
     "surface": {
       "anchor": "bottom",
       "layer": "overlay",
-      "height": 48,
+      "exclusive_zone": 48,
       "keyboard_mode": "on_demand",
-      "visible_on_start": true,
-      "size": "content_measured",
-      "display_transition": { "show_ms": 120, "hide_ms": 90 }
+      "visible_on_start": true
     }
   }
 }
 "#;
     let manifest = ModuleManifest::from_json_str(content).unwrap();
     // The compact `mesh.surface` block is moved into the single typed
-    // `surface_layout` home during normalization.
+    // `surface_layout` home during normalization. It carries placement only —
+    // sizing and the show/hide transition are CSS concerns now.
     assert!(manifest.mesh.surface.is_none());
     let surface = manifest
         .mesh
@@ -191,16 +190,9 @@ fn compact_surface_block_normalizes_into_surface_layout() {
         .expect("surface_layout populated from compact block");
     assert_eq!(surface.anchor.as_deref(), Some("bottom"));
     assert_eq!(surface.layer.as_deref(), Some("overlay"));
-    assert_eq!(surface.height, Some(48));
+    assert_eq!(surface.exclusive_zone, Some(48));
     assert_eq!(surface.keyboard_mode.as_deref(), Some("on_demand"));
     assert_eq!(surface.visible_on_start, Some(true));
-    // `size` is the compact-block alias for the internal `size_policy` field.
-    assert_eq!(surface.size_policy.as_deref(), Some("content_measured"));
-    let transition = surface
-        .display_transition
-        .expect("display transition parsed");
-    assert_eq!(transition.show_ms, 120);
-    assert_eq!(transition.hide_ms, 90);
 }
 
 #[test]
@@ -1188,11 +1180,7 @@ fn declare_frontend_surface_contract(module: &mut LoadedModuleManifest) {
         description: None,
     });
     module.manifest.mesh.surface_layout = Some(crate::manifest::SurfaceLayoutSection {
-        size_policy: Some("content_measured".into()),
         keyboard_mode: Some("on_demand".into()),
-        prefers_content_children_sizing: Some(true),
-        min_width: Some(320),
-        min_height: Some(120),
         ..Default::default()
     });
 }

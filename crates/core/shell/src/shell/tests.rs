@@ -9,7 +9,7 @@ use super::{
         service_name_from_interface,
     },
     shell_global_shortcut_request,
-    surface_layout::{SurfaceSizePolicy, load_active_theme, load_frontend_module_settings},
+    surface_layout::{load_active_theme, load_frontend_module_settings},
 };
 use mesh_core_config::ShellConfig;
 use mesh_core_debug::{
@@ -5916,32 +5916,24 @@ fn profiling_service_command_stays_silent_when_disabled() {
 }
 
 #[test]
-fn launcher_content_size_ignores_root_surface_bounds() {
-    let mut root = node("root", 0.0, 0.0, 640.0, 360.0);
-    root.children.push(node("column", 12.0, 12.0, 336.0, 332.0));
+fn content_size_is_the_root_laid_out_box() {
+    // Sizing is fully CSS-driven now: the surface root's own laid-out box is
+    // the measured size. The layout engine resolved the root's CSS width/height
+    // (here `fit-content` shrank it to 336x332) with its clamps already
+    // applied, so measurement just reads that box — no manifest inputs.
+    let mut root = node("root", 0.0, 0.0, 336.0, 332.0);
+    root.children.push(node("column", 12.0, 12.0, 312.0, 308.0));
 
-    let launcher_layout = SurfaceLayoutSection {
-        size_policy: Some("content_measured".into()),
-        keyboard_mode: Some("on_demand".into()),
-        prefers_content_children_sizing: Some(true),
-        min_width: Some(320),
-        max_width: Some(640),
-        min_height: Some(180),
-        max_height: Some(420),
-        ..Default::default()
-    };
-    assert_eq!(
-        measure_content_size(&root, 640, 360, Some(&launcher_layout)),
-        (348, 344)
-    );
+    assert_eq!(measure_content_size(&root, 640, 360), (336, 332));
 }
 
 #[test]
-fn non_widget_surfaces_keep_fallback_size() {
-    let mut root = node("root", 0.0, 0.0, 1920.0, 32.0);
-    root.children.push(node("row", 0.0, 0.0, 640.0, 32.0));
+fn content_size_falls_back_when_root_has_no_extent() {
+    // A degenerate first frame (root not laid out yet) falls back to the
+    // available size passed by the caller.
+    let root = node("root", 0.0, 0.0, 0.0, 0.0);
 
-    assert_eq!(measure_content_size(&root, 1920, 32, None), (1920, 32));
+    assert_eq!(measure_content_size(&root, 1920, 32), (1920, 32));
 }
 
 #[test]
@@ -6645,8 +6637,6 @@ fn frontend_settings_override_surface_layout_defaults() {
   "surface": {
     "anchor": "left",
     "layer": "overlay",
-    "width": 960,
-    "height": 640,
     "exclusive_zone": 12,
     "keyboard_mode": "exclusive",
     "visible_on_start": true
@@ -6661,63 +6651,12 @@ fn frontend_settings_override_surface_layout_defaults() {
 
     assert_eq!(settings.layout.edge, mesh_core_wayland::Edge::Left);
     assert_eq!(settings.layout.layer, mesh_core_wayland::Layer::Overlay);
-    assert_eq!(settings.layout.width, 960);
-    assert_eq!(settings.layout.height, 640);
     assert_eq!(settings.layout.exclusive_zone, 12);
     assert_eq!(
         settings.layout.keyboard_mode,
         mesh_core_wayland::KeyboardMode::Exclusive
     );
     assert!(settings.layout.visible_on_start);
-    assert_eq!(settings.layout.size_policy, SurfaceSizePolicy::Fixed);
-}
-
-#[test]
-fn frontend_settings_load_surface_display_transition_defaults_and_overrides() {
-    let mut manifest = minimal_manifest("@mesh/base-surface");
-    manifest.settings = Some(SettingsSection {
-        namespace: Some("@mesh/base-surface".into()),
-        schema_path: None,
-        inline_schema: Some(serde_json::json!({
-            "surface": {
-                "type": "object",
-                "properties": {
-                    "display_transition": {
-                        "type": "object",
-                        "default": {
-                            "show_ms": 90,
-                            "hide_ms": 140
-                        }
-                    }
-                }
-            }
-        })),
-    });
-
-    let missing_path = unique_test_file("missing-surface-transition");
-    let default_settings = load_frontend_module_settings(&missing_path, &manifest);
-    assert_eq!(default_settings.layout.display_transition.show_ms, 90);
-    assert_eq!(default_settings.layout.display_transition.hide_ms, 140);
-
-    let path = unique_test_file("surface-transition");
-    fs::write(
-        &path,
-        r#"{
-  "surface": {
-    "display_transition": {
-      "show_ms": 25,
-      "hide_ms": 75
-    }
-  }
-}"#,
-    )
-    .unwrap();
-
-    let settings = load_frontend_module_settings(&path, &manifest);
-    fs::remove_file(&path).ok();
-
-    assert_eq!(settings.layout.display_transition.show_ms, 25);
-    assert_eq!(settings.layout.display_transition.hide_ms, 75);
 }
 
 #[test]

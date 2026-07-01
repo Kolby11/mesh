@@ -86,12 +86,9 @@
     "surface": {
       "anchor": "top",
       "layer": "top",
-      "width": 0,
-      "height": 56,
       "exclusive_zone": 56,
       "keyboard_mode": "none",
-      "visible_on_start": true,
-      "size": "fixed"
+      "visible_on_start": true
     },
     "provides": {
       "i18n": [

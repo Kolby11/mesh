@@ -1,6 +1,5 @@
 pub(super) use mesh_core_surface_config::{
-    SurfaceLayoutSettings, SurfaceSizePolicy, default_surface_visibility,
-    load_frontend_module_settings,
+    SurfaceLayoutSettings, default_surface_visibility, load_frontend_module_settings,
 };
 
 use mesh_core_config::ShellSettings;

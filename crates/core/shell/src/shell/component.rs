@@ -1,7 +1,5 @@
 use super::service::{apply_service_update, script_events_to_requests, seed_service_state};
-use super::surface_layout::{
-    SurfaceLayoutSettings, SurfaceSizePolicy, load_frontend_module_settings,
-};
+use super::surface_layout::{SurfaceLayoutSettings, load_frontend_module_settings};
 use super::types::{
     ChildSurfaceKind, ChildSurfaceRequest, ComponentContext, ComponentError, ComponentInput,
     ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers, ServiceEvent, ShellComponent,

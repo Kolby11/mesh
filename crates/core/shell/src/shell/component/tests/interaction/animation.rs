@@ -243,6 +243,9 @@ end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(96, 32);
     component.paint(&theme, 96, 32, &mut buffer, 1.0).unwrap();
+    // Every surface content-measures now; the first paint records measured_size
+    // and requests one surface-config settle frame. Paint again so it stabilises.
+    component.paint(&theme, 96, 32, &mut buffer, 1.0).unwrap();
     component.dirty = false;
 
     assert!(

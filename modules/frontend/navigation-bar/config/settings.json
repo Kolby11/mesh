@@ -9,9 +9,7 @@
   "surface": {
     "anchor": "top",
     "layer": "top",
-    "width": 0,
-    "height": 50,
-    "exclusive_zone": 50,
+    "exclusive_zone": 56,
     "keyboard_mode": "on_demand",
     "visible_on_start": true
   },

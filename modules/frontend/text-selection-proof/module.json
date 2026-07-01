@@ -15,12 +15,9 @@
     "surface": {
       "anchor": "right",
       "layer": "top",
-      "width": 360,
-      "height": 176,
       "exclusive_zone": 0,
       "keyboard_mode": "none",
-      "visible_on_start": true,
-      "size": "fixed"
+      "visible_on_start": true
     },
     "accessibility": {
       "role": "status",
