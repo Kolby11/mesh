@@ -271,6 +271,13 @@ impl FrontendSurfaceComponent {
             tree.attributes
                 .insert("_mesh_surface_entering".into(), "true".into());
         }
+        for node_key in &self.closing_child_keys {
+            if let Some(node) = find_node_by_key_mut(tree, node_key) {
+                append_class_recursive(node, "mesh-surface-exiting");
+                node.attributes
+                    .insert("_mesh_surface_exiting".into(), "true".into());
+            }
+        }
         self.annotate_surface_shortcuts(tree);
         annotate_overflow_tree(tree, "root", &mut self.scroll_offsets);
 
@@ -630,11 +637,27 @@ fn append_class(node: &mut WidgetNode, class_name: &str) {
     class.push_str(class_name);
 }
 
-fn append_class_recursive(node: &mut WidgetNode, class_name: &str) {
+pub(super) fn append_class_recursive(node: &mut WidgetNode, class_name: &str) {
     append_class(node, class_name);
     for child in &mut node.children {
         append_class_recursive(child, class_name);
     }
+}
+
+fn find_node_by_key_mut<'a>(node: &'a mut WidgetNode, key: &str) -> Option<&'a mut WidgetNode> {
+    if node
+        .attributes
+        .get("_mesh_key")
+        .is_some_and(|value| value == key)
+    {
+        return Some(node);
+    }
+    for child in &mut node.children {
+        if let Some(found) = find_node_by_key_mut(child, key) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 fn annotate_selection_node(

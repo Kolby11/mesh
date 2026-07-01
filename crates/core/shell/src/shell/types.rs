@@ -73,6 +73,11 @@ pub(super) struct ChildSurface {
     #[allow(dead_code)]
     /// Anchor rectangle in the parent surface's coordinate space.
     pub(super) anchor_rect: (i32, i32, i32, i32),
+    /// Set once the originating node drops out of the open-popover requests
+    /// while its own CSS exit transition still has time left to run. The
+    /// child surface is kept alive and repainted with `exiting = true` until
+    /// this deadline passes, then torn down.
+    pub(super) closing_until: Option<std::time::Instant>,
 }
 
 pub(super) struct ComponentRuntime {

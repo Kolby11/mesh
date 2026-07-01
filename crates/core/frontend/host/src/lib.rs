@@ -380,15 +380,33 @@ pub trait ShellComponent: Send {
         Vec::new()
     }
     /// Paint a keyed subtree into a child-surface buffer at local origin.
+    /// When `exiting` is set, the painted subtree gets the same
+    /// `mesh-surface-exiting` class treatment top-level surfaces get while
+    /// playing their hide transition, so a closing popover's CSS exit
+    /// animation (opacity/transform) has pixels to animate before teardown.
     /// Returns `true` when the node existed and pixels were painted.
     fn paint_child_surface(
         &self,
         _node_key: &str,
         _buffer: &mut PixelBuffer,
         _scale: f32,
+        _exiting: bool,
     ) -> Result<bool, ComponentError> {
         Ok(false)
     }
+    /// Duration in milliseconds to keep a closing child popover's surface
+    /// alive so its own CSS exit transition can play, read from the popover
+    /// subtree's own resolved style rather than the component root. Mirrors
+    /// `hide_transition_ms` for the in-tree child-surface path.
+    fn child_hide_transition_ms(&self, _node_key: &str) -> u64 {
+        0
+    }
+    /// Tell the component which in-tree child popovers (by `_mesh_key`) are
+    /// currently playing their exit transition. The component scopes
+    /// `mesh-surface-exiting` to just these subtrees on its next tree build,
+    /// so the popover's own CSS transition resolves and advances through the
+    /// normal per-node transition engine instead of a one-shot style snap.
+    fn set_closing_child_keys(&mut self, _keys: std::collections::HashSet<String>) {}
     /// Best-known logical content size for surface sizing: the measured content
     /// size once a paint has produced one, otherwise the manifest-declared
     /// width/height. Never returns a zero/`1x1` placeholder, so popup creation

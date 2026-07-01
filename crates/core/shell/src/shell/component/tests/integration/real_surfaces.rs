@@ -402,6 +402,80 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
 }
 
 #[test]
+fn set_closing_child_keys_scopes_exit_transition_to_popover_subtree_only() {
+    let theme = default_theme();
+    let mut theme_selector =
+        real_frontend_module_component("@mesh/theme-selector", audio_network_catalog());
+    theme_selector.visible = true;
+    theme_selector.set_surface_exiting(false);
+
+    let mut buffer = PixelBuffer::new(112, 92);
+    theme_selector
+        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .unwrap();
+    // Settle past the entering frame so the baseline paint below isn't itself
+    // carrying `mesh-surface-entering`.
+    theme_selector
+        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .unwrap();
+
+    let popover_key = theme_selector
+        .last_tree
+        .as_ref()
+        .and_then(|tree| first_node_with_class_token(tree, "theme-float-shell"))
+        .and_then(|node| node.attributes.get("_mesh_key"))
+        .expect("theme selector root should be a keyed popover node")
+        .clone();
+
+    // This is the same shell -> component channel `reconcile_child_surface_requests`
+    // uses once a promoted popover's node drops out of the open requests while
+    // its own CSS exit transition still has time left to run.
+    theme_selector.set_closing_child_keys([popover_key.clone()].into_iter().collect());
+    theme_selector
+        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .unwrap();
+
+    let exiting_tree = theme_selector
+        .last_tree
+        .as_ref()
+        .expect("rendered theme selector exiting frame");
+    let popover_node = first_node_with_class_token(exiting_tree, "theme-float-shell")
+        .expect("theme selector popover node should survive the exiting paint");
+    assert!(
+        popover_node
+            .attributes
+            .get("class")
+            .is_some_and(|class| class.contains("mesh-surface-exiting")),
+        "closing_child_keys should append mesh-surface-exiting to the popover's own subtree"
+    );
+    assert!(
+        !theme_selector.transitions.is_empty(),
+        "the exit class change should start the popover's own opacity/transform transition"
+    );
+
+    // Clearing the closing key (e.g. the popover reopened before its grace
+    // period elapsed) should stop re-applying the exiting class on the next
+    // paint — it does not retroactively rewind the in-flight transition.
+    theme_selector.set_closing_child_keys(std::collections::HashSet::new());
+    theme_selector
+        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .unwrap();
+    let reopened_tree = theme_selector
+        .last_tree
+        .as_ref()
+        .expect("rendered theme selector reopened frame");
+    let reopened_popover =
+        first_node_with_class_token(reopened_tree, "theme-float-shell").expect("theme selector popover node");
+    assert!(
+        reopened_popover
+            .attributes
+            .get("class")
+            .is_none_or(|class| !class.contains("mesh-surface-exiting")),
+        "clearing closing_child_keys should stop re-appending mesh-surface-exiting"
+    );
+}
+
+#[test]
 fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
     let theme = default_theme();
     let mut theme_selector =

@@ -506,8 +506,10 @@ struct PopoverHarnessState {
     anchor_rect: (i32, i32, i32, i32),
     content_size: (u32, u32),
     painted_nodes: Vec<String>,
+    exiting_paints: Vec<bool>,
     child_inputs: Vec<(String, ComponentInput)>,
     profiling_enabled: Vec<bool>,
+    hide_transition_ms: u64,
 }
 
 impl Default for PopoverHarnessState {
@@ -518,8 +520,10 @@ impl Default for PopoverHarnessState {
             anchor_rect: (8, 10, 40, 16),
             content_size: (72, 32),
             painted_nodes: Vec::new(),
+            exiting_paints: Vec::new(),
             child_inputs: Vec::new(),
             profiling_enabled: Vec::new(),
+            hide_transition_ms: 0,
         }
     }
 }
@@ -632,12 +636,11 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
         node_key: &str,
         buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
+        exiting: bool,
     ) -> Result<bool, super::types::ComponentError> {
-        self.state
-            .lock()
-            .unwrap()
-            .painted_nodes
-            .push(node_key.to_string());
+        let mut state = self.state.lock().unwrap();
+        state.painted_nodes.push(node_key.to_string());
+        state.exiting_paints.push(exiting);
         buffer.clear(mesh_core_elements::style::Color {
             r: 24,
             g: 48,
@@ -645,6 +648,10 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
             a: 255,
         });
         Ok(true)
+    }
+
+    fn child_hide_transition_ms(&self, _node_key: &str) -> u64 {
+        self.state.lock().unwrap().hide_transition_ms
     }
 
     fn handle_child_surface_input(
@@ -5124,6 +5131,7 @@ fn component_runtime_resolves_parent_and_child_surface_targets() {
             ),
             node_key: "root/0/popover".to_string(),
             anchor_rect: (12, 0, 40, 56),
+            closing_until: None,
         });
 
     // Both surface ids now map to the same component, each tagged with its
@@ -5212,6 +5220,84 @@ fn child_surface_reconcile_removes_closed_popover() {
     );
     assert!(!shell.core.surfaces.contains_key(&child_id));
     assert!(shell.component_target_for_surface(&child_id).is_none());
+}
+
+#[test]
+fn child_surface_reconcile_plays_exit_transition_before_teardown() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState {
+        hide_transition_ms: 120,
+        ..PopoverHarnessState::default()
+    }));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+
+    shell.render_components().unwrap();
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+
+    state.lock().unwrap().open = false;
+    shell.render_components().unwrap();
+
+    // The child popup should still be alive and repainted with the exiting
+    // class so its own CSS exit transition (opacity/transform) can animate,
+    // instead of being torn down the instant `open` flips false.
+    assert_eq!(
+        shell.components[0].children.len(),
+        1,
+        "closing popover should stay mounted for its exit transition"
+    );
+    assert!(shell.components[0].children[0].closing_until.is_some());
+    assert!(
+        !shell
+            .presentation_engine
+            .testing_destroyed_popups()
+            .contains(&child_id)
+    );
+    assert_eq!(
+        state.lock().unwrap().exiting_paints.last(),
+        Some(&true),
+        "the closing repaint pass should mark the popover subtree as exiting"
+    );
+
+    // Simulate the exit-transition deadline having elapsed.
+    shell.components[0].children[0].closing_until =
+        Some(Instant::now() - Duration::from_millis(1));
+    shell.render_components().unwrap();
+
+    assert!(shell.components[0].children.is_empty());
+    assert!(
+        shell
+            .presentation_engine
+            .testing_destroyed_popups()
+            .contains(&child_id)
+    );
+}
+
+#[test]
+fn child_surface_reopen_cancels_pending_exit_transition() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState {
+        hide_transition_ms: 120,
+        ..PopoverHarnessState::default()
+    }));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+
+    shell.render_components().unwrap();
+    state.lock().unwrap().open = false;
+    shell.render_components().unwrap();
+    assert!(shell.components[0].children[0].closing_until.is_some());
+
+    // Reopening before the grace period elapses should cancel the exit and
+    // resume normal (non-exiting) repaints.
+    state.lock().unwrap().open = true;
+    shell.render_components().unwrap();
+
+    assert_eq!(shell.components[0].children.len(), 1);
+    assert!(shell.components[0].children[0].closing_until.is_none());
+    assert_eq!(state.lock().unwrap().exiting_paints.last(), Some(&false));
 }
 
 #[test]

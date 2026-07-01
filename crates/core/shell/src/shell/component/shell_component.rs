@@ -382,6 +382,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             || !self.transitions.is_empty()
             || self.has_active_keyframe_animation
             || !self.scroll_animations.is_empty()
+            || !self.closing_child_keys.is_empty()
     }
 
     fn surface_size_changed(&mut self, width: u32, height: u32) -> bool {
@@ -1117,6 +1118,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         node_key: &str,
         buffer: &mut PixelBuffer,
         scale: f32,
+        exiting: bool,
     ) -> Result<bool, ComponentError> {
         let Some(tree) = self.last_tree.as_ref() else {
             return Ok(false);
@@ -1128,6 +1130,12 @@ impl ShellComponent for FrontendSurfaceComponent {
             return Ok(false);
         };
 
+        // The exiting class (when applicable) is baked into `node`'s
+        // `computed_style` already: `finalize_tree` scopes it to this node's
+        // subtree via `closing_child_keys` before style resolution runs, so
+        // the popover's own CSS transition resolves and advances through the
+        // normal per-node transition engine like any other animated style.
+        let _ = exiting;
         buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
         mesh_core_render::paint_frontend_tree_at_for_module(
             node,
@@ -1139,6 +1147,22 @@ impl ShellComponent for FrontendSurfaceComponent {
             Some(self.compiled.manifest.package.id.as_str()),
         );
         Ok(true)
+    }
+
+    fn child_hide_transition_ms(&self, node_key: &str) -> u64 {
+        let Some(tree) = self.last_tree.as_ref() else {
+            return 0;
+        };
+        let Some(node) = find_node_by_key(tree, node_key) else {
+            return 0;
+        };
+        node.computed_style
+            .transitions
+            .iter()
+            .filter(|transition| transition.properties.all || transition.properties.opacity)
+            .map(|transition| u64::from(transition.duration_ms))
+            .max()
+            .unwrap_or(0)
     }
 
     fn content_input_size(&self) -> Option<(u32, u32)> {
@@ -1215,6 +1239,18 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
         self.surface_exiting = exiting;
         self.invalidate_interaction_restyle();
+    }
+
+    fn set_closing_child_keys(&mut self, keys: std::collections::HashSet<String>) {
+        if self.closing_child_keys == keys {
+            return;
+        }
+        self.closing_child_keys = keys;
+        // A full rebuild (not just a style-only restyle) so the affected
+        // popover subtree's `class` attribute is re-derived fresh from the
+        // template rather than carrying forward a stale appended class from
+        // a previous closing/reopening cycle.
+        self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
     }
 
     fn allows_shrink_to_fit(&self) -> bool {

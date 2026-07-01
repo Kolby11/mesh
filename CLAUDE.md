@@ -30,7 +30,9 @@ Use these terms precisely in code, documentation, and architecture discussions:
   (`frontend`, `backend`, `interface`, `theme`, `icon-pack`, `font-pack`,
   `language-pack`, or `library`). Older `package.json`,
   `package.json`, and `mesh.toml` files are compatibility inputs during
-  migration, not the preferred authoring model.
+  migration, not the preferred authoring model. `mesh.kind` also includes
+  `component`: an embeddable `.mesh` component consumed by other modules via
+  `require("@scope/name")`, with no `mesh.surface` block of its own.
 - **Element**: a base UI primitive exposed by MESH core, such as `box`,
   `row`, `button`, `icon`, `input`, `slider`, or `text`. Elements are the
   built-in building blocks with predefined runtime behavior, styling hooks,

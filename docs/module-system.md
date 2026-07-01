@@ -639,6 +639,7 @@ The `mesh.kind` value describes the module's main role:
 | `font-pack`     | Contributes fonts.                                                      |
 | `language-pack` | Contributes translations.                                               |
 | `library`       | Contributes importable Luau modules.                                    |
+| `component`     | Embeddable `.mesh` component with no `mesh.surface` of its own; consumed via `require("@scope/name")` by another module. |
 
 `library` is the missing piece for extensible scripting. It is not a service
 provider and does not render UI; it contributes files that other modules can

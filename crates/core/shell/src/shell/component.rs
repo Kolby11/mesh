@@ -320,6 +320,13 @@ pub(super) struct FrontendSurfaceComponent {
     pub(super) visible: bool,
     surface_exiting: bool,
     surface_entering: bool,
+    /// `_mesh_key`s of in-tree child popovers currently playing their exit
+    /// transition. `finalize_tree` appends `mesh-surface-exiting` scoped to
+    /// just these subtrees (not the whole tree, unlike `surface_exiting`) so
+    /// each popover's own CSS exit animation resolves and advances through
+    /// the normal transition engine while the shell keeps its child surface
+    /// mapped. Set by the shell via `set_closing_child_keys`.
+    closing_child_keys: HashSet<String>,
     dirty: bool,
     /// Set when only appearance changed (e.g. hover) without script-state
     /// changes. Triggers a paint via `wants_render`, but lets `paint` skip the
@@ -511,6 +518,7 @@ impl FrontendSurfaceComponent {
             visible: settings_state.layout.visible_on_start,
             surface_exiting: false,
             surface_entering: false,
+            closing_child_keys: HashSet::new(),
             dirty: true,
             style_only_dirty: false,
             dirty_types: ComponentDirtyFlags::TREE_REBUILD | ComponentDirtyFlags::SURFACE_CONFIG,

@@ -26,6 +26,7 @@ pub const MODULE_KINDS: &[&str] = &[
     "font-pack",
     "language-pack",
     "library",
+    "component",
 ];
 
 /// A curated set of well-known capability strings. Capabilities are extensible

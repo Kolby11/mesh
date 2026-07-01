@@ -399,23 +399,60 @@ impl Shell {
         self.components[index]
             .dismissed_child_node_keys
             .retain(|node_key| requested_keys.contains(node_key));
-        if requests.is_empty() || !self.presentation_engine.popup_supported() {
+        if !self.presentation_engine.popup_supported() {
             self.destroy_all_child_surfaces(index);
+            self.components[index]
+                .component
+                .set_closing_child_keys(HashSet::new());
             return Ok(false);
         }
 
+        let now = std::time::Instant::now();
         let mut child_index = 0;
         while child_index < self.components[index].children.len() {
-            if requested_keys.contains(
-                self.components[index].children[child_index]
-                    .node_key
-                    .as_str(),
-            ) {
+            let node_key = self.components[index].children[child_index]
+                .node_key
+                .clone();
+            if requested_keys.contains(node_key.as_str()) {
+                self.components[index].children[child_index].closing_until = None;
                 child_index += 1;
-            } else {
-                self.destroy_child_surface_at(index, child_index);
+                continue;
+            }
+            let closing_until = self.components[index].children[child_index].closing_until;
+            match closing_until {
+                Some(until) if until > now => {
+                    // Still playing its exit transition; keep the surface
+                    // alive and let the closing-repaint pass below animate it.
+                    child_index += 1;
+                }
+                Some(_) => {
+                    // Grace period elapsed.
+                    self.destroy_child_surface_at(index, child_index);
+                }
+                None => {
+                    let duration = self.components[index]
+                        .component
+                        .child_hide_transition_ms(&node_key);
+                    if duration == 0 {
+                        self.destroy_child_surface_at(index, child_index);
+                    } else {
+                        self.components[index].children[child_index].closing_until =
+                            Some(now + std::time::Duration::from_millis(duration));
+                        child_index += 1;
+                    }
+                }
             }
         }
+
+        let closing_keys: HashSet<String> = self.components[index]
+            .children
+            .iter()
+            .filter(|child| child.closing_until.is_some())
+            .map(|child| child.node_key.clone())
+            .collect();
+        self.components[index]
+            .component
+            .set_closing_child_keys(closing_keys);
 
         let mut any_presented = false;
         for request in requests {
@@ -444,6 +481,7 @@ impl Shell {
                     target,
                     node_key: request.node_key.clone(),
                     anchor_rect: request.anchor_rect,
+                    closing_until: None,
                 });
                 self.rebuild_component_surface_index();
                 TargetRef::Child(self.components[index].children.len() - 1)
@@ -507,94 +545,161 @@ impl Shell {
                 continue;
             }
 
-            let scale = self.presentation_engine.surface_scale(&child_surface_id);
-            let scale = if scale > 0.0 { scale } else { parent_scale };
             let width = request.content_size.0.max(1);
             let height = request.content_size.1.max(1);
-            let physical_w = ((width as f32 * scale).ceil() as u32).max(1);
-            let physical_h = ((height as f32 * scale).ceil() as u32).max(1);
-
-            const MAX_BUFFER_BYTES: u64 = 512 * 1024 * 1024;
-            let requested_bytes = (physical_w as u64) * (physical_h as u64) * 4;
-            if requested_bytes > MAX_BUFFER_BYTES {
-                return Err(ShellRunError::BufferAlloc {
-                    surface_id: child_surface_id,
-                    logical_w: width,
-                    logical_h: height,
-                    physical_w,
-                    physical_h,
-                    scale,
-                    requested_bytes,
-                    max_bytes: MAX_BUFFER_BYTES,
-                });
-            }
-
-            {
-                let child = &mut self.components[index].children[child_index];
-                if child
-                    .target
-                    .paint_buffer
-                    .as_ref()
-                    .map(|buffer| buffer.width != physical_w || buffer.height != physical_h)
-                    .unwrap_or(true)
-                {
-                    child.target.paint_buffer = Some(PixelBuffer::new(physical_w, physical_h));
-                }
-            }
-
-            let painted = {
-                let runtime = &mut self.components[index];
-                let buffer = runtime.children[child_index]
-                    .target
-                    .paint_buffer
-                    .as_mut()
-                    .expect("child paint buffer initialised");
-                runtime
-                    .component
-                    .paint_child_surface(&request.node_key, buffer, scale)
-                    .map_err(ShellRunError::Component)?
-            };
-            if !painted {
-                self.destroy_child_surface_at(index, child_index);
-                continue;
-            }
-            self.components[index].children[child_index]
-                .target
-                .force_full_present = true;
-            self.presentation_engine.update_input_region(
-                &self.components[index].children[child_index]
-                    .target
-                    .surface_id,
-                Some(DamageRect {
-                    x: 0,
-                    y: 0,
-                    width,
-                    height,
-                }),
-            );
-            let presented = match self.present_surface_target(
+            let presented = self.paint_and_present_child_surface(
                 index,
-                TargetRef::Child(child_index),
+                child_index,
                 component_id,
                 width,
                 height,
-                scale,
+                parent_scale,
                 total_render_started,
-            ) {
-                Ok(presented) => presented,
-                Err(ShellRunError::Presentation(error)) => {
-                    tracing::warn!(
-                        "presenting child popup {child_surface_id} failed; destroying popup and keeping parent surface alive: {error}"
-                    );
-                    self.destroy_child_surface_at(index, child_index);
-                    continue;
-                }
-                Err(error) => return Err(error),
-            };
+                false,
+            )?;
+            any_presented |= presented;
+        }
+
+        // Popovers whose node dropped out of the open requests this frame but
+        // still have exit-transition time left: keep painting/presenting them
+        // with the exiting class applied so their CSS exit animation runs
+        // before `destroy_child_surface_at` tears the popup down above.
+        let closing_indices: Vec<usize> = self.components[index]
+            .children
+            .iter()
+            .enumerate()
+            .filter(|(_, child)| {
+                child.closing_until.is_some() && !requested_keys.contains(&child.node_key)
+            })
+            .map(|(child_index, _)| child_index)
+            .collect();
+        for child_index in closing_indices {
+            let (width, height) = self.components[index].children[child_index]
+                .target
+                .known_surface_size
+                .unwrap_or((1, 1));
+            let presented = self.paint_and_present_child_surface(
+                index,
+                child_index,
+                component_id,
+                width,
+                height,
+                parent_scale,
+                total_render_started,
+                true,
+            )?;
             any_presented |= presented;
         }
 
         Ok(any_presented)
+    }
+
+    /// Shared paint+present tail for a child popup surface, used both for
+    /// actively open popovers and for ones playing their exit transition
+    /// (`exiting = true` appends `mesh-surface-exiting` to the painted
+    /// subtree so its CSS transition animates before teardown).
+    #[allow(clippy::too_many_arguments)]
+    fn paint_and_present_child_surface(
+        &mut self,
+        index: usize,
+        child_index: usize,
+        component_id: &str,
+        width: u32,
+        height: u32,
+        parent_scale: f32,
+        total_render_started: Option<std::time::Instant>,
+        exiting: bool,
+    ) -> Result<bool, ShellRunError> {
+        let child_surface_id = self.components[index].children[child_index]
+            .target
+            .surface_id
+            .clone();
+        let node_key = self.components[index].children[child_index]
+            .node_key
+            .clone();
+
+        let scale = self.presentation_engine.surface_scale(&child_surface_id);
+        let scale = if scale > 0.0 { scale } else { parent_scale };
+        let physical_w = ((width as f32 * scale).ceil() as u32).max(1);
+        let physical_h = ((height as f32 * scale).ceil() as u32).max(1);
+
+        const MAX_BUFFER_BYTES: u64 = 512 * 1024 * 1024;
+        let requested_bytes = (physical_w as u64) * (physical_h as u64) * 4;
+        if requested_bytes > MAX_BUFFER_BYTES {
+            return Err(ShellRunError::BufferAlloc {
+                surface_id: child_surface_id,
+                logical_w: width,
+                logical_h: height,
+                physical_w,
+                physical_h,
+                scale,
+                requested_bytes,
+                max_bytes: MAX_BUFFER_BYTES,
+            });
+        }
+
+        {
+            let child = &mut self.components[index].children[child_index];
+            if child
+                .target
+                .paint_buffer
+                .as_ref()
+                .map(|buffer| buffer.width != physical_w || buffer.height != physical_h)
+                .unwrap_or(true)
+            {
+                child.target.paint_buffer = Some(PixelBuffer::new(physical_w, physical_h));
+            }
+        }
+
+        let painted = {
+            let runtime = &mut self.components[index];
+            let buffer = runtime.children[child_index]
+                .target
+                .paint_buffer
+                .as_mut()
+                .expect("child paint buffer initialised");
+            runtime
+                .component
+                .paint_child_surface(&node_key, buffer, scale, exiting)
+                .map_err(ShellRunError::Component)?
+        };
+        if !painted {
+            self.destroy_child_surface_at(index, child_index);
+            return Ok(false);
+        }
+        self.components[index].children[child_index]
+            .target
+            .force_full_present = true;
+        self.presentation_engine.update_input_region(
+            &self.components[index].children[child_index]
+                .target
+                .surface_id,
+            Some(DamageRect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            }),
+        );
+        match self.present_surface_target(
+            index,
+            TargetRef::Child(child_index),
+            component_id,
+            width,
+            height,
+            scale,
+            total_render_started,
+        ) {
+            Ok(presented) => Ok(presented),
+            Err(ShellRunError::Presentation(error)) => {
+                tracing::warn!(
+                    "presenting child popup {child_surface_id} failed; destroying popup and keeping parent surface alive: {error}"
+                );
+                self.destroy_child_surface_at(index, child_index);
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn drain_dismissed_popups(&mut self) -> Result<(), ShellRunError> {
