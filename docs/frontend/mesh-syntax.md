@@ -559,8 +559,26 @@ event.current_target.position.margin_left
 event.current_target.position.margin_top
 ```
 
-That makes "open this popover at the trigger position" fully explicit in the
-frontend script.
+Inline `<popover>` nodes should normally be authored inside the trigger's
+component and anchored declaratively:
+
+```xml
+<button ref="theme-button" onpointerenter={openTheme}>Theme</button>
+<popover open={theme_open} anchor-ref="theme-button" anchor="bottom" gravity="bottom">
+  <menu aria-label="Theme choices">...</menu>
+</popover>
+```
+
+Open hover menus with the default `grab="hover"` behavior. Hover popovers cannot
+take an `xdg_popup` grab because the compositor requires a recent click serial;
+the shell hover bridge owns dismissal as the pointer crosses from trigger to
+popup. Use `grab="click"` only for click-open popovers that should dismiss on
+outside click through the compositor grab.
+
+Popover promotion assumes the same compositor boundary as the rest of the MESH
+Wayland shell: `wlr-layer-shell-v1` plus `xdg_popup` support through
+layer-shell `get_popup`. wlroots-family compositors, KDE, and Hyprland are in
+scope; GNOME's lack of stable layer-shell support is a non-goal for this path.
 
 ---
 

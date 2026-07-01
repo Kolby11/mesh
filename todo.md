@@ -181,11 +181,13 @@ surface.
       depends on a later `PointerMove`. Planned fix: emit a `PointerMove`
       equivalent on pointer enter for the popup surface so
       `cancel_pending_popover_hide` runs immediately.
-- [ ] **Grab vs hover nuance.** An xdg_popup grab requires a recent input
+- [x] **Grab vs hover nuance.** An xdg_popup grab requires a recent input
       _serial_ (a click) — so grabbed (click-to-dismiss-outside) popups can't be
       opened by pure hover. Decide per popover: hover-open menus stay no-grab (core
-      hover-bridge handles dismiss); click-open menus take the grab. Record the rule
-      rather than assuming grab everywhere.
+      hover-bridge handles dismiss); click-open menus take the grab. Recorded in
+      `docs/frontend/elements.md` and `docs/frontend/mesh-syntax.md`; the Rust
+      `PopoverGrab` contract already enforces `Hover` as the default and maps
+      `grab="click"` to compositor grab requests.
 - [ ] **Buffer padding + input region for shadows.** Popup buffer must include
       padding for `box-shadow`/float animation overshoot, and the input region must
       exclude that padding — reuse the tooltip buffer-padding / input-region masking
@@ -200,10 +202,11 @@ surface.
       the popup (via grab or parent keyboard routing). Lifecycle: Wayland
       auto-dismisses popups when the parent surface is destroyed/hidden — clean up
       the popup `SurfaceId`s in shell bookkeeping to match.
-- [ ] **Compositor support caveat.** layer-shell `get_popup` is supported on
+- [x] **Compositor support caveat.** layer-shell `get_popup` is supported on
       wlroots/KDE/Hyprland but layer-shell itself is absent on GNOME — already
-      inside MESH's `wlr-layer-shell-v1` compatibility constraint; record as a known
-      non-goal boundary.
+      inside MESH's `wlr-layer-shell-v1` compatibility constraint; recorded as a
+      known non-goal boundary in `docs/frontend/elements.md` and
+      `docs/frontend/mesh-syntax.md`.
 - [ ] **`module.json` rework — embeddable component, no surface geometry.**
       An embeddable popover should not declare a `mesh.surface` block at all
       (no anchor/layer/width/height/min/max). Decide the manifest shape for "a
@@ -337,8 +340,9 @@ All five landed 2026-06-23 (single commit).
       `extract_backend_emit_event_names`, `extract_keybind_subscriptions_from_mesh_source`).
       Project policy calls hand-rolled script string-parsing temporary migration
       code; migrate to AST-based analysis when the parser matures. Note:
-      `extract_keybind_subscriptions_from_mesh_source` has a likely `tag_start`
-      `rfind` bug (computed against `remaining`, not the original slice).
+      fixed 2026-07-01: `extract_keybind_subscriptions_from_mesh_source` now scans
+      tag boundaries quote-aware, so `<`/`>` inside other attributes no longer
+      hide `onkeybind`; AST-based migration remains open.
 - [ ] Backend lifecycle `init`/`onRender` fallbacks
       (`scripting/backend/runtime.rs:~179`, `context/runtime.rs:call_render_lifecycle`)
       — all shipped modules use `start`/`render`; the legacy-name fallbacks are

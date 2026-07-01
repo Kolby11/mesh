@@ -141,6 +141,12 @@ Phase 90 adds native source semantics for the container and collection elements 
 
 Containers include `popover`, `dialog`, `tabs`, `tab`, `accordion`, and `details`. `panel` and `sheet` remain configured containers for now. Popover focus and escape behavior continue to use the existing shell cross-surface popover system; Phase 90 does not add a full in-tree modal trap or backdrop model.
 
+Inline `<popover>` nodes are promoted to compositor popups when open, which lets a short parent surface such as a panel host content that paints outside its own buffer. Author placement with `anchor-ref`, `anchor`, `gravity`, `offset-x`, `offset-y`, and `constrain`; avoid manifest surface geometry for embeddable popovers.
+
+Use `grab="hover"` or omit `grab` for hover-open menus. Hover popovers do not take a compositor grab because an `xdg_popup` grab requires a recent click serial; the shell hover bridge handles dismissal while the pointer crosses from trigger to popup. Use `grab="click"` only for click-open popovers that should use compositor outside-click dismissal and keyboard focus ownership.
+
+Popover promotion depends on the compositor protocols MESH already targets: `wlr-layer-shell-v1` plus `xdg_popup` support via layer-shell `get_popup`. This is expected on wlroots-family compositors, KDE, and Hyprland. GNOME does not expose layer-shell as a stable target, so GNOME support remains outside the current shell compatibility boundary rather than a separate popover fallback requirement.
+
 Tabs are an activatable group:
 
 ```xml

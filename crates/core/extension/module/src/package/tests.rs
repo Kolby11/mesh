@@ -3312,6 +3312,19 @@ fn extract_keybind_subscriptions_from_mesh_source_finds_static_actions() {
 }
 
 #[test]
+fn extract_keybind_subscriptions_handles_quoted_angle_brackets_in_tag() {
+    use super::installed_graph::extract_keybind_subscriptions_from_mesh_source;
+
+    let src = r#"
+<template>
+  <button title="2 < 3" keybind="open" data-note="x > y" onkeybind={onOpen}></button>
+</template>
+"#;
+    let subscriptions = extract_keybind_subscriptions_from_mesh_source(src);
+    assert_eq!(subscriptions, vec![("open".to_string(), true)]);
+}
+
+#[test]
 fn graph_diagnostics_report_undeclared_i18n_key() {
     let dir = temp_dir("i18n-key-test");
     let src_dir = dir.join("src");

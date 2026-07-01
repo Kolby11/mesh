@@ -992,11 +992,8 @@ pub(crate) fn extract_keybind_subscriptions_from_mesh_source(content: &str) -> V
                 continue;
             }
         }
-        let tag_start = remaining[..start].rfind('<').unwrap_or(0);
-        let tag_end = remaining[start..]
-            .find('>')
-            .map(|offset| start + offset)
-            .unwrap_or(remaining.len());
+        let tag_start = find_tag_start_before_attr(remaining, start).unwrap_or(0);
+        let tag_end = find_tag_end_after_attr(remaining, start).unwrap_or(remaining.len());
         let tag = &remaining[tag_start..tag_end];
         let after = &remaining[start + "keybind=".len()..];
         let (value, advance) = if after.starts_with('"') || after.starts_with('\'') {
@@ -1048,6 +1045,57 @@ pub(crate) fn extract_keybind_subscriptions_from_mesh_source(content: &str) -> V
     subscriptions.sort();
     subscriptions.dedup();
     subscriptions
+}
+
+fn find_tag_start_before_attr(source: &str, attr_start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut in_string = false;
+    let mut quote = b'"';
+    let mut last_tag_start = None;
+    let mut i = 0usize;
+
+    while i < attr_start.min(bytes.len()) {
+        let b = bytes[i];
+        if in_string {
+            if b == quote && (i == 0 || bytes[i - 1] != b'\\') {
+                in_string = false;
+            }
+        } else if b == b'"' || b == b'\'' {
+            in_string = true;
+            quote = b;
+        } else if b == b'<' {
+            last_tag_start = Some(i);
+        } else if b == b'>' {
+            last_tag_start = None;
+        }
+        i += 1;
+    }
+
+    last_tag_start
+}
+
+fn find_tag_end_after_attr(source: &str, attr_start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut in_string = false;
+    let mut quote = b'"';
+    let mut i = attr_start.min(bytes.len());
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_string {
+            if b == quote && (i == 0 || bytes[i - 1] != b'\\') {
+                in_string = false;
+            }
+        } else if b == b'"' || b == b'\'' {
+            in_string = true;
+            quote = b;
+        } else if b == b'>' {
+            return Some(i);
+        }
+        i += 1;
+    }
+
+    None
 }
 
 fn is_declared_shell_event_channel(channel: &str) -> bool {
