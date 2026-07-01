@@ -14,5 +14,6 @@
   "audio.lower_volume": "Znizit hlasitost",
   "audio.raise_volume": "Zvysit hlasitost",
   "var.track_width": "Sirka posuvnika",
-  "var.track_height": "Vyska posuvnika"
+  "var.track_height": "Vyska posuvnika",
+  "var.anim_ms": "Trvanie animacie"
 }

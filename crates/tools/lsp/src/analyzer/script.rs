@@ -41,6 +41,7 @@ pub fn complete(
         ScriptContext::ComponentInstanceMember { var_name, prefix } => {
             complete_component_instance_members(&var_name, &prefix, doc, registry)
         }
+        ScriptContext::Props { prefix } => complete_props(&prefix, doc),
         ScriptContext::General => complete_state_vars(doc),
     }
 }
@@ -195,6 +196,54 @@ fn complete_interface_proxy(
         });
     }
 
+    items
+}
+
+fn complete_props(prefix: &str, doc: &Document) -> Vec<CompletionItem> {
+    let Some(block) = doc.parsed.as_ref().and_then(|parsed| parsed.props.as_ref()) else {
+        return vec![];
+    };
+    let mut items: Vec<CompletionItem> = block
+        .props
+        .iter()
+        .filter(|prop| prop.name.starts_with(prefix))
+        .map(|prop| CompletionItem {
+            label: prop.name.clone(),
+            kind: Some(CompletionItemKind::FIELD),
+            detail: Some(prop.ty.lua_type().to_string()),
+            documentation: Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format!(
+                    "**`props.{}`**: `{}`\n\nDeclared as `{}` in `<props>`.",
+                    prop.name,
+                    prop.ty.lua_type(),
+                    prop.ty.as_str()
+                ),
+            })),
+            ..Default::default()
+        })
+        .collect();
+    for helper in [
+        ("source", "source(name: string): string"),
+        ("at", "at(name: string, scope: string): any"),
+    ] {
+        if helper.0.starts_with(prefix) {
+            items.push(CompletionItem {
+                label: helper.0.to_string(),
+                kind: Some(CompletionItemKind::METHOD),
+                detail: Some(helper.1.to_string()),
+                insert_text: Some(format!("{}($1)", helper.0)),
+                insert_text_format: Some(Fmt::SNIPPET),
+                documentation: Some(Documentation::MarkupContent(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value:
+                        "Read a specific prop precedence layer. The common path is `props.name`."
+                            .to_string(),
+                })),
+                ..Default::default()
+            });
+        }
+    }
     items
 }
 

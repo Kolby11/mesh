@@ -275,12 +275,22 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .is_some_and(|appeared| appeared.elapsed() < self.tooltip_fade_duration());
         tooltip_delay_pending
             || tooltip_fade_pending
+            || !self.scheduled_handlers.is_empty()
             || !self.pending_surface_states.borrow().is_empty()
     }
 
     fn next_tick_deadline(&self) -> Option<std::time::Instant> {
         if !self.pending_surface_states.borrow().is_empty() {
             return Some(std::time::Instant::now());
+        }
+
+        if let Some(deadline) = self
+            .scheduled_handlers
+            .values()
+            .map(|scheduled| scheduled.deadline)
+            .min()
+        {
+            return Some(deadline);
         }
 
         if let Some(start) = self.hover_start
@@ -304,6 +314,27 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
+        let now = std::time::Instant::now();
+        let due_handlers: Vec<_> = self
+            .scheduled_handlers
+            .iter()
+            .filter(|(_, scheduled)| scheduled.deadline <= now)
+            .map(|(key, scheduled)| {
+                (
+                    key.clone(),
+                    scheduled.instance_key.clone(),
+                    scheduled.handler.clone(),
+                )
+            })
+            .collect();
+
+        let mut requests = Vec::new();
+        for (key, instance_key, handler) in due_handlers {
+            self.scheduled_handlers.remove(&key);
+            let namespaced_handler = format!("__mesh_embed__::{instance_key}::{handler}");
+            requests.extend(self.call_namespaced_handler(&namespaced_handler, &[])?);
+        }
+
         if self.hover_start.is_some() {
             self.refresh_tooltip_settings();
         }
@@ -331,7 +362,6 @@ impl ShellComponent for FrontendSurfaceComponent {
         // Emit Show/HideSurface requests for surface portals whose desired visibility changed.
         let pending = std::mem::take(&mut *self.pending_surface_states.borrow_mut());
         self.last_surface_states.reserve(pending.len());
-        let mut requests = Vec::new();
         for (surface_id, visible) in pending {
             let was_visible = self.last_surface_states.get(&surface_id).copied();
             if was_visible != Some(visible) {

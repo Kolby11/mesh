@@ -14,5 +14,6 @@
   "audio.lower_volume": "Lower volume",
   "audio.raise_volume": "Raise volume",
   "var.track_width": "Slider width",
-  "var.track_height": "Slider height"
+  "var.track_height": "Slider height",
+  "var.anim_ms": "Animation duration"
 }

@@ -2,8 +2,8 @@ use super::{
     AccessibilitySection, AssetsSection, CapabilitiesSection, CompatibilitySection,
     DependenciesSection, DependencySpec, EntrypointsSection, ExportsSection, ExtensionSection,
     I18nSection, IconPackSection, IconRequirementsSection, IconsSection, InterfaceSection,
-    KeybindsSection, Manifest, ModuleSection, ProvidedInterface, ServiceSection,
-    SlotContribution, SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
+    KeybindsSection, Manifest, ModuleSection, ProvidedInterface, ServiceSection, SlotContribution,
+    SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
 };
 use mesh_core_theme::TokenValue;
 use serde::Deserialize;
@@ -87,7 +87,6 @@ impl TomlManifest {
         }
     }
 }
-
 
 #[derive(Debug, Clone, Deserialize)]
 struct TomlI18nSection {

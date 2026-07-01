@@ -572,7 +572,7 @@ impl Shell {
                     height,
                 }),
             );
-            let presented = self.present_surface_target(
+            let presented = match self.present_surface_target(
                 index,
                 TargetRef::Child(child_index),
                 component_id,
@@ -580,7 +580,17 @@ impl Shell {
                 height,
                 scale,
                 total_render_started,
-            )?;
+            ) {
+                Ok(presented) => presented,
+                Err(ShellRunError::Presentation(error)) => {
+                    tracing::warn!(
+                        "presenting child popup {child_surface_id} failed; destroying popup and keeping parent surface alive: {error}"
+                    );
+                    self.destroy_child_surface_at(index, child_index);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             any_presented |= presented;
         }
 

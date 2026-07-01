@@ -187,7 +187,6 @@ fn find_scrollable_at_with_offset(
     None
 }
 
-
 /// Measure a surface's content size for the compositor.
 ///
 /// The surface root's own laid-out box **is** the measured size: the layout

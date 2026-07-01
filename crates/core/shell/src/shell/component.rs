@@ -47,7 +47,7 @@ use mesh_core_frontend::{
 };
 use mesh_core_locale::LocaleEngine;
 use mesh_core_scripting::{
-    LocaleBoundState, ScriptContext, ScriptInterfaceImport, ScriptState, SurfaceVm,
+    LocaleBoundState, PublishedEvent, ScriptContext, ScriptInterfaceImport, ScriptState, SurfaceVm,
 };
 use mesh_core_theme::{Theme, default_theme};
 use mesh_core_wayland::{Edge, KeyboardMode, ShellSurface};
@@ -55,7 +55,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use mesh_core_render::{
     DamageRect, DisplayListMetrics, DisplayListRepaintPolicy, DisplayPaintCommand, PixelBuffer,
@@ -100,6 +100,13 @@ pub(super) struct ScrollAnimation {
     pub(super) target: ScrollOffsetState,
     pub(super) start_time: std::time::Instant,
     pub(super) duration: std::time::Duration,
+}
+
+#[derive(Debug, Clone)]
+struct ScheduledHandler {
+    instance_key: String,
+    handler: String,
+    deadline: Instant,
 }
 
 impl ComponentDirtyFlags {
@@ -357,6 +364,7 @@ pub(super) struct FrontendSurfaceComponent {
     checked_values: HashMap<String, bool>,
     render_hooks_pending: bool,
     pub(super) scroll_offsets: HashMap<String, ScrollOffsetState>,
+    scheduled_handlers: HashMap<String, ScheduledHandler>,
     /// In-flight smooth-scroll animations keyed by scroll-container node key.
     /// Ticked at the top of `finalize_tree`; each writes an eased offset into
     /// `scroll_offsets` until it settles, then is dropped. Started by
@@ -527,6 +535,7 @@ impl FrontendSurfaceComponent {
             checked_values: HashMap::new(),
             render_hooks_pending: true,
             scroll_offsets: HashMap::new(),
+            scheduled_handlers: HashMap::new(),
             scroll_animations: HashMap::new(),
             hovered_key: None,
             hovered_path: Vec::new(),

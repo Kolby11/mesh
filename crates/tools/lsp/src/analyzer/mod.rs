@@ -21,6 +21,11 @@ fn try_upgrade_to_proxy_ctx(
     if doc.interface_proxies.is_empty()
         && doc.element_ref_aliases.is_empty()
         && doc.component_instances.is_empty()
+        && doc
+            .parsed
+            .as_ref()
+            .and_then(|parsed| parsed.props.as_ref())
+            .is_none()
     {
         return ctx;
     }
@@ -100,7 +105,7 @@ pub fn complete(
         }
         Block::Style => {
             let ctx = crate::util::style_context_at(content, loc.offset_in_block);
-            style::complete(ctx, content)
+            style::complete(ctx, doc, content)
         }
         Block::Script => {
             let ctx = crate::util::script_context_at(content, loc.offset_in_block);
@@ -276,6 +281,44 @@ item_row.$0
         assert!(!labels.contains(&"private_state".to_string()));
         assert!(!labels.contains(&"privateHelper".to_string()));
         assert!(!labels.contains(&"render".to_string()));
+    }
+
+    #[test]
+    fn script_completion_on_props_offers_declared_props_and_helpers() {
+        let (source, position) = fixture_with_cursor(
+            r#"<props>
+  track_width: { type: "size", default: "20px" }
+  anim_ms: { type: "duration", default: 120 }
+</props>
+<script lang="luau">
+props.$0
+</script>
+"#,
+        );
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+        let labels = completion_labels(&doc, position);
+
+        assert!(labels.contains(&"track_width".to_string()));
+        assert!(labels.contains(&"anim_ms".to_string()));
+        assert!(labels.contains(&"source".to_string()));
+        assert!(labels.contains(&"at".to_string()));
+    }
+
+    #[test]
+    fn style_completion_inside_prop_call_offers_declared_props() {
+        let (source, position) = fixture_with_cursor(
+            r#"<props>
+  track_width: { type: "size", default: "20px" }
+</props>
+<style>
+.slider { width: prop(track_$0); }
+</style>
+"#,
+        );
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+        let labels = completion_labels(&doc, position);
+
+        assert_eq!(labels, vec!["track_width".to_string()]);
     }
 
     #[test]

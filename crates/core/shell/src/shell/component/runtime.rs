@@ -1,6 +1,52 @@
 use super::*;
 
 impl FrontendSurfaceComponent {
+    fn drain_local_script_events(
+        &mut self,
+        instance_key: &str,
+        events: Vec<PublishedEvent>,
+    ) -> Vec<CoreRequest> {
+        let mut shell_events = Vec::new();
+        for event in events {
+            match event.channel.as_str() {
+                "shell.schedule-handler" => {
+                    let Some(key) = event.payload.get("key").and_then(|value| value.as_str())
+                    else {
+                        continue;
+                    };
+                    let Some(handler) = event
+                        .payload
+                        .get("handler")
+                        .and_then(|value| value.as_str())
+                    else {
+                        continue;
+                    };
+                    let delay_ms = event
+                        .payload
+                        .get("delay_ms")
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0)
+                        .min(5_000);
+                    self.scheduled_handlers.insert(
+                        key.to_string(),
+                        ScheduledHandler {
+                            instance_key: instance_key.to_string(),
+                            handler: handler.to_string(),
+                            deadline: Instant::now() + Duration::from_millis(delay_ms),
+                        },
+                    );
+                }
+                "shell.cancel-handler" => {
+                    if let Some(key) = event.payload.get("key").and_then(|value| value.as_str()) {
+                        self.scheduled_handlers.remove(key);
+                    }
+                }
+                _ => shell_events.push(event),
+            }
+        }
+        script_events_to_requests(shell_events)
+    }
+
     pub(super) fn call_node_handler(
         &mut self,
         tree: &WidgetNode,
@@ -127,6 +173,7 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn create_runtime_for_component(
         &self,
+        instance_key: &str,
         component_id: String,
         manifest: &mesh_core_module::Manifest,
         component: &mesh_core_component::ComponentFile,
@@ -177,7 +224,13 @@ impl FrontendSurfaceComponent {
         for (key, value) in props {
             script_ctx.state_mut().set(key.clone(), value.clone());
         }
-        publish_resolved_props(&mut script_ctx, component, props);
+        publish_resolved_props(
+            &mut script_ctx,
+            component,
+            props,
+            &self.settings_json,
+            instance_key,
+        );
         for (service_name, payload) in &self.cached_service_payloads {
             let interface = format!("mesh.{service_name}");
             // Always seed the Lua-level service payload so interface proxies
@@ -233,10 +286,12 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn create_runtime(
         &self,
+        instance_key: &str,
         compiled: &CompiledFrontendModule,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<EmbeddedFrontendRuntime, ComponentError> {
         self.create_runtime_for_component(
+            instance_key,
             compiled.manifest.package.id.clone(),
             &compiled.manifest,
             &compiled.component,
@@ -247,7 +302,7 @@ impl FrontendSurfaceComponent {
     pub(super) fn init_root_runtime(&self) -> Result<(), ComponentError> {
         let mut props = HashMap::new();
         props.insert("settings".into(), self.settings_json.clone());
-        let runtime = self.create_runtime(&self.compiled, &props)?;
+        let runtime = self.create_runtime(self.id(), &self.compiled, &props)?;
         self.runtimes
             .lock()
             .unwrap()
@@ -268,7 +323,7 @@ impl FrontendSurfaceComponent {
                     message: format!("missing embedded frontend module '{module_id}'"),
                 });
             };
-            let runtime = self.create_runtime(&entry.compiled, props)?;
+            let runtime = self.create_runtime(instance_key, &entry.compiled, props)?;
             let mut runtime = runtime;
             Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
             self.runtimes
@@ -321,6 +376,7 @@ impl FrontendSurfaceComponent {
                 });
             };
             let runtime = self.create_runtime_for_component(
+                instance_key,
                 format!("{host_module_id}::{alias}"),
                 host_manifest,
                 component,
@@ -493,8 +549,9 @@ impl FrontendSurfaceComponent {
         }
         Self::drain_script_diagnostics(&self.diagnostics, runtime);
         let state_dirty = runtime.script_ctx.state().is_dirty();
-        let mut events = script_events_to_requests(runtime.script_ctx.drain_published_events());
+        let published = runtime.script_ctx.drain_published_events();
         drop(runtimes);
+        let mut events = self.drain_local_script_events(&instance_key, published);
         // A live `bind:this` cross-call mutated another instance's `_ENV` directly
         // during this handler — a parent calling `child.fn()` (parent→child) or a
         // child firing `self.Event` to a subscribed parent (child→parent). Re-sync
@@ -554,9 +611,9 @@ impl FrontendSurfaceComponent {
             if neighbor.script_ctx.state().is_dirty() {
                 state_dirty = true;
             }
-            events.extend(script_events_to_requests(
-                neighbor.script_ctx.drain_published_events(),
-            ));
+            let published = neighbor.script_ctx.drain_published_events();
+            drop(runtimes);
+            events.extend(self.drain_local_script_events(&neighbor_key, published));
         }
         (state_dirty, events)
     }
@@ -600,16 +657,40 @@ pub(super) fn publish_resolved_props(
     script_ctx: &mut ScriptContext,
     component: &mesh_core_component::ComponentFile,
     instance_props: &HashMap<String, serde_json::Value>,
+    settings_json: &serde_json::Value,
+    instance_key: &str,
 ) {
     let Some(block) = &component.props else {
         return;
     };
     let mut props = serde_json::Map::new();
+    let global_settings = settings_json
+        .pointer("/props/global")
+        .and_then(serde_json::Value::as_object);
+    let instance_settings = settings_json
+        .pointer("/props/instances")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|instances| instances.get(instance_key))
+        .and_then(serde_json::Value::as_object);
     for def in &block.props {
-        let resolved = instance_props
-            .get(&def.name)
-            .cloned()
-            .or_else(|| def.default.as_ref().map(prop_default_to_json));
+        let resolved = def
+            .default
+            .as_ref()
+            .map(prop_default_to_json)
+            .into_iter()
+            .chain(
+                global_settings
+                    .and_then(|settings| settings.get(&def.name))
+                    .cloned(),
+            )
+            .chain(instance_props.get(&def.name).cloned())
+            .chain(
+                instance_settings
+                    .and_then(|settings| settings.get(&def.name))
+                    .cloned(),
+            )
+            .last()
+            .and_then(|value| validate_json_prop(def, value));
         if let Some(value) = resolved {
             props.insert(def.name.clone(), value);
         }
@@ -624,10 +705,23 @@ pub(super) fn publish_resolved_props(
 }
 
 fn prop_default_to_json(value: &mesh_core_component::PropValue) -> serde_json::Value {
-    match value {
-        mesh_core_component::PropValue::String(s) => serde_json::Value::String(s.clone()),
-        mesh_core_component::PropValue::Number(n) => serde_json::json!(n),
-        mesh_core_component::PropValue::Bool(b) => serde_json::Value::Bool(*b),
+    mesh_core_component::prop_value_to_json(value)
+}
+
+fn validate_json_prop(
+    def: &mesh_core_component::PropDef,
+    value: serde_json::Value,
+) -> Option<serde_json::Value> {
+    let prop_value = mesh_core_component::json_to_prop_value(value.clone())?;
+    match mesh_core_component::validate_prop_value(def, &prop_value) {
+        Ok(()) => Some(value),
+        Err(err) => {
+            tracing::warn!(
+                "invalid value for prop `{}` from settings/instance state ignored: {err}",
+                def.name
+            );
+            None
+        }
     }
 }
 

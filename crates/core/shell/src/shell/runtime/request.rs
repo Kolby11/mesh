@@ -963,6 +963,106 @@ impl Shell {
         cancelled
     }
 
+    pub(in crate::shell) fn defer_child_popover_hides_for_parent(
+        &mut self,
+        parent_surface_id: &str,
+    ) {
+        let Some(index) = self.component_index_for_surface(parent_surface_id) else {
+            return;
+        };
+        let hide_at = std::time::Instant::now() + POPOVER_HOVER_BRIDGE_DELAY;
+        let child_surface_ids: Vec<_> = self.components[index]
+            .children
+            .iter()
+            .filter(|child| child.target.popup_parent_surface.as_deref() == Some(parent_surface_id))
+            .map(|child| child.target.surface_id.clone())
+            .collect();
+        for surface_id in child_surface_ids {
+            self.pending_popover_hides.insert(surface_id, hide_at);
+        }
+    }
+
+    pub(in crate::shell) fn cancel_pending_child_popover_hides_at(
+        &mut self,
+        parent_surface_id: &str,
+        x: f32,
+        y: f32,
+    ) {
+        let Some(index) = self.component_index_for_surface(parent_surface_id) else {
+            return;
+        };
+        let child_surface_ids: Vec<_> = self.components[index]
+            .children
+            .iter()
+            .filter(|child| {
+                child.target.popup_parent_surface.as_deref() == Some(parent_surface_id)
+                    && point_in_rect(x, y, child.anchor_rect)
+            })
+            .map(|child| child.target.surface_id.clone())
+            .collect();
+        for surface_id in child_surface_ids {
+            self.cancel_pending_popover_hide(&surface_id);
+        }
+    }
+
+    fn child_popover_pointer_leave_requests(
+        &mut self,
+        surface_id: &str,
+    ) -> Result<Option<VecDeque<CoreRequest>>, ShellRunError> {
+        let Some((index, crate::shell::types::TargetRef::Child(child_index))) =
+            self.component_target_for_surface(surface_id)
+        else {
+            return Ok(None);
+        };
+        if self.components[index].children[child_index]
+            .target
+            .popup_parent_surface
+            .is_none()
+        {
+            return Ok(None);
+        }
+
+        let node_key = self.components[index].children[child_index]
+            .node_key
+            .clone();
+        let target_surface_size = self.components[index].children[child_index]
+            .target
+            .known_surface_size
+            .or_else(|| {
+                self.components[index].children[child_index]
+                    .target
+                    .paint_buffer
+                    .as_ref()
+                    .map(|buffer| (buffer.width.max(1), buffer.height.max(1)))
+            })
+            .or_else(|| self.presentation_engine.surface_size_if_known(surface_id))
+            .unwrap_or((1, 1));
+        let component_surface_size = self.components[index]
+            .parent
+            .known_surface_size
+            .or_else(|| {
+                self.surfaces
+                    .get(&self.components[index].surface_id)
+                    .map(|surface| (surface.width.max(1), surface.height.max(1)))
+            })
+            .unwrap_or(target_surface_size);
+        self.components[index]
+            .target_mut(crate::shell::types::TargetRef::Child(child_index))
+            .known_surface_size = Some(target_surface_size);
+
+        let emitted = self.components[index]
+            .component
+            .handle_child_surface_input(
+                &node_key,
+                self.theme.active(),
+                component_surface_size.0,
+                component_surface_size.1,
+                ComponentInput::PointerLeave,
+            )
+            .map_err(ShellRunError::Component)?;
+        Ok(Some(VecDeque::from(emitted)))
+    }
+
     fn surface_is_promoted_popover(&mut self, surface_id: &str) -> bool {
         let Some((index, target)) = self.component_target_for_surface(surface_id) else {
             return false;
@@ -1062,7 +1162,12 @@ impl Shell {
         let mut emitted = VecDeque::new();
         for surface_id in due_popovers {
             self.pending_popover_hides.remove(&surface_id);
-            emitted.extend(self.set_surface_visibility(surface_id, false)?);
+            if let Some(mut requests) = self.child_popover_pointer_leave_requests(&surface_id)? {
+                self.drain_requests(&mut requests)?;
+                emitted.extend(requests);
+            } else {
+                emitted.extend(self.set_surface_visibility(surface_id, false)?);
+            }
         }
         for surface_id in due {
             emitted.extend(self.set_surface_visibility_now(surface_id, false)?);
@@ -1092,6 +1197,13 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::CycleDebugTab => "cycle_debug_tab",
         CoreRequest::Shutdown => "shutdown",
     }
+}
+
+fn point_in_rect(x: f32, y: f32, rect: (i32, i32, i32, i32)) -> bool {
+    let (left, top, width, height) = rect;
+    let right = left.saturating_add(width.max(0));
+    let bottom = top.saturating_add(height.max(0));
+    x >= left as f32 && x < right as f32 && y >= top as f32 && y < bottom as f32
 }
 
 fn benchmark_scenario_id(scenario_id: &str) -> Option<BenchmarkScenarioId> {

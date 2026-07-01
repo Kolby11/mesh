@@ -58,6 +58,9 @@ impl Shell {
                     | WindowEvent::Scroll { .. }
             ) {
                 self.cancel_pending_popover_hide(&target_surface_id);
+                if let WindowEvent::PointerMove { x, y, .. } = &event {
+                    self.cancel_pending_child_popover_hides_at(&target_surface_id, *x, *y);
+                }
             } else if matches!(event, WindowEvent::PointerLeave { .. })
                 && self.components[index]
                     .target(target)
@@ -66,6 +69,10 @@ impl Shell {
             {
                 let mut pending = self.hide_popover(target_surface_id.clone(), true)?;
                 self.drain_requests(&mut pending)?;
+            } else if matches!(event, WindowEvent::PointerLeave { .. })
+                && matches!(target, TargetRef::Parent)
+            {
+                self.defer_child_popover_hides_for_parent(&target_surface_id);
             }
             let Some(surface) = self.surfaces.get(&target_surface_id) else {
                 continue;

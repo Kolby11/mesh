@@ -11,7 +11,7 @@
 //! </props>
 //! ```
 
-use crate::{LocalizedLabel, PropDef, PropType, PropValue, PropsBlock};
+use crate::{LocalizedLabel, PropDef, PropType, PropValue, PropsBlock, validate_prop_value};
 
 use super::ParseError;
 
@@ -23,7 +23,10 @@ enum RawValue {
     Bool(bool),
     Array(Vec<RawValue>),
     /// A function call such as `t("var.width")` — used for localized labels.
-    Call { name: String, args: Vec<RawValue> },
+    Call {
+        name: String,
+        args: Vec<RawValue>,
+    },
 }
 
 struct Scanner<'a> {
@@ -253,9 +256,10 @@ fn build_prop(name: String, fields: Vec<(String, RawValue)>) -> Result<PropDef, 
         match key.as_str() {
             "type" => {
                 let raw = expect_string(&key, &name, &value)?;
-                ty = Some(PropType::from_str(&raw).ok_or_else(|| {
-                    invalid(format!("prop `{name}` has unknown type `{raw}`"))
-                })?);
+                ty =
+                    Some(PropType::from_str(&raw).ok_or_else(|| {
+                        invalid(format!("prop `{name}` has unknown type `{raw}`"))
+                    })?);
             }
             "default" => default = Some(to_prop_value(&key, &name, value)?),
             "label" => label = Some(to_label(&key, &name, value)?),
@@ -282,7 +286,7 @@ fn build_prop(name: String, fields: Vec<(String, RawValue)>) -> Result<PropDef, 
         )));
     }
 
-    Ok(PropDef {
+    let def = PropDef {
         name,
         ty,
         default,
@@ -294,7 +298,20 @@ fn build_prop(name: String, fields: Vec<(String, RawValue)>) -> Result<PropDef, 
         step,
         unit,
         expose,
-    })
+    };
+
+    if let Some(default) = &def.default {
+        validate_prop_value(&def, default).map_err(|err| {
+            invalid(format!(
+                "prop `{}` default is invalid for type `{}`: {}",
+                def.name,
+                def.ty.as_str(),
+                err
+            ))
+        })?;
+    }
+
+    Ok(def)
 }
 
 fn to_prop_value(field: &str, prop: &str, value: RawValue) -> Result<PropValue, ParseError> {
@@ -302,7 +319,11 @@ fn to_prop_value(field: &str, prop: &str, value: RawValue) -> Result<PropValue, 
         RawValue::Str(s) => Ok(PropValue::String(s)),
         RawValue::Num(n) => Ok(PropValue::Number(n)),
         RawValue::Bool(b) => Ok(PropValue::Bool(b)),
-        _ => Err(field_type_error(field, prop, "a string, number, or boolean")),
+        _ => Err(field_type_error(
+            field,
+            prop,
+            "a string, number, or boolean",
+        )),
     }
 }
 
@@ -373,9 +394,7 @@ fn expect_bool(field: &str, prop: &str, value: &RawValue) -> Result<bool, ParseE
 }
 
 fn field_type_error(field: &str, prop: &str, expected: &str) -> ParseError {
-    invalid(format!(
-        "prop `{prop}` field `{field}` must be {expected}"
-    ))
+    invalid(format!("prop `{prop}` field `{field}` must be {expected}"))
 }
 
 fn describe(c: Option<char>) -> String {
@@ -454,7 +473,10 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(block.props[0].label, Some(LocalizedLabel::Literal("Plain".into())));
+        assert_eq!(
+            block.props[0].label,
+            Some(LocalizedLabel::Literal("Plain".into()))
+        );
         assert_eq!(
             block.props[1].label,
             Some(LocalizedLabel::Translation {
@@ -517,5 +539,28 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("unknown field `widht`"), "{err}");
+    }
+
+    #[test]
+    fn validates_typed_defaults() {
+        let err = parse_props(r#"x: { type: "bool", default: "yes" }"#)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("default is invalid"), "{err}");
+
+        let err = parse_props(r#"x: { type: "enum", options: ["a"], default: "b" }"#)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not one of"), "{err}");
+
+        parse_props(
+            r##"
+            color: { type: "color", default: "#ff00aa" }
+            token: { type: "token", default: "color-primary" }
+            icon: { type: "icon", default: "audio-volume-high" }
+            duration: { type: "duration", default: "120ms" }
+            "##,
+        )
+        .unwrap();
     }
 }

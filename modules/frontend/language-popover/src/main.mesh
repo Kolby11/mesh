@@ -9,34 +9,36 @@
     onpointerenter={onPopoverEnter}
     onpointerleave={onPopoverLeave}
   >
-    <BubbleOptions
-      label="{t('language.choose')}"
-      item1_button_class="{item1_button_class}"
-      item1_core_class="{item1_core_class}"
-      item1_icon_class="bubble-option-icon bubble-option-hidden"
-      item1_icon="palette"
-      item1_text_class="bubble-option-text"
-      item1_text="{item1_text}"
-      item1_title="{item1_title}"
-      onfirst={onSelectFirst}
-      item2_button_class="{item2_button_class}"
-      item2_core_class="{item2_core_class}"
-      item2_icon_class="bubble-option-icon bubble-option-hidden"
-      item2_icon="palette"
-      item2_text_class="bubble-option-text"
-      item2_text="{item2_text}"
-      item2_title="{item2_title}"
-      onsecond={onSelectSecond}
-      item3_button_class="{item3_button_class}"
-      item3_core_class="{item3_core_class}"
-      item3_icon_class="bubble-option-icon bubble-option-hidden"
-      item3_icon="palette"
-      item3_text_class="bubble-option-text"
-      item3_text="{item3_text}"
-      item3_title="{item3_title}"
-      onthird={onSelectThird}
-      onscroll={onOptionScroll}
-    />
+    <box class="bubble-popover-panel">
+      <BubbleOptions
+        label="{t('language.choose')}"
+        item1_button_class="{item1_button_class}"
+        item1_core_class="{item1_core_class}"
+        item1_icon_class="bubble-option-icon bubble-option-hidden"
+        item1_icon="palette"
+        item1_text_class="bubble-option-text"
+        item1_text="{item1_text}"
+        item1_title="{item1_title}"
+        onfirst={onSelectFirst}
+        item2_button_class="{item2_button_class}"
+        item2_core_class="{item2_core_class}"
+        item2_icon_class="bubble-option-icon bubble-option-hidden"
+        item2_icon="palette"
+        item2_text_class="bubble-option-text"
+        item2_text="{item2_text}"
+        item2_title="{item2_title}"
+        onsecond={onSelectSecond}
+        item3_button_class="{item3_button_class}"
+        item3_core_class="{item3_core_class}"
+        item3_icon_class="bubble-option-icon bubble-option-hidden"
+        item3_icon="palette"
+        item3_text_class="bubble-option-text"
+        item3_text="{item3_text}"
+        item3_title="{item3_title}"
+        onthird={onSelectThird}
+        onscroll={onOptionScroll}
+      />
+    </box>
   </popover>
 </template>
 
@@ -217,10 +219,27 @@ end
     padding: 0;
     background: transparent;
     opacity: 1;
-    transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    transform: translateY(0px) scale(1);
+    transition: opacity 160ms var(--animation-curves-bezier-standard),
+                transform 220ms var(--animation-curves-bezier-emphasized-decelerate);
+}
+
+.bubble-popover-panel {
+    width: 112px;
+    height: 74px;
+    padding: 0;
+    background: transparent;
+}
+
+.language-popover-shell.mesh-surface-entering {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.92);
 }
 
 .language-popover-shell.mesh-surface-exiting {
     opacity: 0;
+    transform: translateY(-6px) scale(0.94);
+    transition: opacity 120ms var(--animation-curves-bezier-standard),
+                transform 140ms var(--animation-curves-bezier-standard);
 }
 </style>

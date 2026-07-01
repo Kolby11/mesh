@@ -2,14 +2,15 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, InsertTextFormat, MarkupContent, MarkupKind,
 };
 
-use crate::{knowledge::css::CSS_PROPERTIES, util::StyleContext};
+use crate::{document::Document, knowledge::css::CSS_PROPERTIES, util::StyleContext};
 use std::{collections::BTreeSet, sync::OnceLock};
 
-pub fn complete(ctx: StyleContext, style_source: &str) -> Vec<CompletionItem> {
+pub fn complete(ctx: StyleContext, doc: &Document, style_source: &str) -> Vec<CompletionItem> {
     match ctx {
         StyleContext::Property => complete_properties(),
         StyleContext::Value { property } => complete_values(&property),
         StyleContext::Variable { prefix } => complete_variables(&prefix, style_source),
+        StyleContext::Prop { prefix } => complete_props(&prefix, doc),
         StyleContext::Selector => vec![],
     }
 }
@@ -88,8 +89,58 @@ fn complete_values(property: &str) -> Vec<CompletionItem> {
         sort_text: Some("9_var".to_string()),
         ..Default::default()
     });
+    items.push(CompletionItem {
+        label: "prop()".to_string(),
+        insert_text: Some("prop($1)".to_string()),
+        insert_text_format: Some(InsertTextFormat::SNIPPET),
+        kind: Some(CompletionItemKind::FUNCTION),
+        detail: Some("Reference a typed component prop".to_string()),
+        documentation: Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: "Reference a prop declared in this component's `<props>` block.".to_string(),
+        })),
+        sort_text: Some("9_prop".to_string()),
+        ..Default::default()
+    });
 
     items
+}
+
+fn complete_props(prefix: &str, doc: &Document) -> Vec<CompletionItem> {
+    let Some(block) = doc.parsed.as_ref().and_then(|parsed| parsed.props.as_ref()) else {
+        return vec![];
+    };
+    block
+        .props
+        .iter()
+        .filter(|prop| prop.name.starts_with(prefix))
+        .map(|prop| CompletionItem {
+            label: prop.name.clone(),
+            kind: Some(CompletionItemKind::VARIABLE),
+            detail: Some(format!("prop: {}", prop.ty.as_str())),
+            documentation: Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format!(
+                    "**`prop({})`**\n\nType: `{}`{}",
+                    prop.name,
+                    prop.ty.as_str(),
+                    prop.default
+                        .as_ref()
+                        .map(|value| format!("\n\nDefault: `{}`", prop_default_label(value)))
+                        .unwrap_or_default()
+                ),
+            })),
+            ..Default::default()
+        })
+        .collect()
+}
+
+fn prop_default_label(value: &mesh_core_component::PropValue) -> String {
+    match value {
+        mesh_core_component::PropValue::String(value) => value.clone(),
+        mesh_core_component::PropValue::Number(value) => value.to_string(),
+        mesh_core_component::PropValue::Bool(value) => value.to_string(),
+    }
 }
 
 fn complete_variables(prefix: &str, style_source: &str) -> Vec<CompletionItem> {
@@ -182,6 +233,7 @@ mod tests {
 
         assert!(transparent < var);
         assert!(!labels.contains(&"token()"));
+        assert!(labels.contains(&"prop()"));
     }
 
     #[test]

@@ -118,12 +118,7 @@ impl FrontendSurfaceComponent {
         surface.anchor(self.surface_layout.edge);
         surface.set_layer(self.surface_layout.layer);
         let (width, height) = self.requested_layout_size();
-        let (tooltip_extra_width, tooltip_extra_height) =
-            Self::tooltip_overlay_extra_for_content(width, height);
-        surface.set_size(
-            width.saturating_add(tooltip_extra_width),
-            height.saturating_add(tooltip_extra_height),
-        );
+        surface.set_size(width, height);
         surface.set_exclusive_zone(self.surface_layout.exclusive_zone);
         surface.set_keyboard_interactivity(
             self.keyboard_mode_override

@@ -28,10 +28,20 @@ trigger_class = "nav-button"
 
 lang_popover = nil
 local lang_popover_connected = false
--- Script-side hover bridge: set when trigger leave fires; cleared by PopoverEnter.
--- render() checks elapsed time and closes if bridge expires without entry.
-local close_after = nil
-local BRIDGE_DELAY = 0.15
+local CLOSE_BRIDGE_KEY = "language-popover-close"
+local CLOSE_BRIDGE_DELAY_MS = 180
+
+local function cancel_bridge_close()
+    mesh.events.publish("shell.cancel-handler", { key = CLOSE_BRIDGE_KEY })
+end
+
+local function schedule_bridge_close()
+    mesh.events.publish("shell.schedule-handler", {
+        key = CLOSE_BRIDGE_KEY,
+        handler = "closeLanguageBridge",
+        delay_ms = CLOSE_BRIDGE_DELAY_MS,
+    })
+end
 
 local function locale_code()
     local locale = mesh.locale.current()
@@ -77,18 +87,18 @@ end
 
 local function do_open()
     if lang_popover and language_surface_hidden then
+        cancel_bridge_close()
         lang_popover.open = true
         language_surface_hidden = false
-        close_after = nil
         sync_trigger_state()
     end
 end
 
 local function do_close()
+    cancel_bridge_close()
     if lang_popover and not language_surface_hidden then
         lang_popover.open = false
         language_surface_hidden = true
-        close_after = nil
         sync_trigger_state()
     end
 end
@@ -101,16 +111,11 @@ function render(self)
     if lang_popover ~= nil and not lang_popover_connected then
         lang_popover_connected = true
         lang_popover.PopoverEnter:on(function()
-            close_after = nil
+            cancel_bridge_close()
         end)
         lang_popover.PopoverLeave:on(function()
             do_close()
         end)
-    end
-
-    -- Hover bridge: close when delay expires without PopoverEnter cancelling.
-    if close_after ~= nil and os.clock() >= close_after then
-        do_close()
     end
 end
 
@@ -128,14 +133,18 @@ function onLanguageToggle(event)
 end
 
 function onLanguageEnter(event)
+    cancel_bridge_close()
     do_open()
 end
 
--- Start the hover bridge: give the pointer time to reach the popup before closing.
 function onLanguageLeave()
     if not language_surface_hidden then
-        close_after = os.clock() + BRIDGE_DELAY
+        schedule_bridge_close()
     end
+end
+
+function closeLanguageBridge()
+    do_close()
 end
 </script>
 

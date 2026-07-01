@@ -5215,6 +5215,80 @@ fn child_surface_reconcile_removes_closed_popover() {
 }
 
 #[test]
+fn parent_pointer_leave_defers_child_popover_close() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+
+    shell.render_components().unwrap();
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+
+    shell.presentation_engine.testing_push_event(
+        mesh_core_presentation::WindowEvent::PointerLeave {
+            surface_id: "@test/popover-host".into(),
+        },
+    );
+    shell.dispatch_wayland().unwrap();
+
+    assert!(
+        shell.pending_popover_hides.contains_key(&child_id),
+        "leaving the parent trigger surface should arm a bridge hide for its child popup"
+    );
+
+    shell.presentation_engine.testing_push_event(
+        mesh_core_presentation::WindowEvent::PointerMove {
+            surface_id: child_id.clone(),
+            x: 4.0,
+            y: 4.0,
+        },
+    );
+    shell.dispatch_wayland().unwrap();
+
+    assert!(
+        !shell.pending_popover_hides.contains_key(&child_id),
+        "entering the promoted child popup should cancel the bridge hide"
+    );
+}
+
+#[test]
+fn child_popover_hover_bridge_deadline_synthesizes_pointer_leave() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+
+    shell.render_components().unwrap();
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+
+    shell.presentation_engine.testing_push_event(
+        mesh_core_presentation::WindowEvent::PointerLeave {
+            surface_id: "@test/popover-host".into(),
+        },
+    );
+    shell.dispatch_wayland().unwrap();
+    shell
+        .pending_popover_hides
+        .insert(child_id.clone(), Instant::now() - Duration::from_millis(1));
+
+    shell.complete_due_surface_transitions().unwrap();
+
+    let inputs = &state.lock().unwrap().child_inputs;
+    assert!(
+        inputs.iter().any(|(node_key, input)| {
+            node_key == "root/popover" && matches!(input, ComponentInput::PointerLeave)
+        }),
+        "bridge deadline should route PointerLeave into the child popup component"
+    );
+    assert!(
+        !shell.pending_popover_hides.contains_key(&child_id),
+        "bridge deadline should drain the pending hide"
+    );
+}
+
+#[test]
 fn dismissed_popup_drain_removes_child_surface() {
     let mut shell = Shell::new();
     shell.presentation_engine =

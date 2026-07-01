@@ -3,8 +3,8 @@ use super::{
     CompatibilitySection, DependenciesSection, DependencySpec, EntrypointsSection, ExportsSection,
     ExtensionSection, FontDependency, I18nSection, IconPackSection, IconRequirementsSection,
     IconsSection, InterfaceDependency, InterfaceSection, KeybindsSection, Manifest, ModuleSection,
-    ModuleType, NativeDependency, OptionalDependencyGroup, ProvidedInterface,
-    SlotContribution, SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
+    ModuleType, NativeDependency, OptionalDependencyGroup, ProvidedInterface, SlotContribution,
+    SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
 };
 use mesh_core_theme::TokenValue;
 use serde::Deserialize;

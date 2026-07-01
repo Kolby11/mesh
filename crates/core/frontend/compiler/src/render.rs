@@ -40,11 +40,38 @@ pub fn resolve_css_props(
     // resolved value per name); script writes round-trip back into it.
     let props_state = state.and_then(|s| s.get("props"));
     for def in &block.props {
-        let value = props_state
-            .as_ref()
-            .and_then(|obj| obj.get(&def.name))
-            .map(|value| json_value_to_css_string(value.clone()))
-            .or_else(|| def.default.as_ref().map(prop_default_to_css_string));
+        let value =
+            props_state
+                .as_ref()
+                .and_then(|obj| obj.get(&def.name))
+                .and_then(|value| {
+                    mesh_core_component::json_to_prop_value(value.clone()).and_then(|value| {
+                        match mesh_core_component::prop_value_to_css(def, &value) {
+                            Ok(css) => Some(css),
+                            Err(err) => {
+                                tracing::warn!(
+                                    "invalid runtime value for prop `{}` ignored: {err}",
+                                    def.name
+                                );
+                                None
+                            }
+                        }
+                    })
+                })
+                .or_else(|| {
+                    def.default.as_ref().and_then(|value| {
+                        match mesh_core_component::prop_value_to_css(def, value) {
+                            Ok(css) => Some(css),
+                            Err(err) => {
+                                tracing::warn!(
+                                    "invalid default value for prop `{}` ignored: {err}",
+                                    def.name
+                                );
+                                None
+                            }
+                        }
+                    })
+                });
         if let Some(value) = value {
             map.insert(prop_variable_key(&def.name), StyleValue::Literal(value));
         }
@@ -65,7 +92,10 @@ pub fn props_settings_schema(block: Option<&PropsBlock>) -> Option<serde_json::V
             continue;
         }
         let mut field = serde_json::Map::new();
-        field.insert("type".into(), serde_json::Value::String(def.ty.as_str().into()));
+        field.insert(
+            "type".into(),
+            serde_json::Value::String(def.ty.as_str().into()),
+        );
         if let Some(default) = &def.default {
             field.insert("default".into(), prop_value_to_json(default));
         }
@@ -107,11 +137,7 @@ pub fn props_settings_schema(block: Option<&PropsBlock>) -> Option<serde_json::V
 }
 
 fn prop_value_to_json(value: &PropValue) -> serde_json::Value {
-    match value {
-        PropValue::String(s) => serde_json::Value::String(s.clone()),
-        PropValue::Number(n) => serde_json::json!(n),
-        PropValue::Bool(b) => serde_json::Value::Bool(*b),
-    }
+    mesh_core_component::prop_value_to_json(value)
 }
 
 fn localized_label_to_json(label: &mesh_core_component::LocalizedLabel) -> serde_json::Value {
@@ -123,36 +149,13 @@ fn localized_label_to_json(label: &mesh_core_component::LocalizedLabel) -> serde
             let mut obj = serde_json::Map::new();
             obj.insert("t".into(), serde_json::Value::String(key.clone()));
             if let Some(fallback) = fallback {
-                obj.insert("fallback".into(), serde_json::Value::String(fallback.clone()));
+                obj.insert(
+                    "fallback".into(),
+                    serde_json::Value::String(fallback.clone()),
+                );
             }
             serde_json::Value::Object(obj)
         }
-    }
-}
-
-fn prop_default_to_css_string(value: &PropValue) -> String {
-    match value {
-        PropValue::String(s) => s.clone(),
-        PropValue::Number(n) => format_css_number(*n),
-        PropValue::Bool(b) => if *b { "1" } else { "0" }.to_string(),
-    }
-}
-
-fn json_value_to_css_string(value: serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(s) => s,
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Bool(b) => if b { "1" } else { "0" }.to_string(),
-        serde_json::Value::Null => String::new(),
-        other => other.to_string(),
-    }
-}
-
-fn format_css_number(n: f64) -> String {
-    if n.fract() == 0.0 {
-        format!("{}", n as i64)
-    } else {
-        n.to_string()
     }
 }
 
@@ -1017,7 +1020,15 @@ mod tests {
         let theme = mesh_core_theme::default_theme();
 
         let tree = build_widget_tree_from_component(
-            &component, &manifest, &theme, 200.0, 80.0, None, "root", None, &[],
+            &component,
+            &manifest,
+            &theme,
+            200.0,
+            80.0,
+            None,
+            "root",
+            None,
+            &[],
         );
 
         let slider = find_tag(&tree, "slider").expect("slider node");

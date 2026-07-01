@@ -9,34 +9,36 @@
         onpointerenter={onPopoverEnter}
         onpointerleave={onPopoverLeave}
     >
-        <BubbleOptions
-            label="Select theme"
-            item1_button_class="{dark_class}"
-            item1_core_class="{dark_core_class}"
-            item1_icon_class="bubble-option-icon"
-            item1_icon="weather-clear-night"
-            item1_text_class="bubble-option-text bubble-option-hidden"
-            item1_text=""
-            item1_title="Default Dark"
-            onfirst={onDark}
-            item2_button_class="{light_class}"
-            item2_core_class="{light_core_class}"
-            item2_icon_class="bubble-option-icon"
-            item2_icon="weather-clear"
-            item2_text_class="bubble-option-text bubble-option-hidden"
-            item2_text=""
-            item2_title="Default Light"
-            onsecond={onLight}
-            item3_button_class="{gruvbox_class}"
-            item3_core_class="{gruvbox_core_class}"
-            item3_icon_class="bubble-option-icon"
-            item3_icon="palette"
-            item3_text_class="bubble-option-text bubble-option-hidden"
-            item3_text=""
-            item3_title="Gruvbox"
-            onthird={onGruvbox}
-            onscroll={onThemeScroll}
-        />
+        <box class="bubble-popover-panel">
+            <BubbleOptions
+                label="Select theme"
+                item1_button_class="{dark_class}"
+                item1_core_class="{dark_core_class}"
+                item1_icon_class="bubble-option-icon"
+                item1_icon="weather-clear-night"
+                item1_text_class="bubble-option-text bubble-option-hidden"
+                item1_text=""
+                item1_title="Default Dark"
+                onfirst={onDark}
+                item2_button_class="{light_class}"
+                item2_core_class="{light_core_class}"
+                item2_icon_class="bubble-option-icon"
+                item2_icon="weather-clear"
+                item2_text_class="bubble-option-text bubble-option-hidden"
+                item2_text=""
+                item2_title="Default Light"
+                onsecond={onLight}
+                item3_button_class="{gruvbox_class}"
+                item3_core_class="{gruvbox_core_class}"
+                item3_icon_class="bubble-option-icon"
+                item3_icon="palette"
+                item3_text_class="bubble-option-text bubble-option-hidden"
+                item3_text=""
+                item3_title="Gruvbox"
+                onthird={onGruvbox}
+                onscroll={onThemeScroll}
+            />
+        </box>
     </popover>
 </template>
 
@@ -125,10 +127,27 @@ end
         padding: 0;
         background: transparent;
         opacity: 1;
-        transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+        transform: translateY(0px) scale(1);
+        transition: opacity 160ms var(--animation-curves-bezier-standard),
+        transform 220ms var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .bubble-popover-panel {
+        width: 112px;
+        height: 74px;
+        padding: 0;
+        background: transparent;
+    }
+
+    .theme-float-shell.mesh-surface-entering {
+        opacity: 0;
+        transform: translateY(-8px) scale(0.92);
     }
 
     .theme-float-shell.mesh-surface-exiting {
         opacity: 0;
+        transform: translateY(-6px) scale(0.94);
+        transition: opacity 120ms var(--animation-curves-bezier-standard),
+        transform 140ms var(--animation-curves-bezier-standard);
     }
 </style>

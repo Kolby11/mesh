@@ -15,7 +15,7 @@ pub fn hover(doc: &Document, position: Position, _registry: &ModuleRegistry) -> 
 
     let markdown = match &loc.block {
         Block::Template => hover_template(content, loc.offset_in_block)?,
-        Block::Style => hover_style(content, loc.offset_in_block)?,
+        Block::Style => hover_style(doc, content, loc.offset_in_block)?,
         Block::Script => hover_script(doc, content, loc.offset_in_block)?,
         _ => return None,
     };
@@ -93,7 +93,13 @@ fn hover_template(content: &str, offset: usize) -> Option<String> {
     None
 }
 
-fn hover_style(content: &str, offset: usize) -> Option<String> {
+fn hover_style(doc: &Document, content: &str, offset: usize) -> Option<String> {
+    if let Some(prop_name) = prop_call_name_at(content, offset)
+        && let Some(markdown) = prop_markdown(doc, prop_name)
+    {
+        return Some(markdown);
+    }
+
     let word = word_at(content, offset);
     if word.is_empty() {
         return None;
@@ -152,6 +158,13 @@ fn hover_script(doc: &Document, content: &str, offset: usize) -> Option<String> 
         return element_ref_markdown(doc, ref_name);
     }
 
+    if let Some(rest) = token.strip_prefix("props.") {
+        let prop_name = rest.split('.').next().unwrap_or(rest);
+        if let Some(markdown) = prop_markdown(doc, prop_name) {
+            return Some(markdown);
+        }
+    }
+
     // Look for full mesh.xxx.yyy path
     if token.starts_with("mesh.") {
         let api_path = token.trim_start_matches("mesh.");
@@ -170,6 +183,61 @@ fn hover_script(doc: &Document, content: &str, offset: usize) -> Option<String> 
     }
 
     None
+}
+
+fn prop_markdown(doc: &Document, prop_name: &str) -> Option<String> {
+    let prop = doc
+        .parsed
+        .as_ref()
+        .and_then(|parsed| parsed.props.as_ref())?
+        .props
+        .iter()
+        .find(|prop| prop.name == prop_name)?;
+    Some(format!(
+        "**`{}`** prop\n\nType: `{}` / Lua `{}`{}{}",
+        prop.name,
+        prop.ty.as_str(),
+        prop.ty.lua_type(),
+        prop.default
+            .as_ref()
+            .map(|value| format!("\n\nDefault: `{}`", prop_default_label(value)))
+            .unwrap_or_default(),
+        prop.label
+            .as_ref()
+            .map(|label| format!("\n\nLabel: {}", prop_label(label)))
+            .unwrap_or_default()
+    ))
+}
+
+fn prop_default_label(value: &mesh_core_component::PropValue) -> String {
+    match value {
+        mesh_core_component::PropValue::String(value) => value.clone(),
+        mesh_core_component::PropValue::Number(value) => value.to_string(),
+        mesh_core_component::PropValue::Bool(value) => value.to_string(),
+    }
+}
+
+fn prop_label(label: &mesh_core_component::LocalizedLabel) -> String {
+    match label {
+        mesh_core_component::LocalizedLabel::Literal(value) => format!("`{value}`"),
+        mesh_core_component::LocalizedLabel::Translation { key, fallback } => {
+            if let Some(fallback) = fallback {
+                format!("`{key}` (`{fallback}`)")
+            } else {
+                format!("`{key}`")
+            }
+        }
+    }
+}
+
+fn prop_call_name_at(source: &str, offset: usize) -> Option<&str> {
+    let before = &source[..offset.min(source.len())];
+    let call_start = before.rfind("prop(")?;
+    let after_start = call_start + "prop(".len();
+    let after = &source[after_start..];
+    let close = after.find(')')?;
+    let name = after[..close].trim();
+    if name.is_empty() { None } else { Some(name) }
 }
 
 /// Extract the word (alphanumeric + hyphens) around a byte offset.

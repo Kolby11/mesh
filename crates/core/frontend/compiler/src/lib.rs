@@ -151,8 +151,10 @@ impl CompiledFrontendModule {
             root.accessibility.description = accessibility.description.clone();
         }
 
-        let resolver = StyleResolver::new(theme)
-            .with_props(render::resolve_css_props(self.component.props.as_ref(), state));
+        let resolver = StyleResolver::new(theme).with_props(render::resolve_css_props(
+            self.component.props.as_ref(),
+            state,
+        ));
         let rules = self
             .component
             .style

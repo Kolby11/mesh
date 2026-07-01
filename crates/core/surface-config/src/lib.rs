@@ -1,5 +1,6 @@
 use mesh_core_module::Manifest;
 use mesh_core_wayland::{Edge, KeyboardMode, Layer};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Surface **placement**, resolved from the manifest and user settings.
@@ -26,6 +27,17 @@ pub struct SurfaceLayoutSettings {
 pub struct FrontendModuleSettingsState {
     pub raw: serde_json::Value,
     pub layout: SurfaceLayoutSettings,
+    pub props: FrontendModulePropSettings,
+}
+
+/// User prop overrides loaded from `config/settings.json`.
+///
+/// Shape:
+/// `{ "props": { "global": { ... }, "instances": { "<instance_key>": { ... } } } }`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FrontendModulePropSettings {
+    pub global: BTreeMap<String, serde_json::Value>,
+    pub instances: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
 }
 
 pub fn default_surface_visibility() -> bool {
@@ -179,7 +191,40 @@ pub fn load_frontend_module_settings(
         layout.margin_left = v;
     }
 
-    FrontendModuleSettingsState { raw, layout }
+    let props = load_prop_settings(&raw);
+
+    FrontendModuleSettingsState { raw, layout, props }
+}
+
+fn load_prop_settings(raw: &serde_json::Value) -> FrontendModulePropSettings {
+    let mut settings = FrontendModulePropSettings::default();
+    let Some(props) = raw.get("props").and_then(serde_json::Value::as_object) else {
+        return settings;
+    };
+    if let Some(global) = props.get("global").and_then(serde_json::Value::as_object) {
+        settings.global = global
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+    }
+    if let Some(instances) = props
+        .get("instances")
+        .and_then(serde_json::Value::as_object)
+    {
+        for (instance_key, values) in instances {
+            let Some(values) = values.as_object() else {
+                continue;
+            };
+            settings.instances.insert(
+                instance_key.clone(),
+                values
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            );
+        }
+    }
+    settings
 }
 
 pub fn parse_surface_edge(value: &str) -> Option<Edge> {
@@ -288,6 +333,40 @@ mod tests {
         fs::remove_file(&path).ok();
 
         assert_eq!(settings.layout.keyboard_mode, KeyboardMode::Exclusive);
+    }
+
+    #[test]
+    fn load_frontend_module_settings_reads_prop_scopes() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
+        let raw = serde_json::json!({
+            "props": {
+                "global": { "track_width": "24px", "anim_ms": 90 },
+                "instances": {
+                    "@mesh/navigation-bar/import:audio": { "track_width": "28px" }
+                }
+            }
+        });
+        let path = std::env::temp_dir().join(format!(
+            "mesh-surface-config-test-{}-props-settings.json",
+            std::process::id()
+        ));
+        fs::write(&path, raw.to_string()).expect("write test settings");
+
+        let settings = load_frontend_module_settings(&path, &manifest);
+        fs::remove_file(&path).ok();
+
+        assert_eq!(
+            settings.props.global.get("track_width"),
+            Some(&serde_json::json!("24px"))
+        );
+        assert_eq!(
+            settings
+                .props
+                .instances
+                .get("@mesh/navigation-bar/import:audio")
+                .and_then(|props| props.get("track_width")),
+            Some(&serde_json::json!("28px"))
+        );
     }
 
     #[test]

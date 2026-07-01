@@ -32,8 +32,20 @@ trigger_class = "nav-button"
 
 theme_popover = nil
 local theme_popover_connected = false
-local close_after = nil
-local BRIDGE_DELAY = 0.15
+local CLOSE_BRIDGE_KEY = "theme-popover-close"
+local CLOSE_BRIDGE_DELAY_MS = 180
+
+local function cancel_bridge_close()
+    mesh.events.publish("shell.cancel-handler", { key = CLOSE_BRIDGE_KEY })
+end
+
+local function schedule_bridge_close()
+    mesh.events.publish("shell.schedule-handler", {
+        key = CLOSE_BRIDGE_KEY,
+        handler = "closeThemeBridge",
+        delay_ms = CLOSE_BRIDGE_DELAY_MS,
+    })
+end
 
 local function read_theme_is_dark()
     if theme then
@@ -69,18 +81,18 @@ end
 
 local function do_open()
     if theme_popover and theme_surface_hidden then
+        cancel_bridge_close()
         theme_popover.open = true
         theme_surface_hidden = false
-        close_after = nil
         sync_trigger_state()
     end
 end
 
 local function do_close()
+    cancel_bridge_close()
     if theme_popover and not theme_surface_hidden then
         theme_popover.open = false
         theme_surface_hidden = true
-        close_after = nil
         sync_trigger_state()
     end
 end
@@ -99,15 +111,11 @@ function render(self)
     if theme_popover ~= nil and not theme_popover_connected then
         theme_popover_connected = true
         theme_popover.PopoverEnter:on(function()
-            close_after = nil
+            cancel_bridge_close()
         end)
         theme_popover.PopoverLeave:on(function()
             do_close()
         end)
-    end
-
-    if close_after ~= nil and os.clock() >= close_after then
-        do_close()
     end
 end
 
@@ -125,13 +133,18 @@ function onThemeToggle(event)
 end
 
 function onThemeEnter(event)
+    cancel_bridge_close()
     do_open()
 end
 
 function onThemeLeave()
     if not theme_surface_hidden then
-        close_after = os.clock() + BRIDGE_DELAY
+        schedule_bridge_close()
     end
+end
+
+function closeThemeBridge()
+    do_close()
 end
 </script>
 

@@ -2075,6 +2075,72 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
 }
 
 #[test]
+fn navigation_theme_and_language_popovers_close_when_trigger_hover_leaves() {
+    let theme = default_theme();
+    let width = 960;
+    let height = 80;
+
+    for (enter_handler, leave_handler) in [
+        (
+            "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeEnter",
+            "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeLeave",
+        ),
+        (
+            "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageEnter",
+            "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageLeave",
+        ),
+    ] {
+        let mut component =
+            real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+        let mut buffer = PixelBuffer::new(width, height);
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.locale".into(),
+                source_module: "@mesh/shell".into(),
+                payload: serde_json::json!({ "locale": "en", "current": "en" }),
+            })
+            .unwrap();
+        component
+            .paint(&theme, width, height, &mut buffer, 1.0)
+            .unwrap();
+
+        component
+            .call_namespaced_handler(enter_handler, &[])
+            .unwrap();
+        component
+            .paint(&theme, width, height, &mut buffer, 1.0)
+            .unwrap();
+        assert_eq!(
+            component.child_surface_requests().len(),
+            1,
+            "{enter_handler} should open one embedded popover"
+        );
+
+        component
+            .call_namespaced_handler(leave_handler, &[])
+            .unwrap();
+        component
+            .paint(&theme, width, height, &mut buffer, 1.0)
+            .unwrap();
+        assert_eq!(
+            component.child_surface_requests().len(),
+            1,
+            "{leave_handler} should keep its embedded popover open during the hover bridge"
+        );
+
+        std::thread::sleep(Duration::from_millis(220));
+        component.tick().unwrap();
+        component
+            .paint(&theme, width, height, &mut buffer, 1.0)
+            .unwrap();
+        assert!(
+            component.child_surface_requests().is_empty(),
+            "{leave_handler} should close its embedded popover after the hover bridge expires"
+        );
+    }
+}
+
+#[test]
 fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
@@ -2093,7 +2159,10 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
         .paint(&theme, width, height, &mut buffer, 1.0)
         .unwrap();
 
-    let tree = component.last_tree.as_ref().expect("rendered navigation tree");
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree");
     let language_button = first_node_with_click_handler(
         tree,
         "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageToggle",
@@ -2123,7 +2192,11 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
         .paint(&theme, width, height, &mut buffer, 1.0)
         .unwrap();
     let child_requests = component.child_surface_requests();
-    assert_eq!(child_requests.len(), 1, "popover should be open: {child_requests:?}");
+    assert_eq!(
+        child_requests.len(),
+        1,
+        "popover should be open: {child_requests:?}"
+    );
     let node_key = child_requests[0].node_key.clone();
     let (cw, ch) = child_requests[0].content_size;
 

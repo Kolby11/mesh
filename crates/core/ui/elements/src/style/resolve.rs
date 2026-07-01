@@ -1753,20 +1753,34 @@ fn resolve_embedded_references(
     let mut rest = value;
 
     loop {
-        let var_start = rest.find("var(");
-        let Some(start) = var_start else {
+        let var_start = rest.find("var(").map(|start| (start, "var("));
+        let prop_start = rest.find("prop(").map(|start| (start, "prop("));
+        let Some((start, marker)) = [var_start, prop_start]
+            .into_iter()
+            .flatten()
+            .min_by_key(|(start, _)| *start)
+        else {
             break;
         };
 
         output.push_str(&rest[..start]);
-        let reference_start = start + "var(".len();
+        let reference_start = start + marker.len();
         let Some(end) = rest[reference_start..].find(')') else {
             output.push_str(&rest[start..]);
             return Ok(output);
         };
 
         let name = rest[reference_start..reference_start + end].trim();
-        if let Some(value) = variables.get(name) {
+        if marker == "prop(" {
+            if let Some(value) = variables.get(&prop_variable_key(name)) {
+                output.push_str(&resolve_embedded_references(
+                    &style_value_to_string(value, theme, variables, strict_animation_tokens)?,
+                    theme,
+                    variables,
+                    strict_animation_tokens,
+                )?);
+            }
+        } else if let Some(value) = variables.get(name) {
             output.push_str(&resolve_embedded_references(
                 &style_value_to_string(value, theme, variables, strict_animation_tokens)?,
                 theme,

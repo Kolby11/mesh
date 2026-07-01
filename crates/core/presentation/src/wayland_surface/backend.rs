@@ -938,7 +938,10 @@ impl LayerShellBackend {
             }
         }
 
-        self.dispatch_pending()?;
+        if let Err(error) = self.dispatch_pending() {
+            self.destroy_popup(surface_id);
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -1599,11 +1602,12 @@ fn build_positioner(
 }
 
 pub(super) fn apply_config(layer_surface: &LayerSurface, cfg: &LayerSurfaceConfig) {
+    let (protocol_width, protocol_height) = layer_protocol_size(cfg);
     layer_surface.set_layer(map_layer(cfg.layer));
     layer_surface.set_anchor(map_anchor(cfg));
     layer_surface.set_exclusive_zone(cfg.exclusive_zone);
     layer_surface.set_keyboard_interactivity(map_keyboard(cfg.keyboard_mode));
-    layer_surface.set_size(cfg.width, cfg.height);
+    layer_surface.set_size(protocol_width, protocol_height);
     layer_surface.set_margin(
         cfg.margin_top,
         cfg.margin_right,
@@ -1637,6 +1641,25 @@ fn map_anchor(cfg: &LayerSurfaceConfig) -> Anchor {
         Some(Edge::Right) => Anchor::TOP | Anchor::RIGHT,
         None => Anchor::empty(),
     }
+}
+
+fn layer_protocol_size(cfg: &LayerSurfaceConfig) -> (u32, u32) {
+    let anchor = map_anchor(cfg);
+    let width = if cfg.width == 0 && !anchor.contains(Anchor::LEFT | Anchor::RIGHT) {
+        layer_protocol_fallback_size(cfg)
+    } else {
+        cfg.width
+    };
+    let height = if cfg.height == 0 && !anchor.contains(Anchor::TOP | Anchor::BOTTOM) {
+        layer_protocol_fallback_size(cfg)
+    } else {
+        cfg.height
+    };
+    (width, height)
+}
+
+fn layer_protocol_fallback_size(cfg: &LayerSurfaceConfig) -> u32 {
+    u32::try_from(cfg.exclusive_zone).unwrap_or(0).max(1)
 }
 
 fn map_keyboard(mode: KeyboardMode) -> KeyboardInteractivity {
@@ -1931,6 +1954,76 @@ mod tests {
             (56, 1080),
             "left rails with height=0 must paint across the output height when the compositor leaves configure height unspecified"
         );
+    }
+
+    #[test]
+    fn top_surface_protocol_size_keeps_only_spanning_width_dynamic() {
+        let mut cfg = base_cfg();
+        cfg.edge = Some(Edge::Top);
+        cfg.width = 0;
+        cfg.height = 0;
+        cfg.exclusive_zone = 56;
+
+        assert_eq!(
+            layer_protocol_size(&cfg),
+            (0, 56),
+            "top surfaces are left+right anchored, so only width may be sent as zero; height falls back to the exclusive zone"
+        );
+    }
+
+    #[test]
+    fn bottom_surface_protocol_size_keeps_only_spanning_width_dynamic() {
+        let mut cfg = base_cfg();
+        cfg.edge = Some(Edge::Bottom);
+        cfg.width = 0;
+        cfg.height = 0;
+        cfg.exclusive_zone = 56;
+
+        assert_eq!(
+            layer_protocol_size(&cfg),
+            (0, 56),
+            "bottom surfaces are left+right anchored, so only width may be sent as zero; height falls back to the exclusive zone"
+        );
+    }
+
+    #[test]
+    fn left_surface_protocol_size_keeps_only_spanning_height_dynamic() {
+        let mut cfg = base_cfg();
+        cfg.edge = Some(Edge::Left);
+        cfg.width = 0;
+        cfg.height = 0;
+        cfg.exclusive_zone = 48;
+
+        assert_eq!(
+            layer_protocol_size(&cfg),
+            (48, 0),
+            "left surfaces with dynamic height are top+bottom anchored, so only height may be sent as zero; width falls back to the exclusive zone"
+        );
+    }
+
+    #[test]
+    fn unanchored_surface_protocol_size_replaces_dynamic_axes() {
+        let mut cfg = base_cfg();
+        cfg.edge = None;
+        cfg.width = 0;
+        cfg.height = 0;
+
+        assert_eq!(
+            layer_protocol_size(&cfg),
+            (1, 1),
+            "unanchored surfaces cannot use zero size on either axis"
+        );
+    }
+
+    #[test]
+    fn overlay_surface_without_exclusive_zone_uses_minimal_protocol_fallback() {
+        let mut cfg = base_cfg();
+        cfg.edge = Some(Edge::Top);
+        cfg.width = 0;
+        cfg.height = 0;
+        cfg.exclusive_zone = 0;
+
+        assert_eq!(layer_protocol_size(&cfg), (0, 1));
     }
 
     // ---------------------------------------------------------------------------

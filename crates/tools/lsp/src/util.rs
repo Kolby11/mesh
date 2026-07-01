@@ -32,6 +32,7 @@ pub enum StyleContext {
     Property,
     Value { property: String },
     Variable { prefix: String },
+    Prop { prefix: String },
     Selector,
 }
 
@@ -87,6 +88,10 @@ pub enum ScriptContext {
         /// The Lua variable name bound to the mounted component instance.
         var_name: String,
         /// Characters typed after the dot so far (may be empty).
+        prefix: String,
+    },
+    /// Cursor is after `props.` in a component script.
+    Props {
         prefix: String,
     },
     General,
@@ -274,6 +279,14 @@ pub fn style_context_at(block_content: &str, offset: usize) -> StyleContext {
                 };
             }
         }
+        if let Some(prop_start) = value_before_cursor.rfind("prop(") {
+            let after_prop = &value_before_cursor[prop_start + "prop(".len()..];
+            if !after_prop.contains(')') {
+                return StyleContext::Prop {
+                    prefix: after_prop.trim().to_string(),
+                };
+            }
+        }
         StyleContext::Value { property }
     } else {
         StyleContext::Property
@@ -300,6 +313,12 @@ pub fn script_context_at(block_content: &str, offset: usize) -> ScriptContext {
             }
             return ScriptContext::Refs {
                 prefix: rest.to_string(),
+            };
+        }
+
+        if let Some(prefix) = token.strip_prefix("props.") {
+            return ScriptContext::Props {
+                prefix: prefix.to_string(),
             };
         }
     }
