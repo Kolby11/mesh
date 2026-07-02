@@ -1,0 +1,528 @@
+<template>
+  <dialog class="settings-shell" aria-label="Settings">
+    <column class="settings-root">
+      <row class="settings-header">
+        <column class="header-copy">
+          <text class="settings-title">Settings</text>
+          <text class="settings-subtitle">{settings_summary}</text>
+        </column>
+        <button class="icon-button" onclick={onClose} aria-label="Close settings">
+          <icon name="window-close" size="16" />
+        </button>
+      </row>
+
+      <column class="section">
+        <text class="section-title">Appearance</text>
+        <row class="control-row">
+          <column class="control-copy">
+            <text class="control-title">Theme</text>
+            <text class="control-meta">{theme_value}</text>
+          </column>
+          <row class="segmented">
+            <button class="{theme_dark_class}" onclick={onThemeDark}><text class="segment-text">Dark</text></button>
+            <button class="{theme_light_class}" onclick={onThemeLight}><text class="segment-text">Light</text></button>
+          </row>
+        </row>
+        <row class="control-row">
+          <column class="control-copy">
+            <text class="control-title">Language</text>
+            <text class="control-meta">{locale_value}</text>
+          </column>
+          <row class="segmented">
+            <button class="{locale_en_class}" onclick={onLocaleEn}><text class="segment-text">EN</text></button>
+            <button class="{locale_sk_class}" onclick={onLocaleSk}><text class="segment-text">SK</text></button>
+          </row>
+        </row>
+      </column>
+
+      <column class="section">
+        <text class="section-title">Active Providers</text>
+        <text class="section-copy">{providers_summary}</text>
+        <list class="compact-list" label="Active providers">
+          <list-item class="compact-row" hidden={provider_row_1_hidden}>
+            <text class="row-title">{provider_row_1_interface}</text>
+            <text class="row-meta">{provider_row_1_provider}</text>
+          </list-item>
+          <list-item class="compact-row" hidden={provider_row_2_hidden}>
+            <text class="row-title">{provider_row_2_interface}</text>
+            <text class="row-meta">{provider_row_2_provider}</text>
+          </list-item>
+          <list-item class="compact-row" hidden={provider_row_3_hidden}>
+            <text class="row-title">{provider_row_3_interface}</text>
+            <text class="row-meta">{provider_row_3_provider}</text>
+          </list-item>
+        </list>
+      </column>
+
+      <column class="section">
+        <text class="section-title">Installed Modules</text>
+        <text class="section-copy">{modules_summary}</text>
+        <input
+          class="module-filter"
+          value={module_filter}
+          placeholder="Filter modules"
+          label="Filter installed modules"
+          onchange={onModuleFilterChange}
+        />
+        <list class="module-list" label="Installed modules">
+          <list-item class="module-card" hidden={module_row_1_hidden}>
+            <column class="module-copy">
+              <row class="module-head">
+                <text class="module-title">{module_row_1_id}</text>
+                <text class="kind-pill">{module_row_1_kind}</text>
+              </row>
+              <text class="row-meta">{module_row_1_status}</text>
+              <text class="row-meta">{module_row_1_resources}</text>
+            </column>
+          </list-item>
+          <list-item class="module-card" hidden={module_row_2_hidden}>
+            <column class="module-copy">
+              <row class="module-head">
+                <text class="module-title">{module_row_2_id}</text>
+                <text class="kind-pill">{module_row_2_kind}</text>
+              </row>
+              <text class="row-meta">{module_row_2_status}</text>
+              <text class="row-meta">{module_row_2_resources}</text>
+            </column>
+          </list-item>
+          <list-item class="module-card" hidden={module_row_3_hidden}>
+            <column class="module-copy">
+              <row class="module-head">
+                <text class="module-title">{module_row_3_id}</text>
+                <text class="kind-pill">{module_row_3_kind}</text>
+              </row>
+              <text class="row-meta">{module_row_3_status}</text>
+              <text class="row-meta">{module_row_3_resources}</text>
+            </column>
+          </list-item>
+          <list-item class="module-card" hidden={module_row_4_hidden}>
+            <column class="module-copy">
+              <row class="module-head">
+                <text class="module-title">{module_row_4_id}</text>
+                <text class="kind-pill">{module_row_4_kind}</text>
+              </row>
+              <text class="row-meta">{module_row_4_status}</text>
+              <text class="row-meta">{module_row_4_resources}</text>
+            </column>
+          </list-item>
+        </list>
+      </column>
+    </column>
+  </dialog>
+</template>
+
+<script lang="luau">
+local debug_service = require("mesh.debug")
+local theme = require("mesh.theme")
+
+settings_summary = "Waiting for module graph"
+theme_value = "Current theme unknown"
+locale_value = "Current language unknown"
+providers_summary = "No active providers published yet"
+modules_summary = "No installed modules published yet"
+module_filter = ""
+
+theme_dark_class = "segment segment-active"
+theme_light_class = "segment"
+locale_en_class = "segment segment-active"
+locale_sk_class = "segment"
+
+provider_row_1_hidden = true
+provider_row_2_hidden = true
+provider_row_3_hidden = true
+provider_row_1_interface = ""
+provider_row_2_interface = ""
+provider_row_3_interface = ""
+provider_row_1_provider = ""
+provider_row_2_provider = ""
+provider_row_3_provider = ""
+
+module_row_1_hidden = true
+module_row_2_hidden = true
+module_row_3_hidden = true
+module_row_4_hidden = true
+module_row_1_id = ""
+module_row_2_id = ""
+module_row_3_id = ""
+module_row_4_id = ""
+module_row_1_kind = ""
+module_row_2_kind = ""
+module_row_3_kind = ""
+module_row_4_kind = ""
+module_row_1_status = ""
+module_row_2_status = ""
+module_row_3_status = ""
+module_row_4_status = ""
+module_row_1_resources = ""
+module_row_2_resources = ""
+module_row_3_resources = ""
+module_row_4_resources = ""
+
+local function list_count(values)
+    if type(values) ~= "table" then return 0 end
+    return #values
+end
+
+local function join_limited(values, limit)
+    if type(values) ~= "table" or #values == 0 then
+        return "none"
+    end
+    local out = {}
+    local max_items = math.min(#values, limit)
+    for i = 1, max_items do
+        local item = values[i]
+        if type(item) == "table" then
+            if item.interface and item.provider then
+                out[#out + 1] = tostring(item.interface) .. "=" .. tostring(item.provider)
+            elseif item.interface then
+                out[#out + 1] = tostring(item.interface)
+            elseif item.id then
+                out[#out + 1] = tostring(item.id)
+            elseif item.name then
+                out[#out + 1] = tostring(item.name)
+            end
+        elseif item ~= nil then
+            out[#out + 1] = tostring(item)
+        end
+    end
+    if #values > limit then
+        out[#out + 1] = "+" .. tostring(#values - limit)
+    end
+    return table.concat(out, ", ")
+end
+
+local function lower(value)
+    return string.lower(tostring(value or ""))
+end
+
+local function module_matches(entry, query)
+    if query == "" then return true end
+    if string.find(lower(entry.module_id), query, 1, true) then return true end
+    if string.find(lower(entry.kind), query, 1, true) then return true end
+    local uses = entry.uses or {}
+    if string.find(lower(join_limited(uses.interfaces, 16)), query, 1, true) then return true end
+    if string.find(lower(join_limited(uses.active_providers, 16)), query, 1, true) then return true end
+    local provides = entry.provides or {}
+    if string.find(lower(join_limited(provides.settings, 16)), query, 1, true) then return true end
+    return false
+end
+
+local function assign_provider_row(index, interface, provider)
+    if index == 1 then
+        provider_row_1_hidden = false
+        provider_row_1_interface = interface
+        provider_row_1_provider = provider
+    elseif index == 2 then
+        provider_row_2_hidden = false
+        provider_row_2_interface = interface
+        provider_row_2_provider = provider
+    elseif index == 3 then
+        provider_row_3_hidden = false
+        provider_row_3_interface = interface
+        provider_row_3_provider = provider
+    end
+end
+
+local function assign_module_row(index, entry)
+    local uses = entry.uses or {}
+    local provides = entry.provides or {}
+    local diagnostics = entry.diagnostics or {}
+    local health = entry.health or {}
+    local status = "enabled"
+    if entry.enabled == false then status = "disabled" end
+    if #diagnostics > 0 then
+        status = status .. "; diagnostics " .. join_limited(diagnostics, 2)
+    elseif #health > 0 then
+        status = status .. "; health " .. join_limited(health, 2)
+    else
+        status = status .. "; clear"
+    end
+    local resources = "uses " .. tostring(list_count(uses.interfaces)) .. " interfaces"
+        .. "; settings " .. join_limited(provides.settings, 2)
+    if index == 1 then
+        module_row_1_hidden = false
+        module_row_1_id = tostring(entry.module_id or "")
+        module_row_1_kind = tostring(entry.kind or "module")
+        module_row_1_status = status
+        module_row_1_resources = resources
+    elseif index == 2 then
+        module_row_2_hidden = false
+        module_row_2_id = tostring(entry.module_id or "")
+        module_row_2_kind = tostring(entry.kind or "module")
+        module_row_2_status = status
+        module_row_2_resources = resources
+    elseif index == 3 then
+        module_row_3_hidden = false
+        module_row_3_id = tostring(entry.module_id or "")
+        module_row_3_kind = tostring(entry.kind or "module")
+        module_row_3_status = status
+        module_row_3_resources = resources
+    elseif index == 4 then
+        module_row_4_hidden = false
+        module_row_4_id = tostring(entry.module_id or "")
+        module_row_4_kind = tostring(entry.kind or "module")
+        module_row_4_status = status
+        module_row_4_resources = resources
+    end
+end
+
+local function reset_rows()
+    provider_row_1_hidden = true
+    provider_row_2_hidden = true
+    provider_row_3_hidden = true
+    module_row_1_hidden = true
+    module_row_2_hidden = true
+    module_row_3_hidden = true
+    module_row_4_hidden = true
+end
+
+local function sync_appearance()
+    local current_theme = "mesh-default-dark"
+    if theme and theme.current then
+        current_theme = tostring(theme.current)
+    elseif theme and theme.active then
+        current_theme = tostring(theme.active)
+    end
+    theme_value = current_theme
+    local is_dark = string.find(current_theme, "dark", 1, true) ~= nil
+    theme_dark_class = is_dark and "segment segment-active" or "segment"
+    theme_light_class = is_dark and "segment" or "segment segment-active"
+
+    local locale = mesh.locale.current() or "en"
+    locale_value = tostring(locale)
+    local is_sk = locale == "sk" or string.find(locale, "sk-", 1, true) == 1
+    locale_en_class = is_sk and "segment" or "segment segment-active"
+    locale_sk_class = is_sk and "segment segment-active" or "segment"
+end
+
+function render(self)
+    reset_rows()
+    sync_appearance()
+
+    local graph = {}
+    if debug_service and type(debug_service.module_graph) == "table" then
+        graph = debug_service.module_graph
+    end
+
+    local query = lower(module_filter)
+    local matched = {}
+    local providers = {}
+    for _, entry in ipairs(graph) do
+        local uses = entry.uses or {}
+        if type(uses.active_providers) == "table" then
+            for _, pair in ipairs(uses.active_providers) do
+                providers[#providers + 1] = pair
+            end
+        end
+        if module_matches(entry, query) then
+            matched[#matched + 1] = entry
+        end
+    end
+
+    settings_summary = tostring(#graph) .. " modules indexed"
+    if #graph == 0 then
+        settings_summary = "Waiting for module graph"
+    end
+
+    providers_summary = tostring(#providers) .. " active provider bindings"
+    if #providers == 0 then
+        providers_summary = "No active providers published yet"
+    end
+    for i = 1, math.min(#providers, 3) do
+        local pair = providers[i]
+        assign_provider_row(i, tostring(pair.interface or ""), tostring(pair.provider or ""))
+    end
+
+    modules_summary = tostring(#matched) .. " of " .. tostring(#graph) .. " installed modules match"
+    if #graph == 0 then
+        modules_summary = "No installed modules published yet"
+    end
+    for i = 1, math.min(#matched, 4) do
+        assign_module_row(i, matched[i])
+    end
+end
+
+function onModuleFilterChange(event)
+    module_filter = tostring(event.value or "")
+end
+
+function onThemeDark()
+    mesh.events.publish("shell.set-theme", { theme_id = "mesh-default-dark" })
+    theme_value = "mesh-default-dark"
+    theme_dark_class = "segment segment-active"
+    theme_light_class = "segment"
+end
+
+function onThemeLight()
+    mesh.events.publish("shell.set-theme", { theme_id = "mesh-default-light" })
+    theme_value = "mesh-default-light"
+    theme_dark_class = "segment"
+    theme_light_class = "segment segment-active"
+end
+
+function onLocaleEn()
+    mesh.locale.set("en")
+    locale_value = "en"
+    locale_en_class = "segment segment-active"
+    locale_sk_class = "segment"
+end
+
+function onLocaleSk()
+    mesh.locale.set("sk")
+    locale_value = "sk"
+    locale_en_class = "segment"
+    locale_sk_class = "segment segment-active"
+end
+
+function onClose()
+    mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/settings" })
+end
+</script>
+
+<style>
+.settings-shell {
+    width: 420px;
+    max-width: 420px;
+    min-height: 100%;
+    background: var(--color-surface);
+    color: var(--color-on-surface);
+    border-left-width: 1px;
+    border-left-style: solid;
+    border-left-color: var(--color-outline-variant);
+}
+
+.settings-root {
+    width: 100%;
+    gap: var(--spacing-lg);
+    padding: var(--spacing-lg);
+}
+
+.settings-header,
+.control-row,
+.module-head {
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+}
+
+.header-copy,
+.control-copy,
+.section,
+.module-copy {
+    gap: var(--spacing-xs);
+}
+
+.settings-title {
+    font-size: var(--typography-size-xl);
+    font-weight: 700;
+    color: var(--color-on-surface);
+}
+
+.settings-subtitle,
+.section-copy,
+.control-meta,
+.row-meta {
+    font-size: var(--typography-size-xs);
+    color: var(--color-on-surface-variant);
+}
+
+.section-title,
+.control-title,
+.module-title,
+.row-title {
+    font-size: var(--typography-size-sm);
+    font-weight: 700;
+    color: var(--color-on-surface);
+}
+
+.icon-button {
+    width: 32px;
+    height: 32px;
+    justify-content: center;
+    align-items: center;
+    border-radius: var(--radius-full);
+    background: var(--color-surface-container);
+    color: var(--color-on-surface);
+    border-width: 0;
+}
+
+.section {
+    width: 100%;
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-container-low);
+    border-width: 1px;
+    border-style: solid;
+    border-color: var(--color-outline-variant);
+}
+
+.segmented {
+    flex-shrink: 0;
+    gap: var(--spacing-xs);
+}
+
+.segment {
+    min-width: 52px;
+    height: 32px;
+    justify-content: center;
+    align-items: center;
+    padding-inline: var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-container);
+    color: var(--color-on-surface);
+    border-width: 1px;
+    border-style: solid;
+    border-color: var(--color-outline-variant);
+}
+
+.segment-active {
+    background: var(--color-primary);
+    color: var(--color-on-primary);
+    border-color: var(--color-primary);
+}
+
+.segment-text {
+    font-size: var(--typography-size-xs);
+    font-weight: 700;
+    color: inherit;
+}
+
+.compact-list,
+.module-list {
+    width: 100%;
+    gap: var(--spacing-sm);
+}
+
+.compact-row,
+.module-card {
+    width: 100%;
+    padding: var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-container);
+    border-width: 1px;
+    border-style: solid;
+    border-color: var(--color-outline-variant);
+}
+
+.compact-row {
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+}
+
+.module-filter {
+    width: 100%;
+}
+
+.kind-pill {
+    flex-shrink: 0;
+    padding-inline: var(--spacing-sm);
+    padding-block: var(--spacing-xs);
+    border-radius: var(--radius-full);
+    background: var(--color-secondary-container);
+    color: var(--color-on-secondary-container);
+    font-size: var(--typography-size-xs);
+    font-weight: 700;
+}
+</style>

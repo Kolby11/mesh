@@ -149,6 +149,36 @@ end
 }
 
 #[test]
+fn quick_settings_open_settings_publishes_show_settings_surface() {
+    let mut ctx = make_network_ctx();
+    ctx.load_script(
+        r#"
+function onOpenSettings()
+    mesh.events.publish("shell.show-surface", { surface_id = "@mesh/settings" })
+    mesh.popover.hide("@mesh/quick-settings")
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_handler("onOpenSettings", &[]).unwrap();
+    let requests = crate::shell::service::script_events_to_requests(ctx.drain_published_events());
+
+    match requests.as_slice() {
+        [
+            CoreRequest::ShowSurface { surface_id },
+            CoreRequest::HideSurface {
+                surface_id: hidden_surface_id,
+            },
+        ] => {
+            assert_eq!(surface_id, "@mesh/settings");
+            assert_eq!(hidden_surface_id, "@mesh/quick-settings");
+        }
+        other => panic!("expected settings show and quick settings hide requests, got {other:?}"),
+    }
+}
+
+#[test]
 fn navigation_volume_button_opens_audio_surface_via_parent_handler() {
     let button_component = parse_component(
         r#"

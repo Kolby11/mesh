@@ -543,6 +543,7 @@ pub(super) fn real_frontend_module_component(
     let language_popover_dir = root.join("modules/frontend/language-popover");
     let theme_selector_dir = root.join("modules/frontend/theme-selector");
     let debug_inspector_dir = root.join("modules/frontend/debug-inspector");
+    let settings_dir = root.join("modules/frontend/settings");
 
     let navigation_manifest = mesh_core_module::manifest::load_manifest(&navigation_dir)
         .expect("navigation manifest")
@@ -559,6 +560,9 @@ pub(super) fn real_frontend_module_component(
         .manifest;
     let debug_inspector_manifest = mesh_core_module::manifest::load_manifest(&debug_inspector_dir)
         .expect("debug inspector manifest")
+        .manifest;
+    let settings_manifest = mesh_core_module::manifest::load_manifest(&settings_dir)
+        .expect("settings manifest")
         .manifest;
 
     let navigation_compiled = CompiledFrontendModule {
@@ -672,6 +676,7 @@ pub(super) fn real_frontend_module_component(
             ("LanguagePopover".into(), "@mesh/language-popover".into()),
             ("ThemeSelector".into(), "@mesh/theme-selector".into()),
             ("QuickSettings".into(), "@mesh/quick-settings".into()),
+            ("Settings".into(), "@mesh/settings".into()),
         ]),
         watched_paths: Vec::new(),
     };
@@ -786,6 +791,18 @@ pub(super) fn real_frontend_module_component(
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
     };
+    let settings_compiled = CompiledFrontendModule {
+        manifest: settings_manifest,
+        source_path: settings_dir.join("src/main.mesh"),
+        component: parse_component(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../modules/frontend/settings/src/main.mesh"
+        )))
+        .unwrap(),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
+    };
 
     let catalog = FrontendCatalog {
         modules: HashMap::from([
@@ -824,6 +841,13 @@ pub(super) fn real_frontend_module_component(
                     compiled: debug_inspector_compiled.clone(),
                 },
             ),
+            (
+                "@mesh/settings".into(),
+                FrontendCatalogEntry {
+                    module_dir: settings_dir.clone(),
+                    compiled: settings_compiled.clone(),
+                },
+            ),
         ]),
         slot_contributions: HashMap::new(),
     };
@@ -840,6 +864,7 @@ pub(super) fn real_frontend_module_component(
         ("@mesh/language-popover", &language_popover_dir),
         ("@mesh/theme-selector", &theme_selector_dir),
         ("@mesh/debug-inspector", &debug_inspector_dir),
+        ("@mesh/settings", &settings_dir),
     ] {
         let i18n_dir = dir.join("config/i18n");
         let Ok(entries) = std::fs::read_dir(&i18n_dir) else {
@@ -864,6 +889,8 @@ pub(super) fn real_frontend_module_component(
         (theme_selector_compiled, theme_selector_dir)
     } else if module_id == "@mesh/debug-inspector" {
         (debug_inspector_compiled, debug_inspector_dir)
+    } else if module_id == "@mesh/settings" {
+        (settings_compiled, settings_dir)
     } else {
         (navigation_compiled, navigation_dir)
     };

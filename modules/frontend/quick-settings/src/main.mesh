@@ -8,6 +8,9 @@
       <row class="qs-header">
         <text class="qs-title">Quick Settings</text>
         <spacer />
+        <button class="qs-close-btn" onclick={onOpenSettings} aria-label="Open settings">
+          <icon name="preferences-system" size="16" />
+        </button>
         <button class="qs-close-btn" onclick={onClose} aria-label="Close">
           <icon name="window-close" size="16" />
         </button>
@@ -179,6 +182,11 @@ function onLangSk()
 end
 
 function onClose()
+    mesh.popover.hide("@mesh/quick-settings")
+end
+
+function onOpenSettings()
+    mesh.events.publish("shell.show-surface", { surface_id = "@mesh/settings" })
     mesh.popover.hide("@mesh/quick-settings")
 end
 </script>

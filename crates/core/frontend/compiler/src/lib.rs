@@ -223,6 +223,19 @@ mod tests {
     }
 
     #[test]
+    fn shipped_settings_surface_source_parses() {
+        let source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../../modules/frontend/settings/src/main.mesh"
+        ));
+        let component = mesh_core_component::parse_component(source).unwrap();
+
+        assert!(component.template.is_some());
+        assert!(component.script.is_some());
+        assert!(component.style.is_some());
+    }
+
+    #[test]
     fn normalizes_on_prefixed_event_handler_names() {
         let attrs = vec![
             Attribute {

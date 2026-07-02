@@ -897,7 +897,13 @@ fn shipped_module_graph_loads_repo_module_fixture() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();
 
-    assert_eq!(graph.frontend_modules().len(), 3);
+    assert_eq!(graph.frontend_modules().len(), 4);
+    assert!(
+        graph
+            .frontend_modules()
+            .into_iter()
+            .any(|module| module.id == "@mesh/settings")
+    );
     let component_ids: std::collections::HashSet<_> = graph
         .modules_by_kind(ModuleKind::Component)
         .into_iter()

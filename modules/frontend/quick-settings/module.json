@@ -6,6 +6,9 @@
     "apiVersion": "0.1",
     "kind": "frontend",
     "uses": {
+      "modules": {
+        "@mesh/settings": ">=0.1.0"
+      },
       "interfaces": {
         "mesh.audio": ">=1.0",
         "mesh.power": ">=1.0",

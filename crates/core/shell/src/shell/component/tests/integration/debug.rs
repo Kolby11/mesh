@@ -390,6 +390,121 @@ fn debug_inspector_modules_view_renders_uses_provides_graph() {
 }
 
 #[test]
+fn settings_surface_renders_modules_providers_theme_and_locale() {
+    let mut component = real_frontend_module_component("@mesh/settings", debug_catalog());
+    {
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(420, 720);
+        component.paint(&theme, 420, 720, &mut buffer, 1.0).unwrap();
+    }
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.debug".into(),
+            source_module: "@mesh/core-debug".into(),
+            payload: serde_json::json!({
+                "overlay_enabled": false,
+                "profiling_enabled": false,
+                "profiling_session_id": 0,
+                "active_view": "overview",
+                "modules": [],
+                "module_graph": [
+                    {
+                        "module_id": "@mesh/navigation-bar",
+                        "kind": "frontend",
+                        "enabled": true,
+                        "path": "modules/frontend/navigation-bar/module.json",
+                        "uses": {
+                            "modules": ["@mesh/quick-settings"],
+                            "interfaces": ["mesh.audio", "mesh.power"],
+                            "optional_interfaces": [],
+                            "icon_packs": [],
+                            "i18n_packs": [],
+                            "theme_packs": [],
+                            "font_packs": [],
+                            "active_providers": [
+                                { "interface": "mesh.audio", "provider": "@mesh/pipewire-audio" }
+                            ]
+                        },
+                        "capabilities": ["shell.surface"],
+                        "optional_capabilities": [],
+                        "provides": {
+                            "interfaces": [],
+                            "settings": ["@mesh/navigation-bar"],
+                            "i18n": [],
+                            "required_icons": [],
+                            "optional_icons": []
+                        },
+                        "diagnostics": [],
+                        "health": []
+                    },
+                    {
+                        "module_id": "@mesh/pipewire-audio",
+                        "kind": "backend",
+                        "enabled": true,
+                        "path": "modules/backend/pipewire-audio/module.json",
+                        "uses": {
+                            "modules": [],
+                            "interfaces": [],
+                            "optional_interfaces": [],
+                            "icon_packs": [],
+                            "i18n_packs": [],
+                            "theme_packs": [],
+                            "font_packs": [],
+                            "active_providers": []
+                        },
+                        "capabilities": ["service.audio.read"],
+                        "optional_capabilities": [],
+                        "provides": {
+                            "interfaces": [{ "interface": "mesh.audio", "label": "Audio" }],
+                            "settings": [],
+                            "i18n": [],
+                            "required_icons": [],
+                            "optional_icons": []
+                        },
+                        "diagnostics": [],
+                        "health": []
+                    }
+                ],
+                "interfaces": [],
+                "backend_runtimes": [],
+                "active_surfaces": ["@mesh/settings"],
+                "benchmarks": { "scenarios": [] },
+                "profiling": serde_json::Value::Null
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(420, 720);
+    component.paint(&theme, 420, 720, &mut buffer, 1.0).unwrap();
+
+    let text = rendered_text(&component);
+    assert!(text.iter().any(|line| line == "Settings"));
+    assert!(text.iter().any(|line| line == "Appearance"));
+    assert!(text.iter().any(|line| line == "Active Providers"));
+    assert!(text.iter().any(|line| line == "mesh.audio"));
+    assert!(text.iter().any(|line| line == "@mesh/pipewire-audio"));
+    assert!(text.iter().any(|line| line == "Installed Modules"));
+    assert!(text.iter().any(|line| line == "@mesh/navigation-bar"));
+
+    let requests = component
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::onThemeLight", &[])
+        .unwrap();
+    match requests.as_slice() {
+        [CoreRequest::SetTheme { theme_id }] => assert_eq!(theme_id, "mesh-default-light"),
+        other => panic!("expected theme change request, got {other:?}"),
+    }
+
+    let requests = component
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::onClose", &[])
+        .unwrap();
+    match requests.as_slice() {
+        [CoreRequest::HideSurface { surface_id }] => assert_eq!(surface_id, "@mesh/settings"),
+        other => panic!("expected settings hide request, got {other:?}"),
+    }
+}
+
+#[test]
 fn debug_inspector_benchmark_view_renders_five_rows_when_profiling_off() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
     component
