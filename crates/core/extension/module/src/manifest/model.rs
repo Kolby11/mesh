@@ -216,7 +216,10 @@ pub enum ModuleType {
     Theme,
     LanguagePack,
     IconPack,
+    FontPack,
     Interface,
+    Library,
+    Component,
 }
 
 impl std::fmt::Display for ModuleType {
@@ -228,7 +231,10 @@ impl std::fmt::Display for ModuleType {
             Self::Theme => write!(f, "theme"),
             Self::LanguagePack => write!(f, "language-pack"),
             Self::IconPack => write!(f, "icon-pack"),
+            Self::FontPack => write!(f, "font-pack"),
             Self::Interface => write!(f, "interface"),
+            Self::Library => write!(f, "library"),
+            Self::Component => write!(f, "component"),
         }
     }
 }

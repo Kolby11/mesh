@@ -1,5 +1,6 @@
 use super::PublishedEvent;
 use mesh_core_capability::{Capability, CapabilitySet};
+pub(super) use mesh_core_service::service_name_from_interface;
 use mesh_core_service::{InterfaceContract, InterfaceResolution};
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value;
@@ -365,13 +366,6 @@ fn consume_self_arg(args: &mlua::Variadic<LuaValue>) -> usize {
         Some(LuaValue::Table(_)) => 1,
         _ => 0,
     }
-}
-
-pub(super) fn service_name_from_interface(interface: &str) -> String {
-    interface
-        .strip_prefix("mesh.")
-        .unwrap_or(interface)
-        .to_string()
 }
 
 fn service_control_capability(service_name: &str) -> Capability {

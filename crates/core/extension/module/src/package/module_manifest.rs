@@ -520,8 +520,11 @@ impl From<ModuleType> for ModuleKind {
             ModuleType::Backend => Self::Backend,
             ModuleType::Theme => Self::Theme,
             ModuleType::IconPack => Self::IconPack,
+            ModuleType::FontPack => Self::FontPack,
             ModuleType::LanguagePack => Self::LanguagePack,
             ModuleType::Interface => Self::Interface,
+            ModuleType::Library => Self::Library,
+            ModuleType::Component => Self::Component,
         }
     }
 }
@@ -533,9 +536,11 @@ impl From<ModuleKind> for ModuleType {
             ModuleKind::Backend => Self::Backend,
             ModuleKind::Theme => Self::Theme,
             ModuleKind::IconPack => Self::IconPack,
+            ModuleKind::FontPack => Self::FontPack,
             ModuleKind::LanguagePack => Self::LanguagePack,
             ModuleKind::Interface => Self::Interface,
-            ModuleKind::FontPack | ModuleKind::Library | ModuleKind::Component => Self::Widget,
+            ModuleKind::Library => Self::Library,
+            ModuleKind::Component => Self::Component,
         }
     }
 }

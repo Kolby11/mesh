@@ -286,15 +286,15 @@ All five landed 2026-06-23 (single commit).
 
 ### Larger refactors (bigger diffs — best as separate reviewed PRs)
 
-- [ ] Split `FrontendSurfaceComponent::paint` (~486 lines,
+- [x] Split `FrontendSurfaceComponent::paint` (~486 lines,
       `shell/component/shell_component.rs:365`). `compute_tooltip_state()` extracted
       2026-07-02 (tooltip placement/opacity/slide + per-frame render hints, ~80 lines
       pulled out of the inline closure; `mesh-core-shell` full suite: 387 passed, 0
-      failed). Still open: `paint_pixel_regions()` — the clear+paint call is repeated
-      four times (full-surface, single-rect, bounding-rect, multi-rect) in the second
-      half of `paint()` (~lines 664-770 post-extraction) and should collapse to one
-      helper taking the damage rect(s) + tooltip-for-damage closure. Hottest path in
-      the system.
+      failed). Completed 2026-07-02: extracted `paint_pixel_regions()` plus
+      `paint_damage_rect()`/`paint_selected_pixels()` for the full-surface,
+      single-rect, bounding-rect, and multi-rect paths while preserving tooltip
+      damage filtering and merged paint metrics. Verified with
+      `nix develop --command cargo test -p mesh-core-shell --lib` (388 passed).
 - [ ] `StyleResolver::apply_declaration` is a ~480-line `match property` block
       (`ui/elements/src/style/resolve.rs`). It is a manually-spelled table-driven
       op; consider a table/macro so adding a CSS property is one entry. Note the
@@ -306,8 +306,12 @@ All five landed 2026-06-23 (single commit).
 - [ ] `install_host_api` splits: frontend (`scripting/context/runtime.rs:824`,
       ~445 lines) and backend (`scripting/backend/runtime.rs:480`, ~200 lines).
       Break per-subsystem (`install_popover_api`, `install_locale_api`,
-      `install_service_api`, `install_exec_api`, …). The frontend
-      `mesh.popover.activate` handler alone is ~75 lines.
+      `install_service_api`, `install_exec_api`, …). Progress 2026-07-02:
+      backend `install_host_api` now delegates to `install_service_api`,
+      `install_exec_api`, `install_config_api`, and `install_log_api`; verified
+      with `mesh-core-scripting` and `mesh-core-backend` lib tests. Remaining:
+      split the frontend installer; the frontend `mesh.popover.activate` handler
+      alone is ~75 lines.
 - [ ] `handle_component_input` (`shell/component/input/mod.rs`, ~500 lines):
       extract `handle_key_pressed`/`handle_key_released` (the press/release arms
       duplicate button/toggle activation logic).
@@ -359,11 +363,13 @@ All five landed 2026-06-23 (single commit).
         vector checkmark/dot (`DisplayPaintContent::Checkmark`), wired into both the
         session and buffer render paths. `#[allow(dead_code)]` removed from
         `PainterPath`/`PainterBlendMode`. Pixel-level tests cover both.
-- [ ] `service_name_from_interface` duplicated `pub(super)` in
-      `shell/service.rs:85` and `scripting/context/proxy.rs:370`. Deferred from
-      the dedup batch: sharing it means a new cross-crate dependency (candidate
-      home `mesh-core-service`, near `canonical_interface_name`) for a 4-line fn —
-      only worth it if more shared interface-name helpers accumulate.
+- [x] `service_name_from_interface` duplicated `pub(super)` in
+      `shell/service.rs:85` and `scripting/context/proxy.rs:370`. Done
+      2026-07-02: moved the helper to `mesh-core-service` beside
+      `canonical_interface_name`, re-exported it, and replaced both local copies
+      without adding a new dependency edge (shell and scripting already depended
+      on `mesh-core-service`). Verified with `mesh-core-service`,
+      `mesh-core-scripting`, and `mesh-core-shell` lib tests.
 - [x] `draw_icon_resolution` shim + test-only `draw_named_icon_with_registry`.
       Done 2026-06-23: inlined the `draw_icon_resolution` shim (it only added
       `GlyphAxes::default()` before delegating to
@@ -398,12 +404,26 @@ All five landed 2026-06-23 (single commit).
       failure remains, plus `mesh-core-animation` unit tests which don't
       compile against current `ComputedStyle`/`AnimatableStyle` — both
       pre-existing, unrelated to this change).
-- [ ] `BackendScriptContext` / `ScriptContext` constructor explosion: ~5 `new_*`
+- [x] `BackendScriptContext` / `ScriptContext` constructor explosion: ~5 `new_*`
       convenience constructors each chaining to the full one; production uses one.
-      Mark the test-only variants `#[cfg(test)]` or move to a builder.
-- [ ] `ModuleKind::{FontPack,Library} => ModuleType::Widget` lossy conversion
-      (`module/package/module_manifest.rs:~544`) — extend `ModuleType` or retire
-      the legacy enum once the canonical `module.json` path is the only one.
+      Done 2026-07-02: backend shorthand constructors (`new`,
+      `new_with_settings`, `new_with_capabilities`, `new_with_storage_root`) are
+      `#[cfg(test)]`, the production constructor remains
+      `new_with_settings_and_capabilities`, and the storage-root frontend
+      constructor now routes through a private initializer with the public
+      storage-root variant test-only. Verified with
+      `nix develop --command cargo test -p mesh-core-scripting --lib` and
+      `nix develop --command cargo test -p mesh-core-backend --lib`.
+- [x] `ModuleKind::{FontPack,Library} => ModuleType::Widget` lossy conversion
+      (`module/package/module_manifest.rs:~544`). Done 2026-07-02: extended the
+      legacy `ModuleType` with `FontPack`, `Library`, and `Component`, mapped
+      canonical `ModuleKind` values directly, and updated frontend acceptance so
+      `Component` remains embeddable while font packs/libraries no longer collapse
+      into widgets. Added a conversion regression test and updated shipped popover
+      assertions to expect `ModuleType::Component`. Verified with
+      `nix develop --command cargo test -p mesh-core-module --lib`,
+      `nix develop --command cargo test -p mesh-core-frontend --lib`, and
+      `nix develop --command cargo test -p mesh-core-shell --lib`.
 
 ---
 

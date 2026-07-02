@@ -5264,8 +5264,7 @@ fn child_surface_reconcile_plays_exit_transition_before_teardown() {
     );
 
     // Simulate the exit-transition deadline having elapsed.
-    shell.components[0].children[0].closing_until =
-        Some(Instant::now() - Duration::from_millis(1));
+    shell.components[0].children[0].closing_until = Some(Instant::now() - Duration::from_millis(1));
     shell.render_components().unwrap();
 
     assert!(shell.components[0].children.is_empty());

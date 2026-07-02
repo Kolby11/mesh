@@ -41,7 +41,7 @@ pub enum CompileFrontendError {
 pub fn is_frontend_module(manifest: &Manifest) -> bool {
     matches!(
         manifest.package.module_type,
-        ModuleType::Surface | ModuleType::Widget
+        ModuleType::Surface | ModuleType::Widget | ModuleType::Component
     )
 }
 

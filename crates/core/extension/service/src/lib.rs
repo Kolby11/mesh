@@ -32,6 +32,6 @@ pub use contract::{
 };
 pub use interface::{
     InterfaceCatalog, InterfaceProvider, InterfaceRegistry, InterfaceResolution,
-    canonical_interface_name,
+    canonical_interface_name, service_name_from_interface,
 };
 pub use registry::{ServiceEntry, ServiceError, ServiceRegistry};

@@ -1,4 +1,5 @@
 use super::*;
+use crate::ModuleType;
 use crate::manifest::CapabilitiesSection;
 use std::collections::HashMap;
 use std::fs;
@@ -1293,6 +1294,16 @@ fn installed_module_graph_exposes_kind_views_from_single_modules_map() {
     assert_eq!(graph.font_modules().len(), 1);
     assert_eq!(graph.language_modules().len(), 1);
     assert_eq!(graph.library_modules().len(), 1);
+}
+
+#[test]
+fn module_kind_to_legacy_module_type_keeps_specific_resource_kinds() {
+    assert_eq!(ModuleType::from(ModuleKind::FontPack), ModuleType::FontPack);
+    assert_eq!(ModuleType::from(ModuleKind::Library), ModuleType::Library);
+    assert_eq!(
+        ModuleType::from(ModuleKind::Component),
+        ModuleType::Component
+    );
 }
 
 #[test]

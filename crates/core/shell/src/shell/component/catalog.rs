@@ -191,9 +191,9 @@ impl FrontendCatalog {
             return Err("target module is not loaded".into());
         };
         match entry.compiled.manifest.package.module_type {
-            ModuleType::Widget | ModuleType::Surface => Ok(()),
+            ModuleType::Widget | ModuleType::Surface | ModuleType::Component => Ok(()),
             other => Err(format!(
-                "target module must be a frontend widget or surface, got {other}"
+                "target module must be a frontend widget, component, or surface, got {other}"
             )),
         }
     }

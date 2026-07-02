@@ -158,10 +158,19 @@ impl ScriptContext {
         module_id: impl Into<String>,
         capabilities: CapabilitySet,
     ) -> Result<Self, ScriptError> {
-        Self::new_with_storage_root(module_id, capabilities, default_runtime_storage_root())
+        Self::new_with_storage_root_inner(module_id, capabilities, default_runtime_storage_root())
     }
 
+    #[cfg(test)]
     pub fn new_with_storage_root(
+        module_id: impl Into<String>,
+        capabilities: CapabilitySet,
+        storage_root: impl Into<PathBuf>,
+    ) -> Result<Self, ScriptError> {
+        Self::new_with_storage_root_inner(module_id, capabilities, storage_root)
+    }
+
+    fn new_with_storage_root_inner(
         module_id: impl Into<String>,
         capabilities: CapabilitySet,
         storage_root: impl Into<PathBuf>,

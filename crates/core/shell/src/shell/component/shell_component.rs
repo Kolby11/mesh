@@ -660,109 +660,16 @@ impl ShellComponent for FrontendSurfaceComponent {
         );
 
         let paint_started = std::time::Instant::now();
-        let paint_metrics = if effective_damage.rects.is_empty() {
-            mesh_core_render::PaintProfilingMetrics::default()
-        } else {
-            if effective_damage.full_surface {
-                buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
-                if tooltip.is_some() {
-                    mesh_core_render::set_tooltip_paint_colors(resolve_tooltip_colors(theme));
-                }
-                mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
-                    &selected_paint,
-                    buffer,
-                    scale,
-                    None,
-                    None,
-                    tooltip
-                        .as_ref()
-                        .map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
-                    Some(self.compiled.manifest.package.id.as_str()),
-                )
-            } else {
-                if tooltip.is_some() {
-                    mesh_core_render::set_tooltip_paint_colors(resolve_tooltip_colors(theme));
-                }
-                if paint_bounding_rect {
-                    if let Some(damage) = effective_damage.rect {
-                        buffer.clear_rect(
-                            damage.x,
-                            damage.y,
-                            damage.width,
-                            damage.height,
-                            mesh_core_elements::style::Color::TRANSPARENT,
-                        );
-                        let tooltip_for_damage = tooltip.as_ref().and_then(|(text, cx, cy)| {
-                            current_tooltip_damage
-                                .filter(|tooltip_rect| tooltip_rect.intersects(damage))
-                                .map(|_| (text.as_str(), *cx, *cy))
-                        });
-                        mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
-                            &selected_paint,
-                            buffer,
-                            scale,
-                            Some((damage.x, damage.y, damage.width, damage.height)),
-                            None,
-                            tooltip_for_damage,
-                            Some(self.compiled.manifest.package.id.as_str()),
-                        )
-                    } else {
-                        mesh_core_render::PaintProfilingMetrics::default()
-                    }
-                } else if effective_damage.rects.len() == 1 {
-                    let damage = effective_damage.rects[0];
-                    buffer.clear_rect(
-                        damage.x,
-                        damage.y,
-                        damage.width,
-                        damage.height,
-                        mesh_core_elements::style::Color::TRANSPARENT,
-                    );
-                    let tooltip_for_damage = tooltip.as_ref().and_then(|(text, cx, cy)| {
-                        current_tooltip_damage
-                            .filter(|tooltip_rect| tooltip_rect.intersects(damage))
-                            .map(|_| (text.as_str(), *cx, *cy))
-                    });
-                    mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
-                        &selected_paint,
-                        buffer,
-                        scale,
-                        Some((damage.x, damage.y, damage.width, damage.height)),
-                        None,
-                        tooltip_for_damage,
-                        Some(self.compiled.manifest.package.id.as_str()),
-                    )
-                } else {
-                    let mut paint_metrics = mesh_core_render::PaintProfilingMetrics::default();
-                    for damage in &effective_damage.rects {
-                        buffer.clear_rect(
-                            damage.x,
-                            damage.y,
-                            damage.width,
-                            damage.height,
-                            mesh_core_elements::style::Color::TRANSPARENT,
-                        );
-                        let tooltip_for_damage = tooltip.as_ref().and_then(|(text, cx, cy)| {
-                            current_tooltip_damage
-                                .filter(|tooltip_rect| tooltip_rect.intersects(*damage))
-                                .map(|_| (text.as_str(), *cx, *cy))
-                        });
-                        let damage_metrics =
-                            mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
-                                &selected_paint,
-                                buffer,
-                                scale,
-                                Some((damage.x, damage.y, damage.width, damage.height)),
-                                None,
-                                tooltip_for_damage,
-                                Some(self.compiled.manifest.package.id.as_str()),
-                            );
-                        merge_paint_metrics(&mut paint_metrics, damage_metrics);
-                    }
-                    paint_metrics
-                }
-            }
-        };
+        let paint_metrics = self.paint_pixel_regions(
+            theme,
+            buffer,
+            scale,
+            &selected_paint,
+            &effective_damage,
+            paint_bounding_rect,
+            tooltip.as_ref(),
+            current_tooltip_damage,
+        );
         if effective_damage.full_surface {
             self.last_present_damage_rects.clear();
             self.last_present_damage_rects.push(surface_damage);
@@ -1422,6 +1329,127 @@ impl FrontendSurfaceComponent {
         mesh_core_render::set_tooltip_scale_from(scale_from);
 
         Some((text, paint_x, paint_y))
+    }
+
+    fn paint_pixel_regions(
+        &self,
+        theme: &Theme,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        selected_paint: &mesh_core_render::display_list::SelectedDisplayListPaint<'_>,
+        effective_damage: &EffectiveDamage,
+        paint_bounding_rect: bool,
+        tooltip: Option<&(String, f32, f32)>,
+        current_tooltip_damage: Option<DamageRect>,
+    ) -> mesh_core_render::PaintProfilingMetrics {
+        if effective_damage.rects.is_empty() {
+            return mesh_core_render::PaintProfilingMetrics::default();
+        }
+
+        if tooltip.is_some() {
+            mesh_core_render::set_tooltip_paint_colors(resolve_tooltip_colors(theme));
+        }
+
+        if effective_damage.full_surface {
+            buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
+            return self.paint_selected_pixels(
+                buffer,
+                scale,
+                selected_paint,
+                None,
+                tooltip.map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
+            );
+        }
+
+        if paint_bounding_rect {
+            return effective_damage
+                .rect
+                .map(|damage| {
+                    self.paint_damage_rect(
+                        buffer,
+                        scale,
+                        selected_paint,
+                        damage,
+                        tooltip,
+                        current_tooltip_damage,
+                    )
+                })
+                .unwrap_or_default();
+        }
+
+        if effective_damage.rects.len() == 1 {
+            return self.paint_damage_rect(
+                buffer,
+                scale,
+                selected_paint,
+                effective_damage.rects[0],
+                tooltip,
+                current_tooltip_damage,
+            );
+        }
+
+        let mut paint_metrics = mesh_core_render::PaintProfilingMetrics::default();
+        for &damage in &effective_damage.rects {
+            let damage_metrics = self.paint_damage_rect(
+                buffer,
+                scale,
+                selected_paint,
+                damage,
+                tooltip,
+                current_tooltip_damage,
+            );
+            merge_paint_metrics(&mut paint_metrics, damage_metrics);
+        }
+        paint_metrics
+    }
+
+    fn paint_damage_rect(
+        &self,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        selected_paint: &mesh_core_render::display_list::SelectedDisplayListPaint<'_>,
+        damage: DamageRect,
+        tooltip: Option<&(String, f32, f32)>,
+        current_tooltip_damage: Option<DamageRect>,
+    ) -> mesh_core_render::PaintProfilingMetrics {
+        buffer.clear_rect(
+            damage.x,
+            damage.y,
+            damage.width,
+            damage.height,
+            mesh_core_elements::style::Color::TRANSPARENT,
+        );
+        let tooltip_for_damage = tooltip.and_then(|(text, cx, cy)| {
+            current_tooltip_damage
+                .filter(|tooltip_rect| tooltip_rect.intersects(damage))
+                .map(|_| (text.as_str(), *cx, *cy))
+        });
+        self.paint_selected_pixels(
+            buffer,
+            scale,
+            selected_paint,
+            Some(damage),
+            tooltip_for_damage,
+        )
+    }
+
+    fn paint_selected_pixels(
+        &self,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        selected_paint: &mesh_core_render::display_list::SelectedDisplayListPaint<'_>,
+        damage: Option<DamageRect>,
+        tooltip: Option<(&str, f32, f32)>,
+    ) -> mesh_core_render::PaintProfilingMetrics {
+        mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
+            selected_paint,
+            buffer,
+            scale,
+            damage.map(|rect| (rect.x, rect.y, rect.width, rect.height)),
+            None,
+            tooltip,
+            Some(self.compiled.manifest.package.id.as_str()),
+        )
     }
 
     fn handle_interface_event(

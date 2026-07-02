@@ -1,6 +1,7 @@
 use super::types::CoreRequest;
 use mesh_core_capability::Capability;
 use mesh_core_scripting::{PublishedEvent, ScriptState};
+pub(super) use mesh_core_service::service_name_from_interface;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -80,13 +81,6 @@ pub(super) fn apply_service_update(
         );
         state.set(service_name, payload.borrow().clone());
     }
-}
-
-pub(super) fn service_name_from_interface(interface: &str) -> String {
-    interface
-        .strip_prefix("mesh.")
-        .unwrap_or(interface)
-        .to_string()
 }
 
 pub(super) fn service_command_control_capability(interface: &str) -> Capability {

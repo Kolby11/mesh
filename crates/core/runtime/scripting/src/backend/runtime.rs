@@ -51,6 +51,7 @@ struct BackendRuntime {
 }
 
 impl BackendScriptContext {
+    #[cfg(test)]
     pub fn new(module_id: impl Into<String>) -> Self {
         Self::new_with_settings_and_capabilities(
             module_id,
@@ -59,10 +60,12 @@ impl BackendScriptContext {
         )
     }
 
+    #[cfg(test)]
     pub fn new_with_settings(module_id: impl Into<String>, settings: JsonValue) -> Self {
         Self::new_with_settings_and_capabilities(module_id, settings, Vec::<String>::new())
     }
 
+    #[cfg(test)]
     pub fn new_with_capabilities(
         module_id: impl Into<String>,
         capabilities: impl IntoIterator<Item = String>,
@@ -83,6 +86,7 @@ impl BackendScriptContext {
         )
     }
 
+    #[cfg(test)]
     pub fn new_with_storage_root(
         module_id: impl Into<String>,
         storage_root: impl Into<PathBuf>,
@@ -95,7 +99,7 @@ impl BackendScriptContext {
         )
     }
 
-    pub fn new_with_settings_capabilities_and_storage_root(
+    fn new_with_settings_capabilities_and_storage_root(
         module_id: impl Into<String>,
         settings: JsonValue,
         capabilities: impl IntoIterator<Item = String>,
@@ -474,9 +478,16 @@ impl BackendScriptContext {
         let globals = target;
         globals.set("self", self.current_self_table()?)?;
         let mesh = self.ensure_lua().create_table()?;
-        let service = self.ensure_lua().create_table()?;
-        let log = self.ensure_lua().create_table()?;
+        self.install_service_api(&mesh)?;
+        self.install_exec_api(&mesh)?;
+        self.install_config_api(&mesh)?;
+        self.install_log_api(&mesh)?;
+        globals.set("mesh", mesh)?;
+        Ok(())
+    }
 
+    fn install_service_api(&mut self, mesh: &Table) -> mlua::Result<()> {
+        let service = self.ensure_lua().create_table()?;
         let module_id = self.module_id.clone();
         let runtime = Arc::clone(&self.runtime);
         service.set(
@@ -577,6 +588,11 @@ impl BackendScriptContext {
                 })?,
         )?;
 
+        mesh.set("service", service)?;
+        Ok(())
+    }
+
+    fn install_exec_api(&mut self, mesh: &Table) -> mlua::Result<()> {
         let capabilities = self.capabilities.clone();
         let module_id = self.module_id.clone();
         mesh.set(
@@ -629,6 +645,10 @@ impl BackendScriptContext {
             )?,
         )?;
 
+        Ok(())
+    }
+
+    fn install_config_api(&mut self, mesh: &Table) -> mlua::Result<()> {
         let runtime = Arc::clone(&self.runtime);
         mesh.set(
             "config",
@@ -637,7 +657,11 @@ impl BackendScriptContext {
                 lua.to_value(&settings)
             })?,
         )?;
+        Ok(())
+    }
 
+    fn install_log_api(&mut self, mesh: &Table) -> mlua::Result<()> {
+        let log = self.ensure_lua().create_table()?;
         let module_id = self.module_id.clone();
         let call_log = self.ensure_lua().create_function(
             move |_lua, (_self, level, message): (mlua::Table, String, String)| {
@@ -668,9 +692,7 @@ impl BackendScriptContext {
             )?;
         }
 
-        mesh.set("service", service)?;
         mesh.set("log", log)?;
-        globals.set("mesh", mesh)?;
         Ok(())
     }
 

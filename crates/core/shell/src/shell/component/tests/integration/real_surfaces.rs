@@ -300,7 +300,7 @@ fn shipped_tiny_nav_popovers_are_embeddable_components_without_surface_geometry(
 
         assert_eq!(
             manifest.package.module_type,
-            mesh_core_module::ModuleType::Widget,
+            mesh_core_module::ModuleType::Component,
             "{module} should be an embeddable component, not a standalone surface"
         );
         assert!(
@@ -464,8 +464,8 @@ fn set_closing_child_keys_scopes_exit_transition_to_popover_subtree_only() {
         .last_tree
         .as_ref()
         .expect("rendered theme selector reopened frame");
-    let reopened_popover =
-        first_node_with_class_token(reopened_tree, "theme-float-shell").expect("theme selector popover node");
+    let reopened_popover = first_node_with_class_token(reopened_tree, "theme-float-shell")
+        .expect("theme selector popover node");
     assert!(
         reopened_popover
             .attributes

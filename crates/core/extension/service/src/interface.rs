@@ -105,6 +105,15 @@ pub fn canonical_interface_name(name: &str) -> String {
     }
 }
 
+/// Convert a canonical interface name such as `mesh.audio` into the short
+/// service state key/capability segment used by runtime APIs.
+pub fn service_name_from_interface(interface: &str) -> String {
+    interface
+        .strip_prefix("mesh.")
+        .unwrap_or(interface)
+        .to_string()
+}
+
 impl InterfaceCatalog {
     pub fn register_contract(&mut self, contract: InterfaceContract) {
         register_contract_in_map(&mut self.contracts, contract);
@@ -292,6 +301,16 @@ mod tests {
         assert_eq!(
             resolved.provider.unwrap().base_module.as_deref(),
             Some("@mesh/network-interface")
+        );
+    }
+
+    #[test]
+    fn service_name_strips_mesh_prefix_only() {
+        assert_eq!(service_name_from_interface("mesh.audio"), "audio");
+        assert_eq!(service_name_from_interface("audio"), "audio");
+        assert_eq!(
+            service_name_from_interface("alice.thermal"),
+            "alice.thermal"
         );
     }
 

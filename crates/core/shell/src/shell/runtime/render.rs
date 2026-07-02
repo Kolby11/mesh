@@ -492,8 +492,7 @@ impl Shell {
                 unreachable!("child reconcile only creates child targets");
             };
             self.components[index].children[child_index].anchor_rect = request.anchor_rect;
-            self.components[index].children[child_index].content_padding =
-                request.content_padding;
+            self.components[index].children[child_index].content_padding = request.content_padding;
             if self
                 .presentation_engine
                 .surface_waiting_for_frame_callback(&child_surface_id)

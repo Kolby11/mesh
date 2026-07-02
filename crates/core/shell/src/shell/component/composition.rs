@@ -158,10 +158,12 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 continue;
             };
 
-            if accepts_widget && entry.compiled.manifest.package.module_type != ModuleType::Widget {
+            let module_type = entry.compiled.manifest.package.module_type;
+            if accepts_widget && !matches!(module_type, ModuleType::Widget | ModuleType::Component)
+            {
                 nodes.push(self.build_error_widget(format!(
                     "slot '{slot_id}' accepts widgets, but '{}' is {}",
-                    contribution.widget_id, entry.compiled.manifest.package.module_type
+                    contribution.widget_id, module_type
                 )));
                 continue;
             }
