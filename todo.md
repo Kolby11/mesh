@@ -317,8 +317,10 @@ All five landed 2026-06-23 (single commit).
       `input/keyboard.rs`, leaving the top-level input dispatcher to delegate
       keyboard arms without changing activation order. Verified 2026-07-02 with
       `cargo fmt --check` and `mesh-core-shell` lib tests.
-- [ ] `annotate_runtime_tree` (`shell/component/runtime_tree.rs:577`, ~180 lines,
-      11 args): introduce an annotation-context struct; split the slider logic.
+- [x] `annotate_runtime_tree` (`shell/component/runtime_tree.rs:577`, ~180 lines,
+      11 args): introduced `RuntimeAnnotationContext` and split slider value
+      preservation into dedicated helpers. Verified 2026-07-02 with
+      `cargo fmt --check` and `mesh-core-shell` lib tests.
 
 ### Decisions / verify-then-act (judgment calls, don't blind-delete)
 

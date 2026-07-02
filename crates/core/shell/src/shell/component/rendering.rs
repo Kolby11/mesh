@@ -247,9 +247,7 @@ impl FrontendSurfaceComponent {
         // Advance smooth-scroll animations before annotation reads scroll_offsets,
         // so the eased offset lands in this frame's `_mesh_scroll_*` attributes.
         self.advance_scroll_animations(std::time::Instant::now());
-        annotate_runtime_tree(
-            tree,
-            "root".to_string(),
+        let mut annotation_context = RuntimeAnnotationContext::new(
             &self.focused_key,
             &self.focus_visible_key,
             &self.hovered_path,
@@ -261,6 +259,7 @@ impl FrontendSurfaceComponent {
             &self.checked_values,
             &self.scroll_offsets,
         );
+        annotate_runtime_tree(tree, "root".to_string(), &mut annotation_context);
         if self.surface_exiting {
             append_class_recursive(tree, "mesh-surface-exiting");
             tree.attributes

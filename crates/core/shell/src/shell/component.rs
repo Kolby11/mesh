@@ -30,8 +30,8 @@ pub(crate) use input::KeybindResolutionSource;
 use mesh_core_animation::transition::TransitionAnimator;
 pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
 use runtime_tree::{
-    NodeServiceFieldDependencies, RetainedWidgetTree, annotate_runtime_tree, collect_all_keys,
-    collect_element_metrics, input_accepts_char,
+    NodeServiceFieldDependencies, RetainedWidgetTree, RuntimeAnnotationContext,
+    annotate_runtime_tree, collect_all_keys, collect_element_metrics, input_accepts_char,
 };
 
 use mesh_core_capability::{Capability, CapabilitySet};
