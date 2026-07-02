@@ -274,6 +274,65 @@ impl Shell {
                     .filter(|icon| icon.module_id == module.id && !icon.required)
                     .map(|icon| icon.name.clone())
                     .collect::<Vec<_>>();
+                let mut required_binaries = module
+                    .manifest
+                    .mesh
+                    .dependencies
+                    .binaries
+                    .iter()
+                    .filter(|binary| !binary.optional)
+                    .map(|binary| binary.name.clone())
+                    .collect::<Vec<_>>();
+                required_binaries.sort();
+                required_binaries.dedup();
+                let mut optional_binaries = module
+                    .manifest
+                    .mesh
+                    .dependencies
+                    .binaries
+                    .iter()
+                    .filter(|binary| binary.optional)
+                    .map(|binary| binary.name.clone())
+                    .collect::<Vec<_>>();
+                optional_binaries.sort();
+                optional_binaries.dedup();
+                let mut native_binaries = module
+                    .manifest
+                    .mesh
+                    .dependencies
+                    .binaries
+                    .iter()
+                    .map(|binary| mesh_core_debug::ModuleBinaryHealthEntry {
+                        name: binary.name.clone(),
+                        optional: binary.optional,
+                        available: mesh_core_module::package::binary_available(&binary.name),
+                    })
+                    .collect::<Vec<_>>();
+                native_binaries.sort_by(|left, right| left.name.cmp(&right.name));
+                let mut keybind_actions = graph
+                    .keybind_actions()
+                    .iter()
+                    .filter(|action| action.module_id == module.id)
+                    .map(|action| action.action_id.clone())
+                    .collect::<Vec<_>>();
+                keybind_actions.sort();
+                keybind_actions.dedup();
+                let mut active_providers = requirements
+                    .into_iter()
+                    .flat_map(|requirements| {
+                        requirements
+                            .backend
+                            .keys()
+                            .chain(requirements.optional_backend.keys())
+                    })
+                    .filter_map(|interface| {
+                        graph
+                            .active_provider(interface)
+                            .map(|provider| format!("{interface}={}", provider.module_id))
+                    })
+                    .collect::<Vec<_>>();
+                active_providers.sort();
+                active_providers.dedup();
                 let frontend_surface = graph
                     .frontend_surfaces()
                     .iter()
@@ -313,6 +372,11 @@ impl Shell {
                     uses_font_packs: requirements
                         .map(|requirements| sorted_keys(&requirements.fonts))
                         .unwrap_or_default(),
+                    required_binaries,
+                    optional_binaries,
+                    keybind_actions,
+                    active_providers,
+                    native_binaries,
                     capabilities: module.manifest.mesh.capabilities.required.clone(),
                     optional_capabilities: module.manifest.mesh.capabilities.optional.clone(),
                     surface_entrypoint: frontend_surface.map(|surface| surface.path.clone()),
@@ -990,6 +1054,15 @@ fn module_graph_entry_json(entry: &mesh_core_debug::ModuleGraphEntry) -> serde_j
             "i18n_packs": entry.uses_i18n_packs,
             "theme_packs": entry.uses_theme_packs,
             "font_packs": entry.uses_font_packs,
+            "required_binaries": entry.required_binaries,
+            "optional_binaries": entry.optional_binaries,
+            "keybinds": entry.keybind_actions,
+            "active_providers": entry.active_providers,
+            "native_binaries": entry.native_binaries.iter().map(|binary| serde_json::json!({
+                "name": binary.name,
+                "optional": binary.optional,
+                "available": binary.available,
+            })).collect::<Vec<_>>(),
             "capabilities": entry.capabilities,
             "optional_capabilities": entry.optional_capabilities,
         },

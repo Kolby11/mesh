@@ -55,6 +55,18 @@ fn temp_dir(name: &str) -> PathBuf {
 }
 
 #[test]
+fn binary_available_accepts_explicit_existing_paths() {
+    let dir = temp_dir("explicit-binary-path");
+    let executable = dir.join("tool");
+    fs::write(&executable, "test").unwrap();
+
+    assert!(binary_available(executable.to_str().unwrap()));
+    assert!(!binary_available(dir.join("missing").to_str().unwrap()));
+
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn module_package_paths_default_to_dot_mesh() {
     let _guard = EnvGuard::set("MESH_HOME", None);
     let path = root_module_graph_manifest_path().unwrap();
@@ -3305,6 +3317,31 @@ end
 }
 
 #[test]
+fn extract_frontend_interface_event_subscriptions_finds_static_proxy_events() {
+    use super::installed_graph::extract_frontend_interface_event_subscriptions;
+
+    let src = r#"
+local audio = require("mesh.audio")
+local power = require('mesh.power')
+local dynamic = require(interface_name)
+
+audio.VolumeChanged:on(function(_event) end)
+audio.events.DeviceChanged:subscribe(function(_event) end)
+power.BatteryChanged:on(function(_event) end)
+dynamic.Ignored:on(function(_event) end)
+"#;
+
+    assert_eq!(
+        extract_frontend_interface_event_subscriptions(src),
+        vec![
+            ("mesh.audio".into(), "DeviceChanged".into()),
+            ("mesh.audio".into(), "VolumeChanged".into()),
+            ("mesh.power".into(), "BatteryChanged".into()),
+        ]
+    );
+}
+
+#[test]
 fn extract_keybind_subscriptions_from_mesh_source_finds_static_actions() {
     use super::installed_graph::extract_keybind_subscriptions_from_mesh_source;
 
@@ -3596,6 +3633,77 @@ end
     assert!(graph.diagnostics().iter().any(|diagnostic| {
         diagnostic.module_id == "@mesh/example-backend"
             && diagnostic.status == "undeclared_interface_event_emit"
+            && diagnostic.message.contains("MissingChanged")
+    }));
+}
+
+#[test]
+fn graph_diagnostics_report_frontend_undeclared_interface_event_subscription() {
+    let interface_dir = temp_dir("frontend-interface-event-contract-test");
+    fs::write(
+        interface_dir.join("interface.toml"),
+        r#"
+[[events]]
+name = "DeclaredChanged"
+"#,
+    )
+    .unwrap();
+    let frontend_dir = temp_dir("frontend-event-subscription-test");
+    let frontend_src = frontend_dir.join("src");
+    fs::create_dir_all(&frontend_src).unwrap();
+    fs::write(
+        frontend_src.join("main.mesh"),
+        r#"
+<script lang="luau">
+local example = require("mesh.example")
+example.MissingChanged:on(function(_event) end)
+</script>
+"#,
+    )
+    .unwrap();
+
+    let root = root_with_modules(
+        &[
+            ("@mesh/example-interface", ModuleKind::Interface),
+            ("@mesh/example-frontend", ModuleKind::Frontend),
+        ],
+        &[],
+        None,
+    );
+    let mut interface = loaded_module(
+        "@mesh/example-interface",
+        ModuleKind::Interface,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    interface.path = interface_dir.join("module.json");
+    interface.manifest.mesh.interface = Some(MeshInterfaceDeclaration {
+        name: "mesh.example".into(),
+        version: Some("1.0".into()),
+        file: Some("interface.toml".into()),
+        domain: Some("example".into()),
+        extends: None,
+        relationship: Some(InterfaceRelationship::Base),
+        reason: None,
+    });
+    let mut frontend = loaded_module(
+        "@mesh/example-frontend",
+        ModuleKind::Frontend,
+        MeshDependencies {
+            backend: HashMap::from([("mesh.example".into(), ">=1.0".into())]),
+            ..MeshDependencies::default()
+        },
+        vec![],
+        MeshContributes::default(),
+    );
+    frontend.path = frontend_dir.join("module.json");
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![interface, frontend]).unwrap();
+
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/example-frontend"
+            && diagnostic.status == "undeclared_interface_event_subscription"
             && diagnostic.message.contains("MissingChanged")
     }));
 }

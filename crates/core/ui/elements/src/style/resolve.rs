@@ -1238,6 +1238,80 @@ fn state_name_bit(state: &str) -> Option<u32> {
     }
 }
 
+macro_rules! css_property_table {
+    (
+        fn $apply:ident(
+            $style:ident: &mut ComputedStyle,
+            $property:ident: &str,
+            $value:ident: &StyleValue,
+            $resolver:ident: &StyleResolver,
+            $variables:ident: &HashMap<String, StyleValue>,
+        ) { $($arms:tt)* }
+    ) => {
+        css_property_table! {
+            @parse
+            [$apply, $style, $property, $value, $resolver, $variables]
+            []
+            []
+            $($arms)*
+        }
+    };
+    (
+        @parse $signature:tt
+        [$($names:expr,)*]
+        [$($parsed:tt)*]
+        $first:literal $(| $alias:literal)* => $body:block $(,)?
+        $($rest:tt)*
+    ) => {
+        css_property_table! {
+            @parse $signature
+            [$($names,)* $first, $($alias,)*]
+            [$($parsed)* $first $(| $alias)* => $body,]
+            $($rest)*
+        }
+    };
+    (
+        @parse $signature:tt
+        [$($names:expr,)*]
+        [$($parsed:tt)*]
+        $first:literal $(| $alias:literal)* => $body:expr,
+        $($rest:tt)*
+    ) => {
+        css_property_table! {
+            @parse $signature
+            [$($names,)* $first, $($alias,)*]
+            [$($parsed)* $first $(| $alias)* => $body,]
+            $($rest)*
+        }
+    };
+    (
+        @parse
+        [$apply:ident, $style:ident, $property:ident, $value:ident, $resolver:ident, $variables:ident]
+        [$($names:expr,)*]
+        [$($parsed:tt)*]
+    ) => {
+        const LOWERED_CSS_PROPERTIES: &[&str] = &[$($names,)*];
+
+        fn $apply(
+            $style: &mut ComputedStyle,
+            $property: &str,
+            $value: &StyleValue,
+            $resolver: &StyleResolver,
+            $variables: &HashMap<String, StyleValue>,
+        ) {
+            match $property {
+                $($parsed)*
+                _ => tracing::warn!("unsupported CSS property '{}'", $property),
+            }
+        }
+    };
+}
+
+pub(super) fn lowered_css_properties() -> &'static [&'static str] {
+    LOWERED_CSS_PROPERTIES
+}
+
+css_property_table! {
 fn apply_declaration(
     style: &mut ComputedStyle,
     property: &str,
@@ -1245,7 +1319,6 @@ fn apply_declaration(
     resolver: &StyleResolver,
     variables: &HashMap<String, StyleValue>,
 ) {
-    match property {
         "background" | "background-color" => {
             style.background_color = resolver.resolve_color_with_variables(value, variables)
         }
@@ -1720,10 +1793,6 @@ fn apply_declaration(
                     style.tooltip_offset = Some((x, y));
                 }
             }
-        }
-        _ if property.starts_with("--") => {}
-        _ => {
-            tracing::warn!("unsupported CSS property '{}'", property);
         }
     }
 }

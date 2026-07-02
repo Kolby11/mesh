@@ -158,7 +158,31 @@ impl ScriptContext {
         module_id: impl Into<String>,
         capabilities: CapabilitySet,
     ) -> Result<Self, ScriptError> {
-        Self::new_with_storage_root_inner(module_id, capabilities, default_runtime_storage_root())
+        let module_id = module_id.into();
+        Self::new_with_storage_scope_inner(
+            module_id.clone(),
+            module_id.clone(),
+            module_id,
+            capabilities,
+            default_runtime_storage_root(),
+        )
+    }
+
+    /// Create a frontend context whose durable storage is isolated to one
+    /// concrete component instance.
+    pub fn new_for_instance(
+        module_id: impl Into<String>,
+        component_id: impl Into<String>,
+        instance_id: impl Into<String>,
+        capabilities: CapabilitySet,
+    ) -> Result<Self, ScriptError> {
+        Self::new_with_storage_scope_inner(
+            module_id.into(),
+            component_id.into(),
+            instance_id.into(),
+            capabilities,
+            default_runtime_storage_root(),
+        )
     }
 
     #[cfg(test)]
@@ -167,19 +191,44 @@ impl ScriptContext {
         capabilities: CapabilitySet,
         storage_root: impl Into<PathBuf>,
     ) -> Result<Self, ScriptError> {
-        Self::new_with_storage_root_inner(module_id, capabilities, storage_root)
+        let module_id = module_id.into();
+        Self::new_with_storage_scope_inner(
+            module_id.clone(),
+            module_id.clone(),
+            module_id,
+            capabilities,
+            storage_root,
+        )
     }
 
-    fn new_with_storage_root_inner(
+    #[cfg(test)]
+    pub fn new_with_storage_scope(
         module_id: impl Into<String>,
+        component_id: impl Into<String>,
+        instance_id: impl Into<String>,
         capabilities: CapabilitySet,
         storage_root: impl Into<PathBuf>,
     ) -> Result<Self, ScriptError> {
-        let module_id = module_id.into();
+        Self::new_with_storage_scope_inner(
+            module_id.into(),
+            component_id.into(),
+            instance_id.into(),
+            capabilities,
+            storage_root,
+        )
+    }
+
+    fn new_with_storage_scope_inner(
+        module_id: String,
+        component_id: String,
+        instance_id: String,
+        capabilities: CapabilitySet,
+        storage_root: impl Into<PathBuf>,
+    ) -> Result<Self, ScriptError> {
         let storage = StorageManager::new(storage_root.into()).open(StorageScope::frontend(
             module_id.clone(),
-            module_id.clone(),
-            module_id.clone(),
+            component_id,
+            instance_id,
         ));
         let storage_diagnostics = storage
             .diagnostics()

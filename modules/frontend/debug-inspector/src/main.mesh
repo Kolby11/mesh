@@ -59,6 +59,8 @@
         <ModulesView
           hidden={modules_hidden}
           state_copy={modules_state_copy}
+          filter_value={module_filter_value}
+          onFilterChange={onModuleFilterChange}
           empty_hidden={modules_empty_hidden}
           row1_hidden={module_row_1_hidden}
           row1_module_id={module_row_1_module_id}
@@ -259,6 +261,7 @@ shell_stage_label = "No recent samples yet"
 shell_render_label = "Total surface render: --"
 
 modules_state_copy = "Installed module contracts show declared dependencies, contributions, resources, and graph diagnostics."
+module_filter_value = ""
 modules_empty = true
 modules_empty_hidden = false
 module_row_1_hidden = true
@@ -602,6 +605,35 @@ local function combined_resources(entry)
     if type(uses.font_packs) == "table" and #uses.font_packs > 0 then
         parts[#parts + 1] = "fonts " .. join_limited(uses.font_packs, 2)
     end
+    if type(uses.required_binaries) == "table" and #uses.required_binaries > 0 then
+        parts[#parts + 1] = "binaries " .. join_limited(uses.required_binaries, 2)
+    end
+    if type(uses.optional_binaries) == "table" and #uses.optional_binaries > 0 then
+        parts[#parts + 1] = "optional binaries " .. join_limited(uses.optional_binaries, 2)
+    end
+    if type(uses.keybinds) == "table" and #uses.keybinds > 0 then
+        parts[#parts + 1] = "keybinds " .. join_limited(uses.keybinds, 2)
+    end
+    if type(uses.active_providers) == "table" and #uses.active_providers > 0 then
+        parts[#parts + 1] = "providers " .. join_limited(uses.active_providers, 2)
+    end
+    if type(uses.native_binaries) == "table" and #uses.native_binaries > 0 then
+        local binary_health = {}
+        for _, binary in ipairs(uses.native_binaries) do
+            if type(binary) == "table" then
+                local state = "missing"
+                if binary.available then
+                    state = "available"
+                elseif binary.optional then
+                    state = "optional missing"
+                end
+                binary_health[#binary_health + 1] = string.format("%s %s", tostring(binary.name or "unknown"), state)
+            end
+        end
+        if #binary_health > 0 then
+            parts[#parts + 1] = "binary health " .. join_limited(binary_health, 2)
+        end
+    end
     if #parts == 0 then
         return "Resources: none"
     end
@@ -618,8 +650,12 @@ local function provided_interfaces_label(entry)
         end
     end
     if type(provides) == "table" and type(provides.interfaces) == "table" then
-        for _, interface_name in ipairs(provides.interfaces) do
-            interfaces[#interfaces + 1] = interface_name
+        for _, interface_entry in ipairs(provides.interfaces) do
+            if type(interface_entry) == "table" then
+                interfaces[#interfaces + 1] = tostring(interface_entry.interface or "unknown")
+            else
+                interfaces[#interfaces + 1] = tostring(interface_entry)
+            end
         end
     end
     return list_label("Interfaces", interfaces)
@@ -761,21 +797,52 @@ local function module_slot(slot, entry)
     )
 end
 
+local function graph_value_matches(value, query)
+    local value_type = type(value)
+    if value_type == "table" then
+        for key, child in pairs(value) do
+            if graph_value_matches(key, query) or graph_value_matches(child, query) then
+                return true
+            end
+        end
+        return false
+    end
+    if value_type == "string" or value_type == "number" or value_type == "boolean" then
+        return string.find(string.lower(tostring(value)), query, 1, true) ~= nil
+    end
+    return false
+end
+
 local function sync_module_rows()
     local graph = nil
     if debug_service and type(debug_service.module_graph) == "table" then
         graph = debug_service.module_graph
     end
-    modules_empty = list_size(graph) == 0
+    local filtered = {}
+    local query = string.lower(module_filter_value or "")
+    if type(graph) == "table" then
+        for _, entry in ipairs(graph) do
+            if query == "" or graph_value_matches(entry, query) then
+                filtered[#filtered + 1] = entry
+            end
+        end
+    end
+    modules_empty = #filtered == 0
     modules_empty_hidden = not modules_empty
     modules_state_copy = string.format(
-        "%s installed graph entries expose declared dependencies, contributions, resources, and diagnostics.",
+        "%s of %s installed graph entries match.",
+        tostring(#filtered),
         tostring(list_size(graph))
     )
-    module_slot(1, graph and graph[1] or nil)
-    module_slot(2, graph and graph[2] or nil)
-    module_slot(3, graph and graph[3] or nil)
-    module_slot(4, graph and graph[4] or nil)
+    module_slot(1, filtered[1])
+    module_slot(2, filtered[2])
+    module_slot(3, filtered[3])
+    module_slot(4, filtered[4])
+end
+
+function onModuleFilterChange(event)
+    module_filter_value = tostring(event.value or "")
+    sync_module_rows()
 end
 
 local function fallback_benchmark_status()

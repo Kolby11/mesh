@@ -420,6 +420,12 @@ pub struct ModuleGraphEntry {
     pub uses_i18n_packs: Vec<String>,
     pub uses_theme_packs: Vec<String>,
     pub uses_font_packs: Vec<String>,
+    pub required_binaries: Vec<String>,
+    pub optional_binaries: Vec<String>,
+    pub keybind_actions: Vec<String>,
+    /// Resolved `interface=provider` pairs for interfaces consumed by this module.
+    pub active_providers: Vec<String>,
+    pub native_binaries: Vec<ModuleBinaryHealthEntry>,
     pub capabilities: Vec<String>,
     pub optional_capabilities: Vec<String>,
     pub surface_entrypoint: Option<String>,
@@ -441,6 +447,13 @@ pub struct ModuleGraphEntry {
     pub optional_icons: Vec<String>,
     pub diagnostics: Vec<String>,
     pub health: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleBinaryHealthEntry {
+    pub name: String,
+    pub optional: bool,
+    pub available: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

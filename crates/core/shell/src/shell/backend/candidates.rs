@@ -1,6 +1,6 @@
 use super::super::*;
 use super::{BackendLaunchCandidate, BackendLifecycleStatusRecord};
-use mesh_core_module::package::BackendProviderNode;
+use mesh_core_module::package::{BackendProviderNode, binary_available};
 
 pub(in crate::shell) fn backend_launch_candidates_from_graph(
     graph: &InstalledModuleGraph,
@@ -96,7 +96,7 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph(
             .dependencies
             .binaries
             .iter()
-            .find(|binary| !binary.optional && !binary_exists(&binary.name))
+            .find(|binary| !binary.optional && !binary_available(&binary.name))
         {
             statuses.push(BackendLifecycleStatusRecord {
                 interface: interface.clone(),
@@ -337,7 +337,7 @@ pub(super) fn legacy_backend_candidates_from_discovery(
             .dependencies
             .binaries
             .iter()
-            .find(|binary| !binary.optional && !binary_exists(&binary.name));
+            .find(|binary| !binary.optional && !binary_available(&binary.name));
         if let Some(binary) = missing_binary {
             tracing::info!(
                 "skipping legacy backend '{}' for service '{}' because binary '{}' is unavailable",
@@ -383,18 +383,6 @@ pub(super) fn legacy_backend_candidates_from_discovery(
     }
 
     candidates
-}
-
-fn binary_exists(name: &str) -> bool {
-    if name.contains(std::path::MAIN_SEPARATOR) {
-        return Path::new(name).is_file();
-    }
-
-    let Some(paths) = env::var_os("PATH") else {
-        return false;
-    };
-
-    env::split_paths(&paths).any(|dir| dir.join(name).is_file())
 }
 
 fn backend_module_settings_json(config: &ShellConfig, module_id: &str) -> serde_json::Value {

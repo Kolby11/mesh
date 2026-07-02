@@ -338,6 +338,30 @@ fn debug_inspector_modules_view_renders_uses_provides_graph() {
         text.iter()
             .any(|line| line.contains("optional mesh.brightness"))
     );
+
+    component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/debug-inspector::onModuleFilterChange",
+            &[serde_json::json!({ "value": "pipewire" })],
+        )
+        .unwrap();
+    component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    let filtered_text = rendered_text(&component);
+    assert!(
+        filtered_text
+            .iter()
+            .any(|line| line == "@mesh/pipewire-audio")
+    );
+    assert!(
+        !filtered_text
+            .iter()
+            .any(|line| line == "@mesh/navigation-bar")
+    );
+    assert!(
+        filtered_text
+            .iter()
+            .any(|line| line == "1 of 2 installed graph entries match.")
+    );
     assert!(
         text.iter()
             .any(|line| line.contains("Resources: icons @mesh/icons-default"))

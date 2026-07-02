@@ -978,6 +978,13 @@ accepted, but static event names are validated against the provider's interface
 TOML. If a backend emits an event that is not declared under `[[events]]`, the
 installed graph reports `undeclared_interface_event_emit`.
 
+Frontend static subscriptions are checked against the same contract. With
+`local audio = require("mesh.audio")`, both `audio.VolumeChanged:on(...)` and
+`audio.events.VolumeChanged:subscribe(...)` report
+`undeclared_interface_event_subscription` when `VolumeChanged` is absent from
+`[[events]]`. Dynamic interface bindings and computed event names are not
+statically diagnosed.
+
 ## Frontend Workflow
 
 Frontend authors should consume interfaces and library helpers:

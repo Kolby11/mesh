@@ -2,6 +2,13 @@
   <column class="modules-view">
     <text class="section-title">Modules</text>
     <text class="section-copy">{state_copy}</text>
+    <input
+      class="module-filter"
+      value={filter_value}
+      placeholder="Filter modules"
+      label="Filter installed modules"
+      onchange={onFilterChange}
+    />
 
     <empty-state class="empty-card" hidden={empty_hidden}>
       <column class="empty-copy">
@@ -93,6 +100,10 @@
 .modules-view,
 .module-list {
     gap: var(--spacing-md);
+}
+
+.module-filter {
+    width: 100%;
 }
 
 .section-title,

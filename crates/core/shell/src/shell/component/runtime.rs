@@ -178,8 +178,10 @@ impl FrontendSurfaceComponent {
         component: &mesh_core_component::ComponentFile,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<EmbeddedFrontendRuntime, ComponentError> {
-        let mut script_ctx = ScriptContext::new(
+        let mut script_ctx = ScriptContext::new_for_instance(
+            manifest.package.id.clone(),
             component_id.clone(),
+            instance_key.to_string(),
             grant_capabilities_from_manifest(manifest),
         )
         .map_err(|source| ComponentError::Script {

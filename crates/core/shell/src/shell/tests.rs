@@ -1438,6 +1438,27 @@ fn debug_snapshot_exposes_installed_module_graph_contracts() {
             .required_icons
             .contains(&"battery-caution".into())
     );
+    assert!(navigation.keybind_actions.contains(&"mute".into()));
+    assert!(
+        navigation
+            .active_providers
+            .iter()
+            .any(|entry| entry.starts_with("mesh.power="))
+    );
+
+    let pipewire = snapshot
+        .module_graph
+        .iter()
+        .find(|entry| entry.module_id == "@mesh/pipewire-audio")
+        .expect("pipewire module graph entry");
+    assert!(pipewire.required_binaries.contains(&"wpctl".into()));
+    assert!(pipewire.optional_binaries.contains(&"aplay".into()));
+    assert!(
+        pipewire
+            .native_binaries
+            .iter()
+            .any(|binary| { binary.name == "wpctl" && !binary.optional })
+    );
 
     let debug_payload = shell
         .latest_service_state
@@ -1453,6 +1474,26 @@ fn debug_snapshot_exposes_installed_module_graph_contracts() {
                         .is_some_and(|interfaces| {
                             interfaces.contains(&serde_json::json!("mesh.audio"))
                         })
+                    && entry["uses"]["keybinds"]
+                        .as_array()
+                        .is_some_and(|actions| actions.contains(&serde_json::json!("mute")))
+            }))
+    );
+    let pipewire_json = debug_payload.state["module_graph"]
+        .as_array()
+        .and_then(|entries| {
+            entries
+                .iter()
+                .find(|entry| entry["module_id"] == serde_json::json!("@mesh/pipewire-audio"))
+        })
+        .expect("serialized pipewire graph entry");
+    assert!(
+        pipewire_json["uses"]["native_binaries"]
+            .as_array()
+            .is_some_and(|binaries| binaries.iter().any(|binary| {
+                binary["name"] == serde_json::json!("wpctl")
+                    && binary["optional"] == serde_json::json!(false)
+                    && binary["available"].is_boolean()
             }))
     );
 }
@@ -5223,6 +5264,35 @@ fn child_surface_reconcile_removes_closed_popover() {
     );
     assert!(!shell.core.surfaces.contains_key(&child_id));
     assert!(shell.component_target_for_surface(&child_id).is_none());
+}
+
+#[test]
+fn hiding_parent_surface_destroys_child_popups_and_clears_child_keyboard_focus() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state)));
+
+    shell.render_components().unwrap();
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    shell.keyboard_focus_surface = Some(child_id.clone());
+
+    shell
+        .set_surface_visibility_now("@test/popover-host".to_string(), false)
+        .unwrap();
+
+    assert!(shell.components[0].children.is_empty());
+    assert!(
+        shell
+            .presentation_engine
+            .testing_destroyed_popups()
+            .contains(&child_id)
+    );
+    assert!(!shell.core.surfaces.contains_key(&child_id));
+    assert!(!shell.surfaces.contains_key(&child_id));
+    assert!(shell.component_target_for_surface(&child_id).is_none());
+    assert_eq!(shell.keyboard_focus_surface, None);
 }
 
 #[test]

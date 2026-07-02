@@ -848,7 +848,12 @@ fn build_graph_health(
     health
 }
 
-fn binary_on_path(name: &str) -> bool {
+/// Return whether a declared executable can be resolved from an explicit path
+/// or the current process PATH.
+pub fn binary_available(name: &str) -> bool {
+    if name.contains(std::path::MAIN_SEPARATOR) {
+        return Path::new(name).is_file();
+    }
     std::env::var_os("PATH")
         .map(|path_var| std::env::split_paths(&path_var).any(|dir| dir.join(name).is_file()))
         .unwrap_or(false)
@@ -979,6 +984,84 @@ pub(crate) fn extract_backend_emit_event_names(content: &str) -> Vec<String> {
     names.sort();
     names.dedup();
     names
+}
+
+pub(crate) fn extract_frontend_interface_event_subscriptions(
+    content: &str,
+) -> Vec<(String, String)> {
+    let mut aliases = HashMap::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let Some(binding) = trimmed.strip_prefix("local ") else {
+            continue;
+        };
+        let Some((alias, expression)) = binding.split_once('=') else {
+            continue;
+        };
+        let alias = alias.trim();
+        if alias.is_empty()
+            || !alias
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '_')
+        {
+            continue;
+        }
+        let expression = expression.trim();
+        let Some(arguments) = expression.strip_prefix("require(") else {
+            continue;
+        };
+        let quote = if arguments.starts_with('"') {
+            '"'
+        } else if arguments.starts_with('\'') {
+            '\''
+        } else {
+            continue;
+        };
+        let quoted = &arguments[1..];
+        let Some(end) = quoted.find(quote) else {
+            continue;
+        };
+        let interface = &quoted[..end];
+        if interface.starts_with("mesh.") {
+            aliases.insert(alias.to_string(), interface.to_string());
+        }
+    }
+
+    let mut subscriptions = Vec::new();
+    for (alias, interface) in aliases {
+        for prefix in [format!("{alias}."), format!("{alias}.events.")] {
+            let mut remaining = content;
+            while let Some(start) = remaining.find(&prefix) {
+                remaining = &remaining[start + prefix.len()..];
+                let event_len = remaining
+                    .find(|character: char| {
+                        !(character.is_ascii_alphanumeric() || character == '_')
+                    })
+                    .unwrap_or(remaining.len());
+                let event = &remaining[..event_len];
+                if event.is_empty()
+                    || !event
+                        .chars()
+                        .next()
+                        .is_some_and(|character| character.is_ascii_uppercase())
+                {
+                    continue;
+                }
+                let suffix = &remaining[event_len..];
+                let subscribes = if prefix.ends_with(".events.") {
+                    suffix.starts_with(":subscribe(")
+                } else {
+                    suffix.starts_with(":on(")
+                };
+                if subscribes {
+                    subscriptions.push((interface.clone(), event.to_string()));
+                }
+            }
+        }
+    }
+    subscriptions.sort();
+    subscriptions.dedup();
+    subscriptions
 }
 
 pub(crate) fn extract_keybind_subscriptions_from_mesh_source(content: &str) -> Vec<(String, bool)> {
@@ -1159,6 +1242,7 @@ fn build_graph_diagnostics(
         frontend_requirements,
         contributions,
         &contract_capabilities,
+        &contract_events,
         &mut diagnostics,
     );
     diagnose_backend_providers(
@@ -1190,6 +1274,7 @@ fn diagnose_frontend_requirements(
     frontend_requirements: &HashMap<String, FrontendRequirementSet>,
     contributions: &ModuleContributionIndex,
     contract_capabilities: &HashMap<String, InterfaceContractCapabilitySection>,
+    contract_events: &HashMap<String, std::collections::HashSet<String>>,
     diagnostics: &mut Vec<ModuleGraphDiagnostic>,
 ) {
     for requirements in frontend_requirements.values() {
@@ -1283,6 +1368,46 @@ fn diagnose_frontend_requirements(
                         requirements.module_id
                     ),
                 });
+            }
+        }
+        let Some(module) = modules.get(&requirements.module_id) else {
+            continue;
+        };
+        let module_dir = module.manifest_path.parent().unwrap_or(Path::new("."));
+        let scan_root = module_dir.join("src");
+        let scan_root = if scan_root.is_dir() {
+            scan_root.as_path()
+        } else {
+            module_dir
+        };
+        for (path, content) in scan_mesh_files_recursive(scan_root) {
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("?");
+            for (interface, event) in extract_frontend_interface_event_subscriptions(&content) {
+                let requires_interface = requirements.backend.contains_key(&interface)
+                    || requirements.optional_backend.contains_key(&interface);
+                if !requires_interface {
+                    continue;
+                }
+                if contract_events
+                    .get(&interface)
+                    .is_some_and(|events| !events.contains(&event))
+                {
+                    diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: requirements.module_id.clone(),
+                        contribution_id: Some(format!(
+                            "{}:event:{}",
+                            requirements.module_id, file_name
+                        )),
+                        status: "undeclared_interface_event_subscription".into(),
+                        message: format!(
+                            "frontend module {} subscribes to event '{}' for interface {} in {}, but the interface contract does not declare it",
+                            requirements.module_id, event, interface, file_name
+                        ),
+                    });
+                }
             }
         }
     }
@@ -1483,7 +1608,7 @@ fn diagnose_required_binaries(
 ) {
     for module in modules.values().filter(|m| m.enabled) {
         for binary in &module.manifest.mesh.dependencies.binaries {
-            if !binary.optional && !binary_on_path(&binary.name) {
+            if !binary.optional && !binary_available(&binary.name) {
                 diagnostics.push(ModuleGraphDiagnostic {
                     module_id: module.id.clone(),
                     contribution_id: None,

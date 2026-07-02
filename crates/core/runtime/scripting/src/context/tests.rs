@@ -351,6 +351,39 @@ end
 }
 
 #[test]
+fn frontend_storage_is_isolated_by_component_instance() {
+    let root = temp_storage_root("frontend-instance-scope");
+    let caps = CapabilitySet::new();
+    let mut first = ScriptContext::new_with_storage_scope(
+        "@mesh/module",
+        "@mesh/component",
+        "panel/first",
+        caps.clone(),
+        &root,
+    )
+    .unwrap();
+    first
+        .load_script("function unmount(self) self.storage.value = 'first' end")
+        .unwrap();
+    first.call_handler("unmount", &[]).unwrap();
+
+    let mut second = ScriptContext::new_with_storage_scope(
+        "@mesh/module",
+        "@mesh/component",
+        "panel/second",
+        caps,
+        &root,
+    )
+    .unwrap();
+    second
+        .load_script("function init(self) loaded = self.storage.value end")
+        .unwrap();
+    second.call_init().unwrap();
+
+    assert_eq!(second.state.get("loaded"), None);
+}
+
+#[test]
 fn frontend_storage_persistence_failure_is_diagnostic_and_keeps_memory_state() {
     let root = temp_storage_root("frontend-failure");
     std::fs::write(&root, "not a directory").unwrap();
