@@ -19,7 +19,16 @@ pub struct ChildSurfaceRequest {
     pub node_key: String,
     pub kind: ChildSurfaceKind,
     pub anchor_rect: (i32, i32, i32, i32),
+    /// True content size, excluding shadow/blur overflow padding. Used to
+    /// confine the popup's pointer input region so clicks over the padding
+    /// pass through instead of hitting a dead zone.
     pub content_size: (u32, u32),
+    /// Buffer/popup size including padding for box-shadow/blur overflow that
+    /// would otherwise be hard-clipped at the content edge.
+    pub surface_size: (u32, u32),
+    /// `(left, top)` padding — where the true content starts within the
+    /// padded buffer.
+    pub content_offset: (u32, u32),
     pub placement: PopoverPlacement,
 }
 

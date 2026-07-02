@@ -1136,13 +1136,14 @@ impl ShellComponent for FrontendSurfaceComponent {
         // the popover's own CSS transition resolves and advances through the
         // normal per-node transition engine like any other animated style.
         let _ = exiting;
+        let (pad_left, pad_top, _, _) = popover_content_padding(node);
         buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
         mesh_core_render::paint_frontend_tree_at_for_module(
             node,
             buffer,
             scale,
-            -bounds.0,
-            -bounds.1,
+            -bounds.0 + pad_left as f32,
+            -bounds.1 + pad_top as f32,
             None,
             Some(self.compiled.manifest.package.id.as_str()),
         );
@@ -1701,6 +1702,47 @@ fn damage_rect_for_widget_node(node: &WidgetNode, surface: DamageRect) -> Option
     visual_damage_rect_for_widget_node(node, surface)
 }
 
+/// Extend a node's plain `(left, top, right, bottom)` box to also cover its
+/// box-shadow and blur-filter overflow, in the same coordinate space as the
+/// input box. Shared by present-damage computation (clipped to the surface)
+/// and popup buffer padding (unclamped, relative to a popover's own origin).
+fn shadow_filter_extended_bounds(
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+    style: &mesh_core_elements::style::ComputedStyle,
+) -> (f32, f32, f32, f32) {
+    let mut ext_left = left;
+    let mut ext_top = top;
+    let mut ext_right = left + width;
+    let mut ext_bottom = top + height;
+
+    let shadow = style.box_shadow;
+    if !shadow.is_none() && !shadow.inset {
+        let spread = shadow.spread_radius;
+        let blur_pad = shadow.blur_radius * 3.0;
+        ext_left = ext_left.min(left + shadow.offset_x - spread - blur_pad);
+        ext_top = ext_top.min(top + shadow.offset_y - spread - blur_pad);
+        ext_right = ext_right.max(left + width + shadow.offset_x + spread + blur_pad);
+        ext_bottom = ext_bottom.max(top + height + shadow.offset_y + spread + blur_pad);
+    }
+
+    let filter_pad = style
+        .filter
+        .blur_radius
+        .max(style.backdrop_filter.blur_radius)
+        * 3.0;
+    if filter_pad > 0.0 {
+        ext_left -= filter_pad;
+        ext_top -= filter_pad;
+        ext_right += filter_pad;
+        ext_bottom += filter_pad;
+    }
+
+    (ext_left, ext_top, ext_right, ext_bottom)
+}
+
 fn visual_damage_rect_for_widget_node(
     node: &WidgetNode,
     surface: DamageRect,
@@ -1713,38 +1755,11 @@ fn visual_damage_rect_for_widget_node(
     let scale_y = transform.scale_y.max(0.0);
     let width = node.layout.width * scale_x;
     let height = node.layout.height * scale_y;
-    let mut left = node.layout.x + transform.translate_x;
-    let mut top = node.layout.y + transform.translate_y;
-    let mut right = left + width;
-    let mut bottom = top + height;
+    let left = node.layout.x + transform.translate_x;
+    let top = node.layout.y + transform.translate_y;
 
-    let shadow = node.computed_style.box_shadow;
-    if !shadow.is_none() && !shadow.inset {
-        let spread = shadow.spread_radius;
-        let blur_pad = shadow.blur_radius * 3.0;
-        left =
-            left.min(node.layout.x + transform.translate_x + shadow.offset_x - spread - blur_pad);
-        top = top.min(node.layout.y + transform.translate_y + shadow.offset_y - spread - blur_pad);
-        right = right.max(
-            node.layout.x + transform.translate_x + width + shadow.offset_x + spread + blur_pad,
-        );
-        bottom = bottom.max(
-            node.layout.y + transform.translate_y + height + shadow.offset_y + spread + blur_pad,
-        );
-    }
-
-    let filter_pad = node
-        .computed_style
-        .filter
-        .blur_radius
-        .max(node.computed_style.backdrop_filter.blur_radius)
-        * 3.0;
-    if filter_pad > 0.0 {
-        left -= filter_pad;
-        top -= filter_pad;
-        right += filter_pad;
-        bottom += filter_pad;
-    }
+    let (left, top, right, bottom) =
+        shadow_filter_extended_bounds(left, top, width, height, &node.computed_style);
 
     let left = left.floor().max(0.0) as u32;
     let top = top.floor().max(0.0) as u32;
@@ -1759,6 +1774,67 @@ fn visual_damage_rect_for_widget_node(
         },
         surface,
     )
+}
+
+/// Padding `(left, top, right, bottom)` a popover's promoted popup buffer
+/// needs beyond its plain content box so descendant box-shadows/blur filters
+/// (e.g. `bubble-options.mesh`'s drop shadow) are not hard-clipped at the
+/// content edge. Walks the popover's subtree in popover-local coordinates —
+/// `node.layout` stores absolute surface coordinates, so descendants are
+/// offset by the popover's own `layout.x`/`layout.y`.
+fn popover_content_padding(node: &WidgetNode) -> (u32, u32, u32, u32) {
+    let origin_x = node.layout.x;
+    let origin_y = node.layout.y;
+    let mut min_left = 0.0_f32;
+    let mut min_top = 0.0_f32;
+    let mut max_right = node.layout.width.max(0.0);
+    let mut max_bottom = node.layout.height.max(0.0);
+    accumulate_popover_padding(
+        node,
+        origin_x,
+        origin_y,
+        &mut min_left,
+        &mut min_top,
+        &mut max_right,
+        &mut max_bottom,
+    );
+    let pad_left = (-min_left).max(0.0).ceil() as u32;
+    let pad_top = (-min_top).max(0.0).ceil() as u32;
+    let pad_right = (max_right - node.layout.width.max(0.0)).max(0.0).ceil() as u32;
+    let pad_bottom = (max_bottom - node.layout.height.max(0.0)).max(0.0).ceil() as u32;
+    (pad_left, pad_top, pad_right, pad_bottom)
+}
+
+fn accumulate_popover_padding(
+    node: &WidgetNode,
+    origin_x: f32,
+    origin_y: f32,
+    min_left: &mut f32,
+    min_top: &mut f32,
+    max_right: &mut f32,
+    max_bottom: &mut f32,
+) {
+    if node.layout.width > 0.0 && node.layout.height > 0.0 {
+        let transform = node.computed_style.transform;
+        let scale_x = transform.scale_x.max(0.0);
+        let scale_y = transform.scale_y.max(0.0);
+        let width = node.layout.width * scale_x;
+        let height = node.layout.height * scale_y;
+        let left = node.layout.x - origin_x + transform.translate_x;
+        let top = node.layout.y - origin_y + transform.translate_y;
+
+        let (ext_left, ext_top, ext_right, ext_bottom) =
+            shadow_filter_extended_bounds(left, top, width, height, &node.computed_style);
+
+        *min_left = min_left.min(ext_left);
+        *min_top = min_top.min(ext_top);
+        *max_right = max_right.max(ext_right);
+        *max_bottom = max_bottom.max(ext_bottom);
+    }
+
+    for child in &node.children {
+        accumulate_popover_padding(child, origin_x, origin_y, min_left, min_top, max_right, max_bottom);
+    }
 }
 
 fn collect_visual_damage_rects(
@@ -1797,11 +1873,14 @@ fn collect_child_surface_requests(
             node.layout.width.ceil().max(1.0) as u32,
             node.layout.height.ceil().max(1.0) as u32,
         );
+        let (pad_left, pad_top, pad_right, pad_bottom) = popover_content_padding(node);
         requests.push(ChildSurfaceRequest {
             node_key: node_key.clone(),
             kind: ChildSurfaceKind::Popover,
             anchor_rect: bounds_to_i32_rect(anchor),
             content_size: content,
+            surface_size: (content.0 + pad_left + pad_right, content.1 + pad_top + pad_bottom),
+            content_offset: (pad_left, pad_top),
             placement: PopoverPlacement::from_node(node),
         });
     }
@@ -2172,7 +2251,45 @@ mod tests {
         assert_eq!(requests[0].kind, ChildSurfaceKind::Popover);
         assert_eq!(requests[0].anchor_rect, (20, 42, 96, 36));
         assert_eq!(requests[0].content_size, (96, 36));
+        assert_eq!(requests[0].surface_size, (96, 36));
+        assert_eq!(requests[0].content_offset, (0, 0));
         assert_eq!(requests[0].placement.offset_y, 6);
+    }
+
+    #[test]
+    fn popover_with_descendant_box_shadow_pads_surface_and_offsets_content() {
+        // Mirrors `bubble-options.mesh`'s shipped shadow: `0px 6px 18px`
+        // (offset_y=6, blur=18, spread=0). `shadow_filter_extended_bounds`
+        // pads by `blur_radius * 3` for rasterization headroom, so:
+        // left/right = blur*3 = 54, top = blur*3 - offset_y = 48,
+        // bottom = blur*3 + offset_y = 60.
+        let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 40.0);
+        let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 96.0, 36.0);
+        popover.attributes.insert("open".into(), "true".into());
+        let mut bubble = keyed_node("box", "root/menu/bubble", 20.0, 42.0, 96.0, 36.0);
+        bubble.computed_style.box_shadow = mesh_core_elements::style::BoxShadow {
+            offset_x: 0.0,
+            offset_y: 6.0,
+            blur_radius: 18.0,
+            spread_radius: 0.0,
+            color: mesh_core_elements::style::Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 87,
+            },
+            inset: false,
+        };
+        popover.children.push(bubble);
+        root.children.push(popover);
+
+        let mut requests = Vec::new();
+        collect_child_surface_requests(&root, &root, &mut requests);
+
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].content_size, (96, 36));
+        assert_eq!(requests[0].content_offset, (54, 48));
+        assert_eq!(requests[0].surface_size, (96 + 54 + 54, 36 + 48 + 60));
     }
 
     #[test]
