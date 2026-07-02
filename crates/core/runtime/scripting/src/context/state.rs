@@ -3,20 +3,21 @@ use mesh_core_locale::LocaleEngine;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Reactive state exposed to and mutated by Luau scripts.
 ///
 /// When a script sets a variable, the state is marked dirty.
 /// The UI layer checks this flag to know when to rebuild the widget tree.
 pub struct ScriptState {
-    pub(super) variables: HashMap<String, Value>,
+    pub(super) variables: HashMap<String, Arc<Value>>,
     pub(super) dirty: bool,
     // Optional proxies that forward get/set to external sources (used by the
     // host to expose imported component variables as if they lived in the
     // same namespace). The getter is invoked on reads; the setter, if
     // provided, is invoked on writes from scripts.
     proxies: HashMap<String, Proxy>,
+    host_value_fingerprints: HashMap<String, u64>,
     /// Monotonically increasing counter — incremented whenever a variable
     /// actually changes. Used by callers to skip expensive re-serialization
     /// when state is provably unchanged since the last flush.
@@ -35,6 +36,7 @@ impl ScriptState {
             variables: HashMap::new(),
             dirty: false,
             proxies: HashMap::new(),
+            host_value_fingerprints: HashMap::new(),
             snapshot_generation: 0,
             cached_snapshot: Mutex::new(None),
             mutation_generation: 0,
@@ -79,11 +81,12 @@ impl ScriptState {
         if self
             .variables
             .get(&name)
-            .is_some_and(|previous| reactive_values_equal(previous, &value))
+            .is_some_and(|previous| reactive_values_equal(previous.as_ref(), &value))
         {
             return;
         }
-        self.variables.insert(name, value);
+        self.host_value_fingerprints.remove(&name);
+        self.variables.insert(name, Arc::new(value));
         self.dirty = true;
         self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
         self.mutation_generation = self.mutation_generation.wrapping_add(1);
@@ -102,11 +105,38 @@ impl ScriptState {
         if self
             .variables
             .get(&name)
-            .is_some_and(|previous| reactive_values_equal(previous, &value))
+            .is_some_and(|previous| reactive_values_equal(previous.as_ref(), &value))
         {
             return;
         }
-        self.variables.insert(name, value);
+        self.host_value_fingerprints.remove(&name);
+        self.variables.insert(name, Arc::new(value));
+        self.mutation_generation = self.mutation_generation.wrapping_add(1);
+        self.cached_snapshot
+            .get_mut()
+            .expect("snapshot cache poisoned")
+            .take();
+    }
+
+    /// Set a large host-maintained variable using a producer-computed
+    /// fingerprint to skip the previous-value deep JSON comparison when the
+    /// producer knows the snapshot is unchanged.
+    pub fn set_host_value_with_fingerprint(
+        &mut self,
+        name: impl Into<String>,
+        value: Value,
+        fingerprint: u64,
+    ) {
+        let name = name.into();
+        if self
+            .host_value_fingerprints
+            .get(&name)
+            .is_some_and(|previous| *previous == fingerprint)
+        {
+            return;
+        }
+        self.variables.insert(name.clone(), Arc::new(value));
+        self.host_value_fingerprints.insert(name, fingerprint);
         self.mutation_generation = self.mutation_generation.wrapping_add(1);
         self.cached_snapshot
             .get_mut()
@@ -158,6 +188,11 @@ impl ScriptState {
         self.proxies.contains_key(name)
     }
 
+    #[cfg(test)]
+    pub(super) fn value_arc_ptr(&self, name: &str) -> Option<*const Value> {
+        self.variables.get(name).map(|value| Arc::as_ptr(value))
+    }
+
     /// Return a JSON object snapshot of all visible state variables.
     pub fn snapshot(&self) -> Value {
         if self.proxies.is_empty() {
@@ -175,7 +210,7 @@ impl ScriptState {
             let snapshot = Value::Object(
                 self.variables
                     .iter()
-                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .map(|(key, value)| (key.clone(), value.as_ref().clone()))
                     .collect(),
             );
             *self
@@ -187,7 +222,7 @@ impl ScriptState {
 
         let mut object = Map::with_capacity(self.variables.len() + self.proxies.len());
         for (key, value) in &self.variables {
-            object.insert(key.clone(), value.clone());
+            object.insert(key.clone(), value.as_ref().clone());
         }
         for (key, proxy) in &self.proxies {
             object.insert(key.clone(), (proxy.getter)());
@@ -213,7 +248,14 @@ impl VariableStore for ScriptState {
         if let Some(proxy) = self.proxies.get(name) {
             return Some((proxy.getter)());
         }
-        self.variables.get(name).cloned()
+        self.variables.get(name).map(|value| value.as_ref().clone())
+    }
+
+    fn get_ref<'a>(&'a self, name: &str) -> Option<&'a Value> {
+        if self.proxies.contains_key(name) {
+            return None;
+        }
+        self.variables.get(name).map(Arc::as_ref)
     }
 
     fn keys(&self) -> Vec<String> {
@@ -221,7 +263,7 @@ impl VariableStore for ScriptState {
         // local variables.
         let mut keys: Vec<String> = self.variables.keys().cloned().collect();
         for key in self.proxies.keys() {
-            if !keys.contains(key) {
+            if !self.variables.contains_key(key) {
                 keys.push(key.clone());
             }
         }
@@ -242,6 +284,7 @@ impl Clone for ScriptState {
             variables: self.variables.clone(),
             dirty: self.dirty,
             proxies: HashMap::new(), // proxies are host-registered and not cloned
+            host_value_fingerprints: self.host_value_fingerprints.clone(),
             snapshot_generation: self.snapshot_generation,
             cached_snapshot: Mutex::new(None),
             mutation_generation: self.mutation_generation,
@@ -277,6 +320,10 @@ impl<'a> LocaleBoundState<'a> {
 impl<'a> VariableStore for LocaleBoundState<'a> {
     fn get(&self, name: &str) -> Option<Value> {
         self.state.get(name)
+    }
+
+    fn get_ref<'b>(&'b self, name: &str) -> Option<&'b Value> {
+        self.state.get_ref(name)
     }
 
     fn keys(&self) -> Vec<String> {

@@ -522,7 +522,7 @@ duplicating it.
 
 ### A. Data handling — Rust ↔ Lua boundary is JSON-shaped and clone-heavy
 
-- [ ] **Full `ScriptState` clone per state mutation.** `runtime_state()`
+- [x] **Full `ScriptState` clone per state mutation.** `runtime_state()`
       (`shell/component/runtime.rs:119-134`) clones the entire
       `HashMap<String, serde_json::Value>` whenever `mutation_generation`
       advanced — i.e. after *every* handler/render-hook that wrote any
@@ -530,20 +530,51 @@ duplicating it.
       cache only helps the no-change case. Move toward persistent/COW state
       (e.g. `im::HashMap`, or `Arc<Value>` per variable so the clone is
       shallow), or let template eval read `ScriptState` directly instead of
-      through a snapshot clone.
-- [ ] **`ScriptState::get` clones a `serde_json::Value` per template read**
+      through a snapshot clone. Done 2026-07-02: `ScriptState` now stores
+      variables as `Arc<serde_json::Value>`, so the shell's cached
+      `runtime_state()` snapshot clone is a shallow `HashMap<String,
+      Arc<Value>>` clone instead of recursively cloning every JSON subtree.
+      Public `VariableStore::get`/`snapshot()` semantics remain owned JSON;
+      the borrowed `get_ref` path from the previous item reads through the
+      same arcs. Proof: `script_state_clone_shares_variable_values` asserts
+      cloned states share the same stored value pointer; release microbenchmark
+      `script_state_clone_is_shallow_for_large_values` measured 20k large-root
+      clones at 3.598s for the old deep `HashMap<String, Value>` clone vs
+      0.000654s for the new shallow `ScriptState` clone on this machine.
+- [x] **`ScriptState::get` clones a `serde_json::Value` per template read**
       (`scripting/context/state.rs:210-217`). Hot template expressions clone
       whole subtrees; when a template touches `elements`/`refs` this clones the
       entire per-frame metrics object. Return `Option<&Value>`/`Arc<Value>`
       through `VariableStore` (the trait already forces owned values —
       `ui/elements` `VariableStore::get`), and fix `keys()`'s `Vec<String>` +
-      O(n²) `contains` merge (`state.rs:219-229`).
-- [ ] **Deep JSON equality on every host write.** `set`/`set_host_value` run
+      O(n²) `contains` merge (`state.rs:219-229`). Done 2026-07-02:
+      `VariableStore` now has an additive borrowed `get_ref` fast path;
+      `ScriptState`, `LocaleBoundState`, `{#for}` layered stores, tracking
+      stores, and compiler test stores implement it. Template length and
+      dotted-path expression evaluation use borrowed JSON when available, so
+      reads like `{refs.menu.width}` and nested service payload reads no longer
+      clone the root JSON object before walking it. `ScriptState::keys()` now
+      checks proxy shadowing against `variables.contains_key()` instead of an
+      O(n²) `Vec::contains` merge. Proof:
+      `eval_expr_dotted_path_uses_borrowed_variable_lookup`; release
+      microbenchmark `eval_expr_borrowed_path_beats_owned_clone` measured
+      20k large-root dotted reads at 2.755s through the old owned-clone store
+      vs 0.00318s through the borrowed path on this machine.
+- [x] **Deep JSON equality on every host write.** `set`/`set_host_value` run
       `reactive_values_equal` (full deep `Value == Value`) per write
       (`state.rs:79-115`). For the per-paint `elements` object this is an
       O(tree) deep compare every frame. Combine with the metrics fix below;
       for scalar writes keep it, for known-big host values use a
-      generation/hash check instead.
+      generation/hash check instead. Done 2026-07-02: scalar `set` and
+      `set_host_value` keep exact deep equality, while large host snapshots can
+      now use `set_host_value_with_fingerprint`. Element metrics publication
+      computes full-JSON fingerprints for `elements` and `refs` and uses the
+      fingerprint setter, so unchanged metrics skip the previous-value deep
+      JSON walk and avoid mutation-generation churn. Proof:
+      `host_value_fingerprint_skips_unchanged_large_snapshot`; release
+      microbenchmark `host_value_fingerprint_beats_repeated_deep_compare`
+      measured 20k unchanged large-host writes at 4.574s with repeated deep
+      compare vs 3.547s with fingerprint skip on this machine.
 - [ ] **Per-paint element metrics: build → deep-compare → JSON→Lua convert,
       every frame.** `publish_element_metrics`
       (`shell/component/interaction_state.rs:41-65`) serializes *every keyed
@@ -556,14 +587,29 @@ duplicating it.
       `__index` (the proxy machinery already exists in `element_ref.rs`),
       publishing only a generation bump per paint; drop the eager
       `elements`/`refs` state tables or gate them on actual template reads.
-- [ ] **Service payloads convert JSON→Lua per runtime per event.**
+      Progress 2026-07-02: the state-side deep-compare portion is removed for
+      unchanged metrics via full-JSON fingerprints (see previous item), but
+      eager JSON construction, JSON→Lua conversion, and proxy reinstall remain.
+- [x] **Service payloads convert JSON→Lua per runtime per event.**
       `apply_service_payload` (`scripting/context/runtime.rs:388-406`) runs
       `lua.to_value(payload)` + `refresh_module_object()` for every runtime in
       every observing component on every backend emission; the shell also
       clones the payload into `cached_service_payloads` per event
       (`shell_component.rs:187-189`). Convert once per surface VM (runtimes
       sharing a `SurfaceVm` can share the converted table) and cache the
-      module-object refresh.
+      module-object refresh. Done 2026-07-02: `apply_service_payload` now
+      stores a shared marker in Lua globals keyed by service and a
+      pointer+full-payload-fingerprint marker. When multiple component
+      contexts share one `SurfaceVm` and receive the same Rust payload object
+      during shell fanout, the first context converts JSON→Lua and refreshes
+      the module object; later contexts on that VM skip the duplicate
+      conversion/refresh while still reading the same global service table.
+      The fingerprint guards against pointer/address reuse with changed
+      content. Proof: `shared_vm_reuses_service_payload_conversion_marker`;
+      release microbenchmark
+      `shared_vm_service_payload_marker_reduces_fanout_cost` measured 8-context
+      fanout over 2k payloads at 14.77ms for shared-payload fanout vs 19.55ms
+      for forced distinct-payload fanout on this machine.
 - [ ] **Stringly-typed template expression values.** `eval_expr` returns
       `String` for everything (`frontend/compiler/src/expr.rs:26,162`);
       numeric ops re-`parse::<f64>` both sides per evaluation
@@ -576,7 +622,7 @@ duplicating it.
 
 ### B. Component communication & input
 
-- [ ] **Full widget-tree deep clone on every input event.**
+- [x] **Full widget-tree deep clone on every input event.**
       `handle_component_input` starts with `self.last_tree.clone()`
       (`shell/component/input/mod.rs:32-35`) — a recursive clone of every
       `WidgetNode` (two `BTreeMap<String,String>`s, style, children) at
@@ -587,14 +633,37 @@ duplicating it.
       clone-on-write only when a handler actually mutates retained state), or
       split hit-test data (key, bounds, handlers) into a slim side structure
       built once per paint and let input run against that instead of the full
-      tree.
-- [ ] **Hit-testing re-walks the tree per pointer motion.**
+      tree. Done 2026-07-02: input dispatch and imperative element actions now
+      move the cached tree out of `last_tree` with `Option::take`, borrow it
+      read-only while component state/handlers mutate, and restore it on every
+      success or error return. This removes the recursive allocation/copy from
+      every pointer, scroll, keyboard, and `refs.*` action without changing
+      tree ownership or invalidation behavior. Release microbenchmark
+      `input_tree_take_restore_beats_deep_clone` measured 10k ownership cycles
+      on a 1,101-node tree at 14.079s for the old deep clone vs 0.424ms for
+      take/restore on this machine (~33,200x faster for this step). The separate
+      per-motion tree-walk costs remain tracked by the hit-test index item below.
+- [x] **Hit-testing re-walks the tree per pointer motion.**
       `find_node_path_at` plus up to two `find_tooltip_by_key` walks and a
       `find_node_bounds_by_key` walk run per `PointerMove`
       (`input/mod.rs:195-226`). Build a flat hit-test index (sorted rects +
       parent links, from the same pass that publishes element metrics) per
       paint and answer motion queries from it; also lets the tree clone above
-      die for the hover path.
+      die for the hover path. Done 2026-07-02 with a measured adjustment to
+      the proposed design: `pointer_hit_test` now returns the deepest path,
+      inherited tooltip owner/text, and tooltip-owner/target bounds from one
+      traversal, and pointer motion caches the previous tooltip metadata.
+      This removes the three follow-up tree walks without adding work to
+      paints that receive no pointer input. A persistent flat index prototype
+      was rejected after its 1,101-node release benchmark showed a 174.5us
+      rebuild cost versus 57.5us for the complete old single-motion path;
+      interaction restyles are layout-dirty, so that cost would recur on the
+      common coalesced one-motion-per-frame path. The fused implementation's
+      release microbenchmark (`fused_pointer_motion_beats_repeated_tree_walks`)
+      measured 20k complete lookups at 1.168s old versus 0.524s fused (~2.23x
+      faster), with no preprocessing cost. Equivalence coverage exercises
+      overlap order, transforms, scroll offsets, inherited tooltip metadata,
+      and bounds; all 104 shell interaction tests pass.
 - [ ] **Hover diff materializes descendant key sets as `HashSet<String>`.**
       `collect_interaction_changed_keys` clones every affected `_mesh_key`
       String and walks subtrees per hover change

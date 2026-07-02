@@ -53,6 +53,10 @@ pub use tree::{ElementState, NodeId, WidgetNode};
 /// without `mesh-core-elements` depending on `mesh-core-scripting`.
 pub trait VariableStore {
     fn get(&self, name: &str) -> Option<serde_json::Value>;
+    fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
+        let _ = name;
+        None
+    }
     fn keys(&self) -> Vec<String>;
     /// Look up a translation key. Returns `None` if no locale engine is available.
     fn translate(&self, key: &str) -> Option<String> {

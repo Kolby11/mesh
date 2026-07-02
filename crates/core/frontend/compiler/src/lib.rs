@@ -37,6 +37,14 @@ impl VariableStore for LayeredStore<'_> {
         }
     }
 
+    fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
+        if name == self.item_name {
+            Some(&self.item_value)
+        } else {
+            self.base.get_ref(name)
+        }
+    }
+
     fn keys(&self) -> Vec<String> {
         let mut keys = self.base.keys();
         if !keys.iter().any(|k| k == self.item_name) {
@@ -217,6 +225,10 @@ mod tests {
             self.0.get(name).cloned()
         }
 
+        fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
+            self.0.get(name)
+        }
+
         fn keys(&self) -> Vec<String> {
             self.0.keys().cloned().collect()
         }
@@ -333,6 +345,112 @@ mod tests {
         );
         assert_eq!(expr::eval_expr("#items", &store), "3");
         assert_eq!(expr::eval_expr("#missing", &store), "0");
+    }
+
+    #[test]
+    fn eval_expr_dotted_path_uses_borrowed_variable_lookup() {
+        use std::cell::Cell;
+
+        struct BorrowCountingStore {
+            payload: serde_json::Value,
+            owned_gets: Cell<usize>,
+        }
+
+        impl mesh_core_elements::VariableStore for BorrowCountingStore {
+            fn get(&self, name: &str) -> Option<serde_json::Value> {
+                self.owned_gets.set(self.owned_gets.get() + 1);
+                (name == "payload").then(|| self.payload.clone())
+            }
+
+            fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
+                (name == "payload").then_some(&self.payload)
+            }
+
+            fn keys(&self) -> Vec<String> {
+                vec!["payload".to_string()]
+            }
+        }
+
+        let store = BorrowCountingStore {
+            payload: serde_json::json!({
+                "metrics": {
+                    "node": {
+                        "bounds": {
+                            "x": 42
+                        }
+                    }
+                }
+            }),
+            owned_gets: Cell::new(0),
+        };
+
+        assert_eq!(
+            expr::eval_expr("payload.metrics.node.bounds.x", &store),
+            "42"
+        );
+        assert_eq!(
+            store.owned_gets.get(),
+            0,
+            "borrowed dotted-path reads should not clone the root JSON value"
+        );
+    }
+
+    // Run with:
+    // cargo test -p mesh-core-frontend --release -- eval_expr_borrowed_path_beats_owned_clone --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn eval_expr_borrowed_path_beats_owned_clone() {
+        use std::time::Instant;
+
+        struct OwnedStore(HashMap<String, serde_json::Value>);
+        impl mesh_core_elements::VariableStore for OwnedStore {
+            fn get(&self, name: &str) -> Option<serde_json::Value> {
+                self.0.get(name).cloned()
+            }
+
+            fn keys(&self) -> Vec<String> {
+                self.0.keys().cloned().collect()
+            }
+        }
+
+        let mut metrics = serde_json::Map::new();
+        for index in 0..1_000usize {
+            metrics.insert(
+                format!("node_{index}"),
+                serde_json::json!({
+                    "x": index,
+                    "y": index + 1,
+                    "width": 20,
+                    "height": 12,
+                }),
+            );
+        }
+
+        let payload = serde_json::Value::Object(metrics);
+        let mut map = HashMap::new();
+        map.insert("payload".to_string(), payload);
+        let owned = OwnedStore(map.clone());
+        let borrowed = MapStore(map);
+        let iterations = 20_000usize;
+        let expression = "payload.node_999.height";
+
+        let owned_start = Instant::now();
+        for _ in 0..iterations {
+            assert_eq!(expr::eval_expr(expression, &owned), "12");
+        }
+        let owned_ns = owned_start.elapsed().as_nanos().max(1);
+
+        let borrowed_start = Instant::now();
+        for _ in 0..iterations {
+            assert_eq!(expr::eval_expr(expression, &borrowed), "12");
+        }
+        let borrowed_ns = borrowed_start.elapsed().as_nanos();
+
+        eprintln!("owned_clone={owned_ns}ns borrowed_ref={borrowed_ns}ns");
+        assert!(
+            borrowed_ns.saturating_mul(2) <= owned_ns,
+            "borrowed path should be at least 2x faster for large JSON roots"
+        );
     }
 
     #[test]

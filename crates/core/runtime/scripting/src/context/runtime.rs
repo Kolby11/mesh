@@ -15,7 +15,9 @@ use mesh_core_elements::VariableStore;
 use mesh_core_service::{InterfaceCatalog, InterfaceResolution};
 use mlua::{Error as LuaError, Function, Lua, LuaSerdeExt, Table, Value as LuaValue, Variadic};
 use serde_json::Value;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -73,6 +75,57 @@ impl SurfaceVm {
 impl Default for SurfaceVm {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn json_value_fingerprint(value: &Value) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hash_json_value(value, &mut hasher);
+    hasher.finish()
+}
+
+fn hash_json_value(value: &Value, hasher: &mut DefaultHasher) {
+    match value {
+        Value::Null => 0u8.hash(hasher),
+        Value::Bool(value) => {
+            1u8.hash(hasher);
+            value.hash(hasher);
+        }
+        Value::Number(value) => {
+            2u8.hash(hasher);
+            if let Some(value) = value.as_i64() {
+                0u8.hash(hasher);
+                value.hash(hasher);
+            } else if let Some(value) = value.as_u64() {
+                1u8.hash(hasher);
+                value.hash(hasher);
+            } else if let Some(value) = value.as_f64() {
+                2u8.hash(hasher);
+                value.to_bits().hash(hasher);
+            } else {
+                3u8.hash(hasher);
+                value.to_string().hash(hasher);
+            }
+        }
+        Value::String(value) => {
+            3u8.hash(hasher);
+            value.hash(hasher);
+        }
+        Value::Array(values) => {
+            4u8.hash(hasher);
+            values.len().hash(hasher);
+            for value in values {
+                hash_json_value(value, hasher);
+            }
+        }
+        Value::Object(map) => {
+            5u8.hash(hasher);
+            map.len().hash(hasher);
+            for (key, value) in map {
+                key.hash(hasher);
+                hash_json_value(value, hasher);
+            }
+        }
     }
 }
 
@@ -387,12 +440,35 @@ impl ScriptContext {
     /// state fields directly without explicit callback or binding APIs.
     pub fn apply_service_payload(&mut self, service: &str, payload: &Value) {
         let _ = self.ensure_initialized();
+        let payload_marker = payload as *const Value as usize;
+        let payload_fingerprint = json_value_fingerprint(payload);
+        let marker = format!("{payload_marker}:{payload_fingerprint}");
+        let globals = self.lua().globals();
+        let marker_table = match globals.get::<Table>("__mesh_service_payload_ptrs") {
+            Ok(table) => table,
+            Err(_) => match self.lua().create_table() {
+                Ok(table) => {
+                    let _ = globals.set("__mesh_service_payload_ptrs", table.clone());
+                    table
+                }
+                Err(_) => return,
+            },
+        };
+        if marker_table
+            .get::<Option<String>>(service)
+            .ok()
+            .flatten()
+            .is_some_and(|previous| previous == marker)
+        {
+            return;
+        }
         let service_key = format!("__mesh_svc_{service}");
         if let Ok(lua_value) = self.lua().to_value(payload) {
             // Set on globals() so proxy __index (service_payload_field) can find it.
             // The env table __index falls through to globals, so scripts accessing
             // __mesh_svc_* directly from the env also work.
             let _ = self.lua().globals().set(service_key.as_str(), lua_value);
+            let _ = marker_table.set(service, marker);
         }
         if service == "locale"
             && let Some(locale) = payload
@@ -403,6 +479,16 @@ impl ScriptContext {
             let _ = self.lua().globals().set("__mesh_locale_current", locale);
         }
         self.refresh_module_object();
+    }
+
+    #[cfg(test)]
+    pub fn service_payload_marker_for_test(&mut self, service: &str) -> Option<String> {
+        let _ = self.ensure_initialized();
+        self.lua()
+            .globals()
+            .get::<Table>("__mesh_service_payload_ptrs")
+            .ok()
+            .and_then(|table| table.get::<Option<String>>(service).ok().flatten())
     }
 
     /// Publish the latest per-paint element metrics so live `refs.<name>` reads

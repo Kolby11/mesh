@@ -1232,6 +1232,88 @@ fn host_value_update_refreshes_snapshot_without_dirty_generation() {
 }
 
 #[test]
+fn host_value_fingerprint_skips_unchanged_large_snapshot() {
+    let mut state = ScriptState::new();
+    let value = serde_json::json!({
+        "root": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 56
+        }
+    });
+
+    state.set_host_value_with_fingerprint("elements", value.clone(), 42);
+    let generation = state.mutation_generation();
+
+    state.set_host_value_with_fingerprint("elements", value.clone(), 42);
+    assert_eq!(
+        state.mutation_generation(),
+        generation,
+        "same producer fingerprint should skip host-value replacement"
+    );
+    assert_eq!(state.get("elements"), Some(value.clone()));
+
+    let changed = serde_json::json!({
+        "root": {
+            "x": 0,
+            "y": 0,
+            "width": 960,
+            "height": 56
+        }
+    });
+    state.set_host_value_with_fingerprint("elements", changed.clone(), 43);
+    assert_ne!(state.mutation_generation(), generation);
+    assert_eq!(state.get("elements"), Some(changed));
+}
+
+// Run with:
+// cargo test -p mesh-core-scripting --release -- host_value_fingerprint_beats_repeated_deep_compare --ignored --nocapture
+#[test]
+#[ignore]
+fn host_value_fingerprint_beats_repeated_deep_compare() {
+    use std::time::Instant;
+
+    let mut large_map = serde_json::Map::new();
+    for index in 0..1_000usize {
+        large_map.insert(
+            format!("node_{index}"),
+            serde_json::json!({
+                "x": index,
+                "y": index + 1,
+                "width": 20,
+                "height": 12,
+                "label": format!("node {index}")
+            }),
+        );
+    }
+    let large_value = serde_json::Value::Object(large_map);
+    let iterations = 20_000usize;
+
+    let mut deep_state = ScriptState::new();
+    deep_state.set_host_value("elements", large_value.clone());
+    let deep_start = Instant::now();
+    for _ in 0..iterations {
+        deep_state.set_host_value("elements", large_value.clone());
+    }
+    let deep_ns = deep_start.elapsed().as_nanos().max(1);
+
+    let mut fingerprint_state = ScriptState::new();
+    fingerprint_state.set_host_value_with_fingerprint("elements", large_value.clone(), 99);
+    let fingerprint_start = Instant::now();
+    for _ in 0..iterations {
+        fingerprint_state.set_host_value_with_fingerprint("elements", large_value.clone(), 99);
+    }
+    let fingerprint_ns = fingerprint_start.elapsed().as_nanos();
+
+    eprintln!("deep_compare={deep_ns}ns fingerprint_skip={fingerprint_ns}ns");
+    assert!(
+        fingerprint_ns < deep_ns,
+        "fingerprint host writes should be faster for unchanged large values"
+    );
+}
+
+#[test]
 fn snapshot_updates_after_cached_read() {
     let mut state = ScriptState::new();
     state.set("count", serde_json::json!(1));
@@ -1255,6 +1337,81 @@ fn snapshot_reads_fresh_proxy_values() {
     assert_eq!(state.snapshot(), serde_json::json!({ "count": 1 }));
     value.store(2, Ordering::SeqCst);
     assert_eq!(state.snapshot(), serde_json::json!({ "count": 2 }));
+}
+
+#[test]
+fn script_state_clone_shares_variable_values() {
+    let mut state = ScriptState::new();
+    state.set(
+        "elements",
+        serde_json::json!({
+            "root": {
+                "x": 0,
+                "y": 0,
+                "width": 1280,
+                "height": 56
+            }
+        }),
+    );
+
+    let cloned = state.clone();
+
+    assert_eq!(
+        state.value_arc_ptr("elements"),
+        cloned.value_arc_ptr("elements"),
+        "cloning ScriptState should not recursively clone JSON variable values"
+    );
+    assert_eq!(cloned.get("elements"), state.get("elements"));
+}
+
+// Run with:
+// cargo test -p mesh-core-scripting --release -- script_state_clone_is_shallow_for_large_values --ignored --nocapture
+#[test]
+#[ignore]
+fn script_state_clone_is_shallow_for_large_values() {
+    use std::time::Instant;
+
+    let mut large_map = serde_json::Map::new();
+    for index in 0..1_000usize {
+        large_map.insert(
+            format!("node_{index}"),
+            serde_json::json!({
+                "x": index,
+                "y": index + 1,
+                "width": 20,
+                "height": 12,
+                "label": format!("node {index}")
+            }),
+        );
+    }
+    let large_value = serde_json::Value::Object(large_map);
+
+    let mut deep_map = HashMap::new();
+    deep_map.insert("elements".to_string(), large_value.clone());
+
+    let mut state = ScriptState::new();
+    state.set("elements", large_value);
+
+    let iterations = 20_000usize;
+    let deep_start = Instant::now();
+    for _ in 0..iterations {
+        let cloned = deep_map.clone();
+        assert!(cloned.contains_key("elements"));
+    }
+    let deep_ns = deep_start.elapsed().as_nanos().max(1);
+
+    let shallow_start = Instant::now();
+    for _ in 0..iterations {
+        let cloned = state.clone();
+        assert!(cloned.value_arc_ptr("elements").is_some());
+    }
+    let shallow_ns = shallow_start.elapsed().as_nanos();
+
+    eprintln!("deep_hashmap_clone={deep_ns}ns shallow_script_state_clone={shallow_ns}ns");
+    assert!(
+        shallow_ns.saturating_mul(2) <= deep_ns,
+        "ScriptState clone should be at least 2x faster for large JSON values"
+    );
 }
 
 #[test]
@@ -1527,6 +1684,125 @@ end
     assert_eq!(
         ctx.state.get("audio_source"),
         Some(serde_json::json!("@mesh/pipewire"))
+    );
+}
+
+#[test]
+fn shared_vm_reuses_service_payload_conversion_marker() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.read"));
+    let vm = SurfaceVm::new();
+    let payload = serde_json::json!({ "percent": 64, "muted": false });
+    let payload_marker_prefix = format!("{}:", &payload as *const serde_json::Value as usize);
+
+    let mut first = ScriptContext::new("@mesh/first", caps.clone()).unwrap();
+    first.attach_shared_vm(&vm);
+    first.set_interface_catalog(audio_catalog());
+    first
+        .load_script(
+            r#"
+audio = require("mesh.audio@>=1.0")
+first_percent = 0
+function read()
+    first_percent = audio.percent
+end
+"#,
+        )
+        .unwrap();
+    first.apply_service_payload("audio", &payload);
+    let first_marker = first.service_payload_marker_for_test("audio").unwrap();
+    assert!(first_marker.starts_with(&payload_marker_prefix));
+
+    let mut second = ScriptContext::new("@mesh/second", caps).unwrap();
+    second.attach_shared_vm(&vm);
+    second.set_interface_catalog(audio_catalog());
+    second
+        .load_script(
+            r#"
+audio = require("mesh.audio@>=1.0")
+second_percent = 0
+function read()
+    second_percent = audio.percent
+end
+"#,
+        )
+        .unwrap();
+    second.apply_service_payload("audio", &payload);
+    assert_eq!(
+        second.service_payload_marker_for_test("audio"),
+        Some(first_marker)
+    );
+
+    first.call_handler("read", &[]).unwrap();
+    second.call_handler("read", &[]).unwrap();
+    assert_eq!(
+        first.state.get("first_percent"),
+        Some(serde_json::json!(64))
+    );
+    assert_eq!(
+        second.state.get("second_percent"),
+        Some(serde_json::json!(64))
+    );
+}
+
+// Run with:
+// cargo test -p mesh-core-scripting --release -- shared_vm_service_payload_marker_reduces_fanout_cost --ignored --nocapture
+#[test]
+#[ignore]
+fn shared_vm_service_payload_marker_reduces_fanout_cost() {
+    use std::time::Instant;
+
+    fn make_contexts(count: usize) -> Vec<ScriptContext> {
+        let vm = SurfaceVm::new();
+        let mut contexts = Vec::with_capacity(count);
+        for index in 0..count {
+            let mut ctx =
+                ScriptContext::new(format!("@mesh/bench-{index}"), CapabilitySet::new()).unwrap();
+            ctx.attach_shared_vm(&vm);
+            ctx.load_script("function init() end").unwrap();
+            contexts.push(ctx);
+        }
+        contexts
+    }
+
+    let context_count = 8usize;
+    let iterations = 2_000usize;
+    let mut shared_contexts = make_contexts(context_count);
+    let mut distinct_contexts = make_contexts(context_count);
+
+    let mut payloads = Vec::with_capacity(iterations);
+    for index in 0..iterations {
+        payloads.push(serde_json::json!({
+            "percent": index % 100,
+            "muted": index % 2 == 0,
+            "devices": [
+                { "id": "sink-0", "name": "Speakers", "volume": index % 100 },
+                { "id": "sink-1", "name": "Headphones", "volume": (index + 7) % 100 }
+            ]
+        }));
+    }
+
+    let shared_start = Instant::now();
+    for payload in &payloads {
+        for ctx in &mut shared_contexts {
+            ctx.apply_service_payload("audio", payload);
+        }
+    }
+    let shared_ns = shared_start.elapsed().as_nanos().max(1);
+
+    let distinct_start = Instant::now();
+    for payload in &payloads {
+        for ctx in &mut distinct_contexts {
+            let distinct_payload = payload.clone();
+            ctx.apply_service_payload("audio", &distinct_payload);
+        }
+    }
+    let distinct_ns = distinct_start.elapsed().as_nanos();
+
+    eprintln!("shared_payload_fanout={shared_ns}ns distinct_payload_fanout={distinct_ns}ns");
+    assert!(
+        shared_ns < distinct_ns,
+        "shared payload marker should reduce service fanout cost"
     );
 }
 

@@ -31,14 +31,27 @@ impl FrontendSurfaceComponent {
 
         let tree = self
             .last_tree
-            .clone()
+            .take()
             .unwrap_or_else(|| self.build_tree(theme, width, height));
+        let result = self.handle_component_input_with_tree(&tree, input);
+        debug_assert!(
+            self.last_tree.is_none(),
+            "input dispatch must not replace the retained tree"
+        );
+        self.last_tree = Some(tree);
+        result
+    }
 
+    fn handle_component_input_with_tree(
+        &mut self,
+        tree: &WidgetNode,
+        input: ComponentInput,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
         match input {
             ComponentInput::PointerButton { x, y, pressed } => {
                 if pressed {
-                    if let Some(selection_key) = self.selectable_text_target_key(&tree, x, y) {
-                        let requests = self.set_focus_target(&tree, None, false)?;
+                    if let Some(selection_key) = self.selectable_text_target_key(tree, x, y) {
+                        let requests = self.set_focus_target(tree, None, false)?;
                         self.pointer_down_key = None;
                         self.pointer_down_bounds = None;
                         self.active_slider_key = None;
@@ -48,25 +61,25 @@ impl FrontendSurfaceComponent {
                     }
 
                     self.clear_selection();
-                    if let Some(node_key) = self.pointer_event_target_key(&tree, x, y) {
+                    if let Some(node_key) = self.pointer_event_target_key(tree, x, y) {
                         self.pointer_down_key = Some(node_key.clone());
                         self.pointer_down_bounds =
-                            find_node_bounds_by_key(&tree, &node_key, 0.0, 0.0);
-                        let mut requests = if let Some(focused_key) = find_focusable_at(&tree, x, y)
+                            find_node_bounds_by_key(tree, &node_key, 0.0, 0.0);
+                        let mut requests = if let Some(focused_key) = find_focusable_at(tree, x, y)
                         {
                             let focus_visible =
-                                self.pointer_focus_visible_for_key(&tree, &focused_key);
-                            self.set_focus_target(&tree, Some(focused_key), focus_visible)?
+                                self.pointer_focus_visible_for_key(tree, &focused_key);
+                            self.set_focus_target(tree, Some(focused_key), focus_visible)?
                         } else {
-                            self.set_focus_target(&tree, None, false)?
+                            self.set_focus_target(tree, None, false)?
                         };
 
-                        if is_slider_key(&tree, &node_key) {
+                        if is_slider_key(tree, &node_key) {
                             self.active_slider_key = Some(node_key.clone());
-                            self.update_slider_from_position(&tree, &node_key, x, y);
-                            if let Some(value) = self.slider_value(&tree, &node_key) {
+                            self.update_slider_from_position(tree, &node_key, x, y);
+                            if let Some(value) = self.slider_value(tree, &node_key) {
                                 requests.extend(self.call_node_handler(
-                                    &tree,
+                                    tree,
                                     &node_key,
                                     "change",
                                     &[serde_json::json!(value)],
@@ -75,14 +88,14 @@ impl FrontendSurfaceComponent {
                             self.invalidate_script_state();
                         } else {
                             self.active_slider_key = None;
-                            if self.is_option_key(&tree, &node_key) {
-                                requests.extend(self.activate_option_choice(&tree, &node_key)?);
-                            } else if self.is_radio_key(&tree, &node_key) {
-                                requests.extend(self.activate_radio_choice(&tree, &node_key)?);
-                            } else if self.is_checkable_choice_key(&tree, &node_key) {
-                                let value = self.toggle_checked_value(&tree, &node_key);
+                            if self.is_option_key(tree, &node_key) {
+                                requests.extend(self.activate_option_choice(tree, &node_key)?);
+                            } else if self.is_radio_key(tree, &node_key) {
+                                requests.extend(self.activate_radio_choice(tree, &node_key)?);
+                            } else if self.is_checkable_choice_key(tree, &node_key) {
+                                let value = self.toggle_checked_value(tree, &node_key);
                                 requests.extend(self.call_node_handler(
-                                    &tree,
+                                    tree,
                                     &node_key,
                                     "change",
                                     &[serde_json::json!(value)],
@@ -95,7 +108,7 @@ impl FrontendSurfaceComponent {
                             return Ok(requests);
                         }
                     } else {
-                        let requests = self.set_focus_target(&tree, None, false)?;
+                        let requests = self.set_focus_target(tree, None, false)?;
                         self.pointer_down_key = None;
                         self.pointer_down_bounds = None;
                         self.active_slider_key = None;
@@ -107,10 +120,10 @@ impl FrontendSurfaceComponent {
                 } else {
                     let mut requests = Vec::new();
                     if let Some(slider_key) = self.active_slider_key.clone()
-                        && let Some(value) = self.slider_value(&tree, &slider_key)
+                        && let Some(value) = self.slider_value(tree, &slider_key)
                     {
                         requests.extend(self.call_node_handler(
-                            &tree,
+                            tree,
                             &slider_key,
                             "release",
                             &[serde_json::json!(value)],
@@ -125,7 +138,7 @@ impl FrontendSurfaceComponent {
                         return Ok(requests);
                     }
 
-                    let release_key = self.pointer_event_target_key(&tree, x, y);
+                    let release_key = self.pointer_event_target_key(tree, x, y);
                     let captured_click_key = self.pointer_down_key.as_ref().and_then(|down_key| {
                         let released_on_same_key =
                             release_key.as_deref() == Some(down_key.as_str());
@@ -136,17 +149,17 @@ impl FrontendSurfaceComponent {
                             .then_some(down_key.clone())
                     });
                     if let Some(node_key) = captured_click_key {
-                        if self.is_menu_item_key(&tree, &node_key)
-                            || self.is_container_collection_item_key(&tree, &node_key)
+                        if self.is_menu_item_key(tree, &node_key)
+                            || self.is_container_collection_item_key(tree, &node_key)
                         {
-                            let click_event = self.build_click_event(&tree, &node_key, x, y);
+                            let click_event = self.build_click_event(tree, &node_key, x, y);
                             requests.extend(self.dispatch_activation_handlers(
-                                &tree,
+                                tree,
                                 &node_key,
                                 click_event,
                             )?);
-                        } else if let Some(handler) = find_click_handler(&tree, &node_key) {
-                            let click_event = self.build_click_event(&tree, &node_key, x, y);
+                        } else if let Some(handler) = find_click_handler(tree, &node_key) {
+                            let click_event = self.build_click_event(tree, &node_key, x, y);
                             requests
                                 .extend(self.call_namespaced_handler(&handler, &[click_event])?);
                         }
@@ -162,11 +175,11 @@ impl FrontendSurfaceComponent {
             }
             ComponentInput::PointerMove { x, y } => {
                 if let Some(slider_key) = self.active_slider_key.clone() {
-                    self.update_slider_from_position(&tree, &slider_key, x, y);
+                    self.update_slider_from_position(tree, &slider_key, x, y);
                     let mut requests = Vec::new();
-                    if let Some(value) = self.slider_value(&tree, &slider_key) {
+                    if let Some(value) = self.slider_value(tree, &slider_key) {
                         requests.extend(self.call_node_handler(
-                            &tree,
+                            tree,
                             &slider_key,
                             "change",
                             &[serde_json::json!(value)],
@@ -192,7 +205,11 @@ impl FrontendSurfaceComponent {
 
                 // Update hover state for CSS :hover and the tooltip system.
                 self.hovered_pos = (x, y);
-                let new_path = find_node_path_at(&tree, x, y).unwrap_or_default();
+                let pointer_hit = mesh_core_interaction::pointer_hit_test(tree, x, y);
+                let new_path = pointer_hit
+                    .as_ref()
+                    .map(|hit| hit.path.clone())
+                    .unwrap_or_default();
                 let new_key = new_path.last().cloned();
                 tracing::trace!(
                     "[hover] pointer=({x:.1},{y:.1}) path={:?} hit={:?} prev={:?}",
@@ -202,13 +219,8 @@ impl FrontendSurfaceComponent {
                 );
                 if new_key != self.hovered_key || new_path != self.hovered_path {
                     let previous_path = self.hovered_path.clone();
-                    let previous_tooltip = self
-                        .hovered_key
-                        .as_ref()
-                        .and_then(|key| find_tooltip_by_key(&tree, key));
-                    let next_tooltip = new_key
-                        .as_ref()
-                        .and_then(|key| find_tooltip_by_key(&tree, key));
+                    let previous_tooltip = self.hovered_tooltip.clone();
+                    let next_tooltip = pointer_hit.as_ref().and_then(|hit| hit.tooltip.clone());
                     let same_tooltip_owner = previous_tooltip
                         .as_ref()
                         .zip(next_tooltip.as_ref())
@@ -217,13 +229,11 @@ impl FrontendSurfaceComponent {
                         });
                     self.hovered_key = new_key.clone();
                     self.hovered_path = new_path.clone();
+                    self.hovered_tooltip = next_tooltip.clone();
                     // Store the hovered element's bounds for tooltip positioning.
                     // Use the tooltip owner's bounds when available; fall back to
                     // the hovered node itself.
-                    let tooltip_owner_key = next_tooltip.as_ref().map(|(owner, _)| owner.as_str());
-                    let bounds_key = tooltip_owner_key.or(new_key.as_deref());
-                    self.hovered_element_bounds =
-                        bounds_key.and_then(|k| find_node_bounds_by_key(&tree, k, 0.0, 0.0));
+                    self.hovered_element_bounds = pointer_hit.as_ref().map(|hit| hit.bounds);
                     // Preserve an already-running tooltip when moving between a
                     // tooltip owner and descendants that inherit that tooltip.
                     if same_tooltip_owner {
@@ -243,7 +253,7 @@ impl FrontendSurfaceComponent {
                     // Dispatch pointerenter/pointerleave to any script handlers on
                     // the entered/left nodes (e.g. hover-to-open popovers).
                     let hover_requests = self.dispatch_hover_transition_handlers(
-                        &tree,
+                        tree,
                         &previous_path,
                         &new_path,
                         x,
@@ -262,6 +272,7 @@ impl FrontendSurfaceComponent {
                 {
                     self.hovered_key = None;
                     self.hovered_path.clear();
+                    self.hovered_tooltip = None;
                     self.hover_start = None;
                     self.tooltip_visible = false;
                     self.hovered_element_bounds = None;
@@ -271,18 +282,18 @@ impl FrontendSurfaceComponent {
                 // The pointer left the whole surface — fire pointerleave/mouseleave
                 // on everything that was hovered so popovers can close themselves.
                 let leave_requests =
-                    self.dispatch_hover_transition_handlers(&tree, &previous_path, &[], 0.0, 0.0)?;
+                    self.dispatch_hover_transition_handlers(tree, &previous_path, &[], 0.0, 0.0)?;
                 if !leave_requests.is_empty() {
                     return Ok(leave_requests);
                 }
             }
             ComponentInput::Scroll { x, y, dx, dy } => {
-                if let Some(requests) = self.dispatch_scroll_handler(&tree, x, y, dx, dy)? {
+                if let Some(requests) = self.dispatch_scroll_handler(tree, x, y, dx, dy)? {
                     return Ok(requests);
                 }
 
-                if let Some(scroll_key) = find_scrollable_at(&tree, x, y) {
-                    if let Some(node) = find_node_by_key(&tree, &scroll_key) {
+                if let Some(scroll_key) = find_scrollable_at(tree, x, y) {
+                    if let Some(node) = find_node_by_key(tree, &scroll_key) {
                         let (max_x, max_y) = scroll_limits(node);
                         let current = self.scroll_offsets.entry(scroll_key).or_default();
                         let next_x = (current.x - dx * 28.0).clamp(0.0, max_x);
@@ -301,16 +312,16 @@ impl FrontendSurfaceComponent {
             }
             ComponentInput::Char { ch } => {
                 if let Some(focused_key) = self.focused_key.clone() {
-                    let accepts_char = find_node_by_key(&tree, &focused_key)
+                    let accepts_char = find_node_by_key(tree, &focused_key)
                         .is_some_and(|node| input_accepts_char(node, ch));
-                    if is_input_key(&tree, &focused_key) && accepts_char {
+                    if is_input_key(tree, &focused_key) && accepts_char {
                         self.clear_selection();
                         let value = self.input_values.entry(focused_key.clone()).or_default();
                         value.push(ch);
                         let current = value.clone();
                         self.invalidate_text_state();
                         return self.dispatch_text_input_value_handlers(
-                            &tree,
+                            tree,
                             &focused_key,
                             &current,
                         );
@@ -320,7 +331,7 @@ impl FrontendSurfaceComponent {
                 let keyboard_settings = self.current_keyboard_settings();
                 let key = ch.to_string();
                 if let Some(requests) = self.dispatch_surface_shortcut(
-                    &tree,
+                    tree,
                     &key,
                     KeyModifiers::default(),
                     &keyboard_settings,
@@ -329,10 +340,10 @@ impl FrontendSurfaceComponent {
                 }
             }
             ComponentInput::KeyPressed { key, modifiers } => {
-                return self.handle_key_pressed(&tree, key, modifiers);
+                return self.handle_key_pressed(tree, key, modifiers);
             }
             ComponentInput::KeyReleased { key, modifiers } => {
-                return self.handle_key_released(&tree, key, modifiers);
+                return self.handle_key_released(tree, key, modifiers);
             }
         }
 
@@ -397,4 +408,66 @@ pub(super) fn is_bare_printable_key(key: &str, modifiers: KeyModifiers) -> bool 
         && !modifiers.alt
         && key.chars().count() == 1
         && key.chars().all(|ch| !ch.is_control())
+}
+
+#[cfg(test)]
+mod performance_tests {
+    use mesh_core_elements::WidgetNode;
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    fn large_tree(rows: usize, columns: usize) -> WidgetNode {
+        let mut root = WidgetNode::new("column");
+        for row_index in 0..rows {
+            let mut row = WidgetNode::new("row");
+            row.attributes
+                .insert("_mesh_key".into(), format!("root/{row_index}"));
+            for column_index in 0..columns {
+                let mut node = WidgetNode::new("button");
+                node.attributes.insert(
+                    "_mesh_key".into(),
+                    format!("root/{row_index}/{column_index}"),
+                );
+                node.attributes
+                    .insert("class".into(), "toolbar-button compact interactive".into());
+                node.attributes
+                    .insert("content".into(), format!("Item {row_index}:{column_index}"));
+                node.event_handlers
+                    .insert("click".into(), "handleItemClick".into());
+                row.children.push(node);
+            }
+            root.children.push(row);
+        }
+        root
+    }
+
+    // Run with:
+    // cargo test -p mesh-core-shell --release -- input_tree_take_restore_beats_deep_clone --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn input_tree_take_restore_beats_deep_clone() {
+        let tree = large_tree(100, 10);
+        let iterations = 10_000usize;
+
+        let clone_start = Instant::now();
+        for _ in 0..iterations {
+            black_box(black_box(&tree).clone());
+        }
+        let clone_ns = clone_start.elapsed().as_nanos().max(1);
+
+        let mut retained = Some(tree);
+        let take_start = Instant::now();
+        for _ in 0..iterations {
+            let current = black_box(&mut retained).take().expect("retained tree");
+            black_box(&current);
+            retained = Some(current);
+        }
+        let take_ns = take_start.elapsed().as_nanos().max(1);
+
+        eprintln!("deep_clone={clone_ns}ns take_restore={take_ns}ns");
+        assert!(
+            take_ns.saturating_mul(10) <= clone_ns,
+            "moving the retained tree should be at least 10x faster than recursively cloning it"
+        );
+    }
 }

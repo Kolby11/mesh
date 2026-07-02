@@ -10,6 +10,14 @@ pub(crate) fn json_value_to_string(value: serde_json::Value) -> String {
     }
 }
 
+fn json_value_ref_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::String(value) => value.clone(),
+        other => other.to_string(),
+    }
+}
+
 /// Evaluate a template expression against the current variable store.
 ///
 /// Supports a subset of Luau expression syntax:
@@ -161,12 +169,15 @@ fn bool_str(value: bool) -> String {
 
 fn eval_compiled(expr: &CompiledExpr, store: &dyn mesh_core_elements::VariableStore) -> String {
     match expr {
-        CompiledExpr::Length(name) => match store.get(name) {
-            Some(serde_json::Value::Array(arr)) => arr.len().to_string(),
-            Some(serde_json::Value::String(s)) => s.len().to_string(),
-            Some(serde_json::Value::Object(obj)) => obj.len().to_string(),
-            _ => "0".into(),
-        },
+        CompiledExpr::Length(name) => {
+            if let Some(value) = store.get_ref(name) {
+                return json_value_len(value).to_string();
+            }
+            match store.get(name) {
+                Some(value) => json_value_len(&value).to_string(),
+                _ => "0".into(),
+            }
+        }
         CompiledExpr::Not(inner) => bool_str(!is_truthy(&eval_compiled(inner, store))),
         CompiledExpr::Ternary {
             cond,
@@ -282,11 +293,23 @@ fn balanced_parens(expr: &str) -> bool {
 }
 
 fn eval_path(expr: &str, store: &dyn mesh_core_elements::VariableStore) -> String {
+    if let Some(value) = store.get_ref(expr) {
+        return json_value_ref_to_string(value);
+    }
+
+    let parts: Vec<&str> = expr.splitn(2, '.').collect();
+    if parts.len() == 2 {
+        if let Some(root) = store.get_ref(parts[0]) {
+            if let Some(nested) = json_path_ref(root, parts[1]) {
+                return json_value_ref_to_string(nested);
+            }
+        }
+    }
+
     if let Some(value) = store.get(expr) {
         return json_value_to_string(value);
     }
 
-    let parts: Vec<&str> = expr.splitn(2, '.').collect();
     if parts.len() == 2 {
         if let Some(root) = store.get(parts[0]) {
             if let Some(nested) = json_path(root, parts[1]) {
@@ -296,6 +319,25 @@ fn eval_path(expr: &str, store: &dyn mesh_core_elements::VariableStore) -> Strin
     }
 
     expr.to_string()
+}
+
+fn json_value_len(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Array(arr) => arr.len(),
+        serde_json::Value::String(s) => s.len(),
+        serde_json::Value::Object(obj) => obj.len(),
+        _ => 0,
+    }
+}
+
+fn json_path_ref<'a>(
+    mut value: &'a serde_json::Value,
+    path: &str,
+) -> Option<&'a serde_json::Value> {
+    for key in path.split('.') {
+        value = value.get(key)?;
+    }
+    Some(value)
 }
 
 fn json_path(mut value: serde_json::Value, path: &str) -> Option<serde_json::Value> {

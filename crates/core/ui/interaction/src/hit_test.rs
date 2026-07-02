@@ -1,4 +1,57 @@
 use super::*;
+#[derive(Debug, Clone, PartialEq)]
+pub struct PointerHit {
+    pub path: Vec<String>,
+    pub tooltip: Option<(String, String)>,
+    pub bounds: ContentBounds,
+}
+
+type TooltipHit = (String, String, ContentBounds);
+
+/// Resolve all pointer-motion metadata in the same tree traversal.
+pub fn pointer_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<PointerHit> {
+    let mut hit = pointer_hit_test_reversed(node, x, y, 0.0, 0.0, None)?;
+    hit.path.reverse();
+    Some(hit)
+}
+
+fn pointer_hit_test_reversed(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    offset_x: f32,
+    offset_y: f32,
+    inherited_tooltip: Option<&TooltipHit>,
+) -> Option<PointerHit> {
+    if node_is_hidden(node) {
+        return None;
+    }
+    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
+    let inside = layout_contains_with_offset(node, x, y, offset_x, offset_y);
+    if !inside && node_clips_children(node) {
+        return None;
+    }
+    let owner_tooltip = node_tooltip_owner_text(node)
+        .map(|(owner, text)| (owner, text, node_rect_with_offset(node, offset_x, offset_y)));
+    let tooltip = owner_tooltip.as_ref().or(inherited_tooltip);
+    let (child_ox, child_oy) = child_offsets_with_scroll(node, offset_x, offset_y);
+    for child in node.children.iter().rev() {
+        if let Some(mut hit) = pointer_hit_test_reversed(child, x, y, child_ox, child_oy, tooltip) {
+            if let Some(key) = node.attributes.get("_mesh_key") {
+                hit.path.push(key.clone());
+            }
+            return Some(hit);
+        }
+    }
+    let key = node.attributes.get("_mesh_key")?;
+    inside.then(|| PointerHit {
+        path: vec![key.clone()],
+        tooltip: tooltip.map(|(owner, text, _)| (owner.clone(), text.clone())),
+        bounds: tooltip
+            .map(|(_, _, bounds)| *bounds)
+            .unwrap_or_else(|| node_rect_with_offset(node, offset_x, offset_y)),
+    })
+}
 
 pub fn find_node_by_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a WidgetNode> {
     if node
@@ -241,6 +294,107 @@ pub fn parse_namespaced_handler(handler: &str) -> Option<(&str, &str)> {
 mod tests {
     use super::*;
     use mesh_core_elements::{LayoutRect, WidgetNode};
+
+    fn indexed_tree(rows: usize, columns: usize) -> WidgetNode {
+        let mut root = WidgetNode::new("surface");
+        root.attributes.insert("_mesh_key".into(), "root".into());
+        root.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: columns as f32 * 20.0,
+            height: rows as f32 * 20.0,
+        };
+        for row_index in 0..rows {
+            let mut row = WidgetNode::new("row");
+            row.attributes
+                .insert("_mesh_key".into(), format!("row-{row_index}"));
+            row.layout = LayoutRect {
+                x: 0.0,
+                y: row_index as f32 * 20.0,
+                width: columns as f32 * 20.0,
+                height: 20.0,
+            };
+            for column_index in 0..columns {
+                let mut cell = WidgetNode::new("button");
+                cell.attributes.insert(
+                    "_mesh_key".into(),
+                    format!("cell-{row_index}-{column_index}"),
+                );
+                cell.layout = LayoutRect {
+                    x: column_index as f32 * 20.0,
+                    y: 0.0,
+                    width: 20.0,
+                    height: 20.0,
+                };
+                row.children.push(cell);
+            }
+            root.children.push(row);
+        }
+        root
+    }
+
+    #[test]
+    fn pointer_hit_test_matches_separate_tree_walks() {
+        let mut root = indexed_tree(6, 8);
+        root.children[2]
+            .attributes
+            .insert("tooltip".into(), "Third row".into());
+        root.children[2]
+            .attributes
+            .insert("_mesh_scroll_x".into(), "5".into());
+        root.children[4].computed_style.transform.translate_x = 7.0;
+        for y in (0..120).step_by(3) {
+            for x in (0..160).step_by(3) {
+                let fused = pointer_hit_test(&root, x as f32, y as f32);
+                assert_eq!(
+                    fused.as_ref().map(|hit| hit.path.clone()),
+                    find_node_path_at(&root, x as f32, y as f32),
+                    "mismatch at ({x}, {y})"
+                );
+            }
+        }
+        let hit = pointer_hit_test(&root, 48.0, 50.0).unwrap();
+        assert_eq!(
+            hit.bounds,
+            find_node_bounds_by_key(&root, "row-2", 0.0, 0.0).unwrap()
+        );
+        assert_eq!(
+            hit.tooltip,
+            find_tooltip_by_key(&root, hit.path.last().unwrap())
+        );
+    }
+
+    #[test]
+    #[ignore = "release-only pointer-motion microbenchmark"]
+    fn fused_pointer_motion_beats_repeated_tree_walks() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let tree = indexed_tree(100, 10);
+        let iterations = 20_000;
+        let started = Instant::now();
+        for i in 0..iterations {
+            let x = ((i * 17) % 200) as f32;
+            let y = ((i * 31) % 2_000) as f32;
+            let path = find_node_path_at(&tree, x, y).unwrap_or_default();
+            let key = path.last().map(String::as_str).unwrap_or_default();
+            black_box(find_tooltip_by_key(&tree, key));
+            black_box(find_tooltip_by_key(&tree, key));
+            black_box(find_node_bounds_by_key(&tree, key, 0.0, 0.0));
+        }
+        let tree_walk = started.elapsed();
+
+        let started = Instant::now();
+        for i in 0..iterations {
+            let x = ((i * 17) % 200) as f32;
+            let y = ((i * 31) % 2_000) as f32;
+            black_box(pointer_hit_test(&tree, x, y));
+        }
+        let fused = started.elapsed();
+
+        eprintln!("tree_walk={tree_walk:?} fused={fused:?}");
+        assert!(fused < tree_walk, "fused lookup must improve pointer time");
+    }
 
     #[test]
     fn phase87_tooltip_attribute_participates_in_inherited_tooltip_lookup() {

@@ -203,6 +203,15 @@ impl VariableStore for TrackingVariableStore<'_> {
         }
         result
     }
+    fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
+        let result = self.inner.get_ref(name);
+        if let Some(dot_pos) = name.find('.') {
+            let service = name[..dot_pos].to_string();
+            let field = name[dot_pos + 1..].to_string();
+            self.reads.borrow_mut().push((service, field));
+        }
+        result
+    }
     fn keys(&self) -> Vec<String> {
         self.inner.keys()
     }
@@ -1525,6 +1534,9 @@ mod tests {
     impl mesh_core_elements::VariableStore for MapStore {
         fn get(&self, name: &str) -> Option<serde_json::Value> {
             self.0.get(name).cloned()
+        }
+        fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
+            self.0.get(name)
         }
         fn keys(&self) -> Vec<String> {
             self.0.keys().cloned().collect()

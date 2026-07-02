@@ -1,4 +1,6 @@
 use super::*;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 impl FrontendSurfaceComponent {
     pub(super) fn clear_selection(&mut self) {
@@ -43,6 +45,8 @@ impl FrontendSurfaceComponent {
         let mut refs = serde_json::Map::new();
         let mut ref_keys = HashMap::new();
         collect_element_metrics(tree, 0.0, 0.0, &mut elements, &mut refs, &mut ref_keys);
+        let elements_fingerprint = json_map_fingerprint(&elements);
+        let refs_fingerprint = json_map_fingerprint(&refs);
         let refs = serde_json::Value::Object(refs);
 
         if let Some(root_runtime) = self.runtimes.lock().unwrap().get_mut(self.id()) {
@@ -53,11 +57,15 @@ impl FrontendSurfaceComponent {
             root_runtime
                 .script_ctx
                 .state_mut()
-                .set_host_value("elements", serde_json::Value::Object(elements));
+                .set_host_value_with_fingerprint(
+                    "elements",
+                    serde_json::Value::Object(elements),
+                    elements_fingerprint,
+                );
             root_runtime
                 .script_ctx
                 .state_mut()
-                .set_host_value("refs", refs.clone());
+                .set_host_value_with_fingerprint("refs", refs.clone(), refs_fingerprint);
             root_runtime.script_ctx.apply_element_metrics(&refs);
         }
         // Remember name -> node key so drained element actions resolve their target.
@@ -75,17 +83,32 @@ impl FrontendSurfaceComponent {
         if actions.is_empty() {
             return Ok(Vec::new());
         }
-        let Some(tree) = self.last_tree.clone() else {
+        let Some(tree) = self.last_tree.take() else {
             return Ok(Vec::new());
         };
         let ref_keys = self.ref_node_keys.borrow().clone();
 
+        let result = self.apply_element_actions_with_tree(&tree, &ref_keys, actions);
+        debug_assert!(
+            self.last_tree.is_none(),
+            "element actions must not replace the retained tree"
+        );
+        self.last_tree = Some(tree);
+        result
+    }
+
+    fn apply_element_actions_with_tree(
+        &mut self,
+        tree: &WidgetNode,
+        ref_keys: &HashMap<String, String>,
+        actions: Vec<mesh_core_scripting::ElementAction>,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
         let mut requests = Vec::new();
         for action in actions {
             match action.action.as_str() {
                 "focus" => {
                     if let Some(key) = ref_keys.get(&action.target) {
-                        requests.extend(self.set_focus_target(&tree, Some(key.clone()), true)?);
+                        requests.extend(self.set_focus_target(tree, Some(key.clone()), true)?);
                     }
                 }
                 "blur" => {
@@ -95,7 +118,7 @@ impl FrontendSurfaceComponent {
                         .get(&action.target)
                         .is_some_and(|key| self.focused_key.as_deref() == Some(key));
                     if holds_focus {
-                        requests.extend(self.set_focus_target(&tree, None, false)?);
+                        requests.extend(self.set_focus_target(tree, None, false)?);
                     }
                 }
                 "scroll_to" => {
@@ -103,7 +126,7 @@ impl FrontendSurfaceComponent {
                     // offset (DOM `element.scrollTop = y`), clamped to the container's
                     // range; omitted axes stay put. `{ smooth = true }` eases there.
                     if let Some(key) = ref_keys.get(&action.target).cloned()
-                        && let Some(node) = find_node_by_key(&tree, &key)
+                        && let Some(node) = find_node_by_key(tree, &key)
                     {
                         let (max_x, max_y) = scroll_limits(node);
                         let nums = action.args.as_array();
@@ -132,7 +155,7 @@ impl FrontendSurfaceComponent {
                     // sets the input's text directly (DOM `input.value = ...`). Like
                     // the DOM, this does not fire `oninput`/`onchange`.
                     if let Some(key) = ref_keys.get(&action.target).cloned()
-                        && find_node_by_key(&tree, &key).is_some()
+                        && find_node_by_key(tree, &key).is_some()
                     {
                         let text = action
                             .args
@@ -148,7 +171,7 @@ impl FrontendSurfaceComponent {
                     // `refs.x:click()` synthesizes a click on the live node through
                     // the same dispatch a real pointer release uses.
                     if let Some(key) = ref_keys.get(&action.target).cloned() {
-                        requests.extend(self.synthesize_click(&tree, &key)?);
+                        requests.extend(self.synthesize_click(tree, &key)?);
                     }
                 }
                 "scroll_into_view" => {
@@ -156,7 +179,7 @@ impl FrontendSurfaceComponent {
                     // the target, routing through the same scroll_offsets map the
                     // wheel handler mutates. Geometry lives in mesh-core-interaction.
                     if let Some(key) = ref_keys.get(&action.target) {
-                        let updates = scroll_into_view_offsets(&tree, key, &self.scroll_offsets);
+                        let updates = scroll_into_view_offsets(tree, key, &self.scroll_offsets);
                         let mut moved = false;
                         for (container_key, target) in updates {
                             let current = self
@@ -354,6 +377,61 @@ impl FrontendSurfaceComponent {
             .is_some_and(|selection| find_node_by_key(tree, &selection.anchor.node_key).is_none());
         if should_clear_selection {
             self.selection = None;
+        }
+    }
+}
+
+fn json_map_fingerprint(map: &serde_json::Map<String, serde_json::Value>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hash_json_map(map, &mut hasher);
+    hasher.finish()
+}
+
+fn hash_json_map(map: &serde_json::Map<String, serde_json::Value>, hasher: &mut DefaultHasher) {
+    6u8.hash(hasher);
+    map.len().hash(hasher);
+    for (key, value) in map {
+        key.hash(hasher);
+        hash_json_value(value, hasher);
+    }
+}
+
+fn hash_json_value(value: &serde_json::Value, hasher: &mut DefaultHasher) {
+    match value {
+        serde_json::Value::Null => 0u8.hash(hasher),
+        serde_json::Value::Bool(value) => {
+            1u8.hash(hasher);
+            value.hash(hasher);
+        }
+        serde_json::Value::Number(value) => {
+            2u8.hash(hasher);
+            if let Some(value) = value.as_i64() {
+                0u8.hash(hasher);
+                value.hash(hasher);
+            } else if let Some(value) = value.as_u64() {
+                1u8.hash(hasher);
+                value.hash(hasher);
+            } else if let Some(value) = value.as_f64() {
+                2u8.hash(hasher);
+                value.to_bits().hash(hasher);
+            } else {
+                3u8.hash(hasher);
+                value.to_string().hash(hasher);
+            }
+        }
+        serde_json::Value::String(value) => {
+            3u8.hash(hasher);
+            value.hash(hasher);
+        }
+        serde_json::Value::Array(values) => {
+            4u8.hash(hasher);
+            values.len().hash(hasher);
+            for value in values {
+                hash_json_value(value, hasher);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            hash_json_map(map, hasher);
         }
     }
 }
