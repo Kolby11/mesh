@@ -481,6 +481,8 @@ impl Shell {
                     target,
                     node_key: request.node_key.clone(),
                     anchor_rect: request.anchor_rect,
+                    content_size: request.content_size,
+                    content_offset: request.content_offset,
                     closing_until: None,
                 });
                 self.rebuild_component_surface_index();
@@ -511,18 +513,27 @@ impl Shell {
                 });
             let surface = self.surfaces.entry(child_surface_id.clone()).or_default();
             surface.visible = true;
-            surface.width = request.content_size.0.max(1);
-            surface.height = request.content_size.1.max(1);
+            surface.width = request.surface_size.0.max(1);
+            surface.height = request.surface_size.1.max(1);
 
+            // The popup buffer is padded (`request.surface_size`) beyond the
+            // plain content box (`request.content_size`) so box-shadow/blur
+            // overflow (e.g. `bubble-options.mesh`'s drop shadow) is not
+            // hard-clipped at the content edge. The positioner offset is
+            // compensated by the top-left padding so the visible content
+            // still lands at the same anchored position.
             let popup_config = PopupConfig {
                 parent_surface_id: parent_surface_id.to_string(),
                 placement: PopupPlacement {
                     anchor_rect: request.anchor_rect,
-                    size: request.content_size,
+                    size: request.surface_size,
                     anchor: map_popover_anchor(request.placement.anchor),
                     gravity: map_popover_gravity(request.placement.gravity),
                     constraint: map_popover_constraint(request.placement.constraint_adjustment),
-                    offset: (request.placement.offset_x, request.placement.offset_y),
+                    offset: (
+                        request.placement.offset_x - request.content_offset.0 as i32,
+                        request.placement.offset_y - request.content_offset.1 as i32,
+                    ),
                 },
                 grab: request.placement.grab == PopoverGrab::Click,
                 grab_serial: None,
@@ -531,9 +542,11 @@ impl Shell {
             {
                 let child = &mut self.components[index].children[child_index];
                 child.target.popup_config = Some(popup_config.clone());
-                child.target.known_surface_size = Some(request.content_size);
-                if child.target.last_popup_size != Some(request.content_size) {
-                    child.target.last_popup_size = Some(request.content_size);
+                child.target.known_surface_size = Some(request.surface_size);
+                child.content_size = request.content_size;
+                child.content_offset = request.content_offset;
+                if child.target.last_popup_size != Some(request.surface_size) {
+                    child.target.last_popup_size = Some(request.surface_size);
                 }
             }
             if let Err(error) = self
@@ -545,8 +558,8 @@ impl Shell {
                 continue;
             }
 
-            let width = request.content_size.0.max(1);
-            let height = request.content_size.1.max(1);
+            let width = request.surface_size.0.max(1);
+            let height = request.surface_size.1.max(1);
             let presented = self.paint_and_present_child_surface(
                 index,
                 child_index,
@@ -670,15 +683,21 @@ impl Shell {
         self.components[index].children[child_index]
             .target
             .force_full_present = true;
+        // The popup buffer is padded beyond the true content box so
+        // box-shadow/blur overflow is not hard-clipped (see
+        // `popover_content_padding`); restrict the input region to the real
+        // content rect so pointer events over the padding pass through
+        // instead of hitting a dead zone.
+        let child = &self.components[index].children[child_index];
+        let (content_w, content_h) = child.content_size;
+        let (offset_x, offset_y) = child.content_offset;
         self.presentation_engine.update_input_region(
-            &self.components[index].children[child_index]
-                .target
-                .surface_id,
+            &child.target.surface_id,
             Some(DamageRect {
-                x: 0,
-                y: 0,
-                width,
-                height,
+                x: offset_x,
+                y: offset_y,
+                width: content_w.max(1),
+                height: content_h.max(1),
             }),
         );
         match self.present_surface_target(

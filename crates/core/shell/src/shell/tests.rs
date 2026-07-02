@@ -627,6 +627,8 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
             kind: super::types::ChildSurfaceKind::Popover,
             anchor_rect: state.anchor_rect,
             content_size: state.content_size,
+            surface_size: state.content_size,
+            content_offset: (0, 0),
             placement: mesh_core_elements::PopoverPlacement::default(),
         }]
     }
@@ -5131,6 +5133,8 @@ fn component_runtime_resolves_parent_and_child_surface_targets() {
             ),
             node_key: "root/0/popover".to_string(),
             anchor_rect: (12, 0, 40, 56),
+            content_size: (40, 56),
+            content_offset: (0, 0),
             closing_until: None,
         });
 

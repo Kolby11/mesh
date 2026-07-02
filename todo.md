@@ -191,11 +191,36 @@ surface.
       `docs/frontend/elements.md` and `docs/frontend/mesh-syntax.md`; the Rust
       `PopoverGrab` contract already enforces `Hover` as the default and maps
       `grab="click"` to compositor grab requests.
-- [ ] **Buffer padding + input region for shadows.** Popup buffer must include
-      padding for `box-shadow`/float animation overshoot, and the input region must
-      exclude that padding — reuse the tooltip buffer-padding / input-region masking
-      pattern (see Tooltip input dead-zone work). Needs an alpha buffer (popups,
-      like layer surfaces, already composite with alpha).
+- [x] **Buffer padding + input region for shadows.** Done 2026-07-02: promoted
+      popup buffers (in-tree `<popover>` → `xdg_popup`, `render.rs`
+      `reconcile_child_surface_requests`) were unpadded — exactly the measured
+      content box — so `bubble-options.mesh`'s shipped `box-shadow: 0px 6px 18px`
+      (used by both `language-popover` and `theme-selector`) was hard-clipped at
+      the content edge. Added `popover_content_padding()`
+      (`shell_component.rs`), which walks a popover's subtree in popover-local
+      coordinates and unions each descendant's shadow/blur-filter overflow
+      (reusing the same extension math as the existing present-damage
+      calculation, factored out into shared `shadow_filter_extended_bounds()`).
+      `ChildSurfaceRequest` gained `surface_size` (padded buffer/popup size) and
+      `content_offset` (`(left, top)` padding) alongside the existing
+      `content_size` (true content, unpadded). The popup buffer/positioner now
+      use `surface_size`; the positioner `offset` is compensated by
+      `-content_offset` so the visible content still lands at the anchored
+      position despite the larger buffer; `paint_child_surface` paints the
+      subtree shifted by `content_offset` into the padded buffer; and the
+      popup's Wayland input region is masked to the true content rect
+      (`content_offset` + `content_size`) so pointer events over the padding
+      pass through instead of hitting a dead zone — mirroring the existing
+      parent-surface tooltip pattern. Alpha buffers were already in place
+      (`Argb8888` used uniformly). Test:
+      `popover_with_descendant_box_shadow_pads_surface_and_offsets_content`.
+      Not verified on a live compositor (no Wayland session in this
+      environment) — the anchor-offset compensation assumes the positioner's
+      anchored corner/edge tracks a fixed screen point independent of buffer
+      size, which holds for the shipped `anchor="bottom" gravity="bottom"`
+      popovers since their shadow is horizontally symmetric (offset_x=0); an
+      asymmetric shadow on a centered-gravity popover would show a small
+      residual off-center shift worth re-checking against a real compositor.
 - [ ] **Content sizing + reposition.** Reuse `content_measured` to size the
       popup from the measured `<popover>` subtree; use `xdg_popup.reposition`
       (xdg_wm_base v3+) when the anchor moves (output/exclusive-zone change). Note
