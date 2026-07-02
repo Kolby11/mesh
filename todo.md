@@ -306,15 +306,17 @@ All five landed 2026-06-23 (single commit).
       providers, contributed resources, source scans, interface files, and
       keybind trigger conflicts. Verified 2026-07-02 with `cargo fmt --check`
       and `mesh-core-module` lib tests.
-- [ ] `install_host_api` splits: frontend (`scripting/context/runtime.rs:824`,
+- [x] `install_host_api` splits: frontend (`scripting/context/runtime.rs:824`,
       ~445 lines) and backend (`scripting/backend/runtime.rs:480`, ~200 lines).
       Break per-subsystem (`install_popover_api`, `install_locale_api`,
-      `install_service_api`, `install_exec_api`, …). Progress 2026-07-02:
+      `install_service_api`, `install_exec_api`, …). Backend done 2026-07-02:
       backend `install_host_api` now delegates to `install_service_api`,
       `install_exec_api`, `install_config_api`, and `install_log_api`; verified
-      with `mesh-core-scripting` and `mesh-core-backend` lib tests. Remaining:
-      split the frontend installer; the frontend `mesh.popover.activate` handler
-      alone is ~75 lines.
+      with `mesh-core-scripting` and `mesh-core-backend` lib tests. Frontend
+      completed 2026-07-02: `install_host_api` now delegates to subsystem
+      installers for module globals, events, UI, locale, logging, popover,
+      loader/import, and refs APIs. Verified with `cargo fmt --check`,
+      `mesh-core-scripting`, and `mesh-core-backend` lib tests.
 - [x] `handle_component_input` (`shell/component/input/mod.rs`, ~500 lines):
       extracted `handle_key_pressed`/`handle_key_released` into
       `input/keyboard.rs`, leaving the top-level input dispatcher to delegate

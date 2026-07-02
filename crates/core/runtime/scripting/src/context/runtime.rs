@@ -827,6 +827,44 @@ impl ScriptContext {
         globals
             .set("self", self.current_self_table()?)
             .map_err(lua_err)?;
+        self.install_module_api(globals)?;
+
+        let mesh = self.lua().create_table().map_err(lua_err)?;
+        let mesh_core_service = self.lua().create_table().map_err(lua_err)?;
+        let mesh_core_events = self.lua().create_table().map_err(lua_err)?;
+        let mesh_ui_api = self.lua().create_table().map_err(lua_err)?;
+        let mesh_log = self.lua().create_table().map_err(lua_err)?;
+        let mesh_popover = self.lua().create_table().map_err(lua_err)?;
+        let mesh_locale = self.lua().create_table().map_err(lua_err)?;
+        let manifest = HostApiManifest::from_capabilities(&self.capabilities);
+
+        self.install_events_api(&mesh_core_events)?;
+        self.install_ui_api(globals, &mesh_ui_api)?;
+        self.install_locale_api(globals, &mesh_locale, &manifest)?;
+        self.install_log_api(&mesh_log)?;
+        self.install_popover_api(&mesh_popover)?;
+
+        mesh.set("service", mesh_core_service).map_err(lua_err)?;
+        mesh.set("events", mesh_core_events).map_err(lua_err)?;
+        mesh.set("ui", mesh_ui_api).map_err(lua_err)?;
+        mesh.set("log", mesh_log).map_err(lua_err)?;
+        mesh.set("popover", mesh_popover).map_err(lua_err)?;
+        mesh.set("locale", mesh_locale).map_err(lua_err)?;
+        let mesh_for_require = mesh.clone();
+        globals.set("mesh", mesh).map_err(lua_err)?;
+        globals
+            .set("__mesh_request_redraw", false)
+            .map_err(lua_err)?;
+        globals
+            .set("__mesh_locale_current", "en")
+            .map_err(lua_err)?;
+
+        self.install_loader_api(globals, &mesh_for_require, &manifest)?;
+        self.install_refs_api(globals)?;
+        Ok(())
+    }
+
+    fn install_module_api(&mut self, globals: &mlua::Table) -> Result<(), ScriptError> {
         let module_object = self.lua().create_table().map_err(lua_err)?;
         let module_state = self.lua().create_table().map_err(lua_err)?;
         let module_exports = self.lua().create_table().map_err(lua_err)?;
@@ -854,22 +892,10 @@ impl ScriptContext {
         module_object
             .set("events", module_events)
             .map_err(lua_err)?;
-        globals.set("module", module_object).map_err(lua_err)?;
+        globals.set("module", module_object).map_err(lua_err)
+    }
 
-        let mesh = self.lua().create_table().map_err(lua_err)?;
-        let mesh_core_service = self.lua().create_table().map_err(lua_err)?;
-        let mesh_core_events = self.lua().create_table().map_err(lua_err)?;
-        let mesh_ui_api = self.lua().create_table().map_err(lua_err)?;
-        let mesh_log = self.lua().create_table().map_err(lua_err)?;
-        let mesh_popover = self.lua().create_table().map_err(lua_err)?;
-        let mesh_locale = self.lua().create_table().map_err(lua_err)?;
-        let interface_catalog = self.interface_catalog.clone();
-        let manifest = HostApiManifest::from_capabilities(&self.capabilities);
-        let allowed_interfaces = manifest.interface_capabilities.clone();
-        let has_theme_read = manifest.has_theme_read;
-        let has_locale_read = manifest.has_locale_read;
-        let has_locale_write = manifest.has_locale_write;
-
+    fn install_events_api(&mut self, mesh_core_events: &Table) -> Result<(), ScriptError> {
         let published_events = Arc::clone(&self.shared_published_events);
         let module_id = self.module_id.clone();
         let capabilities = self.capabilities.clone();
@@ -891,8 +917,14 @@ impl ScriptContext {
                     })
                     .map_err(lua_err)?,
             )
-            .map_err(lua_err)?;
+            .map_err(lua_err)
+    }
 
+    fn install_ui_api(
+        &mut self,
+        globals: &mlua::Table,
+        mesh_ui_api: &Table,
+    ) -> Result<(), ScriptError> {
         let env_for_redraw = globals.clone();
         mesh_ui_api
             .set(
@@ -904,8 +936,15 @@ impl ScriptContext {
                     })
                     .map_err(lua_err)?,
             )
-            .map_err(lua_err)?;
+            .map_err(lua_err)
+    }
 
+    fn install_locale_api(
+        &mut self,
+        globals: &mlua::Table,
+        mesh_locale: &Table,
+        manifest: &HostApiManifest,
+    ) -> Result<(), ScriptError> {
         let env_for_locale = globals.clone();
         mesh_locale
             .set(
@@ -920,6 +959,7 @@ impl ScriptContext {
             )
             .map_err(lua_err)?;
 
+        let has_locale_write = manifest.has_locale_write;
         let published_events_for_locale = Arc::clone(&self.shared_published_events);
         let module_id_for_locale = self.module_id.clone();
         let capabilities_for_locale = self.capabilities.clone();
@@ -946,8 +986,10 @@ impl ScriptContext {
                     })
                     .map_err(lua_err)?,
             )
-            .map_err(lua_err)?;
+            .map_err(lua_err)
+    }
 
+    fn install_log_api(&mut self, mesh_log: &Table) -> Result<(), ScriptError> {
         let module_id = self.module_id.clone();
         mesh_log
             .set(
@@ -983,8 +1025,10 @@ impl ScriptContext {
                     })
                     .map_err(lua_err)?,
             )
-            .map_err(lua_err)?;
+            .map_err(lua_err)
+    }
 
+    fn install_popover_api(&mut self, mesh_popover: &Table) -> Result<(), ScriptError> {
         let published_events_for_popover = Arc::clone(&self.shared_published_events);
         let module_id_for_popover = self.module_id.clone();
         let capabilities_for_popover = self.capabilities.clone();
@@ -1015,12 +1059,6 @@ impl ScriptContext {
                                 .unwrap_or(true),
                             _ => true,
                         };
-                        // Extract trigger surface + key from a click
-                        // event passed in by the script. Falls back
-                        // to empty strings if the script invoked
-                        // activate without an event (no Tab targeting
-                        // possible in that case but the popover still
-                        // shows).
                         let (trigger_surface, trigger_key) = if let Some(event_tbl) = event {
                             let surface = event_tbl
                                 .get::<Table>("surface")
@@ -1111,23 +1149,19 @@ impl ScriptContext {
                     })
                     .map_err(lua_err)?,
             )
-            .map_err(lua_err)?;
+            .map_err(lua_err)
+    }
 
-        mesh.set("service", mesh_core_service).map_err(lua_err)?;
-        mesh.set("events", mesh_core_events).map_err(lua_err)?;
-        mesh.set("ui", mesh_ui_api).map_err(lua_err)?;
-        mesh.set("log", mesh_log).map_err(lua_err)?;
-        mesh.set("popover", mesh_popover).map_err(lua_err)?;
-        mesh.set("locale", mesh_locale).map_err(lua_err)?;
-        let mesh_for_require = mesh.clone();
-        globals.set("mesh", mesh).map_err(lua_err)?;
-        globals
-            .set("__mesh_request_redraw", false)
-            .map_err(lua_err)?;
-        globals
-            .set("__mesh_locale_current", "en")
-            .map_err(lua_err)?;
-
+    fn install_loader_api(
+        &mut self,
+        globals: &mlua::Table,
+        mesh_for_require: &Table,
+        manifest: &HostApiManifest,
+    ) -> Result<(), ScriptError> {
+        let interface_catalog = self.interface_catalog.clone();
+        let allowed_interfaces = manifest.interface_capabilities.clone();
+        let has_theme_read = manifest.has_theme_read;
+        let has_locale_read = manifest.has_locale_read;
         let published_events = Arc::clone(&self.shared_published_events);
         let tracked_service_fields = Arc::clone(&self.tracked_service_fields);
         let subscribed_interface_events = Arc::clone(&self.subscribed_interface_events);
@@ -1138,6 +1172,7 @@ impl ScriptContext {
         // The per-instance _ENV is the channel-registry scope so interface event
         // channels stay private when components share one surface VM.
         let scope_for_require = globals.clone();
+        let mesh_for_require = mesh_for_require.clone();
         let require = self
             .lua()
             .create_function(move |lua, module: String| {
@@ -1277,7 +1312,10 @@ impl ScriptContext {
             })
             .map_err(lua_err)?;
         globals.set("import", import).map_err(lua_err)?;
+        Ok(())
+    }
 
+    fn install_refs_api(&mut self, globals: &mlua::Table) -> Result<(), ScriptError> {
         // `refs.<name>` is a live element-node reference: geometry/state fields
         // read from the latest paint (`__mesh_element_metrics`, published by the
         // shell each frame) and methods (`focus`, `blur`, …) enqueue element
