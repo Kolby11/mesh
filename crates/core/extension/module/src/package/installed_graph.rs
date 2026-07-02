@@ -1154,6 +1154,44 @@ fn build_graph_diagnostics(
         load_interface_contract_capabilities(modules, interface_declarations);
     let contract_events = load_interface_contract_events(modules, interface_declarations);
 
+    diagnose_frontend_requirements(
+        modules,
+        frontend_requirements,
+        contributions,
+        &contract_capabilities,
+        &mut diagnostics,
+    );
+    diagnose_backend_providers(
+        modules,
+        backend_providers,
+        &contract_capabilities,
+        &contract_events,
+        &mut diagnostics,
+    );
+    diagnose_icon_requirements(contributions, &mut diagnostics);
+    diagnose_settings_namespaces(contributions, &mut diagnostics);
+    diagnose_frontend_surfaces(contributions, &mut diagnostics);
+    diagnose_required_binaries(modules, &mut diagnostics);
+    diagnose_frontend_source_contracts(modules, &mut diagnostics);
+    diagnose_interface_contract_files(modules, &mut diagnostics);
+    diagnose_duplicate_keybind_triggers(contributions, &mut diagnostics);
+
+    diagnostics.sort_by(|a, b| {
+        a.status
+            .cmp(&b.status)
+            .then_with(|| a.module_id.cmp(&b.module_id))
+            .then_with(|| a.contribution_id.cmp(&b.contribution_id))
+    });
+    diagnostics
+}
+
+fn diagnose_frontend_requirements(
+    modules: &HashMap<String, InstalledModuleNode>,
+    frontend_requirements: &HashMap<String, FrontendRequirementSet>,
+    contributions: &ModuleContributionIndex,
+    contract_capabilities: &HashMap<String, InterfaceContractCapabilitySection>,
+    diagnostics: &mut Vec<ModuleGraphDiagnostic>,
+) {
     for requirements in frontend_requirements.values() {
         for interface in requirements.backend.keys() {
             if let Some(capabilities) = contract_capabilities.get(interface) {
@@ -1248,7 +1286,15 @@ fn build_graph_diagnostics(
             }
         }
     }
+}
 
+fn diagnose_backend_providers(
+    modules: &HashMap<String, InstalledModuleNode>,
+    backend_providers: &HashMap<String, Vec<BackendProviderNode>>,
+    contract_capabilities: &HashMap<String, InterfaceContractCapabilitySection>,
+    contract_events: &HashMap<String, std::collections::HashSet<String>>,
+    diagnostics: &mut Vec<ModuleGraphDiagnostic>,
+) {
     for provider in backend_providers
         .values()
         .flat_map(|providers| providers.iter())
@@ -1336,7 +1382,12 @@ fn build_graph_diagnostics(
             }
         }
     }
+}
 
+fn diagnose_icon_requirements(
+    contributions: &ModuleContributionIndex,
+    diagnostics: &mut Vec<ModuleGraphDiagnostic>,
+) {
     for requirement in &contributions.icon_requirements {
         if contributions
             .icon_packs
@@ -1366,7 +1417,12 @@ fn build_graph_diagnostics(
             ),
         });
     }
+}
 
+fn diagnose_settings_namespaces(
+    contributions: &ModuleContributionIndex,
+    diagnostics: &mut Vec<ModuleGraphDiagnostic>,
+) {
     let mut settings_by_namespace: HashMap<&str, Vec<&ContributedSettingsSchema>> = HashMap::new();
     for settings in &contributions.settings {
         settings_by_namespace
@@ -1389,7 +1445,12 @@ fn build_graph_diagnostics(
             });
         }
     }
+}
 
+fn diagnose_frontend_surfaces(
+    contributions: &ModuleContributionIndex,
+    diagnostics: &mut Vec<ModuleGraphDiagnostic>,
+) {
     for surface in &contributions.frontend_surfaces {
         if surface.surface_layout.is_none() {
             diagnostics.push(ModuleGraphDiagnostic {
@@ -1414,7 +1475,12 @@ fn build_graph_diagnostics(
             });
         }
     }
+}
 
+fn diagnose_required_binaries(
+    modules: &HashMap<String, InstalledModuleNode>,
+    diagnostics: &mut Vec<ModuleGraphDiagnostic>,
+) {
     for module in modules.values().filter(|m| m.enabled) {
         for binary in &module.manifest.mesh.dependencies.binaries {
             if !binary.optional && !binary_on_path(&binary.name) {
@@ -1437,7 +1503,12 @@ fn build_graph_diagnostics(
             }
         }
     }
+}
 
+fn diagnose_frontend_source_contracts(
+    modules: &HashMap<String, InstalledModuleNode>,
+    diagnostics: &mut Vec<ModuleGraphDiagnostic>,
+) {
     for module in modules
         .values()
         .filter(|m| m.enabled && m.kind == ModuleKind::Frontend)
@@ -1633,7 +1704,12 @@ fn build_graph_diagnostics(
             }
         }
     }
+}
 
+fn diagnose_interface_contract_files(
+    modules: &HashMap<String, InstalledModuleNode>,
+    diagnostics: &mut Vec<ModuleGraphDiagnostic>,
+) {
     for module in modules
         .values()
         .filter(|m| m.enabled && m.kind == ModuleKind::Interface)
@@ -1656,63 +1732,56 @@ fn build_graph_diagnostics(
             }
         }
     }
+}
 
-    {
-        let mut trigger_owners: HashMap<
-            (String, String, String, Vec<String>),
-            Vec<(String, String)>,
-        > = HashMap::new();
-        for action in &contributions.keybinds {
-            if let Some(key) = &action.trigger.key {
-                let mut mods: Vec<String> = action
-                    .trigger
-                    .modifiers
-                    .iter()
-                    .map(|m| m.to_ascii_lowercase())
-                    .collect();
-                mods.sort();
-                let effective = (
-                    format!("{:?}", action.scope),
-                    format!("{:?}", action.trigger.kind),
-                    key.to_ascii_lowercase(),
-                    mods,
-                );
-                trigger_owners
-                    .entry(effective)
-                    .or_default()
-                    .push((action.module_id.clone(), action.action_id.clone()));
-            }
-        }
-        for ((_, _, key, mods), owners) in &trigger_owners {
-            if owners.len() <= 1 {
-                continue;
-            }
-            let trigger_str = if mods.is_empty() {
-                key.clone()
-            } else {
-                format!("{}+{}", mods.join("+"), key)
-            };
-            for (module_id, action_id) in owners {
-                diagnostics.push(ModuleGraphDiagnostic {
-                    module_id: module_id.clone(),
-                    contribution_id: Some(format!("{module_id}:{action_id}")),
-                    status: "duplicate_keybind_trigger".into(),
-                    message: format!(
-                        "keybind action {module_id}:{action_id} has trigger '{trigger_str}' that conflicts with {} other action(s)",
-                        owners.len() - 1
-                    ),
-                });
-            }
+fn diagnose_duplicate_keybind_triggers(
+    contributions: &ModuleContributionIndex,
+    diagnostics: &mut Vec<ModuleGraphDiagnostic>,
+) {
+    let mut trigger_owners: HashMap<(String, String, String, Vec<String>), Vec<(String, String)>> =
+        HashMap::new();
+    for action in &contributions.keybinds {
+        if let Some(key) = &action.trigger.key {
+            let mut mods: Vec<String> = action
+                .trigger
+                .modifiers
+                .iter()
+                .map(|m| m.to_ascii_lowercase())
+                .collect();
+            mods.sort();
+            let effective = (
+                format!("{:?}", action.scope),
+                format!("{:?}", action.trigger.kind),
+                key.to_ascii_lowercase(),
+                mods,
+            );
+            trigger_owners
+                .entry(effective)
+                .or_default()
+                .push((action.module_id.clone(), action.action_id.clone()));
         }
     }
-
-    diagnostics.sort_by(|a, b| {
-        a.status
-            .cmp(&b.status)
-            .then_with(|| a.module_id.cmp(&b.module_id))
-            .then_with(|| a.contribution_id.cmp(&b.contribution_id))
-    });
-    diagnostics
+    for ((_, _, key, mods), owners) in &trigger_owners {
+        if owners.len() <= 1 {
+            continue;
+        }
+        let trigger_str = if mods.is_empty() {
+            key.clone()
+        } else {
+            format!("{}+{}", mods.join("+"), key)
+        };
+        for (module_id, action_id) in owners {
+            diagnostics.push(ModuleGraphDiagnostic {
+                module_id: module_id.clone(),
+                contribution_id: Some(format!("{module_id}:{action_id}")),
+                status: "duplicate_keybind_trigger".into(),
+                message: format!(
+                    "keybind action {module_id}:{action_id} has trigger '{trigger_str}' that conflicts with {} other action(s)",
+                    owners.len() - 1
+                ),
+            });
+        }
+    }
 }
 
 fn enabled_module_exists(

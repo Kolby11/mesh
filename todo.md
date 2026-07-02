@@ -301,8 +301,11 @@ All five landed 2026-06-23 (single commit).
       systematic `_with_diagnostics`/`_no_diagnostics` pairing (~200 dup lines) —
       a deliberate hot-path optimization; only unify behind a const-generic/trait
       if it stays zero-cost.
-- [ ] `installed_graph.rs`: `build_graph_diagnostics` (~570 lines) runs six
-      independent diagnostic passes in one function — extract each pass.
+- [x] `installed_graph.rs`: `build_graph_diagnostics` (~570 lines) now delegates
+      independent passes to named helpers for frontend requirements, backend
+      providers, contributed resources, source scans, interface files, and
+      keybind trigger conflicts. Verified 2026-07-02 with `cargo fmt --check`
+      and `mesh-core-module` lib tests.
 - [ ] `install_host_api` splits: frontend (`scripting/context/runtime.rs:824`,
       ~445 lines) and backend (`scripting/backend/runtime.rs:480`, ~200 lines).
       Break per-subsystem (`install_popover_api`, `install_locale_api`,
