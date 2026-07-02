@@ -1040,6 +1040,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         node_key: &str,
         buffer: &mut PixelBuffer,
         scale: f32,
+        content_offset: (u32, u32),
         exiting: bool,
     ) -> Result<bool, ComponentError> {
         let Some(tree) = self.last_tree.as_ref() else {
@@ -1058,14 +1059,13 @@ impl ShellComponent for FrontendSurfaceComponent {
         // the popover's own CSS transition resolves and advances through the
         // normal per-node transition engine like any other animated style.
         let _ = exiting;
-        let (pad_left, pad_top, _, _) = popover_content_padding(node);
         buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
         mesh_core_render::paint_frontend_tree_at_for_module(
             node,
             buffer,
             scale,
-            -bounds.0 + pad_left as f32,
-            -bounds.1 + pad_top as f32,
+            -bounds.0 + content_offset.0 as f32,
+            -bounds.1 + content_offset.1 as f32,
             None,
             Some(self.compiled.manifest.package.id.as_str()),
         );
@@ -1712,7 +1712,7 @@ fn damage_rect_for_widget_node(node: &WidgetNode, surface: DamageRect) -> Option
 /// Extend a node's plain `(left, top, right, bottom)` box to also cover its
 /// box-shadow and blur-filter overflow, in the same coordinate space as the
 /// input box. Shared by present-damage computation (clipped to the surface)
-/// and popup buffer padding (unclamped, relative to a popover's own origin).
+/// and popup buffer padding.
 fn shadow_filter_extended_bounds(
     left: f32,
     top: f32,
@@ -1750,10 +1750,11 @@ fn shadow_filter_extended_bounds(
     (ext_left, ext_top, ext_right, ext_bottom)
 }
 
-fn visual_damage_rect_for_widget_node(
-    node: &WidgetNode,
-    surface: DamageRect,
-) -> Option<DamageRect> {
+/// A node's own box plus its visual overshoot from `box-shadow` (outer) and
+/// `filter`/`backdrop-filter` blur, in the tree's absolute layout space.
+/// Shared by damage-rect computation (clipped to the surface) and popover
+/// buffer padding (which needs the raw, unclipped extent).
+fn node_visual_bounds(node: &WidgetNode) -> Option<(f32, f32, f32, f32)> {
     if node.layout.width <= 0.0 || node.layout.height <= 0.0 {
         return None;
     }
@@ -1768,6 +1769,14 @@ fn visual_damage_rect_for_widget_node(
     let (left, top, right, bottom) =
         shadow_filter_extended_bounds(left, top, width, height, &node.computed_style);
 
+    Some((left, top, right, bottom))
+}
+
+fn visual_damage_rect_for_widget_node(
+    node: &WidgetNode,
+    surface: DamageRect,
+) -> Option<DamageRect> {
+    let (left, top, right, bottom) = node_visual_bounds(node)?;
     let left = left.floor().max(0.0) as u32;
     let top = top.floor().max(0.0) as u32;
     let right = right.ceil().max(0.0) as u32;
@@ -1783,65 +1792,46 @@ fn visual_damage_rect_for_widget_node(
     )
 }
 
-/// Padding `(left, top, right, bottom)` a popover's promoted popup buffer
-/// needs beyond its plain content box so descendant box-shadows/blur filters
-/// (e.g. `bubble-options.mesh`'s drop shadow) are not hard-clipped at the
-/// content edge. Walks the popover's subtree in popover-local coordinates —
-/// `node.layout` stores absolute surface coordinates, so descendants are
-/// offset by the popover's own `layout.x`/`layout.y`.
-fn popover_content_padding(node: &WidgetNode) -> (u32, u32, u32, u32) {
-    let origin_x = node.layout.x;
-    let origin_y = node.layout.y;
-    let mut min_left = 0.0_f32;
-    let mut min_top = 0.0_f32;
-    let mut max_right = node.layout.width.max(0.0);
-    let mut max_bottom = node.layout.height.max(0.0);
-    accumulate_popover_padding(
-        node,
-        origin_x,
-        origin_y,
-        &mut min_left,
-        &mut min_top,
-        &mut max_right,
-        &mut max_bottom,
-    );
-    let pad_left = (-min_left).max(0.0).ceil() as u32;
-    let pad_top = (-min_top).max(0.0).ceil() as u32;
-    let pad_right = (max_right - node.layout.width.max(0.0)).max(0.0).ceil() as u32;
-    let pad_bottom = (max_bottom - node.layout.height.max(0.0)).max(0.0).ceil() as u32;
-    (pad_left, pad_top, pad_right, pad_bottom)
+/// Union of `node_visual_bounds` over `node` and its full subtree, in
+/// absolute layout space. Used to size a popover's popup buffer so
+/// descendant `box-shadow`/`filter` overshoot (e.g. a floating bubble
+/// button's shadow) isn't clipped at the buffer edge.
+fn subtree_visual_bounds(node: &WidgetNode) -> (f32, f32, f32, f32) {
+    let mut bounds = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    accumulate_subtree_visual_bounds(node, &mut bounds);
+    bounds
 }
 
-fn accumulate_popover_padding(
-    node: &WidgetNode,
-    origin_x: f32,
-    origin_y: f32,
-    min_left: &mut f32,
-    min_top: &mut f32,
-    max_right: &mut f32,
-    max_bottom: &mut f32,
-) {
-    if node.layout.width > 0.0 && node.layout.height > 0.0 {
-        let transform = node.computed_style.transform;
-        let scale_x = transform.scale_x.max(0.0);
-        let scale_y = transform.scale_y.max(0.0);
-        let width = node.layout.width * scale_x;
-        let height = node.layout.height * scale_y;
-        let left = node.layout.x - origin_x + transform.translate_x;
-        let top = node.layout.y - origin_y + transform.translate_y;
-
-        let (ext_left, ext_top, ext_right, ext_bottom) =
-            shadow_filter_extended_bounds(left, top, width, height, &node.computed_style);
-
-        *min_left = min_left.min(ext_left);
-        *min_top = min_top.min(ext_top);
-        *max_right = max_right.max(ext_right);
-        *max_bottom = max_bottom.max(ext_bottom);
+fn accumulate_subtree_visual_bounds(node: &WidgetNode, bounds: &mut (f32, f32, f32, f32)) {
+    if let Some((left, top, right, bottom)) = node_visual_bounds(node) {
+        bounds.0 = bounds.0.min(left);
+        bounds.1 = bounds.1.min(top);
+        bounds.2 = bounds.2.max(right);
+        bounds.3 = bounds.3.max(bottom);
     }
-
     for child in &node.children {
-        accumulate_popover_padding(child, origin_x, origin_y, min_left, min_top, max_right, max_bottom);
+        accumulate_subtree_visual_bounds(child, bounds);
     }
+}
+
+/// Extra buffer padding (left, top, right, bottom) a popover subtree needs
+/// beyond its own laid-out box so descendant shadow/filter overshoot paints
+/// instead of clipping at the popup buffer edge.
+fn popover_content_padding(node: &WidgetNode) -> (u32, u32, u32, u32) {
+    let (left, top, right, bottom) = subtree_visual_bounds(node);
+    if left > right || top > bottom {
+        return (0, 0, 0, 0);
+    }
+    let own_left = node.layout.x;
+    let own_top = node.layout.y;
+    let own_right = node.layout.x + node.layout.width;
+    let own_bottom = node.layout.y + node.layout.height;
+    (
+        (own_left - left).max(0.0).ceil() as u32,
+        (own_top - top).max(0.0).ceil() as u32,
+        (right - own_right).max(0.0).ceil() as u32,
+        (bottom - own_bottom).max(0.0).ceil() as u32,
+    )
 }
 
 fn collect_visual_damage_rects(
@@ -1880,14 +1870,13 @@ fn collect_child_surface_requests(
             node.layout.width.ceil().max(1.0) as u32,
             node.layout.height.ceil().max(1.0) as u32,
         );
-        let (pad_left, pad_top, pad_right, pad_bottom) = popover_content_padding(node);
+        let content_padding = popover_content_padding(node);
         requests.push(ChildSurfaceRequest {
             node_key: node_key.clone(),
             kind: ChildSurfaceKind::Popover,
             anchor_rect: bounds_to_i32_rect(anchor),
             content_size: content,
-            surface_size: (content.0 + pad_left + pad_right, content.1 + pad_top + pad_bottom),
-            content_offset: (pad_left, pad_top),
+            content_padding,
             placement: PopoverPlacement::from_node(node),
         });
     }
@@ -2258,36 +2247,33 @@ mod tests {
         assert_eq!(requests[0].kind, ChildSurfaceKind::Popover);
         assert_eq!(requests[0].anchor_rect, (20, 42, 96, 36));
         assert_eq!(requests[0].content_size, (96, 36));
-        assert_eq!(requests[0].surface_size, (96, 36));
-        assert_eq!(requests[0].content_offset, (0, 0));
+        assert_eq!(requests[0].content_padding, (0, 0, 0, 0));
         assert_eq!(requests[0].placement.offset_y, 6);
     }
 
     #[test]
-    fn popover_with_descendant_box_shadow_pads_surface_and_offsets_content() {
-        // Mirrors `bubble-options.mesh`'s shipped shadow: `0px 6px 18px`
-        // (offset_y=6, blur=18, spread=0). `shadow_filter_extended_bounds`
-        // pads by `blur_radius * 3` for rasterization headroom, so:
-        // left/right = blur*3 = 54, top = blur*3 - offset_y = 48,
-        // bottom = blur*3 + offset_y = 60.
+    fn popover_with_descendant_box_shadow_gets_buffer_padding() {
+        // No shadow on the popover node itself; a descendant (e.g. a
+        // floating bubble button) carries the shadow, mirroring how
+        // language-popover/theme-selector's bubble options are built.
         let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 40.0);
         let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 96.0, 36.0);
         popover.attributes.insert("open".into(), "true".into());
-        let mut bubble = keyed_node("box", "root/menu/bubble", 20.0, 42.0, 96.0, 36.0);
-        bubble.computed_style.box_shadow = mesh_core_elements::style::BoxShadow {
+        let mut child = keyed_node("button", "root/menu/option", 20.0, 42.0, 96.0, 36.0);
+        child.computed_style.box_shadow = mesh_core_elements::style::BoxShadow {
             offset_x: 0.0,
             offset_y: 6.0,
-            blur_radius: 18.0,
-            spread_radius: 0.0,
+            blur_radius: 8.0,
+            spread_radius: 1.0,
             color: mesh_core_elements::style::Color {
                 r: 0,
                 g: 0,
                 b: 0,
-                a: 87,
+                a: 200,
             },
             inset: false,
         };
-        popover.children.push(bubble);
+        popover.children.push(child);
         root.children.push(popover);
 
         let mut requests = Vec::new();
@@ -2295,8 +2281,11 @@ mod tests {
 
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].content_size, (96, 36));
-        assert_eq!(requests[0].content_offset, (54, 48));
-        assert_eq!(requests[0].surface_size, (96 + 54 + 54, 36 + 48 + 60));
+        // blur_pad = 8 * 3 = 24, spread = 1: unshifted overshoot is 25px.
+        // The 6px downward `offset_y` reduces the top overshoot (shadow moves
+        // away from the top edge) and adds to the bottom overshoot.
+        let (left, top, right, bottom) = requests[0].content_padding;
+        assert_eq!((left, top, right, bottom), (25, 19, 25, 31));
     }
 
     #[test]

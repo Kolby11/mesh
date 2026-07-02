@@ -126,3 +126,15 @@ fails on the `xkbcommon` pkg-config dependency for `smithay-client-toolkit`).
 - Don't touch `.planning/` GSD scaffolding unless a skill explicitly asks — this repo
   layers a plain `todo.md` backlog on top of that infra and this loop is driven from
   the plain backlog.
+
+## Backlog verification iteration (2026-07-02)
+
+Several "Embeddable popovers via `<popover>` surface promotion" backlog items
+were re-verified and marked done because earlier commits had already landed
+them: the pointer-enter hover-bridge fix (`2425c33a`), the embeddable component
+`module.json` shape for language/theme popovers, and popup content sizing plus
+`xdg_popup.reposition`.
+
+Before starting any unchecked `todo.md` item, grep for its implementation first.
+This backlog has accumulated across many iterations, and some open checkboxes
+were already finished by later commits without being flipped.

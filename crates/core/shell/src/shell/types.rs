@@ -73,13 +73,9 @@ pub(super) struct ChildSurface {
     #[allow(dead_code)]
     /// Anchor rectangle in the parent surface's coordinate space.
     pub(super) anchor_rect: (i32, i32, i32, i32),
-    /// True content size, excluding shadow/blur overflow padding baked into
-    /// `target`'s buffer (`known_surface_size`). Confines pointer input to
-    /// the real content so clicks over the padding pass through.
-    pub(super) content_size: (u32, u32),
-    /// `(left, top)` padding — where the true content starts within the
-    /// padded buffer.
-    pub(super) content_offset: (u32, u32),
+    /// Extra buffer padding (left, top, right, bottom) reserved for
+    /// `box-shadow`/`filter` overshoot; see `ChildSurfaceRequest::content_padding`.
+    pub(super) content_padding: (u32, u32, u32, u32),
     /// Set once the originating node drops out of the open-popover requests
     /// while its own CSS exit transition still has time left to run. The
     /// child surface is kept alive and repainted with `exiting = true` until

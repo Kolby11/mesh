@@ -191,40 +191,41 @@ surface.
       `docs/frontend/elements.md` and `docs/frontend/mesh-syntax.md`; the Rust
       `PopoverGrab` contract already enforces `Hover` as the default and maps
       `grab="click"` to compositor grab requests.
-- [x] **Buffer padding + input region for shadows.** Done 2026-07-02: promoted
-      popup buffers (in-tree `<popover>` → `xdg_popup`, `render.rs`
-      `reconcile_child_surface_requests`) were unpadded — exactly the measured
-      content box — so `bubble-options.mesh`'s shipped `box-shadow: 0px 6px 18px`
-      (used by both `language-popover` and `theme-selector`) was hard-clipped at
-      the content edge. Added `popover_content_padding()`
-      (`shell_component.rs`), which walks a popover's subtree in popover-local
-      coordinates and unions each descendant's shadow/blur-filter overflow
-      (reusing the same extension math as the existing present-damage
-      calculation, factored out into shared `shadow_filter_extended_bounds()`).
-      `ChildSurfaceRequest` gained `surface_size` (padded buffer/popup size) and
-      `content_offset` (`(left, top)` padding) alongside the existing
-      `content_size` (true content, unpadded). The popup buffer/positioner now
-      use `surface_size`; the positioner `offset` is compensated by
-      `-content_offset` so the visible content still lands at the anchored
-      position despite the larger buffer; `paint_child_surface` paints the
-      subtree shifted by `content_offset` into the padded buffer; and the
-      popup's Wayland input region is masked to the true content rect
-      (`content_offset` + `content_size`) so pointer events over the padding
-      pass through instead of hitting a dead zone — mirroring the existing
-      parent-surface tooltip pattern. Alpha buffers were already in place
-      (`Argb8888` used uniformly). Test:
-      `popover_with_descendant_box_shadow_pads_surface_and_offsets_content`.
-      Not verified on a live compositor (no Wayland session in this
-      environment) — the anchor-offset compensation assumes the positioner's
-      anchored corner/edge tracks a fixed screen point independent of buffer
-      size, which holds for the shipped `anchor="bottom" gravity="bottom"`
-      popovers since their shadow is horizontally symmetric (offset_x=0); an
-      asymmetric shadow on a centered-gravity popover would show a small
-      residual off-center shift worth re-checking against a real compositor.
-- [ ] **Content sizing + reposition.** Reuse `content_measured` to size the
-      popup from the measured `<popover>` subtree; use `xdg_popup.reposition`
-      (xdg_wm_base v3+) when the anchor moves (output/exclusive-zone change). Note
-      the v3 requirement and the configure→ack→paint sequencing.
+- [x] **Buffer padding + input region for shadows.** Done 2026-07-02. Popup
+      buffers were sized exactly to the popover's laid-out content box
+      (`collect_child_surface_requests`, `shell_component.rs`), so any
+      `box-shadow`/`filter` overshoot on the popover or its descendants (e.g.
+      a floating bubble button's shadow) was hard-clipped at the buffer edge,
+      and no input region was ever set for child/popup targets (harmless only
+      because buffer == content). Alpha buffers were already in place
+      (`Argb8888` everywhere), so no format change was needed — this was
+      purely the geometry/input-region gap.
+      Fix: `node_visual_bounds` extracted from the existing damage-rect shadow
+      math (`visual_damage_rect_for_widget_node`) as a shared, unclipped f32
+      helper; new `subtree_visual_bounds`/`popover_content_padding` walk the
+      *whole* popover subtree (not just the popover node's own style) and
+      return per-side padding so a shadow on any descendant is covered.
+      `ChildSurfaceRequest`/`ChildSurface` carry `content_padding` through to
+      `reconcile_child_surfaces` (`shell/runtime/render.rs`), which inflates
+      the popup buffer/surface size by the padding, shifts the `xdg_positioner`
+      offset back by the leading padding so the *visible* content stays
+      anchored exactly where it would land unpadded, and
+      `paint_and_present_child_surface` now sets the child's Wayland input
+      region to the true (unpadded) content rect — mirroring the existing
+      parent/tooltip `content_input_size()` pattern — so clicks over the
+      shadow padding pass through instead of hitting a dead zone. `paint_child_surface`
+      gained a `content_offset` param so painting still lands the unpadded
+      content at the right spot inside the larger buffer. Test:
+      `popover_with_descendant_box_shadow_gets_buffer_padding`
+      (`shell_component.rs`). Full `mesh-core-shell` suite (388 tests) and
+      workspace build pass.
+- [x] **Content sizing + reposition.** Done: `reconcile_child_surfaces`
+      (`shell/runtime/render.rs:512-559`) sizes each popup from
+      `request.content_size` (the measured `<popover>` subtree) every frame,
+      and `PresentationEngine::configure_popup` (`presentation/src/wayland_surface/backend.rs:834-843`)
+      repositions an existing popup via `xdg_popup.reposition` instead of
+      recreating it (`reposition_popup`, `backend.rs:948-963`) so anchor moves
+      (output/exclusive-zone change) don't tear the popup down.
 - [ ] **Keyboard/focus + a11y across the surface boundary.** `role="menu"`,
       arrow-key option nav, and focus traversal must cross from parent surface into
       the popup (via grab or parent keyboard routing). Lifecycle: Wayland
@@ -235,7 +236,11 @@ surface.
       inside MESH's `wlr-layer-shell-v1` compatibility constraint; recorded as a
       known non-goal boundary in `docs/frontend/elements.md` and
       `docs/frontend/mesh-syntax.md`.
-- [ ] **`module.json` rework — embeddable component, no surface geometry.**
+- [x] **`module.json` rework — embeddable component, no surface geometry.**
+      Done (`9305df00`, `35a045a1`): `language-popover` and `theme-selector`
+      both ship `mesh.kind: "component"` with no `mesh.surface` block at all
+      — confirmed by re-reading both `module.json` files 2026-07-02. Original
+      note below kept for the design rationale.
       An embeddable popover should not declare a `mesh.surface` block at all
       (no anchor/layer/width/height/min/max). Decide the manifest shape for "a
       module that exports an embeddable component consumed by another module":
