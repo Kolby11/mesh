@@ -36,5 +36,5 @@ tool is missing. A direct D-Bus implementation remains the long-term target.
 ## Notes
 
 `dbus.system` is a **high-privilege** capability (see
-[`spec/pluggable-backend.md`](../../../../../spec/pluggable-backend.md)). Only
+[`docs/spec/01-module-system.md`](../../../../spec/01-module-system.md)). Only
 trusted, signed backends should request it.

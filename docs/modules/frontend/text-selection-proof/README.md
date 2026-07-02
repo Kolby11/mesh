@@ -53,5 +53,5 @@ testing.
 
 - [`docs/frontend/mesh-syntax.md`](../../../frontend/mesh-syntax.md) — `.mesh`
   syntax, keyboard focus, and selectable text
-- [`docs/settings/README.md`](../../../settings/README.md) — shell settings
+- [`docs/spec/08-settings.md`](../../../spec/08-settings.md) — shell settings
   layers and keyboard overrides

@@ -4,10 +4,10 @@ This directory contains the modules shipped with MESH under the `@mesh`
 scope. They provide the default shell experience, reference implementations
 for system service integrations, and example compositions for module authors.
 The canonical vocabulary for these docs is
-[`docs/module-vocabulary.md`](../module-vocabulary.md).
+[`docs/spec/01-module-system.md`](../spec/01-module-system.md).
 
 Modules are split into two kinds, enforced by the architecture described in
-[`spec/pluggable-backend.md`](../../spec/pluggable-backend.md):
+[`docs/spec/01-module-system.md`](../spec/01-module-system.md):
 
 - **[Frontend modules](./frontend/core/README.md)** — shell surfaces and widgets
   that render the UI. They consume services through named **interface
@@ -27,7 +27,7 @@ The interface registry is the only bridge between the two.
 > **Full extensibility is a first-class goal.** The defaults below are
 > ordinary modules with no privileged status. Anyone can ship a backend, a
 > frontend, or an entirely new interface domain by declaring an interface
-> module. See [`docs/extensibility.md`](../extensibility.md) for the
+> module. See [`docs/spec/01-module-system.md`](../spec/01-module-system.md) for the
 > dynamic, D-Bus-style interface registry that powers this.
 
 ## Layout
@@ -86,7 +86,7 @@ that registers an interface implementation with the interface registry.
 Interface modules ship an `interface.toml` declaration instead of an
 executable entrypoint.
 
-See [`spec/pluggable-backend.md`](../../spec/pluggable-backend.md) for the
+See [`docs/spec/01-module-system.md`](../spec/01-module-system.md) for the
 authoritative module model, lifecycle, capabilities, and distribution rules.
 
 The example frontend module set is documented in

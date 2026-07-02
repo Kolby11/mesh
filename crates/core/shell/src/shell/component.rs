@@ -31,7 +31,7 @@ use mesh_core_animation::transition::TransitionAnimator;
 pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
 use runtime_tree::{
     NodeServiceFieldDependencies, RetainedWidgetTree, RuntimeAnnotationContext,
-    annotate_runtime_tree, collect_all_keys, collect_element_metrics, input_accepts_char,
+    annotate_runtime_tree, collect_element_metrics, input_accepts_char,
 };
 
 use mesh_core_capability::{Capability, CapabilitySet};
@@ -56,6 +56,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+pub(super) type SurfaceCssProps = HashMap<String, mesh_core_component::style::StyleValue>;
 
 use mesh_core_render::{
     DamageRect, DisplayListMetrics, DisplayListRepaintPolicy, DisplayPaintCommand, PixelBuffer,
@@ -451,6 +453,7 @@ pub(super) struct FrontendSurfaceComponent {
     transitions: TransitionAnimator,
     keyframe_animations: HashMap<String, mesh_core_animation::keyframes::ActiveKeyframeAnimation>,
     keyframe_rules: HashMap<String, mesh_core_animation::keyframes::KeyframeRule>,
+    has_animatable_style_rules: bool,
     has_active_keyframe_animation: bool,
     narrow_path_active: bool,
     affected_node_count: u64,
@@ -507,6 +510,7 @@ impl FrontendSurfaceComponent {
             load_frontend_module_settings(&module_settings_file, &compiled.manifest);
         let service_payload_capacity = service_payload_cache_capacity(&compiled.manifest);
         let scripts_use_element_metrics = scripts_reference_element_metrics(&compiled);
+        let has_animatable_style_rules = compiled_module_has_animatable_style_rules(&compiled);
         Self {
             compiled,
             module_dir,
@@ -583,6 +587,7 @@ impl FrontendSurfaceComponent {
             transitions: TransitionAnimator::new(),
             keyframe_animations: HashMap::new(),
             keyframe_rules: HashMap::new(),
+            has_animatable_style_rules,
             has_active_keyframe_animation: false,
             narrow_path_active: false,
             affected_node_count: 0,
@@ -685,6 +690,78 @@ impl FrontendSurfaceComponent {
             flags,
             self.last_dirty_types,
         )
+    }
+}
+
+fn compiled_module_has_animatable_style_rules(compiled: &CompiledFrontendModule) -> bool {
+    component_has_animatable_style_rules(&compiled.component)
+        || compiled
+            .local_components
+            .values()
+            .any(component_has_animatable_style_rules)
+}
+
+fn component_has_animatable_style_rules(component: &mesh_core_component::ComponentFile) -> bool {
+    let Some(style) = &component.style else {
+        return false;
+    };
+    !style.keyframes.is_empty()
+        || style.rules.iter().any(|rule| {
+            rule.declarations.iter().any(|declaration| {
+                declaration.property == "transition"
+                    || declaration.property.starts_with("transition-")
+                    || declaration.property == "animation"
+                    || declaration.property.starts_with("animation-")
+            })
+        })
+}
+
+#[cfg(test)]
+mod animation_rule_detection_tests {
+    use super::*;
+
+    fn component(source: &str) -> mesh_core_component::ComponentFile {
+        mesh_core_component::parse_component(source).expect("component parses")
+    }
+
+    #[test]
+    fn detects_animatable_style_rules_from_declarations_and_keyframes() {
+        let plain = component(
+            r#"
+<template><box class="panel" /></template>
+<style>.panel { color: #fff; }</style>
+"#,
+        );
+        assert!(!component_has_animatable_style_rules(&plain));
+
+        let transition = component(
+            r#"
+<template><box class="panel" /></template>
+<style>.panel { transition: opacity 120ms ease; }</style>
+"#,
+        );
+        assert!(component_has_animatable_style_rules(&transition));
+
+        let animation = component(
+            r#"
+<template><box class="panel" /></template>
+<style>.panel { animation-name: pulse; }</style>
+"#,
+        );
+        assert!(component_has_animatable_style_rules(&animation));
+
+        let keyframes = component(
+            r#"
+<template><box class="panel" /></template>
+<style>
+@keyframes pulse {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+</style>
+"#,
+        );
+        assert!(component_has_animatable_style_rules(&keyframes));
     }
 }
 

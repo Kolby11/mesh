@@ -1,46 +1,44 @@
 # MESH Documentation
 
 Docs for the MESH shell framework. For a high-level project description see
-[`../README.md`](../README.md); for the authoritative module / capability /
-lifecycle spec see [`../spec/pluggable-backend.md`](../spec/pluggable-backend.md).
+[`../README.md`](../README.md).
 
-## Contents
+## The specification
 
-- **[`module-system.md`](./module-system.md)** — target package/module model,
-  including npm-compatible `package.json` + `mesh`, backend/frontend workflow,
-  interface contracts, and shared Luau library modules.
-- **[`extensibility.md`](./extensibility.md)** — interface registry, contract
-  packages, cross-language bindings, event channels, capability
-  classification. The backbone of the extensibility story.
-- **Modules**
-  - [`modules/README.md`](./modules/README.md) — core-module index.
-  - [shipped frontend module docs](./modules/frontend/core/README.md) — shipped
-    frontend surfaces and widgets.
-  - [example frontend module docs](./modules/frontend/examples/README.md) —
-    example frontend compositions and reusable sample widgets.
-  - [shipped backend module docs](./modules/backend/core/README.md) — shipped
-    backends and interface packages.
-- **Frontend**
-  - [`frontend/mesh-syntax.md`](./frontend/mesh-syntax.md) — `.mesh` component syntax: tags, text interpolation, attribute binding, two-way binding, event handlers, accessibility.
-  - [`frontend/html-css-transition.md`](./frontend/html-css-transition.md) — transition sketch for a Qt-style UI XML vocabulary and bounded CSS profile over the current MESH UI/runtime pipeline.
-  - [`frontend/slots.md`](./frontend/slots.md) — slot points for extending
-    surfaces without forking them.
-- **Performance**
-  - [`performance-roadmap.md`](./performance-roadmap.md) — retained rendering,
-    dirty invalidation, damage tracking, text/glyph caching, and GPU sequencing
-    needed to approach Qt-like performance.
-- **Theming & localization**
-  - [`theming/themes.md`](./theming/themes.md) — theme tokens, component
-    defaults, module-owned theme subtrees, modes, hot-swap.
-  - [`theming/icons.md`](./theming/icons.md) — icon packs, fallback chain,
-    Material-3-style variable axes.
-  - [`theming/locales.md`](./theming/locales.md) — module-bundled
-    translations, third-party language packs, locale fallback chain.
-- **Settings**
-  - [`settings/README.md`](./settings/README.md) — JSON settings with a
-    six-layer override stack, contract-level shared schemas.
-- **Lifecycle**
-  - [`installation.md`](./installation.md) — `package.json` manifest,
-    dependency kinds, resolution, multi-provider handling, lockfile.
-  - [`health.md`](./health.md) — module health states, dep-driven fix
-    suggestions, health subscriptions, `mesh doctor`.
+**[`spec/`](./spec/README.md)** is the unified, authoritative specification —
+module system, installation & health, components & props, styling & theming,
+icons, fonts, localization, settings, accessibility, keyboard, automation
+IPC, and MCP. Start there for any design or contract question.
+
+## Codebase orientation
+
+- **[`llm-context.md`](./llm-context.md)** — crate map, module layout, key
+  data flows, common task entry points. The primary orientation guide for
+  working on this codebase.
+- **[`crate-boundaries.md`](./crate-boundaries.md)** — crate responsibility
+  boundaries.
+
+## Frontend reference
+
+- [`frontend/mesh-syntax.md`](./frontend/mesh-syntax.md) — `.mesh` component
+  syntax: tags, interpolation, bindings, event handlers, accessibility.
+- [`frontend/elements.md`](./frontend/elements.md) — native element taxonomy.
+- [`frontend/slots.md`](./frontend/slots.md) — slot points for extending
+  surfaces without forking them.
+- [`frontend/renderer-contract.md`](./frontend/renderer-contract.md) —
+  renderer expectations for module authors.
+- [`frontend/html-css-transition.md`](./frontend/html-css-transition.md) —
+  UI XML vocabulary and bounded CSS profile transition sketch.
+- [`css-coverage.md`](./css-coverage.md) — supported CSS property coverage.
+
+## Shipped modules
+
+- [`modules/README.md`](./modules/README.md) — core-module index
+  (frontends, backends, interface packages, examples).
+
+## Performance & rendering internals
+
+- [`performance-roadmap.md`](./performance-roadmap.md) — retained rendering,
+  invalidation, damage tracking, GPU sequencing.
+- [`renderer-migration.md`](./renderer-migration.md) /
+  [`renderer-ownership.md`](./renderer-ownership.md) — renderer internals.

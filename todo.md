@@ -7,7 +7,7 @@ Items marked `→ vX.Y` are tracked as GSD milestones in `.planning/ROADMAP.md`.
 ## Shell features
 
 - [x] **TOP PRIORITY — finish promoted nav popover polish and remove manifest surface geometry.** Investigated 2026-07-01: `language-popover`/`theme-selector` were already migrated to `mesh.kind: "component"` with no `mesh.surface` block (anchor/layer/width/height/keyboard_mode/display_transition) — that part of this item was already done by an earlier pass (`9305df00`, `35a045a1`) and is verified by `shipped_tiny_nav_popovers_are_embeddable_components_without_surface_geometry`. No `offset-y`/`offset-x` markup nudges exist anywhere in the module tree — placement is already anchor-rect + CSS only (`anchor-ref` resolves the trigger's real measured layout box in `collect_child_surface_requests`/`popover_anchor_bounds`, `shell/component/shell_component.rs:1750-1884`). Horizontal anchoring: `anchor="bottom" gravity="bottom"` maps 1:1 to `xdg_positioner::{Anchor,Gravity}::Bottom` with no `Left`/`Right` bit (`shell/runtime/render.rs:953-978`, `presentation/src/wayland_surface/popup.rs:126-155`), which per the `xdg_positioner` protocol centers the popup horizontally on the anchor point — code-reviewed as spec-correct; not independently re-verified against a live compositor in this pass (no Wayland session in this environment). The real, confirmed gap was close/dismiss + exit-animation: closing child popovers were torn down (`destroy_child_surface_at`) the instant `open` flipped false, before their own CSS `.mesh-surface-exiting` transition (already authored in both components' `<style>`) ever got a chance to apply or run. Fixed: `ChildSurface` now carries a `closing_until` grace deadline sized from the popover's own resolved transition duration (`child_hide_transition_ms`); the shell keeps repainting/presenting the closing popup and calls a new `ShellComponent::set_closing_child_keys` so `finalize_tree` scopes `mesh-surface-exiting` to just that popover's subtree (not the whole tree) before style resolution runs, so the existing per-node CSS transition engine actually animates it — then tears the popup down once the deadline passes (or cancels cleanly if the popover reopens first). Tests: `child_surface_reconcile_plays_exit_transition_before_teardown`, `child_surface_reopen_cancels_pending_exit_transition`, `set_closing_child_keys_scopes_exit_transition_to_popover_subtree_only` (real `@mesh/theme-selector` component, asserts the class is applied/removed and a real transition starts). Also removed `theme-selector/src/components/bubble-burst.mesh`, a decorative burst animation that was never wired into `theme-selector/src/main.mesh` or referenced anywhere (dead code, not the actual bubble launch animation — that's the already-working `bubble-options.mesh` fan-out CSS). Remaining/deferred: visual confirmation of horizontal centering on a live compositor; entrance (`mesh-surface-entering`) is not yet similarly scoped for child popovers (only exit was the confirmed-broken path); the `module.json` "embeddable component, no surface geometry" manifest-shape decision below is a broader follow-on (multi-module design), left open.
-- [x] **Larger design step — module-declared component variables.** Design completed in [`docs/component-configuration.md`](docs/component-configuration.md). Decision: configuration belongs to the component's `.mesh` source as a typed `<props>` public API rather than `module.json`; packaging stays in the manifest. The design specifies types/defaults, `prop(name)` CSS projection, reactive `props.name` script projection, generated settings UI, global/instance/per-instance persistence and precedence, validation/LSP diagnostics, i18n labels, token/icon integration, and the boundary between CSS/content sizing and top-level Wayland placement. Implementation remains phased in that document.
+- [x] **Larger design step — module-declared component variables.** Design completed in [`docs/spec/03-components.md`](docs/spec/03-components.md). Decision: configuration belongs to the component's `.mesh` source as a typed `<props>` public API rather than `module.json`; packaging stays in the manifest. The design specifies types/defaults, `prop(name)` CSS projection, reactive `props.name` script projection, generated settings UI, global/instance/per-instance persistence and precedence, validation/LSP diagnostics, i18n labels, token/icon integration, and the boundary between CSS/content sizing and top-level Wayland placement. Implementation remains phased in that document.
 - [x] Icon rendering using icon packs — XDG resolution and SVG rasterization pipeline. Done: the full chain (`<icon>` → `DisplayPaintContent::Icon` → `render_display_icon_node` → registry/XDG/pack resolution → resvg/image raster + caches → blit, with built-in missing-icon fallback) was already implemented and unit-tested; added an end-to-end pixel-level proof on a real shipped surface (`shipped_navigation_icon_rasterizes_pixels_on_real_surface` in `real_surfaces.rs`) that paints `@mesh/navigation-bar` and asserts the volume `<icon>` rasterizes non-transparent pixels within its layout box. Follow-up resolved 2026-06-22: the off-buffer overflow (icon at x≈1978 on a 960px paint) was a **test artifact**, not a real layout bug — the proof's `audio_network_catalog` omitted `mesh.hyprland`/`mesh.power`, so `WorkspaceList`/`WindowTitle`/`BatteryButton` rendered unbounded ~700px error-string placeholders that inflated the bar past its intrinsic width. Switched the proof to `navigation_bar_catalog()` (all six consumed interfaces present), paints at a realistic 1280px panel width, and now asserts the right `.right-cluster` control cluster (and the volume icon inside it) stay on-buffer — turning the observation into a regression guard. Production content is already bounded (`window-title-row { max-width: 240px }`, small icons/pills). Robustness follow-up completed 2026-07-02: generated component-error boxes and text now carry a core marker whose post-restyle constraints cap them at 320px, allow flex shrink, clip overflow, and render a single-line ellipsis. This prevents one broken embedded module from expanding its host surface; covered by `generated_error_placeholder_is_bounded_after_restyle_constraints`.
 - [x] Layer system — specify which Wayland layer (background/bottom/top/overlay) a surface targets; needed for proper popover/overlay stacking. Backlog sync 2026-06-20: already wired through manifest/settings surface layout (`mesh.surface.layer`), shell surface config, and layer-shell presentation backend.
 - [x] Positioning system — `position: relative / absolute / fixed` in layout and paint; needed for tooltips, context menus, dropdowns. Backlog sync 2026-06-20: style parsing/resolution, layout insets, fixed-position viewport anchoring, retained display list, and painter handling are all present with focused layout tests.
@@ -17,7 +17,7 @@ Items marked `→ vX.Y` are tracked as GSD milestones in `.planning/ROADMAP.md`.
 
 ### Module architecture friction redesign — 2026-06-19
 
-Brainstorm + decision record in [`docs/design-architecture.md`](docs/design-architecture.md).
+Brainstorm + decision record in `docs/design-architecture.md` (folded into `docs/spec/01-module-system.md`).
 Attacks authoring friction on top of the shipped interface/provider/frontend spine
 (easy / unified / configurable). Selected path: **A+B headline, C/D reframed, F follow-on, E deferred.**
 
@@ -509,3 +509,677 @@ Items owned by a milestone are listed with their milestone reference.
 - [ ] Add allocator-level profile mode (allocation counts per render pass) → v1.23
 - [ ] Consider typed runtime node representation for hot paths (`WidgetNode` tag/attrs/content as strings today) → v1.23
 - [ ] GPU rendering — after retained layout, smart invalidation, and damage tracking ship → v1.25
+
+---
+
+## Performance improvements — 2026-07-02 deep scan
+
+Findings from a full-codebase performance scan (data handling, component
+communication, events, rendering) motivated by the gap to QtQuick/webview-class
+shells. Each item cites `file:line` as of this scan; reverify before editing.
+Items that overlap an existing milestone entry above say so instead of
+duplicating it.
+
+### A. Data handling — Rust ↔ Lua boundary is JSON-shaped and clone-heavy
+
+- [ ] **Full `ScriptState` clone per state mutation.** `runtime_state()`
+      (`shell/component/runtime.rs:119-134`) clones the entire
+      `HashMap<String, serde_json::Value>` whenever `mutation_generation`
+      advanced — i.e. after *every* handler/render-hook that wrote any
+      variable, per component instance, per build. The mutation-generation
+      cache only helps the no-change case. Move toward persistent/COW state
+      (e.g. `im::HashMap`, or `Arc<Value>` per variable so the clone is
+      shallow), or let template eval read `ScriptState` directly instead of
+      through a snapshot clone.
+- [ ] **`ScriptState::get` clones a `serde_json::Value` per template read**
+      (`scripting/context/state.rs:210-217`). Hot template expressions clone
+      whole subtrees; when a template touches `elements`/`refs` this clones the
+      entire per-frame metrics object. Return `Option<&Value>`/`Arc<Value>`
+      through `VariableStore` (the trait already forces owned values —
+      `ui/elements` `VariableStore::get`), and fix `keys()`'s `Vec<String>` +
+      O(n²) `contains` merge (`state.rs:219-229`).
+- [ ] **Deep JSON equality on every host write.** `set`/`set_host_value` run
+      `reactive_values_equal` (full deep `Value == Value`) per write
+      (`state.rs:79-115`). For the per-paint `elements` object this is an
+      O(tree) deep compare every frame. Combine with the metrics fix below;
+      for scalar writes keep it, for known-big host values use a
+      generation/hash check instead.
+- [ ] **Per-paint element metrics: build → deep-compare → JSON→Lua convert,
+      every frame.** `publish_element_metrics`
+      (`shell/component/interaction_state.rs:41-65`) serializes *every keyed
+      node* to a `serde_json::Map` per paint, `set_host_value` deep-compares
+      it, then `apply_element_metrics`
+      (`scripting/context/runtime.rs:414-428`) converts the whole object to a
+      Lua table **and** reinstalls bound element proxies — per frame, even
+      when nothing scripted reads geometry that frame. Make `refs.<name>`
+      reads lazy: keep metrics in a Rust-side store and resolve fields on
+      `__index` (the proxy machinery already exists in `element_ref.rs`),
+      publishing only a generation bump per paint; drop the eager
+      `elements`/`refs` state tables or gate them on actual template reads.
+- [ ] **Service payloads convert JSON→Lua per runtime per event.**
+      `apply_service_payload` (`scripting/context/runtime.rs:388-406`) runs
+      `lua.to_value(payload)` + `refresh_module_object()` for every runtime in
+      every observing component on every backend emission; the shell also
+      clones the payload into `cached_service_payloads` per event
+      (`shell_component.rs:187-189`). Convert once per surface VM (runtimes
+      sharing a `SurfaceVm` can share the converted table) and cache the
+      module-object refresh.
+- [ ] **Stringly-typed template expression values.** `eval_expr` returns
+      `String` for everything (`frontend/compiler/src/expr.rs:26,162`);
+      numeric ops re-`parse::<f64>` both sides per evaluation
+      (`expr.rs:197`), `if` conditions compare against `"false"|"nil"|""|"0"`
+      string literals, and every result is stored as an attribute `String`
+      that downstream code re-parses. Introduce a small typed value enum
+      (bool/number/string) for compiled-expression evaluation and only
+      stringify at the attribute boundary — this also removes false
+      attribute-hash dirtiness from float formatting.
+
+### B. Component communication & input
+
+- [ ] **Full widget-tree deep clone on every input event.**
+      `handle_component_input` starts with `self.last_tree.clone()`
+      (`shell/component/input/mod.rs:32-35`) — a recursive clone of every
+      `WidgetNode` (two `BTreeMap<String,String>`s, style, children) at
+      pointer-motion frequency. `apply_element_actions` does the same
+      (`interaction_state.rs:78`). The clone exists only to appease borrows
+      while handlers run against `&self`. Restructure so input reads a
+      borrowed/`Arc`'d tree (e.g. keep `last_tree: Option<Arc<WidgetNode>>`,
+      clone-on-write only when a handler actually mutates retained state), or
+      split hit-test data (key, bounds, handlers) into a slim side structure
+      built once per paint and let input run against that instead of the full
+      tree.
+- [ ] **Hit-testing re-walks the tree per pointer motion.**
+      `find_node_path_at` plus up to two `find_tooltip_by_key` walks and a
+      `find_node_bounds_by_key` walk run per `PointerMove`
+      (`input/mod.rs:195-226`). Build a flat hit-test index (sorted rects +
+      parent links, from the same pass that publishes element metrics) per
+      paint and answer motion queries from it; also lets the tree clone above
+      die for the hover path.
+- [ ] **Hover diff materializes descendant key sets as `HashSet<String>`.**
+      `collect_interaction_changed_keys` clones every affected `_mesh_key`
+      String and walks subtrees per hover change
+      (`shell/component/rendering.rs:440-471`); `annotate_runtime_tree`
+      re-`format!`s the `root/0/2/...` path key and re-FNVs it into `node.id`
+      for every node every frame (`runtime_tree.rs:616-622,746`). Store the
+      runtime key/id as typed fields computed once per retained node
+      (overlaps the v1.27 "typed WidgetNode fields" item; the key-path
+      allocation itself is not yet tracked anywhere).
+- [ ] **Handler dispatch overhead per event.** `call_namespaced_handler`
+      locks the runtimes mutex, allocates 3 Strings for namespacing, and
+      unconditionally runs `resync_binding_neighbors` over every linked
+      instance after each handler (`shell/component/runtime.rs:494-560`).
+      Track "did a cross-`_ENV` write actually happen" (a dirty bit set by
+      the live-binding `__newindex`) and skip neighbor resync when clean;
+      intern instance keys.
+- [ ] **`bind:this`/live-binding writes mark the whole surface dirty.** Any
+      handler that touches state invalidates via `invalidate_script_state()`
+      → full template re-eval + tree rebuild (narrow path still rebuilds the
+      full tree first — see v1.27 item). The typed state-dependency work
+      (v1.18) should extend to handler writes: record which public members a
+      template actually binds and skip rebuilds for writes nothing binds to.
+
+### C. Events & service delivery
+
+- [x] **EventBus clones the full JSON payload per subscriber.**
+      `broadcast::Sender<Event>` with `Event { channel: String, source:
+      String, payload: Value }` (`foundation/events/src/lib.rs`) — every
+      publish deep-clones channel/source/payload once per receiver. Wrap the
+      event in `Arc<Event>` (broadcast clones are then pointer bumps) and
+      intern channel names. Done 2026-07-02: `EventBus` now broadcasts
+      `Arc<Event>` so subscribers receive pointer clones of one event
+      allocation; channel-name interning remains a later refinement. Covered
+      by `subscribers_receive_shared_event_payload`.
+- [ ] **Per-event mutex churn in the observation gate.**
+      `deliver_service_event` (`runtime/service_state.rs:167-184`) calls
+      `observes_service_event` on every component per event, which locks that
+      component's `runtimes` mutex and queries tracked-field maps
+      (`shell_component.rs:261-268`); several tracked-field APIs clone whole
+      maps/sets (`tracked_service_fields()`,
+      `tracked_fields_for_service()` — `scripting/context/runtime.rs:478-497`).
+      Maintain a shell-side subscription index (service → component indices),
+      invalidated when a runtime's tracked fields/subscriptions change, so
+      event routing is a lookup instead of N mutex acquisitions.
+- [ ] **No coalescing of service events within one loop wake.** Each backend
+      emission is delivered and invalidates independently
+      (`runtime/mod.rs:323`); a chatty backend (e.g. volume drag feedback)
+      can trigger several rebuild-invalidations between two paints. Coalesce
+      queued `ServiceEvent::Updated` per service before delivery (keep only
+      the newest payload per service per wake; named interface events stay
+      ordered).
+- [ ] **Backend providers still exec-poll by default.** `spawn_backend_service`
+      drives a tokio interval that re-runs `exec` subprocesses per tick
+      (`runtime/backend/src/lib.rs:157-…`). The pipewire item above tracks one
+      backend; the generic gap is push-based host API primitives (D-Bus
+      signal subscribe, fd/socket watch, `pw-dump --monitor`-style stream
+      adoption) so providers can be event-driven and the safety poll becomes
+      the fallback, not the mechanism.
+
+### D. Rendering & per-frame work
+
+- [ ] **Fractional HiDPI forces full-surface repaint every frame.** `paint`
+      sets `surface_pixels_invalid = true` whenever `scale` is non-integer
+      (`shell/component/shell_component.rs:460-462`), so on a 1.25/1.5×
+      output *every* frame is a full clear+repaint+full-damage present —
+      partial damage only exists at integer scales. Fix the underlying
+      logical-vs-physical damage-clip mismatch (compute/clip damage in
+      physical pixels through the painter) so the retained partial path works
+      at fractional scale. Likely the single biggest win on fractional-scale
+      setups.
+- [ ] **Per-frame full-tree fingerprinting even when clean.**
+      `RetainedWidgetTree::update` re-walks every node, hashes ~50 style
+      fields + every attribute/handler string (FNV byte-at-a-time), allocates
+      a snapshot (with a `child_ids` Vec) per node into a scratch map, and
+      clones snapshots on change (`runtime_tree.rs:98-163,293-392`). The
+      v1.27 "generation-aware diff" item covers skipping clean subtrees; add:
+      hash with a word-at-a-time hasher (fxhash), reuse snapshot allocations
+      in place (index by slotmap key instead of rebuilding the `NodeId` map),
+      and stop hashing shell-owned annotation attributes that already have
+      typed change tracking (`_mesh_scroll_*`, `_mesh_key`).
+- [ ] **`WidgetNode` allocation profile.** Every node carries `tag: String`,
+      `attributes: BTreeMap<String,String>`, `event_handlers:
+      BTreeMap<String,String>` (`ui/elements/src/tree.rs:44-68`), rebuilt
+      from the template on every script invalidation and deep-cloned by the
+      input path. Interning (v1.23) plus a small-map type (attrs are
+      typically <8 entries; `Vec<(Symbol, CompactString)>` beats a BTreeMap)
+      and moving shell annotations (`_mesh_key`, scroll offsets, focus flags,
+      selection coords — currently formatted floats in string attributes,
+      `runtime_tree.rs:729-743`, `rendering.rs:697-728`) to typed fields
+      would shrink both build and diff cost. Overlaps v1.23/v1.27; listed
+      here because the *authoring* of new annotations keeps growing the
+      string surface.
+- [ ] **`finalize_tree` runs ~8 full-tree walks per finalized frame** beyond
+      the annotation fuse already tracked (v1.27): `annotate_runtime_tree`,
+      `append_class_recursive` (exit/enter classes), `annotate_surface_shortcuts`,
+      `annotate_overflow_tree`, `merge_runtime_primitive_defaults`,
+      `collapse_promoted_popover_wrappers`, `constrain_error_placeholders`,
+      `annotate_selection_tree` (`shell/component/rendering.rs:238-432`).
+      Several are only relevant when a feature is active (no popovers → no
+      collapse walk; no selection → skip). Gate the conditional walks on
+      cheap presence flags and fold the unconditional ones into the fused
+      traversal.
+- [ ] **Restyle re-applies string declarations per node on interaction
+      frames** — tracked (v1.23 typed declarations + v1.18 selector
+      dependencies). New detail from this scan: the interaction narrow path
+      falls back to *full-tree* restyle whenever `affected_keys` is empty
+      (`rendering.rs:314-329`) including the common pointer-leave case; make
+      the empty-diff case a no-op restyle instead of a full pass when
+      previous state exists.
+- [ ] **Layout + display list**: Taffy tree rebuilt per layout pass and
+      display-list subtree flattening per update are already tracked
+      (v1.21). Reaffirmed as the dominant structural-frame costs behind
+      restyle in this scan; no new sub-findings.
+- [ ] **CPU Skia raster + SHM is the ceiling.** Painting is skia-safe CPU
+      raster into `PixelBuffer` + SHM upload (`render/src/surface/painter/backend.rs`);
+      blur/shadows/gradients are CPU per damaged pixel. GPU rendering is
+      deferred (v1.25) — when it lands, prefer a `wgpu`/Skia-GPU surface per
+      output with the retained display list as the command source, and keep
+      SHM as fallback. Until then, the damage-path fixes above (especially
+      fractional scale) are the effective lever.
+- [ ] **Present pipeline recomputes derived regions every visible frame.**
+      `present_surface_target` recomputes opaque rect, input region, and blur
+      region from the display list on every present
+      (`shell/runtime/render.rs:804-837`) and issues
+      `update_input_region`/`update_opaque_region` unconditionally; cache the
+      last-sent regions per surface and skip the recompute+protocol calls
+      when the display-list generation didn't change.
+- [ ] **Child popover reconcile allocates per frame.**
+      `reconcile_child_surface_requests` re-derives requests, builds
+      `HashSet<String>`s of node keys, hex-encodes child surface ids, and
+      clones `PopupConfig`s every frame for every component
+      (`shell/runtime/render.rs:386-478,970-977`), even for the common
+      zero-popover case. Early-out when the component has no popover nodes
+      and no live children; cache the encoded child surface id on the
+      `ChildSurface`.
+
+### E. Style system — second-pass findings
+
+- [x] **`StyleRuleIndex` rebuilt per node on the tree-build path.** The
+      restyle path caches the selector index (`cached_style_rule_index`), but
+      the *build* path — `build_element_node` →
+      `resolve_node_style_for_module` →
+      `resolve_node_style_with_attrs_no_diagnostics` — constructs
+      `StyleRuleIndex::new(rules)` **for every node**
+      (`ui/elements/src/style/resolve.rs:538`, called from
+      `frontend/compiler/src/render.rs:535`). Every full tree rebuild pays
+      O(nodes × rules) just building throwaway indexes. Additionally
+      `inherited_style_mask(rules, …)` re-scans the full rule list per node
+      (`render.rs:528-529`). Build one index per tree build and thread it
+      (plus the inherit mask) through `build_widget_node`. Done 2026-07-02:
+      `BuildStyleContext` now builds one `StyleRuleIndex` per component tree
+      build and threads it through recursive `build_widget_node` calls via a
+      new indexed resolver entry point; inherited-style masks continue through
+      their existing cached helper. Covered by
+      `indexed_module_style_resolution_matches_non_indexed_resolution` and
+      the `mesh-core-frontend` render suite.
+- [ ] **Every declaration resolves through a String round-trip.** Theme
+      tokens are stored as `TokenValue::Number` but resolution formats them
+      (`format!("{n}")`, `resolve.rs:402`) and downstream re-parses
+      (`parse_px`, `Color::from_hex` — `resolve.rs:446-461`); `var()`
+      resolution walks embedded-reference string substitution per value.
+      This is the inner loop of both build and restyle. Extends the v1.23
+      typed-declaration item: resolve tokens to typed values
+      (`Color`/`f32`/enum) once per theme load and make
+      `apply_declaration` consume typed values, keeping strings only for
+      diagnostics.
+- [ ] **Theme component defaults re-applied per node from string maps.**
+      `apply_theme_component_defaults` parses `HashMap<String, String>`
+      defaults on every node resolution (already visible in the
+      post-2026-06-10 toggle profile note above). Pre-bake per-tag
+      `ComputedStyle` prototypes once per theme change and start resolution
+      from a memcpy of the prototype instead of re-applying string
+      declarations.
+- [x] **`surface_css_props()` recomputed at least twice per paint.** Both
+      `finalize_tree` (`rendering.rs:291`) and
+      `apply_style_animations_with_previous` (`animation.rs:108`) call it;
+      each call clones the runtime state (`runtime_state()`) and rebuilds the
+      props map. Compute once per paint and pass it down; invalidate on
+      props/state change. Done 2026-07-02: `paint` now computes the surface
+      prop map once and passes it through rebuild, narrow-script rebuild,
+      retained restyle, finalize, and style animation paths; direct
+      `build_tree`/test helpers keep a compatibility wrapper that computes
+      the map once for that standalone call.
+
+### F. Animation & layout per-frame overhead
+
+- [x] **Whole-tree animation bookkeeping runs even with zero animations.**
+      Every paint collects `previous_visual_styles()` — a
+      `HashMap<String, AnimatableStyle>` keyed by cloned `_mesh_key` strings
+      for the entire tree (`animation.rs:88,380-388`) — then
+      `apply_style_animations_to_node` walks every node again with a fresh
+      `StyleResolver`. Components with no `transition`/`animation` CSS should
+      skip both walks entirely (a per-component "has animatable rules" flag
+      computed at compile time); with animations active, track only nodes
+      that have transitions declared instead of snapshotting every node.
+      Done 2026-07-02: `FrontendSurfaceComponent` now records whether the
+      parsed root/local component styles contain transition/animation
+      declarations or keyframes. `paint` skips both `previous_visual_styles`
+      and the animation traversal when that flag is false and there are no
+      active transition/keyframe maps. The gate stays conservative for
+      components that declare any animatable CSS or are already animating;
+      per-node transition tracking remains a later refinement. Covered by
+      `detects_animatable_style_rules_from_declarations_and_keyframes`.
+- [ ] **Retained Taffy layout still re-syncs every node's style per pass.**
+      `compute_incremental` → `update_retained_node_styles` walks the whole
+      tree rebuilding `taffy_style_for_node` and re-populating
+      `node_map`/`text_nodes` HashMaps on every layout-dirty frame
+      (`ui/elements/src/layout.rs:346-390`), even when one node changed.
+      Feed the retained-tree dirty set (already computed in
+      `RetainedWidgetTree::update`) into layout so only dirty nodes get
+      `set_style` calls — Taffy caches internally, but MESH pays the full
+      style-conversion walk. (Structural rebuild case is tracked at v1.21;
+      this is the *non-structural* per-frame cost.)
+
+### G. Lua runtime — state sync & handler overhead
+
+- [ ] **`sync_state_from_lua` converts every user global per handler call.**
+      The "fast path" still reads and Lua→JSON-converts *every known user
+      global* (changed or not), deep-compares each in `state.set`, **and**
+      runs a full `_ENV` `pairs()` scan to discover newly-created globals —
+      after every event handler and render hook
+      (`scripting/context/runtime.rs:1466-1510`). Replace polling with a
+      write log: the component `_ENV` already goes through a metatable for
+      live bindings — record written keys in `__newindex` and sync only
+      those; run the discovery scan only when the write log saw an unknown
+      key.
+- [ ] **Handler-call side channels drain through multiple mutexes per call.**
+      `sync_side_channels` locks published-events, diagnostics, element
+      actions, storage-tracking mutexes sequentially per handler invocation
+      (`runtime.rs:1533+`). Mostly-empty in steady state — swap to a single
+      shared "any pending" atomic flag checked before taking any lock.
+- [ ] **Embedded component handler values serialize JSON into attribute
+      strings.** `build_component_ref` encodes handler-call props as
+      `serde_json::json!({"h":…,"a":…}).to_string()` stored in a node
+      attribute and re-parsed at dispatch (`frontend/compiler/src/render.rs:666-676`).
+      This also churns the attribute hash. Store structured handler bindings
+      on `WidgetNode` (typed field) instead of JSON-in-a-string.
+
+### H. Presentation & memory
+
+- [ ] **Extra full-buffer memcpy per present.** Skia paints into
+      `PixelBuffer`, then `copy_bgra_to_canvas`/`copy_bgra_damage_to_canvas`
+      memcpys into the SHM mapping (`presentation/src/wayland_surface/backend.rs:514-646`).
+      The damage-scoped copy path is good, but full-present frames (first
+      paint, resize, fractional scale until fixed) pay paint + full copy.
+      Have Skia render directly into the mapped SHM canvas
+      (`with_skia_canvas` over the pool slot) for the active buffer,
+      keeping `PixelBuffer` only as the retained/compare copy — or adopt
+      double-buffered direct paint once damage tracking is per-buffer.
+- [ ] **SHM pool thrash on resize.** Any size change clears and re-creates
+      all `SHM_BUFFER_POOL_DEPTH` buffers (`backend.rs:251-260`). A
+      content-measured surface that animates its size (expanding popover,
+      growing launcher list) reallocates the whole buffer set every frame.
+      Round buffer allocation up to size classes (e.g. next-64px) and
+      present with viewport crop, so gradual resizes reuse allocations.
+- [ ] **Startup compiles modules serially.** Module discovery + `.mesh`
+      parse + compile runs one directory at a time on the main thread
+      (`shell/discovery.rs:126+`). Parse/compile are pure per-module —
+      parallelize with rayon/spawn_blocking to cut shell start latency
+      (matters for session startup perception vs. quickshell).
+
+### I. Composition, display list & proxies — third-pass findings
+
+- [ ] **No component-level render memoization — the strategic gap.** Every
+      surface rebuild re-evaluates *every* embedded/local component's
+      template from scratch: `render_import`
+      (`shell/component/composition.rs:12-100`) re-clones props into a fresh
+      `HashMap<String, serde_json::Value>`, re-`format!`s instance keys,
+      re-runs `bind_child_instance`, and re-renders the child subtree even
+      when that instance's props and script state are untouched. This is why
+      one reactive variable changing anywhere re-costs the whole surface.
+      Each `EmbeddedFrontendRuntime` already has a
+      `ScriptState::mutation_generation`; cache each instance's built
+      subtree keyed by (props fingerprint, state generation, locale/theme
+      generation) and reuse it wholesale on rebuild. This is the
+      component-granular complement to the v1.27 node-level narrow re-eval
+      and probably the single largest structural win for complex surfaces.
+- [ ] **Fresh `self` Lua table per lifecycle call.** `current_self_table()`
+      builds a new table + metatable (module/component ids, storage proxy,
+      event channels) on every lifecycle handler invocation — including
+      `render(self)` per frame per instance
+      (`scripting/context/runtime.rs:714-716,760+`). Build once per
+      instance, cache on the context, refresh only when identity/locale
+      changes.
+- [ ] **Interface-proxy field reads take a mutex per Lua `__index`.** Every
+      `audio.percent`-style read locks `tracked_service_fields`
+      (`scripting/context/proxy.rs:108-170,316-324`) to record the tracked
+      field. Steady-state render hooks re-record the same fields every
+      frame. Record into a lock-free per-VM scratch (plain `RefCell` — the
+      VM is single-threaded) or only record fields not already tracked
+      (check with a read-optimized set).
+- [ ] **Display-list rebuild allocates fresh entry maps per frame.**
+      `update_inner` builds `ordered_entries: Vec` + `next: HashMap` from
+      scratch every non-generation-matched update
+      (`render/src/display_list.rs:760-762`) — unlike `RetainedWidgetTree`,
+      which keeps a scratch map. Entry comparison also deep-compares
+      per-entry cloned strings (`content`/`value`/`src`/`name` are cloned
+      into every rebuilt `DisplayPaintNode`, `display_list.rs:2081-2113`).
+      Reuse scratch allocations; share node text via `Arc<str>` between
+      `WidgetNode` and display entries so comparison is pointer-first.
+      (Subtree command arrays are already `Arc<[DisplayPaintCommand]>`, so
+      reuse of clean subtrees is cheap — the waste is in the per-entry
+      bookkeeping, not the commands.)
+- [ ] **Storage reads clone per Lua access.** `self.storage.key` reads lock
+      the storage mutex and clone the JSON value per access
+      (`scripting/storage.rs:275-307`); render hooks that read storage pay
+      this per frame. Minor today; becomes visible once handlers use
+      storage more. Consider caching the storage table Lua-side and
+      invalidating on write.
+- [ ] **Keybind/shortcut annotation scans string attributes per frame.**
+      `annotate_surface_shortcuts` and keybind resolution walk the tree
+      matching `onkeybind`/accesskey attribute strings each finalize (part
+      of the finalize-walk set in D); resolving declared keybinds to a
+      compiled map at tree-build time (they cannot change between rebuilds)
+      removes the per-frame scan. Fold into the fused-walk work.
+
+### J. Algorithmic complexity — quadratic hot-path patterns (fourth pass)
+
+Targeted scan for accidentally-super-linear loops. These compound with each
+other: an uncoalesced motion event multiplied by an O(depth × n) hover dispatch
+multiplied by O(n) tree clones is where interaction latency actually goes.
+
+- [x] **Pointer-motion events are not coalesced — the multiplier on
+      everything.** `dispatch_wayland_events` pops each queued event and runs
+      the full input pipeline per event (`shell/runtime/wayland.rs:14-116`).
+      A 1000 Hz mouse queues ~16 `PointerMove`s per 60 Hz frame; each one
+      pays the full-tree clone, 5+ tree walks, and (during slider drag) a
+      *full script-state rebuild* (`input/mod.rs:163-186`). Coalesce
+      consecutive `PointerMove` events for the same surface down to the
+      latest position before dispatch (buttons/enter/leave act as barriers)
+      — standard practice in every toolkit, small diff, up to ~16× reduction
+      in per-frame input work. Do the same for `Scroll` deltas (sum them).
+      Done 2026-07-02: presentation input coalescing now handles both
+      pointer moves and scrolls before the shell dispatch queue; moves keep
+      the latest position, scrolls sum deltas and keep the latest pointer
+      position, leave/button/key/char events flush the affected surface, and
+      pointer/scroll transitions preserve order. Covered by
+      `coalesces_scroll_deltas_for_same_surface`,
+      `pointer_moves_and_scrolls_flush_each_other_in_order`, and the existing
+      pointer coalescing tests.
+- [ ] **Hover-transition dispatch is O(path-depth × tree).** For every key
+      entering/leaving the hover path, `dispatch_hover_transition_handlers`
+      runs up to two `find_event_handler` full-tree walks, then
+      `build_click_event` (another full-tree bounds walk), then
+      `call_node_handler` → `find_event_handler` *again*
+      (`input/mod.rs:348-392`). Crossing one nested row costs ~5 full-tree
+      walks per path node. One pre-walk building
+      `key → (&node, handlers, bounds)` for the union of both paths makes the
+      whole dispatch a single O(n) pass — or free once the per-paint
+      hit-test/key index (item B) exists.
+- [x] **`prune_stale_interaction_targets` clones every key to validate ~4.**
+      Every paint walks the whole tree cloning every `_mesh_key` String into
+      a fresh `HashSet` (`interaction_state.rs:313-338` via
+      `collect_all_keys`) just to check whether `focused_key`,
+      `focus_visible_key`, `hovered_key`, and the selection anchor still
+      exist. Invert it: 4 × `find_node_by_key` probes (early-exit walks), or
+      4 lookups against the retained tree's existing `node_keys` map. Turns
+      an O(n)-allocations-per-paint pass into effectively O(1). Done
+      2026-07-02: pruning now probes only the tracked focus/hover/pointer/
+      slider/selection keys with `find_node_by_key` and no longer builds the
+      full cloned-key `HashSet`. Covered by existing prune/selection cleanup
+      tests.
+- [x] **`collect_interaction_changed_keys` is O(changed-keys × tree).** For
+      each hover/focus-changed key it calls `collect_descendant_keys`, which
+      restarts the search *from the root* (`rendering.rs:440-471,618-632`).
+      A hover change across a path of depth d scans the tree d times. Single
+      walk that checks membership against the changed-key set and switches
+      to collect-mode inside matched subtrees: O(n) total. Done 2026-07-02:
+      replaced per-key root rescans with `collect_changed_subtree_keys`, a
+      single traversal that enters affected mode at changed hover/focus keys
+      and collects descendant `_mesh_key`s. Removed the now-dead
+      `collect_all_keys` helper. Covered by
+      `collect_changed_subtree_keys_collects_descendants_in_one_walk` and the
+      restyle suite.
+- [ ] **The "narrow" script path currently costs extra and saves nothing.**
+      `narrow_script_update` does the *full* template rebuild, then
+      `narrow_script_diff` re-snapshots and re-hashes every node
+      (`runtime_tree.rs:187-217`), then `narrow_expand_ancestors` builds a
+      full parent map (`rendering.rs:741-768`) — and the result only feeds
+      telemetry (`affected_node_count`, `narrow_path_active`,
+      `rendering.rs:202-218`); the returned tree is finalized/restyled/laid
+      out in full regardless. Until the v1.27 subtree re-eval lands, this is
+      pure added O(2n) hash work on the most common invalidation class
+      (service updates). Either wire `full_affected` into finalize (skip
+      restyle/layout outside affected subtrees) now, or gate the diff behind
+      profiling mode.
+- [ ] **Runtime key paths make deep trees O(n × depth).** Every node's key
+      is the full slash-joined ancestor path built with
+      `format!("{key}/{index}")` and FNV-hashed from scratch per node per
+      frame (`runtime_tree.rs:616-622,281-291`) — a 10-deep list row hashes
+      ~40-byte strings for every row every frame, and key length grows with
+      depth. Derive ids by hash-chaining `(parent_id, child_index)` — O(1)
+      per node, no string at all — and keep the string path only for debug
+      builds / diagnostics.
+- [ ] **`finalize_tree` closing-popover pass: O(closing-keys × tree)**
+      `find_node_by_key_mut` per closing key (`rendering.rs:273-279`).
+      Trivial count in practice; fold into the fused annotation walk (D)
+      rather than fixing separately.
+- [ ] **Slider drag worst case = every quadratic above at once.** Each
+      uncoalesced motion during a drag runs slider-value tree walks ×3, a
+      handler call (Lua + full `sync_state_from_lua`), then
+      `invalidate_script_state()` → full template rebuild + restyle + layout
+      + paint (`input/mod.rs:163-186`). With motion coalescing (above) plus
+      routing slider drags through the STATE/interaction-restyle path
+      instead of SCRIPT invalidation (the knob position is
+      shell-owned state — `slider_values` — not script state), a drag frame
+      should cost a targeted restyle, not a rebuild.
+
+### K. Threading & repaint suppression (fifth pass)
+
+MESH is effectively single-threaded for all UI work: script execution, tree
+build, restyle, layout, Skia raster, and present for **every surface** run
+serially inside `Shell::run` on the main thread (`shell/runtime/mod.rs:173+`).
+The Tokio runtime (`runtime/mod.rs:182`) only hosts backend pollers and IPC.
+QtQuick's render loop, by contrast, splits scene-graph sync from rendering.
+The Lua VMs are `!Send` and must stay on the shell thread — but everything
+after the display list is built does not.
+
+- [ ] **Parallelize paint across surfaces.** After `finalize_tree`, painting
+      is pure: display list + `PixelBuffer` in, pixels out. Surfaces are
+      independent (own buffer, own damage). Restructure `render_components`
+      into two phases — phase 1 (serial, VM-bound): script hooks, build,
+      restyle, layout, display-list update per dirty surface; phase 2
+      (parallel): `paint_pixel_regions` + SHM copy per surface via rayon
+      scope. The painter's text/glyph/gradient caches are already
+      `thread_local` (`painter/backend.rs:29`, `text.rs:28-48`), so worker
+      threads get their own — verify cache hit rates don't crater with a
+      pinned worker-per-surface mapping. Bar + popover + launcher painting
+      concurrently roughly divides paint latency by the surface count.
+- [ ] **Pipeline paint against the next frame's script work.** Even with one
+      surface, phase 2 for frame N can overlap phase 1 of frame N+1 (double-
+      buffer the `PixelBuffer`, hand the display list snapshot to a render
+      thread, present from there). This is the classic guarded-render-loop
+      design; it halves effective frame latency for rebuild-heavy frames.
+      Bigger lift than per-surface parallelism — do that first.
+- [ ] **Tile-parallel raster for large damage.** Within one buffer, split
+      full-surface repaints (theme change, first paint, launcher open) into
+      horizontal bands painted in parallel (disjoint `&mut [u8]` slices via
+      `split_at_mut`; each band gets its own Skia canvas with a band clip).
+      Only worth it above a damage-area threshold; measure with the v1.21
+      profiles first.
+- [ ] **Move blocking file IO off the shell thread.** `load_graph_i18n_catalogs`
+      does `fs::read_to_string` per catalog on mount (`component/runtime.rs:136-171`),
+      settings/theme reloads re-read files inline in the loop, and icon/SVG
+      cache *misses* rasterize on the paint path. Route one-shot IO through
+      `spawn_blocking` with a completion event (the loop already wakes on
+      eventfd), and make icon-cache misses paint a placeholder frame and
+      fill in on the next wake instead of stalling the frame.
+- [ ] **Dedup service payloads before touching any runtime.** A poll backend
+      re-emitting unchanged JSON still costs, per emission: payload clone
+      into `cached_service_payloads`, `apply_service_payload` (JSON→Lua
+      conversion + `refresh_module_object`) for every observing runtime, an
+      `apply_service_update` deep-compare per runtime, and a tracked-fields
+      scan (`shell_component.rs:184-236`). The rebuild is correctly skipped,
+      but all boundary work still runs at poll frequency × runtimes. Add
+      `payload == cached` short-circuit at the top of `handle_service_event`
+      (and ideally shell-level in `deliver_service_event` so non-observing
+      components aren't even iterated).
+- [ ] **Gate interaction invalidation on rule existence.** Every hover-path
+      change calls `invalidate_interaction_restyle()` unconditionally
+      (`input/mod.rs:242,269`), triggering a restyle + layout + retained
+      hash + display-list pass even when **no `:hover`/`:focus`/`:active`
+      rule can match the affected nodes** — the common case for plain
+      text/box/row nodes. At compile time, collect the set of
+      (tag/class/id) keys referenced by state-dependent selectors per
+      component; on hover change, skip invalidation entirely when neither
+      the old nor new path intersects it. Complements the v1.18
+      selector-dependency item but is much cheaper to ship: it's a presence
+      check, not a dependency graph. Same gate applies to
+      `prune`-style hover annotation (`_mesh_key` state bits) — nodes that
+      no state rule targets don't need `state.hovered` maintained at all.
+- [ ] **Skip `render()`/`render_layout` bookkeeping for clean visible
+      surfaces.** `ShellComponent::render` runs per loop iteration for every
+      `wants_render` component and re-applies anchor/layer/margins/keyboard
+      mode to the surface struct plus a `tracing::debug!` format of node
+      counts/roles (`shell_component.rs:392-424`) before paint decides
+      nothing changed. Cheap individually, but it's per-frame steady-state
+      work; fold it into the config-changed path (the
+      `last_surface_config` compare already exists downstream).
+
+### L. Live performance debugging — design
+
+Goal: see hotspots *live* while interacting with the shell, with cause
+attribution (which rule, which component, which invalidation), without the
+measurement tool perturbing what it measures. Builds on what already exists:
+`ProfilingStage` accumulators + `ProfilingSnapshot` (`runtime/profiling.rs`),
+`ProfilingInvalidationSnapshot` (per-paint rebuild/retained/narrow/damage
+counts), the `DebugOverlay` painter, `mesh.debug.*` IPC, and the
+debug-inspector's profiling start/stop. Tiered by effort:
+
+- [ ] **Tier 0 — Tracy live flamegraph via a feature flag.** The codebase is
+      already instrumented with `tracing` spans/events throughout. Add a
+      `perf-tracy` cargo feature that installs `tracing-tracy` as a layer;
+      running the shell with it + the Tracy profiler UI gives live frame
+      flamegraphs, per-span self-time, plots, and memory zones with ~zero
+      new code. Add explicit `tracing::span!` around the missing hot spans
+      first: `build_tree`, `finalize_tree` sub-walks, `restyle`, `layout`,
+      `retained_tree.update`, `display_list.update`, `paint_pixel_regions`,
+      `present_with_damage`, `sync_state_from_lua`, `call_handler`,
+      `handle_component_input`. This is the fastest path to "where do the
+      milliseconds go" and validates every item in sections A–K empirically.
+- [ ] **Tier 1 — in-shell perf HUD painted by the renderer, not a module.**
+      A HUD that is itself a `.mesh` surface would pollute the numbers with
+      its own rebuild/restyle cycle at every update. Instead extend the
+      existing `DebugOverlay` (which already paints layout bounds directly
+      into the buffer post-paint, `frontend/render/src/surface/debug_overlay.rs`)
+      with a profiling mode, toggled by the existing `CoreRequest` debug
+      path:
+      - **frame waterfall strip**: last ~120 frames as stacked bars (script /
+        build / restyle / layout / display-list / paint / SHM / present),
+        color-coded, 16.6 ms budget line — the data is already in
+        `ProfilingSurfaceSnapshot.recent_samples`, it just needs a ring
+        buffer keyed by frame rather than by stage;
+      - **live counters**: FPS, presents vs skipped, damage area % of
+        surface, retained-path vs full-rebuild ratio, narrow-path hits — all
+        already in `ProfilingInvalidationSnapshot`, currently only visible in
+        the inspector module;
+      - **paint flashing** (the Chrome/KWin repaint debugger): translucent
+        colored overlay on each frame's damage rects, decaying over ~300 ms.
+        This makes "we repainted the whole bar for a clock tick" *visible*
+        instantly, and is the single best tool for the repaint-suppression
+        work in K. Trivial to add: the damage rects are already in
+        `last_present_damage_rects` when the overlay paints.
+      HUD paint cost must be excluded from the recorded stages (paint it
+      after `PaintTraversal` is recorded) and its damage must not feed back
+      into the damage stats (flag its rects).
+- [ ] **Tier 2 — cause attribution (top-N tables).** Stages say *what phase*
+      is slow; attribution says *why*:
+      - per-style-rule cumulative restyle time + match count (time
+        `apply_declaration` per rule id in the cached index; report top 10
+        selectors);
+      - per-component-instance build time (wrap `render_import`/embedded
+        instance eval — directly measures the memoization win in I);
+      - per-node paint time bucketed by command kind (text/shadow/blur/
+        gradient/icon) — the painter already returns `PaintMetrics` with
+        shaping/raster micros, extend to per-kind totals;
+      - wasted-work counters: rebuilds whose retained diff was empty,
+        restyles with zero changed styles, service deliveries whose payload
+        was identical (K), motion events coalesced vs dispatched (J).
+      Surface these in the HUD's second page and in the IPC snapshot.
+- [ ] **Tier 3 — streaming + offline analysis.**
+      - `mesh.debug.profiling_stream`: push per-frame profiling records over
+        the existing IPC bus so an external `mesh-tools-cli perf top`
+        TUI can show live tables without any in-shell UI (and without the
+        HUD's paint cost);
+      - Chrome-trace/Perfetto JSON export of a captured window (the
+        `ProfilingSample` ring buffers already hold timestamps+durations) for
+        offline flamegraph comparison before/after each A–K fix;
+      - wire the existing `DebugBenchmarkSnapshot`/`BenchmarkScenarioSnapshot`
+        types to the canonical-workload profiles item (v1.21): scripted
+        scenarios (idle 10 s, pointer sweep, slider drag, popover open/close,
+        theme switch) that run headless and emit a JSON summary — this is the
+        regression harness that keeps the wins from A–K from rotting.
+      Compare runs in CI against a stored baseline with a tolerance band.
+
+### Suggested attack order
+
+1. **Pointer-motion + scroll coalescing (J)** — one small diff in
+   `dispatch_wayland_events`; divides all per-motion costs by the
+   motion-to-frame ratio. Do this first.
+2. Fractional-scale partial damage (D, first item) — biggest visible win on
+   scaled outputs, bounded scope.
+3. Per-node `StyleRuleIndex` rebuild on the build path (E) — turns every
+   script-driven rebuild from O(nodes × rules) into O(nodes + rules); tiny
+   diff.
+4. Per-paint key/hit-test index (B + J) — kills the input-path tree clone,
+   the 5-walk hover dispatch, and the per-paint `prune_stale` key sweep with
+   one shared structure.
+5. `sync_state_from_lua` write log (G) — removes per-handler full-globals
+   conversion; helps every interaction.
+6. Slider-drag reclassification + narrow-path gating (J) — makes drags cost
+   a restyle instead of rebuild+diff overhead.
+7. Element-metrics laziness (A) — removes per-paint JSON build/compare/convert.
+8. Animation walk gating (F) — free win for the common no-animation surface.
+9. Event routing index + payload `Arc` (C) — cheap, unblocks chatty backends.
+10. Service-payload dedup + interaction rule-existence gate (K) — two small
+    diffs that eliminate steady-state work at poll/hover frequency.
+11. Per-surface parallel paint (K) — first threading step; needs the
+    phase-split refactor of `render_components` but no new invalidation
+    machinery.
+12. Component-level render memoization (I) — largest structural win; plan it
+    with the v1.18/v1.27 invalidation work since it shares the dependency
+    bookkeeping.
+13. State snapshot COW + typed expression/declaration values (A/E) — feeds
+    the same invalidation work.
+14. Paint/script pipelining + tile-parallel raster (K) — after the
+    per-surface split proves the phase boundary; pairs naturally with the
+    GPU work (v1.25).

@@ -170,6 +170,7 @@ impl CompiledFrontendModule {
                     container_height: height as f32,
                 },
             );
+            let build_style = render::BuildStyleContext::new(rules, &resolver);
             root.children = template
                 .root
                 .iter()
@@ -177,8 +178,7 @@ impl CompiledFrontendModule {
                     render::build_widget_node(
                         node,
                         &self.manifest,
-                        rules,
-                        &resolver,
+                        &build_style,
                         Some(&root.computed_style),
                         root_context,
                         state,

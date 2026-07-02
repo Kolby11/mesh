@@ -54,7 +54,7 @@ pub struct ComponentFile {
 ///
 /// Each entry auto-projects to a `prop(name)` CSS reference, a reactive
 /// `props.name` script field, and a generated settings-UI row. See
-/// `docs/component-configuration.md`.
+/// `docs/spec/03-components.md`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PropsBlock {
     pub props: Vec<PropDef>,

@@ -632,7 +632,7 @@ standard easing keywords plus `cubic-bezier(...)`. `transform` parses
 painted and hit-tested today.
 
 Theme-driven component defaults resolve before local stylesheet rules. The
-effective order is documented in [`../theming/themes.md`](../theming/themes.md).
+effective order is documented in [`../spec/04-styling.md`](../spec/04-styling.md).
 
 Keyframes are percentage-only:
 

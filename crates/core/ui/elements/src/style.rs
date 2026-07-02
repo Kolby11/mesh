@@ -89,6 +89,47 @@ mod tests {
     }
 
     #[test]
+    fn indexed_module_style_resolution_matches_non_indexed_resolution() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = parse_fixture_style(
+            r#"
+<style>
+box { width: 10px; }
+.card { height: 20px; }
+box.card { padding: 3px; }
+</style>
+"#,
+        );
+        let classes = vec!["card".to_string()];
+        let index = StyleRuleIndex::new(&rules);
+
+        let expected = resolver.resolve_node_style_for_module(
+            &rules,
+            "box",
+            &classes,
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+            Some("@mesh/test"),
+        );
+        let actual = resolver.resolve_node_style_for_module_indexed(
+            &rules,
+            &index,
+            "box",
+            &classes,
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+            Some("@mesh/test"),
+        );
+
+        assert_eq!(actual.width, expected.width);
+        assert_eq!(actual.height, expected.height);
+        assert_eq!(actual.padding.left, expected.padding.left);
+    }
+
+    #[test]
     fn parse_hex_colors() {
         assert_eq!(
             Color::from_hex("#fff"),

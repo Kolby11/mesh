@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use crate::shell::component::ComponentDirtyFlags;
+use crate::shell::component::{ComponentDirtyFlags, SurfaceCssProps};
 use mesh_core_animation::{
     keyframes::{
         ActiveKeyframeAnimation, KeyframeRegistry, KeyframeRule as RenderKeyframeRule,
@@ -79,10 +79,18 @@ pub(super) fn keyframe_rule_animation_bucket(rule: &RenderKeyframeRule) -> Anima
 }
 
 impl FrontendSurfaceComponent {
+    pub(super) fn should_run_style_animation_pass(&self) -> bool {
+        self.has_animatable_style_rules
+            || !self.transitions.is_empty()
+            || !self.keyframe_animations.is_empty()
+            || self.has_active_keyframe_animation
+    }
+
     #[cfg(test)]
     pub(super) fn apply_style_animations(&mut self, tree: &mut WidgetNode) {
         let previous_styles = self.previous_visual_styles();
-        self.apply_style_animations_with_previous(tree, &previous_styles);
+        let surface_css_props = self.surface_css_props();
+        self.apply_style_animations_with_previous(tree, &previous_styles, &surface_css_props);
     }
 
     pub(super) fn previous_visual_styles(&self) -> HashMap<String, AnimatableStyle> {
@@ -96,6 +104,7 @@ impl FrontendSurfaceComponent {
         &mut self,
         tree: &mut WidgetNode,
         previous_styles: &HashMap<String, AnimatableStyle>,
+        surface_css_props: &SurfaceCssProps,
     ) {
         let now = Instant::now();
         let mut live_keys = HashSet::new();
@@ -105,7 +114,7 @@ impl FrontendSurfaceComponent {
         let mut has_active_keyframe_animation = false;
         let mut active_keyframe_bucket = AnimationPropertyBucket::None;
         let theme = self.active_theme.borrow().clone();
-        let resolver = StyleResolver::new(&theme).with_props(self.surface_css_props());
+        let resolver = StyleResolver::new(&theme).with_props(surface_css_props.clone());
 
         self.apply_style_animations_to_node(
             tree,

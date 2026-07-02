@@ -196,7 +196,7 @@ fn find_scrollable_at_with_offset(
 /// applied by taffy. So sizing is fully CSS-driven with no manifest inputs; this
 /// replaces the old `mesh.surface` `size_policy`/`min_*`/`max_*`/
 /// `prefers_content_children_sizing` fields (see
-/// `docs/component-configuration.md` §5).
+/// `docs/spec/03-components.md` §2).
 ///
 /// `fallback_*` is used only when the root has no positive laid-out extent yet
 /// (e.g. a degenerate first frame).

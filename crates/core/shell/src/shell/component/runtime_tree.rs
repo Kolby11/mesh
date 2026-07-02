@@ -492,18 +492,6 @@ fn hash_option_f32(value: Option<f32>, hasher: &mut impl Hasher) {
     }
 }
 
-/// Collect every `_mesh_key` present in the fully built and restyled widget tree.
-/// Used by `FrontendSurfaceComponent::prune_stale_interaction_targets` to determine
-/// which interaction targets are still valid after a restyle.
-pub(super) fn collect_all_keys(node: &WidgetNode, keys: &mut HashSet<String>) {
-    if let Some(key) = node.attributes.get("_mesh_key") {
-        keys.insert(key.clone());
-    }
-    for child in &node.children {
-        collect_all_keys(child, keys);
-    }
-}
-
 pub(super) fn input_accepts_char(node: &WidgetNode, ch: char) -> bool {
     if ch.is_control() {
         return false;

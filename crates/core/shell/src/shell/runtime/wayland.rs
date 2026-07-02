@@ -4,7 +4,7 @@ const MAX_WAYLAND_EVENTS_PER_FRAME: usize = 32;
 
 impl Shell {
     pub(in crate::shell) fn dispatch_wayland(&mut self) -> Result<(), ShellRunError> {
-        let events = coalesce_pointer_moves(self.presentation_engine.poll_events());
+        let events = coalesce_input_events(self.presentation_engine.poll_events());
         if !events.is_empty() {
             self.presented_last_frame = true;
         }

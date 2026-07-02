@@ -6,20 +6,37 @@ use crate::style::{
 use crate::tags::lower_source_tag;
 use crate::{FrontendCompositionResolver, LayeredStore};
 
-use mesh_core_component::style::{StyleValue, prop_variable_key};
+use mesh_core_component::style::{StyleRule, StyleValue, prop_variable_key};
 use mesh_core_component::template::{
     Attribute, AttributeValue, ComponentRef, ElementNode, SourceTag, TemplateNode,
 };
 use mesh_core_component::{PropValue, PropsBlock};
 use mesh_core_elements::accessibility::AccessibilityInfo;
 use mesh_core_elements::{
-    ComputedStyle, StyleContext, StyleResolver, VariableStore, WidgetNode, element_contract_for_tag,
+    ComputedStyle, StyleContext, StyleResolver, StyleRuleIndex, VariableStore, WidgetNode,
+    element_contract_for_tag,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
 use serde_json;
 
 use std::collections::{BTreeMap, HashMap};
+
+pub(crate) struct BuildStyleContext<'a, 'theme> {
+    rules: &'a [StyleRule],
+    index: StyleRuleIndex,
+    resolver: &'a StyleResolver<'theme>,
+}
+
+impl<'a, 'theme> BuildStyleContext<'a, 'theme> {
+    pub(crate) fn new(rules: &'a [StyleRule], resolver: &'a StyleResolver<'theme>) -> Self {
+        Self {
+            rules,
+            index: StyleRuleIndex::new(rules),
+            resolver,
+        }
+    }
+}
 
 /// Build the per-instance CSS prop map consumed by `StyleResolver::with_props`.
 ///
@@ -256,6 +273,7 @@ pub fn build_widget_tree_from_component(
             container_width,
             container_height,
         };
+        let build_style = BuildStyleContext::new(rules, &resolver);
         let children: Vec<WidgetNode> = template
             .root
             .iter()
@@ -263,8 +281,7 @@ pub fn build_widget_tree_from_component(
                 build_widget_node(
                     node,
                     host_manifest,
-                    rules,
-                    &resolver,
+                    &build_style,
                     None,
                     child_context,
                     state,
@@ -287,8 +304,7 @@ pub fn build_widget_tree_from_component(
 pub(crate) fn build_widget_node(
     node: &TemplateNode,
     manifest: &Manifest,
-    rules: &[mesh_core_component::style::StyleRule],
-    resolver: &StyleResolver<'_>,
+    build_style: &BuildStyleContext<'_, '_>,
     parent_style: Option<&ComputedStyle>,
     container_context: StyleContext,
     state: Option<&dyn VariableStore>,
@@ -299,8 +315,7 @@ pub(crate) fn build_widget_node(
         TemplateNode::Element(element) => build_element_node(
             element,
             manifest,
-            rules,
-            resolver,
+            build_style,
             parent_style,
             container_context,
             state,
@@ -310,8 +325,7 @@ pub(crate) fn build_widget_node(
         TemplateNode::Component(component) => build_component_ref(
             component,
             manifest,
-            rules,
-            resolver,
+            build_style,
             parent_style,
             container_context,
             state,
@@ -378,8 +392,7 @@ pub(crate) fn build_widget_node(
                     build_widget_node(
                         child,
                         manifest,
-                        rules,
-                        resolver,
+                        build_style,
                         Some(&node.computed_style),
                         child_context,
                         state,
@@ -415,8 +428,7 @@ pub(crate) fn build_widget_node(
                             node.children.push(build_widget_node(
                                 child,
                                 manifest,
-                                rules,
-                                resolver,
+                                build_style,
                                 Some(&node.computed_style),
                                 child_context,
                                 Some(&item_store as &dyn VariableStore),
@@ -487,8 +499,7 @@ pub(crate) fn build_widget_node(
 fn build_element_node(
     element: &ElementNode,
     manifest: &Manifest,
-    rules: &[mesh_core_component::style::StyleRule],
-    resolver: &StyleResolver<'_>,
+    build_style: &BuildStyleContext<'_, '_>,
     parent_style: Option<&ComputedStyle>,
     container_context: StyleContext,
     state: Option<&dyn VariableStore>,
@@ -525,15 +536,21 @@ fn build_element_node(
         }
     }
     apply_source_tag_defaults(&element.tag_kind, &mut attributes);
-    let inherited_mask =
-        inherited_style_mask(rules, &tag, &classes, id.as_deref(), container_context);
+    let inherited_mask = inherited_style_mask(
+        build_style.rules,
+        &tag,
+        &classes,
+        id.as_deref(),
+        container_context,
+    );
 
     let mut node = WidgetNode::new(tag.clone());
     attach_module_id(&mut node, &manifest.package.id);
     node.attributes = attributes;
     node.event_handlers = event_handlers;
-    node.computed_style = resolver.resolve_node_style_for_module(
-        rules,
+    node.computed_style = build_style.resolver.resolve_node_style_for_module_indexed(
+        build_style.rules,
+        &build_style.index,
         &tag,
         &classes,
         id.as_deref(),
@@ -578,8 +595,7 @@ fn build_element_node(
             build_widget_node(
                 child,
                 manifest,
-                rules,
-                resolver,
+                build_style,
                 Some(&node.computed_style),
                 child_context,
                 state,
@@ -646,8 +662,7 @@ fn resolve_inline_content(node: &TemplateNode, state: Option<&dyn VariableStore>
 fn build_component_ref(
     component: &ComponentRef,
     manifest: &Manifest,
-    rules: &[mesh_core_component::style::StyleRule],
-    resolver: &StyleResolver<'_>,
+    build_style: &BuildStyleContext<'_, '_>,
     parent_style: Option<&ComputedStyle>,
     container_context: StyleContext,
     state: Option<&dyn VariableStore>,
@@ -706,8 +721,7 @@ fn build_component_ref(
     let mut node = build_element_node(
         &fake_element,
         manifest,
-        rules,
-        resolver,
+        build_style,
         parent_style,
         container_context,
         state,

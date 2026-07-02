@@ -9,7 +9,7 @@ use std::path::Path;
 /// content measurement of its component root (`width`/`height`/`min-*`/`max-*`
 /// on the surface root, resolved by the layout engine) and the show/hide
 /// transition is a CSS `transition` on that root. See
-/// `docs/component-configuration.md` §5.
+/// `docs/spec/03-components.md` §2.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SurfaceLayoutSettings {
     pub edge: Edge,

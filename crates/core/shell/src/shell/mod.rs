@@ -45,7 +45,7 @@ use backend::{BackendRuntimeStatus, BackendRuntimeStatusEntry};
 use ipc::spawn_ipc_server;
 use mesh_core_backend::{BackendServiceEvent, spawn_backend_service};
 use mesh_core_presentation::{
-    LayerSurfaceConfig, PresentationEngine, WindowEvent, WindowKeyEvent, coalesce_pointer_moves,
+    LayerSurfaceConfig, PresentationEngine, WindowEvent, WindowKeyEvent, coalesce_input_events,
     event_surface_id,
 };
 use mesh_core_render::{DebugOverlay, PixelBuffer};

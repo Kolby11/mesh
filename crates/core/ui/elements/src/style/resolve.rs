@@ -489,6 +489,24 @@ impl<'a> StyleResolver<'a> {
         self.resolve_node_style_with_attrs_no_diagnostics(rules, &attrs, context)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_node_style_for_module_indexed(
+        &self,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
+        tag: &str,
+        classes: &[String],
+        id: Option<&str>,
+        context: StyleContext,
+        state: ElementState,
+        module_id: Option<&str>,
+    ) -> ComputedStyle {
+        debug_assert!(index.is_for(rules));
+        let mut attrs = StyleNodeAttrs::new(tag, classes, id, state);
+        attrs.module_id = module_id;
+        self.resolve_node_style_with_attrs_indexed_no_diagnostics(rules, index, &attrs, context)
+    }
+
     pub fn resolve_node_style_with_diagnostics(
         &self,
         rules: &[StyleRule],

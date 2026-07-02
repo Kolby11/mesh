@@ -464,27 +464,61 @@ impl ShellComponent for FrontendSurfaceComponent {
             && can_use_retained_path
             && self.last_tree.is_some()
             && !self.render_hooks_pending;
-        let previous_visual_styles = if self.last_tree.is_some() {
+        let run_style_animation_pass = self.should_run_style_animation_pass();
+        let previous_visual_styles = if run_style_animation_pass && self.last_tree.is_some() {
             self.previous_visual_styles()
         } else {
             Default::default()
         };
+        let surface_css_props = self.surface_css_props();
         let mut tree = if dirty_types.contains(ComponentDirtyFlags::SCRIPT_NARROW) {
-            match self.narrow_script_update(theme, content_width, content_height) {
+            match self.narrow_script_update(
+                theme,
+                content_width,
+                content_height,
+                &surface_css_props,
+            ) {
                 Some(t) => t,
-                None => self.build_tree(theme, content_width, content_height),
+                None => self.build_tree_with_surface_css_props(
+                    theme,
+                    content_width,
+                    content_height,
+                    &surface_css_props,
+                ),
             }
         } else if use_retained_style_path {
-            match self.restyle_retained_tree(theme, content_width, content_height, dirty_types) {
+            match self.restyle_retained_tree(
+                theme,
+                content_width,
+                content_height,
+                dirty_types,
+                &surface_css_props,
+            ) {
                 Some(t) => t,
-                None => self.build_tree(theme, content_width, content_height),
+                None => self.build_tree_with_surface_css_props(
+                    theme,
+                    content_width,
+                    content_height,
+                    &surface_css_props,
+                ),
             }
         } else {
-            self.build_tree(theme, content_width, content_height)
+            self.build_tree_with_surface_css_props(
+                theme,
+                content_width,
+                content_height,
+                &surface_css_props,
+            )
         };
         self.prune_stale_interaction_targets(&tree);
         self.apply_pending_auto_focus(&tree);
-        self.apply_style_animations_with_previous(&mut tree, &previous_visual_styles);
+        if run_style_animation_pass {
+            self.apply_style_animations_with_previous(
+                &mut tree,
+                &previous_visual_styles,
+                &surface_css_props,
+            );
+        }
         let retained_dirty = self.retained_tree.update(&tree);
         let retained_tree_generation = self.retained_tree.generation();
         let use_generation_shortcuts =

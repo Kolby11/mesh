@@ -195,7 +195,7 @@ impl IconRegistry {
     }
 
     /// Resolve a logical name in the context of a specific frontend.
-    /// Walks the resolution order documented in `docs/icon-system.md`.
+    /// Walks the resolution order documented in `docs/spec/05-icons.md`.
     pub fn resolve_for_module(
         &mut self,
         module_id: &str,

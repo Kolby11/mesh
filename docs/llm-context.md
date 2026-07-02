@@ -152,7 +152,7 @@ Every frontend module is a complete feature module. It declares in its
 canonical author-facing manifest, `module.json`:
 - `mesh.kind`: `"frontend"` for frontend modules
 - `mesh.entrypoints.main`: path to the `.mesh` single-file component
-- `mesh.surface`: surface **placement only** — `anchor`, `layer`, `exclusive_zone`, `keyboard_mode`, `visible_on_start`, `margins`. Surface **sizing** and the show/hide transition are CSS on the component root, not manifest fields (see `docs/component-configuration.md` §5).
+- `mesh.surface`: surface **placement only** — `anchor`, `layer`, `exclusive_zone`, `keyboard_mode`, `visible_on_start`, `margins`. Surface **sizing** and the show/hide transition are CSS on the component root, not manifest fields (see `docs/spec/03-components.md` §2).
 - `mesh.capabilities.required`: permission gates (`shell.surface`, `theme.read`, etc.)
 - `mesh.dependencies.modules`: module IDs this module depends on
 
@@ -171,7 +171,7 @@ The `<props>` block is the **target** configuration model: one typed declaration
 auto-projects to a `prop(name)` CSS reference, a reactive `props.name` Lua field,
 and a generated settings UI row, replacing scattered `mesh.surface` sizing +
 `mesh.settings`. It is a **design spec, not yet implemented** — see
-[Component Configuration Model](component-configuration.md).
+[Components & Props](spec/03-components.md).
 
 Components are reusable authoring units. They should be made from MESH core
 elements (`button`, `icon`, `input`, etc.) or other components. Do not call a
@@ -242,7 +242,7 @@ backend module (`module.json` with `mesh.implements`)
 | Add a new frontend module      | Create `modules/frontend/<name>/`, `module.json` with `mesh.kind = "frontend"`, `src/main.mesh`                                  |
 | Change surface placement | `surface_layout_from_manifest()` in `mesh-core-surface-config`; manifest's `mesh.surface` block (placement only) |
 | Change surface sizing | CSS `width`/`height`/`min-*`/`max-*` on the component root (`fit-content` measures, `100%` spans); measured in `measure_content_size()` |
-| Configure/customize a component | Target model: the `<props>` block — see [Component Configuration Model](component-configuration.md) (design spec; replaces `mesh.surface` sizing + `mesh.settings`) |
+| Configure/customize a component | Target model: the `<props>` block — see [Components & Props](spec/03-components.md) (design spec; replaces `mesh.surface` sizing + `mesh.settings`) |
 | Add a backend provider module  | Create `modules/backend/<name>/`, `module.json` with `mesh.kind = "backend"` and `mesh.implements`, plus `src/main.luau`         |
 | Add a new CoreRequest action   | `CoreRequest` enum in `crates/core/shell/src/shell/types.rs` plus request handling under `crates/core/shell/src/shell/runtime/request.rs` |
 | Add a theme value              | `config/themes/<theme-id>/theme.css`, then reference with `var(--group-name)` in `.mesh`                                        |

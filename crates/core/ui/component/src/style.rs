@@ -146,7 +146,7 @@ pub struct KeyframeStop {
 
 /// Reserved variable-store key prefix under which resolved component-prop values
 /// are published, so `StyleValue::Prop(name)` resolves through the same variable
-/// map as `var(--…)`. See `docs/component-configuration.md`.
+/// map as `var(--…)`. See `docs/spec/03-components.md`.
 pub const PROP_VAR_PREFIX: &str = "--mesh-prop-";
 
 /// The variable-store key that holds the resolved value of prop `name`.

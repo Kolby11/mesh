@@ -149,15 +149,24 @@ impl FrontendSurfaceComponent {
     /// initial `build_tree_with_state` pass. (Embedded child components with their
     /// own `<props>` are resolved during build; the flat restyle pass uses the
     /// surface root's props — full per-instance restyle is future work.)
-    pub(super) fn surface_css_props(
-        &self,
-    ) -> std::collections::HashMap<String, mesh_core_component::style::StyleValue> {
+    pub(super) fn surface_css_props(&self) -> SurfaceCssProps {
         let state = self.runtime_state(self.id()).unwrap_or_default();
         let bound = LocaleBoundState::new(&state, &self.locale);
         mesh_core_frontend::resolve_css_props(self.compiled.component.props.as_ref(), Some(&bound))
     }
 
     pub(super) fn build_tree(&mut self, theme: &Theme, width: u32, height: u32) -> WidgetNode {
+        let surface_css_props = self.surface_css_props();
+        self.build_tree_with_surface_css_props(theme, width, height, &surface_css_props)
+    }
+
+    pub(super) fn build_tree_with_surface_css_props(
+        &mut self,
+        theme: &Theme,
+        width: u32,
+        height: u32,
+        surface_css_props: &SurfaceCssProps,
+    ) -> WidgetNode {
         if self.render_hooks_pending {
             self.call_render_hooks();
             self.render_hooks_pending = false;
@@ -195,6 +204,7 @@ impl FrontendSurfaceComponent {
             height,
             "rebuild",
             ComponentDirtyFlags::TREE_REBUILD,
+            surface_css_props,
         );
         tree
     }
@@ -204,8 +214,9 @@ impl FrontendSurfaceComponent {
         theme: &Theme,
         width: u32,
         height: u32,
+        surface_css_props: &SurfaceCssProps,
     ) -> Option<WidgetNode> {
-        let tree = self.build_tree(theme, width, height);
+        let tree = self.build_tree_with_surface_css_props(theme, width, height, surface_css_props);
         let (affected, total) = self.retained_tree.narrow_script_diff(&tree)?;
         if affected.len() * 2 > total {
             return None;
@@ -228,10 +239,19 @@ impl FrontendSurfaceComponent {
         width: u32,
         height: u32,
         dirty_types: ComponentDirtyFlags,
+        surface_css_props: &SurfaceCssProps,
     ) -> Option<WidgetNode> {
         let mut tree = self.last_tree.take()?;
         self.refresh_active_theme(theme);
-        self.finalize_tree(&mut tree, theme, width, height, "restyle", dirty_types);
+        self.finalize_tree(
+            &mut tree,
+            theme,
+            width,
+            height,
+            "restyle",
+            dirty_types,
+            surface_css_props,
+        );
         Some(tree)
     }
 
@@ -243,6 +263,7 @@ impl FrontendSurfaceComponent {
         height: u32,
         trigger_kind: &'static str,
         dirty_types: ComponentDirtyFlags,
+        surface_css_props: &SurfaceCssProps,
     ) {
         // Advance smooth-scroll animations before annotation reads scroll_offsets,
         // so the eased offset lands in this frame's `_mesh_scroll_*` attributes.
@@ -288,7 +309,7 @@ impl FrontendSurfaceComponent {
         // The cache survives across paints — we only pay the clone cost on
         // source reload (when `cached_restyle_rules` is reset).
         self.module_restyle_rules();
-        let resolver = StyleResolver::new(theme).with_props(self.surface_css_props());
+        let resolver = StyleResolver::new(theme).with_props(surface_css_props.clone());
         let context = StyleContext {
             container_width: width as f32,
             container_height: height as f32,
@@ -460,13 +481,8 @@ impl FrontendSurfaceComponent {
             return changed_keys; // first frame: no previous state
         }
 
-        // For each changed key, add all descendant keys (entire subtree).
         let mut all_affected: HashSet<String> = HashSet::new();
-        for changed_key in &changed_keys {
-            all_affected.insert(changed_key.clone());
-            collect_descendant_keys(tree, changed_key, &mut all_affected);
-        }
-
+        collect_changed_subtree_keys(tree, &changed_keys, false, &mut all_affected);
         all_affected
     }
 
@@ -613,21 +629,62 @@ pub(super) fn constrain_error_placeholders(node: &mut WidgetNode) {
     }
 }
 
-/// Recursively collects `_mesh_key` values of all descendants of the node
-/// identified by `target_mesh_key`.
-fn collect_descendant_keys(node: &WidgetNode, target_mesh_key: &str, out: &mut HashSet<String>) {
-    let node_key = node.attributes.get("_mesh_key").map(|s| s.as_str());
-    let found_target = node_key == Some(target_mesh_key);
-
-    if found_target {
-        // Collect all descendants of this node.
-        collect_all_keys(node, out);
-        return;
+fn collect_changed_subtree_keys(
+    node: &WidgetNode,
+    changed_keys: &HashSet<String>,
+    parent_affected: bool,
+    out: &mut HashSet<String>,
+) {
+    let node_key = node.attributes.get("_mesh_key");
+    let node_affected = parent_affected || node_key.is_some_and(|key| changed_keys.contains(key));
+    if node_affected && let Some(key) = node_key {
+        out.insert(key.clone());
     }
 
-    // Keep searching in children.
     for child in &node.children {
-        collect_descendant_keys(child, target_mesh_key, out);
+        collect_changed_subtree_keys(child, changed_keys, node_affected, out);
+    }
+}
+
+#[cfg(test)]
+mod interaction_changed_key_tests {
+    use super::*;
+
+    fn keyed_node(key: &str, children: Vec<WidgetNode>) -> WidgetNode {
+        let mut node = WidgetNode::new("box");
+        node.attributes.insert("_mesh_key".into(), key.into());
+        node.children = children;
+        node
+    }
+
+    #[test]
+    fn collect_changed_subtree_keys_collects_descendants_in_one_walk() {
+        let tree = keyed_node(
+            "root",
+            vec![
+                keyed_node(
+                    "root/0",
+                    vec![
+                        keyed_node("root/0/0", vec![]),
+                        keyed_node("root/0/1", vec![]),
+                    ],
+                ),
+                keyed_node("root/1", vec![keyed_node("root/1/0", vec![])]),
+            ],
+        );
+        let changed = HashSet::from(["root/0".to_string()]);
+        let mut affected = HashSet::new();
+
+        collect_changed_subtree_keys(&tree, &changed, false, &mut affected);
+
+        assert_eq!(
+            affected,
+            HashSet::from([
+                "root/0".to_string(),
+                "root/0/0".to_string(),
+                "root/0/1".to_string(),
+            ])
+        );
     }
 }
 

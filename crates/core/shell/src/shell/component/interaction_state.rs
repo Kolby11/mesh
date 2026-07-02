@@ -307,28 +307,25 @@ impl FrontendSurfaceComponent {
     /// receive interaction styling on the next frame.
     ///
     /// Sibling and ancestor state is preserved: only targets whose exact key is
-    /// absent from `valid_keys` are cleared. Input, slider, checked, and scroll
+    /// absent from the final tree are cleared. Input, slider, checked, and scroll
     /// maps are never pruned here — their cleanup rules are deliberate and covered
     /// by separate logic when elements are explicitly removed by the user.
     pub(super) fn prune_stale_interaction_targets(&mut self, tree: &WidgetNode) {
-        let mut valid_keys = std::collections::HashSet::new();
-        collect_all_keys(tree, &mut valid_keys);
-
         if let Some(key) = &self.focused_key {
-            if !valid_keys.contains(key) {
+            if find_node_by_key(tree, key).is_none() {
                 self.focused_key = None;
                 self.focus_visible_key = None;
             }
         }
 
         if let Some(key) = &self.focus_visible_key
-            && !valid_keys.contains(key)
+            && find_node_by_key(tree, key).is_none()
         {
             self.focus_visible_key = None;
         }
 
         if let Some(key) = &self.hovered_key {
-            if !valid_keys.contains(key) {
+            if find_node_by_key(tree, key).is_none() {
                 self.hovered_key = None;
                 self.hovered_path.clear();
                 self.hover_start = None;
@@ -339,14 +336,14 @@ impl FrontendSurfaceComponent {
         }
 
         if let Some(key) = &self.pointer_down_key {
-            if !valid_keys.contains(key) {
+            if find_node_by_key(tree, key).is_none() {
                 self.pointer_down_key = None;
                 self.pointer_down_bounds = None;
             }
         }
 
         if let Some(key) = &self.active_slider_key {
-            if !valid_keys.contains(key) {
+            if find_node_by_key(tree, key).is_none() {
                 self.active_slider_key = None;
             }
         }
@@ -354,7 +351,7 @@ impl FrontendSurfaceComponent {
         let should_clear_selection = self
             .selection
             .as_ref()
-            .is_some_and(|selection| !valid_keys.contains(&selection.anchor.node_key));
+            .is_some_and(|selection| find_node_by_key(tree, &selection.anchor.node_key).is_none());
         if should_clear_selection {
             self.selection = None;
         }

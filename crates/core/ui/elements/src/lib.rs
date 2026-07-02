@@ -41,8 +41,9 @@ pub use popover::{
 pub use style::{
     AlignContent, AlignItems, AlignSelf, BlendMode, BoxShadow, Color, ComputedStyle, Corners,
     Dimension, Display, Edges, FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow,
-    Position, StepPosition, StyleContext, StyleResolver, TextAlign, TextDirection, TextOverflow,
-    Transform2D, TransitionEasing, TransitionProperties, TransitionStyle, VisualFilter, WhiteSpace,
+    Position, StepPosition, StyleContext, StyleResolver, StyleRuleIndex, TextAlign, TextDirection,
+    TextOverflow, Transform2D, TransitionEasing, TransitionProperties, TransitionStyle,
+    VisualFilter, WhiteSpace,
 };
 pub use tree::{ElementState, NodeId, WidgetNode};
 

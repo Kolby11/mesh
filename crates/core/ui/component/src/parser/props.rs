@@ -1,5 +1,5 @@
 //! Parser for the `<props>` block — a component's typed, defaulted, localized
-//! configuration. See `docs/component-configuration.md`.
+//! configuration. See `docs/spec/03-components.md`.
 //!
 //! Syntax (one entry per `name: { ...fields... }`, commas/newlines separate):
 //!

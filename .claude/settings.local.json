@@ -183,7 +183,10 @@
       "Bash(sed -n '110,152p' crates/core/shell/src/shell/component/tests/restyle/metrics.rs)",
       "Bash(sed -n '230,260p' crates/core/shell/src/shell/component/tests/interaction/reflow.rs)",
       "Bash(awk '{printf \"%6d KB  %s\\\\n\", $1/1024, $2}')",
-      "Bash(awk *)"
+      "Bash(awk *)",
+      "Bash(sed -i 's|docs/component-configuration\\\\.md §10|docs/spec/03-components.md §7|; s|docs/component-configuration\\\\.md|docs/spec/03-components.md|g' project_component_config_model.md)",
+      "Bash(sed -i 's|\\(`docs/component-configuration\\\\.md` §5\\)|\\(`docs/spec/03-components.md` §2\\)|' project_css_surface_sizing.md)",
+      "Bash(sed -i 's|spec in docs/component-configuration\\\\.md|spec in docs/spec/03-components.md|' MEMORY.md)"
     ]
   }
 }

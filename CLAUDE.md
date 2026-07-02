@@ -25,14 +25,15 @@ MESH is a platform for building desktop shell experiences with:
 
 Use these terms precisely in code, documentation, and architecture discussions:
 
-- **Module**: the target installable package unit for MESH. New packages use
-  `package.json` with a `mesh` section. `mesh.kind` describes the role
-  (`frontend`, `backend`, `interface`, `theme`, `icon-pack`, `font-pack`,
-  `language-pack`, or `library`). Older `package.json`,
-  `package.json`, and `mesh.toml` files are compatibility inputs during
-  migration, not the preferred authoring model. `mesh.kind` also includes
-  `component`: an embeddable `.mesh` component consumed by other modules via
-  `require("@scope/name")`, with no `mesh.surface` block of its own.
+- **Module**: the installable package unit for MESH. Modules use a canonical
+  `module.json` with all MESH behavior under the `mesh` key. `mesh.kind`
+  describes the role (`frontend`, `backend`, `interface`, `theme`,
+  `icon-pack`, `font-pack`, `language-pack`, or `library`). Old manifest
+  inputs (`package.json`, `mesh.toml`, legacy top-level `id/type` fields) are
+  rejected with migration diagnostics — not accepted as compatibility inputs.
+  `mesh.kind` also includes `component`: an embeddable `.mesh` component
+  consumed by other modules via `require("@scope/name")`, with no
+  `mesh.surface` block of its own.
 - **Element**: a base UI primitive exposed by MESH core, such as `box`,
   `row`, `button`, `icon`, `input`, `slider`, or `text`. Elements are the
   built-in building blocks with predefined runtime behavior, styling hooks,
@@ -43,7 +44,7 @@ Use these terms precisely in code, documentation, and architecture discussions:
   and handlers, styles, schema, translations, and metadata. A component is not
   a core primitive.
 - **Frontend module**: a complete frontend implementation for a specific shell
-  capability or feature. A frontend module has a `package.json`, an entrypoint
+  capability or feature. A frontend module has a `module.json`, an entrypoint
   `.mesh` file, capabilities, settings, and may contain multiple reusable
   components. For example, an audio controls frontend module can contain
   separate components for a volume mixer, output selector, mute button, and
@@ -60,7 +61,7 @@ When modeling Lua or LSP APIs, prefer this hierarchy: core **elements** expose
 the base typed API; user **components** compose elements; **frontend modules**
 package one or more components into a complete shell feature.
 
-For the target module/package direction, see `docs/module-system.md`.
+For the target module/package direction, see `docs/spec/01-module-system.md`.
 
 ## Main goals
 
@@ -133,9 +134,9 @@ default. Only introduce special parsing, custom DSL behavior, magic globals, or
 non-standard syntax when there is a clear product need that cannot be met
 cleanly through regular host APIs or standard language constructs.
 
-Backend `main.luau` files should expose an explicit `init()` entrypoint
+Backend `main.luau` files should expose an explicit `start(self)` entrypoint
 function. Backend setup such as poll interval registration should happen inside
-`init()` rather than relying on top-level side effects.
+`start()` rather than relying on top-level side effects.
 
 ### 4. UI component format
 
@@ -153,28 +154,24 @@ The `<props>` block is the planned single declaration for typed, defaulted,
 localized component configuration. One entry auto-projects to a `prop(name)` CSS
 reference, a reactive `props.name` Lua field, and a generated settings UI row —
 replacing scattered `mesh.surface` sizing and `mesh.settings`. This is a **design
-spec, not yet implemented**: see `docs/component-configuration.md`.
+spec, not yet implemented**: see `docs/spec/03-components.md`.
 
-## Core package types
+## Core module kinds
 
-- widget
-- surface
-- service
+- frontend
+- backend
+- interface
+- component
+- library
 - theme
-- language-pack
 - icon-pack
+- font-pack
+- language-pack
 
-Each package should declare:
-
-- id
-- version
-- compatibility
-- dependencies
-- capabilities
-- entrypoints
-- settings schema
-- translations
-- theme token usage
+Each module declares identity (`name`, `version`), `mesh.kind`, dependencies
+and capabilities (`mesh.uses`), contributions (`mesh.provides`), provider
+records (`mesh.implements`), entrypoints, and i18n metadata. See
+`docs/spec/01-module-system.md`.
 
 ## Key concepts
 

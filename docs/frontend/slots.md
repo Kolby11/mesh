@@ -78,7 +78,7 @@ match is rejected at load with a diagnostic.
 ## User control
 
 Users reshape any slot without editing module code. The system settings file
-(see [`../settings/README.md`](../settings/README.md)) has a reserved
+(see [`../spec/08-settings.md`](../spec/08-settings.md)) has a reserved
 `slots` section:
 
 ```json

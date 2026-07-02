@@ -738,7 +738,7 @@ pub struct SlotContribution {
 /// transition are no longer authored here: they are expressed in the
 /// component's CSS (`width`/`height`/`min-*`/`max-*` on the surface root, a CSS
 /// `transition` on the root) and measured at paint time. See
-/// `docs/component-configuration.md` §5.
+/// `docs/spec/03-components.md` §2.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SurfaceLayoutSection {
     /// Screen edge: "top" | "bottom" | "left" | "right"

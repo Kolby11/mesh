@@ -5,7 +5,7 @@ Backend modules implement interface contracts such as `mesh.audio`,
 code consume the active provider through the interface import, not by reaching
 for a concrete backend module id. Frontend modules never depend on backend provider modules.
 
-See [`../../../extensibility.md`](../../../extensibility.md) for the broader
+See [`../../../spec/01-module-system.md`](../../../spec/01-module-system.md) for the broader
 model. This page documents the bundled backend contracts and the current MVP
 authoring path.
 
