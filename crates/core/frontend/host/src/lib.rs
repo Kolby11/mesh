@@ -20,6 +20,11 @@ pub struct ChildSurfaceRequest {
     pub kind: ChildSurfaceKind,
     pub anchor_rect: (i32, i32, i32, i32),
     pub content_size: (u32, u32),
+    /// Extra buffer padding (left, top, right, bottom) beyond `content_size`
+    /// reserved for `box-shadow`/`filter` overshoot in the popover subtree,
+    /// so shadows don't clip at the popup buffer edge. All zero when the
+    /// subtree has no such overshoot.
+    pub content_padding: (u32, u32, u32, u32),
     pub placement: PopoverPlacement,
 }
 
@@ -379,7 +384,9 @@ pub trait ShellComponent: Send {
     fn child_surface_requests(&self) -> Vec<ChildSurfaceRequest> {
         Vec::new()
     }
-    /// Paint a keyed subtree into a child-surface buffer at local origin.
+    /// Paint a keyed subtree into a child-surface buffer at local origin,
+    /// offset by `content_offset` (the left/top padding reserved for
+    /// shadow/filter overshoot; see `ChildSurfaceRequest::content_padding`).
     /// When `exiting` is set, the painted subtree gets the same
     /// `mesh-surface-exiting` class treatment top-level surfaces get while
     /// playing their hide transition, so a closing popover's CSS exit
@@ -390,6 +397,7 @@ pub trait ShellComponent: Send {
         _node_key: &str,
         _buffer: &mut PixelBuffer,
         _scale: f32,
+        _content_offset: (u32, u32),
         _exiting: bool,
     ) -> Result<bool, ComponentError> {
         Ok(false)

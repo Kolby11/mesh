@@ -1118,6 +1118,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         node_key: &str,
         buffer: &mut PixelBuffer,
         scale: f32,
+        content_offset: (u32, u32),
         exiting: bool,
     ) -> Result<bool, ComponentError> {
         let Some(tree) = self.last_tree.as_ref() else {
@@ -1141,8 +1142,8 @@ impl ShellComponent for FrontendSurfaceComponent {
             node,
             buffer,
             scale,
-            -bounds.0,
-            -bounds.1,
+            -bounds.0 + content_offset.0 as f32,
+            -bounds.1 + content_offset.1 as f32,
             None,
             Some(self.compiled.manifest.package.id.as_str()),
         );
@@ -1701,10 +1702,11 @@ fn damage_rect_for_widget_node(node: &WidgetNode, surface: DamageRect) -> Option
     visual_damage_rect_for_widget_node(node, surface)
 }
 
-fn visual_damage_rect_for_widget_node(
-    node: &WidgetNode,
-    surface: DamageRect,
-) -> Option<DamageRect> {
+/// A node's own box plus its visual overshoot from `box-shadow` (outer) and
+/// `filter`/`backdrop-filter` blur, in the tree's absolute layout space.
+/// Shared by damage-rect computation (clipped to the surface) and popover
+/// buffer padding (which needs the raw, unclipped extent).
+fn node_visual_bounds(node: &WidgetNode) -> Option<(f32, f32, f32, f32)> {
     if node.layout.width <= 0.0 || node.layout.height <= 0.0 {
         return None;
     }
@@ -1746,6 +1748,14 @@ fn visual_damage_rect_for_widget_node(
         bottom += filter_pad;
     }
 
+    Some((left, top, right, bottom))
+}
+
+fn visual_damage_rect_for_widget_node(
+    node: &WidgetNode,
+    surface: DamageRect,
+) -> Option<DamageRect> {
+    let (left, top, right, bottom) = node_visual_bounds(node)?;
     let left = left.floor().max(0.0) as u32;
     let top = top.floor().max(0.0) as u32;
     let right = right.ceil().max(0.0) as u32;
@@ -1758,6 +1768,48 @@ fn visual_damage_rect_for_widget_node(
             height: bottom.saturating_sub(top),
         },
         surface,
+    )
+}
+
+/// Union of `node_visual_bounds` over `node` and its full subtree, in
+/// absolute layout space. Used to size a popover's popup buffer so
+/// descendant `box-shadow`/`filter` overshoot (e.g. a floating bubble
+/// button's shadow) isn't clipped at the buffer edge.
+fn subtree_visual_bounds(node: &WidgetNode) -> (f32, f32, f32, f32) {
+    let mut bounds = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    accumulate_subtree_visual_bounds(node, &mut bounds);
+    bounds
+}
+
+fn accumulate_subtree_visual_bounds(node: &WidgetNode, bounds: &mut (f32, f32, f32, f32)) {
+    if let Some((left, top, right, bottom)) = node_visual_bounds(node) {
+        bounds.0 = bounds.0.min(left);
+        bounds.1 = bounds.1.min(top);
+        bounds.2 = bounds.2.max(right);
+        bounds.3 = bounds.3.max(bottom);
+    }
+    for child in &node.children {
+        accumulate_subtree_visual_bounds(child, bounds);
+    }
+}
+
+/// Extra buffer padding (left, top, right, bottom) a popover subtree needs
+/// beyond its own laid-out box so descendant shadow/filter overshoot paints
+/// instead of clipping at the popup buffer edge.
+fn popover_content_padding(node: &WidgetNode) -> (u32, u32, u32, u32) {
+    let (left, top, right, bottom) = subtree_visual_bounds(node);
+    if left > right || top > bottom {
+        return (0, 0, 0, 0);
+    }
+    let own_left = node.layout.x;
+    let own_top = node.layout.y;
+    let own_right = node.layout.x + node.layout.width;
+    let own_bottom = node.layout.y + node.layout.height;
+    (
+        (own_left - left).max(0.0).ceil() as u32,
+        (own_top - top).max(0.0).ceil() as u32,
+        (right - own_right).max(0.0).ceil() as u32,
+        (bottom - own_bottom).max(0.0).ceil() as u32,
     )
 }
 
@@ -1802,6 +1854,7 @@ fn collect_child_surface_requests(
             kind: ChildSurfaceKind::Popover,
             anchor_rect: bounds_to_i32_rect(anchor),
             content_size: content,
+            content_padding: popover_content_padding(node),
             placement: PopoverPlacement::from_node(node),
         });
     }
@@ -2172,7 +2225,45 @@ mod tests {
         assert_eq!(requests[0].kind, ChildSurfaceKind::Popover);
         assert_eq!(requests[0].anchor_rect, (20, 42, 96, 36));
         assert_eq!(requests[0].content_size, (96, 36));
+        assert_eq!(requests[0].content_padding, (0, 0, 0, 0));
         assert_eq!(requests[0].placement.offset_y, 6);
+    }
+
+    #[test]
+    fn popover_with_descendant_box_shadow_gets_buffer_padding() {
+        // No shadow on the popover node itself; a descendant (e.g. a
+        // floating bubble button) carries the shadow, mirroring how
+        // language-popover/theme-selector's bubble options are built.
+        let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 40.0);
+        let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 96.0, 36.0);
+        popover.attributes.insert("open".into(), "true".into());
+        let mut child = keyed_node("button", "root/menu/option", 20.0, 42.0, 96.0, 36.0);
+        child.computed_style.box_shadow = mesh_core_elements::style::BoxShadow {
+            offset_x: 0.0,
+            offset_y: 6.0,
+            blur_radius: 8.0,
+            spread_radius: 1.0,
+            color: mesh_core_elements::style::Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 200,
+            },
+            inset: false,
+        };
+        popover.children.push(child);
+        root.children.push(popover);
+
+        let mut requests = Vec::new();
+        collect_child_surface_requests(&root, &root, &mut requests);
+
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].content_size, (96, 36));
+        // blur_pad = 8 * 3 = 24, spread = 1: unshifted overshoot is 25px.
+        // The 6px downward `offset_y` reduces the top overshoot (shadow moves
+        // away from the top edge) and adds to the bottom overshoot.
+        let (left, top, right, bottom) = requests[0].content_padding;
+        assert_eq!((left, top, right, bottom), (25, 19, 25, 31));
     }
 
     #[test]

@@ -627,6 +627,7 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
             kind: super::types::ChildSurfaceKind::Popover,
             anchor_rect: state.anchor_rect,
             content_size: state.content_size,
+            content_padding: (0, 0, 0, 0),
             placement: mesh_core_elements::PopoverPlacement::default(),
         }]
     }
@@ -636,6 +637,7 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
         node_key: &str,
         buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
+        _content_offset: (u32, u32),
         exiting: bool,
     ) -> Result<bool, super::types::ComponentError> {
         let mut state = self.state.lock().unwrap();
@@ -5131,6 +5133,7 @@ fn component_runtime_resolves_parent_and_child_surface_targets() {
             ),
             node_key: "root/0/popover".to_string(),
             anchor_rect: (12, 0, 40, 56),
+            content_padding: (0, 0, 0, 0),
             closing_until: None,
         });
 

@@ -1,0 +1,431 @@
+🔄 (1) Starting iteration...
+⚠️  (1) Already on iteration branch: continuous-claude/iteration-1/2026-07-02-3b38f51f
+🌿 (1) Creating branch: continuous-claude/iteration-1/2026-07-02-f9fd87cf
+🤖 (1) Running Claude Code...
+Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
+   (1) 💻 cat SHARED_TASK_NOTES.md 2>/dev/null; echo ---; find . -iname "todo.md" -not -path "*/node_modules/*" -not -path "*/target/*"
+   (1) 📖 todo.md
+   (1) 🛠️ Agent
+   (1) 💬 I've kicked off research on the popup buffer-padding/input-region task while I continue. Let me also check current state of related smaller cleanup items I could tackle in parallel or as fallback.
+   (1) 💬 I'll research this investigation task directly using code search, since it's well-scoped file/pattern investigation.
+   (1) 💻 grep -rn "service_name_from_interface" --include=*.rs crates/ | head -20
+   (1) 💻 grep -rn "set_input_region\|input_region" crates --include="*.rs" | grep -v target
+   (1) 💻 grep -rln "tooltip" crates --include="*.rs" | grep -v target
+   (1) 📖 crates/core/shell/src/shell/component/tooltip.rs
+   (1) 💻 grep -n "padding\|input_rect\|update_input_region\|shadow" crates/core/shell/src/shell/runtime/render.rs | head -60
+   (1) 💻 grep -n "ModuleKind::FontPack\|ModuleKind::Library\|FontPack,Library\|=> ModuleType::Widget" -r crates/core/module/src/package/module_manifest.rs 2>/dev/null; find crates -path "*module*package*module_manifest*"
+   (1) 💬 This tooltip.rs file is just placement logic, not the padding. Let me look at render.rs around the buffer-padding and input-region lines.
+   (1) 📖 crates/core/shell/src/shell/runtime/render.rs (line 150)
+   (1) 💻 grep -n "ModuleKind\|ModuleType" crates/core/extension/module/src/package/module_manifest.rs | head -60
+   (1) 📖 crates/core/shell/src/shell/runtime/render.rs (line 600)
+   (1) 💬 Found the key mechanism. Now let's find `content_input_size()`, `TOOLTIP_OVERLAY_*`, and where the parent surface buffer gets padded.
+   (1) 💻 grep -rn "content_input_size\|TOOLTIP_OVERLAY" crates --include="*.rs" | grep -v target
+   (1) 💻 grep -n "enum ModuleType" -A 20 crates/core/extension/module/src/manifest.rs | head -30
+   (1) 📖 crates/core/shell/src/shell/component/rendering.rs (line 50)
+   (1) 📖 crates/core/shell/src/shell/component/shell_component.rs (line 1140)
+   (1) 💻 grep -n "pub enum ModuleType" -A 15 crates/core/extension/module/src/*.rs
+   (1) 💬 Now let's find where the buffer allocation (physical_w/h) itself gets padded — the `wayland.rs` reference and `resolve_dynamic_surface_size`/paint path, plus how `last_surface_size` is set vs `measured_size`.
+   (1) 💻 grep -rn "pub enum ModuleType" crates/
+   (1) 💻 grep -n "tooltip_overlay_extra_for_content\|last_surface_size\s*=" crates/core/shell/src/shell/component/shell_component.rs crates/core/shell/src/shell/runtime/*.rs
+   (1) 📖 crates/core/extension/module/src/manifest/model.rs (line 195)
+   (1) 💻 grep -n "tooltip_overlay_extra_for_content\|last_surface_size\s*=" crates/core/shell/src/shell/component/shell_component.rs crates/core/shell/src/shell/runtime/*.rs
+   (1) 💻 grep -rn "tooltip_overlay_extra_for_content\|last_surface_size" crates --include="*.rs" | grep -v target
+   (1) 📖 crates/core/shell/src/shell/component/rendering.rs (line 440)
+   (1) 💻 sed -n '520,560p' crates/core/shell/src/shell/component/shell_component.rs
+   (1) 💬 Now I understand tooltip padding is fixed-size and layer-surface only (top-panel style, tooltips overlaid). Let's find where the "extra" is actually applied to the layer surface's requested width/height (the padding-adds-to-buffer part), and also confirm it's layer-surface-only (not popups).
+   (1) 💻 grep -n "tooltip_overlay_extra_for_content\|extra_w\|extra_h" -r crates/core/shell/src/shell/runtime/render.rs crates/core/shell/src/shell/component/rendering.rs
+   (1) 💬 Let me check on the research agent's progress.
+   (1) 💻 sleep 30
+   (1) 💬 That's declared but not called anywhere currently visible — let's confirm and find its actual caller (maybe named differently, or in shell.rs/paint pipeline).
+   (1) 💻 grep -rn "tooltip_overlay_extra_for_content" crates --include="*.rs" | grep -v target
+   (1) 💬 I'll wait for the background research agent to finish rather than polling.
+   (1) 🛠️ ScheduleWakeup
+   (1) 📖 crates/core/shell/src/shell/component/shell_component.rs (line 426)
+   (1) 💬 Waiting for the background research agent to complete before proceeding with implementation.
+   (1) 💬 Now I see: `paint_width`/`paint_height` = `width.max(content_width)` — the actual buffer padding comes from the caller passing a larger `width`/`height` than content. Let's find where that larger width/height originates for layer surfaces (the tooltip case) — likely `resolve_dynamic_surface_size` or the StubSurface padded reporting mentioned in comments.
+   (1) 💻 grep -n "fn resolve_dynamic_surface_size\|tooltip.*pad\|pad.*tooltip" -ri crates/core/shell/src/shell/runtime/render.rs
+   (1) 💻 grep -rn "TOOLTIP_OVERLAY_WIDTH\|TOOLTIP_OVERLAY_HEIGHT" crates --include="*.rs" | grep -v target
+   (1) 💬 So the actual "extra buffer size for tooltip" (`tooltip_overlay_extra_for_content`) is unused/dead code — the real padding mechanism is that `paint()` uses `width.max(content_width)`, where `width`/`height` come from the presentation-reported StubSurface size (which is padded elsewhere, likely at a different layer — presentation/layer-shell level). Let's check `wayland.rs:105` and StubSurface/mock surface padding, and the `set_size` call path.
+   (1) 📖 crates/core/shell/src/shell/runtime/wayland.rs (line 70)
+   (1) 💻 grep -n "TOOLTIP\|tooltip" crates/core/presentation/src/wayland_surface/backend.rs | head -30
+   (1) 💬 This confirms the padding is really about `paint_width/height = width.max(content_width)` where `width` comes into `paint()` from the caller passing the surface's actual (possibly larger, e.g. the "reserve" navbar height) buffer dims — for the navigation bar case, the surface layer height itself is set larger than content to allow tooltips to draw outside. Let's check `set_size` call in `render_layout` and where the reserved/expanded size feeds `width`/`height` params to `paint`.
+   (1) 💻 grep -n "\.paint(\|fn paint\b" crates/core/shell/src/shell/runtime/render.rs
+   (1) 💻 grep -n "\.paint(\|fn paint\b" crates/core/shell/src/shell/runtime/render.rs
+   (1) 📖 crates/core/shell/src/shell/runtime/render.rs (line 270)
+   (1) 💬 This confirms `width, height` passed to `paint()` at line 296-298 is the same `width, height` computed earlier at line 208-227/264 (`resolved_size`), which for non-popup is `resolve_dynamic_surface_size` — no tooltip padding added at this layer for the main surface. So for the navbar, `paint_width`/`paint_height` = `width.max(content_width)` where `width` is the surface's own configured size (which for a full-span bar is already larger than content due to spanning). The tooltip mechanism relies on the surface already being sized bigger than the content box (e.g. spanning bar), not on explicit padding logic for a tight-content surface. For popups (tight-content), there's currently no such margin. Let's check CSS box-shadow usage in shipped popover components and check ChildSurface/popup creation code in shell_component.rs and popup.rs.
+   (1) 💻 grep -rln "box-shadow" modules --include="*.mesh" --include="*.css" 2>/dev/null
+   (1) 💬 API Error: Connection closed mid-response. The response above may be incomplete.
+   (1) 💻 grep -rn "box-shadow" modules/frontend/shared/components/bubble-options.mesh modules/frontend/theme-selector modules/frontend/language-popover -r 2>/dev/null
+   (1) 💬 Confirmed: `box-shadow: 0px 6px 18px rgba(0,0,0,0.34)` — blur 18px + 6px y-offset means real overshoot (up to ~18-24px) that would currently be clipped since popup buffers are exactly the measured content box. Now let's check popup.rs and shell_component.rs for buffer creation/sizing and PopupConfig, plus alpha buffer setup.
+   (1) 📖 crates/core/presentation/src/wayland_surface/popup.rs
+   (1) 💬 Confirmed: `PopupPlacement.size` is exactly the "measured `<popover>` subtree" — no padding at all. Now let's check `configure_popup` in backend.rs for buffer/alpha creation and the popup xdg_surface creation for opaque/alpha region.
+   (1) 💻 grep -n "fn configure_popup\|fn create_popup\|xdg_surface_from_wl\|set_opaque_region\|Alpha\|alpha" crates/core/presentation/src/wayland_surface/backend.rs | head -40
+   (1) 📖 crates/core/presentation/src/wayland_surface/backend.rs (line 834)
+   (1) 💬 I have enough. Let's quickly check how the parent (child_index) content input size is set for popups (line 673-683 uses `width,height` directly, not `content_input_size()`), and check `Surface::new` for shm format/alpha to confirm alpha is already used.
+   (1) 💻 grep -n "Format::Argb8888\|shm_format\|fn new" crates/core/presentation/src/wayland_surface/backend.rs | head -10
+   (1) 💬 Good — alpha (Argb8888) already used uniformly, confirming the todo's claim.
+   (1) 💬 
+   (1) 💬 ## Report
+   (1) 💬 
+   (1) 💬 **1. Tooltip padding + input-region pattern**
+   (1) 💬 - Padding constants: `TOOLTIP_OVERLAY_WIDTH`/`HEIGHT` (240×80) at `crates/core/shell/src/shell/component.rs:65-66`.
+   (1) 💬 - `paint()` in `crates/core/shell/src/shell/component/shell_component.rs:426-452`: `paint_width = width.max(content_width)`, `paint_height = height.max(content_height)` (lines 451-452) — the buffer is whatever's bigger, surface size vs content size. There's a helper `tooltip_overlay_extra_for_content()` (`rendering.rs:97-109`) but it's **currently dead code — not called anywhere**. The actual "extra" today only exists because a spanning bar surface is already larger than its content box; there's no explicit pad-then-shrink-input step at the buffer-size level for tight-content surfaces.
+   (1) 💬 - Input-region masking (the real reusable pattern): `content_input_size()` (`shell_component.rs:1168-1174`) returns `self.last_surface_size` — the **true content size**, not the padded surface size. Consumed in `present_surface_target()` at `crates/core/shell/src/shell/runtime/render.rs:794-806`, which calls `presentation_engine.update_input_region(&surface_id, Some(DamageRect{0,0,content_w,content_h}))`, gated `if visible && is_parent`. This is parent-surface-only today (comment at line 762 says so explicitly).
+   (1) 💬 - Wayland-level plumbing: `PresentationEngine::update_input_region` (`crates/core/presentation/src/lib.rs:294-297`) → `backend.rs:1262-1282`, calling `wl_surface.set_input_region(Some(region))` (or `None` to mean "whole surface" when no rect given).
+   (1) 💬 
+   (1) 💬 **2/3. Popup buffer sizing — currently unpadded**
+   (1) 💬 - `PopupPlacement.size` (`crates/core/presentation/src/wayland_surface/popup.rs:81-93`) is exactly "the measured `<popover>` subtree" — no shadow margin.
+   (1) 💬 - Shell side computes it at `crates/core/shell/src/shell/runtime/render.rs:206-209`: `(measured_w, measured_h) = component.declared_or_measured_size()` → `width/height = measured.max(1)`, fed straight into `resolved_size` and then `configure_popup` (line 240-261) which sets `config.placement.size = resolved_size`.
+   (1) 💬 - Popup buffer allocation: `paint_and_present_child_surface()` (`render.rs:602-703`) computes `physical_w/h` directly from that same `width/height` (line 623-624), and its input region is set unconditionally to the **full** `width, height` (lines 673-683) — no content-vs-padded distinction exists for popups at all.
+   (1) 💬 - Backend creation: `configure_popup()` in `crates/core/presentation/src/wayland_surface/backend.rs:834-946` builds the `LayerSurfaceConfig` straight from `config.placement.size` (lines 910-914) — no padding added.
+   (1) 💬 - Alpha: confirmed `wl_shm::Format::Argb8888` already used uniformly for surfaces (`backend.rs:298`, `505`) — popups already composite with alpha, satisfying the todo's prerequisite.
+   (1) 💬 
+   (1) 💬 **4. Shipped shadow overshoot**
+   (1) 💬 - `modules/frontend/shared/components/bubble-options.mesh:157`: `box-shadow: 0px 6px 18px rgba(0,0,0,0.34)`. Used by both `theme-selector` and `language-popover` (`grep` confirmed `bubble-options` import in both `src/main.mesh`). Blur radius 18px + 6px y-offset means real visible overshoot (roughly up to ~24px below, ~18px sides/top) that is currently hard-clipped at the exact content box.
+   (1) 💬 
+   (1) 💬 **5. Minimal edit set**
+   (1) 💬 - Add a popup-padding constant (mirror `TOOLTIP_OVERLAY_*`), e.g. in `component.rs` near line 65, sized for shadow overshoot (or derive from computed `box_shadow` like the opaque/blur region helpers do — see `compute_opaque_rect_for_root`/`compute_blur_region` referenced at `render.rs:785,808`).
+   (1) 💬 - In `render.rs:206-209` (popup sizing branch): inflate `width/height` by the padding before creating/measuring the popup, keeping the *measured content size* separately available for input-region masking (analogous to `content_input_size()`).
+   (1) 💬 - `declared_or_measured_size()` (`shell_component.rs:1176-1178`) and `content_input_size()` (`1168-1174`) currently return the same value for popups since `last_surface_size` = content size; need to either add a distinct "padded surface size" accessor or apply the same `width.max(content)` pattern used in `paint()` (lines 451-452) to the popup path.
+   (1) 💬 - In `paint_and_present_child_surface()` (`render.rs:673-683`), replace the unconditional `Some(DamageRect{0,0,width,height})` input region with the component's true content size (mirroring the parent-path logic at lines 794-806), so padding pixels become click-through.
+   (1) 💬 - `configure_popup`/`PopupPlacement.size` (`popup.rs:81-93`, `backend.rs:910-914`) then receives the padded size for buffer/positioner purposes, while positioning math (anchor_rect, offset) may need adjusting so the *visual* content stays anchored correctly despite the larger buffer — check `build_positioner` (referenced `backend.rs:881`) for how anchor_rect/size interact.
+   (1) 💻 grep -n "compute_opaque_rect_for_root\|compute_blur_region\|shadow" crates/core/shell/src/shell/runtime/render.rs | head -30
+   (1) 💻 grep -rn "struct BoxShadow" -A 15 crates/core/ui/elements/src/*.rs crates/core/ui/elements/src/**/*.rs 2>/dev/null
+   (1) 📖 crates/core/shell/src/shell/runtime/render.rs (line 180)
+   (1) 📖 crates/core/shell/src/shell/runtime/render.rs (line 1)
+   (1) 💻 grep -n "fn paint_and_present_child_surface\|fn declared_or_measured_size\|fn content_input_size\|fn update_input_region\|TOOLTIP_OVERLAY" -r crates/core/shell/src/shell/ | head -30
+   (1) 📖 crates/core/shell/src/shell/runtime/render.rs (line 602)
+   (1) 💻 grep -n "paint_and_present_child_surface\|fn reconcile_child_surfaces\|ChildSurfaceRequest\|fn.*child_surface_request" crates/core/shell/src/shell/runtime/render.rs | head -30
+   (1) 📖 crates/core/shell/src/shell/runtime/render.rs (line 386)
+   (1) 💻 grep -n "fn child_surface_requests\|struct ChildSurfaceRequest\|fn paint_child_surface\|content_size" crates/core/shell/src/shell/component/shell_component.rs crates/core/shell/src/shell/types.rs crates/core/shell/src/shell/component.rs crates/core/frontend/host/src/*.rs 2>/dev/null
+   (1) 📖 crates/core/shell/src/shell/component/shell_component.rs (line 1700)
+   (1) 📖 crates/core/shell/src/shell/component/shell_component.rs (line 1100)
+   (1) 📖 crates/core/frontend/host/src/lib.rs (line 1)
+   (1) 📖 crates/core/frontend/host/src/lib.rs (line 350)
+   (1) 💻 grep -n "struct PopoverPlacement" -A 20 crates/core/ui/elements/src/*.rs 2>/dev/null; grep -rln "struct PopoverPlacement" crates/
+   (1) 💻 grep -rn "\.content_size\b" --include=*.rs crates/ | grep -v "test"
+   (1) 💻 grep -n "^use \|ComputedStyle" crates/core/shell/src/shell/component/shell_component.rs | head -30
+   (1) 💻 grep -n "^use " crates/core/shell/src/shell/component.rs | head -40
+   (1) 💬 Let's implement the padding computation. First add the shared helper and refactor the existing damage function.
+   (1) ✏️ crates/core/shell/src/shell/component/shell_component.rs
+   (1) 💬 Now update `collect_child_surface_requests` to compute padding and populate new request fields.
+   (1) ✏️ crates/core/shell/src/shell/component/shell_component.rs
+   (1) 💬 Now update `paint_child_surface` to offset painting by the padding:
+   (1) ✏️ crates/core/shell/src/shell/component/shell_component.rs
+   (1) 💬 Now update the `ChildSurfaceRequest` struct definition in frontend/host:
+   (1) ✏️ crates/core/frontend/host/src/lib.rs
+   (1) 💬 Now update the render.rs consumer logic to use padded surface size for buffer/popup creation, true content size + offset for input region, and compensate the positioner offset.
+   (1) 📖 crates/core/shell/src/shell/runtime/render.rs (line 499)
+   (1) ✏️ crates/core/shell/src/shell/runtime/render.rs
+   (1) 💻 grep -n "struct ChildSurface" -A 20 crates/core/shell/src/shell/types.rs
+   (1) ✏️ crates/core/shell/src/shell/types.rs
+   (1) 💬 Now find the `ChildSurface { ... }` construction site and the closing-branch width/height usage in render.rs to update.
+   (1) 💻 grep -n "ChildSurface {" -A 6 crates/core/shell/src/shell/runtime/render.rs
+   (1) ✏️ crates/core/shell/src/shell/runtime/render.rs
+   (1) 💬 Now check the tests.rs construction of `ChildSurface` if any (search).
+   (1) 💻 grep -rn "ChildSurface {" crates/core/shell/src/shell/tests.rs
+   (1) 📖 crates/core/shell/src/shell/tests.rs (line 5115)
+   (1) ✏️ crates/core/shell/src/shell/tests.rs
+   (1) 💬 Now update the closing branch in render.rs and `paint_and_present_child_surface`'s input-region logic to use content_size/content_offset instead of full width/height.
+   (1) 📖 crates/core/shell/src/shell/runtime/render.rs (line 570)
+   (1) 💬 That already uses `known_surface_size` which we now store as the padded `surface_size`, so it stays consistent. Now update the input region logic inside `paint_and_present_child_surface`:
+   (1) 📖 crates/core/shell/src/shell/runtime/render.rs (line 613)
+   (1) 📖 crates/core/shell/src/shell/runtime/render.rs (line 686)
+   (1) ✏️ crates/core/shell/src/shell/runtime/render.rs
+   (1) 💻 grep -n "struct DamageRect" -A 8 crates/core/frontend/render/src/*.rs crates/core/frontend/render/src/**/*.rs 2>/dev/null
+   (1) 💬 Good, all `u32` — matches. Now let's build to catch remaining issues.
+   (1) 💻 cargo build -p mesh-core-shell -p mesh-core-frontend-host 2>&1 | tail -150
+   (1) 💻 which nix 2>&1; ls flake.nix shell.nix 2>&1
+   (1) 💻 nix develop --command cargo build -p mesh-core-shell -p mesh-core-frontend-host 2>&1 | tail -200
+   (1) 💬 Compiles cleanly (all warnings pre-existing). Now let's run the relevant tests.
+   (1) 💻 nix develop --command cargo test -p mesh-core-shell -- popover popup child_surface 2>&1 | tail -100
+   (1) 📖 crates/core/shell/src/shell/tests.rs (line 615)
+   (1) ✏️ crates/core/shell/src/shell/tests.rs
+   (1) 💻 nix develop --command cargo test -p mesh-core-shell -- popover popup child_surface 2>&1 | tail -100
+   (1) 💬 All relevant tests pass. Now let's add a focused test proving the padding/input-region behavior on a real shipped popover with a shadow, and run the full shell test suite to confirm no regressions.
+   (1) 💻 grep -n "open_popover_nodes_derive_child_surface_requests" -A 40 crates/core/shell/src/shell/component/shell_component.rs | head -60
+   (1) 💻 grep -n "fn keyed_node" -A 20 crates/core/shell/src/shell/component/shell_component.rs | head -30
+   (1) 💬 Now let's add a test that puts a box-shadow on a descendant and verifies padding/offset/input-region math.
+   (1) ✏️ crates/core/shell/src/shell/component/shell_component.rs
+   (1) 💻 nix develop --command cargo test -p mesh-core-shell popover_with_descendant_box_shadow 2>&1 | tail -30
+   (1) ✏️ crates/core/shell/src/shell/component/shell_component.rs
+   (1) ✏️ crates/core/shell/src/shell/component/shell_component.rs
+   (1) 💻 nix develop --command cargo test -p mesh-core-shell popover_with_descendant_box_shadow 2>&1 | tail -15
+   (1) 💻 nix develop --command cargo test -p mesh-core-shell 2>&1 | tail -40
+   (1) 💻 grep -rln "ChildSurfaceRequest" --include=*.rs crates/ | grep -v "shell/src\|frontend/host/src"
+   (1) 💬 No other consumers. Let's do a full workspace build to be safe.
+   (1) 💻 nix develop --command cargo build --workspace 2>&1 | tail -60
+   (1) 💬 Whole workspace builds cleanly. Now let's update `todo.md` to mark the item done with a summary, and write `SHARED_TASK_NOTES.md`.
+   (1) ✏️ todo.md
+   (1) ✍️ SHARED_TASK_NOTES.md
+   (1) 💬 ## Summary
+   (1) 💬 
+   (1) 💬 Implemented the todo.md item **"Buffer padding + input region for shadows"** for promoted `<popover>` → `xdg_popup` surfaces:
+   (1) 💬 
+   (1) 💬 - Added `popover_content_padding()` / `shadow_filter_extended_bounds()` in `crates/core/shell/src/shell/component/shell_component.rs`, reusing the existing shadow/blur damage-extent math (previously only used for present-damage tracking) to compute how much a popover's buffer needs to grow beyond its content box.
+   (1) 💬 - `ChildSurfaceRequest` (in `mesh-core-frontend-host`) gained `surface_size` (padded buffer size) and `content_offset` (padding origin), alongside the existing unpadded `content_size`.
+   (1) 💬 - The popup buffer, positioner size, and painted subtree now use the padded size/offset; the positioner's `offset` is compensated by `-content_offset` so anchored content doesn't visually shift; the Wayland input region is masked back down to the true content rect (mirroring the existing tooltip pattern), so clicks over the shadow padding pass through.
+   (1) 💬 - Added a unit test (`popover_with_descendant_box_shadow_pads_surface_and_offsets_content`) verifying the padding math against `bubble-options.mesh`'s real shipped shadow values.
+   (1) 💬 
+   (1) 💬 Full workspace build and the `mesh-core-shell` suite (388 tests) pass. This wasn't visually verified against a live compositor (no Wayland session here) — noted as a caveat in both `todo.md` and `SHARED_TASK_NOTES.md` for the next iteration.
+
+💰 (1) Iteration cost: $4.255
+   Running total: $4.255
+✅ (1) Work completed
+💬 (1) Committing changes...
+Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.⚠️  (1) Commit command ran but changes still present (uncommitted or untracked files remain)
+❌ (1) PR workflow failed (1 consecutive errors)
+🔄 (2) Starting iteration...
+⚠️  (2) Already on iteration branch: continuous-claude/iteration-1/2026-07-02-3b38f51f
+🌿 (2) Creating branch: continuous-claude/iteration-2/2026-07-02-93872d5f
+🤖 (2) Running Claude Code...
+Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
+   (2) 💻 cat SHARED_TASK_NOTES.md 2>/dev/null | head -200; echo "---TODO---"; cat todo.md 2>/dev/null | head -400
+   (2) 💻 wc -l todo.md SHARED_TASK_NOTES.md; sed -n '1,300p' SHARED_TASK_NOTES.md
+   (2) 💬 No SHARED_TASK_NOTES.md exists yet. Let me read the full todo.md to find the next unchecked item to tackle.
+   (2) 📖 todo.md
+   (2) 💻 grep -n "fn paint" crates/core/shell/src/shell/component/shell_component.rs | head -20
+   (2) 📖 crates/core/shell/src/shell/component/shell_component.rs (line 400)
+   (2) 📖 crates/core/shell/src/shell/component/shell_component.rs (line 850)
+   (2) 💬 I'll extract `compute_tooltip_state()` from the 480-line `paint()` function — the tooltip placement block is self-contained enough to pull out cleanly.
+   (2) 💻 grep -n "fn find_tooltip_by_key\|fn find_node_by_key\|fn find_node_bounds_by_key\|struct.*TooltipSettings\|fn refresh_tooltip_settings_from_theme" crates/core/shell/src/shell/component/shell_component.rs | head -20
+   (2) 💬 Now let me make the extraction:
+   (2) ✏️ crates/core/shell/src/shell/component/shell_component.rs
+   (2) 💬 Now add the extracted method. Let me find a good location near `refresh_tooltip_settings_from_theme`.
+   (2) 📖 crates/core/shell/src/shell/component/shell_component.rs (line 1290)
+   (2) 💬 I'll insert the new method right before `tooltip_fade_duration`.
+   (2) ✏️ crates/core/shell/src/shell/component/shell_component.rs
+   (2) 💻 grep -n "^use\|WidgetNode" crates/core/shell/src/shell/component/shell_component.rs | grep -i widgetnode | head -10
+   (2) 💬 Good, `WidgetNode` is already used elsewhere in this file so it's in scope. Now let's build to verify.
+   (2) 💻 cargo check -p mesh-core-shell 2>&1 | tail -80
+   (2) 💬 Needs `nix develop` per prior memory notes about this project's build environment.
+   (2) 💻 nix develop --command cargo check -p mesh-core-shell 2>&1 | tail -100
+   (2) 💬 Compiles clean, no new errors from the extraction (these are pre-existing warnings). Now let's run the relevant tests to be safe.
+   (2) 💻 nix develop --command cargo test -p mesh-core-shell --lib tooltip 2>&1 | tail -50
+   (2) 💬 All tooltip tests pass. Let's run the broader shell test suite to confirm no regressions against the known baseline (347 passed/7 known-failing per memory).
+   (2) 💻 nix develop --command cargo test -p mesh-core-shell --lib 2>&1 | tail -30
+   (2) 💬 All 387 tests pass, no regressions. Let me update the todo.md to reflect this progress.
+   (2) ✏️ todo.md
+   (2) ✍️ SHARED_TASK_NOTES.md
+   (2) 💬 Done for this iteration. Summary:
+   (2) 💬 
+   (2) 💬 - Extracted `compute_tooltip_state()` from the ~486-line `FrontendSurfaceComponent::paint()` (`crates/core/shell/src/shell/component/shell_component.rs`), pulling out the tooltip placement/opacity/slide-in logic and per-frame render hint calls into a self-contained method.
+   (2) 💬 - Verified with `nix develop --command cargo test -p mesh-core-shell --lib`: 387 passed, 0 failed — no regressions.
+   (2) 💬 - Updated `todo.md` to reflect partial completion, and wrote `SHARED_TASK_NOTES.md` pointing the next iteration at the remaining `paint_pixel_regions()` extraction (the four near-identical clear+paint call sites later in the same function) plus fallback candidates from the backlog.
+
+💰 (2) Iteration cost: $0.977
+   Running total: $5.232
+✅ (2) Work completed
+💬 (2) Committing changes...
+Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.⚠️  (2) Commit command ran but changes still present (uncommitted or untracked files remain)
+❌ (2) PR workflow failed (2 consecutive errors)
+🔄 (3) Starting iteration...
+⚠️  (3) Already on iteration branch: continuous-claude/iteration-1/2026-07-02-3b38f51f
+🌿 (3) Creating branch: continuous-claude/iteration-3/2026-07-02-abec8ded
+🤖 (3) Running Claude Code...
+Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
+   (3) 💻 cat SHARED_TASK_NOTES.md 2>/dev/null; echo "---TODO---"; cat todo.md 2>/dev/null | head -300
+   (3) 💻 wc -l todo.md; sed -n '300,700p' todo.md
+   (3) 💻 grep -rn "cancel_pending_popover_hide" --include=*.rs crates/ | head -30
+   (3) 💻 sed -n '1,120p' crates/core/shell/src/shell/runtime/wayland.rs
+   (3) 💻 grep -rn "PointerEventKind::Enter\|Enter =>" --include=*.rs crates/core/presentation/ | head -30
+   (3) 📖 crates/core/presentation/src/wayland_surface/handlers.rs (line 150)
+   (3) 💻 git log -1 --format=%H -- crates/core/presentation/src/wayland_surface/handlers.rs && git log --oneline -5 -- crates/core/presentation/src/wayland_surface/handlers.rs
+   (3) 💬 Good — that item is already fixed. Let me update todo.md to mark it done and check for other in-progress items to verify their real status before picking the next task.
+   (3) 💻 git log --oneline -20
+   (3) 💻 grep -rln '"kind": "component"' modules/ 2>/dev/null; find modules -iname "module.json" | xargs grep -l "component" 2>/dev/null
+   (3) 💬 Good, that item is done too. Let me update todo.md accordingly and mark that bullet complete, then look for a genuinely open item to work on next.
+   (3) 💻 cat modules/frontend/language-popover/module.json
+   (3) 💬 Confirmed done. Now let's update todo.md to reflect these two already-resolved items, then move on to picking a genuinely open task.
+   (3) ✏️ todo.md
+   (3) 📖 todo.md (line 185)
+   (3) 📖 todo.md (line 170)
+   (3) ✏️ todo.md
+   (3) ✏️ todo.md
+   (3) 🛠️ Agent
+   (3) 💬 I'll research this directly with grep/read rather than spawning an agent, since it's a focused investigation.
+   (3) 💬 While that investigates, let me look at another candidate: the smaller "cheap" dedup item for `service_name_from_interface`.
+   (3) 💻 grep -n "fn service_name_from_interface" -A15 crates/core/shell/src/shell/service.rs crates/core/runtime/scripting/src/context/proxy.rs
+   (3) 💻 grep -rn "input_region\|set_input_region" --include=*.rs crates/ | grep -v target
+   (3) 💻 grep -rln "dead.zone\|deadzone\|dead_zone" --include=*.rs crates/ | grep -v target
+   (3) 💬 Let me examine those key files in detail, plus find where tooltips call this and where popup buffers are created.
+   (3) 💻 sed -n '600,830p' crates/core/shell/src/shell/runtime/render.rs
+   (3) 💻 sed -n '1230,1300p' crates/core/presentation/src/wayland_surface/backend.rs
+   (3) 💻 grep -rn "reposition\|content_measured" crates/core/shell/src/shell/component/*.rs crates/core/presentation/src/wayland_surface/popup.rs 2>/dev/null | head -40
+   (3) 💬 Now let's find `content_input_size`, `TOOLTIP_OVERLAY_*`, and where the parent buffer padding is applied, plus popup buffer sizing/creation.
+   (3) 💻 grep -rln "reposition" crates/ ; echo ---; grep -rln "ChildSurfaceKind\|ChildSurface" crates/core/shell/src/shell/ | head
+   (3) 💻 grep -rn "content_input_size\|TOOLTIP_OVERLAY" --include=*.rs crates | grep -v target
+   (3) 💻 grep -rln "fn paint_child_surface\|content_measured\|measure_content_size" --include=*.rs crates | grep -v target
+   (3) 💻 grep -n "reposition\|PopupConfig\|content_measured\|measure_content_size" crates/core/shell/src/shell/runtime/render.rs | head -60
+   (3) 📖 crates/core/shell/src/shell/runtime/render.rs (line 440)
+   (3) 💻 sed -n '60,140p' crates/core/shell/src/shell/component/rendering.rs
+   (3) 💻 sed -n '1140,1180p' crates/core/shell/src/shell/component/shell_component.rs
+   (3) 💻 sed -n '70,115p' crates/core/shell/src/shell/component/rendering.rs
+   (3) 💻 grep -n "fn configure_popup" -A 60 crates/core/presentation/src/wayland_surface/backend.rs | head -100
+   (3) 💬 Good — content sizing and reposition are already implemented. So that todo bullet is also stale. Let me wait for the padding investigation agent before deciding what to implement.
+   (3) 💻 grep -n "fn reposition_popup" -A 20 crates/core/presentation/src/wayland_surface/backend.rs
+   (3) 💻 grep -n "fn paint_child_surface" -A 60 crates/core/shell/src/shell/component/shell_component.rs | head -100
+   (3) 💬 That's also already done. Let me update the todo for these two items too, then wait for the padding agent's findings.
+   (3) 💬 Now I understand `paint_child_surface` paints exactly to `bounds` (the node's content box, no padding). Let's confirm where `width`/`height` used for the child buffer come from (caller `paint_and_present_child_surface`) — trace back to where those are computed, and check `update_input_region` is only called for parent target, not child.
+   (3) 💻 grep -n "paint_and_present_child_surface\|fn.*child.*width\|children\[.*\]\.target\.\(width\|height\)\|struct ChildSurface\|content_measured_size\|fn find_node_bounds_by_key" crates/core/shell/src/shell/component/shell_component.rs | head -40
+   (3) ✏️ todo.md
+   (3) 💻 grep -rn "paint_and_present_child_surface(" crates/core/shell/src/shell/runtime/render.rs
+   (3) 💻 grep -rn "keyboard_focus_surface\|popup_parent_surface" crates/core/shell/src/shell/runtime/request.rs crates/core/shell/src/shell/types.rs | head -30
+   (3) 💻 sed -n '490,602p' crates/core/shell/src/shell/runtime/render.rs
+   (3) 💻 grep -n "fn present_surface_target" -A 5 crates/core/shell/src/shell/runtime/render.rs; echo ---; grep -n "TargetRef::Child\|is_parent\b" crates/core/shell/src/shell/runtime/render.rs
+   (3) 💻 sleep 30; echo done
+   (3) 💬 This confirms `request.content_size` (exact content, no padding) drives buffer size, popup config size, and `content_input_size()`. Let me check `request.content_size` origin and confirm the child branch never restricts input region beyond the whole-buffer default set at line ~671-679.
+   (3) 💻 grep -n "content_size" crates/core/shell/src/shell/component/composition.rs 2>/dev/null | head -20
+   (3) 💻 sed -n '840,860p' crates/core/shell/src/shell/runtime/render.rs
+   (3) 💬 I'll continue investigating other candidate items myself while the background agent works.
+   (3) 💻 grep -n "role=\"menu\"\|arrow.*nav\|ArrowDown\|ArrowUp" -ri crates/core/shell/src/shell/component/input/*.rs 2>/dev/null | head -20
+   (3) 💬 This confirms the whole `is_parent` block (opaque region, input region restriction, blur region) is gated on `is_parent` — child (popup) targets get none of that. So popups currently: no padding, no input region (whole buffer is input, but buffer == content anyway so it's moot), no alpha-specific handling noted (need to check buffer alpha/format). Let me check PixelBuffer alpha and `configure_popup`/xdg_popup surface creation for alpha compositing setup.
+   (3) 💻 sed -n '400,460p' crates/core/shell/src/shell/component/input/mod.rs
+   (3) 💻 grep -n "content_size" crates/core/shell/src/shell/component/shell_component.rs | head -20
+   (3) 💻 grep -n "fn configure_popup\|fn create_popup\|premultiplied\|Argb8888\|alpha" crates/core/presentation/src/wayland_surface/backend.rs | head -30
+   (3) 💻 grep -n "keyboard_focus_surface =" crates/core/shell/src/shell/runtime/*.rs
+   (3) 💬 Good — buffers are already Argb8888 (alpha-capable) universally, so the "needs an alpha buffer" note in the backlog item is likely already satisfied or trivially true. Let's check `measure_content_size` call at line 670 and where `content` (line 1804) comes from, to see if box-shadow bounds factor in.
+   (3) 💻 sed -n '640,690p' crates/core/shell/src/shell/component/shell_component.rs
+   (3) 💻 sed -n '1770,1810p' crates/core/shell/src/shell/component/shell_component.rs
+   (3) 🛠️ ToolSearch
+   (3) 💬 I'll just proceed with other investigation while waiting for the background agent notification.
+   (3) 💻 grep -n "fn build_positioner\|input_region\|set_input_region" crates/core/presentation/src/wayland_surface/*.rs | head -30
+   (3) 💻 grep -rn "update_input_region" crates/core/ | grep -v "backend.rs:1262"
+   (3) 💻 sed -n '620,810p' crates/core/shell/src/shell/runtime/render.rs
+   (3) 💻 grep -rn "TOOLTIP_OVERLAY\|content_input_size\|fn measure_content_size\b" crates/core/shell/src/shell/component/*.rs crates/core/interaction/src/*.rs 2>/dev/null | head -40
+   (3) 💬 Confirmed: `content_size = (node.layout.width, node.layout.height)` — the popover's laid-out box dimensions exactly, no box-shadow/overshoot padding at all. Any `box-shadow` on the popover will be clipped by the buffer bounds. I have everything needed. Let me write the report.
+   (3) 💬 
+   (3) 💬 ## Report
+   (3) 💬 
+   (3) 💬 **1. Existing tooltip pattern (buffer padding + input region masking)**
+   (3) 💬 
+   (3) 💬 - Padding constants & inflation math: `crates/core/shell/src/shell/component.rs:65-66` (`TOOLTIP_OVERLAY_WIDTH = 240`, `TOOLTIP_OVERLAY_HEIGHT = 80`); `tooltip_overlay_extra_for_content()` in `crates/core/shell/src/shell/component/rendering.rs:88-105` computes extra w/h added to the content box.
+   (3) 💬 - Padding is folded into the parent surface's buffer/configure size elsewhere in `shell_component.rs` (e.g. line 544, 1620-1621 reference the same constants for surface sizing).
+   (3) 💬 - Content-only rect exposed for input restriction: `ShellComponent::content_input_size()` — trait default at `crates/core/frontend/host/src/lib.rs:364`; real impl at `crates/core/shell/src/shell/component/shell_component.rs:1168-1174`, returning `self.last_surface_size` (the true content size, *not* the tooltip-inflated surface size).
+   (3) 💬 - Consumer that actually restricts the Wayland input region: `crates/core/shell/src/shell/runtime/render.rs:778-802` inside `present_surface_target`, gated `if visible && is_parent`. It computes opaque region, then calls `content_input_size()` and if present calls `self.presentation_engine.update_input_region(&surface_id, Some(DamageRect{0,0,content_w,content_h}))`.
+   (3) 💬 - Presentation-layer primitive: `crates/core/presentation/src/lib.rs:294-297` (`PresentationEngine::update_input_region`) forwards to `crates/core/presentation/src/wayland_surface/backend.rs:1262-1282` (`update_input_region`), which calls `wl_surface.set_input_region(...)` or `None` to reset to whole-surface input.
+   (3) 💬 
+   (3) 💬 **2. Popup (xdg_popup) buffer sizing today**
+   (3) 💬 
+   (3) 💬 - Popover content size is computed with zero padding: `crates/core/shell/src/shell/component/shell_component.rs:1793-1796` in `collect_child_surface_requests` — `content = (node.layout.width.ceil(), node.layout.height.ceil())`, the exact CSS-measured box, no shadow/overshoot allowance.
+   (3) 💬 - That `content_size` flows straight through: surface width/height (`render.rs:512-513`), `PopupConfig.placement.size` (`render.rs:516-522`), and the paint buffer's physical dims in `paint_and_present_child_surface` (`render.rs:602-624`, using `width`/`height` params = `content_size.max(1)`).
+   (3) 💬 - Paint itself (`paint_child_surface`, `shell_component.rs:1116-1150`) paints the node at `bounds` (its own layout position) into a buffer sized exactly to that content — no margin for `box-shadow`/glow/overshoot, so any shadow gets hard-clipped at the buffer edge.
+   (3) 💬 - Input region: `present_surface_target`'s region-setting block (`render.rs:778`) is `is_parent`-only; child (`TargetRef::Child`) targets never call `update_input_region`, so popups fall back to whole-buffer input by default (`set_input_region(None)`). Currently harmless only because buffer == content; once padding is added, the whole padded buffer would become click-through-blocking dead space unless input region is explicitly restricted like the tooltip case.
+   (3) 💬 - Buffer format: already `Argb8888` for all surfaces (`crates/core/presentation/src/wayland_surface/backend.rs:298`, `505`), i.e. popups already composite with alpha — the "needs an alpha buffer" note in the backlog is already satisfied; no format change needed.
+   (3) 💬 
+   (3) 💬 **3. Answer**
+   (3) 💬 
+   (3) 💬 Popup buffers are sized exactly to content — no shadow padding exists today, so `box-shadow`/glow on a promoted `<popover>` is currently clipped. No input region is set for child/popup targets at all (defaults to whole-surface input), which today is a no-op since buffer==content, but would become a real dead-zone bug the moment padding is added.
+   (3) 💬 
+   (3) 💬 **4. Scoping assessment**
+   (3) 💬 
+   (3) 💬 Well-scoped, buildable in one pass, and directly mirrors the parent/tooltip pattern — no new primitives needed (`update_input_region` already accepts arbitrary surface_id + rect). Concrete changes:
+   (3) 💬 
+   (3) 💬 - Add a popover-specific overlay-padding constant/helper analogous to `tooltip_overlay_extra_for_content` (or reuse a general one), likely based on max `box-shadow` blur+spread+offset rather than a fixed 240x80 — needs a way to read the popover node's shadow extent from `computed_style` (check if `mesh-core-elements` computed style already exposes box-shadow blur/spread; if not, a conservative fixed pad like the tooltip case is the minimal-risk fallback).
+   (3) 💬 - In `collect_child_surface_requests` (`shell_component.rs:1793-1796`): inflate `content_size` by the padding, and record the *unpadded* content rect + offset (top-left inset) somewhere reachable per-child (e.g. a new field on `ChildSurfaceTarget`/`ChildSurfaceRuntime`, paralleling `last_surface_size` for parents).
+   (3) 💬 - In `paint_child_surface` (`shell_component.rs:1116-1150`): offset painting by the padding inset so content still lands correctly inside the larger buffer (adjust the `-bounds.0, -bounds.1` translate by `+pad_x, +pad_y`).
+   (3) 💬 - In `present_surface_target`'s region block (`render.rs:778`): extend the `is_parent` branch (or add a parallel child branch) to also call `update_input_region` for `TargetRef::Child` using the popover's unpadded content rect offset by the padding.
+   (3) 💬 - No presentation-layer or alpha-format changes required — `update_input_region`/`set_input_region` and Argb8888 buffers already exist and are generic over surface id.
+   (3) 💬 
+   (3) 💬 Main open question before implementing: whether to size padding from actual computed `box-shadow` extent (correct, but requires checking if that's exposed) or reuse a fixed constant like the tooltip's 240x80 (simpler, matches "reuse the tooltip pattern" wording in the backlog item, but wastes buffer memory / may still clip large shadows).
+   (3) 💻 grep -n "TOOLTIP_OVERLAY_WIDTH\|TOOLTIP_OVERLAY_HEIGHT" -r crates/core/shell/src/ | grep "const\|="  | head
+   (3) 💻 grep -n "box_shadow\|BoxShadow" crates/core/ui/elements/src/style.rs | head -20
+   (3) 💻 grep -n "pub struct BoxShadow\|box_shadow:" crates/core/ui/elements/src/style.rs | head -10
+   (3) 💻 grep -rn "struct BoxShadow\|pub box_shadow" crates/core/ui/elements/src/ | head -10
+   (3) 💬 Computed style already exposes real box-shadow geometry. Let's implement padding based on actual measured box-shadow extent, mirroring the tooltip pattern. Let me look at the relevant code sections in detail.
+   (3) 💻 sed -n '1230,1270p' crates/core/ui/elements/src/style/types.rs
+   (3) 💻 grep -n "struct ChildSurfaceRequest\|collect_child_surface_requests\|fn paint_child_surface" crates/core/shell/src/shell/component/shell_component.rs
+   (3) 📖 
+   (3) 📖 crates/core/shell/src/shell/component/shell_component.rs (line 1080)
+   (3) 📖 crates/core/shell/src/shell/component/shell_component.rs (line 1760)
+   (3) 💻 grep -rn "box-shadow" modules/frontend/language-popover/src/*.mesh modules/frontend/theme-selector/src/*.mesh modules/frontend/*/src/components/*.mesh 2>/dev/null
+   (3) 💻 grep -rln "box-shadow" modules/frontend/ | head -20
+   (3) 💻 grep -n "box-shadow\|<popover" -B3 -A3 modules/frontend/shared/components/bubble-options.mesh
+   (3) 💻 grep -n "<popover\|box-shadow\|shadow" modules/frontend/language-popover/src/main.mesh
+   (3) 💻 sed -n '1,60p' modules/frontend/language-popover/src/main.mesh
+   (3) 💻 grep -n "fn visual_damage_rect_for_widget_node\|fn.*shadow.*extent\|shadow_padding\|fn visual_overflow" -r crates/core/ | head -20
+   (3) 📖 crates/core/shell/src/shell/component/shell_component.rs (line 1690)
+   (3) 💻 grep -n "fn find_node_bounds_by_key\|fn offset_widget_tree_layout" -A20 crates/core/shell/src/shell/component/shell_component.rs | head -60
+   (3) 💻 grep -rn "fn find_node_bounds_by_key" crates/core/
+   (3) 📖 crates/core/ui/interaction/src/hit_test.rs (line 1)
+   (3) 💻 grep -rn "layout.x +=\|bake.*offset\|absolute layout\|fn finalize_tree" crates/core/shell/src/shell/component/*.rs | head -20
+   (3) 💻 grep -n "struct ChildSurfaceRequest\|enum ChildSurfaceKind\|struct ChildSurface\b\|struct SurfaceTarget" -A15 crates/core/shell/src/shell/types.rs crates/core/frontend/host/src/lib.rs
+   (3) 💻 grep -n "fn build_positioner" -A 60 crates/core/presentation/src/wayland_surface/backend.rs | head -80
+   (3) 📖 crates/core/shell/src/shell/types.rs
+   (3) 💻 grep -rn "content_size" crates/core/shell/src/shell/component/shell_component.rs crates/core/shell/src/shell/runtime/render.rs crates/core/shell/src/shell/tests.rs crates/core/frontend/host/src/lib.rs | head -40
+   (3) 📖 crates/core/shell/src/shell/component/shell_component.rs (line 1704)
+   (3) 💬 Now let's refactor to extract the shared float bounds computation, then add the popover overflow-padding helper and wire everything through.
+   (3) ✏️ crates/core/shell/src/shell/component/shell_component.rs
+   (3) 💬 Now update `collect_child_surface_requests` and `paint_child_surface` to use padding:
+   (3) 📖 crates/core/shell/src/shell/component/shell_component.rs (line 1848)
+   (3) ✏️ crates/core/shell/src/shell/component/shell_component.rs
+   (3) 💬 Now update `paint_child_surface` to accept and apply the padding offset:
+   (3) 📖 crates/core/shell/src/shell/component/shell_component.rs (line 1116)
+   (3) 💻 grep -n "fn paint_child_surface" crates/core/frontend/host/src/lib.rs
+   (3) 📖 crates/core/frontend/host/src/lib.rs (line 375)
+   (3) ✏️ crates/core/frontend/host/src/lib.rs
+   (3) 💬 Now check the `ChildSurfaceRequest` struct field addition:
+   (3) 📖 crates/core/frontend/host/src/lib.rs (line 14)
+   (3) ✏️ crates/core/frontend/host/src/lib.rs
+   (3) 💬 Now update the `paint_child_surface` impl in shell_component.rs:
+   (3) ✏️ crates/core/shell/src/shell/component/shell_component.rs
+   (3) 💬 Now let's update the ChildSurface struct to store the padding, and the render.rs reconciliation/paint code:
+   (3) ✏️ crates/core/shell/src/shell/types.rs
+   (3) 💬 Now find all places constructing `ChildSurface { ... }` to add the new field:
+   (3) 💻 grep -rn "ChildSurface {" crates/core/shell/src/
+   (3) 📖 crates/core/shell/src/shell/runtime/render.rs (line 460)
+   (3) ✏️ crates/core/shell/src/shell/runtime/render.rs
+   (3) 💬 Now let's update the sizing/placement math to include padding:
+   (3) ✏️ crates/core/shell/src/shell/runtime/render.rs
+   (3) 💬 Now let's find `paint_and_present_child_surface` to pass content_offset and set the input region for the child:
+   (3) 💻 grep -n "fn paint_and_present_child_surface" -A 90 crates/core/shell/src/shell/runtime/render.rs | head -110
+   (3) ✏️ crates/core/shell/src/shell/runtime/render.rs
+   (3) 💻 grep -n "fn paint_frontend_tree_at_for_module" -A 15 crates/core/frontend/render/src/*.rs crates/core/frontend/render/src/**/*.rs 2>/dev/null
+   (3) ✏️ crates/core/shell/src/shell/runtime/render.rs
+   (3) 💬 Now update the test-only `ChildSurface` construction in tests.rs:
+   (3) 📖 crates/core/shell/src/shell/tests.rs (line 5110)
+   (3) ✏️ crates/core/shell/src/shell/tests.rs
+   (3) 💬 Now let's find other `ChildSurfaceRequest` constructions and `paint_child_surface` call sites/impls (e.g. test mocks implementing ShellComponent trait) that need updates:
+   (3) 💻 grep -rn "ChildSurfaceRequest {" crates/ ; echo ---; grep -rn "fn paint_child_surface" crates/
+   (3) 📖 
+   (3) 📖 crates/core/shell/src/shell/tests.rs (line 610)
+   (3) ✏️ crates/core/shell/src/shell/tests.rs
+   (3) 💬 Now let's check the shell_component.rs test asserting `requests[0].content_size` to see if it also needs `content_padding` assertion, and then build.
+   (3) 💻 cargo build -p mesh-core-shell -p mesh-core-frontend-host -p mesh-core-presentation 2>&1 | tail -100
+   (3) 💻 which nix 2>/dev/null; cat .envrc 2>/dev/null | head
+   (3) 💻 timeout 590 nix develop --command cargo build -p mesh-core-shell -p mesh-core-frontend-host -p mesh-core-presentation 2>&1 | tail -150
+   (3) 💬 Build succeeds (these warnings are pre-existing, unrelated to this change). Now let's run the relevant test suite.
+   (3) 💻 timeout 590 nix develop --command cargo test -p mesh-core-shell child_surface 2>&1 | tail -80
+   (3) 💬 All relevant tests pass. Now let's add a focused regression test proving the padding/offset/input-region behavior. Let's look at how existing tests exercise `collect_child_surface_requests` / `open_popover_nodes_derive_child_surface_requests`.
+   (3) 💻 grep -n "fn open_popover_nodes_derive_child_surface_requests" -A 40 crates/core/shell/src/shell/component/shell_component.rs | head -60
+   (3) 💻 grep -n "fn keyed_node" -A 25 crates/core/shell/src/shell/component/shell_component.rs | head -30
+   (3) 💬 Now let's add a regression test verifying padding derives correctly when a descendant has a box-shadow that overshoots the popover's own box.
+   (3) 📖 crates/core/shell/src/shell/component/shell_component.rs (line 2223)
+   (3) ✏️ crates/core/shell/src/shell/component/shell_component.rs
+   (3) 💻 timeout 590 nix develop --command cargo test -p mesh-core-shell popover_with_descendant_box_shadow -- --nocapture 2>&1 | tail -40
+   (3) ✏️ crates/core/shell/src/shell/component/shell_component.rs
+   (3) 💻 timeout 590 nix develop --command cargo test -p mesh-core-shell popover 2>&1 | tail -30
+   (3) 💬 All passing. Now let's run the full shell test suite plus the broader workspace to check nothing else broke.
+   (3) 💻 timeout 590 nix develop --command cargo test -p mesh-core-shell 2>&1 | tail -50
+   (3) 💬 All 388 tests pass. Let's build the whole workspace to make sure nothing else references the changed signatures.
+   (3) 💻 timeout 590 nix develop --command cargo build --workspace 2>&1 | tail -60
+   (3) 💬 Workspace builds cleanly. Now let's update the todo.md to mark this item done, with a concise description.
+   (3) ✏️ todo.md
+   (3) 💬 Now let's write the SHARED_TASK_NOTES.md for the next iteration.
+   (3) ✍️ SHARED_TASK_NOTES.md
+   (3) 💬 ## Summary
+   (3) 💬 
+   (3) 💬 This iteration worked from `todo.md`'s popover-promotion backlog:
+   (3) 💬 
+   (3) 💬 1. **Audited stale checkboxes** — found and verified three items already implemented by earlier commits but still marked open (pointer-enter hover-bridge fix, embeddable-component manifest shape, popup content sizing/reposition), updated `todo.md` with citations.
+   (3) 💬 
+   (3) 💬 2. **Implemented the one genuinely open item**: popup buffer padding + input-region masking for shadows. Popover popup buffers were sized exactly to content, clipping any `box-shadow`/`filter` overshoot (including from descendant nodes like floating bubble buttons), and no Wayland input region was set for popups. Fixed by extracting a shared shadow/filter-overflow helper from the existing damage-rect code, computing per-popover padding across the whole subtree, inflating the popup buffer/positioner accordingly (with offset compensation so visible content stays anchored), and restricting the input region to the true content rect — mirroring the existing parent-surface tooltip pattern.
+   (3) 💬 
+   (3) 💬 3. Added a regression test, ran the full `mesh-core-shell` suite (388 passed) and a full workspace build under `nix develop` — all green.
+   (3) 💬 
+   (3) 💬 4. Wrote `SHARED_TASK_NOTES.md` with a caveat for the next iteration: verify checkbox state against the code before starting, since the backlog has accumulated stale entries.
+
+💰 (3) Iteration cost: $5.560
+   Running total: $10.792
+✅ (3) Work completed
+💬 (3) Committing changes...

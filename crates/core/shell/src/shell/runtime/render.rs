@@ -481,6 +481,7 @@ impl Shell {
                     target,
                     node_key: request.node_key.clone(),
                     anchor_rect: request.anchor_rect,
+                    content_padding: request.content_padding,
                     closing_until: None,
                 });
                 self.rebuild_component_surface_index();
@@ -491,12 +492,26 @@ impl Shell {
                 unreachable!("child reconcile only creates child targets");
             };
             self.components[index].children[child_index].anchor_rect = request.anchor_rect;
+            self.components[index].children[child_index].content_padding =
+                request.content_padding;
             if self
                 .presentation_engine
                 .surface_waiting_for_frame_callback(&child_surface_id)
             {
                 continue;
             }
+
+            // The buffer is padded (pad_left/top/right/bottom) beyond the
+            // measured popover content so descendant `box-shadow`/`filter`
+            // overshoot has pixels to paint into instead of clipping at the
+            // buffer edge; the positioner offset is shifted back by the
+            // leading padding so the *visible* content stays anchored where
+            // it would land with a zero-padding buffer.
+            let (pad_left, pad_top, pad_right, pad_bottom) = request.content_padding;
+            let padded_size = (
+                request.content_size.0 + pad_left + pad_right,
+                request.content_size.1 + pad_top + pad_bottom,
+            );
 
             self.core
                 .surfaces
@@ -511,18 +526,21 @@ impl Shell {
                 });
             let surface = self.surfaces.entry(child_surface_id.clone()).or_default();
             surface.visible = true;
-            surface.width = request.content_size.0.max(1);
-            surface.height = request.content_size.1.max(1);
+            surface.width = padded_size.0.max(1);
+            surface.height = padded_size.1.max(1);
 
             let popup_config = PopupConfig {
                 parent_surface_id: parent_surface_id.to_string(),
                 placement: PopupPlacement {
                     anchor_rect: request.anchor_rect,
-                    size: request.content_size,
+                    size: padded_size,
                     anchor: map_popover_anchor(request.placement.anchor),
                     gravity: map_popover_gravity(request.placement.gravity),
                     constraint: map_popover_constraint(request.placement.constraint_adjustment),
-                    offset: (request.placement.offset_x, request.placement.offset_y),
+                    offset: (
+                        request.placement.offset_x - pad_left as i32,
+                        request.placement.offset_y - pad_top as i32,
+                    ),
                 },
                 grab: request.placement.grab == PopoverGrab::Click,
                 grab_serial: None,
@@ -531,9 +549,9 @@ impl Shell {
             {
                 let child = &mut self.components[index].children[child_index];
                 child.target.popup_config = Some(popup_config.clone());
-                child.target.known_surface_size = Some(request.content_size);
-                if child.target.last_popup_size != Some(request.content_size) {
-                    child.target.last_popup_size = Some(request.content_size);
+                child.target.known_surface_size = Some(padded_size);
+                if child.target.last_popup_size != Some(padded_size) {
+                    child.target.last_popup_size = Some(padded_size);
                 }
             }
             if let Err(error) = self
@@ -545,8 +563,8 @@ impl Shell {
                 continue;
             }
 
-            let width = request.content_size.0.max(1);
-            let height = request.content_size.1.max(1);
+            let width = padded_size.0.max(1);
+            let height = padded_size.1.max(1);
             let presented = self.paint_and_present_child_surface(
                 index,
                 child_index,
@@ -651,6 +669,12 @@ impl Shell {
             }
         }
 
+        let (pad_left, pad_top, pad_right, pad_bottom) =
+            self.components[index].children[child_index].content_padding;
+        // `paint_child_surface`'s offset is in the same logical layout units
+        // as `-bounds.0`/`-bounds.1` (the renderer applies `scale` to layout
+        // + offset together), so this is unscaled padding, not physical px.
+        let content_offset = (pad_left, pad_top);
         let painted = {
             let runtime = &mut self.components[index];
             let buffer = runtime.children[child_index]
@@ -660,7 +684,7 @@ impl Shell {
                 .expect("child paint buffer initialised");
             runtime
                 .component
-                .paint_child_surface(&node_key, buffer, scale, exiting)
+                .paint_child_surface(&node_key, buffer, scale, content_offset, exiting)
                 .map_err(ShellRunError::Component)?
         };
         if !painted {
@@ -670,15 +694,18 @@ impl Shell {
         self.components[index].children[child_index]
             .target
             .force_full_present = true;
+        // Restrict pointer input to the true (unpadded) content rect, same
+        // pattern as the parent tooltip surface: the padding exists so
+        // shadow/filter overshoot can paint, not to receive input.
         self.presentation_engine.update_input_region(
             &self.components[index].children[child_index]
                 .target
                 .surface_id,
             Some(DamageRect {
-                x: 0,
-                y: 0,
-                width,
-                height,
+                x: pad_left,
+                y: pad_top,
+                width: width.saturating_sub(pad_left + pad_right),
+                height: height.saturating_sub(pad_top + pad_bottom),
             }),
         );
         match self.present_surface_target(

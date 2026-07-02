@@ -174,13 +174,14 @@ surface.
       popups and legacy promoted popover modules. Remaining: migrate audio once
       drag/capture state is represented in core, then broaden the exclusivity
       policy beyond same-trigger siblings if needed.
-      Follow-up 2026-06-24: language/theme options can still close while the
-      pointer crosses into the promoted popup. Likely cause: Wayland
-      `PointerEventKind::Enter` updates backend pointer focus but does not emit
-      a shell-visible `WindowEvent`, so pending hover-bridge hide cancellation
-      depends on a later `PointerMove`. Planned fix: emit a `PointerMove`
-      equivalent on pointer enter for the popup surface so
-      `cancel_pending_popover_hide` runs immediately.
+      Follow-up 2026-06-24, fixed same day (`2425c33a`): language/theme
+      options were closing while the pointer crossed into the promoted popup
+      because `PointerEventKind::Enter` updated backend pointer focus but did
+      not emit a shell-visible `WindowEvent`, so pending hover-bridge hide
+      cancellation depended on a later `PointerMove`. Fix landed: layer-shell
+      `Enter` now also pushes a synthetic `PointerMove` at the entry
+      coordinates (`presentation/src/wayland_surface/handlers.rs:239-244`),
+      so `cancel_pending_popover_hide` runs immediately on entry.
 - [x] **Grab vs hover nuance.** An xdg_popup grab requires a recent input
       _serial_ (a click) — so grabbed (click-to-dismiss-outside) popups can't be
       opened by pure hover. Decide per popover: hover-open menus stay no-grab (core
@@ -188,15 +189,41 @@ surface.
       `docs/frontend/elements.md` and `docs/frontend/mesh-syntax.md`; the Rust
       `PopoverGrab` contract already enforces `Hover` as the default and maps
       `grab="click"` to compositor grab requests.
-- [ ] **Buffer padding + input region for shadows.** Popup buffer must include
-      padding for `box-shadow`/float animation overshoot, and the input region must
-      exclude that padding — reuse the tooltip buffer-padding / input-region masking
-      pattern (see Tooltip input dead-zone work). Needs an alpha buffer (popups,
-      like layer surfaces, already composite with alpha).
-- [ ] **Content sizing + reposition.** Reuse `content_measured` to size the
-      popup from the measured `<popover>` subtree; use `xdg_popup.reposition`
-      (xdg_wm_base v3+) when the anchor moves (output/exclusive-zone change). Note
-      the v3 requirement and the configure→ack→paint sequencing.
+- [x] **Buffer padding + input region for shadows.** Done 2026-07-02. Popup
+      buffers were sized exactly to the popover's laid-out content box
+      (`collect_child_surface_requests`, `shell_component.rs`), so any
+      `box-shadow`/`filter` overshoot on the popover or its descendants (e.g.
+      a floating bubble button's shadow) was hard-clipped at the buffer edge,
+      and no input region was ever set for child/popup targets (harmless only
+      because buffer == content). Alpha buffers were already in place
+      (`Argb8888` everywhere), so no format change was needed — this was
+      purely the geometry/input-region gap.
+      Fix: `node_visual_bounds` extracted from the existing damage-rect shadow
+      math (`visual_damage_rect_for_widget_node`) as a shared, unclipped f32
+      helper; new `subtree_visual_bounds`/`popover_content_padding` walk the
+      *whole* popover subtree (not just the popover node's own style) and
+      return per-side padding so a shadow on any descendant is covered.
+      `ChildSurfaceRequest`/`ChildSurface` carry `content_padding` through to
+      `reconcile_child_surfaces` (`shell/runtime/render.rs`), which inflates
+      the popup buffer/surface size by the padding, shifts the `xdg_positioner`
+      offset back by the leading padding so the *visible* content stays
+      anchored exactly where it would land unpadded, and
+      `paint_and_present_child_surface` now sets the child's Wayland input
+      region to the true (unpadded) content rect — mirroring the existing
+      parent/tooltip `content_input_size()` pattern — so clicks over the
+      shadow padding pass through instead of hitting a dead zone. `paint_child_surface`
+      gained a `content_offset` param so painting still lands the unpadded
+      content at the right spot inside the larger buffer. Test:
+      `popover_with_descendant_box_shadow_gets_buffer_padding`
+      (`shell_component.rs`). Full `mesh-core-shell` suite (388 tests) and
+      workspace build pass.
+- [x] **Content sizing + reposition.** Done: `reconcile_child_surfaces`
+      (`shell/runtime/render.rs:512-559`) sizes each popup from
+      `request.content_size` (the measured `<popover>` subtree) every frame,
+      and `PresentationEngine::configure_popup` (`presentation/src/wayland_surface/backend.rs:834-843`)
+      repositions an existing popup via `xdg_popup.reposition` instead of
+      recreating it (`reposition_popup`, `backend.rs:948-963`) so anchor moves
+      (output/exclusive-zone change) don't tear the popup down.
 - [ ] **Keyboard/focus + a11y across the surface boundary.** `role="menu"`,
       arrow-key option nav, and focus traversal must cross from parent surface into
       the popup (via grab or parent keyboard routing). Lifecycle: Wayland
@@ -207,7 +234,11 @@ surface.
       inside MESH's `wlr-layer-shell-v1` compatibility constraint; recorded as a
       known non-goal boundary in `docs/frontend/elements.md` and
       `docs/frontend/mesh-syntax.md`.
-- [ ] **`module.json` rework — embeddable component, no surface geometry.**
+- [x] **`module.json` rework — embeddable component, no surface geometry.**
+      Done (`9305df00`, `35a045a1`): `language-popover` and `theme-selector`
+      both ship `mesh.kind: "component"` with no `mesh.surface` block at all
+      — confirmed by re-reading both `module.json` files 2026-07-02. Original
+      note below kept for the design rationale.
       An embeddable popover should not declare a `mesh.surface` block at all
       (no anchor/layer/width/height/min/max). Decide the manifest shape for "a
       module that exports an embeddable component consumed by another module":
