@@ -3081,7 +3081,14 @@ fn graph_diagnostics_skip_optional_missing_binary() {
 #[test]
 fn extract_icon_names_from_mesh_source_finds_static_names() {
     use super::installed_graph::extract_icon_names_from_mesh_source;
-    let src = r#"<icon name="audio-volume-high" size="24"/><icon name="battery-full"/>"#;
+    let src = r#"
+<template>
+  <row>
+    <icon name="audio-volume-high" size="24"/>
+    <icon name="battery-full"/>
+  </row>
+</template>
+"#;
     let names = extract_icon_names_from_mesh_source(src);
     assert!(names.contains(&"audio-volume-high".into()));
     assert!(names.contains(&"battery-full".into()));
@@ -3090,10 +3097,42 @@ fn extract_icon_names_from_mesh_source_finds_static_names() {
 #[test]
 fn extract_icon_names_ignores_dynamic_expressions() {
     use super::installed_graph::extract_icon_names_from_mesh_source;
-    let src = r#"<icon name="{icon_name}" /><icon name="audio-volume-muted"/>"#;
+    let src = r#"
+<template>
+  <row>
+    <icon name={icon_name} />
+    <icon name="audio-volume-muted"/>
+  </row>
+</template>
+"#;
     let names = extract_icon_names_from_mesh_source(src);
     assert!(!names.iter().any(|n| n.contains('{')));
     assert!(names.contains(&"audio-volume-muted".into()));
+}
+
+#[test]
+fn extract_icon_names_from_mesh_source_walks_control_flow_branches() {
+    use super::installed_graph::extract_icon_names_from_mesh_source;
+    let src = r#"
+<template>
+  @if muted
+    <icon name="audio-volume-muted"/>
+  @else
+    <icon name="audio-volume-high"/>
+  @endif
+  @for item in items
+    <icon name="battery-full"/>
+  @endfor
+</template>
+"#;
+    assert_eq!(
+        extract_icon_names_from_mesh_source(src),
+        vec![
+            "audio-volume-high".to_string(),
+            "audio-volume-muted".to_string(),
+            "battery-full".to_string(),
+        ]
+    );
 }
 
 #[test]

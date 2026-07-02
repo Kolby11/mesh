@@ -70,6 +70,8 @@ const TOOLTIP_OVERLAY_HEIGHT: u32 = 80;
 /// carrying this after each restyle pass (restyle re-resolves `computed_style`
 /// from CSS and would otherwise drop imperatively-set geometry).
 pub(super) const PROMOTED_POPOVER_MARKER: &str = "_mesh_promoted_popover";
+pub(super) const ERROR_PLACEHOLDER_MARKER: &str = "_mesh_error_placeholder";
+pub(super) const ERROR_PLACEHOLDER_MAX_WIDTH: f32 = 320.0;
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

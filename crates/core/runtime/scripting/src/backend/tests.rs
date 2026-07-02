@@ -640,6 +640,26 @@ fn bundled_backend_scripts_expose_required_host_api_surface() {
 }
 
 #[test]
+fn bundled_pulseaudio_backend_does_not_restore_high_frequency_exec_polling() {
+    let script = bundled_backend_script(
+        "../../../../packages/modules/backend/core/pulseaudio-audio/src/main.luau",
+    );
+    assert!(
+        script.contains("mesh.exec_stream(\"pactl\", { \"subscribe\" })"),
+        "PulseAudio should consume pactl's event stream instead of polling for every change"
+    );
+
+    let mut ctx = BackendScriptContext::new("@mesh/pulseaudio-audio");
+    ctx.load_script(&script).unwrap();
+    ctx.call_init().unwrap();
+
+    assert!(
+        ctx.poll_interval_ms() >= 250,
+        "PulseAudio fallback polling must stay at or above 250ms to avoid spawning two pactl processes every 100ms"
+    );
+}
+
+#[test]
 fn emit_json_accepts_explicit_string() {
     let mut ctx =
         BackendScriptContext::new_with_capabilities("@test/backend", ["exec.printf".into()]);

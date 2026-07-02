@@ -4,6 +4,7 @@ use super::{
     dependency_spec_to_string, parse_module_entrypoint, validate_relative_path,
 };
 use crate::manifest;
+use mesh_core_component::{AttributeValue, SourceTag, TemplateNode, parse_component};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -877,32 +878,58 @@ fn binary_package_hint(binary: &manifest::BinaryDependency) -> String {
 
 pub(crate) fn extract_icon_names_from_mesh_source(content: &str) -> Vec<String> {
     let mut names = Vec::new();
-    let mut remaining = content;
-    while let Some(start) = remaining.find("<icon") {
-        remaining = &remaining[start + 5..];
-        let tag_end = remaining.find('>').unwrap_or(remaining.len());
-        let tag = &remaining[..tag_end];
-        if let Some(name_pos) = tag.find("name=") {
-            let after = &tag[name_pos + 5..];
-            let close = if after.starts_with('"') {
-                '"'
-            } else if after.starts_with('\'') {
-                '\''
-            } else {
-                continue;
-            };
-            let value = &after[1..];
-            if let Some(end) = value.find(close) {
-                let name = &value[..end];
-                if !name.is_empty() && !name.contains('{') {
-                    names.push(name.to_string());
-                }
-            }
-        }
+    let Ok(component) = parse_component(content) else {
+        return names;
+    };
+    let Some(template) = component.template else {
+        return names;
+    };
+
+    for node in &template.root {
+        collect_icon_names_from_template_node(node, &mut names);
     }
     names.sort();
     names.dedup();
     names
+}
+
+fn collect_icon_names_from_template_node(node: &TemplateNode, names: &mut Vec<String>) {
+    match node {
+        TemplateNode::Element(element) => {
+            if element.tag_kind == SourceTag::Icon {
+                for attribute in &element.attributes {
+                    if attribute.name == "name"
+                        && let AttributeValue::Static(name) = &attribute.value
+                        && !name.is_empty()
+                    {
+                        names.push(name.clone());
+                    }
+                }
+            }
+            for child in &element.children {
+                collect_icon_names_from_template_node(child, names);
+            }
+        }
+        TemplateNode::If(node) => {
+            for child in &node.then_children {
+                collect_icon_names_from_template_node(child, names);
+            }
+            for child in &node.else_children {
+                collect_icon_names_from_template_node(child, names);
+            }
+        }
+        TemplateNode::For(node) => {
+            for child in &node.children {
+                collect_icon_names_from_template_node(child, names);
+            }
+        }
+        TemplateNode::Component(component) => {
+            for child in &component.children {
+                collect_icon_names_from_template_node(child, names);
+            }
+        }
+        TemplateNode::Text(_) | TemplateNode::Expr(_) | TemplateNode::Slot(_) => {}
+    }
 }
 
 pub(crate) fn extract_t_keys_from_mesh_source(content: &str) -> Vec<String> {

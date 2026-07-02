@@ -577,6 +577,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let effective_damage_rects = std::mem::take(&mut self.effective_damage_scratch);
         let mut effective_damage = select_effective_damage_rects(
             display_list_metrics,
+            self.retained_display_list.damage_rects(),
             surface_damage,
             requires_tree_rebuild,
             &visual_damage_rects,
@@ -1544,6 +1545,7 @@ fn select_effective_damage(
     let tooltip_damage = tooltip_damage.into_iter().collect::<Vec<_>>();
     select_effective_damage_rects(
         metrics,
+        &[],
         surface,
         requires_tree_rebuild,
         &extra_damage,
@@ -1554,6 +1556,7 @@ fn select_effective_damage(
 
 fn select_effective_damage_rects(
     metrics: DisplayListMetrics,
+    base_damage: &[DamageRect],
     surface: DamageRect,
     requires_tree_rebuild: bool,
     extra_damage: &[DamageRect],
@@ -1571,10 +1574,13 @@ fn select_effective_damage_rects(
         };
     }
 
-    let base_damage = (metrics.damage_area > 0).then_some(metrics.damage_rect);
     let has_extra_damage_sources = !extra_damage.is_empty() || !tooltip_damage.is_empty();
-    if let Some(base) = base_damage {
-        push_damage_rect(&mut rects, base, surface);
+    if base_damage.is_empty() {
+        if metrics.damage_area > 0 {
+            push_damage_rect(&mut rects, metrics.damage_rect, surface);
+        }
+    } else {
+        merge_damage_rects(&mut rects, base_damage.iter().copied(), surface);
     }
     merge_damage_rects(&mut rects, extra_damage.iter().copied(), surface);
     merge_damage_rects(&mut rects, tooltip_damage.iter().copied(), surface);
@@ -2581,6 +2587,7 @@ mod tests {
 
         let effective = select_effective_damage_rects(
             metrics,
+            &[],
             surface(100, 100),
             false,
             &[left, right],

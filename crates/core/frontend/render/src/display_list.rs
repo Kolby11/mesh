@@ -183,6 +183,7 @@ pub struct RetainedDisplayList {
     paint_commands: Arc<[DisplayPaintCommand]>,
     command_kinds: Arc<[DisplayPaintCommandKind]>,
     last_metrics: DisplayListMetrics,
+    last_damage_rects: Vec<DamageRect>,
 }
 
 impl Default for RetainedDisplayList {
@@ -198,6 +199,7 @@ impl Default for RetainedDisplayList {
             paint_commands: Vec::new().into(),
             command_kinds: Vec::new().into(),
             last_metrics: DisplayListMetrics::default(),
+            last_damage_rects: Vec::new(),
         }
     }
 }
@@ -823,6 +825,8 @@ impl RetainedDisplayList {
         };
 
         let mut damage: Option<DamageRect> = None;
+        let mut damage_rects = std::mem::take(&mut self.last_damage_rects);
+        damage_rects.clear();
         let mut reused = 0u64;
         let mut rebuilt = 0u64;
         for (key, next_entry) in &next {
@@ -832,10 +836,13 @@ impl RetainedDisplayList {
                     rebuilt = rebuilt.saturating_add(1);
                     damage = union_damage(damage, previous.bounds);
                     damage = union_damage(damage, next_entry.bounds);
+                    push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
+                    push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
                 }
                 None => {
                     rebuilt = rebuilt.saturating_add(1);
                     damage = union_damage(damage, next_entry.bounds);
+                    push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
                 }
             }
         }
@@ -845,6 +852,7 @@ impl RetainedDisplayList {
             if !next.contains_key(key) {
                 removed = removed.saturating_add(1);
                 damage = union_damage(damage, previous.bounds);
+                push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
             }
         }
 
@@ -855,6 +863,10 @@ impl RetainedDisplayList {
             damage.unwrap_or_default()
         };
         let damage_rect = clip_rect(damage_rect, surface).unwrap_or_default();
+        if full_surface_damage {
+            damage_rects.clear();
+            damage_rects.push(surface);
+        }
         let damage_area = damage_rect.area();
         let surface_area = surface.area();
         let skipped_paint_pixels = if partial_present_supported {
@@ -925,6 +937,7 @@ impl RetainedDisplayList {
             barrier_count: batch_metrics.barrier_count,
             barriers: batch_metrics.barriers,
         };
+        self.last_damage_rects = damage_rects;
         self.last_metrics
     }
 
@@ -940,6 +953,10 @@ impl RetainedDisplayList {
             DamageRect::default()
         };
         let damage_rect = clip_rect(damage_rect, surface).unwrap_or_default();
+        self.last_damage_rects.clear();
+        if force_full_damage {
+            self.last_damage_rects.push(surface);
+        }
         let damage_area = damage_rect.area();
         let surface_area = surface.area();
         let skipped_paint_pixels = if partial_present_supported {
@@ -992,6 +1009,10 @@ impl RetainedDisplayList {
 
     pub fn last_metrics(&self) -> DisplayListMetrics {
         self.last_metrics
+    }
+
+    pub fn damage_rects(&self) -> &[DamageRect] {
+        &self.last_damage_rects
     }
 
     pub fn paint_commands(&self) -> &[DisplayPaintCommand] {
@@ -1577,6 +1598,29 @@ fn union_damage_rects(damages: &[DamageRect]) -> Option<DamageRect> {
         width: max_x.saturating_sub(min_x),
         height: max_y.saturating_sub(min_y),
     })
+}
+
+fn push_sparse_damage_rect(rects: &mut Vec<DamageRect>, rect: DamageRect, surface: DamageRect) {
+    const MAX_RETAINED_DAMAGE_RECTS: usize = 16;
+
+    let Some(mut merged) = clip_rect(rect, surface) else {
+        return;
+    };
+    let mut index = 0;
+    while index < rects.len() {
+        if rects[index].intersects(merged) {
+            merged = rects.swap_remove(index).union(merged);
+            index = 0;
+        } else {
+            index += 1;
+        }
+    }
+    rects.push(merged);
+    if rects.len() > MAX_RETAINED_DAMAGE_RECTS {
+        let union = union_damage_rects(rects).expect("non-empty retained damage list");
+        rects.clear();
+        rects.push(union);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2673,6 +2717,34 @@ mod tests {
         assert_eq!(metrics.entries_rebuilt, 1);
         assert_eq!(metrics.damage_area, 1_000);
         assert_eq!(metrics.skipped_paint_pixels, 9_000);
+    }
+
+    #[test]
+    fn display_list_preserves_disjoint_changed_entry_damage_rects() {
+        let mut root = node(1, "row", 0.0, 0.0, 200.0, 40.0);
+        root.children.push(node(2, "box", 0.0, 0.0, 20.0, 20.0));
+        root.children.push(node(3, "box", 160.0, 0.0, 20.0, 20.0));
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 200, 40, false, true);
+
+        root.children[0].computed_style.background_color.r = 40;
+        root.children[1].computed_style.background_color.r = 50;
+        let metrics = list.update(&root, 200, 40, false, true);
+
+        assert_eq!(metrics.entries_rebuilt, 2);
+        assert_eq!(list.damage_rects().len(), 2);
+        assert!(list.damage_rects().contains(&DamageRect {
+            x: 0,
+            y: 0,
+            width: 20,
+            height: 20,
+        }));
+        assert!(list.damage_rects().contains(&DamageRect {
+            x: 160,
+            y: 0,
+            width: 20,
+            height: 20,
+        }));
     }
 
     #[test]

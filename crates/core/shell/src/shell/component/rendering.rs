@@ -395,6 +395,7 @@ impl FrontendSurfaceComponent {
         // a promoted (but hidden) popover's full-size subtree would lay out inline
         // and push its trigger row's siblings into overlap. Must run before layout.
         collapse_promoted_popover_wrappers(tree);
+        constrain_error_placeholders(tree);
 
         let layout_work_required = !reused_retained_layout || !self.layout_state.valid;
         // Enter the retained layout path on every finalized tree. On
@@ -591,6 +592,24 @@ fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
     }
     for child in &mut node.children {
         collapse_promoted_popover_wrappers(child);
+    }
+}
+
+/// Keeps generated component-error content from taking over its host layout.
+/// These constraints are shell-owned and must be restored after CSS restyling,
+/// just like promoted-popover geometry above.
+pub(super) fn constrain_error_placeholders(node: &mut WidgetNode) {
+    if node.attributes.contains_key(ERROR_PLACEHOLDER_MARKER) {
+        node.computed_style.min_width = Some(0.0);
+        node.computed_style.max_width = Some(ERROR_PLACEHOLDER_MAX_WIDTH);
+        node.computed_style.flex_shrink = 1.0;
+        node.computed_style.overflow_x = mesh_core_elements::style::Overflow::Hidden;
+        node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Hidden;
+        node.computed_style.white_space = mesh_core_elements::style::WhiteSpace::Nowrap;
+        node.computed_style.text_overflow = mesh_core_elements::style::TextOverflow::Ellipsis;
+    }
+    for child in &mut node.children {
+        constrain_error_placeholders(child);
     }
 }
 

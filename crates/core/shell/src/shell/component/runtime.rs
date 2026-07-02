@@ -346,13 +346,7 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn build_error_widget(&self, message: impl Into<String>) -> WidgetNode {
-        let message = message.into();
-        let mut node = WidgetNode::new("box");
-        let mut text = WidgetNode::new("text");
-        text.attributes.insert("content".into(), message.clone());
-        node.attributes.insert("content".into(), message);
-        node.children.push(text);
-        node
+        bounded_error_widget(message)
     }
 
     pub(super) fn ensure_local_component_runtime(
@@ -857,6 +851,20 @@ impl FrontendSurfaceComponent {
             "keybinds": keybinds,
         })
     }
+}
+
+pub(super) fn bounded_error_widget(message: impl Into<String>) -> WidgetNode {
+    let message = message.into();
+    let mut node = WidgetNode::new("box");
+    let mut text = WidgetNode::new("text");
+    text.attributes.insert("content".into(), message.clone());
+    text.attributes
+        .insert(ERROR_PLACEHOLDER_MARKER.into(), "true".into());
+    node.attributes.insert("content".into(), message);
+    node.attributes
+        .insert(ERROR_PLACEHOLDER_MARKER.into(), "true".into());
+    node.children.push(text);
+    node
 }
 
 fn insert_resolved_manifest_text(

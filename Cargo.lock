@@ -1759,6 +1759,7 @@ name = "mesh-core-module"
 version = "0.1.0"
 dependencies = [
  "mesh-core-capability",
+ "mesh-core-component",
  "mesh-core-elements",
  "mesh-core-theme",
  "serde",
