@@ -254,9 +254,14 @@ All five landed 2026-06-23 (single commit).
 ### Larger refactors (bigger diffs — best as separate reviewed PRs)
 
 - [ ] Split `FrontendSurfaceComponent::paint` (~486 lines,
-      `shell/component/shell_component.rs:365`). Extract at least
-      `compute_tooltip_state()` and `paint_pixel_regions()` (the clear+paint loop
-      repeats the same paint call three times). Hottest path in the system.
+      `shell/component/shell_component.rs:365`). `compute_tooltip_state()` extracted
+      2026-07-02 (tooltip placement/opacity/slide + per-frame render hints, ~80 lines
+      pulled out of the inline closure; `mesh-core-shell` full suite: 387 passed, 0
+      failed). Still open: `paint_pixel_regions()` — the clear+paint call is repeated
+      four times (full-surface, single-rect, bounding-rect, multi-rect) in the second
+      half of `paint()` (~lines 664-770 post-extraction) and should collapse to one
+      helper taking the damage rect(s) + tooltip-for-damage closure. Hottest path in
+      the system.
 - [ ] `StyleResolver::apply_declaration` is a ~480-line `match property` block
       (`ui/elements/src/style/resolve.rs`). It is a manually-spelled table-driven
       op; consider a table/macro so adding a CSS property is one entry. Note the

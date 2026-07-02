@@ -502,85 +502,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             Some("rebuild"),
         );
 
-        if self.tooltip_visible {
-            self.refresh_tooltip_settings_from_theme(theme);
-        }
-
-        let tooltip = if self.tooltip_visible {
-            self.hovered_key
-                .as_ref()
-                .and_then(|hovered_key| find_tooltip_by_key(&tree, hovered_key))
-                .map(|(owner_key, text)| {
-                    let fade_in_ms = self.tooltip_settings.fade_in_ms as f64;
-                    let opacity = self
-                        .tooltip_appeared_at
-                        .map(|appeared| {
-                            if fade_in_ms <= f64::EPSILON {
-                                return 1.0;
-                            }
-                            let elapsed = appeared.elapsed().as_millis() as f64;
-                            (elapsed / fade_in_ms).min(1.0) as f32
-                        })
-                        .unwrap_or(1.0);
-
-                    // Inherited tooltips use the owner for placement and style
-                    // so a titled button still anchors below the button when a
-                    // child icon receives pointer hover.
-                    let owner_node = find_node_by_key(&tree, &owner_key);
-                    let element_anchor = owner_node
-                        .map(|node| node.computed_style.tooltip_anchor)
-                        .unwrap_or_default();
-                    let anchor = tooltip::effective_anchor(element_anchor, &self.tooltip_settings);
-
-                    let element_offset =
-                        owner_node.and_then(|node| node.computed_style.tooltip_offset);
-                    let element_bounds = find_node_bounds_by_key(&tree, &owner_key, 0.0, 0.0)
-                        .or(self.hovered_element_bounds);
-
-                    let placement = tooltip::compute_tooltip_placement(
-                        anchor,
-                        element_bounds,
-                        self.hovered_pos,
-                        (TOOLTIP_OVERLAY_WIDTH as f32, TOOLTIP_OVERLAY_HEIGHT as f32),
-                        (paint_width as f32, paint_height as f32),
-                        opacity,
-                        &self.tooltip_settings,
-                    );
-
-                    let base_x = placement.paint_x + element_offset.map(|(x, _)| x).unwrap_or(0.0);
-                    let base_y = placement.paint_y + element_offset.map(|(_, y)| y).unwrap_or(0.0);
-
-                    // Slide animation: the tooltip moves along its placement axis
-                    // from an offset position toward its final position as it fades
-                    // in. For "bottom" the tooltip starts further below and slides
-                    // up; for "top" it starts further above and slides down, etc.
-                    let slide = self.tooltip_settings.slide_in_px * (1.0 - placement.opacity);
-                    let (paint_x, paint_y) = match anchor {
-                        tooltip::ResolvedAnchor::Bottom => (base_x, base_y + slide),
-                        tooltip::ResolvedAnchor::Top => (base_x, base_y - slide),
-                        tooltip::ResolvedAnchor::Right => (base_x + slide, base_y),
-                        tooltip::ResolvedAnchor::Left => (base_x - slide, base_y),
-                        tooltip::ResolvedAnchor::Cursor => (base_x, base_y),
-                    };
-
-                    // Set per-frame tooltip rendering hints.
-                    mesh_core_render::set_tooltip_paint_opacity(placement.opacity);
-                    let center_x = matches!(
-                        anchor,
-                        tooltip::ResolvedAnchor::Bottom | tooltip::ResolvedAnchor::Top
-                    );
-                    mesh_core_render::set_tooltip_center_x(center_x);
-                    let scale_from = match self.tooltip_settings.animation.as_str() {
-                        "expand" => self.tooltip_settings.expand_from,
-                        _ => 0.0,
-                    };
-                    mesh_core_render::set_tooltip_scale_from(scale_from);
-
-                    (text, paint_x, paint_y)
-                })
-        } else {
-            None
-        };
+        let tooltip = self.compute_tooltip_state(theme, &tree, paint_width, paint_height);
 
         let surface_damage = DamageRect {
             x: 0,
@@ -1414,6 +1336,91 @@ impl FrontendSurfaceComponent {
 
     fn tooltip_fade_duration(&self) -> Duration {
         Duration::from_millis(self.tooltip_settings.fade_in_ms)
+    }
+
+    /// Resolves the currently hovered tooltip's text and paint position, and
+    /// pushes the per-frame tooltip rendering hints (opacity/center/scale)
+    /// consumed by the painter. Returns `None` when no tooltip should show.
+    fn compute_tooltip_state(
+        &mut self,
+        theme: &Theme,
+        tree: &WidgetNode,
+        paint_width: u32,
+        paint_height: u32,
+    ) -> Option<(String, f32, f32)> {
+        if !self.tooltip_visible {
+            return None;
+        }
+        self.refresh_tooltip_settings_from_theme(theme);
+
+        let hovered_key = self.hovered_key.as_ref()?;
+        let (owner_key, text) = find_tooltip_by_key(tree, hovered_key)?;
+
+        let fade_in_ms = self.tooltip_settings.fade_in_ms as f64;
+        let opacity = self
+            .tooltip_appeared_at
+            .map(|appeared| {
+                if fade_in_ms <= f64::EPSILON {
+                    return 1.0;
+                }
+                let elapsed = appeared.elapsed().as_millis() as f64;
+                (elapsed / fade_in_ms).min(1.0) as f32
+            })
+            .unwrap_or(1.0);
+
+        // Inherited tooltips use the owner for placement and style so a
+        // titled button still anchors below the button when a child icon
+        // receives pointer hover.
+        let owner_node = find_node_by_key(tree, &owner_key);
+        let element_anchor = owner_node
+            .map(|node| node.computed_style.tooltip_anchor)
+            .unwrap_or_default();
+        let anchor = tooltip::effective_anchor(element_anchor, &self.tooltip_settings);
+
+        let element_offset = owner_node.and_then(|node| node.computed_style.tooltip_offset);
+        let element_bounds =
+            find_node_bounds_by_key(tree, &owner_key, 0.0, 0.0).or(self.hovered_element_bounds);
+
+        let placement = tooltip::compute_tooltip_placement(
+            anchor,
+            element_bounds,
+            self.hovered_pos,
+            (TOOLTIP_OVERLAY_WIDTH as f32, TOOLTIP_OVERLAY_HEIGHT as f32),
+            (paint_width as f32, paint_height as f32),
+            opacity,
+            &self.tooltip_settings,
+        );
+
+        let base_x = placement.paint_x + element_offset.map(|(x, _)| x).unwrap_or(0.0);
+        let base_y = placement.paint_y + element_offset.map(|(_, y)| y).unwrap_or(0.0);
+
+        // Slide animation: the tooltip moves along its placement axis from an
+        // offset position toward its final position as it fades in. For
+        // "bottom" the tooltip starts further below and slides up; for "top"
+        // it starts further above and slides down, etc.
+        let slide = self.tooltip_settings.slide_in_px * (1.0 - placement.opacity);
+        let (paint_x, paint_y) = match anchor {
+            tooltip::ResolvedAnchor::Bottom => (base_x, base_y + slide),
+            tooltip::ResolvedAnchor::Top => (base_x, base_y - slide),
+            tooltip::ResolvedAnchor::Right => (base_x + slide, base_y),
+            tooltip::ResolvedAnchor::Left => (base_x - slide, base_y),
+            tooltip::ResolvedAnchor::Cursor => (base_x, base_y),
+        };
+
+        // Set per-frame tooltip rendering hints.
+        mesh_core_render::set_tooltip_paint_opacity(placement.opacity);
+        let center_x = matches!(
+            anchor,
+            tooltip::ResolvedAnchor::Bottom | tooltip::ResolvedAnchor::Top
+        );
+        mesh_core_render::set_tooltip_center_x(center_x);
+        let scale_from = match self.tooltip_settings.animation.as_str() {
+            "expand" => self.tooltip_settings.expand_from,
+            _ => 0.0,
+        };
+        mesh_core_render::set_tooltip_scale_from(scale_from);
+
+        Some((text, paint_x, paint_y))
     }
 
     fn handle_interface_event(
