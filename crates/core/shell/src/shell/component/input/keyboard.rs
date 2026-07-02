@@ -1,4 +1,5 @@
 use super::super::*;
+use super::is_bare_printable_key;
 
 #[derive(Debug, Clone)]
 pub(in crate::shell::component) struct ResolvedSurfaceShortcut {
@@ -31,6 +32,210 @@ pub(in crate::shell::component) struct KeybindSubscriber {
 }
 
 impl FrontendSurfaceComponent {
+    pub(super) fn handle_key_pressed(
+        &mut self,
+        tree: &WidgetNode,
+        key: String,
+        modifiers: KeyModifiers,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let keyboard_settings = self.current_keyboard_settings();
+        if matches!(key.as_str(), "Tab") && !modifiers.ctrl && !modifiers.alt {
+            self.clear_selection();
+            self.invalidate_interaction_restyle();
+            return self.handle_tab_with_cross_surface(tree, modifiers.shift);
+        }
+        if matches!(key.as_str(), "Escape") && !modifiers.ctrl && !modifiers.alt {
+            if let Some(requests) = self.handle_escape_with_cross_surface()? {
+                self.clear_selection();
+                self.invalidate_interaction_restyle();
+                return Ok(requests);
+            }
+        }
+        if modifiers.ctrl
+            && key.eq_ignore_ascii_case("c")
+            && let Some(text) = self.selection_copy_payload(tree)
+        {
+            return Ok(vec![CoreRequest::WriteClipboard { text }]);
+        }
+
+        let focused_key = self.normalized_focused_key(tree);
+        let focused_text_input_has_bare_printable_key = focused_key
+            .as_deref()
+            .is_some_and(|focused_key| is_input_key(tree, focused_key))
+            && is_bare_printable_key(&key, modifiers);
+        if !focused_text_input_has_bare_printable_key {
+            if let Some(requests) =
+                self.dispatch_surface_shortcut(tree, &key, modifiers, &keyboard_settings)?
+            {
+                return Ok(requests);
+            }
+        }
+        self.focus_visible_key = self.focused_key.clone();
+        if let Some(focused_key) = focused_key {
+            let mut requests = self.dispatch_focused_keyboard_handler(
+                tree,
+                &focused_key,
+                "keydown",
+                "keydown",
+                &key,
+                modifiers,
+            )?;
+            if is_input_key(tree, &focused_key) {
+                self.clear_selection();
+                let value = self.input_values.entry(focused_key.clone()).or_default();
+                match key.as_str() {
+                    "Backspace" => {
+                        value.pop();
+                        let current = value.clone();
+                        self.invalidate_text_state();
+                        requests.extend(self.dispatch_text_input_value_handlers(
+                            tree,
+                            &focused_key,
+                            &current,
+                        )?);
+                        return Ok(requests);
+                    }
+                    _ => {}
+                }
+            } else if (Self::key_matches_any_binding(
+                &key,
+                &keyboard_settings.slider_decrement_keys,
+            ) || Self::key_matches_any_binding(
+                &key,
+                &keyboard_settings.slider_increment_keys,
+            )) && is_slider_key(tree, &focused_key)
+            {
+                self.clear_selection();
+                let delta = if Self::key_matches_any_binding(
+                    &key,
+                    &keyboard_settings.slider_decrement_keys,
+                ) {
+                    -1.0
+                } else {
+                    1.0
+                };
+                if let Some(value) = self.slider_step_value(tree, &focused_key, delta) {
+                    self.preserve_slider_value(tree, &focused_key, value);
+                    self.invalidate_interaction_restyle();
+                    requests.extend(self.call_node_handler(
+                        tree,
+                        &focused_key,
+                        "change",
+                        &[serde_json::json!(value)],
+                    )?);
+                    return Ok(requests);
+                }
+            }
+
+            if find_node_by_key(tree, &focused_key).is_some_and(|node| node.tag == "button")
+                && Self::key_matches_any_binding(&key, &keyboard_settings.button_activation_keys)
+            {
+                self.clear_selection();
+                self.keyboard_button_press_activations
+                    .insert((focused_key.clone(), key.clone()));
+                requests.extend(self.dispatch_keyboard_button_activation(
+                    tree,
+                    &focused_key,
+                    &key,
+                )?);
+                return Ok(requests);
+            }
+
+            if matches!(key.as_str(), "ArrowDown" | "ArrowUp")
+                && let Some(next_key) =
+                    self.rove_focus_within_parent(tree, &focused_key, key == "ArrowUp")
+            {
+                requests.extend(self.set_focus_target(tree, Some(next_key), true)?);
+                self.invalidate_interaction_restyle();
+                return Ok(requests);
+            }
+
+            if !requests.is_empty() {
+                return Ok(requests);
+            }
+        }
+
+        Ok(Vec::new())
+    }
+
+    pub(super) fn handle_key_released(
+        &mut self,
+        tree: &WidgetNode,
+        key: String,
+        modifiers: KeyModifiers,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let keyboard_settings = self.current_keyboard_settings();
+        self.focus_visible_key = self.focused_key.clone();
+        if let Some(focused_key) = self.normalized_focused_key(tree) {
+            let mut requests = self.dispatch_focused_keyboard_handler(
+                tree,
+                &focused_key,
+                "keyup",
+                "keyup",
+                &key,
+                modifiers,
+            )?;
+
+            if find_node_by_key(tree, &focused_key).is_some_and(|node| node.tag == "button")
+                && Self::key_matches_any_binding(&key, &keyboard_settings.button_activation_keys)
+            {
+                self.clear_selection();
+                if self
+                    .keyboard_button_press_activations
+                    .remove(&(focused_key.clone(), key.clone()))
+                {
+                    return Ok(requests);
+                }
+                requests.extend(self.dispatch_keyboard_button_activation(
+                    tree,
+                    &focused_key,
+                    &key,
+                )?);
+                return Ok(requests);
+            }
+
+            if Self::key_matches_any_binding(&key, &keyboard_settings.toggle_activation_keys)
+                && (self.is_checkable_choice_key(tree, &focused_key)
+                    || self.is_radio_key(tree, &focused_key)
+                    || self.is_option_key(tree, &focused_key)
+                    || self.is_menu_item_key(tree, &focused_key)
+                    || self.is_container_collection_item_key(tree, &focused_key))
+            {
+                self.clear_selection();
+                self.invalidate_interaction_restyle();
+                if self.is_option_key(tree, &focused_key) {
+                    requests.extend(self.activate_option_choice(tree, &focused_key)?);
+                } else if self.is_radio_key(tree, &focused_key) {
+                    requests.extend(self.activate_radio_choice(tree, &focused_key)?);
+                } else if self.is_menu_item_key(tree, &focused_key)
+                    || self.is_container_collection_item_key(tree, &focused_key)
+                {
+                    let click_event = self.build_click_event(tree, &focused_key, 0.0, 0.0);
+                    requests.extend(self.dispatch_activation_handlers(
+                        tree,
+                        &focused_key,
+                        click_event,
+                    )?);
+                } else {
+                    let value = self.toggle_checked_value(tree, &focused_key);
+                    requests.extend(self.call_node_handler(
+                        tree,
+                        &focused_key,
+                        "change",
+                        &[serde_json::json!(value)],
+                    )?);
+                }
+                return Ok(requests);
+            }
+
+            if !requests.is_empty() {
+                return Ok(requests);
+            }
+        }
+
+        Ok(Vec::new())
+    }
+
     pub(super) fn build_keyboard_event(
         &self,
         tree: &WidgetNode,

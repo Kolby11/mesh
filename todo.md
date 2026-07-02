@@ -312,9 +312,11 @@ All five landed 2026-06-23 (single commit).
       with `mesh-core-scripting` and `mesh-core-backend` lib tests. Remaining:
       split the frontend installer; the frontend `mesh.popover.activate` handler
       alone is ~75 lines.
-- [ ] `handle_component_input` (`shell/component/input/mod.rs`, ~500 lines):
-      extract `handle_key_pressed`/`handle_key_released` (the press/release arms
-      duplicate button/toggle activation logic).
+- [x] `handle_component_input` (`shell/component/input/mod.rs`, ~500 lines):
+      extracted `handle_key_pressed`/`handle_key_released` into
+      `input/keyboard.rs`, leaving the top-level input dispatcher to delegate
+      keyboard arms without changing activation order. Verified 2026-07-02 with
+      `cargo fmt --check` and `mesh-core-shell` lib tests.
 - [ ] `annotate_runtime_tree` (`shell/component/runtime_tree.rs:577`, ~180 lines,
       11 args): introduce an annotation-context struct; split the slider logic.
 
