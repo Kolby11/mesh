@@ -66,7 +66,9 @@ impl FrontendSurfaceComponent {
                 .script_ctx
                 .state_mut()
                 .set_host_value_with_fingerprint("refs", refs.clone(), refs_fingerprint);
-            root_runtime.script_ctx.apply_element_metrics(&refs);
+            root_runtime
+                .script_ctx
+                .apply_element_metrics_with_fingerprint(&refs, refs_fingerprint);
         }
         // Remember name -> node key so drained element actions resolve their target.
         *self.ref_node_keys.borrow_mut() = ref_keys;

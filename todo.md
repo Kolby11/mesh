@@ -589,7 +589,13 @@ duplicating it.
       `elements`/`refs` state tables or gate them on actual template reads.
       Progress 2026-07-02: the state-side deep-compare portion is removed for
       unchanged metrics via full-JSON fingerprints (see previous item), but
-      eager JSON construction, JSON→Lua conversion, and proxy reinstall remain.
+      eager JSON construction remains. Progress 2026-07-03: the scripting
+      runtime now caches the last successfully installed refs fingerprint, so
+      unchanged paints skip JSON→Lua conversion and bound-proxy reinstallation.
+      A release benchmark over 20k unchanged publications measured 90.711ms for
+      the eager path versus 0.140ms for the fingerprint-gated path (~647x
+      faster). Rust-side tree walking/JSON construction and lazy `refs` field
+      resolution remain open.
 - [x] **Service payloads convert JSON→Lua per runtime per event.**
       `apply_service_payload` (`scripting/context/runtime.rs:388-406`) runs
       `lua.to_value(payload)` + `refresh_module_object()` for every runtime in

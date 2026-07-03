@@ -2611,6 +2611,75 @@ end
 }
 
 #[test]
+fn element_metrics_fingerprint_skips_unchanged_lua_publication() {
+    let mut ctx = ScriptContext::new("@test/refs-fingerprint", CapabilitySet::new()).unwrap();
+    ctx.load_script("function init() end").unwrap();
+    let first = serde_json::json!({ "panel": { "width": 320.0 } });
+    let changed = serde_json::json!({ "panel": { "width": 200.0 } });
+
+    ctx.apply_element_metrics_with_fingerprint(&first, 41);
+    ctx.apply_element_metrics_with_fingerprint(&changed, 41);
+    ctx.load_script(
+        r#"
+width = -1
+function measure()
+    width = refs.panel.width
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_handler("measure", &[]).unwrap();
+
+    assert_eq!(ctx.state.get("width"), Some(serde_json::json!(320)));
+
+    ctx.apply_element_metrics_with_fingerprint(&changed, 42);
+    ctx.call_handler("measure", &[]).unwrap();
+    assert_eq!(ctx.state.get("width"), Some(serde_json::json!(200)));
+}
+
+// Run with:
+// cargo test -p mesh-core-scripting --release -- unchanged_element_metrics_skip_lua_conversion --ignored --nocapture
+#[test]
+#[ignore]
+fn unchanged_element_metrics_skip_lua_conversion() {
+    use std::time::Instant;
+
+    let metrics = serde_json::json!({
+        "panel": {
+            "width": 320.0,
+            "height": 48.0,
+            "attributes": { "_mesh_bind_this": "panel", "class": "toolbar" }
+        },
+        "search": {
+            "width": 240.0,
+            "height": 32.0,
+            "attributes": { "_mesh_bind_this": "search", "value": "query" }
+        }
+    });
+    let iterations = 20_000usize;
+    let mut old_ctx = ScriptContext::new("@mesh/metrics-old", CapabilitySet::new()).unwrap();
+    let mut new_ctx = ScriptContext::new("@mesh/metrics-new", CapabilitySet::new()).unwrap();
+
+    let old_start = Instant::now();
+    for _ in 0..iterations {
+        old_ctx.apply_element_metrics(&metrics);
+    }
+    let old_ns = old_start.elapsed().as_nanos();
+
+    let new_start = Instant::now();
+    for _ in 0..iterations {
+        new_ctx.apply_element_metrics_with_fingerprint(&metrics, 42);
+    }
+    let new_ns = new_start.elapsed().as_nanos().max(1);
+
+    eprintln!("eager_metrics={old_ns}ns fingerprinted_metrics={new_ns}ns");
+    assert!(
+        new_ns * 10 < old_ns,
+        "unchanged metrics should avoid repeated JSON-to-Lua conversion"
+    );
+}
+
+#[test]
 fn refs_absent_element_reads_nil_and_reports_not_present() {
     let mut ctx = ScriptContext::new("@test/refs-absent", CapabilitySet::new()).unwrap();
     ctx.load_script(

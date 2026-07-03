@@ -180,6 +180,9 @@ pub struct ScriptContext {
     /// When this matches the current generation (and no proxies exist), the Lua
     /// `module.state` table is already up to date and the rebuild can be skipped.
     last_module_refresh_gen: u64,
+    /// Fingerprint of the last element metrics snapshot converted into Lua.
+    /// Shell paints commonly publish identical geometry across many frames.
+    last_element_metrics_fingerprint: Option<u64>,
     cached_self_table: Option<Table>,
 }
 
@@ -330,6 +333,7 @@ impl ScriptContext {
             tracking_storage_reads: Arc::new(Mutex::new(false)),
             pending_side_channels: Arc::new(AtomicBool::new(false)),
             last_module_refresh_gen: u64::MAX,
+            last_element_metrics_fingerprint: None,
             cached_self_table: None,
         })
     }
@@ -398,6 +402,7 @@ impl ScriptContext {
         self.builtin_globals.clear();
         self.user_global_keys.clear();
         self.user_global_key_set.clear();
+        self.last_element_metrics_fingerprint = None;
         self.assigned_global_keys.lock().unwrap().clear();
         self.subscribed_interface_events.lock().unwrap().clear();
         self.vm = None;
@@ -528,6 +533,20 @@ impl ScriptContext {
     /// from the painted tree). Stored on the shared realm's globals so every
     /// component in the surface reads through `_ENV.__index -> globals`.
     pub fn apply_element_metrics(&mut self, metrics: &Value) {
+        self.apply_element_metrics_inner(metrics);
+    }
+
+    /// Publish element metrics only when the producer's full-snapshot
+    /// fingerprint differs from the last snapshot installed in this context.
+    pub fn apply_element_metrics_with_fingerprint(&mut self, metrics: &Value, fingerprint: u64) {
+        if self.last_element_metrics_fingerprint == Some(fingerprint) {
+            return;
+        }
+        self.apply_element_metrics_inner(metrics);
+        self.last_element_metrics_fingerprint = Some(fingerprint);
+    }
+
+    fn apply_element_metrics_inner(&mut self, metrics: &Value) {
         let _ = self.ensure_initialized();
         if let Ok(lua_value) = self.lua().to_value(metrics) {
             let _ = self
