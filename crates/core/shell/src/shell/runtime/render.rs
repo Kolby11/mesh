@@ -392,13 +392,20 @@ impl Shell {
         total_render_started: Option<std::time::Instant>,
     ) -> Result<bool, ShellRunError> {
         let requests = self.components[index].component.child_surface_requests();
-        let requested_keys: HashSet<String> = requests
+        if requests.is_empty() && self.components[index].children.is_empty() {
+            // Common no-popup frame: avoid allocating key sets and running
+            // reconciliation bookkeeping. A dismissed key only suppresses
+            // recreation until its authored request disappears for one frame.
+            self.components[index].dismissed_child_node_keys.clear();
+            return Ok(false);
+        }
+        let requested_keys: HashSet<&str> = requests
             .iter()
-            .map(|request| request.node_key.clone())
+            .map(|request| request.node_key.as_str())
             .collect();
         self.components[index]
             .dismissed_child_node_keys
-            .retain(|node_key| requested_keys.contains(node_key));
+            .retain(|node_key| requested_keys.contains(node_key.as_str()));
         if !self.presentation_engine.popup_supported() {
             self.destroy_all_child_surfaces(index);
             self.components[index]
@@ -455,7 +462,7 @@ impl Shell {
             .set_closing_child_keys(closing_keys);
 
         let mut any_presented = false;
-        for request in requests {
+        for request in &requests {
             if !matches!(request.kind, ChildSurfaceKind::Popover) {
                 continue;
             }
@@ -465,12 +472,19 @@ impl Shell {
             {
                 continue;
             }
-            let child_surface_id = child_surface_id(parent_surface_id, &request.node_key);
-            let child_ref = if let Some(existing) = self.components[index]
+            let existing_child = self.components[index]
                 .children
                 .iter()
-                .position(|child| child.node_key == request.node_key)
-            {
+                .position(|child| child.node_key == request.node_key);
+            let child_surface_id = existing_child
+                .map(|existing| {
+                    self.components[index].children[existing]
+                        .target
+                        .surface_id
+                        .clone()
+                })
+                .unwrap_or_else(|| child_surface_id(parent_surface_id, &request.node_key));
+            let child_ref = if let Some(existing) = existing_child {
                 TargetRef::Child(existing)
             } else {
                 let mut target =
@@ -545,17 +559,22 @@ impl Shell {
                 grab_serial: None,
             };
 
-            {
+            let popup_config_changed = {
                 let child = &mut self.components[index].children[child_index];
-                child.target.popup_config = Some(popup_config.clone());
+                let changed = child.target.popup_config.as_ref() != Some(&popup_config);
+                if changed {
+                    child.target.popup_config = Some(popup_config.clone());
+                }
                 child.target.known_surface_size = Some(padded_size);
                 if child.target.last_popup_size != Some(padded_size) {
                     child.target.last_popup_size = Some(padded_size);
                 }
-            }
-            if let Err(error) = self
-                .presentation_engine
-                .configure_popup(&child_surface_id, popup_config)
+                changed
+            };
+            if popup_config_changed
+                && let Err(error) = self
+                    .presentation_engine
+                    .configure_popup(&child_surface_id, popup_config)
             {
                 tracing::warn!("configure_popup for child {child_surface_id} failed: {error}");
                 self.destroy_child_surface_at(index, child_index);
@@ -586,7 +605,7 @@ impl Shell {
             .iter()
             .enumerate()
             .filter(|(_, child)| {
-                child.closing_until.is_some() && !requested_keys.contains(&child.node_key)
+                child.closing_until.is_some() && !requested_keys.contains(child.node_key.as_str())
             })
             .map(|(child_index, _)| child_index)
             .collect();
@@ -802,38 +821,35 @@ impl Shell {
         let is_parent = matches!(target, TargetRef::Parent);
 
         if visible && is_parent {
-            let commands = self.components[index]
-                .component
-                .display_list_paint_commands();
-            if let Some((surface_w, surface_h)) =
-                self.components[index].target(target).known_surface_size
-            {
-                let opaque_rect = compute_opaque_rect_for_root(commands, surface_w, surface_h);
+            let generation = self.components[index].component.display_list_generation();
+            let surface_size = self.components[index].target(target).known_surface_size;
+            let content_size = self.components[index].component.content_input_size();
+            let region_state = (generation, surface_size, content_size);
+            if self.components[index].target(target).last_region_state != Some(region_state) {
+                let commands = self.components[index]
+                    .component
+                    .display_list_paint_commands();
+                let opaque_rect = surface_size.and_then(|(surface_w, surface_h)| {
+                    compute_opaque_rect_for_root(commands, surface_w, surface_h)
+                });
                 self.presentation_engine
                     .update_opaque_region(&surface_id, opaque_rect);
+
+                // Restrict pointer input to true content rather than tooltip padding.
+                let input_rect = content_size.map(|(content_w, content_h)| DamageRect {
+                    x: 0,
+                    y: 0,
+                    width: content_w,
+                    height: content_h,
+                });
+                self.presentation_engine
+                    .update_input_region(&surface_id, input_rect);
+
+                let blur_region = compute_blur_region(commands);
+                self.presentation_engine
+                    .update_blur_region(&surface_id, blur_region);
+                self.components[index].target_mut(target).last_region_state = Some(region_state);
             }
-            // The surface buffer is padded (TOOLTIP_OVERLAY_*) so tooltips can render
-            // outside the content box, but `known_surface_size` reflects that inflated
-            // size. Restrict pointer input to the component's true content rect so
-            // clicks over the padding pass through to the windows beneath instead of
-            // hitting a dead zone below the bar.
-            if let Some((content_w, content_h)) =
-                self.components[index].component.content_input_size()
-            {
-                self.presentation_engine.update_input_region(
-                    &surface_id,
-                    Some(DamageRect {
-                        x: 0,
-                        y: 0,
-                        width: content_w,
-                        height: content_h,
-                    }),
-                );
-            }
-            // Compute and set blur region from display list backdrop-filter nodes
-            let blur_region = compute_blur_region(commands);
-            self.presentation_engine
-                .update_blur_region(&surface_id, blur_region);
         }
 
         let mut present_damage: Vec<DamageRect> = if is_parent {
@@ -1001,6 +1017,41 @@ fn map_popover_gravity(gravity: PopoverGravity) -> PopupGravity {
         PopoverGravity::TopRight => PopupGravity::TopRight,
         PopoverGravity::BottomLeft => PopupGravity::BottomLeft,
         PopoverGravity::BottomRight => PopupGravity::BottomRight,
+    }
+}
+
+#[cfg(test)]
+mod performance_tests {
+    use super::child_surface_id;
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    // cargo test -p mesh-core-shell --release -- cached_child_surface_id_beats_reencoding --ignored --nocapture
+    #[test]
+    #[ignore = "release-only child-surface id microbenchmark"]
+    fn cached_child_surface_id_beats_reencoding() {
+        let parent = "@mesh/navigation-bar";
+        let key = "root/0/2/1/5/language-popover";
+        let cached = child_surface_id(parent, key);
+        let iterations = 100_000;
+
+        let encode_started = Instant::now();
+        for _ in 0..iterations {
+            black_box(child_surface_id(black_box(parent), black_box(key)));
+        }
+        let encode = encode_started.elapsed();
+
+        let clone_started = Instant::now();
+        for _ in 0..iterations {
+            black_box(black_box(&cached).clone());
+        }
+        let clone = clone_started.elapsed();
+
+        eprintln!(
+            "child id re-encode: {encode:?}; cached clone: {clone:?}; ratio: {:.1}x",
+            encode.as_secs_f64() / clone.as_secs_f64()
+        );
+        assert!(clone < encode);
     }
 }
 
@@ -1197,6 +1248,46 @@ mod tests {
                 height: 150
             })
         );
+    }
+
+    // cargo test -p mesh-core-shell --release -- cached_region_state_beats_command_scan --ignored --nocapture
+    #[test]
+    #[ignore = "release-only derived-region microbenchmark"]
+    fn cached_region_state_beats_command_scan() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let commands: Vec<_> = (0..500)
+            .map(|index| {
+                make_cmd(
+                    index as f32,
+                    index as f32,
+                    20.0,
+                    20.0,
+                    if index % 50 == 0 { 4.0 } else { 0.0 },
+                )
+            })
+            .collect();
+        let cached = (7_u64, Some((1920, 1080)), Some((1920, 56)));
+        let iterations = 20_000;
+
+        let scan_started = Instant::now();
+        for _ in 0..iterations {
+            black_box(compute_blur_region(black_box(&commands)));
+        }
+        let scan = scan_started.elapsed();
+
+        let cache_started = Instant::now();
+        for _ in 0..iterations {
+            black_box(black_box(Some(cached)) == Some(cached));
+        }
+        let cache = cache_started.elapsed();
+
+        eprintln!(
+            "region command scan: {scan:?}; generation/geometry cache check: {cache:?}; ratio: {:.1}x",
+            scan.as_secs_f64() / cache.as_secs_f64()
+        );
+        assert!(cache < scan);
     }
 }
 

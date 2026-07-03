@@ -457,6 +457,13 @@ impl CoalescedShellMessages {
                 .entry(interface.clone())
                 .or_default()
                 .insert(provider_id.clone(), self.messages.len());
+        } else {
+            // Lifecycle, command-result, named interface-event, IPC, and
+            // filesystem messages are ordering barriers. Updates after one
+            // must not replace a slot before it, otherwise consumers can see
+            // the newest state before an event that was emitted against the
+            // older state.
+            self.backend_update_index.clear();
         }
 
         self.messages.push(message);
@@ -513,5 +520,96 @@ mod tests {
         let messages = coalesced.into_vec();
         assert_eq!(messages.len(), 1);
         assert!(matches!(messages[0], ShellMessage::FilesystemChanged));
+    }
+
+    #[test]
+    fn named_interface_event_is_a_backend_update_coalescing_barrier() {
+        let mut coalesced = CoalescedShellMessages::default();
+        coalesced.push(backend_update("mesh.audio", "@mesh/pipewire-audio", 1));
+        coalesced.push(ShellMessage::BackendInterfaceEvent {
+            interface: "mesh.audio".to_string(),
+            provider_id: "@mesh/pipewire-audio".to_string(),
+            name: "VolumeChanged".to_string(),
+            payload: serde_json::json!({ "value": 1 }),
+        });
+        coalesced.push(backend_update("mesh.audio", "@mesh/pipewire-audio", 2));
+
+        let messages = coalesced.into_vec();
+        assert_eq!(messages.len(), 3);
+        assert!(matches!(
+            messages[0],
+            ShellMessage::BackendServiceUpdate { .. }
+        ));
+        assert!(matches!(
+            messages[1],
+            ShellMessage::BackendInterfaceEvent { .. }
+        ));
+        assert!(matches!(
+            messages[2],
+            ShellMessage::BackendServiceUpdate { .. }
+        ));
+    }
+
+    #[test]
+    fn backend_updates_still_coalesce_independently_before_a_barrier() {
+        let mut coalesced = CoalescedShellMessages::default();
+        for value in 0..1_000 {
+            coalesced.push(backend_update("mesh.audio", "@mesh/pipewire-audio", value));
+        }
+
+        let messages = coalesced.into_vec();
+        assert_eq!(messages.len(), 1, "999 redundant deliveries are removed");
+        let ShellMessage::BackendServiceUpdate { event, .. } = &messages[0] else {
+            panic!("expected backend update");
+        };
+        let ServiceEvent::Updated { payload, .. } = event else {
+            panic!("expected state update");
+        };
+        assert_eq!(payload["value"], serde_json::json!(999));
+    }
+
+    // cargo test -p mesh-core-shell --release -- wake_coalescing_beats_repeated_shell_delivery --ignored --nocapture
+    #[test]
+    #[ignore = "release-only service-update coalescing microbenchmark"]
+    fn wake_coalescing_beats_repeated_shell_delivery() {
+        use std::time::Instant;
+
+        let updates = 10_000;
+        let mut baseline_shell = Shell::new();
+        let mut baseline_pending = VecDeque::new();
+        let baseline_started = Instant::now();
+        for value in 0..updates {
+            baseline_shell
+                .handle_shell_message(
+                    &mut baseline_pending,
+                    backend_update("mesh.audio", "@mesh/pipewire-audio", value),
+                )
+                .unwrap();
+        }
+        let baseline = baseline_started.elapsed();
+
+        let mut optimized_shell = Shell::new();
+        let mut optimized_pending = VecDeque::new();
+        let optimized_started = Instant::now();
+        let mut coalesced = CoalescedShellMessages::default();
+        for value in 0..updates {
+            coalesced.push(backend_update("mesh.audio", "@mesh/pipewire-audio", value));
+        }
+        for message in coalesced.into_vec() {
+            optimized_shell
+                .handle_shell_message(&mut optimized_pending, message)
+                .unwrap();
+        }
+        let optimized = optimized_started.elapsed();
+
+        eprintln!(
+            "10k repeated deliveries: {baseline:?}; wake coalescing + one delivery: {optimized:?}; ratio: {:.1}x",
+            baseline.as_secs_f64() / optimized.as_secs_f64()
+        );
+        assert!(optimized < baseline);
+        assert_eq!(
+            baseline_shell.latest_service_state["mesh.audio"].state,
+            optimized_shell.latest_service_state["mesh.audio"].state
+        );
     }
 }

@@ -221,6 +221,10 @@ impl FrontendSurfaceComponent {
                     let previous_path = self.hovered_path.clone();
                     let previous_tooltip = self.hovered_tooltip.clone();
                     let next_tooltip = pointer_hit.as_ref().and_then(|hit| hit.tooltip.clone());
+                    let tooltip_may_change = previous_tooltip.is_some()
+                        || next_tooltip.is_some()
+                        || self.tooltip_visible
+                        || self.last_tooltip_damage.is_some();
                     let same_tooltip_owner = previous_tooltip
                         .as_ref()
                         .zip(next_tooltip.as_ref())
@@ -249,7 +253,7 @@ impl FrontendSurfaceComponent {
                     // Hover changes don't mutate script state — flag the surface
                     // for a style-only repaint so paint() can reuse the cached
                     // widget tree instead of re-running Luau scripts.
-                    self.invalidate_interaction_restyle();
+                    self.invalidate_hover_change(tooltip_may_change);
                     // Dispatch pointerenter/pointerleave to any script handlers on
                     // the entered/left nodes (e.g. hover-to-open popovers).
                     let hover_requests = self.dispatch_hover_transition_handlers(
@@ -270,6 +274,9 @@ impl FrontendSurfaceComponent {
                     || !self.hovered_path.is_empty()
                     || self.hover_start.is_some()
                 {
+                    let tooltip_may_change = self.hovered_tooltip.is_some()
+                        || self.tooltip_visible
+                        || self.last_tooltip_damage.is_some();
                     self.hovered_key = None;
                     self.hovered_path.clear();
                     self.hovered_tooltip = None;
@@ -277,7 +284,7 @@ impl FrontendSurfaceComponent {
                     self.tooltip_visible = false;
                     self.hovered_element_bounds = None;
                     self.tooltip_appeared_at = None;
-                    self.invalidate_interaction_restyle();
+                    self.invalidate_hover_change(tooltip_may_change);
                 }
                 // The pointer left the whole surface — fire pointerleave/mouseleave
                 // on everything that was hovered so popovers can close themselves.

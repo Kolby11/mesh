@@ -391,6 +391,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// Previous frame's focused key — used to detect which node's focus state
     /// changed between frames for targeted interaction restyle.
     previous_focused_key: Option<String>,
+    interaction_snapshot_valid: bool,
     hovered_pos: (f32, f32),
     hover_start: Option<std::time::Instant>,
     tooltip_visible: bool,
@@ -456,6 +457,8 @@ pub(super) struct FrontendSurfaceComponent {
     keyframe_rules: HashMap<String, mesh_core_animation::keyframes::KeyframeRule>,
     has_animatable_style_rules: bool,
     has_active_keyframe_animation: bool,
+    has_promoted_popover_wrappers: Cell<bool>,
+    has_error_placeholders: Cell<bool>,
     narrow_path_active: bool,
     affected_node_count: u64,
     profiling_enabled: bool,
@@ -557,6 +560,7 @@ impl FrontendSurfaceComponent {
             hovered_tooltip: None,
             previous_hovered_path: Vec::new(),
             previous_focused_key: None,
+            interaction_snapshot_valid: false,
             hovered_pos: (0.0, 0.0),
             hover_start: None,
             tooltip_visible: false,
@@ -591,6 +595,8 @@ impl FrontendSurfaceComponent {
             keyframe_rules: HashMap::new(),
             has_animatable_style_rules,
             has_active_keyframe_animation: false,
+            has_promoted_popover_wrappers: Cell::new(false),
+            has_error_placeholders: Cell::new(false),
             narrow_path_active: false,
             affected_node_count: 0,
             profiling_enabled: false,
@@ -659,6 +665,14 @@ impl FrontendSurfaceComponent {
         self.invalidate_style_path(ComponentDirtyFlags::INTERACTION_RESTYLE);
     }
 
+    pub(super) fn invalidate_hover_change(&mut self, tooltip_may_change: bool) {
+        if self.module_styles_have_state_rules() {
+            self.invalidate_interaction_restyle();
+        } else if tooltip_may_change {
+            self.invalidate_paint();
+        }
+    }
+
     pub(super) fn invalidate_text_state(&mut self) {
         self.invalidate(ComponentDirtyFlags::TEXT_RELAYOUT);
     }
@@ -669,6 +683,12 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn invalidate_surface_config(&mut self) {
         self.invalidate_style_path(ComponentDirtyFlags::SURFACE_CONFIG);
+    }
+
+    pub(super) fn should_update_surface_config_on_render(&self) -> bool {
+        self.dirty_types
+            .contains(ComponentDirtyFlags::SURFACE_CONFIG)
+            || (self.dirty_types.is_empty() && (self.dirty || self.style_only_dirty))
     }
 
     pub(super) fn take_dirty_for_paint(

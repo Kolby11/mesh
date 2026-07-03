@@ -390,35 +390,37 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn render(&mut self, surface: &mut dyn ShellSurface) -> Result<(), ComponentError> {
-        self.render_layout(surface);
+        if self.should_update_surface_config_on_render() {
+            self.render_layout(surface);
 
-        if self.visible {
-            surface.show();
-        } else {
-            surface.hide();
+            if self.visible {
+                surface.show();
+            } else {
+                surface.hide();
+            }
+
+            let template_nodes = self
+                .compiled
+                .component
+                .template
+                .as_ref()
+                .map(|template| template.root.len())
+                .unwrap_or(0);
+            let role = root_accessibility_role(&self.compiled.manifest)
+                .unwrap_or_else(|| "unknown".into());
+
+            tracing::debug!(
+                "rendered frontend '{}' visible={} nodes={} role={}{}",
+                self.id(),
+                self.visible,
+                template_nodes,
+                role,
+                self.last_service_update
+                    .as_deref()
+                    .map(|summary| format!(" service={summary}"))
+                    .unwrap_or_default()
+            );
         }
-
-        let template_nodes = self
-            .compiled
-            .component
-            .template
-            .as_ref()
-            .map(|template| template.root.len())
-            .unwrap_or(0);
-        let role =
-            root_accessibility_role(&self.compiled.manifest).unwrap_or_else(|| "unknown".into());
-
-        tracing::debug!(
-            "rendered frontend '{}' visible={} nodes={} role={}{}",
-            self.id(),
-            self.visible,
-            template_nodes,
-            role,
-            self.last_service_update
-                .as_deref()
-                .map(|summary| format!(" service={summary}"))
-                .unwrap_or_default()
-        );
 
         Ok(())
     }
@@ -1199,6 +1201,14 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn set_popup_promoted(&mut self, promoted: bool) {
         self.popup_promoted = promoted;
+    }
+
+    fn display_list_paint_commands(&self) -> &[DisplayPaintCommand] {
+        self.retained_display_list.paint_commands()
+    }
+
+    fn display_list_generation(&self) -> u64 {
+        self.retained_display_list.generation()
     }
 
     fn debug_keybinds(&self) -> Vec<mesh_core_debug::DebugKeybindEntry> {

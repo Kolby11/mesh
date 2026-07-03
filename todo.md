@@ -707,14 +707,30 @@ duplicating it.
       `tracked_fields_for_service()` — `scripting/context/runtime.rs:478-497`).
       Maintain a shell-side subscription index (service → component indices),
       invalidated when a runtime's tracked fields/subscriptions change, so
-      event routing is a lookup instead of N mutex acquisitions.
-- [ ] **No coalescing of service events within one loop wake.** Each backend
+      event routing is a lookup instead of N mutex acquisitions. Experiment
+      2026-07-03: a component-local copied summary refreshed after paint/input
+      was rejected and reverted. Its production-faithful single-runtime
+      release benchmark improved the event gate only from 2.544ms to 2.221ms
+      over 100k calls (1.1x), while refreshes had to clone the tracked maps.
+      The shell-side index described above remains the viable design because it
+      also eliminates the O(component count) scan rather than merely moving
+      locks into refresh work.
+- [x] **No coalescing of service events within one loop wake.** Each backend
       emission is delivered and invalidates independently
       (`runtime/mod.rs:323`); a chatty backend (e.g. volume drag feedback)
       can trigger several rebuild-invalidations between two paints. Coalesce
       queued `ServiceEvent::Updated` per service before delivery (keep only
       the newest payload per service per wake; named interface events stay
-      ordered).
+      ordered). Backlog sync + hardening 2026-07-03: wake-level
+      `CoalescedShellMessages` was already retaining only the latest backend
+      update per interface/provider. Fixed its barrier semantics so lifecycle,
+      command-result, named interface-event, IPC, and filesystem messages stop
+      replacement across their position; this preserves state/event ordering.
+      Tests prove 1,000 consecutive updates collapse to the final one and that
+      named events remain between surrounding updates. A release benchmark of
+      10k real `handle_shell_message` updates measured 4.395ms repeated versus
+      915.428us including coalescing plus one delivery (4.8x faster), with
+      identical final service state.
 - [ ] **Backend providers still exec-poll by default.** `spawn_backend_service`
       drives a tokio interval that re-runs `exec` subprocesses per tick
       (`runtime/backend/src/lib.rs:157-…`). The pipewire item above tracks one
@@ -733,7 +749,12 @@ duplicating it.
       logical-vs-physical damage-clip mismatch (compute/clip damage in
       physical pixels through the painter) so the retained partial path works
       at fractional scale. Likely the single biggest win on fractional-scale
-      setups.
+      setups. Experiment 2026-07-03: a physical-damage rect fix was correct
+      byte-for-byte against forced-full repaint, but rejected as a performance
+      change for now. End-to-end release benchmarks did not show a meaningful
+      CPU-side win: one-box 1200×600 forced-full 28.066ms vs partial 28.367ms,
+      and large 3600×1800 forced-full 74.918ms vs partial 73.910ms. Revisit
+      with compositor/upload damage instrumentation before marking this done.
 - [ ] **Per-frame full-tree fingerprinting even when clean.**
       `RetainedWidgetTree::update` re-walks every node, hashes ~50 style
       fields + every attribute/handler string (FNV byte-at-a-time), allocates
@@ -743,7 +764,13 @@ duplicating it.
       hash with a word-at-a-time hasher (fxhash), reuse snapshot allocations
       in place (index by slotmap key instead of rebuilding the `NodeId` map),
       and stop hashing shell-owned annotation attributes that already have
-      typed change tracking (`_mesh_scroll_*`, `_mesh_key`).
+      typed change tracking (`_mesh_scroll_*`, `_mesh_key`). Partial
+      2026-07-03: `RuntimeTreeHasher` now implements primitive `write_*`
+      methods so numeric style fields are mixed word-at-a-time instead of
+      falling back to byte-at-a-time hashing. A release benchmark over 500k
+      style fingerprints measured 118.362ms for the old byte fallback versus
+      63.946ms primitive-aware (1.9x faster). Snapshot allocation reuse and
+      shell-owned annotation filtering remain open.
 - [ ] **`WidgetNode` allocation profile.** Every node carries `tag: String`,
       `attributes: BTreeMap<String,String>`, `event_handlers:
       BTreeMap<String,String>` (`ui/elements/src/tree.rs:44-68`), rebuilt
@@ -765,14 +792,28 @@ duplicating it.
       Several are only relevant when a feature is active (no popovers → no
       collapse walk; no selection → skip). Gate the conditional walks on
       cheap presence flags and fold the unconditional ones into the fused
-      traversal.
-- [ ] **Restyle re-applies string declarations per node on interaction
+      traversal. Partial 2026-07-03: promoted-popover collapse and generated
+      error-placeholder constraints are now guarded by component-level presence
+      flags set at the actual marker creation sites; normal trees skip both
+      marker walks. Surface shortcut annotation now also returns before loading
+      keyboard settings when neither manifest nor legacy settings declare
+      shortcuts. A release microbenchmark over 20k plain-tree finalizations
+      measured 361.497ms for the two old marker walks versus 2.375us for the
+      gated path (152k×). The always-needed annotation/restyle/layout walks and
+      broader traversal fusion remain open.
+- [x] **Restyle re-applies string declarations per node on interaction
       frames** — tracked (v1.23 typed declarations + v1.18 selector
       dependencies). New detail from this scan: the interaction narrow path
       falls back to *full-tree* restyle whenever `affected_keys` is empty
       (`rendering.rs:314-329`) including the common pointer-leave case; make
       the empty-diff case a no-op restyle instead of a full pass when
-      previous state exists.
+      previous state exists. Done 2026-07-03: finalized frames now record when
+      an interaction-state snapshot exists. Targeted interaction restyles still
+      fall back to full restyle before the first snapshot, but after that an
+      empty affected-key set skips the full-tree restyle and default merge
+      pass. A release benchmark over 500 paint iterations measured 2.369s for
+      the forced old fallback versus 456.527ms for the no-op empty-diff path
+      (5.2x faster).
 - [ ] **Layout + display list**: Taffy tree rebuilt per layout pass and
       display-list subtree flattening per update are already tracked
       (v1.21). Reaffirmed as the dominant structural-frame costs behind
@@ -784,21 +825,37 @@ duplicating it.
       output with the retained display list as the command source, and keep
       SHM as fallback. Until then, the damage-path fixes above (especially
       fractional scale) are the effective lever.
-- [ ] **Present pipeline recomputes derived regions every visible frame.**
+- [x] **Present pipeline recomputes derived regions every visible frame.**
       `present_surface_target` recomputes opaque rect, input region, and blur
       region from the display list on every present
       (`shell/runtime/render.rs:804-837`) and issues
       `update_input_region`/`update_opaque_region` unconditionally; cache the
       last-sent regions per surface and skip the recompute+protocol calls
-      when the display-list generation didn't change.
-- [ ] **Child popover reconcile allocates per frame.**
+      when the display-list generation didn't change. Done 2026-07-03:
+      `ShellComponent` now exposes its retained display-list generation and
+      each `SurfaceTarget` caches `(generation, surface size, content input
+      size)`. Unchanged frames skip command traversal plus opaque/input/blur
+      protocol updates; display-list changes and either geometry change still
+      invalidate the cache. A 500-command release microbenchmark over 20k
+      iterations measured 5.317ms for repeated blur-region scans versus
+      28.495us for the generation/geometry cache check (186.6x faster).
+- [x] **Child popover reconcile allocates per frame.**
       `reconcile_child_surface_requests` re-derives requests, builds
       `HashSet<String>`s of node keys, hex-encodes child surface ids, and
       clones `PopupConfig`s every frame for every component
       (`shell/runtime/render.rs:386-478,970-977`), even for the common
       zero-popover case. Early-out when the component has no popover nodes
       and no live children; cache the encoded child surface id on the
-      `ChildSurface`.
+      `ChildSurface`. Done 2026-07-03: the empty-request/no-live-child case now
+      returns before allocating key sets or doing popup bookkeeping; live
+      request keys are borrowed (`HashSet<&str>`) instead of cloning every
+      `_mesh_key`; existing children reuse `SurfaceTarget.surface_id` instead
+      of hex-encoding it again; and unchanged `PopupConfig`s skip both the
+      config clone and presentation `configure_popup` call. `PopupConfig` now
+      has value equality for that cache check. A release microbenchmark over
+      100k iterations measured 37.506ms for repeated ID encoding versus
+      636.395us for cloning the cached ID (58.9x faster). Child creation,
+      close, and exit-transition reconciliation tests pass.
 
 ### E. Style system — second-pass findings
 
@@ -1038,7 +1095,7 @@ multiplied by O(n) tree clones is where interaction latency actually goes.
       `collect_all_keys` helper. Covered by
       `collect_changed_subtree_keys_collects_descendants_in_one_walk` and the
       restyle suite.
-- [ ] **The "narrow" script path currently costs extra and saves nothing.**
+- [x] **The "narrow" script path currently costs extra and saves nothing.**
       `narrow_script_update` does the *full* template rebuild, then
       `narrow_script_diff` re-snapshots and re-hashes every node
       (`runtime_tree.rs:187-217`), then `narrow_expand_ancestors` builds a
@@ -1049,7 +1106,12 @@ multiplied by O(n) tree clones is where interaction latency actually goes.
       pure added O(2n) hash work on the most common invalidation class
       (service updates). Either wire `full_affected` into finalize (skip
       restyle/layout outside affected subtrees) now, or gate the diff behind
-      profiling mode.
+      profiling mode. Done 2026-07-03: the full template build remains (it is
+      required for the rendered result), but `narrow_script_update` now skips
+      `narrow_script_diff`, affected-set cloning, and ancestor expansion unless
+      component profiling is enabled. Profiling sessions retain the existing
+      telemetry. A 1,001-node release microbenchmark over 1,000 iterations
+      measured 1.091s for analysis versus 2.375us for the profiling-off gate.
 - [ ] **Runtime key paths make deep trees O(n × depth).** Every node's key
       is the full slash-joined ancestor path built with
       `format!("{key}/{index}")` and FNV-hashed from scratch per node per
@@ -1112,7 +1174,7 @@ after the display list is built does not.
       `spawn_blocking` with a completion event (the loop already wakes on
       eventfd), and make icon-cache misses paint a placeholder frame and
       fill in on the next wake instead of stalling the frame.
-- [ ] **Dedup service payloads before touching any runtime.** A poll backend
+- [x] **Dedup service payloads before touching any runtime.** A poll backend
       re-emitting unchanged JSON still costs, per emission: payload clone
       into `cached_service_payloads`, `apply_service_payload` (JSON→Lua
       conversion + `refresh_module_object`) for every observing runtime, an
@@ -1121,8 +1183,14 @@ after the display list is built does not.
       but all boundary work still runs at poll frequency × runtimes. Add
       `payload == cached` short-circuit at the top of `handle_service_event`
       (and ideally shell-level in `deliver_service_event` so non-observing
-      components aren't even iterated).
-- [ ] **Gate interaction invalidation on rule existence.** Every hover-path
+      components aren't even iterated). Backlog sync 2026-07-03: already
+      implemented at the stronger shell boundary. `broadcast_service_event`
+      calls `record_latest_service_state`, which returns before
+      `deliver_service_event` when provider and payload are unchanged, avoiding
+      component observation locks, Lua conversion, tracked-field scans, and
+      invalidation. Existing shell tests cover duplicate rejection and changed
+      provider/payload retention.
+- [x] **Gate interaction invalidation on rule existence.** Every hover-path
       change calls `invalidate_interaction_restyle()` unconditionally
       (`input/mod.rs:242,269`), triggering a restyle + layout + retained
       hash + display-list pass even when **no `:hover`/`:focus`/`:active`
@@ -1134,15 +1202,39 @@ after the display list is built does not.
       selector-dependency item but is much cheaper to ship: it's a presence
       check, not a dependency graph. Same gate applies to
       `prune`-style hover annotation (`_mesh_key` state bits) — nodes that
-      no state rule targets don't need `state.hovered` maintained at all.
-- [ ] **Skip `render()`/`render_layout` bookkeeping for clean visible
+      no state rule targets don't need `state.hovered` maintained at all. Done
+      2026-07-03: components now cache whether their root/local styles contain
+      any state selectors. Pure hover enter/leave changes on components with no
+      state selectors skip restyle/layout/paint entirely; tooltip changes still
+      get a paint-only invalidation, and components with state selectors retain
+      the existing interaction restyle path. A release benchmark over 1,000
+      plain hover moves measured 4.917s for forced old-style restyle+paint
+      versus 1.610ms gated (3054.3x faster). Review fix same day: the presence
+      flag was initially computed from the host module's own component + local
+      components only, while the actual restyle rule set also aggregates
+      imported component modules' rules — a host with no state selectors of
+      its own embedding an imported `:hover` component would silently drop
+      that hover styling, and a hot source reload adding a state rule never
+      re-enabled the path. The gate is now derived from the same cached rule
+      set as `module_restyle_rules()` (which sorts state rules last, making
+      the check O(1)), so imported modules and reload resets stay in sync.
+      Covered by `hover_gate_sees_state_rules_from_imported_component_modules`.
+- [x] **Skip `render()`/`render_layout` bookkeeping for clean visible
       surfaces.** `ShellComponent::render` runs per loop iteration for every
       `wants_render` component and re-applies anchor/layer/margins/keyboard
       mode to the surface struct plus a `tracing::debug!` format of node
       counts/roles (`shell_component.rs:392-424`) before paint decides
       nothing changed. Cheap individually, but it's per-frame steady-state
       work; fold it into the config-changed path (the
-      `last_surface_config` compare already exists downstream).
+      `last_surface_config` compare already exists downstream). Done
+      2026-07-03: `FrontendSurfaceComponent::render` now runs
+      `render_layout`, show/hide, and debug message construction only when
+      `SURFACE_CONFIG` is dirty (or legacy untyped dirty is present). Paint-only
+      and animation frames bypass that surface bookkeeping; compositor
+      configure calls remain protected by the downstream `last_surface_config`
+      compare. A release benchmark over 500k render calls measured 6.942ms
+      with repeated config bookkeeping (3.5M surface calls) versus 1.091ms for
+      gated paint-only renders with zero surface calls (6.4x faster).
 
 ### L. Live performance debugging — design
 

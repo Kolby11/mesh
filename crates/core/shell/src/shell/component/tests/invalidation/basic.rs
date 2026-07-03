@@ -1,5 +1,53 @@
 use super::*;
+use mesh_core_wayland::{Edge, KeyboardMode, Layer, ShellSurface};
 use std::collections::HashSet;
+
+#[derive(Default)]
+struct CountingSurface {
+    layout_calls: u64,
+    visibility_calls: u64,
+}
+
+impl CountingSurface {
+    fn reset(&mut self) {
+        self.layout_calls = 0;
+        self.visibility_calls = 0;
+    }
+}
+
+impl ShellSurface for CountingSurface {
+    fn anchor(&mut self, _edge: Edge) {
+        self.layout_calls += 1;
+    }
+
+    fn set_size(&mut self, _width: u32, _height: u32) {
+        self.layout_calls += 1;
+    }
+
+    fn set_exclusive_zone(&mut self, _zone: i32) {
+        self.layout_calls += 1;
+    }
+
+    fn set_layer(&mut self, _layer: Layer) {
+        self.layout_calls += 1;
+    }
+
+    fn set_keyboard_interactivity(&mut self, _mode: KeyboardMode) {
+        self.layout_calls += 1;
+    }
+
+    fn set_margin(&mut self, _top: i32, _right: i32, _bottom: i32, _left: i32) {
+        self.layout_calls += 1;
+    }
+
+    fn show(&mut self) {
+        self.visibility_calls += 1;
+    }
+
+    fn hide(&mut self) {
+        self.visibility_calls += 1;
+    }
+}
 
 #[test]
 fn service_update_marks_component_dirty_only_when_tracked_fields_change() {
@@ -58,6 +106,313 @@ fn typed_invalidations_distinguish_restyle_from_script_rebuild() {
     assert!(!can_use_retained_path);
     assert!(flags.contains(ComponentDirtyFlags::SCRIPT));
     assert!(flags.contains(ComponentDirtyFlags::STATE));
+}
+
+#[test]
+fn render_skips_surface_bookkeeping_for_paint_only_dirty_frames() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    let mut surface = CountingSurface::default();
+
+    component.render(&mut surface).unwrap();
+    assert!(surface.layout_calls > 0);
+    assert!(surface.visibility_calls > 0);
+
+    surface.reset();
+    component.dirty = false;
+    component.style_only_dirty = false;
+    component.dirty_types = ComponentDirtyFlags::empty();
+    component.invalidate_paint();
+    component.render(&mut surface).unwrap();
+    assert_eq!(surface.layout_calls, 0);
+    assert_eq!(surface.visibility_calls, 0);
+
+    component.invalidate_surface_config();
+    component.render(&mut surface).unwrap();
+    assert!(surface.layout_calls > 0);
+    assert!(surface.visibility_calls > 0);
+}
+
+// cargo test -p mesh-core-shell --release -- render_surface_config_gate_skips_paint_only_bookkeeping --ignored --nocapture
+#[test]
+#[ignore = "release-only render surface-config gate microbenchmark"]
+fn render_surface_config_gate_skips_paint_only_bookkeeping() {
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    let iterations = 500_000;
+    let mut surface = CountingSurface::default();
+
+    let mut old_component = test_frontend_component("<template><box /></template>");
+    old_component.dirty = true;
+    old_component.style_only_dirty = true;
+    old_component.dirty_types = ComponentDirtyFlags::SURFACE_CONFIG;
+    let old_started = Instant::now();
+    for _ in 0..iterations {
+        old_component.render(black_box(&mut surface)).unwrap();
+    }
+    let old_time = old_started.elapsed();
+    let old_calls = surface.layout_calls + surface.visibility_calls;
+
+    surface.reset();
+    let mut gated_component = test_frontend_component("<template><box /></template>");
+    gated_component.dirty = true;
+    gated_component.style_only_dirty = true;
+    gated_component.dirty_types = ComponentDirtyFlags::PAINT;
+    let gated_started = Instant::now();
+    for _ in 0..iterations {
+        gated_component.render(black_box(&mut surface)).unwrap();
+    }
+    let gated_time = gated_started.elapsed();
+    let gated_calls = surface.layout_calls + surface.visibility_calls;
+
+    eprintln!(
+        "render surface config bookkeeping: {old_time:?} ({old_calls} calls); gated paint-only: {gated_time:?} ({gated_calls} calls); ratio: {:.1}x",
+        old_time.as_secs_f64() / gated_time.as_secs_f64()
+    );
+    assert_eq!(gated_calls, 0);
+    assert!(gated_time * 2 < old_time);
+}
+
+#[test]
+fn plain_hover_change_without_state_rules_does_not_dirty_component() {
+    let mut component = test_frontend_component(
+        r#"
+<template><row><box class="plain" /><box class="plain" /></row></template>
+<style>
+surface { width: 200px; height: 80px; }
+.plain { width: 80px; height: 40px; background: #222222; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(200, 80);
+    component.paint(&theme, 200, 80, &mut buffer, 1.0).unwrap();
+    if component.wants_render() {
+        component.paint(&theme, 200, 80, &mut buffer, 1.0).unwrap();
+    }
+    assert!(!component.wants_render());
+
+    component
+        .handle_input(
+            &theme,
+            200,
+            80,
+            ComponentInput::PointerMove { x: 10.0, y: 10.0 },
+        )
+        .unwrap();
+
+    assert!(component.hovered_key.is_some());
+    assert!(
+        !component.wants_render(),
+        "hovering plain nodes without state selectors should not schedule restyle/layout/paint"
+    );
+}
+
+#[test]
+fn hover_change_with_state_rules_still_invalidates_interaction_restyle() {
+    let mut component = test_frontend_component(
+        r#"
+<template><button class="target">Hover</button></template>
+<style>
+surface { width: 120px; height: 48px; }
+button { width: 80px; height: 32px; background: #222222; }
+button:hover { background: #444444; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 48);
+    component.paint(&theme, 120, 48, &mut buffer, 1.0).unwrap();
+    if component.wants_render() {
+        component.paint(&theme, 120, 48, &mut buffer, 1.0).unwrap();
+    }
+    assert!(!component.wants_render());
+
+    component
+        .handle_input(
+            &theme,
+            120,
+            48,
+            ComponentInput::PointerMove { x: 10.0, y: 10.0 },
+        )
+        .unwrap();
+
+    let (requires_tree_rebuild, can_use_retained_path, flags, _) = component.take_dirty_for_paint();
+    assert!(!requires_tree_rebuild);
+    assert!(can_use_retained_path);
+    assert!(flags.contains(ComponentDirtyFlags::STYLE));
+    assert!(flags.contains(ComponentDirtyFlags::LAYOUT));
+    assert!(flags.contains(ComponentDirtyFlags::PAINT));
+}
+
+#[test]
+fn hover_gate_sees_state_rules_from_imported_component_modules() {
+    use crate::shell::component::catalog::FrontendCatalogEntry;
+    use mesh_core_component::parse_component;
+    use mesh_core_frontend::CompiledFrontendModule;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    // Host surface has no state selectors of its own...
+    let mut component = test_frontend_component(
+        r#"
+<template><row><box class="plain" /></row></template>
+<style>
+surface { width: 200px; height: 80px; }
+.plain { width: 80px; height: 40px; background: #222222; }
+</style>
+"#,
+    );
+    // ...but imports a component module whose styles do use `:hover`. The
+    // restyle rule set aggregates imported-module rules, so the hover gate
+    // must see them too.
+    let imported_id = "@test/imported-popover".to_string();
+    component
+        .compiled
+        .module_component_imports
+        .insert("ImportedPopover".into(), imported_id.clone());
+    component.frontend_catalog.modules.insert(
+        imported_id.clone(),
+        FrontendCatalogEntry {
+            module_dir: PathBuf::from("."),
+            compiled: CompiledFrontendModule {
+                manifest: minimal_test_manifest(&imported_id),
+                source_path: PathBuf::from("src/main.mesh"),
+                component: parse_component(
+                    r#"
+<template><button class="opt">Pick</button></template>
+<style>
+.opt { background: #222222; }
+.opt:hover { background: #444444; }
+</style>
+"#,
+                )
+                .unwrap(),
+                local_components: HashMap::new(),
+                module_component_imports: HashMap::new(),
+                watched_paths: Vec::new(),
+            },
+        },
+    );
+    // The rule cache may have been built before the import was wired (as it
+    // is on hot source reload); reset it the same way reloads do.
+    component.cached_restyle_rules = None;
+
+    assert!(component.module_styles_have_state_rules());
+
+    component.dirty = false;
+    component.style_only_dirty = false;
+    component.dirty_types = ComponentDirtyFlags::empty();
+    component.invalidate_hover_change(false);
+    assert!(
+        component.wants_render(),
+        "hover changes must schedule an interaction restyle when an imported component module declares state selectors"
+    );
+}
+
+// cargo test -p mesh-core-shell --release -- hover_without_state_rules_skips_repaint_benchmark --ignored --nocapture
+#[test]
+#[ignore = "release-only hover invalidation microbenchmark"]
+fn hover_without_state_rules_skips_repaint_benchmark() {
+    use std::time::Instant;
+
+    let mut source = String::from(r#"<template><row>"#);
+    for _ in 0..250 {
+        source.push_str(r#"<box class="plain" />"#);
+    }
+    source.push_str(
+        r#"</row></template>
+<style>
+surface { width: 1000px; height: 80px; }
+.plain { width: 4px; height: 40px; background: #222222; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let iterations = 1_000;
+
+    let run = |force_old_restyle: bool| {
+        let mut component = test_frontend_component(&source);
+        let mut buffer = PixelBuffer::new(1000, 80);
+        component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+        if component.wants_render() {
+            component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+        }
+        let started = Instant::now();
+        for iteration in 0..iterations {
+            let x = if iteration % 2 == 0 { 2.0 } else { 998.0 };
+            component
+                .handle_input(&theme, 1000, 80, ComponentInput::PointerMove { x, y: 10.0 })
+                .unwrap();
+            if force_old_restyle {
+                component.invalidate_interaction_restyle();
+            }
+            if component.wants_render() {
+                component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+            }
+        }
+        started.elapsed()
+    };
+
+    let old_time = run(true);
+    let gated_time = run(false);
+    eprintln!(
+        "plain hover forced restyle: {old_time:?}; gated: {gated_time:?}; ratio: {:.1}x",
+        old_time.as_secs_f64() / gated_time.as_secs_f64()
+    );
+    assert!(gated_time * 2 < old_time);
+}
+
+// cargo test -p mesh-core-shell --release -- empty_interaction_diff_skips_full_restyle_benchmark --ignored --nocapture
+#[test]
+#[ignore = "release-only interaction restyle empty-diff microbenchmark"]
+fn empty_interaction_diff_skips_full_restyle_benchmark() {
+    use std::time::Instant;
+
+    let mut source = String::from(r#"<template><row>"#);
+    for _ in 0..250 {
+        source.push_str(r#"<box class="plain" />"#);
+    }
+    source.push_str(
+        r#"</row></template>
+<style>
+surface { width: 1000px; height: 80px; }
+.plain { width: 4px; height: 40px; background: #222222; }
+.plain:hover { background: #444444; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let iterations = 500;
+
+    let run = |force_old_fallback: bool| {
+        let mut component = test_frontend_component(&source);
+        let mut buffer = PixelBuffer::new(1000, 80);
+        component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+        if component.wants_render() {
+            component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+        }
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            component.previous_hovered_path.clear();
+            component.hovered_path.clear();
+            component.previous_focused_key = None;
+            component.focused_key = None;
+            component.interaction_snapshot_valid = !force_old_fallback;
+            component.invalidate_interaction_restyle();
+            component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+        }
+        started.elapsed()
+    };
+
+    let old_time = run(true);
+    let no_op_time = run(false);
+    eprintln!(
+        "empty interaction diff full restyle fallback: {old_time:?}; no-op: {no_op_time:?}; ratio: {:.1}x",
+        old_time.as_secs_f64() / no_op_time.as_secs_f64()
+    );
+    assert!(no_op_time * 2 < old_time);
 }
 
 #[test]

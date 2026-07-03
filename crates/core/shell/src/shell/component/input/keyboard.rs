@@ -434,6 +434,13 @@ impl FrontendSurfaceComponent {
         surface_shortcut_declarations_from_settings(&self.settings_json)
     }
 
+    fn has_surface_shortcut_declarations(&self) -> bool {
+        !self.compiled.manifest.keybinds.actions.is_empty()
+            || !self
+                .legacy_settings_surface_shortcut_declarations()
+                .is_empty()
+    }
+
     pub(in crate::shell::component) fn keybind_subscribers(
         &self,
         tree: &WidgetNode,
@@ -503,6 +510,9 @@ impl FrontendSurfaceComponent {
     }
 
     pub(in crate::shell::component) fn annotate_surface_shortcuts(&self, tree: &mut WidgetNode) {
+        if !self.has_surface_shortcut_declarations() {
+            return;
+        }
         let keyboard_settings = self.current_keyboard_settings();
         for shortcut in self.resolved_surface_shortcuts(&keyboard_settings) {
             let accessibility_shortcut = format_shortcut_for_accessibility(&shortcut);

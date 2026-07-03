@@ -85,6 +85,17 @@ impl FrontendSurfaceComponent {
         self.cached_restyle_rules.as_deref().unwrap()
     }
 
+    /// Whether any rule this surface restyles with — including rules pulled in
+    /// from imported component modules — carries a state selector
+    /// (`:hover`/`:focus`/...). Derived from the same cache as
+    /// `module_restyle_rules` (which sorts state rules last), so it stays in
+    /// sync with imported modules and hot source reloads.
+    pub(super) fn module_styles_have_state_rules(&mut self) -> bool {
+        self.module_restyle_rules()
+            .last()
+            .is_some_and(|rule| selector_contains_state(&rule.selector))
+    }
+
     pub(super) fn requested_layout_size(&self) -> (u32, u32) {
         // Every surface is CSS content-measured now. Until the first paint
         // populates `measured_size`, report `(0, 0)`: zero flows through the
@@ -179,6 +190,8 @@ impl FrontendSurfaceComponent {
             stack.clear();
             stack.push(self.id().to_string());
         }
+        self.has_promoted_popover_wrappers.set(false);
+        self.has_error_placeholders.set(false);
         let measurer = SharedTextMeasurer;
         let tree_build_started = std::time::Instant::now();
         let mut tree = self.compiled.build_tree_with_state(
@@ -217,6 +230,14 @@ impl FrontendSurfaceComponent {
         surface_css_props: &SurfaceCssProps,
     ) -> Option<WidgetNode> {
         let tree = self.build_tree_with_surface_css_props(theme, width, height, surface_css_props);
+        // Narrow-script analysis currently feeds profiling telemetry only; the
+        // finalized tree still takes the same full restyle/layout path. Avoid
+        // snapshotting and hashing every node when nobody will consume those
+        // measurements. Once affected subtrees drive rendering behavior this
+        // gate can be removed alongside that implementation.
+        if !self.profiling_enabled {
+            return Some(tree);
+        }
         let (affected, total) = self.retained_tree.narrow_script_diff(&tree)?;
         if affected.len() * 2 > total {
             return None;
@@ -329,22 +350,26 @@ impl FrontendSurfaceComponent {
         } else {
             HashSet::new()
         };
+        let interaction_snapshot_valid = self.interaction_snapshot_valid;
         let index_cache = &mut self.cached_style_rule_index;
         let mut reused_retained_layout = false;
         let preserve_surface_root = tree.tag == "surface";
         if targeted_interaction_restyle {
             if affected_keys.is_empty() {
-                // First frame or no previous interaction state — fall back
-                // to full-tree restyle.
-                if preserve_surface_root {
-                    resolver.restyle_subtree_children_cached(
-                        tree,
-                        restyle_rules,
-                        context,
-                        index_cache,
-                    );
-                } else {
-                    resolver.restyle_subtree_cached(tree, restyle_rules, context, index_cache);
+                if !interaction_snapshot_valid {
+                    // First frame or no previous interaction state — fall back
+                    // to full-tree restyle.
+                    if preserve_surface_root {
+                        resolver.restyle_subtree_children_cached(
+                            tree,
+                            restyle_rules,
+                            context,
+                            index_cache,
+                        );
+                    } else {
+                        resolver.restyle_subtree_cached(tree, restyle_rules, context, index_cache);
+                    }
+                    merge_runtime_primitive_defaults(tree);
                 }
             } else {
                 // Narrow restyle: only restyle state-changed nodes and their
@@ -373,8 +398,8 @@ impl FrontendSurfaceComponent {
                         &affected_keys,
                     );
                 }
+                merge_runtime_primitive_defaults(tree);
             }
-            merge_runtime_primitive_defaults(tree);
             reused_retained_layout = !dirty_types.contains(ComponentDirtyFlags::LAYOUT);
         } else {
             if preserve_surface_root {
@@ -415,8 +440,12 @@ impl FrontendSurfaceComponent {
         // the `position: absolute` set when the wrapper was composed. Without this,
         // a promoted (but hidden) popover's full-size subtree would lay out inline
         // and push its trigger row's siblings into overlap. Must run before layout.
-        collapse_promoted_popover_wrappers(tree);
-        constrain_error_placeholders(tree);
+        if self.has_promoted_popover_wrappers.get() {
+            collapse_promoted_popover_wrappers(tree);
+        }
+        if self.has_error_placeholders.get() {
+            constrain_error_placeholders(tree);
+        }
 
         let layout_work_required = !reused_retained_layout || !self.layout_state.valid;
         // Enter the retained layout path on every finalized tree. On
@@ -450,14 +479,14 @@ impl FrontendSurfaceComponent {
         // Store current interaction state for next frame's targeted restyle diff.
         self.previous_hovered_path = self.hovered_path.clone();
         self.previous_focused_key = self.focused_key.clone();
+        self.interaction_snapshot_valid = true;
     }
 
     /// Collects the set of `_mesh_key` values for all nodes whose interaction
     /// state changed this frame plus all their descendants.
     ///
     /// Compares current hover/focus state against previous frame's state to
-    /// identify which nodes changed. Returns an empty HashSet if there is no
-    /// previous state to diff against (first frame), signaling fallback to full restyle.
+    /// identify which nodes changed.
     fn collect_interaction_changed_keys(&self, tree: &WidgetNode) -> HashSet<String> {
         let mut changed_keys: HashSet<String> = HashSet::new();
 
@@ -649,12 +678,34 @@ fn collect_changed_subtree_keys(
 #[cfg(test)]
 mod interaction_changed_key_tests {
     use super::*;
+    use std::time::Instant;
 
     fn keyed_node(key: &str, children: Vec<WidgetNode>) -> WidgetNode {
         let mut node = WidgetNode::new("box");
         node.attributes.insert("_mesh_key".into(), key.into());
         node.children = children;
         node
+    }
+
+    fn broad_plain_tree(width: usize, depth: usize) -> WidgetNode {
+        fn build(level: usize, width: usize, depth: usize) -> WidgetNode {
+            let mut node = WidgetNode::new("box");
+            node.attributes
+                .insert("_mesh_key".into(), format!("root/{level}"));
+            if level < depth {
+                node.children = (0..width)
+                    .map(|index| {
+                        let mut child = build(level + 1, width, depth);
+                        child
+                            .attributes
+                            .insert("_mesh_key".into(), format!("root/{level}/{index}"));
+                        child
+                    })
+                    .collect();
+            }
+            node
+        }
+        build(0, width, depth)
     }
 
     #[test]
@@ -685,6 +736,40 @@ mod interaction_changed_key_tests {
                 "root/0/1".to_string(),
             ])
         );
+    }
+
+    // cargo test -p mesh-core-shell --release -- finalize_marker_walk_gates_skip_plain_trees --ignored --nocapture
+    #[test]
+    #[ignore = "release-only finalize marker walk microbenchmark"]
+    fn finalize_marker_walk_gates_skip_plain_trees() {
+        let mut tree = broad_plain_tree(4, 5);
+        let iterations = 20_000;
+
+        let old_started = Instant::now();
+        for _ in 0..iterations {
+            collapse_promoted_popover_wrappers(std::hint::black_box(&mut tree));
+            constrain_error_placeholders(std::hint::black_box(&mut tree));
+        }
+        let old_time = old_started.elapsed();
+
+        let gated_started = Instant::now();
+        let has_promoted_popover_wrappers = false;
+        let has_error_placeholders = false;
+        for _ in 0..iterations {
+            if has_promoted_popover_wrappers {
+                collapse_promoted_popover_wrappers(std::hint::black_box(&mut tree));
+            }
+            if has_error_placeholders {
+                constrain_error_placeholders(std::hint::black_box(&mut tree));
+            }
+        }
+        let gated_time = gated_started.elapsed();
+
+        eprintln!(
+            "finalize marker walks plain tree: {old_time:?}; gated: {gated_time:?}; ratio: {:.1}x",
+            old_time.as_secs_f64() / gated_time.as_secs_f64()
+        );
+        assert!(gated_time * 10 < old_time);
     }
 }
 

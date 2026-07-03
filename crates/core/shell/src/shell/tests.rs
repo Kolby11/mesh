@@ -4600,6 +4600,26 @@ fn latest_service_state_tracks_provider_metadata_separately() {
 }
 
 #[test]
+fn identical_service_state_is_deduplicated_before_delivery() {
+    let mut shell = Shell::new();
+    let event = service_update(
+        "mesh.audio",
+        "@mesh/pipewire-audio",
+        serde_json::json!({ "available": true, "percent": 65.0, "muted": false }),
+    );
+
+    assert!(shell.record_latest_service_state(&event));
+    assert!(!shell.record_latest_service_state(&event));
+
+    let changed = service_update(
+        "mesh.audio",
+        "@mesh/pipewire-audio",
+        serde_json::json!({ "available": true, "percent": 66.0, "muted": false }),
+    );
+    assert!(shell.record_latest_service_state(&changed));
+}
+
+#[test]
 fn provider_swap_replaces_interface_latest_state() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();

@@ -107,7 +107,7 @@ impl Default for PopupPlacement {
 
 /// Request to promote a component into an `xdg_popup` child of an existing
 /// (layer) surface owned by the backend.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PopupConfig {
     /// `surface_id` of the parent surface (must be a layer surface owned by the
     /// backend). The popup is a Wayland child of this surface.

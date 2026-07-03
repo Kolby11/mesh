@@ -664,6 +664,10 @@ enum LocalReuseDecision {
 }
 
 impl RetainedDisplayList {
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     pub fn update(
         &mut self,
         root: &WidgetNode,

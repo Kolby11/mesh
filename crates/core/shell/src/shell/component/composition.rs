@@ -120,6 +120,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         // are additionally promoted to a child surface.
         if embedded_root_is_popover(&node) {
             let mut node = node;
+            self.has_promoted_popover_wrappers.set(true);
             node.attributes.insert("hidden".into(), "true".into());
             node.attributes
                 .insert(PROMOTED_POPOVER_MARKER.into(), "true".into());

@@ -136,3 +136,60 @@ fn threshold_narrow_below_half() {
         "≤50% of nodes changed — narrow path should be taken"
     );
 }
+
+#[test]
+fn narrow_script_analysis_is_disabled_outside_profiling() {
+    let mut component = test_frontend_component(
+        "<template><box><text>a</text><text>b</text><text>c</text></box></template>",
+    );
+    let theme = themed_primary("test", "#000000");
+    let surface_css_props = component.surface_css_props();
+
+    let tree = component.build_tree(&theme, 100, 100);
+    let _ = component.retained_tree.update(&tree);
+    component.narrow_path_active = false;
+    component.affected_node_count = 0;
+
+    let result = component.narrow_script_update(&theme, 100, 100, &surface_css_props);
+
+    assert!(result.is_some());
+    assert!(!component.narrow_path_active);
+    assert_eq!(component.affected_node_count, 0);
+}
+
+// cargo test -p mesh-core-shell --release -- narrow_script_analysis_cost --ignored --nocapture
+#[test]
+#[ignore = "release-only narrow-script analysis microbenchmark"]
+fn narrow_script_analysis_cost() {
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    let mut component = test_frontend_component(&format!(
+        "<template><box>{}</box></template>",
+        (0..1_000)
+            .map(|index| format!("<text>row {index}</text>"))
+            .collect::<String>()
+    ));
+    let theme = themed_primary("test", "#000000");
+    let tree = component.build_tree(&theme, 1_000, 1_000);
+    let _ = component.retained_tree.update(&tree);
+    let iterations = 1_000;
+
+    let analysis_started = Instant::now();
+    for _ in 0..iterations {
+        black_box(component.retained_tree.narrow_script_diff(black_box(&tree)));
+    }
+    let analysis = analysis_started.elapsed();
+
+    let gated_started = Instant::now();
+    for _ in 0..iterations {
+        black_box(black_box(&tree));
+    }
+    let gated = gated_started.elapsed();
+
+    eprintln!(
+        "narrow-script analysis: {analysis:?}; profiling-off gate: {gated:?}; ratio: {:.1}x",
+        analysis.as_secs_f64() / gated.as_secs_f64()
+    );
+    assert!(gated < analysis);
+}

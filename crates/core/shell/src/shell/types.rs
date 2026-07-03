@@ -39,6 +39,7 @@ pub(super) struct SurfaceTarget {
     pub(super) popup_config: Option<PopupConfig>,
     /// Last size handed to `configure_popup`; used to skip redundant calls.
     pub(super) last_popup_size: Option<(u32, u32)>,
+    pub(super) last_region_state: Option<(u64, Option<(u32, u32)>, Option<(u32, u32)>)>,
 }
 
 impl SurfaceTarget {
@@ -53,6 +54,7 @@ impl SurfaceTarget {
             popup_parent_surface: None,
             popup_config: None,
             last_popup_size: None,
+            last_region_state: None,
         }
     }
 }

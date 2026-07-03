@@ -272,6 +272,64 @@ impl Hasher for RuntimeTreeHasher {
             self.0 = self.0.wrapping_mul(FNV_PRIME);
         }
     }
+
+    fn write_u8(&mut self, value: u8) {
+        self.write_mix(u64::from(value));
+    }
+
+    fn write_u16(&mut self, value: u16) {
+        self.write_mix(u64::from(value));
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.write_mix(u64::from(value));
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.write_mix(value);
+    }
+
+    fn write_u128(&mut self, value: u128) {
+        self.write_mix(value as u64);
+        self.write_mix((value >> 64) as u64);
+    }
+
+    fn write_usize(&mut self, value: usize) {
+        self.write_mix(value as u64);
+    }
+
+    fn write_i8(&mut self, value: i8) {
+        self.write_mix(value as u8 as u64);
+    }
+
+    fn write_i16(&mut self, value: i16) {
+        self.write_mix(value as u16 as u64);
+    }
+
+    fn write_i32(&mut self, value: i32) {
+        self.write_mix(value as u32 as u64);
+    }
+
+    fn write_i64(&mut self, value: i64) {
+        self.write_mix(value as u64);
+    }
+
+    fn write_i128(&mut self, value: i128) {
+        self.write_u128(value as u128);
+    }
+
+    fn write_isize(&mut self, value: isize) {
+        self.write_mix(value as usize as u64);
+    }
+}
+
+impl RuntimeTreeHasher {
+    #[inline]
+    fn write_mix(&mut self, value: u64) {
+        self.0 ^= value;
+        self.0 = self.0.wrapping_mul(FNV_PRIME);
+        self.0 ^= self.0 >> 32;
+    }
 }
 
 /// Deterministic runtime node id derived from the stable runtime key assigned
@@ -321,57 +379,61 @@ fn layout_fingerprint(layout: LayoutRect) -> LayoutFingerprint {
 
 fn style_fingerprint(style: &ComputedStyle) -> u64 {
     let mut hasher = RuntimeTreeHasher::default();
-    hash_dimension(style.width, &mut hasher);
-    hash_dimension(style.height, &mut hasher);
-    hash_option_f32(style.min_width, &mut hasher);
-    hash_option_f32(style.max_width, &mut hasher);
-    hash_option_f32(style.min_height, &mut hasher);
-    hash_option_f32(style.max_height, &mut hasher);
-    hash_edges(style.padding, &mut hasher);
-    hash_edges(style.margin, &mut hasher);
-    hash_edges(style.border_width, &mut hasher);
-    hash_color(style.background_color, &mut hasher);
-    hash_color(style.border_color, &mut hasher);
-    hash_corners(style.border_radius, &mut hasher);
-    style.opacity.to_bits().hash(&mut hasher);
-    hash_transform(style.transform, &mut hasher);
-    style.transitions.hash(&mut hasher);
-    style.animations.hash(&mut hasher);
-    style.overflow_x.hash(&mut hasher);
-    style.overflow_y.hash(&mut hasher);
-    style.font_family.hash(&mut hasher);
-    style.font_size.to_bits().hash(&mut hasher);
-    style.font_weight.hash(&mut hasher);
-    hash_color(style.color, &mut hasher);
-    style.text_align.hash(&mut hasher);
-    style.line_height.to_bits().hash(&mut hasher);
-    style.font_style.hash(&mut hasher);
-    style.letter_spacing.to_bits().hash(&mut hasher);
-    style.text_overflow.hash(&mut hasher);
-    style.text_direction.hash(&mut hasher);
-    style.display.hash(&mut hasher);
-    style.direction.hash(&mut hasher);
-    style.justify_content.hash(&mut hasher);
-    style.align_items.hash(&mut hasher);
-    style.align_content.hash(&mut hasher);
-    style.gap.to_bits().hash(&mut hasher);
-    style.flex_grow.to_bits().hash(&mut hasher);
-    style.flex_shrink.to_bits().hash(&mut hasher);
-    hash_dimension(style.flex_basis, &mut hasher);
-    style.flex_wrap.hash(&mut hasher);
-    style.align_self.hash(&mut hasher);
-    style.position.hash(&mut hasher);
-    style.mix_blend_mode.hash(&mut hasher);
-    style.z_index.hash(&mut hasher);
-    hash_option_f32(style.inset_top, &mut hasher);
-    hash_option_f32(style.inset_right, &mut hasher);
-    hash_option_f32(style.inset_bottom, &mut hasher);
-    hash_option_f32(style.inset_left, &mut hasher);
-    hash_option_f32(style.icon_fill, &mut hasher);
-    hash_option_f32(style.icon_weight, &mut hasher);
-    hash_option_f32(style.icon_grade, &mut hasher);
-    hash_option_f32(style.icon_optical_size, &mut hasher);
+    hash_style_fields(style, &mut hasher);
     hasher.finish()
+}
+
+fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher) {
+    hash_dimension(style.width, hasher);
+    hash_dimension(style.height, hasher);
+    hash_option_f32(style.min_width, hasher);
+    hash_option_f32(style.max_width, hasher);
+    hash_option_f32(style.min_height, hasher);
+    hash_option_f32(style.max_height, hasher);
+    hash_edges(style.padding, hasher);
+    hash_edges(style.margin, hasher);
+    hash_edges(style.border_width, hasher);
+    hash_color(style.background_color, hasher);
+    hash_color(style.border_color, hasher);
+    hash_corners(style.border_radius, hasher);
+    style.opacity.to_bits().hash(hasher);
+    hash_transform(style.transform, hasher);
+    style.transitions.hash(hasher);
+    style.animations.hash(hasher);
+    style.overflow_x.hash(hasher);
+    style.overflow_y.hash(hasher);
+    style.font_family.hash(hasher);
+    style.font_size.to_bits().hash(hasher);
+    style.font_weight.hash(hasher);
+    hash_color(style.color, hasher);
+    style.text_align.hash(hasher);
+    style.line_height.to_bits().hash(hasher);
+    style.font_style.hash(hasher);
+    style.letter_spacing.to_bits().hash(hasher);
+    style.text_overflow.hash(hasher);
+    style.text_direction.hash(hasher);
+    style.display.hash(hasher);
+    style.direction.hash(hasher);
+    style.justify_content.hash(hasher);
+    style.align_items.hash(hasher);
+    style.align_content.hash(hasher);
+    style.gap.to_bits().hash(hasher);
+    style.flex_grow.to_bits().hash(hasher);
+    style.flex_shrink.to_bits().hash(hasher);
+    hash_dimension(style.flex_basis, hasher);
+    style.flex_wrap.hash(hasher);
+    style.align_self.hash(hasher);
+    style.position.hash(hasher);
+    style.mix_blend_mode.hash(hasher);
+    style.z_index.hash(hasher);
+    hash_option_f32(style.inset_top, hasher);
+    hash_option_f32(style.inset_right, hasher);
+    hash_option_f32(style.inset_bottom, hasher);
+    hash_option_f32(style.inset_left, hasher);
+    hash_option_f32(style.icon_fill, hasher);
+    hash_option_f32(style.icon_weight, hasher);
+    hash_option_f32(style.icon_grade, hasher);
+    hash_option_f32(style.icon_optical_size, hasher);
 }
 
 fn attributes_fingerprint(node: &WidgetNode) -> u64 {
@@ -855,6 +917,7 @@ fn collect_node_service_deps(node: &WidgetNode, deps: &mut NodeServiceFieldDepen
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     fn annotate_with_empty_context(node: &mut WidgetNode) {
         let input_values = HashMap::new();
@@ -875,6 +938,107 @@ mod tests {
             &scroll_offsets,
         );
         annotate_runtime_tree(node, "root".to_string(), &mut context);
+    }
+
+    #[derive(Default)]
+    struct ByteOnlyRuntimeTreeHasher(u64);
+
+    impl Hasher for ByteOnlyRuntimeTreeHasher {
+        fn finish(&self) -> u64 {
+            self.0
+        }
+
+        fn write(&mut self, bytes: &[u8]) {
+            for byte in bytes {
+                self.0 ^= u64::from(*byte);
+                self.0 = self.0.wrapping_mul(FNV_PRIME);
+            }
+        }
+    }
+
+    fn benchmark_style() -> ComputedStyle {
+        let mut style = ComputedStyle::default();
+        style.width = Dimension::Px(960.0);
+        style.height = Dimension::Percent(100.0);
+        style.min_width = Some(24.0);
+        style.max_width = Some(1200.0);
+        style.padding = Edges {
+            top: 4.0,
+            right: 8.0,
+            bottom: 4.0,
+            left: 8.0,
+        };
+        style.margin = Edges {
+            top: 1.0,
+            right: 2.0,
+            bottom: 3.0,
+            left: 4.0,
+        };
+        style.border_width = Edges {
+            top: 1.0,
+            right: 1.0,
+            bottom: 1.0,
+            left: 1.0,
+        };
+        style.background_color = Color::BLACK;
+        style.border_color = Color::WHITE;
+        style.border_radius = Corners {
+            top_left: 6.0,
+            top_right: 7.0,
+            bottom_right: 8.0,
+            bottom_left: 9.0,
+        };
+        style.opacity = 0.87;
+        style.font_size = 13.0;
+        style.line_height = 18.0;
+        style.letter_spacing = 0.3;
+        style.gap = 6.0;
+        style.flex_grow = 1.0;
+        style.flex_shrink = 0.0;
+        style.flex_basis = Dimension::Content;
+        style.inset_top = Some(2.0);
+        style.inset_right = Some(3.0);
+        style.inset_bottom = Some(4.0);
+        style.inset_left = Some(5.0);
+        style.icon_fill = Some(1.0);
+        style.icon_weight = Some(400.0);
+        style.icon_grade = Some(0.0);
+        style.icon_optical_size = Some(20.0);
+        style
+    }
+
+    // cargo test -p mesh-core-shell --release -- runtime_tree_primitive_hashing_beats_byte_fallback --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained-tree fingerprint microbenchmark"]
+    fn runtime_tree_primitive_hashing_beats_byte_fallback() {
+        let style = benchmark_style();
+        let iterations = 500_000;
+
+        let old_started = Instant::now();
+        let mut old_accumulator = 0u64;
+        for _ in 0..iterations {
+            let mut hasher = ByteOnlyRuntimeTreeHasher(FNV_OFFSET);
+            hash_style_fields(std::hint::black_box(&style), &mut hasher);
+            old_accumulator = old_accumulator.wrapping_add(std::hint::black_box(hasher.finish()));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_accumulator = 0u64;
+        for _ in 0..iterations {
+            new_accumulator = new_accumulator.wrapping_add(std::hint::black_box(
+                style_fingerprint(std::hint::black_box(&style)),
+            ));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "runtime tree style fingerprint byte fallback: {old_time:?}; primitive-aware: {new_time:?}; ratio: {:.1}x; accumulators={old_accumulator:x}/{new_accumulator:x}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_ne!(old_accumulator, 0);
+        assert_ne!(new_accumulator, 0);
+        assert!(new_time * 5 < old_time * 4);
     }
 
     #[test]

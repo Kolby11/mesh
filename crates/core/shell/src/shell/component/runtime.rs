@@ -346,6 +346,7 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn build_error_widget(&self, message: impl Into<String>) -> WidgetNode {
+        self.has_error_placeholders.set(true);
         bounded_error_widget(message)
     }
 

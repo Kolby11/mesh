@@ -362,6 +362,9 @@ pub trait ShellComponent: Send {
     fn display_list_paint_commands(&self) -> &[DisplayPaintCommand] {
         &[]
     }
+    fn display_list_generation(&self) -> u64 {
+        0
+    }
     /// The interactive content size, excluding any tooltip-overlay buffer padding.
     /// Used to confine the surface's pointer input region to the real content so
     /// clicks over the padding fall through to the windows beneath. `None` leaves
