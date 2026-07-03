@@ -331,6 +331,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// the normal transition engine while the shell keeps its child surface
     /// mapped. Set by the shell via `set_closing_child_keys`.
     closing_child_keys: HashSet<String>,
+    /// `_mesh_key`s of newly opened child popovers receiving a controlled
+    /// first paint in their collapsed entrance state.
+    entering_child_keys: HashSet<String>,
     dirty: bool,
     /// Set when only appearance changed (e.g. hover) without script-state
     /// changes. Triggers a paint via `wants_render`, but lets `paint` skip the
@@ -529,6 +532,7 @@ impl FrontendSurfaceComponent {
             surface_exiting: false,
             surface_entering: false,
             closing_child_keys: HashSet::new(),
+            entering_child_keys: HashSet::new(),
             dirty: true,
             style_only_dirty: false,
             dirty_types: ComponentDirtyFlags::TREE_REBUILD | ComponentDirtyFlags::SURFACE_CONFIG,

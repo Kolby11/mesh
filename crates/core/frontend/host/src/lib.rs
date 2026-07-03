@@ -418,6 +418,11 @@ pub trait ShellComponent: Send {
     /// so the popover's own CSS transition resolves and advances through the
     /// normal per-node transition engine instead of a one-shot style snap.
     fn set_closing_child_keys(&mut self, _keys: std::collections::HashSet<String>) {}
+    /// Tell the component which newly opened child popovers should be painted
+    /// in their authored entrance state. The shell maps the child from this
+    /// paint, then clears the keys so normal CSS transitions animate it to its
+    /// resting state instead of exposing the resting frame first.
+    fn set_entering_child_keys(&mut self, _keys: std::collections::HashSet<String>) {}
     /// Best-known logical content size for surface sizing: the measured content
     /// size once a paint has produced one, otherwise the manifest-declared
     /// width/height. Never returns a zero/`1x1` placeholder, so popup creation

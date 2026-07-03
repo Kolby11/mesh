@@ -1,2 +1,4 @@
 /target
+/profiles/
+/perf.data
 /.claude/worktrees/

@@ -178,6 +178,7 @@ impl FrontendSurfaceComponent {
         height: u32,
         surface_css_props: &SurfaceCssProps,
     ) -> WidgetNode {
+        let _span = tracing::debug_span!("build_tree", surface = %self.id()).entered();
         if self.render_hooks_pending {
             self.call_render_hooks();
             self.render_hooks_pending = false;
@@ -262,6 +263,7 @@ impl FrontendSurfaceComponent {
         dirty_types: ComponentDirtyFlags,
         surface_css_props: &SurfaceCssProps,
     ) -> Option<WidgetNode> {
+        let _span = tracing::debug_span!("restyle", surface = %self.id()).entered();
         let mut tree = self.last_tree.take()?;
         self.refresh_active_theme(theme);
         self.finalize_tree(
@@ -286,6 +288,8 @@ impl FrontendSurfaceComponent {
         dirty_types: ComponentDirtyFlags,
         surface_css_props: &SurfaceCssProps,
     ) {
+        let _span =
+            tracing::debug_span!("finalize_tree", surface = %self.id(), trigger_kind).entered();
         // Advance smooth-scroll animations before annotation reads scroll_offsets,
         // so the eased offset lands in this frame's `_mesh_scroll_*` attributes.
         self.advance_scroll_animations(std::time::Instant::now());
@@ -317,6 +321,13 @@ impl FrontendSurfaceComponent {
                 append_class_recursive(node, "mesh-surface-exiting");
                 node.attributes
                     .insert("_mesh_surface_exiting".into(), "true".into());
+            }
+        }
+        for node_key in &self.entering_child_keys {
+            if let Some(node) = find_node_by_key_mut(tree, node_key) {
+                append_class_recursive(node, "mesh-surface-entering");
+                node.attributes
+                    .insert("_mesh_surface_entering".into(), "true".into());
             }
         }
         self.annotate_surface_shortcuts(tree);

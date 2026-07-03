@@ -476,6 +476,43 @@ fn set_closing_child_keys_scopes_exit_transition_to_popover_subtree_only() {
 }
 
 #[test]
+fn set_entering_child_keys_scopes_entrance_to_popover_subtree_only() {
+    let theme = default_theme();
+    let mut theme_selector =
+        real_frontend_module_component("@mesh/theme-selector", audio_network_catalog());
+    theme_selector.visible = true;
+
+    let mut buffer = PixelBuffer::new(112, 92);
+    theme_selector
+        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .unwrap();
+    let popover_key = theme_selector
+        .last_tree
+        .as_ref()
+        .and_then(|tree| first_node_with_class_token(tree, "theme-float-shell"))
+        .and_then(|node| node.attributes.get("_mesh_key"))
+        .expect("theme selector root should be a keyed popover node")
+        .clone();
+
+    theme_selector.set_entering_child_keys([popover_key].into_iter().collect());
+    theme_selector
+        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = theme_selector.last_tree.as_ref().expect("entering tree");
+    let popover = first_node_with_class_token(tree, "theme-float-shell").unwrap();
+    assert!(
+        popover
+            .attributes
+            .get("class")
+            .is_some_and(|class| class.contains("mesh-surface-entering"))
+    );
+    let motion = first_node_with_class_token(popover, "bubble-options-motion").unwrap();
+    assert_eq!(motion.computed_style.transform.translate_x, 46.0);
+    assert_eq!(motion.computed_style.opacity, 0.0);
+}
+
+#[test]
 fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
     let theme = default_theme();
     let mut theme_selector =

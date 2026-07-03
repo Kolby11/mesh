@@ -128,8 +128,8 @@ end
         background: transparent;
         opacity: 1;
         transform: translateY(0px) scale(1);
-        transition: opacity 160ms var(--animation-curves-bezier-standard),
-        transform 220ms var(--animation-curves-bezier-emphasized-decelerate);
+        transition: transform 220ms var(--animation-curves-bezier-emphasized-decelerate),
+        opacity 180ms var(--animation-curves-bezier-standard);
     }
 
     .bubble-popover-panel {
@@ -147,7 +147,7 @@ end
     .theme-float-shell.mesh-surface-exiting {
         opacity: 0;
         transform: translateY(-6px) scale(0.94);
-        transition: opacity 120ms var(--animation-curves-bezier-standard),
-        transform 140ms var(--animation-curves-bezier-standard);
+        transition: transform 140ms var(--animation-curves-bezier-standard),
+        opacity 180ms var(--animation-curves-bezier-standard);
     }
 </style>

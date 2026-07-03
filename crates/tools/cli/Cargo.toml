@@ -9,6 +9,9 @@ license.workspace = true
 name = "mesh-shell"
 path = "src/main.rs"
 
+[features]
+perf-tracy = ["dep:tracing-tracy", "dep:tracy-client"]
+
 [dependencies]
 mesh-core-shell = { workspace = true }
 mesh-core-module = { workspace = true }
@@ -18,3 +21,5 @@ mesh-core-diagnostics = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+tracing-tracy = { version = "=0.11.4", optional = true, default-features = false, features = ["enable", "ondemand", "only-localhost"] }
+tracy-client = { version = "=0.18.4", optional = true, default-features = false, features = ["enable", "ondemand", "only-localhost"] }

@@ -3,10 +3,13 @@ use mesh_core_shell::{Shell, default_ipc_socket_path};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 
+#[cfg(feature = "perf-tracy")]
+#[global_allocator]
+static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
+    tracy_client::ProfiledAllocator::new(std::alloc::System, 16);
+
 fn main() {
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    init_tracing();
 
     let args: Vec<String> = std::env::args().collect();
     let command = args.get(1).map(|s| s.as_str());
@@ -27,6 +30,23 @@ fn main() {
             std::process::exit(1);
         }
     }
+}
+
+fn init_tracing() {
+    use tracing_subscriber::prelude::*;
+
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(env_filter);
+
+    #[cfg(feature = "perf-tracy")]
+    tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(tracing_tracy::TracyLayer::default())
+        .init();
+
+    #[cfg(not(feature = "perf-tracy"))]
+    tracing_subscriber::registry().with(fmt_layer).init();
 }
 
 fn cmd_start() {

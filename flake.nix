@@ -29,6 +29,12 @@
             rustfmt
             clippy
             pkg-config
+          ] ++ lib.optionals stdenv.isLinux [
+            cargo-flamegraph
+            heaptrack
+            hotspot
+            perf
+            tracy
           ] ++ runtimeLibs;
 
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibs;
@@ -36,6 +42,7 @@
           shellHook = ''
             echo "MESH dev shell ready"
             echo "Run: cargo run -p mesh-tools-cli --bin mesh-shell -- start"
+            echo "Profile: ./tools/profile-shell live|cpu|memory"
           '';
         };
       });

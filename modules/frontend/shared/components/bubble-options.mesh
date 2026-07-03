@@ -78,9 +78,12 @@ onscroll = nil
         align-items: center;
         padding: 0;
         border-radius: var(--radius-full);
-        background: transparent;
+        /* Alpha must be nonzero: exact-0 alpha reads as "unset" and gets replaced with this tag's opaque default background. */
+        background: #00000001;
         border-width: 0;
         opacity: 1;
+        /* Overrides the theme's global background-color-first transition default. */
+        transition: none;
     }
 
     .bubble-option-left {
@@ -147,7 +150,6 @@ onscroll = nil
     .bubble-options-motion.mesh-surface-exiting {
         transition: transform 180ms var(--animation-curves-bezier-emphasized-decelerate),
         opacity 140ms var(--animation-curves-bezier-standard);
-        transition-delay: 0ms;
     }
 
     .bubble-option-core {
@@ -156,6 +158,9 @@ onscroll = nil
         border-color: transparent;
         box-shadow: 0px 6px 18px rgba(0, 0, 0, 0.34);
         color: var(--color-on-surface);
+        opacity: 1;
+        /* Overrides the theme's global background-color-first transition default. */
+        transition: border-color var(--animation-duration-short) var(--animation-curves-bezier-standard);
         animation-duration: 2800ms;
         animation-timing-function: ease-in-out;
         animation-iteration-count: infinite;
@@ -174,27 +179,28 @@ onscroll = nil
     }
 
     .bubble-option-core-dark {
-        background: #121821;
+        background: var(--color-surface-container);
+        color: #8394aa;
         animation-name: bubble-option-float-left;
         animation-delay: 360ms;
     }
 
     .bubble-option-core-light {
-        background: #f3ead7;
-        color: #443a2b;
+        background: var(--color-surface-container);
+        color: #e9c46a;
         animation-name: bubble-option-float-center;
         animation-delay: 430ms;
     }
 
     .bubble-option-core-gruvbox {
-        background: #5b4636;
-        color: #f2e5bc;
+        background: var(--color-surface-container);
+        color: #d79921;
         animation-name: bubble-option-float-right;
         animation-delay: 500ms;
     }
 
     .bubble-option-core-language {
-        background: var(--color-surface-container-high);
+        background: var(--color-surface-container);
         color: var(--color-on-surface);
     }
 
@@ -217,6 +223,8 @@ onscroll = nil
         width: 18px;
         height: 18px;
         color: inherit;
+        opacity: 1;
+        transition: none;
     }
 
     .bubble-option-text {
@@ -225,6 +233,8 @@ onscroll = nil
         font-weight: 700;
         line-height: 1;
         text-wrap: none;
+        opacity: 1;
+        transition: none;
     }
 
     .bubble-option-hidden {

@@ -96,6 +96,7 @@ pub(super) struct RetainedWidgetTree {
 
 impl RetainedWidgetTree {
     pub(super) fn update(&mut self, root: &WidgetNode) -> RetainedTreeDirtySummary {
+        let _span = tracing::debug_span!("retained_tree_update").entered();
         // Take the scratch map out so we can freely mutate other fields while holding it.
         let mut next_nodes = std::mem::take(&mut self.next_nodes_scratch);
         next_nodes.clear();

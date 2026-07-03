@@ -121,6 +121,7 @@ impl FrontendSurfaceComponent {
             previous_styles,
             &resolver,
             now,
+            false,
             &mut live_keys,
             &mut live_keyframe_keys,
             &mut has_active_animation,
@@ -162,6 +163,7 @@ impl FrontendSurfaceComponent {
         previous_styles: &HashMap<String, AnimatableStyle>,
         resolver: &StyleResolver,
         now: Instant,
+        ancestor_entering: bool,
         live_keys: &mut HashSet<String>,
         live_keyframe_keys: &mut HashSet<String>,
         has_active_animation: &mut bool,
@@ -169,9 +171,28 @@ impl FrontendSurfaceComponent {
         has_active_keyframe_animation: &mut bool,
         active_keyframe_bucket: &mut AnimationPropertyBucket,
     ) {
+        let entering = ancestor_entering
+            || node
+                .attributes
+                .get("_mesh_surface_entering")
+                .is_some_and(|value| value == "true");
         if let Some(key) = node.attributes.get("_mesh_key").cloned() {
             live_keys.insert(key.clone());
-            self.apply_node_style_animation(&key, node, previous_styles, now, has_active_animation);
+            if entering {
+                // A promoted child is mapped from this exact paint. Snap its
+                // first buffer to the authored entrance state; on the next
+                // paint the marker disappears and the normal transition pass
+                // animates from this snapshot to the resting style.
+                self.transitions.remove(&key);
+            } else {
+                self.apply_node_style_animation(
+                    &key,
+                    node,
+                    previous_styles,
+                    now,
+                    has_active_animation,
+                );
+            }
             if let Some(transition) = self.transitions.active_unfinished(&key, now) {
                 *active_animation_bucket = merge_animation_bucket(
                     *active_animation_bucket,
@@ -195,6 +216,7 @@ impl FrontendSurfaceComponent {
                 previous_styles,
                 resolver,
                 now,
+                entering,
                 live_keys,
                 live_keyframe_keys,
                 has_active_animation,

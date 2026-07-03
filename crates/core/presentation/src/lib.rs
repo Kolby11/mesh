@@ -268,6 +268,8 @@ impl PresentationEngine {
         buffer: &PixelBuffer,
         damage: &[DamageRect],
     ) -> Result<(), PresentationError> {
+        let _span =
+            tracing::debug_span!("present_with_damage", surface_id, rects = damage.len()).entered();
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => {
                 bridge.present_with_damage(surface_id, title, visible, buffer, damage)

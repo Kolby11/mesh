@@ -1626,6 +1626,7 @@ impl ScriptContext {
     /// not prefixed with `__`, and not a function) is reactive state and gets
     /// synced to the template. Local variables are never synced.
     pub(super) fn sync_state_from_lua(&mut self) {
+        let _span = tracing::debug_span!("sync_state_from_lua", module = %self.module_id).entered();
         if self.user_global_keys.is_empty() {
             // Full scan: discover all user globals (runs once per load_script).
             let user_globals: Vec<(String, LuaValue)> = self

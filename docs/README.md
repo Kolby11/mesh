@@ -40,5 +40,7 @@ IPC, and MCP. Start there for any design or contract question.
 
 - [`performance-roadmap.md`](./performance-roadmap.md) — retained rendering,
   invalidation, damage tracking, GPU sequencing.
+- [`performance-profiling.md`](./performance-profiling.md) — capture CPU
+  flamegraphs and Heaptrack allocation profiles from the running shell.
 - [`renderer-migration.md`](./renderer-migration.md) /
   [`renderer-ownership.md`](./renderer-ownership.md) — renderer internals.

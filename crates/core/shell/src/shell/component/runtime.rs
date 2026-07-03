@@ -516,6 +516,7 @@ impl FrontendSurfaceComponent {
         handler: &str,
         args: &[serde_json::Value],
     ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let _span = tracing::debug_span!("call_handler", surface = %self.id(), handler).entered();
         let (instance_key, raw_handler_name, component_id) =
             if let Some((instance_key, handler_name)) = parse_namespaced_handler(handler) {
                 let component_id = self

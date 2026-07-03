@@ -35,6 +35,13 @@ members = [
 lto = "thin"
 codegen-units = 1
 
+# Production-equivalent optimization with symbols retained for perf, flamegraph,
+# and heaptrack. Keep this separate so normal release artifacts stay lean.
+[profile.profiling]
+inherits = "release"
+debug = 1
+strip = "none"
+
 [workspace.package]
 version = "0.1.0"
 edition = "2024"

@@ -383,6 +383,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             || self.has_active_keyframe_animation
             || !self.scroll_animations.is_empty()
             || !self.closing_child_keys.is_empty()
+            || !self.entering_child_keys.is_empty()
     }
 
     fn surface_size_changed(&mut self, width: u32, height: u32) -> bool {
@@ -433,6 +434,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         buffer: &mut PixelBuffer,
         scale: f32,
     ) -> Result<(), ComponentError> {
+        let _span = tracing::debug_span!("paint", surface = %self.id()).entered();
         // Capture and clear dirty flags up front. paint is the work-doer; if
         // anything during paint (measured_size change, active animation) needs
         // another frame, it sets a flag again and wants_render picks it up.
@@ -553,6 +555,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             height: content_height.max(1),
         };
         let display_list_started = std::time::Instant::now();
+        let display_list_span = tracing::debug_span!("display_list_update").entered();
         let display_list_metrics = if use_generation_shortcuts {
             self.retained_display_list.update_for_retained_generation(
                 &tree,
@@ -575,6 +578,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 true,
             )
         };
+        drop(display_list_span);
         self.record_profiling_stage_with_elapsed(
             mesh_core_debug::ProfilingStage::RetainedDisplayListUpdate,
             display_list_started.elapsed(),
@@ -1120,6 +1124,14 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
     }
 
+    fn set_entering_child_keys(&mut self, keys: std::collections::HashSet<String>) {
+        if self.entering_child_keys == keys {
+            return;
+        }
+        self.entering_child_keys = keys;
+        self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
+    }
+
     fn allows_shrink_to_fit(&self) -> bool {
         // All surfaces are CSS content-measured, so shrink-to-fit always applies.
         true
@@ -1387,6 +1399,7 @@ impl FrontendSurfaceComponent {
         tooltip: Option<&(String, f32, f32)>,
         current_tooltip_damage: Option<DamageRect>,
     ) -> mesh_core_render::PaintProfilingMetrics {
+        let _span = tracing::debug_span!("paint_pixel_regions").entered();
         if effective_damage.rects.is_empty() {
             return mesh_core_render::PaintProfilingMetrics::default();
         }

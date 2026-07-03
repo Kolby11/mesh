@@ -1336,7 +1336,7 @@ measurement tool perturbing what it measures. Builds on what already exists:
 counts), the `DebugOverlay` painter, `mesh.debug.*` IPC, and the
 debug-inspector's profiling start/stop. Tiered by effort:
 
-- [ ] **Tier 0 — Tracy live flamegraph via a feature flag.** The codebase is
+- [x] **Tier 0 — Tracy live flamegraph via a feature flag.** The codebase is
       already instrumented with `tracing` spans/events throughout. Add a
       `perf-tracy` cargo feature that installs `tracing-tracy` as a layer;
       running the shell with it + the Tracy profiler UI gives live frame
@@ -1347,6 +1347,12 @@ debug-inspector's profiling start/stop. Tiered by effort:
       `present_with_damage`, `sync_state_from_lua`, `call_handler`,
       `handle_component_input`. This is the fastest path to "where do the
       milliseconds go" and validates every item in sections A–K empirically.
+      Done 2026-07-03: `perf-tracy` installs a localhost-only, on-demand
+      `tracing-tracy` layer and a 16-frame profiled global allocator. Explicit
+      spans cover the listed shell pipeline boundaries, and
+      `./tools/profile-shell live` builds the symbolized profile, launches the
+      Tracy UI, and runs the instrumented shell. Normal builds contain neither
+      the Tracy layer nor allocator wrapper.
 - [ ] **Tier 1 — in-shell perf HUD painted by the renderer, not a module.**
       A HUD that is itself a `.mesh` surface would pollute the numbers with
       its own rebuild/restyle cycle at every update. Instead extend the

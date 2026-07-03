@@ -228,6 +228,7 @@ impl LayoutEngine {
         intrinsic_cache: &mut IntrinsicLayoutCache,
         measurer: Option<&dyn TextMeasurer>,
     ) {
+        let _span = tracing::debug_span!("layout").entered();
         let mut report = TaffyLayoutReport::default();
         let mut tree = TaffyTree::<NodeId>::new();
         let mut node_map = HashMap::new();

@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly PROFILE="profiling"
+readonly TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
+readonly BINARY="$TARGET_DIR/$PROFILE/mesh-shell"
+readonly STAMP="$(date +%Y%m%d-%H%M%S)"
+
+usage() {
+  cat <<'EOF'
+Usage: ./tools/profile-shell <live|cpu|memory|build> [shell arguments...]
+
+  live     Stream CPU spans and allocations to the Tracy profiler UI
+  cpu      Record CPU stacks and write profiles/cpu/<timestamp>.svg
+  memory   Record allocations and write profiles/memory/<timestamp>.*.gz
+  build    Build the optimized, symbolized profiling binary only
+
+Shell arguments default to "start". Stop any existing MESH shell first.
+Interact with the shell during capture, then press Ctrl-C to finish.
+EOF
+}
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "missing '$1'; run this command inside 'nix develop'" >&2
+    exit 1
+  fi
+}
+
+require_build_space() {
+  local available_kib
+  mkdir -p "$TARGET_DIR"
+  available_kib="$(df -Pk "$TARGET_DIR" | awk 'NR == 2 { print $4 }')"
+  if [[ -z "$available_kib" || "$available_kib" -lt 4194304 ]]; then
+    echo "profiling build requires at least 4 GiB free on the target filesystem" >&2
+    echo "current available space: ${available_kib:-unknown} KiB" >&2
+    echo "remove stale Cargo artifacts or point CARGO_TARGET_DIR at a larger filesystem" >&2
+    exit 1
+  fi
+}
+
+build_shell() {
+  require_build_space
+  cargo build --profile "$PROFILE" -p mesh-tools-cli --bin mesh-shell
+}
+
+build_tracy_shell() {
+  require_build_space
+  cargo build --profile "$PROFILE" -p mesh-tools-cli --bin mesh-shell --features perf-tracy
+}
+
+ensure_shell_is_not_running() {
+  local socket
+  if [[ -n "${MESH_IPC_SOCKET:-}" ]]; then
+    socket="$MESH_IPC_SOCKET"
+  elif [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
+    socket="$XDG_RUNTIME_DIR/mesh.sock"
+  else
+    socket="/tmp/mesh-${UID:-unknown}/mesh.sock"
+  fi
+  if [[ -S "$socket" ]]; then
+    echo "a MESH shell is already listening at $socket" >&2
+    echo "stop it first so the profiler captures the shell you interact with" >&2
+    exit 1
+  fi
+}
+
+main() {
+  local command="${1:-}"
+  if [[ -z "$command" || "$command" == "-h" || "$command" == "--help" ]]; then
+    usage
+    return 0
+  fi
+  shift
+  local shell_args=("$@")
+  if [[ ${#shell_args[@]} -eq 0 ]]; then
+    shell_args=(start)
+  fi
+
+  cd "$ROOT"
+  case "$command" in
+    live)
+      require_command tracy
+      ensure_shell_is_not_running
+      build_tracy_shell
+      echo "Starting Tracy. Connect to the discovered MESH client to watch CPU and memory live."
+      tracy >/dev/null 2>&1 &
+      local tracy_pid=$!
+      trap "kill $tracy_pid 2>/dev/null || true" EXIT
+      sleep 1
+      if ! kill -0 "$tracy_pid" 2>/dev/null; then
+        echo "Tracy UI exited before the shell started" >&2
+        return 1
+      fi
+      "$BINARY" "${shell_args[@]}"
+      ;;
+    build)
+      build_shell
+      ;;
+    cpu)
+      require_command cargo-flamegraph
+      ensure_shell_is_not_running
+      require_build_space
+      mkdir -p profiles/cpu
+      local output="profiles/cpu/$STAMP.svg"
+      echo "CPU capture: $output"
+      echo "Interact with MESH, then press Ctrl-C to finish the flamegraph."
+      cargo flamegraph \
+        --profile "$PROFILE" \
+        --package mesh-tools-cli \
+        --bin mesh-shell \
+        --output "$output" \
+        -- "${shell_args[@]}"
+      echo "Wrote $output"
+      ;;
+    memory)
+      require_command heaptrack
+      ensure_shell_is_not_running
+      mkdir -p profiles/memory
+      build_shell
+      local output="profiles/memory/$STAMP"
+      echo "Memory capture prefix: $output"
+      echo "Interact with MESH, then press Ctrl-C to finish the capture."
+      heaptrack --output "$output" "$BINARY" "${shell_args[@]}"
+      echo "Open the generated $output.*.gz with: heaptrack_gui $output.*.gz"
+      ;;
+    *)
+      echo "unknown profile mode: $command" >&2
+      usage >&2
+      return 2
+      ;;
+  esac
+}
+
+main "$@"

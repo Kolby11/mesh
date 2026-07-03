@@ -183,8 +183,8 @@ end
     }
 
     .nav-button-open {
-        background: var(--color-primary-container);
-        color: var(--color-on-primary-container);
+        background: var(--color-surface-container);
+        color: var(--color-on-surface);
         border-color: var(--color-primary);
         transform: translateY(-1px) scale(1.03);
     }

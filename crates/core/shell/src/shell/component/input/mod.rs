@@ -19,6 +19,7 @@ impl FrontendSurfaceComponent {
         height: u32,
         input: ComponentInput,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let _span = tracing::debug_span!("handle_component_input", surface = %self.id()).entered();
         tracing::trace!(
             "[hover] handle_input called: id={} visible={} input={:?}",
             self.id(),

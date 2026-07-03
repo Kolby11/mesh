@@ -373,10 +373,9 @@ impl Shell {
                 total_render_started,
             )?;
             any_component_presented |= child_presented;
-            if child_presented {
-                components_want_render_after_frame |=
-                    self.components[index].component.wants_render();
-            }
+            // Reconciliation can invalidate the component without presenting
+            // a child yet (notably the staged first entrance paint).
+            components_want_render_after_frame |= self.components[index].component.wants_render();
         }
         self.components_want_render = components_want_render_after_frame;
         self.presented_last_frame = any_component_presented;
@@ -397,6 +396,10 @@ impl Shell {
             // reconciliation bookkeeping. A dismissed key only suppresses
             // recreation until its authored request disappears for one frame.
             self.components[index].dismissed_child_node_keys.clear();
+            self.components[index].entering_child_node_keys.clear();
+            self.components[index]
+                .component
+                .set_entering_child_keys(HashSet::new());
             return Ok(false);
         }
         let requested_keys: HashSet<&str> = requests
@@ -404,13 +407,20 @@ impl Shell {
             .map(|request| request.node_key.as_str())
             .collect();
         self.components[index]
+            .entering_child_node_keys
+            .retain(|node_key| requested_keys.contains(node_key.as_str()));
+        self.components[index]
             .dismissed_child_node_keys
             .retain(|node_key| requested_keys.contains(node_key.as_str()));
         if !self.presentation_engine.popup_supported() {
             self.destroy_all_child_surfaces(index);
+            self.components[index].entering_child_node_keys.clear();
             self.components[index]
                 .component
                 .set_closing_child_keys(HashSet::new());
+            self.components[index]
+                .component
+                .set_entering_child_keys(HashSet::new());
             return Ok(false);
         }
 
@@ -476,6 +486,23 @@ impl Shell {
                 .children
                 .iter()
                 .position(|child| child.node_key == request.node_key);
+            if existing_child.is_none()
+                && !self.components[index]
+                    .entering_child_node_keys
+                    .contains(&request.node_key)
+            {
+                self.components[index]
+                    .entering_child_node_keys
+                    .insert(request.node_key.clone());
+                let entering = self.components[index].entering_child_node_keys.clone();
+                self.components[index]
+                    .component
+                    .set_entering_child_keys(entering);
+                // Defer mapping until the component has rebuilt this subtree
+                // with mesh-surface-entering applied. Otherwise the compositor
+                // exposes one resting frame and there is nothing to animate.
+                continue;
+            }
             let child_surface_id = existing_child
                 .map(|existing| {
                     self.components[index].children[existing]
@@ -517,14 +544,30 @@ impl Shell {
             // The buffer is padded (pad_left/top/right/bottom) beyond the
             // measured popover content so descendant `box-shadow`/`filter`
             // overshoot has pixels to paint into instead of clipping at the
-            // buffer edge; the positioner offset is shifted back by the
-            // leading padding so the *visible* content stays anchored where
-            // it would land with a zero-padding buffer.
+            // buffer edge; the positioner offset is adjusted so the *visible*
+            // content — not the padded buffer — lands where it would with a
+            // zero-padding buffer. The correction depends on how the
+            // positioner anchors this axis: an edge-pinned anchor needs the
+            // padding on that edge subtracted back out, while a center-based
+            // anchor already centers the padded buffer (which centers the
+            // visible content too when padding is symmetric).
             let (pad_left, pad_top, pad_right, pad_bottom) = request.content_padding;
             let padded_size = (
                 request.content_size.0 + pad_left + pad_right,
                 request.content_size.1 + pad_top + pad_bottom,
             );
+            let offset_x = request.placement.offset_x
+                + axis_padding_compensation(
+                    popover_gravity_horizontal_alignment(request.placement.gravity),
+                    pad_left,
+                    pad_right,
+                );
+            let offset_y = request.placement.offset_y
+                + axis_padding_compensation(
+                    popover_gravity_vertical_alignment(request.placement.gravity),
+                    pad_top,
+                    pad_bottom,
+                );
 
             self.core
                 .surfaces
@@ -550,10 +593,7 @@ impl Shell {
                     anchor: map_popover_anchor(request.placement.anchor),
                     gravity: map_popover_gravity(request.placement.gravity),
                     constraint: map_popover_constraint(request.placement.constraint_adjustment),
-                    offset: (
-                        request.placement.offset_x - pad_left as i32,
-                        request.placement.offset_y - pad_top as i32,
-                    ),
+                    offset: (offset_x, offset_y),
                 },
                 grab: request.placement.grab == PopoverGrab::Click,
                 grab_serial: None,
@@ -594,6 +634,16 @@ impl Shell {
                 false,
             )?;
             any_presented |= presented;
+
+            if self.components[index]
+                .entering_child_node_keys
+                .remove(&request.node_key)
+            {
+                let entering = self.components[index].entering_child_node_keys.clone();
+                self.components[index]
+                    .component
+                    .set_entering_child_keys(entering);
+            }
         }
 
         // Popovers whose node dropped out of the open requests this frame but
@@ -990,6 +1040,69 @@ fn child_surface_id(parent_surface_id: &str, node_key: &str) -> String {
         let _ = write!(&mut encoded, "{byte:02x}");
     }
     format!("{parent_surface_id}::child::{encoded}")
+}
+
+/// Padding compensation for the popup positioner offset along one axis.
+///
+/// `xdg_positioner` places the popup buffer so that the edge/corner named by
+/// *gravity* touches the anchor point plus `offset`, sized to the full
+/// *padded* buffer — gravity "bottom" pins the popup's TOP edge to the anchor
+/// point and grows downward, "top" pins the BOTTOM edge and grows upward,
+/// "left"/"right" are the mirrored horizontal cases, and no horizontal/
+/// vertical gravity component centers that axis on the anchor point. The
+/// buffer's visible content sits inset by `(pad_leading, pad_trailing)`. Only
+/// an edge-pinned gravity needs the offset shifted back by the padding on
+/// that pinned edge so the visible content — not the padded buffer — lands
+/// where the caller asked; a center-based gravity already centers the padded
+/// buffer, which centers the visible content too when padding is symmetric
+/// (and splits the difference otherwise).
+fn axis_padding_compensation(alignment: AxisAlignment, pad_leading: u32, pad_trailing: u32) -> i32 {
+    match alignment {
+        AxisAlignment::Leading => -(pad_leading as i32),
+        AxisAlignment::Trailing => pad_trailing as i32,
+        AxisAlignment::Center => (pad_leading as i32 - pad_trailing as i32) / 2,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AxisAlignment {
+    Leading,
+    Center,
+    Trailing,
+}
+
+/// Gravity "left"/"right" pins the popup's RIGHT/LEFT edge to the anchor
+/// point (the popup body extends away from that edge), which is the mirror
+/// image of the anchor-side `Leading`/`Trailing` naming — hence the swap here.
+fn popover_gravity_horizontal_alignment(gravity: PopoverGravity) -> AxisAlignment {
+    match gravity {
+        PopoverGravity::Left | PopoverGravity::TopLeft | PopoverGravity::BottomLeft => {
+            AxisAlignment::Trailing
+        }
+        PopoverGravity::Right | PopoverGravity::TopRight | PopoverGravity::BottomRight => {
+            AxisAlignment::Leading
+        }
+        PopoverGravity::Center | PopoverGravity::Top | PopoverGravity::Bottom => {
+            AxisAlignment::Center
+        }
+    }
+}
+
+/// Gravity "top"/"bottom" pins the popup's BOTTOM/TOP edge to the anchor
+/// point (the popup body extends away from that edge), mirroring the
+/// anchor-side naming — hence the swap here.
+fn popover_gravity_vertical_alignment(gravity: PopoverGravity) -> AxisAlignment {
+    match gravity {
+        PopoverGravity::Top | PopoverGravity::TopLeft | PopoverGravity::TopRight => {
+            AxisAlignment::Trailing
+        }
+        PopoverGravity::Bottom | PopoverGravity::BottomLeft | PopoverGravity::BottomRight => {
+            AxisAlignment::Leading
+        }
+        PopoverGravity::Center | PopoverGravity::Left | PopoverGravity::Right => {
+            AxisAlignment::Center
+        }
+    }
 }
 
 fn map_popover_anchor(anchor: PopoverAnchor) -> PopupAnchor {
