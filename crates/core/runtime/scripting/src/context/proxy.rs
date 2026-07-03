@@ -5,7 +5,10 @@ use mesh_core_service::{InterfaceContract, InterfaceResolution};
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 pub(super) fn create_interface_proxy(
     lua: &Lua,
@@ -16,6 +19,7 @@ pub(super) fn create_interface_proxy(
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
+    pending_side_channels: Arc<AtomicBool>,
 ) -> mlua::Result<Table> {
     create_service_proxy(
         lua,
@@ -28,6 +32,7 @@ pub(super) fn create_interface_proxy(
         tracked_service_fields,
         subscribed_interface_events,
         published_events,
+        pending_side_channels,
     )
 }
 
@@ -42,6 +47,7 @@ pub(super) fn create_service_proxy(
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
+    pending_side_channels: Arc<AtomicBool>,
 ) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
     let meta = lua.create_table()?;
@@ -55,10 +61,12 @@ pub(super) fn create_service_proxy(
         .map(|c| c.interface.clone())
         .filter(|name| !name.is_empty())
         .unwrap_or(interface_name);
+    let observed_state_fields = Arc::new(Mutex::new(HashSet::new()));
     let state_proxy = create_service_state_proxy(
         lua,
         service_name.clone(),
         Arc::clone(&tracked_service_fields),
+        Arc::clone(&observed_state_fields),
     )?;
     proxy.set("state", state_proxy)?;
     let events_proxy = create_events_proxy(
@@ -129,6 +137,7 @@ pub(super) fn create_service_proxy(
                 let method = method.clone();
                 let iface = interface_name.clone();
                 let events = Arc::clone(&published_events);
+                let pending_side_channels = Arc::clone(&pending_side_channels);
                 let source_module_id = source_module_id.clone();
                 let source_capabilities = source_capabilities.clone();
                 return Ok(LuaValue::Function(lua.create_function(
@@ -154,6 +163,7 @@ pub(super) fn create_service_proxy(
                                     .map(|value| (arg.name.clone(), value))
                             })
                             .collect::<mlua::Result<serde_json::Map<String, Value>>>()?;
+                        pending_side_channels.store(true, Ordering::Release);
                         events.lock().unwrap().push(PublishedEvent {
                             channel: format!("{}.{}", iface, method.name),
                             payload: Value::Object(payload),
@@ -166,12 +176,12 @@ pub(super) fn create_service_proxy(
             }
 
             // Case B: state field read from the live service payload table.
-            tracked_service_fields
-                .lock()
-                .unwrap()
-                .entry(service_name.clone())
-                .or_default()
-                .insert(key.clone());
+            record_tracked_field_once(
+                &tracked_service_fields,
+                &observed_state_fields,
+                &service_name,
+                &key,
+            );
             service_payload_field(lua, &service_name, &key)
         })?,
     )?;
@@ -314,23 +324,45 @@ fn create_service_state_proxy(
     lua: &Lua,
     service_name: String,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
+    observed_state_fields: Arc<Mutex<HashSet<String>>>,
 ) -> mlua::Result<Table> {
     let state = lua.create_table()?;
     let meta = lua.create_table()?;
     meta.set(
         "__index",
         lua.create_function(move |lua, (_table, key): (Table, String)| {
-            tracked_service_fields
-                .lock()
-                .unwrap()
-                .entry(service_name.clone())
-                .or_default()
-                .insert(key.clone());
+            record_tracked_field_once(
+                &tracked_service_fields,
+                &observed_state_fields,
+                &service_name,
+                &key,
+            );
             service_payload_field(lua, &service_name, &key)
         })?,
     )?;
     state.set_metatable(Some(meta))?;
     Ok(state)
+}
+
+fn record_tracked_field_once(
+    tracked_service_fields: &Arc<Mutex<HashMap<String, HashSet<String>>>>,
+    observed_state_fields: &Arc<Mutex<HashSet<String>>>,
+    service_name: &str,
+    key: &str,
+) {
+    if !observed_state_fields
+        .lock()
+        .unwrap()
+        .insert(key.to_string())
+    {
+        return;
+    }
+    tracked_service_fields
+        .lock()
+        .unwrap()
+        .entry(service_name.to_string())
+        .or_default()
+        .insert(key.to_string());
 }
 
 fn service_payload_field(lua: &Lua, service_name: &str, key: &str) -> mlua::Result<LuaValue> {

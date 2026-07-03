@@ -1,6 +1,9 @@
 use mlua::{Lua, LuaSerdeExt, Table, Value as LuaValue, Variadic};
 use serde_json::Value;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 /// A queued imperative action against a live element reference, e.g.
 /// `refs.search_input:focus()`. The shell drains these after a script handler
@@ -52,6 +55,7 @@ pub(super) fn create_refs_proxy(
     lua: &Lua,
     scope: &Table,
     actions: Arc<Mutex<Vec<ElementAction>>>,
+    pending_side_channels: Arc<AtomicBool>,
 ) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
     let meta = lua.create_table()?;
@@ -59,7 +63,14 @@ pub(super) fn create_refs_proxy(
     meta.set(
         "__index",
         lua.create_function(move |lua, (_proxy, name): (Table, String)| {
-            create_element_node_proxy(lua, &scope, &name, Arc::clone(&actions)).map(LuaValue::Table)
+            create_element_node_proxy(
+                lua,
+                &scope,
+                &name,
+                Arc::clone(&actions),
+                Arc::clone(&pending_side_channels),
+            )
+            .map(LuaValue::Table)
         })?,
     )?;
     proxy.set_metatable(Some(meta))?;
@@ -71,6 +82,7 @@ pub(super) fn install_bound_element_proxies(
     scope: &Table,
     metrics: &Value,
     actions: Arc<Mutex<Vec<ElementAction>>>,
+    pending_side_channels: Arc<AtomicBool>,
 ) -> mlua::Result<()> {
     let Some(entries) = metrics.as_object() else {
         return Ok(());
@@ -85,7 +97,13 @@ pub(super) fn install_bound_element_proxies(
         if binding != Some(name.as_str()) {
             continue;
         }
-        let proxy = create_element_node_proxy(lua, scope, name, Arc::clone(&actions))?;
+        let proxy = create_element_node_proxy(
+            lua,
+            scope,
+            name,
+            Arc::clone(&actions),
+            Arc::clone(&pending_side_channels),
+        )?;
         scope.raw_set(name.as_str(), proxy)?;
     }
 
@@ -97,6 +115,7 @@ fn create_element_node_proxy(
     scope: &Table,
     name: &str,
     actions: Arc<Mutex<Vec<ElementAction>>>,
+    pending_side_channels: Arc<AtomicBool>,
 ) -> mlua::Result<Table> {
     let node = lua.create_table()?;
     // Tag the proxy so imperative methods can recognize the implicit `self` from
@@ -108,6 +127,7 @@ fn create_element_node_proxy(
     let name_owned = name.to_string();
     // Clones for the `__newindex` closure, since `__index` moves the originals.
     let write_actions = Arc::clone(&actions);
+    let write_pending_side_channels = Arc::clone(&pending_side_channels);
     let write_name = name_owned.clone();
     meta.set(
         "__index",
@@ -123,6 +143,7 @@ fn create_element_node_proxy(
             }
             if ELEMENT_METHODS.contains(&key.as_str()) {
                 let actions = Arc::clone(&actions);
+                let pending_side_channels = Arc::clone(&pending_side_channels);
                 let target = name_owned.clone();
                 let action = key.clone();
                 return Ok(LuaValue::Function(lua.create_function(
@@ -150,6 +171,7 @@ fn create_element_node_proxy(
                                 }
                             }
                         }
+                        pending_side_channels.store(true, Ordering::Release);
                         actions.lock().unwrap().push(ElementAction {
                             target: target.clone(),
                             action: action.clone(),
@@ -192,6 +214,7 @@ fn create_element_node_proxy(
             if key != "value" {
                 if let Some(attribute_name) = element_member_attribute_name(&key) {
                     let payload = lua.from_value::<Value>(value)?;
+                    write_pending_side_channels.store(true, Ordering::Release);
                     write_actions.lock().unwrap().push(ElementAction {
                         target: write_name.clone(),
                         action: "set_attribute".to_string(),
@@ -205,6 +228,7 @@ fn create_element_node_proxy(
                 )));
             }
             let payload = lua.from_value::<Value>(value)?;
+            write_pending_side_channels.store(true, Ordering::Release);
             write_actions.lock().unwrap().push(ElementAction {
                 target: write_name.clone(),
                 action: "set_value".to_string(),

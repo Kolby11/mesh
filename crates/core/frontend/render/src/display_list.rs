@@ -179,6 +179,9 @@ pub struct RetainedDisplayList {
     surface_size: Option<(u32, u32)>,
     entries: HashMap<DisplayListKey, DisplayListEntry>,
     subtrees: HashMap<NodeId, RetainedPaintSubtree>,
+    ordered_entries_scratch: Vec<(DisplayListKey, DisplayListEntry)>,
+    next_entries_scratch: HashMap<DisplayListKey, DisplayListEntry>,
+    next_subtrees_scratch: HashMap<NodeId, RetainedPaintSubtree>,
     command_spans: Vec<RetainedCommandSpan>,
     paint_commands: Arc<[DisplayPaintCommand]>,
     command_kinds: Arc<[DisplayPaintCommandKind]>,
@@ -195,6 +198,9 @@ impl Default for RetainedDisplayList {
             surface_size: None,
             entries: HashMap::new(),
             subtrees: HashMap::new(),
+            ordered_entries_scratch: Vec::new(),
+            next_entries_scratch: HashMap::new(),
+            next_subtrees_scratch: HashMap::new(),
             command_spans: Vec::new(),
             paint_commands: Vec::new().into(),
             command_kinds: Vec::new().into(),
@@ -761,8 +767,10 @@ impl RetainedDisplayList {
             );
         }
 
-        let mut ordered_entries = Vec::new();
-        let mut next = HashMap::new();
+        let mut ordered_entries = std::mem::take(&mut self.ordered_entries_scratch);
+        ordered_entries.clear();
+        let mut next = std::mem::take(&mut self.next_entries_scratch);
+        next.clear();
         collect_display_entries(root, 0.0, 0.0, &mut ordered_entries, &mut next);
         let dirty_summary = dirty_summary.unwrap_or_default();
         let empty_dirty_nodes = HashSet::new();
@@ -777,7 +785,8 @@ impl RetainedDisplayList {
         let (paint_commands, command_kinds, pruning, subtrees, local_metrics) = match decision {
             LocalReuseDecision::RebuildDirtySubtrees => {
                 let rebuild_ancestors = collect_dirty_ancestor_ids(root, dirty_node_ids);
-                let mut next_subtrees = HashMap::new();
+                let mut next_subtrees = std::mem::take(&mut self.next_subtrees_scratch);
+                next_subtrees.clear();
                 let mut local_metrics = LocalReuseMetrics::default();
                 let vclip = surface_clip(surface);
                 let subtree = build_paint_subtree(
@@ -802,7 +811,8 @@ impl RetainedDisplayList {
                 )
             }
             LocalReuseDecision::FallbackFull { .. } => {
-                let mut next_subtrees = HashMap::new();
+                let mut next_subtrees = std::mem::take(&mut self.next_subtrees_scratch);
+                next_subtrees.clear();
                 let mut local_metrics = LocalReuseMetrics::default();
                 let vclip = surface_clip(surface);
                 let subtree = build_paint_subtree(
@@ -888,8 +898,13 @@ impl RetainedDisplayList {
         if rebuilt > 0 || removed > 0 || force_full_damage {
             self.generation = self.generation.saturating_add(1);
         }
-        self.entries = next;
-        self.subtrees = subtrees;
+        let mut previous_entries = std::mem::replace(&mut self.entries, next);
+        previous_entries.clear();
+        self.next_entries_scratch = previous_entries;
+        let mut previous_subtrees = std::mem::replace(&mut self.subtrees, subtrees);
+        previous_subtrees.clear();
+        self.next_subtrees_scratch = previous_subtrees;
+        self.ordered_entries_scratch = ordered_entries;
         self.command_spans = command_spans;
         self.paint_commands = paint_commands;
         self.command_kinds = command_kinds;
@@ -2639,6 +2654,38 @@ mod tests {
         node
     }
 
+    fn display_entry_benchmark_tree(rows: usize, cols: usize) -> WidgetNode {
+        let mut root = node(
+            1,
+            "column",
+            0.0,
+            0.0,
+            (cols as f32) * 12.0,
+            (rows as f32) * 8.0,
+        );
+        let mut id = 2;
+        for row_index in 0..rows {
+            let mut row = node(
+                id,
+                "row",
+                0.0,
+                (row_index as f32) * 8.0,
+                (cols as f32) * 12.0,
+                8.0,
+            );
+            id += 1;
+            for col_index in 0..cols {
+                let mut cell = node(id, "text", (col_index as f32) * 12.0, 0.0, 10.0, 8.0);
+                cell.attributes
+                    .insert("content".into(), format!("{row_index}:{col_index}"));
+                row.children.push(cell);
+                id += 1;
+            }
+            root.children.push(row);
+        }
+        root
+    }
+
     #[test]
     fn checkbox_and_radio_emit_checkmark_content_only_when_checked() {
         let mut checkbox = node(1, "checkbox", 0.0, 0.0, 18.0, 18.0);
@@ -3764,5 +3811,49 @@ mod tests {
         );
         assert_eq!(metrics.omitted_subtrees, 0);
         assert_eq!(metrics.preclipped_descendants, 0);
+    }
+
+    // cargo test -p mesh-core-render --release -- display_entry_scratch_reuse_beats_fresh_allocations_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only display-list scratch allocation microbenchmark"]
+    fn display_entry_scratch_reuse_beats_fresh_allocations_benchmark() {
+        let tree = display_entry_benchmark_tree(120, 20);
+        let iterations = 2_000;
+
+        let old_start = std::time::Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let mut ordered_entries = Vec::new();
+            let mut next = HashMap::new();
+            collect_display_entries(&tree, 0.0, 0.0, &mut ordered_entries, &mut next);
+            old_total = old_total
+                .saturating_add(std::hint::black_box(ordered_entries.len()))
+                .saturating_add(std::hint::black_box(next.len()));
+        }
+        let old_elapsed = old_start.elapsed();
+
+        let new_start = std::time::Instant::now();
+        let mut new_total = 0usize;
+        let mut ordered_entries = Vec::new();
+        let mut next = HashMap::new();
+        for _ in 0..iterations {
+            ordered_entries.clear();
+            next.clear();
+            collect_display_entries(&tree, 0.0, 0.0, &mut ordered_entries, &mut next);
+            new_total = new_total
+                .saturating_add(std::hint::black_box(ordered_entries.len()))
+                .saturating_add(std::hint::black_box(next.len()));
+        }
+        let new_elapsed = new_start.elapsed();
+
+        assert_eq!(old_total, new_total);
+        println!(
+            "display entry collection over {iterations} iterations: fresh allocations {:?}, scratch reuse {:?}",
+            old_elapsed, new_elapsed
+        );
+        assert!(
+            new_elapsed < old_elapsed,
+            "scratch reuse should be faster than fresh allocations"
+        );
     }
 }

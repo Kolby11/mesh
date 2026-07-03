@@ -45,6 +45,7 @@ pub use style::{
     TextOverflow, Transform2D, TransitionEasing, TransitionProperties, TransitionStyle,
     VisualFilter, WhiteSpace,
 };
+pub use tree::EventHandlerCall;
 pub use tree::{ElementState, NodeId, WidgetNode};
 
 /// Abstraction over the source of variable values for template evaluation.

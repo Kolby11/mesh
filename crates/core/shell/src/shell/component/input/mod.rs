@@ -158,10 +158,14 @@ impl FrontendSurfaceComponent {
                                 &node_key,
                                 click_event,
                             )?);
-                        } else if let Some(handler) = find_click_handler(tree, &node_key) {
+                        } else if find_click_handler(tree, &node_key).is_some() {
                             let click_event = self.build_click_event(tree, &node_key, x, y);
-                            requests
-                                .extend(self.call_namespaced_handler(&handler, &[click_event])?);
+                            requests.extend(self.call_node_handler(
+                                tree,
+                                &node_key,
+                                "click",
+                                &[click_event],
+                            )?);
                         }
                     }
                     self.pointer_down_key = None;

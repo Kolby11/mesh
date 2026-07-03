@@ -229,8 +229,8 @@ impl FrontendSurfaceComponent {
             || self.is_container_collection_item_key(tree, node_key)
         {
             self.dispatch_activation_handlers(tree, node_key, click_event)
-        } else if let Some(handler) = find_click_handler(tree, node_key) {
-            self.call_namespaced_handler(&handler, &[click_event])
+        } else if find_click_handler(tree, node_key).is_some() {
+            self.call_node_handler(tree, node_key, "click", &[click_event])
         } else {
             Ok(Vec::new())
         }

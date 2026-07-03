@@ -937,7 +937,7 @@ duplicating it.
 
 ### G. Lua runtime — state sync & handler overhead
 
-- [ ] **`sync_state_from_lua` converts every user global per handler call.**
+- [x] **`sync_state_from_lua` converts every user global per handler call.**
       The "fast path" still reads and Lua→JSON-converts *every known user
       global* (changed or not), deep-compares each in `state.set`, **and**
       runs a full `_ENV` `pairs()` scan to discover newly-created globals —
@@ -946,18 +946,45 @@ duplicating it.
       write log: the component `_ENV` already goes through a metatable for
       live bindings — record written keys in `__newindex` and sync only
       those; run the discovery scan only when the write log saw an unknown
-      key.
-- [ ] **Handler-call side channels drain through multiple mutexes per call.**
+      key. Done 2026-07-03: the component `_ENV` now records newly assigned
+      global names through its `__newindex` metatable and clears that log after
+      the initial full discovery pass. Later syncs still refresh known reactive
+      globals, but discover new globals from the write log instead of building a
+      known-key set and scanning every `_ENV` entry on every handler/render
+      return. Covered by `sync_state_from_lua_discovers_new_globals_from_write_log`;
+      release microbenchmark `sync_state_write_log_beats_full_env_scan`
+      measured 2k handler iterations over 1k reactive globals at 1.289s for
+      the old full-scan discovery path versus 0.914s for the write-log path.
+- [x] **Handler-call side channels drain through multiple mutexes per call.**
       `sync_side_channels` locks published-events, diagnostics, element
       actions, storage-tracking mutexes sequentially per handler invocation
       (`runtime.rs:1533+`). Mostly-empty in steady state — swap to a single
-      shared "any pending" atomic flag checked before taking any lock.
-- [ ] **Embedded component handler values serialize JSON into attribute
+      shared "any pending" atomic flag checked before taking any lock. Done
+      2026-07-03: `ScriptContext` now owns a shared pending-side-channel
+      `AtomicBool`; every producer that pushes into the shared published-event,
+      diagnostic, element-action, storage-change, or interface-binding queues
+      sets it, and `sync_side_channels` returns before taking queue locks when
+      it is clear. Covered by `side_channel_pending_flag_drains_published_events`;
+      release microbenchmark `empty_side_channel_pending_flag_beats_lock_drains`
+      measured 1M empty drains at 31.383ms through the old lock-every-queue path
+      versus 1.720ms through the pending-flag skip.
+- [x] **Embedded component handler values serialize JSON into attribute
       strings.** `build_component_ref` encodes handler-call props as
       `serde_json::json!({"h":…,"a":…}).to_string()` stored in a node
       attribute and re-parsed at dispatch (`frontend/compiler/src/render.rs:666-676`).
       This also churns the attribute hash. Store structured handler bindings
-      on `WidgetNode` (typed field) instead of JSON-in-a-string.
+      on `WidgetNode` (typed field) instead of JSON-in-a-string. Done
+      2026-07-03: `WidgetNode` now carries typed `EventHandlerCall` entries
+      (`handler` + pre-bound JSON args) alongside the legacy string handler map.
+      Markup handler-call syntax populates the typed map instead of JSON
+      stringifying the call, embedded component prop calls cross the composition
+      resolver as typed call metadata, namespace propagation handles typed calls,
+      and node dispatch prepends typed args before event args while keeping the
+      old JSON unpack fallback for compatibility. Covered by
+      `event_handler_call_attrs_store_typed_args_not_json_handler_string` and
+      `node_handler_and_args_prefers_typed_call_args`; release microbenchmark
+      `typed_handler_call_args_beat_json_unpack` measured 200k dispatch merges
+      at 86.230ms for legacy JSON unpack versus 26.003ms for typed calls.
 
 ### H. Presentation & memory
 
@@ -998,21 +1025,36 @@ duplicating it.
       generation) and reuse it wholesale on rebuild. This is the
       component-granular complement to the v1.27 node-level narrow re-eval
       and probably the single largest structural win for complex surfaces.
-- [ ] **Fresh `self` Lua table per lifecycle call.** `current_self_table()`
+- [x] **Fresh `self` Lua table per lifecycle call.** `current_self_table()`
       builds a new table + metatable (module/component ids, storage proxy,
       event channels) on every lifecycle handler invocation — including
       `render(self)` per frame per instance
       (`scripting/context/runtime.rs:714-716,760+`). Build once per
       instance, cache on the context, refresh only when identity/locale
-      changes.
-- [ ] **Interface-proxy field reads take a mutex per Lua `__index`.** Every
+      changes. Done 2026-07-03: `ScriptContext` caches the frontend lifecycle
+      `self` table for the lifetime of the initialized context and clears it on
+      `uninit`, so `init`/`render`/lifecycle handlers reuse the same meta,
+      storage, and event-channel table instead of rebuilding it. Covered by
+      `lifecycle_handlers_reuse_self_table`; release microbenchmark
+      `cached_lifecycle_self_table_beats_rebuilding` measured 20k render
+      lifecycle calls at 98.552ms with forced table rebuilds versus 54.203ms
+      with the cached table.
+- [x] **Interface-proxy field reads take a mutex per Lua `__index`.** Every
       `audio.percent`-style read locks `tracked_service_fields`
       (`scripting/context/proxy.rs:108-170,316-324`) to record the tracked
       field. Steady-state render hooks re-record the same fields every
       frame. Record into a lock-free per-VM scratch (plain `RefCell` — the
       VM is single-threaded) or only record fields not already tracked
-      (check with a read-optimized set).
-- [ ] **Display-list rebuild allocates fresh entry maps per frame.**
+      (check with a read-optimized set). Done 2026-07-03: each interface proxy
+      now owns a small seen-field set shared by direct `audio.percent` and
+      `audio.state.percent` reads. The first read of a field records it in the
+      shared tracked-field map; repeated reads only hit the proxy-local set and
+      avoid the shared map lock/update. Covered by
+      `interface_proxy_repeated_field_reads_track_once_per_proxy`; release
+      microbenchmark `repeated_interface_field_reads_use_proxy_seen_cache`
+      measured 20k repeated reads at 0.926ms through the old shared-map lock
+      path versus 0.423ms with the proxy seen-field cache.
+- [x] **Display-list rebuild allocates fresh entry maps per frame.**
       `update_inner` builds `ordered_entries: Vec` + `next: HashMap` from
       scratch every non-generation-matched update
       (`render/src/display_list.rs:760-762`) — unlike `RetainedWidgetTree`,
@@ -1023,7 +1065,20 @@ duplicating it.
       `WidgetNode` and display entries so comparison is pointer-first.
       (Subtree command arrays are already `Arc<[DisplayPaintCommand]>`, so
       reuse of clean subtrees is cheap — the waste is in the per-entry
-      bookkeeping, not the commands.)
+      bookkeeping, not the commands.) Done 2026-07-03: `RetainedDisplayList`
+      now keeps scratch storage for `ordered_entries`, the next entry map, and
+      the next subtree map, swapping old retained maps back into scratch after
+      each rebuild so subsequent frames reuse allocation capacity. Covered by
+      the existing display-list suite plus release microbenchmark
+      `display_entry_scratch_reuse_beats_fresh_allocations_benchmark`, which
+      measured 2k entry-collection rebuilds on a 120x20 synthetic tree at
+      3.208s with fresh allocations versus 2.366s with scratch reuse.
+- [ ] **Display payload text still clones string attributes.** Display-entry
+      comparison and paint-node creation still clone/deep-compare per-entry
+      strings (`content`/`value`/`src`/`name`). Consider sharing node text via
+      `Arc<str>` between `WidgetNode` and display entries, or introducing a
+      compact interned attribute payload, after auditing the `WidgetNode` and
+      renderer payload contract.
 - [ ] **Storage reads clone per Lua access.** `self.storage.key` reads lock
       the storage mutex and clone the JSON value per access
       (`scripting/storage.rs:275-307`); render hooks that read storage pay

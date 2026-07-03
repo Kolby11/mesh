@@ -320,6 +320,11 @@ pub fn namespace_event_handlers(node: &mut WidgetNode, instance_key: &str) {
             *handler = format!("__mesh_embed__::{instance_key}::{handler}");
         }
     }
+    for call in node.event_handler_calls.values_mut() {
+        if !call.handler.starts_with("__mesh_embed__::") {
+            call.handler = format!("__mesh_embed__::{instance_key}::{}", call.handler);
+        }
+    }
 
     for child in &mut node.children {
         namespace_event_handlers(child, instance_key);

@@ -6,7 +6,9 @@ mod style;
 mod tags;
 
 use mesh_core_component::ComponentFile;
-use mesh_core_elements::{LayoutEngine, StyleContext, StyleResolver, VariableStore, WidgetNode};
+use mesh_core_elements::{
+    EventHandlerCall, LayoutEngine, StyleContext, StyleResolver, VariableStore, WidgetNode,
+};
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
 
@@ -71,6 +73,7 @@ pub trait FrontendCompositionResolver {
         host_instance_key: &str,
         alias: &str,
         props: &BTreeMap<String, String>,
+        prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
         container_width: f32,
         container_height: f32,
     ) -> Option<WidgetNode>;
@@ -268,7 +271,7 @@ mod tests {
             },
         ];
 
-        let (_, _, _, handlers) = render::parse_attributes(&attrs, None);
+        let (_, _, _, handlers, _) = render::parse_attributes(&attrs, None);
 
         assert_eq!(handlers.get("click").map(String::as_str), Some("openPanel"));
         assert_eq!(
@@ -304,7 +307,7 @@ mod tests {
             .collect(),
         );
 
-        let (_, _, _, handlers) = render::parse_attributes(&attrs, Some(&store));
+        let (_, _, _, handlers, _) = render::parse_attributes(&attrs, Some(&store));
 
         assert_eq!(
             handlers.get("click").map(String::as_str),
@@ -327,7 +330,7 @@ mod tests {
             .collect(),
         );
 
-        let (_, _, resolved, handlers) = render::parse_attributes(&attrs, Some(&store));
+        let (_, _, resolved, handlers, _) = render::parse_attributes(&attrs, Some(&store));
 
         assert!(resolved.is_empty());
         assert_eq!(

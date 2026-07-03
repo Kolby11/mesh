@@ -317,9 +317,9 @@ impl FrontendSurfaceComponent {
         node_key: &str,
         key: &str,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
-        let Some(handler) = find_click_handler(tree, node_key) else {
+        if find_click_handler(tree, node_key).is_none() {
             return Ok(Vec::new());
-        };
+        }
         let (left, top, right, bottom) =
             find_node_bounds_by_key(tree, node_key, 0.0, 0.0).unwrap_or((0.0, 0.0, 0.0, 0.0));
         let center_x = (left + right) * 0.5;
@@ -334,7 +334,7 @@ impl FrontendSurfaceComponent {
                 }),
             );
         }
-        self.call_namespaced_handler(&handler, &[event])
+        self.call_node_handler(tree, node_key, "click", &[event])
     }
 
     pub(super) fn current_keyboard_settings(&self) -> mesh_core_config::KeyboardSettings {

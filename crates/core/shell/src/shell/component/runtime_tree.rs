@@ -450,6 +450,13 @@ fn attributes_fingerprint(node: &WidgetNode) -> u64 {
         event.hash(&mut hasher);
         handler.hash(&mut hasher);
     }
+    for (event, call) in &node.event_handler_calls {
+        event.hash(&mut hasher);
+        call.handler.hash(&mut hasher);
+        for arg in &call.args {
+            arg.to_string().hash(&mut hasher);
+        }
+    }
     hasher.finish()
 }
 

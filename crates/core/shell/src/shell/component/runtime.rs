@@ -54,10 +54,13 @@ impl FrontendSurfaceComponent {
         event_name: &str,
         args: &[serde_json::Value],
     ) -> Result<Vec<CoreRequest>, ComponentError> {
-        let Some(handler) = find_event_handler(tree, node_key, event_name) else {
+        let Some(node) = find_node_by_key(tree, node_key) else {
             return Ok(Vec::new());
         };
-        self.call_namespaced_handler(&handler, args)
+        let Some((handler, merged_args)) = node_handler_and_args(node, event_name, args) else {
+            return Ok(Vec::new());
+        };
+        self.call_namespaced_handler(&handler, &merged_args)
     }
 
     /// Same as `call_node_handler`, but reads the handler off an
@@ -70,10 +73,10 @@ impl FrontendSurfaceComponent {
         event_name: &str,
         args: &[serde_json::Value],
     ) -> Result<Vec<CoreRequest>, ComponentError> {
-        let Some(handler) = node.event_handlers.get(event_name).cloned() else {
+        let Some((handler, merged_args)) = node_handler_and_args(node, event_name, args) else {
             return Ok(Vec::new());
         };
-        self.call_namespaced_handler(&handler, args)
+        self.call_namespaced_handler(&handler, &merged_args)
     }
 
     pub(super) fn call_render_hooks(&mut self) {
@@ -651,11 +654,107 @@ fn unpack_handler_args(
     (handler_name.to_string(), event_args.to_vec())
 }
 
+fn node_handler_and_args(
+    node: &WidgetNode,
+    event_name: &str,
+    event_args: &[serde_json::Value],
+) -> Option<(String, Vec<serde_json::Value>)> {
+    if let Some(call) = node.event_handler_calls.get(event_name) {
+        let mut merged = call.args.clone();
+        merged.extend_from_slice(event_args);
+        return Some((call.handler.clone(), merged));
+    }
+    node.event_handlers
+        .get(event_name)
+        .cloned()
+        .map(|handler| (handler, event_args.to_vec()))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::shell::component) struct ResolvedManifestText {
     pub(in crate::shell::component) text: String,
     pub(in crate::shell::component) key: Option<String>,
     pub(in crate::shell::component) fallback: Option<String>,
+}
+
+#[cfg(test)]
+mod handler_call_tests {
+    use super::*;
+    use mesh_core_elements::EventHandlerCall;
+
+    #[test]
+    fn node_handler_and_args_prefers_typed_call_args() {
+        let mut node = WidgetNode::new("button");
+        node.event_handlers
+            .insert("click".into(), "__mesh_embed__::host::legacy".into());
+        node.event_handler_calls.insert(
+            "click".into(),
+            EventHandlerCall {
+                handler: "__mesh_embed__::host::typed".into(),
+                args: vec![serde_json::json!("prebound")],
+            },
+        );
+
+        let (handler, args) =
+            node_handler_and_args(&node, "click", &[serde_json::json!({ "type": "click" })])
+                .expect("handler");
+
+        assert_eq!(handler, "__mesh_embed__::host::typed");
+        assert_eq!(args[0], serde_json::json!("prebound"));
+        assert_eq!(args[1], serde_json::json!({ "type": "click" }));
+    }
+
+    // Run with:
+    // nix develop --command cargo test -p mesh-core-shell --release -- typed_handler_call_args_beat_json_unpack --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn typed_handler_call_args_beat_json_unpack() {
+        use std::time::Instant;
+
+        let iterations = 200_000usize;
+        let legacy_handler = serde_json::json!({
+            "h": "__mesh_embed__::host::selectItem",
+            "a": ["alpha", "beta", "gamma"]
+        })
+        .to_string();
+        let event_args = [serde_json::json!({ "type": "click", "x": 12, "y": 34 })];
+
+        let legacy_start = Instant::now();
+        for _ in 0..iterations {
+            let (handler, args) = unpack_handler_args(&legacy_handler, &event_args);
+            assert_eq!(handler, "__mesh_embed__::host::selectItem");
+            assert_eq!(args.len(), 4);
+        }
+        let legacy_ns = legacy_start.elapsed().as_nanos().max(1);
+
+        let mut node = WidgetNode::new("button");
+        node.event_handler_calls.insert(
+            "click".into(),
+            EventHandlerCall {
+                handler: "__mesh_embed__::host::selectItem".into(),
+                args: vec![
+                    serde_json::json!("alpha"),
+                    serde_json::json!("beta"),
+                    serde_json::json!("gamma"),
+                ],
+            },
+        );
+
+        let typed_start = Instant::now();
+        for _ in 0..iterations {
+            let (handler, args) =
+                node_handler_and_args(&node, "click", &event_args).expect("handler");
+            assert_eq!(handler, "__mesh_embed__::host::selectItem");
+            assert_eq!(args.len(), 4);
+        }
+        let typed_ns = typed_start.elapsed().as_nanos();
+
+        eprintln!("legacy_json_unpack={legacy_ns}ns typed_handler_call={typed_ns}ns");
+        assert!(
+            typed_ns < legacy_ns,
+            "typed handler calls should avoid per-dispatch JSON parsing"
+        );
+    }
 }
 
 /// Publish each declared prop's precedence-resolved value under `props.<name>`

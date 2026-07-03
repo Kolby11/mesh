@@ -1437,6 +1437,189 @@ end
 }
 
 #[test]
+fn sync_state_from_lua_discovers_new_globals_from_write_log() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@test/write-log", caps).unwrap();
+    ctx.load_script(
+        r#"
+count = 1
+
+function add_later()
+    late_value = count + 41
+end
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(ctx.state.get("late_value"), None);
+    ctx.call_handler("add_later", &[]).unwrap();
+    assert_eq!(ctx.state.get("late_value"), Some(Value::from(42)));
+    assert!(ctx.has_user_global_key_for_test("late_value"));
+}
+
+#[test]
+fn lifecycle_handlers_reuse_self_table() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@test/self-cache", caps).unwrap();
+    ctx.load_script(
+        r#"
+first = nil
+second = nil
+
+function render(self)
+    if first == nil then
+        first = tostring(self)
+    else
+        second = tostring(self)
+    end
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_render_lifecycle().unwrap();
+    ctx.call_render_lifecycle().unwrap();
+
+    assert_eq!(ctx.state.get("first"), ctx.state.get("second"));
+}
+
+// Run with:
+// cargo test -p mesh-core-scripting --release -- sync_state_write_log_beats_full_env_scan --ignored --nocapture
+#[test]
+#[ignore]
+fn sync_state_write_log_beats_full_env_scan() {
+    use std::time::Instant;
+
+    let mut source = String::new();
+    for index in 0..1_000usize {
+        source.push_str(&format!("value_{index} = {index}\n"));
+    }
+    source.push_str(
+        r#"
+function tick()
+    value_500 = value_500 + 1
+end
+"#,
+    );
+
+    let iterations = 2_000usize;
+    let mut old_ctx = ScriptContext::new("@test/old-sync", CapabilitySet::new()).unwrap();
+    old_ctx.load_script(&source).unwrap();
+    let old_start = Instant::now();
+    for _ in 0..iterations {
+        old_ctx
+            .call_lua_function_without_sync_for_test("tick")
+            .unwrap();
+        old_ctx.old_sync_state_from_lua_scan_for_benchmark();
+    }
+    let old_ns = old_start.elapsed().as_nanos().max(1);
+
+    let mut new_ctx = ScriptContext::new("@test/new-sync", CapabilitySet::new()).unwrap();
+    new_ctx.load_script(&source).unwrap();
+    let new_start = Instant::now();
+    for _ in 0..iterations {
+        new_ctx.call_handler("tick", &[]).unwrap();
+    }
+    let new_ns = new_start.elapsed().as_nanos();
+
+    eprintln!("old_env_scan={old_ns}ns write_log_sync={new_ns}ns");
+    assert!(
+        new_ns < old_ns,
+        "write-log sync should beat the old full _ENV scan path"
+    );
+}
+
+// Run with:
+// cargo test -p mesh-core-scripting --release -- cached_lifecycle_self_table_beats_rebuilding --ignored --nocapture
+#[test]
+#[ignore]
+fn cached_lifecycle_self_table_beats_rebuilding() {
+    use std::time::Instant;
+
+    let source = r#"
+function render(self)
+    local id = self.meta.module_id
+end
+"#;
+    let iterations = 20_000usize;
+
+    let mut rebuild_ctx = ScriptContext::new("@test/self-rebuild", CapabilitySet::new()).unwrap();
+    rebuild_ctx.load_script(source).unwrap();
+    let rebuild_start = Instant::now();
+    for _ in 0..iterations {
+        rebuild_ctx.clear_cached_self_table_for_benchmark();
+        rebuild_ctx.call_render_lifecycle().unwrap();
+    }
+    let rebuild_ns = rebuild_start.elapsed().as_nanos().max(1);
+
+    let mut cached_ctx = ScriptContext::new("@test/self-cached", CapabilitySet::new()).unwrap();
+    cached_ctx.load_script(source).unwrap();
+    let cached_start = Instant::now();
+    for _ in 0..iterations {
+        cached_ctx.call_render_lifecycle().unwrap();
+    }
+    let cached_ns = cached_start.elapsed().as_nanos();
+
+    eprintln!("rebuild_self_table={rebuild_ns}ns cached_self_table={cached_ns}ns");
+    assert!(
+        cached_ns < rebuild_ns,
+        "cached lifecycle self table should beat rebuilding it per render"
+    );
+}
+
+#[test]
+fn side_channel_pending_flag_drains_published_events() {
+    let mut ctx = ScriptContext::new("@test/side-channel-flag", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+function publish()
+    mesh.events.publish("test.channel", { ok = true })
+end
+"#,
+    )
+    .unwrap();
+
+    assert!(!ctx.pending_side_channels_for_test());
+    ctx.call_lua_function_without_sync_for_test("publish")
+        .unwrap();
+    assert!(ctx.pending_side_channels_for_test());
+
+    let events = ctx.drain_published_events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].channel, "test.channel");
+    assert!(!ctx.pending_side_channels_for_test());
+}
+
+// Run with:
+// cargo test -p mesh-core-scripting --release -- empty_side_channel_pending_flag_beats_lock_drains --ignored --nocapture
+#[test]
+#[ignore]
+fn empty_side_channel_pending_flag_beats_lock_drains() {
+    use std::time::Instant;
+
+    let iterations = 1_000_000usize;
+    let mut old_ctx = ScriptContext::new("@test/old-side", CapabilitySet::new()).unwrap();
+    let old_start = Instant::now();
+    for _ in 0..iterations {
+        old_ctx.old_sync_side_channels_for_benchmark();
+    }
+    let old_ns = old_start.elapsed().as_nanos().max(1);
+
+    let mut new_ctx = ScriptContext::new("@test/new-side", CapabilitySet::new()).unwrap();
+    let new_start = Instant::now();
+    for _ in 0..iterations {
+        new_ctx.sync_side_channels_for_benchmark();
+    }
+    let new_ns = new_start.elapsed().as_nanos();
+
+    eprintln!("old_empty_side_channel_locks={old_ns}ns pending_flag_skip={new_ns}ns");
+    assert!(
+        new_ns < old_ns,
+        "pending flag should beat locking every empty side-channel queue"
+    );
+}
+
+#[test]
 fn if_then_end_executes_conditionally() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@test/if", caps).unwrap();
@@ -1517,6 +1700,79 @@ end
         Some(&serde_json::json!({ "percent": 65, "muted": false })),
         &serde_json::json!({ "percent": 66, "muted": false }),
     ));
+}
+
+#[test]
+fn interface_proxy_repeated_field_reads_track_once_per_proxy() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.read"));
+    let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+total = 0
+
+function sync_audio_state()
+    local audio = require("mesh.audio@>=1.0")
+    for i = 1, 50 do
+        total = total + (audio.percent or 0)
+        total = total + (audio.state.percent or 0)
+    end
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.apply_service_payload("audio", &serde_json::json!({ "percent": 1 }));
+    ctx.call_handler("sync_audio_state", &[]).unwrap();
+
+    let tracked = ctx.tracked_fields_for_service("audio");
+    assert_eq!(tracked.len(), 1);
+    assert!(tracked.contains("percent"));
+}
+
+// Run with:
+// cargo test -p mesh-core-scripting --release -- repeated_interface_field_reads_use_proxy_seen_cache --ignored --nocapture
+#[test]
+#[ignore]
+fn repeated_interface_field_reads_use_proxy_seen_cache() {
+    use std::time::Instant;
+
+    let iterations = 20_000usize;
+    let old_tracked =
+        std::sync::Mutex::new(HashMap::<String, std::collections::HashSet<String>>::new());
+    let old_start = Instant::now();
+    for _ in 0..iterations {
+        old_tracked
+            .lock()
+            .unwrap()
+            .entry("audio".to_string())
+            .or_default()
+            .insert("percent".to_string());
+    }
+    let old_ns = old_start.elapsed().as_nanos().max(1);
+
+    let observed = std::sync::Mutex::new(std::collections::HashSet::<String>::new());
+    let cached_tracked =
+        std::sync::Mutex::new(HashMap::<String, std::collections::HashSet<String>>::new());
+    let cached_start = Instant::now();
+    for _ in 0..iterations {
+        if observed.lock().unwrap().insert("percent".to_string()) {
+            cached_tracked
+                .lock()
+                .unwrap()
+                .entry("audio".to_string())
+                .or_default()
+                .insert("percent".to_string());
+        }
+    }
+    let cached_ns = cached_start.elapsed().as_nanos();
+
+    eprintln!("shared_tracking_every_read={old_ns}ns proxy_seen_cache={cached_ns}ns");
+    assert!(
+        cached_ns < old_ns,
+        "proxy seen-field cache should avoid repeated shared tracking work"
+    );
 }
 
 #[test]

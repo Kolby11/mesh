@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
-use mesh_core_elements::WidgetNode;
 use mesh_core_elements::style::Dimension;
+use mesh_core_elements::{EventHandlerCall, WidgetNode};
 use mesh_core_frontend::FrontendCompositionResolver;
 use mesh_core_interaction::source_element_tag;
 use mesh_core_module::ModuleType;
@@ -15,6 +15,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         host_instance_key: &str,
         alias: &str,
         props: &BTreeMap<String, String>,
+        prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
         container_width: f32,
         container_height: f32,
     ) -> Option<WidgetNode> {
@@ -29,7 +30,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                     .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
                     .collect();
                 let instance_key = format!("{host_instance_key}/local:{alias}");
-                let node = self.render_local_component(
+                let mut node = self.render_local_component(
                     &entry.compiled.manifest,
                     alias,
                     &instance_key,
@@ -37,6 +38,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                     container_width,
                     container_height,
                 );
+                apply_prop_handler_calls(&mut node, props, prop_handler_calls);
                 if let Some(binding) = bind_this.and_then(|value| simple_state_binding(&value)) {
                     self.bind_child_instance(host_instance_key, &binding, &instance_key);
                 }
@@ -94,13 +96,14 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             .collect();
         let bind_this = props.get("__mesh_bind_this").cloned();
         let instance_key = format!("{host_instance_key}/import:{alias}");
-        let node = self.render_embedded_instance(
+        let mut node = self.render_embedded_instance(
             &instance_key,
             &module_id,
             &props_json,
             container_width,
             container_height,
         );
+        apply_prop_handler_calls(&mut node, props, prop_handler_calls);
         if let Some(binding) = bind_this.and_then(|value| simple_state_binding(&value)) {
             self.bind_child_instance(host_instance_key, &binding, &instance_key);
         }
@@ -205,6 +208,34 @@ fn embedded_root_is_popover(node: &WidgetNode) -> bool {
     node.children
         .first()
         .is_some_and(|child| source_element_tag(child) == "popover")
+}
+
+fn apply_prop_handler_calls(
+    node: &mut WidgetNode,
+    props: &BTreeMap<String, String>,
+    prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
+) {
+    if prop_handler_calls.is_empty() {
+        return;
+    }
+    for (event_name, handler) in node.event_handlers.clone() {
+        let Some((_, call)) = prop_handler_calls
+            .iter()
+            .find(|(prop_name, _)| props.get(*prop_name) == Some(&handler))
+        else {
+            continue;
+        };
+        node.event_handler_calls.insert(
+            event_name,
+            EventHandlerCall {
+                handler,
+                args: call.args.clone(),
+            },
+        );
+    }
+    for child in &mut node.children {
+        apply_prop_handler_calls(child, props, prop_handler_calls);
+    }
 }
 
 fn simple_state_binding(binding: &str) -> Option<String> {

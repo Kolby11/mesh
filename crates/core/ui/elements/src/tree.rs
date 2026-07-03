@@ -36,6 +36,17 @@ pub fn next_node_id() -> NodeId {
     NEXT_NODE_ID.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Pre-bound event-handler call generated from markup like
+/// `onclick={handler(arg)}`.
+///
+/// Kept out of `event_handlers` string values so compiled trees do not encode
+/// handler-call arguments as JSON strings that must be reparsed at dispatch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EventHandlerCall {
+    pub handler: String,
+    pub args: Vec<serde_json::Value>,
+}
+
 /// A single node in the widget tree.
 ///
 /// Produced by evaluating a template against script state. Each node has
@@ -57,6 +68,8 @@ pub struct WidgetNode {
     pub accessibility: AccessibilityInfo,
     /// Event handler mappings: event name → script handler name.
     pub event_handlers: BTreeMap<String, String>,
+    /// Event handler mappings with pre-bound arguments.
+    pub event_handler_calls: BTreeMap<String, EventHandlerCall>,
     /// Live interaction state (hover, focus, active, etc.).
     pub state: ElementState,
     /// Service field reads captured during template evaluation.
@@ -79,6 +92,7 @@ impl WidgetNode {
             children: Vec::new(),
             accessibility: AccessibilityInfo::default(),
             event_handlers: BTreeMap::new(),
+            event_handler_calls: BTreeMap::new(),
             state: ElementState::default(),
             service_field_reads: Vec::new(),
             cached_class_attr: None,

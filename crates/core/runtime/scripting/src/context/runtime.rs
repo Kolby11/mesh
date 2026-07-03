@@ -19,7 +19,10 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 #[derive(Debug, Default)]
 struct SharedInterfaceBindings {
@@ -158,6 +161,8 @@ pub struct ScriptContext {
     /// Subsequent `sync_state_from_lua` calls use targeted `get` lookups
     /// instead of iterating the entire globals table.
     user_global_keys: Vec<String>,
+    user_global_key_set: HashSet<String>,
+    assigned_global_keys: Arc<Mutex<HashSet<String>>>,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
     published_events: Vec<PublishedEvent>,
@@ -170,10 +175,12 @@ pub struct ScriptContext {
     tracked_storage_keys: Arc<Mutex<HashSet<String>>>,
     changed_storage_keys: Arc<Mutex<HashSet<String>>>,
     tracking_storage_reads: Arc<Mutex<bool>>,
+    pending_side_channels: Arc<AtomicBool>,
     /// `state.snapshot_generation()` at the time of the last `refresh_module_object` call.
     /// When this matches the current generation (and no proxies exist), the Lua
     /// `module.state` table is already up to date and the rebuild can be skipped.
     last_module_refresh_gen: u64,
+    cached_self_table: Option<Table>,
 }
 
 impl Drop for ScriptContext {
@@ -307,6 +314,8 @@ impl ScriptContext {
             interface_bindings_generation: 0,
             builtin_globals: HashSet::new(),
             user_global_keys: Vec::new(),
+            user_global_key_set: HashSet::new(),
+            assigned_global_keys: Arc::new(Mutex::new(HashSet::new())),
             tracked_service_fields: Arc::new(Mutex::new(HashMap::new())),
             subscribed_interface_events: Arc::new(Mutex::new(HashMap::new())),
             published_events: Vec::new(),
@@ -319,7 +328,9 @@ impl ScriptContext {
             tracked_storage_keys: Arc::new(Mutex::new(HashSet::new())),
             changed_storage_keys: Arc::new(Mutex::new(HashSet::new())),
             tracking_storage_reads: Arc::new(Mutex::new(false)),
+            pending_side_channels: Arc::new(AtomicBool::new(false)),
             last_module_refresh_gen: u64::MAX,
+            cached_self_table: None,
         })
     }
 
@@ -348,6 +359,18 @@ impl ScriptContext {
         let env = lua.create_table().map_err(lua_err)?;
         let meta = lua.create_table().map_err(lua_err)?;
         meta.set("__index", lua.globals()).map_err(lua_err)?;
+        let assigned_global_keys = Arc::clone(&self.assigned_global_keys);
+        meta.set(
+            "__newindex",
+            lua.create_function(move |_, (table, key, value): (Table, String, LuaValue)| {
+                if !key.starts_with("__") {
+                    assigned_global_keys.lock().unwrap().insert(key.clone());
+                }
+                table.raw_set(key, value)
+            })
+            .map_err(lua_err)?,
+        )
+        .map_err(lua_err)?;
         env.set_metatable(Some(meta)).map_err(lua_err)?;
 
         self.vm = Some(vm);
@@ -362,6 +385,7 @@ impl ScriptContext {
             .pairs::<String, LuaValue>()
             .filter_map(|result| result.ok().map(|(key, _)| key))
             .collect();
+        self.assigned_global_keys.lock().unwrap().clear();
 
         Ok(())
     }
@@ -370,8 +394,11 @@ impl ScriptContext {
     /// must not be called after this without a subsequent ensure_initialized().
     pub fn uninit(&mut self) {
         self.env_table = None;
+        self.cached_self_table = None;
         self.builtin_globals.clear();
         self.user_global_keys.clear();
+        self.user_global_key_set.clear();
+        self.assigned_global_keys.lock().unwrap().clear();
         self.subscribed_interface_events.lock().unwrap().clear();
         self.vm = None;
     }
@@ -391,6 +418,8 @@ impl ScriptContext {
         self.ensure_initialized()?;
         self.interface_bindings.clear();
         self.user_global_keys.clear();
+        self.user_global_key_set.clear();
+        self.assigned_global_keys.lock().unwrap().clear();
         {
             let mut shared_interface_bindings = self.shared_interface_bindings.lock().unwrap();
             shared_interface_bindings.bindings.clear();
@@ -402,6 +431,7 @@ impl ScriptContext {
         self.shared_diagnostics.lock().unwrap().clear();
         self.shared_element_actions.lock().unwrap().clear();
         self.changed_storage_keys.lock().unwrap().clear();
+        self.pending_side_channels.store(false, Ordering::Release);
         self.clear_tracked_service_fields();
         self.clear_subscribed_interface_events();
         self.clear_tracked_storage_keys();
@@ -510,6 +540,7 @@ impl ScriptContext {
             self.env(),
             metrics,
             Arc::clone(&self.shared_element_actions),
+            Arc::clone(&self.pending_side_channels),
         );
     }
 
@@ -843,7 +874,10 @@ impl ScriptContext {
         }
     }
 
-    fn current_self_table(&self) -> Result<Table, ScriptError> {
+    fn current_self_table(&mut self) -> Result<Table, ScriptError> {
+        if let Some(table) = &self.cached_self_table {
+            return Ok(table.clone());
+        }
         let current_self = self.lua().create_table().map_err(lua_err)?;
         let meta = self.lua().create_table().map_err(lua_err)?;
         meta.set("module_id", self.module_id.as_str())
@@ -861,10 +895,13 @@ impl ScriptContext {
         let tracked_storage_keys = Arc::clone(&self.tracked_storage_keys);
         let tracking_storage_reads = Arc::clone(&self.tracking_storage_reads);
         let changed_storage_keys = Arc::clone(&self.changed_storage_keys);
+        let pending_storage_side_channels = Arc::clone(&self.pending_side_channels);
+        let pending_storage_diagnostics = Arc::clone(&self.pending_side_channels);
         let storage = create_lua_storage_table(
             self.lua(),
             Arc::clone(&self.storage),
             Arc::new(move |reason| {
+                pending_storage_diagnostics.store(true, Ordering::Release);
                 storage_diagnostics.lock().unwrap().push(ScriptDiagnostic {
                     module_id: storage_module_id.clone(),
                     interface: "self.storage".to_string(),
@@ -878,6 +915,7 @@ impl ScriptContext {
                 }
             }),
             Arc::new(move |key| {
+                pending_storage_side_channels.store(true, Ordering::Release);
                 changed_storage_keys.lock().unwrap().insert(key);
             }),
         )
@@ -909,6 +947,7 @@ impl ScriptContext {
         current_self
             .set_metatable(Some(self_events_meta))
             .map_err(lua_err)?;
+        self.cached_self_table = Some(current_self.clone());
         Ok(current_self)
     }
 
@@ -1032,6 +1071,7 @@ impl ScriptContext {
 
     fn install_events_api(&mut self, mesh_core_events: &Table) -> Result<(), ScriptError> {
         let published_events = Arc::clone(&self.shared_published_events);
+        let pending_side_channels = Arc::clone(&self.pending_side_channels);
         let module_id = self.module_id.clone();
         let capabilities = self.capabilities.clone();
         mesh_core_events
@@ -1042,6 +1082,7 @@ impl ScriptContext {
                         let payload = payload.unwrap_or(LuaValue::Nil);
                         let payload = lua.from_value::<Value>(payload)?;
                         tracing::info!("{} published event {}", module_id, channel);
+                        pending_side_channels.store(true, Ordering::Release);
                         published_events.lock().unwrap().push(PublishedEvent {
                             channel,
                             payload,
@@ -1096,6 +1137,7 @@ impl ScriptContext {
 
         let has_locale_write = manifest.has_locale_write;
         let published_events_for_locale = Arc::clone(&self.shared_published_events);
+        let pending_side_channels_for_locale = Arc::clone(&self.pending_side_channels);
         let module_id_for_locale = self.module_id.clone();
         let capabilities_for_locale = self.capabilities.clone();
         mesh_locale
@@ -1108,6 +1150,7 @@ impl ScriptContext {
                                 "locale.write".to_string(),
                             )));
                         }
+                        pending_side_channels_for_locale.store(true, Ordering::Release);
                         published_events_for_locale
                             .lock()
                             .unwrap()
@@ -1165,6 +1208,7 @@ impl ScriptContext {
 
     fn install_popover_api(&mut self, mesh_popover: &Table) -> Result<(), ScriptError> {
         let published_events_for_popover = Arc::clone(&self.shared_published_events);
+        let pending_side_channels_for_popover = Arc::clone(&self.pending_side_channels);
         let module_id_for_popover = self.module_id.clone();
         let capabilities_for_popover = self.capabilities.clone();
         mesh_popover
@@ -1225,6 +1269,7 @@ impl ScriptContext {
                             "{} called mesh.popover.activate target={} trigger_surface={} trigger_key={} focus={}",
                             module_id_for_popover, surface_id, trigger_surface, trigger_key, focus
                         );
+                        pending_side_channels_for_popover.store(true, Ordering::Release);
                         published_events_for_popover
                             .lock()
                             .unwrap()
@@ -1241,6 +1286,7 @@ impl ScriptContext {
             .map_err(lua_err)?;
 
         let published_events_for_popover = Arc::clone(&self.shared_published_events);
+        let pending_side_channels_for_popover = Arc::clone(&self.pending_side_channels);
         let module_id_for_popover = self.module_id.clone();
         let capabilities_for_popover = self.capabilities.clone();
         mesh_popover
@@ -1268,6 +1314,7 @@ impl ScriptContext {
                                 .unwrap_or(false),
                             _ => false,
                         };
+                        pending_side_channels_for_popover.store(true, Ordering::Release);
                         published_events_for_popover
                             .lock()
                             .unwrap()
@@ -1298,11 +1345,13 @@ impl ScriptContext {
         let has_theme_read = manifest.has_theme_read;
         let has_locale_read = manifest.has_locale_read;
         let published_events = Arc::clone(&self.shared_published_events);
+        let pending_side_channels = Arc::clone(&self.pending_side_channels);
         let tracked_service_fields = Arc::clone(&self.tracked_service_fields);
         let subscribed_interface_events = Arc::clone(&self.subscribed_interface_events);
         let module_id_for_require = self.module_id.clone();
         let capabilities_for_require = self.capabilities.clone();
         let diagnostics_for_require = Arc::clone(&self.shared_diagnostics);
+        let pending_diagnostics_for_require = Arc::clone(&self.pending_side_channels);
         let optional_interfaces_for_require = Arc::clone(&self.optional_interfaces);
         // The per-instance _ENV is the channel-registry scope so interface event
         // channels stay private when components share one surface VM.
@@ -1351,6 +1400,7 @@ impl ScriptContext {
                 if canonical.starts_with("mesh.") && !readable {
                     return Err(record_lookup_diagnostic_lua(
                         &diagnostics_for_require,
+                        &pending_diagnostics_for_require,
                         &module_id_for_require,
                         &canonical,
                         version.as_deref(),
@@ -1367,6 +1417,7 @@ impl ScriptContext {
                     let reason = lookup_failure_reason(&interface_catalog, &resolution);
                     return Err(record_lookup_diagnostic_lua(
                         &diagnostics_for_require,
+                        &pending_diagnostics_for_require,
                         &module_id_for_require,
                         &canonical,
                         version.as_deref(),
@@ -1387,6 +1438,7 @@ impl ScriptContext {
                     Arc::clone(&tracked_service_fields),
                     Arc::clone(&subscribed_interface_events),
                     Arc::clone(&published_events),
+                    Arc::clone(&pending_side_channels),
                 )?;
                 Ok(LuaValue::Table(proxy))
             })
@@ -1459,6 +1511,7 @@ impl ScriptContext {
             self.lua(),
             globals,
             Arc::clone(&self.shared_element_actions),
+            Arc::clone(&self.pending_side_channels),
         )
         .map_err(lua_err)?;
         globals.set("refs", refs_proxy).map_err(lua_err)?;
@@ -1484,6 +1537,7 @@ impl ScriptContext {
             if canonical.starts_with("mesh.") && !readable {
                 record_lookup_diagnostic(
                     &self.shared_diagnostics,
+                    &self.pending_side_channels,
                     &self.module_id,
                     &canonical,
                     import.version.as_deref(),
@@ -1508,6 +1562,7 @@ impl ScriptContext {
                 let reason = lookup_failure_reason(&self.interface_catalog, &resolution);
                 record_lookup_diagnostic(
                     &self.shared_diagnostics,
+                    &self.pending_side_channels,
                     &self.module_id,
                     &canonical,
                     import.version.as_deref(),
@@ -1526,6 +1581,7 @@ impl ScriptContext {
                     .insert(import.alias.clone(), resolution.clone());
                 shared_interface_bindings.generation =
                     shared_interface_bindings.generation.wrapping_add(1);
+                self.pending_side_channels.store(true, Ordering::Release);
             }
             let proxy = create_interface_proxy(
                 self.lua(),
@@ -1536,6 +1592,7 @@ impl ScriptContext {
                 Arc::clone(&self.tracked_service_fields),
                 Arc::clone(&self.subscribed_interface_events),
                 Arc::clone(&self.shared_published_events),
+                Arc::clone(&self.pending_side_channels),
             )
             .map_err(lua_err)?;
             globals.set(import.alias.as_str(), proxy).map_err(lua_err)?;
@@ -1565,9 +1622,11 @@ impl ScriptContext {
             for (name, lua_value) in user_globals {
                 if let Ok(value) = self.lua().from_value::<Value>(lua_value) {
                     self.state.set(name.clone(), value);
+                    self.user_global_key_set.insert(name.clone());
                     self.user_global_keys.push(name);
                 }
             }
+            self.assigned_global_keys.lock().unwrap().clear();
         } else {
             // Fast path: only check known user global keys.
             for key in &self.user_global_keys {
@@ -1579,26 +1638,24 @@ impl ScriptContext {
                     }
                 }
             }
-            let known = self
-                .user_global_keys
-                .iter()
-                .cloned()
-                .collect::<HashSet<_>>();
-            let new_user_globals: Vec<(String, LuaValue)> = self
-                .env()
-                .pairs::<String, LuaValue>()
-                .filter_map(|result| result.ok())
-                .filter(|(key, value)| {
-                    !known.contains(key)
-                        && !key.starts_with("__")
-                        && !self.builtin_globals.contains(key)
-                        && !matches!(value, LuaValue::Function(_))
-                })
-                .collect();
-            for (name, lua_value) in new_user_globals {
-                if let Ok(value) = self.lua().from_value::<Value>(lua_value) {
-                    self.state.set(name.clone(), value);
-                    self.user_global_keys.push(name);
+            let assigned_keys = {
+                let mut assigned = self.assigned_global_keys.lock().unwrap();
+                assigned.drain().collect::<Vec<_>>()
+            };
+            for name in assigned_keys {
+                if name.starts_with("__")
+                    || self.builtin_globals.contains(&name)
+                    || self.user_global_key_set.contains(&name)
+                {
+                    continue;
+                }
+                self.user_global_key_set.insert(name.clone());
+                self.user_global_keys.push(name.clone());
+                if let Ok(lua_value) = self.env().get::<LuaValue>(name.as_str())
+                    && !matches!(lua_value, LuaValue::Nil | LuaValue::Function(_))
+                    && let Ok(value) = self.lua().from_value::<Value>(lua_value)
+                {
+                    self.state.set(name, value);
                 }
             }
         }
@@ -1617,6 +1674,9 @@ impl ScriptContext {
     }
 
     fn sync_side_channels(&mut self) {
+        if !self.pending_side_channels.swap(false, Ordering::AcqRel) {
+            return;
+        }
         {
             let mut published = self.shared_published_events.lock().unwrap();
             if !published.is_empty() {
@@ -1683,6 +1743,116 @@ impl ScriptContext {
             let _ = module_table.set("state", state_value);
         }
         self.last_module_refresh_gen = current_gen;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_user_global_key_for_test(&self, key: &str) -> bool {
+        self.user_global_key_set.contains(key)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn clear_cached_self_table_for_benchmark(&mut self) {
+        self.cached_self_table = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_side_channels_for_test(&self) -> bool {
+        self.pending_side_channels.load(Ordering::Acquire)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn sync_side_channels_for_benchmark(&mut self) {
+        self.sync_side_channels();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn old_sync_side_channels_for_benchmark(&mut self) {
+        {
+            let mut published = self.shared_published_events.lock().unwrap();
+            if !published.is_empty() {
+                self.published_events.extend(published.drain(..));
+            }
+        }
+        {
+            let mut diagnostics = self.shared_diagnostics.lock().unwrap();
+            if !diagnostics.is_empty() {
+                self.diagnostics.extend(diagnostics.drain(..));
+            }
+        }
+        {
+            let mut element_actions = self.shared_element_actions.lock().unwrap();
+            if !element_actions.is_empty() {
+                self.element_actions.extend(element_actions.drain(..));
+            }
+        }
+        let changed_storage_keys = {
+            let mut changed = self.changed_storage_keys.lock().unwrap();
+            changed.drain().collect::<HashSet<_>>()
+        };
+        if !changed_storage_keys.is_empty() {
+            let tracked_storage_keys = self.tracked_storage_keys.lock().unwrap();
+            if changed_storage_keys
+                .iter()
+                .any(|key| tracked_storage_keys.contains(key))
+            {
+                self.state.dirty = true;
+            }
+        }
+        let shared_interface_bindings = self.shared_interface_bindings.lock().unwrap();
+        if self.interface_bindings_generation != shared_interface_bindings.generation {
+            self.interface_bindings = shared_interface_bindings.bindings.clone();
+            self.interface_bindings_generation = shared_interface_bindings.generation;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn call_lua_function_without_sync_for_test(
+        &mut self,
+        name: &str,
+    ) -> Result<(), ScriptError> {
+        self.ensure_initialized()?;
+        let handler = self
+            .env()
+            .get::<Function>(name)
+            .map_err(|_| ScriptError::HandlerNotFound(name.to_string()))?;
+        handler.call::<()>(()).map_err(map_lua_error)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn old_sync_state_from_lua_scan_for_benchmark(&mut self) {
+        for key in &self.user_global_keys {
+            if let Ok(lua_value) = self.env().get::<LuaValue>(key.as_str())
+                && !matches!(lua_value, LuaValue::Nil | LuaValue::Function(_))
+                && let Ok(value) = self.lua().from_value::<Value>(lua_value)
+            {
+                self.state.set(key.clone(), value);
+            }
+        }
+        let known = self
+            .user_global_keys
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
+        let new_user_globals: Vec<(String, LuaValue)> = self
+            .env()
+            .pairs::<String, LuaValue>()
+            .filter_map(|result| result.ok())
+            .filter(|(key, value)| {
+                !known.contains(key)
+                    && !key.starts_with("__")
+                    && !self.builtin_globals.contains(key)
+                    && !matches!(value, LuaValue::Function(_))
+            })
+            .collect();
+        for (name, lua_value) in new_user_globals {
+            if let Ok(value) = self.lua().from_value::<Value>(lua_value) {
+                self.state.set(name.clone(), value);
+                self.user_global_key_set.insert(name.clone());
+                self.user_global_keys.push(name);
+            }
+        }
+        self.sync_module_exports_from_lua();
+        self.refresh_module_object();
     }
 }
 

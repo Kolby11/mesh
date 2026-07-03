@@ -1,22 +1,34 @@
 use super::{ScriptDiagnostic, ScriptError};
 use mesh_core_service::{InterfaceCatalog, InterfaceResolution};
 use mlua::Value as LuaValue;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 pub(super) fn record_lookup_diagnostic_lua(
     diagnostics: &Arc<Mutex<Vec<ScriptDiagnostic>>>,
+    pending_side_channels: &Arc<AtomicBool>,
     module_id: &str,
     interface: &str,
     requested_version: Option<&str>,
     reason: &str,
     err: ScriptError,
 ) -> mlua::Error {
-    record_lookup_diagnostic(diagnostics, module_id, interface, requested_version, reason);
+    record_lookup_diagnostic(
+        diagnostics,
+        pending_side_channels,
+        module_id,
+        interface,
+        requested_version,
+        reason,
+    );
     mlua::Error::external(err)
 }
 
 pub(super) fn record_lookup_diagnostic(
     diagnostics: &Arc<Mutex<Vec<ScriptDiagnostic>>>,
+    pending_side_channels: &Arc<AtomicBool>,
     module_id: &str,
     interface: &str,
     requested_version: Option<&str>,
@@ -29,6 +41,7 @@ pub(super) fn record_lookup_diagnostic(
         reason,
         "service interface lookup failed"
     );
+    pending_side_channels.store(true, Ordering::Release);
     diagnostics.lock().unwrap().push(ScriptDiagnostic {
         module_id: module_id.to_string(),
         interface: interface.to_string(),

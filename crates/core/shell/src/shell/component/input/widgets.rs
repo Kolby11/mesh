@@ -151,8 +151,8 @@ impl FrontendSurfaceComponent {
         click_event: serde_json::Value,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let mut requests = Vec::new();
-        if let Some(handler) = find_click_handler(tree, key) {
-            requests.extend(self.call_namespaced_handler(&handler, &[click_event.clone()])?);
+        if find_click_handler(tree, key).is_some() {
+            requests.extend(self.call_node_handler(tree, key, "click", &[click_event.clone()])?);
         }
         requests.extend(self.call_node_handler(tree, key, "activate", &[click_event])?);
         Ok(requests)
@@ -419,9 +419,9 @@ impl FrontendSurfaceComponent {
         else {
             return Ok(None);
         };
-        let Some(handler) = find_event_handler(tree, &node_key, "scroll") else {
+        if find_event_handler(tree, &node_key, "scroll").is_none() {
             return Ok(None);
-        };
+        }
         let target = find_node_by_key(tree, &node_key);
         let (left, top, right, bottom) =
             find_node_bounds_by_key(tree, &node_key, 0.0, 0.0).unwrap_or((0.0, 0.0, 0.0, 0.0));
@@ -457,7 +457,8 @@ impl FrontendSurfaceComponent {
                 "bounds": bounds,
             }
         });
-        self.call_namespaced_handler(&handler, &[event]).map(Some)
+        self.call_node_handler(tree, &node_key, "scroll", &[event])
+            .map(Some)
     }
 
     pub(super) fn slider_step_value(

@@ -13,8 +13,8 @@ use mesh_core_component::template::{
 use mesh_core_component::{PropValue, PropsBlock};
 use mesh_core_elements::accessibility::AccessibilityInfo;
 use mesh_core_elements::{
-    ComputedStyle, StyleContext, StyleResolver, StyleRuleIndex, VariableStore, WidgetNode,
-    element_contract_for_tag,
+    ComputedStyle, EventHandlerCall, StyleContext, StyleResolver, StyleRuleIndex, VariableStore,
+    WidgetNode, element_contract_for_tag,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
@@ -525,7 +525,7 @@ fn build_element_node(
         tracking_store.as_ref().map(|t| t as &dyn VariableStore);
     let effective_state = tracking_state.or(state);
 
-    let (classes, id, mut attributes, event_handlers) =
+    let (classes, id, mut attributes, event_handlers, event_handler_calls) =
         parse_attributes(&element.attributes, effective_state);
     if let Some(binding) = element.attributes.iter().find_map(|attribute| {
         if let AttributeValue::InstanceBinding(binding) = &attribute.value {
@@ -557,6 +557,7 @@ fn build_element_node(
     attach_module_id(&mut node, &manifest.package.id);
     node.attributes = attributes;
     node.event_handlers = event_handlers;
+    node.event_handler_calls = event_handler_calls;
     node.computed_style = build_style.resolver.resolve_node_style_for_module_indexed(
         build_style.rules,
         &build_style.index,
@@ -678,30 +679,20 @@ fn build_component_ref(
     host_instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
 ) -> WidgetNode {
-    let (_, _, mut props, _) = parse_attributes(&component.props, state);
+    let (_, _, mut props, _, prop_handler_calls) = parse_attributes(&component.props, state);
     for attr in &component.props {
         if let AttributeValue::EventHandler(handler) = &attr.value {
             props.insert(
                 attr.name.clone(),
                 resolve_component_prop_handler_value(state, host_instance_key, handler),
             );
-        } else if let AttributeValue::EventHandlerCall { handler, args } = &attr.value {
-            let resolved_handler = resolve_event_handler_value(state, handler);
-            let resolved_args: Vec<serde_json::Value> = args
-                .iter()
-                .map(|arg| {
-                    let val = state.map(|store| eval_expr(arg, store)).unwrap_or_default();
-                    serde_json::Value::String(val)
-                })
-                .collect();
-            let call_value =
-                serde_json::json!({"h": resolved_handler, "a": resolved_args}).to_string();
-            let namespaced = if resolved_handler.starts_with("__mesh_embed__::") {
-                call_value
-            } else {
-                format!("__mesh_embed__::{host_instance_key}::{call_value}")
-            };
-            props.insert(attr.name.clone(), namespaced);
+        } else if matches!(attr.value, AttributeValue::EventHandlerCall { .. }) {
+            if let Some(call) = prop_handler_calls.get(&attr.name) {
+                props.insert(
+                    attr.name.clone(),
+                    namespaced_handler(host_instance_key, &call.handler),
+                );
+            }
         } else if let AttributeValue::Binding(binding) = &attr.value {
             props.insert(format!("__mesh_binding_{}", attr.name), binding.clone());
         } else if let AttributeValue::InstanceBinding(binding) = &attr.value {
@@ -714,6 +705,7 @@ fn build_component_ref(
             host_instance_key,
             &component.name,
             &props,
+            &prop_handler_calls,
             container_context.container_width,
             container_context.container_height,
         ) {
@@ -755,11 +747,13 @@ pub(crate) fn parse_attributes(
     Option<String>,
     BTreeMap<String, String>,
     BTreeMap<String, String>,
+    BTreeMap<String, EventHandlerCall>,
 ) {
     let mut classes = Vec::new();
     let mut id = None;
     let mut resolved = BTreeMap::new();
     let mut event_handlers = BTreeMap::new();
+    let mut event_handler_calls = BTreeMap::new();
 
     for attr in attrs {
         match &attr.value {
@@ -796,14 +790,19 @@ pub(crate) fn parse_attributes(
                         serde_json::Value::String(val)
                     })
                     .collect();
-                let value =
-                    serde_json::json!({"h": resolved_handler, "a": resolved_args}).to_string();
-                event_handlers.insert(normalize_event_handler_name(&attr.name), value);
+                event_handler_calls.insert(
+                    normalize_event_handler_name(&attr.name),
+                    EventHandlerCall {
+                        handler: resolved_handler.clone(),
+                        args: resolved_args,
+                    },
+                );
+                event_handlers.insert(normalize_event_handler_name(&attr.name), resolved_handler);
             }
         }
     }
 
-    (classes, id, resolved, event_handlers)
+    (classes, id, resolved, event_handlers, event_handler_calls)
 }
 
 fn resolve_event_handler_value(state: Option<&dyn VariableStore>, handler: &str) -> String {
@@ -823,7 +822,15 @@ fn resolve_component_prop_handler_value(
     if resolved.starts_with("__mesh_embed__::") {
         resolved
     } else {
-        format!("__mesh_embed__::{host_instance_key}::{resolved}")
+        namespaced_handler(host_instance_key, &resolved)
+    }
+}
+
+fn namespaced_handler(host_instance_key: &str, handler: &str) -> String {
+    if handler.starts_with("__mesh_embed__::") {
+        handler.to_string()
+    } else {
+        format!("__mesh_embed__::{host_instance_key}::{handler}")
     }
 }
 
@@ -1168,7 +1175,7 @@ mod tests {
             },
         ];
 
-        let (_, _, _, handlers) = parse_attributes(&attrs, None);
+        let (_, _, _, handlers, _) = parse_attributes(&attrs, None);
 
         assert_eq!(handlers.get("input"), Some(&"onInput".to_string()));
         assert_eq!(handlers.get("change"), Some(&"onChange".to_string()));
@@ -1181,13 +1188,51 @@ mod tests {
     }
 
     #[test]
+    fn event_handler_call_attrs_store_typed_args_not_json_handler_string() {
+        let attrs = vec![Attribute {
+            name: "onclick".into(),
+            value: AttributeValue::EventHandlerCall {
+                handler: "selectItem".into(),
+                args: vec!["item_id".into(), "\"fallback\"".into()],
+            },
+        }];
+        let store = MapStore(
+            [
+                ("item_id".to_string(), serde_json::json!("alpha")),
+                ("selectItem".to_string(), serde_json::json!("onSelectItem")),
+            ]
+            .into_iter()
+            .collect(),
+        );
+
+        let (_, _, _, handlers, handler_calls) = parse_attributes(&attrs, Some(&store));
+
+        assert_eq!(handlers.get("click"), Some(&"onSelectItem".to_string()));
+        let call = handler_calls.get("click").expect("typed call");
+        assert_eq!(call.handler, "onSelectItem");
+        assert_eq!(
+            call.args,
+            vec![
+                serde_json::Value::String("alpha".into()),
+                serde_json::Value::String("fallback".into())
+            ]
+        );
+        assert!(
+            !handlers
+                .get("click")
+                .is_some_and(|handler| handler.starts_with('{')),
+            "event handler should no longer be JSON-in-a-string"
+        );
+    }
+
+    #[test]
     fn two_way_value_binding_still_resolves_attribute_value() {
         let attrs = vec![Attribute {
             name: "value".into(),
             value: AttributeValue::TwoWayBinding("current_value".into()),
         }];
 
-        let (_, _, resolved, _) = parse_attributes(&attrs, None);
+        let (_, _, resolved, _, _) = parse_attributes(&attrs, None);
 
         assert_eq!(resolved.get("value"), Some(&String::new()));
     }
