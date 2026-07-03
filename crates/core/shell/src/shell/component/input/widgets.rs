@@ -276,8 +276,24 @@ impl FrontendSurfaceComponent {
         y: f32,
     ) -> serde_json::Value {
         let target = find_node_by_key(tree, node_key);
-        let (left, top, right, bottom) =
+        let bounds =
             find_node_bounds_by_key(tree, node_key, 0.0, 0.0).unwrap_or((0.0, 0.0, 0.0, 0.0));
+        self.build_click_event_for(tree, node_key, target, bounds, x, y)
+    }
+
+    /// Same event shape as `build_click_event`, but takes an already-resolved
+    /// node + bounds so a caller holding several keys (e.g. hover-transition
+    /// dispatch) doesn't re-walk the tree per key.
+    pub(in crate::shell::component) fn build_click_event_for(
+        &self,
+        tree: &WidgetNode,
+        node_key: &str,
+        target: Option<&WidgetNode>,
+        bounds: (f32, f32, f32, f32),
+        x: f32,
+        y: f32,
+    ) -> serde_json::Value {
+        let (left, top, right, bottom) = bounds;
         let width = (right - left).max(0.0);
         let height = (bottom - top).max(0.0);
         let bounds = serde_json::json!({

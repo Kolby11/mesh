@@ -787,3 +787,69 @@ function onHoverLeave() left = true end
         Some(serde_json::json!(true))
     );
 }
+
+#[test]
+fn moving_directly_between_sibling_buttons_fires_leave_and_enter_with_correct_bounds() {
+    // A single pointer move can transition off one node and onto another in
+    // the same frame; both nodes must be resolved and their handlers fired
+    // with bounds/current_target matching their own layout, not each other's.
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+left_bounds = nil
+entered_bounds = nil
+function onLeaveA(event) left_bounds = event.current.bounds end
+function onEnterB(event) entered_bounds = event.current.bounds end
+</script>
+"#,
+    );
+    let button_a = event_node(
+        "button",
+        "root/0",
+        10.0,
+        10.0,
+        40.0,
+        40.0,
+        &[("pointerleave", "onLeaveA")],
+    );
+    let button_b = event_node(
+        "button",
+        "root/1",
+        100.0,
+        10.0,
+        40.0,
+        40.0,
+        &[("pointerenter", "onEnterB")],
+    );
+    component.last_tree = Some(root_with(vec![button_a, button_b]));
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerMove { x: 20.0, y: 20.0 },
+        )
+        .unwrap();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerMove { x: 110.0, y: 20.0 },
+        )
+        .unwrap();
+
+    assert_eq!(
+        runtime_value(&component, "left_bounds")
+            .and_then(|value| value.get("left").and_then(|v| v.as_f64())),
+        Some(10.0)
+    );
+    assert_eq!(
+        runtime_value(&component, "entered_bounds")
+            .and_then(|value| value.get("left").and_then(|v| v.as_f64())),
+        Some(100.0)
+    );
+}

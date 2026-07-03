@@ -1061,7 +1061,7 @@ multiplied by O(n) tree clones is where interaction latency actually goes.
       `coalesces_scroll_deltas_for_same_surface`,
       `pointer_moves_and_scrolls_flush_each_other_in_order`, and the existing
       pointer coalescing tests.
-- [ ] **Hover-transition dispatch is O(path-depth × tree).** For every key
+- [x] **Hover-transition dispatch is O(path-depth × tree).** For every key
       entering/leaving the hover path, `dispatch_hover_transition_handlers`
       runs up to two `find_event_handler` full-tree walks, then
       `build_click_event` (another full-tree bounds walk), then
@@ -1070,7 +1070,25 @@ multiplied by O(n) tree clones is where interaction latency actually goes.
       walks per path node. One pre-walk building
       `key → (&node, handlers, bounds)` for the union of both paths makes the
       whole dispatch a single O(n) pass — or free once the per-paint
-      hit-test/key index (item B) exists.
+      hit-test/key index (item B) exists. Done 2026-07-03: new
+      `mesh_core_interaction::find_nodes_by_keys` resolves node refs + bounds
+      for a whole key set in one traversal (early-exits once every requested
+      key is found); `dispatch_hover_transition_handlers` now builds the
+      union of left/entered keys, calls it once, and reads
+      `event_handlers.contains_key(...)` directly off the resolved nodes
+      instead of re-walking per key per event name. Added
+      `build_click_event_for` (click-event JSON from an already-resolved
+      node+bounds) and `call_resolved_node_handler` (handler dispatch off a
+      resolved node) so the hover path never calls the by-key lookups at all.
+      A release microbenchmark over a 200×20 grid with 4 keys measured
+      5.762s for repeated `find_node_by_key`+`find_node_bounds_by_key` pairs
+      versus 2.677s fused (2.2x faster; the ratio grows with path depth and
+      tree size). Covered by
+      `find_nodes_by_keys_matches_separate_lookups`,
+      `find_nodes_by_keys_respects_transform_offsets`, and
+      `moving_directly_between_sibling_buttons_fires_leave_and_enter_with_correct_bounds`
+      (proves simultaneous leave+enter across two sibling nodes resolves each
+      node's own bounds, not the other's).
 - [x] **`prune_stale_interaction_targets` clones every key to validate ~4.**
       Every paint walks the whole tree cloning every `_mesh_key` String into
       a fresh `HashSet` (`interaction_state.rs:313-338` via

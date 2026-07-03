@@ -372,38 +372,70 @@ impl FrontendSurfaceComponent {
         y: f32,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let mut requests = Vec::new();
-        for key in previous_path {
-            if new_path.contains(key) {
+        let left_keys: Vec<&str> = previous_path
+            .iter()
+            .filter(|key| !new_path.contains(key))
+            .map(String::as_str)
+            .collect();
+        let entered_keys: Vec<&str> = new_path
+            .iter()
+            .filter(|key| !previous_path.contains(key))
+            .map(String::as_str)
+            .collect();
+        if left_keys.is_empty() && entered_keys.is_empty() {
+            return Ok(requests);
+        }
+        // One traversal resolves every transitioning node + its bounds,
+        // instead of a `find_event_handler`/`build_click_event` walk per key
+        // (each of those is itself a full-tree walk, so a depth-d hover
+        // transition previously cost O(d) walks per handler check).
+        let target_keys: HashSet<&str> = left_keys
+            .iter()
+            .chain(entered_keys.iter())
+            .copied()
+            .collect();
+        let nodes = mesh_core_interaction::find_nodes_by_keys(tree, &target_keys);
+
+        for key in left_keys {
+            let Some((node, bounds)) = nodes.get(key) else {
+                continue;
+            };
+            let has_pointerleave = node.event_handlers.contains_key("pointerleave");
+            let has_mouseleave = node.event_handlers.contains_key("mouseleave");
+            if !has_pointerleave && !has_mouseleave {
                 continue;
             }
-            if find_event_handler(tree, key, "pointerleave").is_some()
-                || find_event_handler(tree, key, "mouseleave").is_some()
-            {
-                let event = self.build_click_event(tree, key, x, y);
-                requests.extend(self.call_node_handler(
-                    tree,
-                    key,
+            let event = self.build_click_event_for(tree, key, Some(node), *bounds, x, y);
+            if has_pointerleave {
+                requests.extend(self.call_resolved_node_handler(
+                    node,
                     "pointerleave",
                     &[event.clone()],
                 )?);
-                requests.extend(self.call_node_handler(tree, key, "mouseleave", &[event])?);
+            }
+            if has_mouseleave {
+                requests.extend(self.call_resolved_node_handler(node, "mouseleave", &[event])?);
             }
         }
-        for key in new_path {
-            if previous_path.contains(key) {
+        for key in entered_keys {
+            let Some((node, bounds)) = nodes.get(key) else {
+                continue;
+            };
+            let has_pointerenter = node.event_handlers.contains_key("pointerenter");
+            let has_mouseenter = node.event_handlers.contains_key("mouseenter");
+            if !has_pointerenter && !has_mouseenter {
                 continue;
             }
-            if find_event_handler(tree, key, "pointerenter").is_some()
-                || find_event_handler(tree, key, "mouseenter").is_some()
-            {
-                let event = self.build_click_event(tree, key, x, y);
-                requests.extend(self.call_node_handler(
-                    tree,
-                    key,
+            let event = self.build_click_event_for(tree, key, Some(node), *bounds, x, y);
+            if has_pointerenter {
+                requests.extend(self.call_resolved_node_handler(
+                    node,
                     "pointerenter",
                     &[event.clone()],
                 )?);
-                requests.extend(self.call_node_handler(tree, key, "mouseenter", &[event])?);
+            }
+            if has_mouseenter {
+                requests.extend(self.call_resolved_node_handler(node, "mouseenter", &[event])?);
             }
         }
         Ok(requests)

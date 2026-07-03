@@ -60,6 +60,22 @@ impl FrontendSurfaceComponent {
         self.call_namespaced_handler(&handler, args)
     }
 
+    /// Same as `call_node_handler`, but reads the handler off an
+    /// already-resolved node instead of re-walking the tree by key. Used by
+    /// callers (hover-transition dispatch) that resolved several nodes in one
+    /// pass via `find_nodes_by_keys`.
+    pub(super) fn call_resolved_node_handler(
+        &mut self,
+        node: &WidgetNode,
+        event_name: &str,
+        args: &[serde_json::Value],
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(handler) = node.event_handlers.get(event_name).cloned() else {
+            return Ok(Vec::new());
+        };
+        self.call_namespaced_handler(&handler, args)
+    }
+
     pub(super) fn call_render_hooks(&mut self) {
         let mut state_dirty = false;
         let mut runtimes = self.runtimes.lock().unwrap();

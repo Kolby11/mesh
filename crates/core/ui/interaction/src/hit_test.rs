@@ -83,6 +83,47 @@ pub fn node_is_source(node: &WidgetNode, tags: &[&str]) -> bool {
     tags.iter().any(|tag| *tag == source)
 }
 
+/// Resolves node references and bounds for a set of `_mesh_key`s in one
+/// traversal, instead of a separate `find_node_by_key` + `find_node_bounds_by_key`
+/// walk per key. Used by hover-transition dispatch, where a path-depth number
+/// of keys would otherwise each re-walk the whole tree.
+pub fn find_nodes_by_keys<'a>(
+    node: &'a WidgetNode,
+    keys: &std::collections::HashSet<&str>,
+) -> std::collections::HashMap<String, (&'a WidgetNode, ContentBounds)> {
+    let mut found = std::collections::HashMap::with_capacity(keys.len());
+    collect_nodes_by_keys(node, keys, 0.0, 0.0, &mut found);
+    found
+}
+
+fn collect_nodes_by_keys<'a>(
+    node: &'a WidgetNode,
+    keys: &std::collections::HashSet<&str>,
+    offset_x: f32,
+    offset_y: f32,
+    found: &mut std::collections::HashMap<String, (&'a WidgetNode, ContentBounds)>,
+) {
+    if found.len() == keys.len() {
+        return;
+    }
+    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
+    if let Some(key) = node.attributes.get("_mesh_key")
+        && keys.contains(key.as_str())
+    {
+        found.insert(
+            key.clone(),
+            (node, node_rect_with_offset(node, offset_x, offset_y)),
+        );
+    }
+    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
+    for child in &node.children {
+        collect_nodes_by_keys(child, keys, child_offset_x, child_offset_y, found);
+        if found.len() == keys.len() {
+            break;
+        }
+    }
+}
+
 pub fn find_node_bounds_by_key(
     node: &WidgetNode,
     key: &str,
@@ -362,6 +403,79 @@ mod tests {
             hit.tooltip,
             find_tooltip_by_key(&root, hit.path.last().unwrap())
         );
+    }
+
+    #[test]
+    fn find_nodes_by_keys_matches_separate_lookups() {
+        let root = indexed_tree(6, 8);
+        let keys: std::collections::HashSet<&str> =
+            ["row-2", "cell-4-3", "missing-key"].into_iter().collect();
+
+        let found = find_nodes_by_keys(&root, &keys);
+
+        assert_eq!(found.len(), 2, "the missing key must not appear");
+        let (row_node, row_bounds) = found.get("row-2").expect("row-2 found");
+        assert_eq!(row_node.attributes.get("_mesh_key").unwrap(), "row-2");
+        assert_eq!(
+            row_bounds,
+            &find_node_bounds_by_key(&root, "row-2", 0.0, 0.0).unwrap()
+        );
+
+        let (cell_node, cell_bounds) = found.get("cell-4-3").expect("cell-4-3 found");
+        assert_eq!(cell_node.attributes.get("_mesh_key").unwrap(), "cell-4-3");
+        assert_eq!(
+            cell_bounds,
+            &find_node_bounds_by_key(&root, "cell-4-3", 0.0, 0.0).unwrap()
+        );
+    }
+
+    #[test]
+    fn find_nodes_by_keys_respects_transform_offsets() {
+        let mut root = indexed_tree(3, 3);
+        root.children[1].computed_style.transform.translate_x = 7.0;
+        let keys: std::collections::HashSet<&str> = ["cell-1-1"].into_iter().collect();
+
+        let found = find_nodes_by_keys(&root, &keys);
+
+        let (_, bounds) = found.get("cell-1-1").expect("cell-1-1 found");
+        assert_eq!(
+            bounds,
+            &find_node_bounds_by_key(&root, "cell-1-1", 0.0, 0.0).unwrap()
+        );
+    }
+
+    // cargo test -p mesh-core-interaction --release -- find_nodes_by_keys_beats_per_key_lookups --ignored --nocapture
+    #[test]
+    #[ignore = "release-only per-key-lookup microbenchmark"]
+    fn find_nodes_by_keys_beats_per_key_lookups() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let root = indexed_tree(200, 20);
+        let keys = ["row-198", "cell-199-19", "cell-0-0", "row-100"];
+        let key_set: std::collections::HashSet<&str> = keys.into_iter().collect();
+        let iterations = 20_000;
+
+        let per_key_started = Instant::now();
+        for _ in 0..iterations {
+            for key in keys {
+                black_box(find_node_by_key(black_box(&root), key));
+                black_box(find_node_bounds_by_key(black_box(&root), key, 0.0, 0.0));
+            }
+        }
+        let per_key = per_key_started.elapsed();
+
+        let fused_started = Instant::now();
+        for _ in 0..iterations {
+            black_box(find_nodes_by_keys(black_box(&root), &key_set));
+        }
+        let fused = fused_started.elapsed();
+
+        eprintln!(
+            "per-key find_node_by_key+bounds: {per_key:?}; fused find_nodes_by_keys: {fused:?}; ratio: {:.1}x",
+            per_key.as_secs_f64() / fused.as_secs_f64()
+        );
+        assert!(fused < per_key);
     }
 
     #[test]
