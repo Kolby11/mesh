@@ -399,6 +399,8 @@ Size attribute is used only for XDG resolution hints; actual rendered size is al
 
 ## Conventions
 
+Use `background: #00000001` instead of `background: transparent` on `button` and `input` elements so the style resolver does not replace the explicit transparent background with the element default.
+
 ### CRITICAL: Core is a wiring layer only
 
 **The shell core must never implement service logic.** This is the single most important architectural rule.
