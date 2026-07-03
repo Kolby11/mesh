@@ -1085,12 +1085,23 @@ duplicating it.
       this per frame. Minor today; becomes visible once handlers use
       storage more. Consider caching the storage table Lua-side and
       invalidating on write.
-- [ ] **Keybind/shortcut annotation scans string attributes per frame.**
+- [x] **Keybind/shortcut annotation scans string attributes per frame.**
       `annotate_surface_shortcuts` and keybind resolution walk the tree
       matching `onkeybind`/accesskey attribute strings each finalize (part
       of the finalize-walk set in D); resolving declared keybinds to a
       compiled map at tree-build time (they cannot change between rebuilds)
-      removes the per-frame scan. Fold into the fused-walk work.
+      removes the per-frame scan. Fold into the fused-walk work. Done
+      2026-07-03: shortcut accessibility annotation now resolves all surface
+      shortcuts into a keybind-id map and annotates matching nodes in one tree
+      traversal instead of walking the tree once per shortcut declaration.
+      Covered by `annotate_nodes_by_keybind_applies_shortcuts_in_one_walk`;
+      release microbenchmark
+      `shortcut_annotation_single_walk_beats_per_shortcut_tree_walks` measured
+      1k annotation passes over a 120x20 synthetic tree with 24 keybinds at
+      1.328s for per-shortcut walks versus 0.989s for the single-walk path.
+      A fully compiled per-tree keybind target index can still fold into the
+      broader fused annotation walk later, but the repeated traversal cost is
+      removed.
 
 ### J. Algorithmic complexity — quadratic hot-path patterns (fourth pass)
 
