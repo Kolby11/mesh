@@ -717,60 +717,52 @@ impl<'a> StyleResolver<'a> {
         }
     }
 
-    pub fn restyle_subtree_for_keys(
+    pub fn restyle_subtree_for_ids(
         &self,
         node: &mut crate::tree::WidgetNode,
         rules: &[StyleRule],
         context: StyleContext,
-        target_keys: &std::collections::HashSet<String>,
+        target_ids: &std::collections::HashSet<crate::tree::NodeId>,
     ) {
         let index = StyleRuleIndex::new(rules);
-        self.restyle_subtree_for_keys_with_index(node, rules, &index, context, target_keys);
+        self.restyle_subtree_for_ids_with_index(node, rules, &index, context, target_ids);
     }
 
-    pub fn restyle_subtree_for_keys_cached(
+    pub fn restyle_subtree_for_ids_cached(
         &self,
         node: &mut crate::tree::WidgetNode,
         rules: &[StyleRule],
         context: StyleContext,
         index: &mut Option<StyleRuleIndex>,
-        target_keys: &std::collections::HashSet<String>,
+        target_ids: &std::collections::HashSet<crate::tree::NodeId>,
     ) {
         let idx = ensure_index(rules, index);
-        self.restyle_subtree_for_keys_with_index(node, rules, idx, context, target_keys);
+        self.restyle_subtree_for_ids_with_index(node, rules, idx, context, target_ids);
     }
 
-    fn restyle_subtree_for_keys_with_index(
+    fn restyle_subtree_for_ids_with_index(
         &self,
         node: &mut crate::tree::WidgetNode,
         rules: &[StyleRule],
         index: &StyleRuleIndex,
         context: StyleContext,
-        target_keys: &std::collections::HashSet<String>,
+        target_ids: &std::collections::HashSet<crate::tree::NodeId>,
     ) {
-        self.restyle_subtree_for_keys_with_index_and_inheritance(
-            node,
-            rules,
-            index,
-            context,
-            target_keys,
-            None,
+        self.restyle_subtree_for_ids_with_index_and_inheritance(
+            node, rules, index, context, target_ids, None,
         );
     }
 
-    fn restyle_subtree_for_keys_with_index_and_inheritance(
+    fn restyle_subtree_for_ids_with_index_and_inheritance(
         &self,
         node: &mut crate::tree::WidgetNode,
         rules: &[StyleRule],
         index: &StyleRuleIndex,
         context: StyleContext,
-        target_keys: &std::collections::HashSet<String>,
+        target_ids: &std::collections::HashSet<crate::tree::NodeId>,
         parent_style: Option<&ParentInheritedStyle>,
     ) {
-        let is_target = node
-            .attributes
-            .get("_mesh_key")
-            .is_some_and(|key| target_keys.contains(key));
+        let is_target = target_ids.contains(&node.id);
         // A node should have its style recomputed if it is a direct target, or
         // if it is a descendant of a restyled node (parent_style.is_some()),
         // in which case it must inherit updated values from its restyled parent.
@@ -792,12 +784,12 @@ impl<'a> StyleResolver<'a> {
             // Pass this node's style down so children inherit from it.
             let child_parent = ParentInheritedStyle::from(&node.computed_style);
             for child in &mut node.children {
-                self.restyle_subtree_for_keys_with_index_and_inheritance(
+                self.restyle_subtree_for_ids_with_index_and_inheritance(
                     child,
                     rules,
                     index,
                     context,
-                    target_keys,
+                    target_ids,
                     Some(&child_parent),
                 );
             }
@@ -806,13 +798,8 @@ impl<'a> StyleResolver<'a> {
             // Don't restyle it, but keep recursing — target nodes may be
             // deeper in the tree.
             for child in &mut node.children {
-                self.restyle_subtree_for_keys_with_index_and_inheritance(
-                    child,
-                    rules,
-                    index,
-                    context,
-                    target_keys,
-                    None,
+                self.restyle_subtree_for_ids_with_index_and_inheritance(
+                    child, rules, index, context, target_ids, None,
                 );
             }
         }

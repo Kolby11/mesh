@@ -13,7 +13,9 @@ use crate::util::{default_runtime_storage_root, is_named_event_channel};
 use mesh_core_capability::CapabilitySet;
 use mesh_core_elements::VariableStore;
 use mesh_core_service::{InterfaceCatalog, InterfaceResolution};
-use mlua::{Error as LuaError, Function, Lua, LuaSerdeExt, Table, Value as LuaValue, Variadic};
+use mlua::{
+    Error as LuaError, Function, Lua, LuaSerdeExt, MultiValue, Table, Value as LuaValue, Variadic,
+};
 use serde_json::Value;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
@@ -176,6 +178,10 @@ pub struct ScriptContext {
     changed_storage_keys: Arc<Mutex<HashSet<String>>>,
     tracking_storage_reads: Arc<Mutex<bool>>,
     pending_side_channels: Arc<AtomicBool>,
+    /// Set when another component instance touches this context through a live
+    /// `bind:this` proxy. The shell consumes this before doing the expensive
+    /// cross-instance state resync.
+    live_binding_external_accessed: Arc<AtomicBool>,
     /// `state.snapshot_generation()` at the time of the last `refresh_module_object` call.
     /// When this matches the current generation (and no proxies exist), the Lua
     /// `module.state` table is already up to date and the rebuild can be skipped.
@@ -332,6 +338,7 @@ impl ScriptContext {
             changed_storage_keys: Arc::new(Mutex::new(HashSet::new())),
             tracking_storage_reads: Arc::new(Mutex::new(false)),
             pending_side_channels: Arc::new(AtomicBool::new(false)),
+            live_binding_external_accessed: Arc::new(AtomicBool::new(false)),
             last_module_refresh_gen: u64::MAX,
             last_element_metrics_fingerprint: None,
             cached_self_table: None,
@@ -758,12 +765,14 @@ impl ScriptContext {
         let lua = self.lua();
         let child_env = child.env().clone();
         let denylist = child.builtin_globals.clone();
+        let child_external_accessed = Arc::clone(&child.live_binding_external_accessed);
 
         let proxy = lua.create_table().map_err(lua_err)?;
         let meta = lua.create_table().map_err(lua_err)?;
 
         let index_env = child_env.clone();
         let index_deny = denylist.clone();
+        let index_external_accessed = Arc::clone(&child_external_accessed);
         meta.set(
             "__index",
             lua.create_function(move |lua, (_proxy, key): (Table, String)| {
@@ -774,6 +783,15 @@ impl ScriptContext {
                 // members are exposed, not globals inherited via `_ENV.__index`.
                 let raw = index_env.raw_get::<LuaValue>(key.as_str())?;
                 if !matches!(raw, LuaValue::Nil) {
+                    if let LuaValue::Function(function) = raw {
+                        let accessed = Arc::clone(&index_external_accessed);
+                        return lua
+                            .create_function(move |_lua, args: Variadic<LuaValue>| {
+                                accessed.store(true, Ordering::Release);
+                                function.call::<MultiValue>(args)
+                            })
+                            .map(LuaValue::Function);
+                    }
                     return Ok(raw);
                 }
                 // Child→parent events: a named-channel key with no public member
@@ -791,12 +809,14 @@ impl ScriptContext {
         .map_err(lua_err)?;
 
         let newindex_env = child_env;
+        let newindex_external_accessed = child_external_accessed;
         meta.set(
             "__newindex",
             lua.create_function(move |_, (_proxy, key, value): (Table, String, LuaValue)| {
                 if is_denied_binding_key(&key, &denylist) {
                     return Ok(());
                 }
+                newindex_external_accessed.store(true, Ordering::Release);
                 newindex_env.raw_set(key, value)
             })
             .map_err(lua_err)?,
@@ -821,6 +841,13 @@ impl ScriptContext {
         }
         self.sync_state_from_lua();
         self.sync_side_channels();
+    }
+
+    /// Returns whether another component touched this context through a live
+    /// `bind:this` proxy since the last call, clearing the flag.
+    pub fn take_live_binding_external_accessed(&self) -> bool {
+        self.live_binding_external_accessed
+            .swap(false, Ordering::AcqRel)
     }
 
     /// Call the script's `init(self)` function if it exists.

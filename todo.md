@@ -677,7 +677,7 @@ duplicating it.
       faster), with no preprocessing cost. Equivalence coverage exercises
       overlap order, transforms, scroll offsets, inherited tooltip metadata,
       and bounds; all 104 shell interaction tests pass.
-- [ ] **Hover diff materializes descendant key sets as `HashSet<String>`.**
+- [x] **Hover diff materializes descendant key sets as `HashSet<String>`.**
       `collect_interaction_changed_keys` clones every affected `_mesh_key`
       String and walks subtrees per hover change
       (`shell/component/rendering.rs:440-471`); `annotate_runtime_tree`
@@ -685,14 +685,36 @@ duplicating it.
       for every node every frame (`runtime_tree.rs:616-622,746`). Store the
       runtime key/id as typed fields computed once per retained node
       (overlaps the v1.27 "typed WidgetNode fields" item; the key-path
-      allocation itself is not yet tracked anywhere).
+      allocation itself is not yet tracked anywhere). Done 2026-07-04:
+      interaction changed-subtree collection and targeted style resolution now
+      use stable `NodeId` values. Hover/focus keys are borrowed during the
+      discovery walk, and descendants insert copy-only IDs instead of cloning
+      slash-joined strings. A 1,365-node release benchmark over 2,000 subtree
+      diffs measured 109.628ms with `HashSet<String>` versus 71.894ms with
+      `HashSet<NodeId>` (1.5x faster), with identical affected counts. Runtime
+      key-path construction remains tracked separately.
 - [ ] **Handler dispatch overhead per event.** `call_namespaced_handler`
       locks the runtimes mutex, allocates 3 Strings for namespacing, and
       unconditionally runs `resync_binding_neighbors` over every linked
       instance after each handler (`shell/component/runtime.rs:494-560`).
       Track "did a cross-`_ENV` write actually happen" (a dirty bit set by
       the live-binding `__newindex`) and skip neighbor resync when clean;
-      intern instance keys.
+      intern instance keys. Progress 2026-07-04: ordinary handler names now
+      bypass legacy JSON-descriptor parsing unless the first byte is `{`;
+      legacy pre-bound descriptors remain supported. A release benchmark over
+      500k pointer-handler unpacks measured 43.866ms with failed JSON parsing
+      versus 37.898ms with the syntax gate (1.2x faster). The binding-resync
+      and instance-key allocation work remains open; a simple `__newindex`
+      dirty bit is insufficient because Lua does not invoke it when replacing
+      existing globals. Progress 2026-07-04: live `bind:this` proxies now set
+      a per-runtime external-access flag only when another component writes
+      through the proxy or calls a proxied function. Post-handler neighbor
+      resync consumes that flag and skips untouched linked runtimes, while
+      touched child-call semantics remain covered by
+      `bind_this_event_handler_calls_child_live_and_resyncs_it`. A release
+      benchmark over 2k untouched-neighbor checks measured 3.194ms for
+      unconditional child resync versus 42.743us for the flag-gated skip
+      (74.7x faster). Instance-key interning remains open.
 - [ ] **`bind:this`/live-binding writes mark the whole surface dirty.** Any
       handler that touches state invalidates via `invalidate_script_state()`
       → full template re-eval + tree rebuild (narrow path still rebuilds the
@@ -795,6 +817,10 @@ duplicating it.
       heap allocation for normal UI trees while spilling safely for wider
       containers. A 4-child release microbenchmark over 2M snapshots measured
       9.811ms with fresh `Vec` allocation versus 2.810ms inline (3.5x faster).
+      The transient retained dirty `SecondaryMap` now also swaps through a
+      scratch slot instead of reallocating on each interaction update; a
+      128-dirty-node release benchmark over 20k updates measured 6.622ms fresh
+      versus 3.419ms reused (1.9x faster).
 - [ ] **`WidgetNode` allocation profile.** Every node carries `tag: String`,
       `attributes: BTreeMap<String,String>`, `event_handlers:
       BTreeMap<String,String>` (`ui/elements/src/tree.rs:44-68`), rebuilt
@@ -824,7 +850,11 @@ duplicating it.
       shortcuts. A release microbenchmark over 20k plain-tree finalizations
       measured 361.497ms for the two old marker walks versus 2.375us for the
       gated path (152k×). The always-needed annotation/restyle/layout walks and
-      broader traversal fusion remain open.
+      broader traversal fusion remain open. Rejected experiment 2026-07-04:
+      fusing surface and child enter/exit class annotation into one full-tree
+      traversal measured 87.249ms versus 52.903ms for the existing targeted
+      searches/subtree walks (0.6x). The prototype was reverted; any future
+      fusion needs to avoid scanning unrelated branches.
 - [x] **Restyle re-applies string declarations per node on interaction
       frames** — tracked (v1.23 typed declarations + v1.18 selector
       dependencies). New detail from this scan: the interaction narrow path
@@ -967,6 +997,11 @@ duplicating it.
       old synchronization walk versus 40.369us for the fast path (9,374x).
       Dirty-node-only synchronization within actual layout passes remains a
       possible follow-up once retained-tree dirty IDs are exposed here.
+      Rejected experiment 2026-07-04: retaining and clearing the temporary
+      `node_map`/`text_nodes` allocations made the end-to-end layout pass
+      slightly slower (77.502ms scratch versus 77.033ms fresh, 0.99x), because
+      full style synchronization and map clearing dominate. The prototype was
+      reverted.
 
 ### G. Lua runtime — state sync & handler overhead
 
@@ -1117,7 +1152,12 @@ duplicating it.
       (`scripting/storage.rs:275-307`); render hooks that read storage pay
       this per frame. Minor today; becomes visible once handlers use
       storage more. Consider caching the storage table Lua-side and
-      invalidating on write.
+      invalidating on write. Rejected experiment 2026-07-04: a private
+      Lua-table cache for scalar values measured 50.238ms versus 39.202ms for
+      the existing lock/clone/convert path (0.8x); the extra Lua lookup cost
+      outweighed the saved Rust work, so the prototype was reverted. A future
+      attempt should target shared immutable JSON values or lock avoidance
+      without adding another Lua table lookup.
 - [x] **Keybind/shortcut annotation scans string attributes per frame.**
       `annotate_surface_shortcuts` and keybind resolution walk the tree
       matching `onkeybind`/accesskey attribute strings each finalize (part

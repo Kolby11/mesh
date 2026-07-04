@@ -622,6 +622,9 @@ impl FrontendSurfaceComponent {
             let Some(neighbor) = runtimes.get_mut(&neighbor_key) else {
                 continue;
             };
+            if !neighbor.script_ctx.take_live_binding_external_accessed() {
+                continue;
+            }
             neighbor.script_ctx.resync_state();
             Self::drain_script_diagnostics(&self.diagnostics, neighbor);
             if neighbor.script_ctx.state().is_dirty() {
@@ -642,7 +645,12 @@ fn unpack_handler_args(
     handler_name: &str,
     event_args: &[serde_json::Value],
 ) -> (String, Vec<serde_json::Value>) {
-    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(handler_name) {
+    // Legacy pre-bound descriptors are JSON objects. Ordinary handler names
+    // dominate event dispatch, so avoid constructing a JSON parser/error for
+    // names that cannot possibly be descriptors.
+    if handler_name.as_bytes().first() == Some(&b'{')
+        && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(handler_name)
+    {
         if let (Some(h), Some(a)) = (
             parsed.get("h").and_then(serde_json::Value::as_str),
             parsed.get("a").and_then(serde_json::Value::as_array),
@@ -703,6 +711,57 @@ mod handler_call_tests {
         assert_eq!(handler, "__mesh_embed__::host::typed");
         assert_eq!(args[0], serde_json::json!("prebound"));
         assert_eq!(args[1], serde_json::json!({ "type": "click" }));
+    }
+
+    #[test]
+    fn unpack_handler_args_preserves_plain_and_legacy_descriptor_forms() {
+        let event_args = [serde_json::json!({ "type": "click" })];
+        assert_eq!(
+            unpack_handler_args("onClick", &event_args),
+            ("onClick".to_string(), event_args.to_vec())
+        );
+
+        let descriptor = r#"{"h":"selectItem","a":["alpha"]}"#;
+        assert_eq!(
+            unpack_handler_args(descriptor, &event_args),
+            (
+                "selectItem".to_string(),
+                vec![serde_json::json!("alpha"), event_args[0].clone()]
+            )
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- plain_handler_syntax_gate_beats_failed_json_parse --ignored --nocapture
+    #[test]
+    #[ignore = "release-only plain handler dispatch microbenchmark"]
+    fn plain_handler_syntax_gate_beats_failed_json_parse() {
+        fn old_unpack(
+            handler_name: &str,
+            event_args: &[serde_json::Value],
+        ) -> (String, Vec<serde_json::Value>) {
+            let _ = serde_json::from_str::<serde_json::Value>(handler_name);
+            (handler_name.to_string(), event_args.to_vec())
+        }
+
+        let iterations = 500_000;
+        let event_args = [serde_json::json!({ "type": "pointermove", "x": 12, "y": 34 })];
+        let old_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(old_unpack("onPointerMove", &event_args));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(unpack_handler_args("onPointerMove", &event_args));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "plain handler unpack: failed JSON parse {old_time:?}; syntax gate {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
     }
 
     // Run with:

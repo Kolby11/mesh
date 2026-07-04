@@ -93,6 +93,9 @@ pub(super) struct RetainedWidgetTree {
     last_dirty: RetainedTreeDirtySummary,
     // Scratch map reused each frame to avoid per-frame allocation.
     next_nodes_scratch: HashMap<NodeId, RetainedNodeSnapshot>,
+    // Dirty slots are transient but interaction frames repopulate them often.
+    // Swap the previous map into scratch so its slot allocation is retained.
+    next_dirty_scratch: SecondaryMap<RetainedNodeKey, RetainedNodeDirtyFlags>,
 }
 
 impl RetainedWidgetTree {
@@ -104,7 +107,8 @@ impl RetainedWidgetTree {
         collect_retained_snapshots(root, &mut next_nodes);
 
         let mut dirty = RetainedTreeDirtySummary::default();
-        let mut next_dirty = SecondaryMap::new();
+        let mut next_dirty = std::mem::take(&mut self.next_dirty_scratch);
+        next_dirty.clear();
 
         for (&node_id, next) in &next_nodes {
             match self.node_keys.get(&node_id).copied() {
@@ -156,7 +160,8 @@ impl RetainedWidgetTree {
         if dirty.any() {
             self.generation = self.generation.saturating_add(1);
         }
-        self.dirty = next_dirty;
+        let previous_dirty = std::mem::replace(&mut self.dirty, next_dirty);
+        self.next_dirty_scratch = previous_dirty;
         self.last_dirty = dirty;
 
         // Return the scratch map, preserving its backing allocation for the next frame.
@@ -1252,6 +1257,55 @@ mod tests {
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- reused_dirty_secondary_map_beats_fresh_allocations --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained dirty-map allocation microbenchmark"]
+    fn reused_dirty_secondary_map_beats_fresh_allocations() {
+        let mut nodes: SlotMap<RetainedNodeKey, RetainedNodeSnapshot> = SlotMap::with_key();
+        let keys = (0..128)
+            .map(|_| {
+                nodes.insert(RetainedNodeSnapshot {
+                    layout: (0, 0, 0, 0),
+                    style_hash: 0,
+                    attributes_hash: 0,
+                    child_ids: SmallVec::new(),
+                    state: ElementState::default(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let iterations = 20_000;
+
+        let old_started = Instant::now();
+        let mut old_count = 0;
+        for _ in 0..iterations {
+            let mut dirty = SecondaryMap::new();
+            for key in &keys {
+                dirty.insert(*key, RetainedNodeDirtyFlags::STATE);
+            }
+            old_count += std::hint::black_box(dirty.len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_count = 0;
+        let mut dirty = SecondaryMap::new();
+        for _ in 0..iterations {
+            dirty.clear();
+            for key in &keys {
+                dirty.insert(*key, RetainedNodeDirtyFlags::STATE);
+            }
+            new_count += std::hint::black_box(dirty.len());
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "retained dirty map: fresh {old_time:?}; reused {new_time:?}; ratio {:.1}x; counts={old_count}/{new_count}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_count, new_count);
         assert!(new_time < old_time);
     }
 

@@ -948,19 +948,21 @@ box.card { padding: 3px; }
         }];
         let mut root = crate::tree::WidgetNode::new("row");
         let mut previous = crate::tree::WidgetNode::new("button");
+        previous.id = 1;
         previous
             .attributes
             .insert("_mesh_key".into(), "prev".into());
         previous.state.hovered = false;
         previous.computed_style.background_color = Color::from_hex("#ff0000").unwrap();
         let mut current = crate::tree::WidgetNode::new("button");
+        current.id = 2;
         current.attributes.insert("_mesh_key".into(), "next".into());
         current.state.hovered = true;
         root.children.push(previous);
         root.children.push(current);
 
-        let target_keys = std::collections::HashSet::from(["prev".to_string(), "next".to_string()]);
-        resolver.restyle_subtree_for_keys(&mut root, &rules, StyleContext::default(), &target_keys);
+        let target_ids = std::collections::HashSet::from([1, 2]);
+        resolver.restyle_subtree_for_ids(&mut root, &rules, StyleContext::default(), &target_ids);
 
         assert_eq!(
             root.children[0].computed_style.background_color,

@@ -344,9 +344,9 @@ impl FrontendSurfaceComponent {
             && dirty_types.contains(ComponentDirtyFlags::STATE)
             && !dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
         // Compute affected keys before borrowing index_cache to satisfy the borrow checker.
-        // collect_interaction_changed_keys takes &self, so it must run before the &mut borrow.
+        // Collect affected IDs before borrowing index_cache to satisfy the borrow checker.
         let affected_keys = if targeted_interaction_restyle {
-            self.collect_interaction_changed_keys(tree)
+            self.collect_interaction_changed_node_ids(tree)
         } else {
             HashSet::new()
         };
@@ -379,7 +379,7 @@ impl FrontendSurfaceComponent {
                     // For surface root, restyle only children that are in
                     // the affected set. Use targeted restyle on each child.
                     for child in &mut tree.children {
-                        resolver.restyle_subtree_for_keys_cached(
+                        resolver.restyle_subtree_for_ids_cached(
                             child,
                             restyle_rules,
                             context,
@@ -390,7 +390,7 @@ impl FrontendSurfaceComponent {
                 } else {
                     // For non-surface trees, restyle the entire tree but only
                     // nodes in affected_keys will be touched.
-                    resolver.restyle_subtree_for_keys_cached(
+                    resolver.restyle_subtree_for_ids_cached(
                         tree,
                         restyle_rules,
                         context,
@@ -482,36 +482,36 @@ impl FrontendSurfaceComponent {
         self.interaction_snapshot_valid = true;
     }
 
-    /// Collects the set of `_mesh_key` values for all nodes whose interaction
+    /// Collects stable IDs for all nodes whose interaction
     /// state changed this frame plus all their descendants.
     ///
     /// Compares current hover/focus state against previous frame's state to
     /// identify which nodes changed.
-    fn collect_interaction_changed_keys(&self, tree: &WidgetNode) -> HashSet<String> {
-        let mut changed_keys: HashSet<String> = HashSet::new();
+    fn collect_interaction_changed_node_ids(&self, tree: &WidgetNode) -> HashSet<NodeId> {
+        let mut changed_keys: HashSet<&str> = HashSet::new();
 
         // Collect keys that had hover change: union of old and new hovered paths.
         for key in &self.previous_hovered_path {
-            changed_keys.insert(key.clone());
+            changed_keys.insert(key.as_str());
         }
         for key in &self.hovered_path {
-            changed_keys.insert(key.clone());
+            changed_keys.insert(key.as_str());
         }
 
         // Collect keys that had focus change.
         if let Some(ref prev) = self.previous_focused_key {
-            changed_keys.insert(prev.clone());
+            changed_keys.insert(prev.as_str());
         }
         if let Some(ref curr) = self.focused_key {
-            changed_keys.insert(curr.clone());
+            changed_keys.insert(curr.as_str());
         }
 
         if changed_keys.is_empty() {
-            return changed_keys; // first frame: no previous state
+            return HashSet::new(); // first frame: no previous state
         }
 
-        let mut all_affected: HashSet<String> = HashSet::new();
-        collect_changed_subtree_keys(tree, &changed_keys, false, &mut all_affected);
+        let mut all_affected: HashSet<NodeId> = HashSet::new();
+        collect_changed_subtree_node_ids(tree, &changed_keys, false, &mut all_affected);
         all_affected
     }
 
@@ -658,20 +658,21 @@ pub(super) fn constrain_error_placeholders(node: &mut WidgetNode) {
     }
 }
 
-fn collect_changed_subtree_keys(
+fn collect_changed_subtree_node_ids(
     node: &WidgetNode,
-    changed_keys: &HashSet<String>,
+    changed_keys: &HashSet<&str>,
     parent_affected: bool,
-    out: &mut HashSet<String>,
+    out: &mut HashSet<NodeId>,
 ) {
     let node_key = node.attributes.get("_mesh_key");
-    let node_affected = parent_affected || node_key.is_some_and(|key| changed_keys.contains(key));
-    if node_affected && let Some(key) = node_key {
-        out.insert(key.clone());
+    let node_affected =
+        parent_affected || node_key.is_some_and(|key| changed_keys.contains(key.as_str()));
+    if node_affected {
+        out.insert(node.id);
     }
 
     for child in &node.children {
-        collect_changed_subtree_keys(child, changed_keys, node_affected, out);
+        collect_changed_subtree_node_ids(child, changed_keys, node_affected, out);
     }
 }
 
@@ -682,6 +683,7 @@ mod interaction_changed_key_tests {
 
     fn keyed_node(key: &str, children: Vec<WidgetNode>) -> WidgetNode {
         let mut node = WidgetNode::new("box");
+        node.id = crate::shell::component::runtime_tree::stable_runtime_node_id(key);
         node.attributes.insert("_mesh_key".into(), key.into());
         node.children = children;
         node
@@ -709,7 +711,7 @@ mod interaction_changed_key_tests {
     }
 
     #[test]
-    fn collect_changed_subtree_keys_collects_descendants_in_one_walk() {
+    fn collect_changed_subtree_node_ids_collects_descendants_in_one_walk() {
         let tree = keyed_node(
             "root",
             vec![
@@ -723,19 +725,83 @@ mod interaction_changed_key_tests {
                 keyed_node("root/1", vec![keyed_node("root/1/0", vec![])]),
             ],
         );
-        let changed = HashSet::from(["root/0".to_string()]);
+        let changed = HashSet::from(["root/0"]);
         let mut affected = HashSet::new();
 
-        collect_changed_subtree_keys(&tree, &changed, false, &mut affected);
+        collect_changed_subtree_node_ids(&tree, &changed, false, &mut affected);
 
         assert_eq!(
             affected,
             HashSet::from([
-                "root/0".to_string(),
-                "root/0/0".to_string(),
-                "root/0/1".to_string(),
+                crate::shell::component::runtime_tree::stable_runtime_node_id("root/0"),
+                crate::shell::component::runtime_tree::stable_runtime_node_id("root/0/0"),
+                crate::shell::component::runtime_tree::stable_runtime_node_id("root/0/1"),
             ])
         );
+    }
+
+    // cargo test -p mesh-core-shell --release -- interaction_changed_node_ids_beat_runtime_key_clones --ignored --nocapture
+    #[test]
+    #[ignore = "release-only interaction changed-set microbenchmark"]
+    fn interaction_changed_node_ids_beat_runtime_key_clones() {
+        fn build(key: String, width: usize, depth: usize, next_id: &mut NodeId) -> WidgetNode {
+            let mut node = WidgetNode::new("box");
+            node.id = *next_id;
+            *next_id += 1;
+            node.attributes.insert("_mesh_key".into(), key.clone());
+            if depth > 0 {
+                node.children = (0..width)
+                    .map(|index| build(format!("{key}/{index}"), width, depth - 1, next_id))
+                    .collect();
+            }
+            node
+        }
+        fn old_collect(
+            node: &WidgetNode,
+            changed: &HashSet<String>,
+            parent_affected: bool,
+            out: &mut HashSet<String>,
+        ) {
+            let key = node.attributes.get("_mesh_key");
+            let affected = parent_affected || key.is_some_and(|key| changed.contains(key));
+            if affected && let Some(key) = key {
+                out.insert(key.clone());
+            }
+            for child in &node.children {
+                old_collect(child, changed, affected, out);
+            }
+        }
+
+        let mut next_id = 1;
+        let tree = build("root".into(), 4, 5, &mut next_id);
+        let iterations = 2_000;
+        let old_changed = HashSet::from(["root/0".to_string()]);
+        let new_changed = HashSet::from(["root/0"]);
+
+        let old_started = Instant::now();
+        let mut old_count = 0;
+        for _ in 0..iterations {
+            let mut affected = HashSet::new();
+            old_collect(&tree, &old_changed, false, &mut affected);
+            old_count += std::hint::black_box(affected.len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_count = 0;
+        for _ in 0..iterations {
+            let mut affected = HashSet::new();
+            collect_changed_subtree_node_ids(&tree, &new_changed, false, &mut affected);
+            new_count += std::hint::black_box(affected.len());
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "interaction changed set: String keys {old_time:?}; NodeId keys {new_time:?}; ratio {:.1}x; counts={old_count}/{new_count}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_count, new_count);
+        assert!(new_time < old_time);
     }
 
     // cargo test -p mesh-core-shell --release -- finalize_marker_walk_gates_skip_plain_trees --ignored --nocapture

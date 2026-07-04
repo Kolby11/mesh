@@ -126,3 +126,117 @@ end
         Some(serde_json::json!(99))
     );
 }
+
+#[test]
+fn bind_this_ordinary_parent_handler_skips_untouched_child_resync() {
+    let mut component = bind_live_surface(
+        r#"
+<template>
+    <box>
+        <Child bind:this={child} />
+    </box>
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+counter = 0
+function bump()
+    counter = counter + 1
+end
+</script>
+"#,
+        r#"
+<template>
+    <box />
+</template>
+<script lang="luau">
+value = 0
+</script>
+"#,
+    );
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    let child_key = format!("{PARENT_ID}/local:Child");
+
+    {
+        let mut runtimes = component.runtimes.lock().unwrap();
+        let child = runtimes.get_mut(&child_key).unwrap();
+        child.script_ctx.state.set("value", serde_json::json!(123));
+        child.script_ctx.state.clear_dirty();
+    }
+
+    component.call_namespaced_handler("bump", &[]).unwrap();
+
+    assert_eq!(
+        child_runtime_value(&component, "value"),
+        Some(serde_json::json!(123)),
+        "untouched live-bound children should not be resynced after ordinary parent handlers"
+    );
+}
+
+// cargo test -p mesh-core-shell --release -- untouched_live_binding_neighbors_skip_resync --ignored --nocapture
+#[test]
+#[ignore = "release-only live-binding neighbor resync microbenchmark"]
+fn untouched_live_binding_neighbors_skip_resync() {
+    use std::time::Instant;
+
+    let mut component = bind_live_surface(
+        r#"
+<template>
+    <box>
+        <Child bind:this={child} />
+    </box>
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+counter = 0
+function bump()
+    counter = counter + 1
+end
+</script>
+"#,
+        r#"
+<template>
+    <box />
+</template>
+<script lang="luau">
+value = 0
+mirror = 0
+other = 0
+</script>
+"#,
+    );
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    let child_key = format!("{PARENT_ID}/local:Child");
+    let iterations = 2_000;
+
+    let old_started = Instant::now();
+    for _ in 0..iterations {
+        let mut runtimes = component.runtimes.lock().unwrap();
+        let child = runtimes.get_mut(&child_key).unwrap();
+        child.script_ctx.resync_state();
+        std::hint::black_box(child.script_ctx.state().mutation_generation());
+    }
+    let old_time = old_started.elapsed();
+
+    let new_started = Instant::now();
+    for _ in 0..iterations {
+        let mut runtimes = component.runtimes.lock().unwrap();
+        let child = runtimes.get_mut(&child_key).unwrap();
+        if child.script_ctx.take_live_binding_external_accessed() {
+            child.script_ctx.resync_state();
+        }
+        std::hint::black_box(child.script_ctx.state().mutation_generation());
+    }
+    let new_time = new_started.elapsed();
+
+    eprintln!(
+        "untouched live-binding neighbor: unconditional resync {old_time:?}; flag skip {new_time:?}; ratio {:.1}x",
+        old_time.as_secs_f64() / new_time.as_secs_f64()
+    );
+    assert!(new_time < old_time);
+}
