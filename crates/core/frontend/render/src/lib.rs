@@ -43,5 +43,5 @@ pub use surface::{
     paint_frontend_tree_at_for_module_with_text_metrics_clipped,
     paint_frontend_tree_at_for_module_with_text_metrics_clipped_filtered,
     paint_selected_display_list_for_module_with_profiling_metrics, set_tooltip_center_x,
-    set_tooltip_paint_colors, set_tooltip_paint_opacity, set_tooltip_scale_from,
+    set_tooltip_paint_colors, set_tooltip_paint_opacity, set_tooltip_paint_scale,
 };

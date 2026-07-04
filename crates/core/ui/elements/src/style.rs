@@ -2,6 +2,7 @@ mod parse;
 mod resolve;
 mod types;
 
+pub use parse::{parse_animation_shorthand, parse_transform};
 pub use resolve::*;
 pub use types::*;
 
@@ -774,6 +775,7 @@ box.card { padding: 3px; }
                     )]),
                 )]),
             },
+            keyframes: std::collections::HashMap::new(),
             modules: std::collections::HashMap::new(),
         };
         theme.modules.insert(

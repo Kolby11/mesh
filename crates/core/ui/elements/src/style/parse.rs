@@ -32,7 +32,7 @@ pub(super) fn parse_edges_shorthand(value: &str) -> Edges {
     }
 }
 
-pub(super) fn parse_transform(value: &str) -> Transform2D {
+pub fn parse_transform(value: &str) -> Transform2D {
     let trimmed = value.trim();
     if trimmed.is_empty() || trimmed == "none" {
         return Transform2D::IDENTITY;
@@ -617,7 +617,7 @@ fn parse_animation_item(item: &str) -> AnimationStyle {
     animation
 }
 
-pub(super) fn parse_animation_shorthand(value: &str) -> Vec<AnimationStyle> {
+pub fn parse_animation_shorthand(value: &str) -> Vec<AnimationStyle> {
     let items: Vec<AnimationStyle> = split_paren_aware(value, ',')
         .iter()
         .map(|s| s.trim())

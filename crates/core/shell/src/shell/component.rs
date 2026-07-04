@@ -8,7 +8,8 @@ use super::types::{
 use mesh_core_interaction::{
     annotate_overflow_tree, collect_focus_traversal, find_click_handler, find_event_handler,
     find_focusable_at, find_node_bounds_by_key, find_node_by_key, find_node_path_at,
-    find_scrollable_at, find_tooltip_by_key, is_input_key, is_slider_key, measure_content_size,
+    find_scrollable_at, find_tooltip_by_key, find_tooltip_container_bounds, is_input_key,
+    is_slider_key, measure_content_size,
     namespace_event_handlers, next_focus_target, node_is_source, parse_namespaced_handler,
     scroll_into_view_offsets, scroll_limits, source_element_tag,
 };
@@ -66,6 +67,28 @@ use mesh_core_render::{
 
 const TOOLTIP_OVERLAY_WIDTH: u32 = 240;
 const TOOLTIP_OVERLAY_HEIGHT: u32 = 80;
+
+/// Extra logical pixels a parent layer surface reserves beyond its content so
+/// tooltips can paint outside the content box (e.g. below a bar).
+///
+/// The reserve is a presentation-boundary concern only: the compositor
+/// configure and the paint buffer are inflated by it (`render_components`),
+/// while every component-facing size — `surface_size_changed`,
+/// `observe_surface_size`, `content_input_size`, popup sizing — stays the
+/// plain content size. Feeding an inflated size back into the component
+/// invalidates its measurement cache and ping-pongs with paint's own content
+/// observation, forcing a full rebuild every frame. Pointer input is confined
+/// back to the content rect at present time, so the reserve never takes
+/// clicks or focus from windows beneath it.
+pub(in crate::shell) fn tooltip_overlay_extra_for_content(width: u32, height: u32) -> (u32, u32) {
+    let extra_w = if width > 0 && width < TOOLTIP_OVERLAY_WIDTH {
+        TOOLTIP_OVERLAY_WIDTH.saturating_sub(width)
+    } else {
+        0
+    };
+    let extra_h = if height > 0 { TOOLTIP_OVERLAY_HEIGHT } else { 0 };
+    (extra_w, extra_h)
+}
 
 /// Marker attribute set on an embedded `<popover>` wrapper that is promoted to a
 /// child surface. `finalize_tree` re-applies the out-of-flow collapse to nodes
@@ -475,6 +498,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// Current tooltip configuration from shell settings. Refreshed while a
     /// tooltip hover is active so settings changes apply without remounting.
     tooltip_settings: TooltipSettings,
+    /// Enter animation lowered from the active theme's CSS (`tooltip {
+    /// animation: ... }` + `@keyframes`). `None` = show instantly.
+    tooltip_animation: Option<tooltip::TooltipAnimation>,
     visual_damage_scratch: Vec<DamageRect>,
     effective_damage_scratch: Vec<DamageRect>,
     /// Cached aggregate of restyle rules collected from `compiled.component`
@@ -612,6 +638,7 @@ impl FrontendSurfaceComponent {
             tooltip_damage_scratch: Vec::new(),
             dirty_node_visual_damage_scratch: Vec::new(),
             tooltip_settings: TooltipSettings::default(),
+            tooltip_animation: None,
             visual_damage_scratch: Vec::new(),
             effective_damage_scratch: Vec::new(),
             cached_restyle_rules: None,

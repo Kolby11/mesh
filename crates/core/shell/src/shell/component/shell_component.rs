@@ -1279,15 +1279,6 @@ impl FrontendSurfaceComponent {
         if let Some(v) = parse_f64("delay") {
             self.tooltip_settings.delay_ms = v as u64;
         }
-        if let Some(v) = parse_f64("animation-duration") {
-            self.tooltip_settings.fade_in_ms = v as u64;
-        }
-        if let Some(v) = parse_str("animation") {
-            self.tooltip_settings.animation = v;
-        }
-        if let Some(v) = parse_f64("expand-from") {
-            self.tooltip_settings.expand_from = v as f32;
-        }
         if let Some(v) = parse_f64("gap") {
             self.tooltip_settings.gap = v as f32;
         }
@@ -1297,10 +1288,19 @@ impl FrontendSurfaceComponent {
         if let Some(v) = parse_f64("cursor-offset-y") {
             self.tooltip_settings.cursor_offset_y = v as f32;
         }
+
+        // The enter animation is pure theme CSS: `animation:` shorthand on
+        // the tooltip block plus a theme-level `@keyframes` rule.
+        self.tooltip_animation = tooltip::tooltip_animation_from_theme(theme);
     }
 
+    /// How long the tooltip keeps animating after it appears. Zero when the
+    /// theme declares no enter animation.
     fn tooltip_fade_duration(&self) -> Duration {
-        Duration::from_millis(self.tooltip_settings.fade_in_ms)
+        self.tooltip_animation
+            .as_ref()
+            .map(tooltip::TooltipAnimation::total_duration)
+            .unwrap_or(Duration::ZERO)
     }
 
     /// Resolves the currently hovered tooltip's text and paint position, and
@@ -1321,17 +1321,12 @@ impl FrontendSurfaceComponent {
         let hovered_key = self.hovered_key.as_ref()?;
         let (owner_key, text) = find_tooltip_by_key(tree, hovered_key)?;
 
-        let fade_in_ms = self.tooltip_settings.fade_in_ms as f64;
-        let opacity = self
-            .tooltip_appeared_at
-            .map(|appeared| {
-                if fade_in_ms <= f64::EPSILON {
-                    return 1.0;
-                }
-                let elapsed = appeared.elapsed().as_millis() as f64;
-                (elapsed / fade_in_ms).min(1.0) as f32
-            })
-            .unwrap_or(1.0);
+        // Sample the theme-CSS enter animation at the current elapsed time.
+        // No animation in the theme (or no appear timestamp) → resting state.
+        let sample = match (&self.tooltip_animation, self.tooltip_appeared_at) {
+            (Some(animation), Some(appeared)) => animation.sample(appeared.elapsed()),
+            _ => tooltip::TooltipAnimationSample::FINISHED,
+        };
 
         // Inherited tooltips use the owner for placement and style so a
         // titled button still anchors below the button when a child icon
@@ -1345,45 +1340,46 @@ impl FrontendSurfaceComponent {
         let element_offset = owner_node.and_then(|node| node.computed_style.tooltip_offset);
         let element_bounds =
             find_node_bounds_by_key(tree, &owner_key, 0.0, 0.0).or(self.hovered_element_bounds);
+        // The box the tooltip should stay inside for automatic placement:
+        // the owner's innermost clipping ancestor, or the whole paint surface.
+        let container_bounds = find_tooltip_container_bounds(tree, &owner_key);
+
+        // Measure the real logical tooltip box (mirrors render_tooltip's
+        // geometry at scale 1: 12px Inter, 1.3 line height, 220px wrap width,
+        // 8px/5px padding) so fit checks match what actually paints.
+        let (text_w, text_h) =
+            SharedTextMeasurer.measure_styled(&text, "Inter", 12.0, 400, 1.3, Some(220.0));
+        let tooltip_size = (
+            (text_w.ceil() + 16.0).min(220.0 + 16.0),
+            (text_h.ceil() + 10.0).max(12.0 + 10.0),
+        );
 
         let placement = tooltip::compute_tooltip_placement(
             anchor,
             element_bounds,
+            container_bounds,
             self.hovered_pos,
-            (TOOLTIP_OVERLAY_WIDTH as f32, TOOLTIP_OVERLAY_HEIGHT as f32),
+            tooltip_size,
             (paint_width as f32, paint_height as f32),
-            opacity,
+            sample.opacity,
             &self.tooltip_settings,
         );
 
-        let base_x = placement.paint_x + element_offset.map(|(x, _)| x).unwrap_or(0.0);
-        let base_y = placement.paint_y + element_offset.map(|(_, y)| y).unwrap_or(0.0);
+        // The keyframes' `translate()` moves the whole box relative to its
+        // resting spot; the authored element offset stacks on top.
+        let paint_x =
+            placement.paint_x + element_offset.map(|(x, _)| x).unwrap_or(0.0) + sample.translate_x;
+        let paint_y =
+            placement.paint_y + element_offset.map(|(_, y)| y).unwrap_or(0.0) + sample.translate_y;
 
-        // Slide animation: the tooltip moves along its placement axis from an
-        // offset position toward its final position as it fades in. For
-        // "bottom" the tooltip starts further below and slides up; for "top"
-        // it starts further above and slides down, etc.
-        let slide = self.tooltip_settings.slide_in_px * (1.0 - placement.opacity);
-        let (paint_x, paint_y) = match anchor {
-            tooltip::ResolvedAnchor::Bottom => (base_x, base_y + slide),
-            tooltip::ResolvedAnchor::Top => (base_x, base_y - slide),
-            tooltip::ResolvedAnchor::Right => (base_x + slide, base_y),
-            tooltip::ResolvedAnchor::Left => (base_x - slide, base_y),
-            tooltip::ResolvedAnchor::Cursor => (base_x, base_y),
-        };
-
-        // Set per-frame tooltip rendering hints.
+        // Set per-frame tooltip rendering hints from the animation sample.
         mesh_core_render::set_tooltip_paint_opacity(placement.opacity);
         let center_x = matches!(
-            anchor,
-            tooltip::ResolvedAnchor::Bottom | tooltip::ResolvedAnchor::Top
+            placement.side,
+            tooltip::PlacedSide::Bottom | tooltip::PlacedSide::Top
         );
         mesh_core_render::set_tooltip_center_x(center_x);
-        let scale_from = match self.tooltip_settings.animation.as_str() {
-            "expand" => self.tooltip_settings.expand_from,
-            _ => 0.0,
-        };
-        mesh_core_render::set_tooltip_scale_from(scale_from);
+        mesh_core_render::set_tooltip_paint_scale(sample.scale);
 
         Some((text, paint_x, paint_y))
     }

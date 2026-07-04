@@ -239,6 +239,48 @@ fn non_empty_tooltip_text(value: Option<&str>) -> Option<&str> {
     value.filter(|value| !value.trim().is_empty())
 }
 
+/// Bounds of the innermost ancestor of the keyed node whose overflow clips
+/// contents, in surface coordinates (left, top, right, bottom).
+///
+/// Tooltip auto-placement uses this as the box the tooltip should stay inside:
+/// a clipping container is the visual region the user perceives the element to
+/// live in, so a tooltip escaping it reads as overflow. Returns `None` when the
+/// key is absent or no ancestor clips — the caller then constrains against the
+/// whole paint surface instead. The node itself is never its own container.
+pub fn find_tooltip_container_bounds(node: &WidgetNode, key: &str) -> Option<ContentBounds> {
+    find_container_bounds_inner(node, key, 0.0, 0.0, None).flatten()
+}
+
+/// Outer `Option` = keyed node found; inner = nearest clipping ancestor bounds.
+fn find_container_bounds_inner(
+    node: &WidgetNode,
+    key: &str,
+    offset_x: f32,
+    offset_y: f32,
+    nearest_clip: Option<ContentBounds>,
+) -> Option<Option<ContentBounds>> {
+    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
+    if node.attributes.get("_mesh_key").is_some_and(|k| k == key) {
+        return Some(nearest_clip);
+    }
+    let clips = node.computed_style.overflow_x.clips_contents()
+        || node.computed_style.overflow_y.clips_contents();
+    let nearest_clip = if clips {
+        Some(node_rect_with_offset(node, offset_x, offset_y))
+    } else {
+        nearest_clip
+    };
+    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
+    for child in &node.children {
+        if let Some(found) =
+            find_container_bounds_inner(child, key, child_offset_x, child_offset_y, nearest_clip)
+        {
+            return Some(found);
+        }
+    }
+    None
+}
+
 /// Find tooltip text for a specific node key in the tree.
 pub fn find_tooltip_text_by_key(node: &WidgetNode, key: &str) -> Option<String> {
     find_tooltip_by_key(node, key).map(|(_, text)| text)
@@ -407,6 +449,37 @@ mod tests {
         assert_eq!(
             hit.tooltip,
             find_tooltip_by_key(&root, hit.path.last().unwrap())
+        );
+    }
+
+    #[test]
+    fn tooltip_container_bounds_finds_innermost_clipping_ancestor() {
+        use mesh_core_elements::style::Overflow;
+
+        let mut root = indexed_tree(6, 8);
+        // No ancestor clips → no container.
+        assert_eq!(find_tooltip_container_bounds(&root, "cell-2-3"), None);
+        // Missing key → no container.
+        assert_eq!(find_tooltip_container_bounds(&root, "missing"), None);
+
+        // Root clips: it becomes the container for descendants.
+        root.computed_style.overflow_y = Overflow::Hidden;
+        assert_eq!(
+            find_tooltip_container_bounds(&root, "cell-2-3"),
+            Some((0.0, 0.0, 160.0, 120.0))
+        );
+
+        // An inner clipping row overrides the root for its own children.
+        root.children[2].computed_style.overflow_y = Overflow::Scroll;
+        assert_eq!(
+            find_tooltip_container_bounds(&root, "cell-2-3"),
+            Some(find_node_bounds_by_key(&root, "row-2", 0.0, 0.0).unwrap())
+        );
+
+        // The clipping node itself is not its own container.
+        assert_eq!(
+            find_tooltip_container_bounds(&root, "row-2"),
+            Some((0.0, 0.0, 160.0, 120.0))
         );
     }
 

@@ -96,6 +96,10 @@ impl Shell {
             let mut width = width;
             let mut height = height;
             let mut scale = scale;
+            // Buffer/present dimensions: content plus the tooltip overlay
+            // reserve for parent layer surfaces (popups stay content-sized).
+            let mut paint_width = width;
+            let mut paint_height = height;
             loop {
                 let surface = self
                     .surfaces
@@ -144,6 +148,15 @@ impl Shell {
                 // Compare all copy fields before cloning namespace (the only heap field).
                 let size_policy = self.components[index].parent.surface_size_policy;
                 let layer = surface.layer.unwrap_or(Layer::Top);
+                // The compositor-facing layer surface is inflated by the
+                // tooltip overlay reserve so tooltips can paint outside the
+                // content box. `surface.width/height` (and everything the
+                // component sees) stay content-sized; pointer input is
+                // confined back to content in `present_surface_target`.
+                let (tooltip_extra_w, tooltip_extra_h) =
+                    component::tooltip_overlay_extra_for_content(surface.width, surface.height);
+                let configured_width = surface.width.saturating_add(tooltip_extra_w);
+                let configured_height = surface.height.saturating_add(tooltip_extra_h);
                 let config_changed = self.components[index]
                     .parent
                     .last_surface_config
@@ -152,8 +165,8 @@ impl Shell {
                         last.edge != surface.edge
                             || last.layer != layer
                             || last.size_policy != size_policy
-                            || last.width != surface.width
-                            || last.height != surface.height
+                            || last.width != configured_width
+                            || last.height != configured_height
                             || last.exclusive_zone != surface.exclusive_zone
                             || last.keyboard_mode != surface.keyboard_mode
                             || last.margin_top != surface.margin_top
@@ -166,8 +179,8 @@ impl Shell {
                         edge: surface.edge,
                         layer,
                         size_policy,
-                        width: surface.width,
-                        height: surface.height,
+                        width: configured_width,
+                        height: configured_height,
                         exclusive_zone: surface.exclusive_zone,
                         keyboard_mode: surface.keyboard_mode,
                         namespace: surface_id.clone(),
@@ -261,8 +274,22 @@ impl Shell {
                 }
 
                 scale = self.presentation_engine.surface_scale(&surface_id);
-                let physical_w = ((width as f32 * scale).ceil() as u32).max(1);
-                let physical_h = ((height as f32 * scale).ceil() as u32).max(1);
+                // The paint buffer matches the compositor-configured surface:
+                // content plus the tooltip overlay reserve for parent layer
+                // surfaces. `width`/`height` stay content-sized for the
+                // component-facing notifications and popup config above.
+                (paint_width, paint_height) = if is_popup {
+                    (width, height)
+                } else {
+                    let (extra_w, extra_h) =
+                        component::tooltip_overlay_extra_for_content(width, height);
+                    (
+                        width.saturating_add(extra_w),
+                        height.saturating_add(extra_h),
+                    )
+                };
+                let physical_w = ((paint_width as f32 * scale).ceil() as u32).max(1);
+                let physical_h = ((paint_height as f32 * scale).ceil() as u32).max(1);
 
                 // Buffer size cap (T-102-05): prevent allocation beyond 512 MB
                 const MAX_BUFFER_BYTES: u64 = 512 * 1024 * 1024;
@@ -270,8 +297,8 @@ impl Shell {
                 if requested_bytes > MAX_BUFFER_BYTES {
                     return Err(ShellRunError::BufferAlloc {
                         surface_id: surface_id.clone(),
-                        logical_w: width,
-                        logical_h: height,
+                        logical_w: paint_width,
+                        logical_h: paint_height,
                         physical_w,
                         physical_h,
                         scale,
@@ -294,8 +321,8 @@ impl Shell {
                     .component
                     .paint(
                         self.theme.active(),
-                        width,
-                        height,
+                        paint_width,
+                        paint_height,
                         runtime
                             .parent
                             .paint_buffer
@@ -354,8 +381,8 @@ impl Shell {
                 index,
                 TargetRef::Parent,
                 &component_id,
-                width,
-                height,
+                paint_width,
+                paint_height,
                 scale,
                 total_render_started,
             )?;

@@ -159,16 +159,24 @@ impl Default for I18nSettings {
 
 /// Global tooltip behavior settings.
 ///
-/// These control the default tooltip positioning, animation, and timing for
-/// all shell components. Individual elements can override the positioning
-/// strategy via the `tooltip-anchor` CSS property.
+/// These control the default tooltip positioning and timing for all shell
+/// components. Individual elements can override the positioning strategy via
+/// the `tooltip-anchor` CSS property. The enter animation is not configured
+/// here — it is authored in theme CSS (`tooltip { animation: ... }` plus a
+/// theme-level `@keyframes` rule).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TooltipSettings {
     /// Default positioning strategy when the element does not specify
     /// `tooltip-anchor`. Accepted values: `"auto"`, `"bottom"`, `"top"`,
     /// `"left"`, `"right"`, `"cursor"`.
     ///
-    /// - `"auto"` picks `"bottom"` and flips when it would overflow.
+    /// Placement resolves in three steps: this shell-wide default, then the
+    /// element's `tooltip-anchor` CSS preference on top, then automatic
+    /// container-aware adjustment — if the chosen side would overflow the
+    /// element's nearest clipping container (or the paint surface), the
+    /// tooltip flips to the opposite side when it fits there.
+    ///
+    /// - `"auto"` picks whichever side has room, preferring below.
     /// - `"bottom"` / `"top"` / `"left"` / `"right"` place the tooltip at
     ///   the corresponding edge of the hovered element, flipping when needed.
     /// - `"cursor"` places the tooltip near the cursor position.
@@ -178,10 +186,6 @@ pub struct TooltipSettings {
     /// Delay in milliseconds before the tooltip appears after hover starts.
     #[serde(default = "default_tooltip_delay_ms")]
     pub delay_ms: u64,
-
-    /// Duration in milliseconds of the tooltip fade-in animation.
-    #[serde(default = "default_tooltip_fade_in_ms")]
-    pub fade_in_ms: u64,
 
     /// Gap in pixels between the tooltip and the hovered element.
     #[serde(default = "default_tooltip_gap")]
@@ -194,24 +198,6 @@ pub struct TooltipSettings {
     /// Vertical offset from the cursor when using cursor positioning.
     #[serde(default = "default_tooltip_cursor_offset_y")]
     pub cursor_offset_y: f32,
-
-    /// Pixels the tooltip slides along its placement axis during fade-in.
-    /// Only used when `animation` is `"slide"` or `"slide-fade"`.
-    #[serde(default = "default_tooltip_slide_in_px")]
-    pub slide_in_px: f32,
-
-    /// Enter animation style. Accepted values:
-    /// - `"expand"` — box scales from `expand_from` to 1.0 (default)
-    /// - `"slide"` — translates along the placement axis
-    /// - `"fade"` — opacity only
-    /// - `"none"` — instant
-    #[serde(default = "default_tooltip_animation")]
-    pub animation: String,
-
-    /// Starting scale factor for the `"expand"` animation (0.0–1.0).
-    /// 0.85 means the box starts at 85 % of its full size and grows to 100 %.
-    #[serde(default = "default_tooltip_expand_from")]
-    pub expand_from: f32,
 }
 
 impl Default for TooltipSettings {
@@ -219,13 +205,9 @@ impl Default for TooltipSettings {
         Self {
             position: default_tooltip_position(),
             delay_ms: default_tooltip_delay_ms(),
-            fade_in_ms: default_tooltip_fade_in_ms(),
             gap: default_tooltip_gap(),
             cursor_offset_x: default_tooltip_cursor_offset_x(),
             cursor_offset_y: default_tooltip_cursor_offset_y(),
-            slide_in_px: default_tooltip_slide_in_px(),
-            animation: default_tooltip_animation(),
-            expand_from: default_tooltip_expand_from(),
         }
     }
 }
@@ -236,9 +218,6 @@ fn default_tooltip_position() -> String {
 fn default_tooltip_delay_ms() -> u64 {
     300
 }
-fn default_tooltip_fade_in_ms() -> u64 {
-    150
-}
 fn default_tooltip_gap() -> f32 {
     6.0
 }
@@ -247,15 +226,6 @@ fn default_tooltip_cursor_offset_x() -> f32 {
 }
 fn default_tooltip_cursor_offset_y() -> f32 {
     18.0
-}
-fn default_tooltip_slide_in_px() -> f32 {
-    4.0
-}
-fn default_tooltip_animation() -> String {
-    "expand".into()
-}
-fn default_tooltip_expand_from() -> f32 {
-    0.85
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -879,13 +849,9 @@ mod tests {
             tooltip: TooltipSettings {
                 position: "cursor".into(),
                 delay_ms: 25,
-                fade_in_ms: 0,
                 gap: 10.0,
                 cursor_offset_x: 3.0,
                 cursor_offset_y: 4.0,
-                slide_in_px: 0.0,
-                animation: "none".into(),
-                expand_from: 0.85,
             },
             ..ShellSettings::default()
         };
@@ -894,7 +860,6 @@ mod tests {
 
         assert_eq!(base.tooltip.position, "cursor");
         assert_eq!(base.tooltip.delay_ms, 25);
-        assert_eq!(base.tooltip.fade_in_ms, 0);
         assert_eq!(base.tooltip.gap, 10.0);
         assert_eq!(base.tooltip.cursor_offset_x, 3.0);
         assert_eq!(base.tooltip.cursor_offset_y, 4.0);

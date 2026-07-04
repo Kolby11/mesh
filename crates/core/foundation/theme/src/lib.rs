@@ -36,6 +36,17 @@ pub struct ThemeDefaults {
     pub components: HashMap<String, ComponentDefaults>,
 }
 
+/// One stop of a theme-level `@keyframes` rule: a timeline offset in
+/// `[0.0, 1.0]` plus the raw CSS declarations at that stop. The theme stores
+/// keyframes uninterpreted; consumers (e.g. the shell's tooltip animation)
+/// resolve `var()` references and lower the properties themselves.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ThemeKeyframeStop {
+    pub offset: f32,
+    #[serde(default)]
+    pub declarations: ComponentDefaults,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ThemeModule {
     #[serde(default)]
@@ -53,6 +64,8 @@ pub struct Theme {
     pub tokens: HashMap<String, TokenValue>,
     #[serde(default)]
     pub defaults: ThemeDefaults,
+    #[serde(default)]
+    pub keyframes: HashMap<String, Vec<ThemeKeyframeStop>>,
     #[serde(default)]
     pub modules: HashMap<String, ThemeModule>,
 }
@@ -83,6 +96,12 @@ impl Theme {
 
     pub fn component_defaults(&self, component: &str) -> Option<&ComponentDefaults> {
         self.defaults.components.get(component)
+    }
+
+    /// Look up a named `@keyframes` rule declared in the theme CSS. Stops are
+    /// sorted by offset.
+    pub fn keyframe_stops(&self, name: &str) -> Option<&[ThemeKeyframeStop]> {
+        self.keyframes.get(name).map(Vec::as_slice)
     }
 
     pub fn module_component_defaults(
@@ -117,6 +136,7 @@ impl From<RawTheme> for Theme {
             name: raw.name,
             tokens: raw.tokens,
             defaults: raw.defaults,
+            keyframes: HashMap::new(),
             modules: raw.modules,
         };
         normalize_legacy_default_shell_animations(
@@ -409,6 +429,7 @@ fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String>
         name: name.to_string(),
         tokens: HashMap::new(),
         defaults: ThemeDefaults::default(),
+        keyframes: HashMap::new(),
         modules: HashMap::new(),
     };
 
@@ -469,6 +490,16 @@ fn parse_theme_css_block(selector: &str, body: &str, theme: &mut Theme) -> Resul
         return Ok(());
     }
 
+    if let Some(name) = selector.strip_prefix("@keyframes") {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("@keyframes rule is missing a name".into());
+        }
+        let stops = parse_keyframes_body(name, body)?;
+        theme.keyframes.insert(name.to_string(), stops);
+        return Ok(());
+    }
+
     if let Some(module_id) = parse_module_selector(selector) {
         parse_theme_module_css(module_id, body, theme)?;
         return Ok(());
@@ -493,6 +524,43 @@ fn parse_theme_css_block(selector: &str, body: &str, theme: &mut Theme) -> Resul
         .or_default()
         .extend(declarations);
     Ok(())
+}
+
+/// Parse the inside of an `@keyframes` rule: a sequence of
+/// `<stop-selector> { declarations }` blocks where the stop selector is
+/// `from`, `to`, a `<percent>%`, or a comma list of those (which duplicates
+/// the declarations at each listed offset). Returns stops sorted by offset.
+fn parse_keyframes_body(name: &str, mut rest: &str) -> Result<Vec<ThemeKeyframeStop>, String> {
+    let mut stops: Vec<ThemeKeyframeStop> = Vec::new();
+    while let Some(open) = rest.find('{') {
+        let stop_selector = rest[..open].trim();
+        let close = find_matching_brace(rest, open)
+            .ok_or_else(|| format!("missing closing brace in @keyframes '{name}'"))?;
+        let declarations = parse_css_declarations(&rest[open + 1..close])?;
+        for part in stop_selector.split(',') {
+            let offset = parse_keyframe_offset(part.trim()).ok_or_else(|| {
+                format!("invalid keyframe offset '{part}' in @keyframes '{name}'")
+            })?;
+            stops.push(ThemeKeyframeStop {
+                offset,
+                declarations: declarations.clone(),
+            });
+        }
+        rest = &rest[close + 1..];
+    }
+    stops.sort_by(|a, b| a.offset.total_cmp(&b.offset));
+    Ok(stops)
+}
+
+fn parse_keyframe_offset(selector: &str) -> Option<f32> {
+    match selector {
+        "from" => Some(0.0),
+        "to" => Some(1.0),
+        _ => {
+            let percent = selector.strip_suffix('%')?.trim().parse::<f32>().ok()?;
+            Some((percent / 100.0).clamp(0.0, 1.0))
+        }
+    }
 }
 
 fn parse_module_selector(selector: &str) -> Option<&str> {
@@ -666,6 +734,50 @@ fn split_explicit_module_token(name: &str) -> Option<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn theme_css_keyframes_parse_into_sorted_stops() {
+        let theme = parse_theme_css(
+            "kf",
+            "KF",
+            r#"
+            tooltip {
+              animation: tooltip-enter 150ms ease-out;
+            }
+            @keyframes tooltip-enter {
+              to { opacity: 1; transform: scale(1); }
+              from { opacity: 0; transform: scale(0.85); }
+              25%, 75% { opacity: 0.5; }
+            }
+            "#,
+        )
+        .expect("theme css parses");
+
+        let stops = theme
+            .keyframe_stops("tooltip-enter")
+            .expect("keyframes stored");
+        assert_eq!(
+            stops.iter().map(|s| s.offset).collect::<Vec<_>>(),
+            vec![0.0, 0.25, 0.75, 1.0]
+        );
+        assert_eq!(
+            stops[0].declarations.get("transform").map(String::as_str),
+            Some("scale(0.85)")
+        );
+        assert_eq!(
+            stops[1].declarations.get("opacity").map(String::as_str),
+            Some("0.5")
+        );
+        // The keyframes rule must not leak into component defaults.
+        assert!(theme.component_defaults("@keyframes tooltip-enter").is_none());
+        assert_eq!(
+            theme
+                .component_defaults("tooltip")
+                .and_then(|d| d.get("animation"))
+                .map(String::as_str),
+            Some("tooltip-enter 150ms ease-out")
+        );
+    }
 
     #[test]
     fn explicit_module_token_lookup_reads_module_subtree() {

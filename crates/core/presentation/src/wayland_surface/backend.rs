@@ -131,6 +131,12 @@ pub(super) struct SurfaceEntry {
     pub(super) kde_blur: Option<OrgKdeKwinBlur>,
     pub(super) blur_region: Option<DamageRect>,
     pub(super) blur_committed: bool,
+    /// Desired input region in surface-local logical coordinates. `None`
+    /// means whole-surface input (the wl_surface default). Persisted here and
+    /// applied with the next present commit so it can never be lost to
+    /// call-ordering around configure/remap.
+    pub(super) input_region_rect: Option<DamageRect>,
+    pub(super) input_region_dirty: bool,
 }
 
 struct SurfaceConfigHasher(u64);
@@ -180,6 +186,8 @@ impl SurfaceEntry {
             kde_blur: None,
             blur_region: None,
             blur_committed: false,
+            input_region_rect: None,
+            input_region_dirty: false,
         }
     }
 
@@ -1205,6 +1213,30 @@ impl LayerShellBackend {
                 None => {}
             }
         }
+        // Apply the persisted input region as pending state so the present
+        // commit below carries it. Doing this every time it is dirty (rather
+        // than fire-and-forget at update time) guarantees it lands on a
+        // mapped, configured surface regardless of configure/remap ordering.
+        if entry.input_region_dirty {
+            match entry.input_region_rect {
+                Some(rect) => {
+                    if let Ok(region) = Region::new(&state.compositor_state) {
+                        region.add(
+                            rect.x as i32,
+                            rect.y as i32,
+                            rect.width as i32,
+                            rect.height as i32,
+                        );
+                        entry.wl_surface().set_input_region(Some(region.wl_region()));
+                        entry.input_region_dirty = false;
+                    }
+                }
+                None => {
+                    entry.wl_surface().set_input_region(None);
+                    entry.input_region_dirty = false;
+                }
+            }
+        }
         entry.attach_shm_buffer(
             &qh,
             buffer_index,
@@ -1260,26 +1292,18 @@ impl LayerShellBackend {
     /// this surface, creating a dead zone where clicks never reach the windows
     /// underneath. `None` resets to the default (whole-surface input).
     pub(crate) fn update_input_region(&mut self, surface_id: &str, input_rect: Option<DamageRect>) {
-        let Some(entry) = self.state.surfaces.get(surface_id) else {
+        let Some(entry) = self.state.surfaces.get_mut(surface_id) else {
             return;
         };
-        let wl_surface = entry.wl_surface();
-
-        let Some(rect) = input_rect.filter(|r| r.width > 0 && r.height > 0) else {
-            wl_surface.set_input_region(None);
+        let input_rect = input_rect.filter(|r| r.width > 0 && r.height > 0);
+        if entry.input_region_rect == input_rect && !entry.input_region_dirty {
             return;
-        };
-
-        let Ok(region) = Region::new(&self.state.compositor_state) else {
-            return;
-        };
-        region.add(
-            rect.x as i32,
-            rect.y as i32,
-            rect.width as i32,
-            rect.height as i32,
-        );
-        wl_surface.set_input_region(Some(region.wl_region()));
+        }
+        // Store only; the region is applied together with the present commit
+        // (`apply_pending_input_region`) so it always lands on a mapped
+        // surface and survives configure/remap ordering.
+        entry.input_region_rect = input_rect;
+        entry.input_region_dirty = true;
     }
 
     /// Set the logical-coordinate blur region for a surface.

@@ -1,10 +1,11 @@
 :root {
-  --animation-curves-bezier-emphasized: cubic-bezier(0.2, 0.0, 0, 1.0);
-  --animation-curves-bezier-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1.0);
-  --animation-curves-bezier-standard: cubic-bezier(0.2, 0.0, 0, 1.0);
-  --animation-curves-bezier-standard-accelerate: cubic-bezier(0.3, 0.0, 1, 1.0);
-  --animation-curves-bezier-standard-decelerate: cubic-bezier(0.0, 0.0, 0, 1.0);
-  --animation-default-border-radius: border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+  --animation-curves-bezier-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --animation-curves-bezier-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --animation-curves-bezier-standard: cubic-bezier(0.2, 0, 0, 1);
+  --animation-curves-bezier-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
+  --animation-curves-bezier-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+  --animation-default-border-radius: border-radius var(--animation-duration-short)
+    var(--animation-curves-bezier-emphasized-decelerate);
   --animation-default-opacity: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
   --animation-duration-extra-long: 500;
   --animation-duration-fast: 90;
@@ -119,10 +120,10 @@
   --radius-none: 0;
   --radius-sm: 4;
   --radius-xl: 24;
-  --shadow-colored-primary: 0 0 0 1px rgba(250,189,47,0.22);
-  --shadow-umbra-lg: 0 4px 12px rgba(0,0,0,0.40);
-  --shadow-umbra-md: 0 2px 6px rgba(0,0,0,0.36);
-  --shadow-umbra-sm: 0 1px 2px rgba(0,0,0,0.32);
+  --shadow-colored-primary: 0 0 0 1px rgba(250, 189, 47, 0.22);
+  --shadow-umbra-lg: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-umbra-md: 0 2px 6px rgba(0, 0, 0, 0.36);
+  --shadow-umbra-sm: 0 1px 2px rgba(0, 0, 0, 0.32);
   --shape-corner-extra-large: 28;
   --shape-corner-extra-small: 4;
   --shape-corner-full: 9999;
@@ -213,16 +214,38 @@
 }
 
 node {
-  transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard), color var(--animation-duration-short) var(--animation-curves-bezier-standard), border-color var(--animation-duration-short) var(--animation-curves-bezier-standard), opacity var(--animation-duration-medium) var(--animation-curves-bezier-standard), border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate), border-width var(--animation-duration-medium) var(--animation-curves-bezier-standard), width var(--animation-duration-medium) var(--animation-curves-bezier-standard), height var(--animation-duration-medium) var(--animation-curves-bezier-standard), padding var(--animation-duration-medium) var(--animation-curves-bezier-standard), margin var(--animation-duration-medium) var(--animation-curves-bezier-standard), transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+  transition:
+    background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+    color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+    border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+    opacity var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate),
+    border-width var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    width var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    height var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    padding var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    margin var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
 }
 
 tooltip {
-  animation: expand;
-  animation-duration: var(--animation-duration-short);
+  animation: tooltip-enter var(--animation-duration-short) ease-out;
   cursor-offset-x: 14;
   cursor-offset-y: 18;
   delay: 300;
-  expand-from: 0.85;
   gap: 6;
   position: bottom;
+}
+
+/* Tooltip enter animation: expands outward from the box center while fading
+   in. Stops may declare `opacity` and `transform` (scale/translate). */
+@keyframes tooltip-enter {
+  from {
+    opacity: 0;
+    transform: scale(0);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }

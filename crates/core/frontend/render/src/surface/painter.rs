@@ -130,10 +130,10 @@ pub struct FrontendRenderEngine {
     /// When true, `paint_x` passed to `render_tooltip` is the horizontal
     /// center of the tooltip box rather than its left edge.
     tooltip_center_x: Cell<bool>,
-    /// Starting scale factor for the `"expand"` animation (0.0 = no scale).
-    /// The box is rendered at `scale_from + (1.0 - scale_from) * opacity` of
-    /// its full size, anchored at the element-closest edge.
-    tooltip_scale_from: Cell<f32>,
+    /// Animated scale of the tooltip box for the current frame (1.0 = resting
+    /// size). Driven by the theme-CSS tooltip enter animation; the box is
+    /// drawn centered inside its final rect so it grows outward.
+    tooltip_scale: Cell<f32>,
     render_scratch: RefCell<RenderScratch>,
     /// Full-surface clip set at the start of each render pass. Used to give
     /// `position: fixed` children the viewport clip rather than their parent's.
@@ -182,7 +182,7 @@ impl FrontendRenderEngine {
             tooltip_colors: Cell::new(TooltipPaintColors::DEFAULT_DARK),
             tooltip_opacity: Cell::new(1.0),
             tooltip_center_x: Cell::new(false),
-            tooltip_scale_from: Cell::new(0.0),
+            tooltip_scale: Cell::new(1.0),
             render_scratch: RefCell::new(RenderScratch::default()),
             viewport_clip: Cell::new(ClipRect {
                 x: 0,
@@ -202,7 +202,7 @@ impl FrontendRenderEngine {
             tooltip_colors: Cell::new(TooltipPaintColors::DEFAULT_DARK),
             tooltip_opacity: Cell::new(1.0),
             tooltip_center_x: Cell::new(false),
-            tooltip_scale_from: Cell::new(0.0),
+            tooltip_scale: Cell::new(1.0),
             render_scratch: RefCell::new(RenderScratch::default()),
             viewport_clip: Cell::new(ClipRect {
                 x: 0,
@@ -225,8 +225,8 @@ impl FrontendRenderEngine {
         self.tooltip_center_x.set(centered);
     }
 
-    pub fn set_tooltip_scale_from(&self, scale_from: f32) {
-        self.tooltip_scale_from.set(scale_from.clamp(0.0, 1.0));
+    pub fn set_tooltip_scale(&self, scale: f32) {
+        self.tooltip_scale.set(scale.max(0.0));
     }
 
     pub(super) fn tooltip_colors(&self) -> TooltipPaintColors {
@@ -241,8 +241,8 @@ impl FrontendRenderEngine {
         self.tooltip_center_x.get()
     }
 
-    pub(super) fn tooltip_scale_from(&self) -> f32 {
-        self.tooltip_scale_from.get()
+    pub(super) fn tooltip_scale(&self) -> f32 {
+        self.tooltip_scale.get()
     }
 
     pub fn paint_backend_id(&self) -> &'static str {

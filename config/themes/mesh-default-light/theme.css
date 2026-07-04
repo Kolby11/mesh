@@ -215,12 +215,23 @@ node {
 }
 
 tooltip {
-  animation: expand;
-  animation-duration: var(--animation-duration-short);
+  animation: tooltip-enter var(--animation-duration-short) ease-out;
   cursor-offset-x: 14;
   cursor-offset-y: 18;
   delay: 300;
-  expand-from: 0.85;
   gap: 6;
   position: bottom;
+}
+
+/* Tooltip enter animation: expands outward from the box center while fading
+   in. Stops may declare `opacity` and `transform` (scale/translate). */
+@keyframes tooltip-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }

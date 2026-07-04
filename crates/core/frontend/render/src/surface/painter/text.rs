@@ -684,28 +684,31 @@ impl FrontendRenderEngine {
 
         let opacity = self.tooltip_opacity();
 
-        // Expand animation: scale the drawn box from scale_from → 1.0.
-        // The box is anchored at its top edge (element-closest side for bottom
-        // placement) so it grows downward and outward from the element.
-        let scale_from = self.tooltip_scale_from();
-        let anim_scale = if scale_from > 0.0 {
-            scale_from + (1.0 - scale_from) * opacity
-        } else {
-            1.0
-        };
+        // Animated scale from the theme-CSS tooltip enter animation
+        // (1.0 = resting size).
+        let anim_scale = self.tooltip_scale().max(0.0);
         let draw_w = ((box_w as f32) * anim_scale) as i32;
         let draw_h = ((box_h as f32) * anim_scale) as i32;
 
-        let tx_raw = if self.tooltip_center_x() {
+        // Resolve the final (full-size) box position first, including edge
+        // clamping against the full dimensions. Clamping the animated size
+        // instead would pin whichever edge hits the clamp and make the box
+        // appear to grow out of a corner.
+        let tx_full_raw = if self.tooltip_center_x() {
             // paint_x is the horizontal center of the element; center the
-            // (possibly scaled) box around it.
-            ((paint_x) * scale) as i32 - draw_w / 2
+            // box around it.
+            ((paint_x) * scale) as i32 - box_w / 2
         } else {
             ((paint_x) * scale) as i32
         };
-        let tx = tx_raw.min(buffer.width as i32 - draw_w - 6).max(4);
-        let ty = ((paint_y) * scale) as i32;
-        let ty = ty.min(buffer.height as i32 - draw_h - 6).max(4);
+        let tx_full = tx_full_raw.min(buffer.width as i32 - box_w - 6).max(4);
+        let ty_full = ((paint_y) * scale) as i32;
+        let ty_full = ty_full.min(buffer.height as i32 - box_h - 6).max(4);
+
+        // Center the animated box inside the final rect so the expand grows
+        // outward from the middle — both sides move apart symmetrically.
+        let tx = tx_full + (box_w - draw_w) / 2;
+        let ty = ty_full + (box_h - draw_h) / 2;
 
         let full_clip = ClipRect {
             x: 0,
@@ -809,8 +812,10 @@ impl FrontendRenderEngine {
             TextAlign::Left,
             text_color,
             buffer,
-            (tx + pad_h) as u32,
-            (ty + pad_v) as u32,
+            // Anchor the text to the final box so it stays put while the
+            // centered expand clip reveals it.
+            (tx_full + pad_h) as u32,
+            (ty_full + pad_v) as u32,
             text_clip,
             Some(max_text_w),
         );

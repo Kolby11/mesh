@@ -105,20 +105,6 @@ impl FrontendSurfaceComponent {
         self.measured_size.unwrap_or((0, 0))
     }
 
-    pub(super) fn tooltip_overlay_extra_for_content(width: u32, height: u32) -> (u32, u32) {
-        let extra_w = if width > 0 && width < TOOLTIP_OVERLAY_WIDTH {
-            TOOLTIP_OVERLAY_WIDTH.saturating_sub(width)
-        } else {
-            0
-        };
-        let extra_h = if height > 0 {
-            TOOLTIP_OVERLAY_HEIGHT
-        } else {
-            0
-        };
-        (extra_w, extra_h)
-    }
-
     pub(super) fn render_layout(&self, surface: &mut dyn ShellSurface) {
         // Promoted popovers are positioned entirely by their `xdg_positioner`;
         // the layer-surface anchor/margin/size pokes below do not apply and the
@@ -129,6 +115,9 @@ impl FrontendSurfaceComponent {
         surface.anchor(self.surface_layout.edge);
         surface.set_layer(self.surface_layout.layer);
         let (width, height) = self.requested_layout_size();
+        // Content size only — the tooltip overlay reserve is added at the
+        // presentation boundary in `render_components`, never to the shell
+        // surface record the component reads back.
         surface.set_size(width, height);
         surface.set_exclusive_zone(self.surface_layout.exclusive_zone);
         surface.set_keyboard_interactivity(

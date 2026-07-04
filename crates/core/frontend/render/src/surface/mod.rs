@@ -66,12 +66,13 @@ pub fn set_tooltip_center_x(centered: bool) {
     });
 }
 
-/// Set the starting scale factor for the `"expand"` tooltip animation.
-/// 0.0 disables scale (pure fade/slide). Values like 0.85 start the box at
-/// 85 % of its full size and grow it to 100 % over the fade-in duration.
-pub fn set_tooltip_scale_from(scale_from: f32) {
+/// Set the tooltip box scale for the next tooltip paint (1.0 = resting
+/// size). The shell samples the theme-CSS tooltip enter animation and pushes
+/// the current frame's scale here; the box is drawn centered inside its final
+/// rect so it expands outward from the middle.
+pub fn set_tooltip_paint_scale(scale: f32) {
     FRONTEND_RENDERER.with(|engine| {
-        engine.borrow().set_tooltip_scale_from(scale_from);
+        engine.borrow().set_tooltip_scale(scale);
     });
 }
 
