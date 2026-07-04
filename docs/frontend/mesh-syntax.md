@@ -230,8 +230,20 @@ Use `{}` to bind an expression to any attribute value:
   <text>{volume_icon_name}</text>
 </button>
 
-<box class="chip {active ? 'chip--on' : 'chip--off'}">{label}</box>
+<box class={active and "chip chip--on" or "chip chip--off"}>{label}</box>
 ```
+
+Template expressions are a compiled subset of Luau, not full Luau. Supported
+forms: string literals, variable and dotted-path lookup (`a.b.c`), `not x`,
+comparisons (`==`, `~=`, `<`, `<=`, `>`, `>=`), concatenation (`x .. y`),
+length (`#items`), translation (`t(expr)`), and the Lua ternary idiom
+`cond and a or b`. C-style `cond ? a : b` is **not** valid. Known current
+divergences from Lua semantics (tracked in `todo.md` §M): bare `and`/`or`
+outside the exact ternary shape evaluate to `"true"`/`"false"` instead of
+returning an operand (so `{name or "fallback"}` does not work as a default —
+derive the value in `<script>` instead), and `"0"`/`""` are treated as falsy.
+Anything beyond this subset belongs in the `<script>` block as a public
+member.
 
 ### Two-way binding
 

@@ -44,15 +44,34 @@ Improvement 1 status: implemented for the widget-tree layer.
 - Focus-visible annotation for focused text inputs is deterministic even when a
   test or runtime path seeds logical focus directly.
 
+Shipped since this document was written (see `todo.md` sections D/E/K for
+details):
+
+- Retained display list (`RetainedDisplayList`) with scratch-allocation reuse
+  and subtree command sharing.
+- Damage tracking and partial repaint at integer scales, including multi-rect
+  damage through pixel paint and `damage_buffer`. The SHM upload itself copies
+  a single bounding union of the frame's rects, not per-rect regions (open,
+  `todo.md` §U). Fractional-scale outputs still force full-surface repaint
+  (open, `todo.md` §D).
+- Paint-only fast paths in incremental layout (`compute_incremental` skips the
+  full style re-sync when geometry and layout dirtiness are unchanged).
+
 Still pending:
 
 - Persistent render-object tree separate from `WidgetNode`.
-- Using retained dirty summaries to skip clean subtrees.
-- Incremental full style recomputation for retained nodes.
-- Incremental layout.
-- Retained display list.
-- Damage tracking and partial repaint.
-- GPU upload/batching.
+- Using retained dirty summaries to skip clean subtrees (generation-aware diff,
+  `todo.md` v1.27).
+- Incremental full style recomputation for retained nodes (selector-dependency
+  analysis, v1.18).
+- Dirty-node-only layout synchronization within real layout passes; Taffy tree
+  retention across structural rebuilds (v1.21).
+- GPU upload/batching (v1.25).
+- Component-level render memoization and template-eval structural work — the
+  composition/template pipeline findings live in `todo.md` §M and
+  `PERFORMANCE_SECTIONS.md` §1 (embedded builds currently run a redundant full
+  layout per instance; `{#if}`/`{#for}` insert synthetic column wrappers; build
+  has shell-state side effects that block memoization).
 
 ## Priority Order
 

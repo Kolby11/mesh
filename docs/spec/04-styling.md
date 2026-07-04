@@ -166,6 +166,22 @@ token read still returns the theme value.
 - Icon style (axes, sizes) and font roles are theme tokens too
   (`--icon-*`, `--font-*`) — see [05 §7](05-icons.md), [06 §3](06-fonts.md).
 
+## 6.1 Selector support & cascade order
+
+Component `<style>` blocks support a deliberate selector subset: tag, `.class`,
+`#id`, `*`, pseudo-states (`:hover`, `:focus`, `:focus-visible`, `:active`,
+`:disabled`, `:checked`, …), and compounds of those (`button.primary:hover`).
+Descendant/child combinators (`.parent .child`, `a > b`) and relational
+pseudo-classes (`:has()`) are **not** supported and are rejected at compile
+time with a diagnostic — scope styles with classes on the target elements
+instead.
+
+There is **no CSS specificity**. Matching rules apply in source order and the
+last declaration wins, regardless of selector shape (`#id` does not beat
+`.class`). Theme component defaults apply before all component rules, and
+`@container` queries only gate whether a rule matches — they do not reorder
+it.
+
 ## 7. Theme coherence enforcement
 
 **Status: target.** Token-based theming only works ecosystem-wide if modules
