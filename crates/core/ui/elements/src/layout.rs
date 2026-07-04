@@ -344,6 +344,16 @@ impl LayoutEngine {
             return;
         };
 
+        let available_changed = state.last_available != (available_width, available_height);
+        // Paint-only frames cannot change geometry. Leave the retained Taffy
+        // tree untouched and defer style/context synchronization until a
+        // layout-dirty frame, when it is needed immediately before layout.
+        // This avoids rebuilding two maps, converting every ComputedStyle,
+        // and calling set_style for every node on animation/repaint frames.
+        if !available_changed && !dirty_layout {
+            return;
+        }
+
         let mut report = TaffyLayoutReport::default();
         let mut node_map = HashMap::new();
         let mut text_nodes = HashMap::new();
@@ -356,7 +366,6 @@ impl LayoutEngine {
             &mut report,
         );
 
-        let available_changed = state.last_available != (available_width, available_height);
         if available_changed || dirty_layout {
             let available_space = taffy_available_space(available_width, available_height);
             if let Err(error) = state.tree.compute_layout_with_measure(
@@ -1151,6 +1160,19 @@ mod tests {
         root
     }
 
+    fn broad_retained_fixture(width: usize, depth: usize) -> WidgetNode {
+        fn build(key: String, width: usize, depth: usize) -> WidgetNode {
+            let mut node = keyed_node(&key, "box", Dimension::Px(20.0), Dimension::Px(20.0));
+            if depth > 0 {
+                node.children = (0..width)
+                    .map(|index| build(format!("{key}/{index}"), width, depth - 1))
+                    .collect();
+            }
+            node
+        }
+        build("root".into(), width, depth)
+    }
+
     fn collect_keyed_layouts(node: &WidgetNode, layouts: &mut HashMap<String, LayoutRect>) {
         if let Some(key) = node.attributes.get("_mesh_key") {
             layouts.insert(key.clone(), node.layout);
@@ -1754,6 +1776,59 @@ mod tests {
         assert_layout_maps_eq(&keyed_layouts(&root), &before);
     }
 
+    // cargo test -p mesh-core-elements --release -- retained_layout_paint_only_fast_path_beats_tree_sync --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained layout paint-only microbenchmark"]
+    fn retained_layout_paint_only_fast_path_beats_tree_sync() {
+        use std::time::Instant;
+
+        let mut root = broad_retained_fixture(4, 5);
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, 1200.0, 800.0, false, false, &mut cache, None,
+        );
+        let iterations = 2_000;
+
+        let old_started = Instant::now();
+        for _ in 0..iterations {
+            let mut node_map = HashMap::new();
+            let mut text_nodes = HashMap::new();
+            let mut report = TaffyLayoutReport::default();
+            update_retained_node_styles(
+                std::hint::black_box(&root),
+                &mut state,
+                false,
+                &mut node_map,
+                &mut text_nodes,
+                &mut report,
+            );
+            std::hint::black_box((node_map, text_nodes, report));
+        }
+        let old_time = old_started.elapsed();
+
+        let fast_started = Instant::now();
+        for _ in 0..iterations {
+            LayoutEngine::compute_incremental(
+                std::hint::black_box(&mut root),
+                &mut state,
+                1200.0,
+                800.0,
+                false,
+                false,
+                &mut cache,
+                None,
+            );
+        }
+        let fast_time = fast_started.elapsed();
+
+        eprintln!(
+            "retained layout paint-only: old tree sync {old_time:?}; fast path {fast_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / fast_time.as_secs_f64()
+        );
+        assert!(fast_time * 10 < old_time);
+    }
+
     #[test]
     fn retained_layout_parity_style_only() {
         let mut retained = retained_fixture();
@@ -1830,6 +1905,27 @@ mod tests {
         );
 
         assert_layout_maps_eq(&keyed_layouts(&retained), &keyed_layouts(&fresh));
+    }
+
+    #[test]
+    fn paint_only_fast_path_defers_style_sync_until_layout_is_dirty() {
+        let mut retained = retained_fixture();
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut retained, &mut state, 200.0, 100.0, false, false, &mut cache, None,
+        );
+
+        retained.children[0].computed_style.width = Dimension::Px(80.0);
+        LayoutEngine::compute_incremental(
+            &mut retained, &mut state, 200.0, 100.0, false, false, &mut cache, None,
+        );
+        assert_eq!(retained.children[0].layout.width, 50.0);
+
+        LayoutEngine::compute_incremental(
+            &mut retained, &mut state, 200.0, 100.0, true, false, &mut cache, None,
+        );
+        assert_eq!(retained.children[0].layout.width, 80.0);
     }
 
     #[test]

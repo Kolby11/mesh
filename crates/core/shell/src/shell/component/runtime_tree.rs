@@ -6,6 +6,7 @@ use mesh_core_elements::style::{Color, ComputedStyle, Corners, Dimension, Edges,
 use mesh_core_elements::{ElementState, LayoutRect, NodeId, WidgetNode, element_snapshot_json};
 use mesh_core_interaction::{ScrollOffsetState, node_is_source, source_element_tag};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
+use smallvec::SmallVec;
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -223,7 +224,7 @@ struct RetainedNodeSnapshot {
     layout: LayoutFingerprint,
     style_hash: u64,
     attributes_hash: u64,
-    child_ids: Vec<NodeId>,
+    child_ids: SmallVec<[NodeId; 8]>,
     state: ElementState,
 }
 
@@ -349,6 +350,15 @@ pub(super) fn stable_runtime_node_id(key: &str) -> NodeId {
     if hash == 0 { 1 } else { hash }
 }
 
+#[inline]
+fn child_runtime_node_id(parent_id: NodeId, child_index: usize) -> NodeId {
+    let mut hash = parent_id ^ 0x9e37_79b9_7f4a_7c15;
+    hash ^= (child_index as u64).wrapping_add(1);
+    hash = hash.wrapping_mul(FNV_PRIME);
+    hash ^= hash >> 32;
+    if hash == 0 { 1 } else { hash }
+}
+
 fn collect_retained_snapshots(
     node: &WidgetNode,
     snapshots: &mut HashMap<NodeId, RetainedNodeSnapshot>,
@@ -441,6 +451,12 @@ fn attributes_fingerprint(node: &WidgetNode) -> u64 {
     let mut hasher = RuntimeTreeHasher::default();
     node.tag.hash(&mut hasher);
     for (key, value) in &node.attributes {
+        // Runtime identity is already represented by `node.id`. Rehashing the
+        // full slash-joined path here makes deep trees pay for the same
+        // identity twice on every retained snapshot.
+        if key == "_mesh_key" {
+            continue;
+        }
         if key == "content" && !node.children.is_empty() {
             continue;
         }
@@ -676,7 +692,17 @@ pub(super) fn annotate_runtime_tree(
     key: String,
     context: &mut RuntimeAnnotationContext<'_>,
 ) {
-    node.id = stable_runtime_node_id(&key);
+    let node_id = stable_runtime_node_id(&key);
+    annotate_runtime_tree_inner(node, key, node_id, context);
+}
+
+fn annotate_runtime_tree_inner(
+    node: &mut WidgetNode,
+    key: String,
+    node_id: NodeId,
+    context: &mut RuntimeAnnotationContext<'_>,
+) {
+    node.id = node_id;
     node.attributes.insert("_mesh_key".into(), key.clone());
 
     let key_str = key.as_str();
@@ -801,7 +827,12 @@ pub(super) fn annotate_runtime_tree(
     }
 
     for (index, child) in node.children.iter_mut().enumerate() {
-        annotate_runtime_tree(child, format!("{key}/{index}"), context);
+        annotate_runtime_tree_inner(
+            child,
+            format!("{key}/{index}"),
+            child_runtime_node_id(node_id, index),
+            context,
+        );
     }
 }
 
@@ -1057,6 +1088,171 @@ mod tests {
         assert_ne!(first, 0);
         assert_eq!(first, second);
         assert_ne!(first, stable_runtime_node_id("root/0/3"));
+    }
+
+    #[test]
+    fn chained_runtime_node_ids_are_deterministic_and_distinguish_siblings() {
+        let parent = stable_runtime_node_id("root/0");
+        assert_eq!(
+            child_runtime_node_id(parent, 2),
+            child_runtime_node_id(parent, 2)
+        );
+        assert_ne!(
+            child_runtime_node_id(parent, 2),
+            child_runtime_node_id(parent, 3)
+        );
+        assert_ne!(child_runtime_node_id(parent, 2), 0);
+    }
+
+    // cargo test -p mesh-core-shell --release -- chained_runtime_ids_beat_rehashing_deep_paths --ignored --nocapture
+    #[test]
+    #[ignore = "release-only runtime node id microbenchmark"]
+    fn chained_runtime_ids_beat_rehashing_deep_paths() {
+        let paths = (0..10)
+            .scan("root".to_string(), |path, index| {
+                path.push('/');
+                path.push_str(&index.to_string());
+                Some(path.clone())
+            })
+            .collect::<Vec<_>>();
+        let iterations = 500_000;
+
+        let old_started = Instant::now();
+        let mut old_accumulator = 0u64;
+        for _ in 0..iterations {
+            for path in &paths {
+                old_accumulator ^= stable_runtime_node_id(std::hint::black_box(path));
+            }
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_accumulator = 0u64;
+        for _ in 0..iterations {
+            let mut parent = stable_runtime_node_id("root");
+            for index in 0..paths.len() {
+                parent = child_runtime_node_id(parent, index);
+                new_accumulator ^= std::hint::black_box(parent);
+            }
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "runtime node ids: full-path hash {old_time:?}; parent-chain {new_time:?}; ratio {:.1}x; accumulators={old_accumulator:x}/{new_accumulator:x}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
+    }
+
+    #[test]
+    fn attribute_fingerprint_uses_node_id_instead_of_runtime_key_string() {
+        let mut node = WidgetNode::new("box");
+        node.id = stable_runtime_node_id("root/0");
+        node.attributes.insert("_mesh_key".into(), "root/0".into());
+        node.attributes.insert("class".into(), "card".into());
+        let original = attributes_fingerprint(&node);
+
+        node.attributes
+            .insert("_mesh_key".into(), "different/debug/path".into());
+        assert_eq!(attributes_fingerprint(&node), original);
+
+        node.attributes.insert("class".into(), "card active".into());
+        assert_ne!(attributes_fingerprint(&node), original);
+    }
+
+    // cargo test -p mesh-core-shell --release -- attribute_fingerprint_skips_redundant_runtime_key_hash --ignored --nocapture
+    #[test]
+    #[ignore = "release-only attribute fingerprint microbenchmark"]
+    fn attribute_fingerprint_skips_redundant_runtime_key_hash() {
+        fn old_attributes_fingerprint(node: &WidgetNode) -> u64 {
+            let mut hasher = RuntimeTreeHasher::default();
+            node.tag.hash(&mut hasher);
+            for (key, value) in &node.attributes {
+                key.hash(&mut hasher);
+                value.hash(&mut hasher);
+            }
+            hasher.finish()
+        }
+
+        let mut node = WidgetNode::new("box");
+        node.id = stable_runtime_node_id("root/0/1/2/3/4/5/6/7/8/9");
+        node.attributes
+            .insert("_mesh_key".into(), "root/0/1/2/3/4/5/6/7/8/9".into());
+        node.attributes.insert("class".into(), "card active".into());
+        node.attributes.insert("role".into(), "button".into());
+        let iterations = 2_000_000;
+
+        let old_started = Instant::now();
+        let mut old_accumulator = 0u64;
+        for _ in 0..iterations {
+            old_accumulator = old_accumulator
+                .wrapping_add(old_attributes_fingerprint(std::hint::black_box(&node)));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_accumulator = 0u64;
+        for _ in 0..iterations {
+            new_accumulator =
+                new_accumulator.wrapping_add(attributes_fingerprint(std::hint::black_box(&node)));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "attribute fingerprint: runtime-key hash {old_time:?}; node-id identity {new_time:?}; ratio {:.1}x; accumulators={old_accumulator:x}/{new_accumulator:x}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
+    }
+
+    #[test]
+    fn retained_snapshot_keeps_common_child_lists_inline() {
+        let mut node = WidgetNode::new("row");
+        node.children = (0..8)
+            .map(|index| {
+                let mut child = WidgetNode::new("box");
+                child.id = index + 1;
+                child
+            })
+            .collect();
+
+        let snapshot = retained_snapshot(&node);
+        assert_eq!(snapshot.child_ids.len(), 8);
+        assert!(!snapshot.child_ids.spilled());
+
+        node.children.push(WidgetNode::new("box"));
+        assert!(retained_snapshot(&node).child_ids.spilled());
+    }
+
+    // cargo test -p mesh-core-shell --release -- inline_child_ids_beat_fresh_vec_allocations --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained child-id allocation microbenchmark"]
+    fn inline_child_ids_beat_fresh_vec_allocations() {
+        let child_ids = [11_u64, 12, 13, 14];
+        let iterations = 2_000_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0u64;
+        for _ in 0..iterations {
+            let ids = child_ids.iter().copied().collect::<Vec<NodeId>>();
+            old_total = old_total.wrapping_add(std::hint::black_box(ids)[0]);
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0u64;
+        for _ in 0..iterations {
+            let ids = child_ids.iter().copied().collect::<SmallVec<[NodeId; 8]>>();
+            new_total = new_total.wrapping_add(std::hint::black_box(ids)[0]);
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "retained child ids: Vec {old_time:?}; inline SmallVec {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 
     #[test]

@@ -595,7 +595,14 @@ duplicating it.
       A release benchmark over 20k unchanged publications measured 90.711ms for
       the eager path versus 0.140ms for the fingerprint-gated path (~647x
       faster). Rust-side tree walking/JSON construction and lazy `refs` field
-      resolution remain open.
+      resolution remain open. Progress 2026-07-04: metrics publication is now
+      gated by the retained-tree diff. Paint/style/state-only frames skip the
+      Rust tree walk, JSON maps, fingerprints, runtime lock, and proxy update;
+      layout, attribute, child, insertion, and removal changes still publish.
+      A 1,365-node release microbenchmark over 2,000 unchanged passes measured
+      23.236s for rebuilding snapshots versus 1.188us for the dirty-summary
+      gate. Lazy field resolution remains open for frames where metrics really
+      changed.
 - [x] **Service payloads convert JSON→Lua per runtime per event.**
       `apply_service_payload` (`scripting/context/runtime.rs:388-406`) runs
       `lua.to_value(payload)` + `refresh_module_object()` for every runtime in
@@ -776,7 +783,18 @@ duplicating it.
       falling back to byte-at-a-time hashing. A release benchmark over 500k
       style fingerprints measured 118.362ms for the old byte fallback versus
       63.946ms primitive-aware (1.9x faster). Snapshot allocation reuse and
-      shell-owned annotation filtering remain open.
+      broader shell-owned annotation filtering remain open. Progress
+      2026-07-04: `_mesh_key` is no longer included in the attribute hash
+      because the same identity is already encoded by the retained `node.id`;
+      structural movement still changes parent `child_ids`. A 10-level-key
+      release microbenchmark over 2M fingerprints measured 98.724ms with the
+      redundant key hash versus 44.799ms without it (2.2x faster). Scroll and
+      other shell annotations remain hashed until they have equivalent typed
+      change tracking. Progress 2026-07-04: retained snapshot `child_ids` now
+      use inline storage for up to eight children, eliminating the per-node
+      heap allocation for normal UI trees while spilling safely for wider
+      containers. A 4-child release microbenchmark over 2M snapshots measured
+      9.811ms with fresh `Vec` allocation versus 2.810ms inline (3.5x faster).
 - [ ] **`WidgetNode` allocation profile.** Every node carries `tag: String`,
       `attributes: BTreeMap<String,String>`, `event_handlers:
       BTreeMap<String,String>` (`ui/elements/src/tree.rs:44-68`), rebuilt
@@ -939,7 +957,16 @@ duplicating it.
       `RetainedWidgetTree::update`) into layout so only dirty nodes get
       `set_style` calls — Taffy caches internally, but MESH pays the full
       style-conversion walk. (Structural rebuild case is tracked at v1.21;
-      this is the *non-structural* per-frame cost.)
+      this is the *non-structural* per-frame cost.) Progress 2026-07-04 for the
+      paint-only case: when available geometry and layout dirtiness are both
+      unchanged, `compute_incremental` now returns before rebuilding node/text
+      maps, converting styles, or calling Taffy `set_style`. A layout-dirty or
+      resized frame still synchronizes the full retained tree immediately
+      before layout, preserving deferred correctness. The 1,365-node release
+      microbenchmark over 2,000 paint-only passes measured 378.430ms for the
+      old synchronization walk versus 40.369us for the fast path (9,374x).
+      Dirty-node-only synchronization within actual layout passes remains a
+      possible follow-up once retained-tree dirty IDs are exposed here.
 
 ### G. Lua runtime — state sync & handler overhead
 
@@ -1209,7 +1236,13 @@ multiplied by O(n) tree clones is where interaction latency actually goes.
       ~40-byte strings for every row every frame, and key length grows with
       depth. Derive ids by hash-chaining `(parent_id, child_index)` — O(1)
       per node, no string at all — and keep the string path only for debug
-      builds / diagnostics.
+      builds / diagnostics. Progress 2026-07-04: runtime node IDs now hash-chain
+      `(parent_id, child_index)` instead of rehashing each full ancestor path.
+      IDs remain deterministic, nonzero, and sibling-distinct. A 10-level
+      release microbenchmark over 500k iterations measured 36.394ms for full
+      path hashing versus 5.755ms for parent chaining (6.3x faster). String
+      paths are still built because interaction state and refs currently use
+      them as public runtime keys; removing those allocations remains open.
 - [ ] **`finalize_tree` closing-popover pass: O(closing-keys × tree)**
       `find_node_by_key_mut` per closing key (`rendering.rs:273-279`).
       Trivial count in practice; fold into the fused annotation walk (D)

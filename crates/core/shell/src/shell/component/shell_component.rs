@@ -1,4 +1,5 @@
 use super::*;
+use super::runtime_tree::RetainedTreeDirtySummary;
 use crate::shell::component::runtime::script_has_service_read;
 
 impl FrontendSurfaceComponent {
@@ -636,7 +637,12 @@ impl ShellComponent for FrontendSurfaceComponent {
                 self.invalidate_surface_config();
             }
         }
-        if self.scripts_use_element_metrics {
+        // Element metrics depend on geometry plus ref/id/scroll attributes,
+        // not paint-only style or interaction state. Avoid rebuilding and
+        // fingerprinting the full JSON snapshot when the retained diff proves
+        // those inputs are unchanged.
+        let element_metrics_changed = retained_dirty_affects_element_metrics(retained_dirty);
+        if self.scripts_use_element_metrics && element_metrics_changed {
             self.publish_element_metrics(&tree);
         }
 
@@ -1226,6 +1232,14 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn debug_keybinds(&self) -> Vec<mesh_core_debug::DebugKeybindEntry> {
         self.debug_surface_keybinds()
     }
+}
+
+fn retained_dirty_affects_element_metrics(dirty: RetainedTreeDirtySummary) -> bool {
+    dirty.inserted > 0
+        || dirty.removed > 0
+        || dirty.layout > 0
+        || dirty.attributes > 0
+        || dirty.children > 0
 }
 
 impl FrontendSurfaceComponent {
@@ -2278,6 +2292,94 @@ fn clip_damage(rect: DamageRect, surface: DamageRect) -> Option<DamageRect> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn element_metrics_gate_ignores_paint_and_state_only_diffs() {
+        let visual_only = RetainedTreeDirtySummary {
+            style: 4,
+            state: 2,
+            ..Default::default()
+        };
+        assert!(!retained_dirty_affects_element_metrics(visual_only));
+
+        for changed in [
+            RetainedTreeDirtySummary {
+                layout: 1,
+                ..Default::default()
+            },
+            RetainedTreeDirtySummary {
+                attributes: 1,
+                ..Default::default()
+            },
+            RetainedTreeDirtySummary {
+                inserted: 1,
+                ..Default::default()
+            },
+            RetainedTreeDirtySummary {
+                removed: 1,
+                ..Default::default()
+            },
+            RetainedTreeDirtySummary {
+                children: 1,
+                ..Default::default()
+            },
+        ] {
+            assert!(retained_dirty_affects_element_metrics(changed));
+        }
+    }
+
+    // cargo test -p mesh-core-shell --release -- element_metrics_dirty_gate_beats_unchanged_snapshot_build --ignored --nocapture
+    #[test]
+    #[ignore = "release-only element metrics gate microbenchmark"]
+    fn element_metrics_dirty_gate_beats_unchanged_snapshot_build() {
+        fn build(key: String, width: usize, depth: usize) -> WidgetNode {
+            let mut node = WidgetNode::new("box");
+            node.attributes.insert("_mesh_key".into(), key.clone());
+            node.layout.width = 20.0;
+            node.layout.height = 20.0;
+            if depth > 0 {
+                node.children = (0..width)
+                    .map(|index| build(format!("{key}/{index}"), width, depth - 1))
+                    .collect();
+            }
+            node
+        }
+
+        let tree = build("root".into(), 4, 5);
+        let iterations = 2_000;
+        let old_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            let mut elements = serde_json::Map::new();
+            let mut refs = serde_json::Map::new();
+            let mut ref_keys = HashMap::new();
+            collect_element_metrics(
+                std::hint::black_box(&tree),
+                0.0,
+                0.0,
+                &mut elements,
+                &mut refs,
+                &mut ref_keys,
+            );
+            std::hint::black_box((elements, refs, ref_keys));
+        }
+        let old_time = old_started.elapsed();
+
+        let visual_only = RetainedTreeDirtySummary {
+            style: 1,
+            ..Default::default()
+        };
+        let gate_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(retained_dirty_affects_element_metrics(visual_only));
+        }
+        let gate_time = gate_started.elapsed();
+
+        eprintln!(
+            "unchanged element metrics: snapshot {old_time:?}; dirty gate {gate_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / gate_time.as_secs_f64()
+        );
+        assert!(gate_time * 10 < old_time);
+    }
 
     fn surface(width: u32, height: u32) -> DamageRect {
         DamageRect {
