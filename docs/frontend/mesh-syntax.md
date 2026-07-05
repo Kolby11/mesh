@@ -233,17 +233,17 @@ Use `{}` to bind an expression to any attribute value:
 <box class={active and "chip chip--on" or "chip chip--off"}>{label}</box>
 ```
 
-Template expressions are a compiled subset of Luau, not full Luau. Supported
-forms: string literals, variable and dotted-path lookup (`a.b.c`), `not x`,
-comparisons (`==`, `~=`, `<`, `<=`, `>`, `>=`), concatenation (`x .. y`),
-length (`#items`), translation (`t(expr)`), and the Lua ternary idiom
-`cond and a or b`. C-style `cond ? a : b` is **not** valid. Known current
-divergences from Lua semantics (tracked in `todo.md` §M): bare `and`/`or`
-outside the exact ternary shape evaluate to `"true"`/`"false"` instead of
-returning an operand (so `{name or "fallback"}` does not work as a default —
-derive the value in `<script>` instead), and `"0"`/`""` are treated as falsy.
-Anything beyond this subset belongs in the `<script>` block as a public
-member.
+Template expressions are Luau expressions evaluated in the same component
+instance environment as the `<script lang="luau">` block. They can read public
+and private script locals, call functions, use standard Luau operators, and
+access loop-local bindings. The braces select a value-producing expression;
+they do not create a separate DSL or restricted scripting scope.
+
+Runtime rendering compiles template expressions as closures in the component
+script chunk, so they capture script-local values and functions. Loop bindings
+are supplied through a temporary locals-first function environment. Tooling and
+VM-less preview paths may use static approximation, but that approximation is
+not the language specification.
 
 ### Two-way binding
 

@@ -1187,6 +1187,36 @@ fn scheduler_wakes_immediately_for_due_component_tick_deadline() {
 }
 
 #[test]
+fn scheduler_wakes_for_visible_dirty_component_even_without_previous_present() {
+    let state = Arc::new(Mutex::new(DirtyHiddenState::default()));
+    let mut shell = Shell::new();
+    park_reload_deadlines(&mut shell);
+    shell.register_component(Box::new(DirtyHiddenComponent::new(
+        "@test/dirty",
+        None,
+        Arc::clone(&state),
+    )));
+    {
+        shell
+            .core
+            .surfaces
+            .get_mut("@test/dirty")
+            .expect("registered core surface")
+            .visible = true;
+        let surface = shell
+            .surfaces
+            .get_mut("@test/dirty")
+            .expect("registered surface target");
+        surface.visible = true;
+        surface.width = 120;
+        surface.height = 36;
+    }
+    shell.presented_last_frame = false;
+
+    assert_eq!(shell.next_runtime_sleep(false), Duration::ZERO);
+}
+
+#[test]
 fn scheduler_ignores_hidden_component_deadlines_and_render_dirtiness() {
     let state = Arc::new(Mutex::new(DirtyHiddenState::default()));
     let mut shell = Shell::new();
@@ -5229,6 +5259,13 @@ fn component_runtime_resolves_parent_and_child_surface_targets() {
     );
 }
 
+fn render_components_until_child_popup(shell: &mut Shell) {
+    // Child popups stage one parent repaint with `mesh-surface-entering`
+    // before the xdg_popup is created and painted.
+    shell.render_components().unwrap();
+    shell.render_components().unwrap();
+}
+
 #[test]
 fn child_surface_reconcile_creates_popup_and_paints_subtree() {
     let mut shell = Shell::new();
@@ -5237,7 +5274,7 @@ fn child_surface_reconcile_creates_popup_and_paints_subtree() {
     let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
     shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
 
-    shell.render_components().unwrap();
+    render_components_until_child_popup(&mut shell);
 
     assert_eq!(shell.components[0].children.len(), 1);
     let child_id = shell.components[0].children[0].target.surface_id.clone();
@@ -5270,7 +5307,7 @@ fn child_surface_reconcile_removes_closed_popover() {
     let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
     shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
 
-    shell.render_components().unwrap();
+    render_components_until_child_popup(&mut shell);
     let child_id = shell.components[0].children[0].target.surface_id.clone();
     state.lock().unwrap().open = false;
     shell.render_components().unwrap();
@@ -5294,7 +5331,7 @@ fn hiding_parent_surface_destroys_child_popups_and_clears_child_keyboard_focus()
     let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
     shell.register_component(Box::new(PopoverHarnessComponent::new(state)));
 
-    shell.render_components().unwrap();
+    render_components_until_child_popup(&mut shell);
     let child_id = shell.components[0].children[0].target.surface_id.clone();
     shell.keyboard_focus_surface = Some(child_id.clone());
 
@@ -5326,7 +5363,7 @@ fn child_surface_reconcile_plays_exit_transition_before_teardown() {
     }));
     shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
 
-    shell.render_components().unwrap();
+    render_components_until_child_popup(&mut shell);
     let child_id = shell.components[0].children[0].target.surface_id.clone();
 
     state.lock().unwrap().open = false;
@@ -5377,7 +5414,7 @@ fn child_surface_reopen_cancels_pending_exit_transition() {
     }));
     shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
 
-    shell.render_components().unwrap();
+    render_components_until_child_popup(&mut shell);
     state.lock().unwrap().open = false;
     shell.render_components().unwrap();
     assert!(shell.components[0].children[0].closing_until.is_some());
@@ -5400,7 +5437,7 @@ fn parent_pointer_leave_defers_child_popover_close() {
     let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
     shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
 
-    shell.render_components().unwrap();
+    render_components_until_child_popup(&mut shell);
     let child_id = shell.components[0].children[0].target.surface_id.clone();
 
     shell.presentation_engine.testing_push_event(
@@ -5438,7 +5475,7 @@ fn child_popover_hover_bridge_deadline_synthesizes_pointer_leave() {
     let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
     shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
 
-    shell.render_components().unwrap();
+    render_components_until_child_popup(&mut shell);
     let child_id = shell.components[0].children[0].target.surface_id.clone();
 
     shell.presentation_engine.testing_push_event(
@@ -5474,7 +5511,7 @@ fn dismissed_popup_drain_removes_child_surface() {
     let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
     shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
 
-    shell.render_components().unwrap();
+    render_components_until_child_popup(&mut shell);
     let child_id = shell.components[0].children[0].target.surface_id.clone();
     shell
         .presentation_engine
@@ -5494,7 +5531,7 @@ fn dismissed_popup_drain_removes_child_surface() {
         let mut state = state.lock().unwrap();
         state.open = true;
     }
-    shell.render_components().unwrap();
+    render_components_until_child_popup(&mut shell);
     assert_eq!(
         shell.components[0].children.len(),
         1,
@@ -5512,7 +5549,7 @@ fn child_surface_input_routes_to_local_child_handler_and_profiles() {
     shell
         .apply_request(CoreRequest::ToggleDebugProfiling)
         .unwrap();
-    shell.render_components().unwrap();
+    render_components_until_child_popup(&mut shell);
     let child_id = shell.components[0].children[0].target.surface_id.clone();
 
     shell

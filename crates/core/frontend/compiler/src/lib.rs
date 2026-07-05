@@ -13,6 +13,7 @@ use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
 
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 pub use accessibility::root_accessibility_role;
@@ -58,6 +59,15 @@ impl VariableStore for LayeredStore<'_> {
     fn translate(&self, key: &str) -> Option<String> {
         self.base.translate(key)
     }
+
+    fn template_locals(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut locals = self.base.template_locals();
+        locals.insert(self.item_name.to_owned(), self.item_value.clone());
+        locals
+    }
+    fn record_template_service_reads(&self, reads: &[(String, String)]) {
+        self.base.record_template_service_reads(reads);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +77,13 @@ pub enum FrontendRenderMode {
 }
 
 pub trait FrontendCompositionResolver {
+    fn evaluate_template_expression(
+        &self,
+        instance_key: &str,
+        expression: &str,
+        locals: &serde_json::Map<String, serde_json::Value>,
+    ) -> Option<TemplateExpressionResult>;
+
     fn render_import(
         &self,
         host: &Manifest,
@@ -86,6 +103,78 @@ pub trait FrontendCompositionResolver {
         container_width: f32,
         container_height: f32,
     ) -> Vec<WidgetNode>;
+}
+
+pub struct TemplateExpressionResult {
+    pub value: serde_json::Value,
+    pub service_reads: Vec<(String, String)>,
+}
+
+pub fn collect_template_expressions(component: &ComponentFile) -> Vec<String> {
+    fn insert(expression: &str, seen: &mut HashSet<String>, out: &mut Vec<String>) {
+        if seen.insert(expression.to_owned()) {
+            out.push(expression.to_owned());
+        }
+    }
+    fn attributes(
+        attributes: &[mesh_core_component::template::Attribute],
+        seen: &mut HashSet<String>,
+        out: &mut Vec<String>,
+    ) {
+        use mesh_core_component::template::AttributeValue;
+        for attribute in attributes {
+            match &attribute.value {
+                AttributeValue::Binding(expression) | AttributeValue::TwoWayBinding(expression) => {
+                    insert(expression, seen, out)
+                }
+                AttributeValue::EventHandlerCall { args, .. } => {
+                    for expression in args {
+                        insert(expression, seen, out);
+                    }
+                }
+                AttributeValue::Static(_)
+                | AttributeValue::InstanceBinding(_)
+                | AttributeValue::EventHandler(_) => {}
+            }
+        }
+    }
+    fn nodes(
+        template_nodes: &[mesh_core_component::template::TemplateNode],
+        seen: &mut HashSet<String>,
+        out: &mut Vec<String>,
+    ) {
+        use mesh_core_component::template::TemplateNode;
+        for node in template_nodes {
+            match node {
+                TemplateNode::Element(node) => {
+                    attributes(&node.attributes, seen, out);
+                    nodes(&node.children, seen, out);
+                }
+                TemplateNode::Component(node) => {
+                    attributes(&node.props, seen, out);
+                    nodes(&node.children, seen, out);
+                }
+                TemplateNode::Expr(node) => insert(&node.expression, seen, out),
+                TemplateNode::If(node) => {
+                    insert(&node.condition, seen, out);
+                    nodes(&node.then_children, seen, out);
+                    nodes(&node.else_children, seen, out);
+                }
+                TemplateNode::For(node) => {
+                    insert(&node.iterable, seen, out);
+                    nodes(&node.children, seen, out);
+                }
+                TemplateNode::Text(_) | TemplateNode::Slot(_) => {}
+            }
+        }
+    }
+
+    let mut seen = HashSet::new();
+    let mut expressions = Vec::new();
+    if let Some(template) = &component.template {
+        nodes(&template.root, &mut seen, &mut expressions);
+    }
+    expressions
 }
 
 #[derive(Debug, Clone)]

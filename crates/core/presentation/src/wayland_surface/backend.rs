@@ -1227,7 +1227,9 @@ impl LayerShellBackend {
                             rect.width as i32,
                             rect.height as i32,
                         );
-                        entry.wl_surface().set_input_region(Some(region.wl_region()));
+                        entry
+                            .wl_surface()
+                            .set_input_region(Some(region.wl_region()));
                         entry.input_region_dirty = false;
                     }
                 }

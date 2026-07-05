@@ -769,7 +769,11 @@ mod tests {
             Some("0.5")
         );
         // The keyframes rule must not leak into component defaults.
-        assert!(theme.component_defaults("@keyframes tooltip-enter").is_none());
+        assert!(
+            theme
+                .component_defaults("@keyframes tooltip-enter")
+                .is_none()
+        );
         assert_eq!(
             theme
                 .component_defaults("tooltip")

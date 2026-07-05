@@ -206,9 +206,6 @@ impl RenderObjectTree {
 
 impl RenderObjectDirtySummary {
     fn add_diff(&mut self, previous: &RenderObjectPaintData, next: &RenderObjectPaintData) {
-        if previous.parent != next.parent || previous.child_ids != next.child_ids {
-            self.reordered += 1;
-        }
         if previous.transform != next.transform {
             self.transform += 1;
         }
@@ -254,17 +251,17 @@ struct RenderObjectPaintData {
 type TransformSlot = (u32, u32, u32, u32, u32);
 type GeometrySlot = (u32, u32, u32, u32, u32, u32, u32, u32, u32, u32);
 type ClipSlot = (bool, u32, u32, u32, u32);
-type AccessibilitySlot = (AccessibilityRoleSlot, Option<String>, bool, bool);
+type AccessibilitySlot = (AccessibilityRoleSlot, Option<Arc<str>>, bool, bool);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AccessibilityRoleSlot {
     Builtin(u8),
-    Custom(String),
+    Custom(Arc<str>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TextSlot {
-    content: Option<String>,
+    content: Option<Arc<str>>,
     family: Arc<str>,
     size: u32,
     weight: u16,
@@ -282,10 +279,21 @@ fn update_retained_render_objects(
     dirty: &mut RenderObjectDirtySummary,
     dirty_nodes: &mut HashSet<NodeId>,
 ) {
-    let next = render_object_paint_data(node, parent);
     match objects.get_mut(&node.id) {
         Some(current) => {
             let before = *dirty;
+            if current.parent != parent
+                || current.child_ids.len() != node.children.len()
+                || !current
+                    .child_ids
+                    .iter()
+                    .copied()
+                    .eq(node.children.iter().map(|child| child.id))
+            {
+                dirty.reordered += 1;
+            }
+            let child_ids = refill_child_id_slot(node, std::mem::take(&mut current.child_ids));
+            let next = render_object_paint_data(node, parent, Some(current), child_ids);
             dirty.add_diff(current, &next);
             if *dirty != before {
                 dirty_nodes.insert(node.id);
@@ -296,6 +304,7 @@ fn update_retained_render_objects(
             };
         }
         None => {
+            let next = render_object_paint_data(node, parent, None, child_id_slot(node));
             dirty.inserted += 1;
             dirty_nodes.insert(node.id);
             objects.insert(
@@ -320,31 +329,36 @@ fn update_retained_render_objects(
     }
 }
 
-fn render_object_paint_data(node: &WidgetNode, parent: Option<NodeId>) -> RenderObjectPaintData {
+fn render_object_paint_data(
+    node: &WidgetNode,
+    parent: Option<NodeId>,
+    previous: Option<&RenderObjectPaintData>,
+    child_ids: Vec<NodeId>,
+) -> RenderObjectPaintData {
     let geometry = geometry_slot(node);
     RenderObjectPaintData {
         last_seen_epoch: 0,
         parent,
-        child_ids: child_id_slot(node),
+        child_ids,
         transform: transform_slot(node.computed_style.transform),
         clip: clip_slot(node, geometry),
         opacity: node.computed_style.opacity.to_bits(),
         geometry,
         material: material_hash(&node.computed_style),
         primitive: primitive_hash(node),
-        text: text_slot(node),
-        accessibility: accessibility_slot(node),
+        text: text_slot(node, previous.map(|data| &data.text)),
+        accessibility: accessibility_slot(node, previous.map(|data| &data.accessibility)),
     }
 }
 
 fn child_id_slot(node: &WidgetNode) -> Vec<NodeId> {
-    if node.children.is_empty() {
-        Vec::new()
-    } else {
-        let mut child_ids = Vec::with_capacity(node.children.len());
-        child_ids.extend(node.children.iter().map(|child| child.id));
-        child_ids
-    }
+    refill_child_id_slot(node, Vec::new())
+}
+
+fn refill_child_id_slot(node: &WidgetNode, mut child_ids: Vec<NodeId>) -> Vec<NodeId> {
+    child_ids.clear();
+    child_ids.extend(node.children.iter().map(|child| child.id));
+    child_ids
 }
 
 fn transform_slot(transform: Transform2D) -> TransformSlot {
@@ -365,23 +379,27 @@ fn clip_slot(node: &WidgetNode, geometry: GeometrySlot) -> ClipSlot {
 
 fn geometry_slot(node: &WidgetNode) -> GeometrySlot {
     let layout = node.layout;
+    let scroll = node.resolved_scroll_metrics();
     (
         layout.x.to_bits(),
         layout.y.to_bits(),
         layout.width.to_bits(),
         layout.height.to_bits(),
-        attr_f32(node, "_mesh_scroll_x").to_bits(),
-        attr_f32(node, "_mesh_scroll_y").to_bits(),
-        attr_f32(node, "_mesh_scroll_max_x").to_bits(),
-        attr_f32(node, "_mesh_scroll_max_y").to_bits(),
-        attr_f32(node, "_mesh_content_width").to_bits(),
-        attr_f32(node, "_mesh_content_height").to_bits(),
+        scroll.x.to_bits(),
+        scroll.y.to_bits(),
+        scroll.max_x.to_bits(),
+        scroll.max_y.to_bits(),
+        scroll.content_width.to_bits(),
+        scroll.content_height.to_bits(),
     )
 }
 
-fn text_slot(node: &WidgetNode) -> TextSlot {
+fn text_slot(node: &WidgetNode, previous: Option<&TextSlot>) -> TextSlot {
     TextSlot {
-        content: node.attributes.get("content").cloned(),
+        content: retained_arc_str(
+            node.attributes.get("content").map(String::as_str),
+            previous.and_then(|slot| slot.content.as_ref()),
+        ),
         family: node.computed_style.font_family.clone(),
         size: node.computed_style.font_size.to_bits(),
         weight: node.computed_style.font_weight,
@@ -390,16 +408,25 @@ fn text_slot(node: &WidgetNode) -> TextSlot {
     }
 }
 
-fn accessibility_slot(node: &WidgetNode) -> AccessibilitySlot {
+fn accessibility_slot(
+    node: &WidgetNode,
+    previous: Option<&AccessibilitySlot>,
+) -> AccessibilitySlot {
     (
-        accessibility_role_slot(&node.accessibility.role),
-        node.accessibility.label.clone(),
+        accessibility_role_slot(&node.accessibility.role, previous.map(|slot| &slot.0)),
+        retained_arc_str(
+            node.accessibility.label.as_deref(),
+            previous.and_then(|slot| slot.1.as_ref()),
+        ),
         node.accessibility.focusable,
         node.accessibility.focused,
     )
 }
 
-fn accessibility_role_slot(role: &AccessibilityRole) -> AccessibilityRoleSlot {
+fn accessibility_role_slot(
+    role: &AccessibilityRole,
+    previous: Option<&AccessibilityRoleSlot>,
+) -> AccessibilityRoleSlot {
     let slot = match role {
         AccessibilityRole::Button => 0,
         AccessibilityRole::Slider => 1,
@@ -422,10 +449,23 @@ fn accessibility_role_slot(role: &AccessibilityRole) -> AccessibilityRoleSlot {
         AccessibilityRole::TabPanel => 18,
         AccessibilityRole::Separator => 19,
         AccessibilityRole::Custom(value) => {
-            return AccessibilityRoleSlot::Custom(value.clone());
+            let previous = match previous {
+                Some(AccessibilityRoleSlot::Custom(value)) => Some(value),
+                _ => None,
+            };
+            return AccessibilityRoleSlot::Custom(
+                retained_arc_str(Some(value), previous).expect("custom role value"),
+            );
         }
     };
     AccessibilityRoleSlot::Builtin(slot)
+}
+
+fn retained_arc_str(value: Option<&str>, previous: Option<&Arc<str>>) -> Option<Arc<str>> {
+    value.map(|value| match previous {
+        Some(previous) if previous.as_ref() == value => Arc::clone(previous),
+        _ => Arc::from(value),
+    })
 }
 
 fn material_hash(style: &ComputedStyle) -> u64 {
@@ -517,13 +557,6 @@ fn color_slot(color: Color) -> ColorSlot {
     (color.r, color.g, color.b, color.a)
 }
 
-fn attr_f32(node: &WidgetNode, key: &str) -> f32 {
-    node.attributes
-        .get(key)
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0)
-}
-
 fn attr_f32_with_default(node: &WidgetNode, key: &str, default: f32) -> f32 {
     node.attributes
         .get(key)
@@ -601,6 +634,142 @@ mod tests {
         );
         assert_eq!(visited_count, epoch_count);
         assert!(epoch_time < visited_time);
+    }
+
+    // cargo test -p mesh-core-render --release -- typed_scroll_geometry_beats_string_parsing --ignored --nocapture
+    #[test]
+    #[ignore = "release-only typed scroll geometry microbenchmark"]
+    fn typed_scroll_geometry_beats_string_parsing() {
+        let mut legacy = retained_visual_node();
+        for (key, value) in [
+            ("_mesh_scroll_x", "12.3456"),
+            ("_mesh_scroll_y", "23.4567"),
+            ("_mesh_scroll_max_x", "100.25"),
+            ("_mesh_scroll_max_y", "200.5"),
+            ("_mesh_content_width", "960.75"),
+            ("_mesh_content_height", "720.125"),
+        ] {
+            legacy.attributes.insert(key.into(), value.into());
+        }
+        let mut typed = retained_visual_node();
+        typed.scroll_metrics = Some(legacy.resolved_scroll_metrics());
+        let iterations = 2_000_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0_u64;
+        for _ in 0..iterations {
+            let geometry = geometry_slot(std::hint::black_box(&legacy));
+            old_total = old_total.wrapping_add(std::hint::black_box(geometry.4 as u64));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0_u64;
+        for _ in 0..iterations {
+            let geometry = geometry_slot(std::hint::black_box(&typed));
+            new_total = new_total.wrapping_add(std::hint::black_box(geometry.4 as u64));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "scroll geometry: string parse {old_time:?}; typed fields {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    #[test]
+    fn render_object_reuses_unchanged_text_and_accessibility_strings() {
+        let mut node = retained_visual_node();
+        node.attributes
+            .insert("content".into(), "retained text".into());
+        node.accessibility.label = Some("retained label".into());
+        let mut tree = RenderObjectTree::default();
+        tree.update(&node);
+        let first = tree.objects.get(&node.id).expect("first render object");
+        let first_text = Arc::clone(first.text.content.as_ref().expect("text content"));
+        let first_label = Arc::clone(first.accessibility.1.as_ref().expect("label"));
+
+        tree.update(&node);
+        let second = tree.objects.get(&node.id).expect("second render object");
+        assert!(Arc::ptr_eq(
+            &first_text,
+            second.text.content.as_ref().expect("text content")
+        ));
+        assert!(Arc::ptr_eq(
+            &first_label,
+            second.accessibility.1.as_ref().expect("label")
+        ));
+    }
+
+    // cargo test -p mesh-core-render --release -- retained_render_strings_beat_string_clones --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained render string microbenchmark"]
+    fn retained_render_strings_beat_string_clones() {
+        let value = "render object text and accessibility content retained across dirty frames";
+        let retained: Arc<str> = Arc::from(value);
+        let iterations = 5_000_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0_usize;
+        for _ in 0..iterations {
+            let cloned = std::hint::black_box(value).to_owned();
+            old_total = old_total.saturating_add(std::hint::black_box(cloned.len()));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0_usize;
+        for _ in 0..iterations {
+            let cloned = retained_arc_str(Some(value), Some(&retained)).expect("retained value");
+            new_total = new_total.saturating_add(std::hint::black_box(cloned.len()));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "render object strings: String clone {old_time:?}; retained Arc {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-render --release -- reused_child_id_vec_beats_fresh_allocation --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained child-id vector microbenchmark"]
+    fn reused_child_id_vec_beats_fresh_allocation() {
+        let mut node = WidgetNode::new("row");
+        for id in 1..=6 {
+            let mut child = WidgetNode::new("box");
+            child.id = id;
+            node.children.push(child);
+        }
+        let iterations = 5_000_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0_usize;
+        for _ in 0..iterations {
+            let child_ids = child_id_slot(std::hint::black_box(&node));
+            old_total = old_total.saturating_add(std::hint::black_box(child_ids.len()));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0_usize;
+        let mut child_ids = Vec::new();
+        for _ in 0..iterations {
+            child_ids = refill_child_id_slot(std::hint::black_box(&node), child_ids);
+            new_total = new_total.saturating_add(std::hint::black_box(child_ids.len()));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "render object child ids: fresh Vec {old_time:?}; retained Vec {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 
     #[test]

@@ -2887,3 +2887,39 @@ end
 
     assert!(ctx.call_handler("bad", &[]).is_err());
 }
+#[test]
+fn template_expressions_use_component_lexical_scope_and_full_luau() {
+    let mut ctx = ScriptContext::new("@test/template-expressions", CapabilitySet::new()).unwrap();
+    let expressions = vec![
+        "add(secret, 2)".to_string(),
+        "0 or 5".to_string(),
+        "add(item.value, secret)".to_string(),
+    ];
+    ctx.compile_and_execute_component(
+        "local secret = 40\nlocal function add(a, b) return a + b end",
+        &[],
+        &expressions,
+    )
+    .unwrap();
+
+    assert_eq!(
+        ctx.evaluate_template_expression("add(secret, 2)", &serde_json::Map::new())
+            .unwrap()
+            .0,
+        serde_json::json!(42)
+    );
+    assert_eq!(
+        ctx.evaluate_template_expression("0 or 5", &serde_json::Map::new())
+            .unwrap()
+            .0,
+        serde_json::json!(0)
+    );
+    let mut locals = serde_json::Map::new();
+    locals.insert("item".into(), serde_json::json!({ "value": 2 }));
+    assert_eq!(
+        ctx.evaluate_template_expression("add(item.value, secret)", &locals)
+            .unwrap()
+            .0,
+        serde_json::json!(42)
+    );
+}

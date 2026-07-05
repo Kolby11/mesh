@@ -586,12 +586,13 @@ impl FrontendRenderEngine {
         bounds: ClipRect,
         clip: ClipRect,
     ) {
-        let max_x = node_attr_f32(node, "_mesh_scroll_max_x");
-        let max_y = node_attr_f32(node, "_mesh_scroll_max_y");
-        let scroll_x = node_attr_f32(node, "_mesh_scroll_x");
-        let scroll_y = node_attr_f32(node, "_mesh_scroll_y");
-        let content_width = node_attr_f32(node, "_mesh_content_width");
-        let content_height = node_attr_f32(node, "_mesh_content_height");
+        let scroll = node.resolved_scroll_metrics();
+        let max_x = scroll.max_x;
+        let max_y = scroll.max_y;
+        let scroll_x = scroll.x;
+        let scroll_y = scroll.y;
+        let content_width = scroll.content_width;
+        let content_height = scroll.content_height;
 
         let show_vertical = node.computed_style.overflow_y.always_shows_scrollbar()
             || (node

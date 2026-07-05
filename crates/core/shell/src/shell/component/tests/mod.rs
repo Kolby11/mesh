@@ -8,6 +8,49 @@ mod invalidation;
 mod restyle;
 
 #[test]
+fn markup_expressions_run_as_full_luau_in_component_scope() {
+    let mut component = common::test_frontend_component(
+        r#"
+<template>
+  <column title={string.upper("scope")}>
+    <text>{add(secret, 2)}</text>
+    {#for item in values}
+      <text>{add(item.value, secret)}</text>
+    {/for}
+  </column>
+</template>
+<script lang="luau">
+local secret = 40
+local values = {{ value = 1 }, { value = 2 }}
+local function add(a, b)
+  return a + b
+end
+</script>
+"#,
+    );
+    let theme = mesh_core_theme::default_theme();
+    let tree = component.build_tree(&theme, 200, 100);
+    let column = &tree.children[0];
+    assert_eq!(
+        column.attributes.get("title").map(String::as_str),
+        Some("SCOPE")
+    );
+    let text: Vec<_> = column
+        .children
+        .iter()
+        .flat_map(|child| {
+            if child.tag == "text" {
+                vec![child]
+            } else {
+                child.children.iter().collect()
+            }
+        })
+        .filter_map(|node| node.attributes.get("content").map(String::as_str))
+        .collect();
+    assert_eq!(text, vec!["42", "41", "42"]);
+}
+
+#[test]
 fn generated_error_placeholder_is_bounded_after_restyle_constraints() {
     let message = "missing interface ".repeat(100);
     let mut node = runtime::bounded_error_widget(&message);

@@ -1913,17 +1913,38 @@ mod tests {
         let mut state = PerSurfaceLayoutState::default();
         let mut cache = IntrinsicLayoutCache::default();
         LayoutEngine::compute_incremental(
-            &mut retained, &mut state, 200.0, 100.0, false, false, &mut cache, None,
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            false,
+            &mut cache,
+            None,
         );
 
         retained.children[0].computed_style.width = Dimension::Px(80.0);
         LayoutEngine::compute_incremental(
-            &mut retained, &mut state, 200.0, 100.0, false, false, &mut cache, None,
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            false,
+            &mut cache,
+            None,
         );
         assert_eq!(retained.children[0].layout.width, 50.0);
 
         LayoutEngine::compute_incremental(
-            &mut retained, &mut state, 200.0, 100.0, true, false, &mut cache, None,
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            true,
+            false,
+            &mut cache,
+            None,
         );
         assert_eq!(retained.children[0].layout.width, 80.0);
     }

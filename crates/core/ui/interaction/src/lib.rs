@@ -63,17 +63,11 @@ pub(crate) fn node_rect_with_offset(
 }
 
 fn node_scroll_offset(node: &WidgetNode) -> ScrollOffsetState {
+    let scroll = node.resolved_scroll_metrics();
     ScrollOffsetState {
-        x: parse_node_attr_f32(node, "_mesh_scroll_x"),
-        y: parse_node_attr_f32(node, "_mesh_scroll_y"),
+        x: scroll.x,
+        y: scroll.y,
     }
-}
-
-pub(crate) fn parse_node_attr_f32(node: &WidgetNode, key: &str) -> f32 {
-    node.attributes
-        .get(key)
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0)
 }
 
 pub(crate) fn node_clips_children(node: &WidgetNode) -> bool {

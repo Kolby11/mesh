@@ -2073,16 +2073,9 @@ fn find_node_bounds_by_reference(
         ));
     }
 
-    let scroll_x = node
-        .attributes
-        .get("_mesh_scroll_x")
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0);
-    let scroll_y = node
-        .attributes
-        .get("_mesh_scroll_y")
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0);
+    let scroll = node.resolved_scroll_metrics();
+    let scroll_x = scroll.x;
+    let scroll_y = scroll.y;
     let child_offset_x = offset_x - scroll_x;
     let child_offset_y = offset_y - scroll_y;
     for child in &node.children {

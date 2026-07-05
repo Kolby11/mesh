@@ -63,6 +63,15 @@ fn first_node_with_class_token<'a>(node: &'a WidgetNode, token: &str) -> Option<
         .find_map(|child| first_node_with_class_token(child, token))
 }
 
+fn collect_class_attributes(node: &WidgetNode, classes: &mut Vec<String>) {
+    if let Some(class) = node.attributes.get("class") {
+        classes.push(class.clone());
+    }
+    for child in &node.children {
+        collect_class_attributes(child, classes);
+    }
+}
+
 fn parent_of_node_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a WidgetNode> {
     if node.children.iter().any(|child| {
         child
@@ -345,6 +354,14 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
     );
     let entering_motion = first_node_with_class_token(entering_tree, "bubble-options-motion")
         .expect("entering bubble motion wrapper");
+    assert_eq!(
+        entering_tree.computed_style.opacity, 1.0,
+        "entering popover root must stay visible while launching"
+    );
+    assert_eq!(
+        entering_motion.computed_style.opacity, 1.0,
+        "entering bubble content must stay visible while launching"
+    );
     assert_eq!(
         entering_motion.computed_style.transform.translate_x, 46.0,
         "motion wrapper should visually launch from the trigger origin"
@@ -1493,6 +1510,122 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
         cluster_after.layout.x + cluster_after.layout.width <= width as f32,
         "open promoted popover must not push controls off the nav surface"
     );
+}
+
+#[test]
+fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
+    let theme = default_theme();
+    let width = 1280;
+    let height = 80;
+
+    for (handler, expected_size, expected_core_class, expected_text) in [
+        (
+            "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeToggle",
+            (112, 74),
+            "bubble-option-core-dark",
+            None,
+        ),
+        (
+            "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageToggle",
+            (112, 74),
+            "bubble-option-core-language",
+            Some("EN"),
+        ),
+    ] {
+        let mut component =
+            real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+        component.visible = true;
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.locale".into(),
+                source_module: "@mesh/shell".into(),
+                payload: serde_json::json!({ "locale": "en", "current": "en" }),
+            })
+            .unwrap();
+
+        let mut buffer = PixelBuffer::new(width, height);
+        component
+            .paint(&theme, width, height, &mut buffer, 1.0)
+            .unwrap();
+
+        let tree = component
+            .last_tree
+            .as_ref()
+            .expect("rendered navigation bar");
+        let button = first_node_with_click_handler(tree, handler).expect("hover trigger button");
+        let button_key = button
+            .attributes
+            .get("_mesh_key")
+            .expect("button mesh key")
+            .clone();
+        let (left, top, right, bottom) =
+            find_node_bounds_by_key(tree, &button_key, 0.0, 0.0).expect("button bounds");
+
+        component
+            .handle_input(
+                &theme,
+                width,
+                height,
+                ComponentInput::PointerMove {
+                    x: (left + right) / 2.0,
+                    y: (top + bottom) / 2.0,
+                },
+            )
+            .unwrap();
+        component
+            .paint(&theme, width, height, &mut buffer, 1.0)
+            .unwrap();
+
+        let requests = component.child_surface_requests();
+        assert_eq!(
+            requests.len(),
+            1,
+            "{handler} should promote one child popup after real pointer hover: {requests:?}"
+        );
+        assert_eq!(requests[0].content_size, expected_size);
+        assert_eq!(
+            requests[0].anchor_rect,
+            i32_rect((left, top, right, bottom)),
+            "{handler} popup should anchor to the hovered trigger"
+        );
+
+        let mut child_buffer =
+            PixelBuffer::new(requests[0].content_size.0, requests[0].content_size.1);
+        assert!(
+            component
+                .paint_child_surface(&requests[0].node_key, &mut child_buffer, 1.0, (0, 0), false,)
+                .unwrap(),
+            "{handler} child popup should paint successfully"
+        );
+        let child_tree = component
+            .child_surface_debug_tree(&requests[0].node_key)
+            .expect("debug child tree");
+        let mut classes = Vec::new();
+        collect_class_attributes(&child_tree, &mut classes);
+        assert!(
+            first_node_with_class_token(&child_tree, expected_core_class).is_some(),
+            "{handler} child popup should render option body class {expected_core_class}, got {classes:?}"
+        );
+        if let Some(expected_text) = expected_text {
+            let mut labels = Vec::new();
+            collect_text_content(&child_tree, &mut labels);
+            assert!(
+                labels.iter().any(|label| label == expected_text),
+                "{handler} child popup should render option text {expected_text}, got {labels:?}"
+            );
+        }
+        let painted = opaque_pixels_in_bounds(
+            &child_buffer,
+            0.0,
+            0.0,
+            requests[0].content_size.0 as f32,
+            requests[0].content_size.1 as f32,
+        );
+        assert!(
+            painted > 0,
+            "{handler} promoted popup should paint visible option pixels"
+        );
+    }
 }
 
 #[test]

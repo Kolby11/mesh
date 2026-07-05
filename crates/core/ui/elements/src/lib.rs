@@ -46,7 +46,7 @@ pub use style::{
     VisualFilter, WhiteSpace,
 };
 pub use tree::EventHandlerCall;
-pub use tree::{ElementState, NodeId, WidgetNode};
+pub use tree::{ElementState, NodeId, WidgetNode, WidgetScrollMetrics};
 
 /// Abstraction over the source of variable values for template evaluation.
 ///
@@ -63,5 +63,11 @@ pub trait VariableStore {
     fn translate(&self, key: &str) -> Option<String> {
         let _ = key;
         None
+    }
+    fn template_locals(&self) -> serde_json::Map<String, serde_json::Value> {
+        serde_json::Map::new()
+    }
+    fn record_template_service_reads(&self, reads: &[(String, String)]) {
+        let _ = reads;
     }
 }

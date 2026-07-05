@@ -389,8 +389,9 @@ impl FrontendRenderEngine {
             let temp_clip = temp_bounds;
             self.render_node_self(node, &mut temp, scale, temp_bounds, temp_clip, module_id);
             // Render children into temp buffer too
-            let scroll_x = node_attr_f32(node, "_mesh_scroll_x");
-            let scroll_y = node_attr_f32(node, "_mesh_scroll_y");
+            let scroll = node.resolved_scroll_metrics();
+            let scroll_x = scroll.x;
+            let scroll_y = scroll.y;
             let child_offset_x_temp = -scroll_x;
             let child_offset_y_temp = -scroll_y;
             let child_clip_temp = if node_clips_children(node) {
@@ -498,8 +499,9 @@ impl FrontendRenderEngine {
 
         self.render_node_self(node, buffer, scale, bounds, clip, module_id);
 
-        let scroll_x = node_attr_f32(node, "_mesh_scroll_x");
-        let scroll_y = node_attr_f32(node, "_mesh_scroll_y");
+        let scroll = node.resolved_scroll_metrics();
+        let scroll_x = scroll.x;
+        let scroll_y = scroll.y;
         let child_offset_x = offset_x - scroll_x;
         let child_offset_y = offset_y - scroll_y;
         let child_clip = if node_clips_children(node) {

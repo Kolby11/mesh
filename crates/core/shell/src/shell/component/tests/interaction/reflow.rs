@@ -329,10 +329,9 @@ end
     assert!(node_by_mesh_key(narrow_tree, "root/0/2").state.checked);
     assert_eq!(
         node_by_mesh_key(narrow_tree, "root/0/3")
-            .attributes
-            .get("_mesh_scroll_y")
-            .map(String::as_str),
-        Some("14.00")
+            .resolved_scroll_metrics()
+            .y,
+        14.0
     );
 }
 

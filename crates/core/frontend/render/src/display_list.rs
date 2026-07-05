@@ -183,7 +183,7 @@ pub struct RetainedDisplayList {
     ordered_entries_scratch: Vec<(DisplayListKey, DisplayListEntry)>,
     next_entries_scratch: HashMap<DisplayListKey, DisplayListEntry>,
     next_subtrees_scratch: HashMap<NodeId, Arc<RetainedPaintSubtree>>,
-    command_spans: Vec<RetainedCommandSpan>,
+    command_spans: Arc<[RetainedCommandSpan]>,
     paint_commands: Arc<[DisplayPaintCommand]>,
     command_kinds: Arc<[DisplayPaintCommandKind]>,
     last_metrics: DisplayListMetrics,
@@ -203,7 +203,7 @@ impl Default for RetainedDisplayList {
             ordered_entries_scratch: Vec::new(),
             next_entries_scratch: HashMap::new(),
             next_subtrees_scratch: HashMap::new(),
-            command_spans: Vec::new(),
+            command_spans: Vec::new().into(),
             paint_commands: Vec::new().into(),
             command_kinds: Vec::new().into(),
             last_metrics: DisplayListMetrics::default(),
@@ -528,8 +528,11 @@ impl<'a> SelectedDisplayListPaint<'a> {
 struct RetainedPaintSubtree {
     commands: Arc<[DisplayPaintCommand]>,
     kinds: Arc<[DisplayPaintCommandKind]>,
+    command_spans: Arc<[RetainedCommandSpan]>,
+    effect_overflow_count: u64,
     pruning: PruningMetrics,
     command_span: Option<RetainedSubtreeSpan>,
+    #[cfg(test)]
     child_order: Option<Arc<[usize]>>,
 }
 
@@ -538,8 +541,11 @@ impl Default for RetainedPaintSubtree {
         Self {
             commands: Vec::new().into(),
             kinds: Vec::new().into(),
+            command_spans: Vec::new().into(),
+            effect_overflow_count: 0,
             pruning: PruningMetrics::default(),
             command_span: None,
+            #[cfg(test)]
             child_order: None,
         }
     }
@@ -549,6 +555,7 @@ impl Default for RetainedPaintSubtree {
 struct RetainedSubtreeSpan {
     bounds: DamageRect,
     local_bounds: DamageRect,
+    #[cfg(test)]
     command_count: usize,
     includes_scrollbars: bool,
 }
@@ -557,11 +564,14 @@ struct RetainedSubtreeSpan {
 struct PaintSubtreeBuilder {
     commands: Vec<DisplayPaintCommand>,
     kinds: Vec<DisplayPaintCommandKind>,
+    child_command_spans: Vec<RetainedCommandSpan>,
+    effect_overflow_count: u64,
     pruning: PruningMetrics,
     bounds: DamageRect,
     local_bounds: DamageRect,
     includes_scrollbars: bool,
     local_command_count: usize,
+    #[cfg(test)]
     child_order: Option<Arc<[usize]>>,
 }
 
@@ -569,6 +579,9 @@ impl PaintSubtreeBuilder {
     fn push_command(&mut self, command: DisplayPaintCommand) {
         let kind = command.kind;
         let bounds = command_bounds(&command);
+        if command_has_effect_overflow(&command) {
+            self.effect_overflow_count = self.effect_overflow_count.saturating_add(1);
+        }
         self.bounds = if self.bounds.width == 0 || self.bounds.height == 0 {
             bounds
         } else {
@@ -586,6 +599,18 @@ impl PaintSubtreeBuilder {
     }
 
     fn append_child(&mut self, child_subtree: &RetainedPaintSubtree) {
+        let command_offset = self.commands.len();
+        self.child_command_spans
+            .reserve(child_subtree.command_spans.len());
+        self.child_command_spans
+            .extend(child_subtree.command_spans.iter().copied().map(|mut span| {
+                span.start = span.start.saturating_add(command_offset);
+                span.end = span.end.saturating_add(command_offset);
+                span
+            }));
+        self.effect_overflow_count = self
+            .effect_overflow_count
+            .saturating_add(child_subtree.effect_overflow_count);
         if let Some(span) = child_subtree.command_span {
             self.bounds = if self.bounds.width == 0 || self.bounds.height == 0 {
                 span.bounds
@@ -620,7 +645,7 @@ impl PaintSubtreeBuilder {
             .saturating_add(child_subtree.pruning.preclipped_descendants);
     }
 
-    fn into_retained(self) -> RetainedPaintSubtree {
+    fn into_retained(self, owner: NodeId) -> RetainedPaintSubtree {
         let command_count = self.local_command_count;
         let command_span = if command_count == 0 {
             None
@@ -628,15 +653,55 @@ impl PaintSubtreeBuilder {
             Some(RetainedSubtreeSpan {
                 bounds: self.bounds,
                 local_bounds: self.local_bounds,
+                #[cfg(test)]
                 command_count,
                 includes_scrollbars: self.includes_scrollbars,
             })
         };
+        let mut command_spans =
+            Vec::with_capacity(self.child_command_spans.len() + usize::from(command_count > 0) * 2);
+        if let Some(span) = command_span {
+            let has_children = self.commands.len() > command_count;
+            if !has_children || command_count <= 1 {
+                command_spans.push(RetainedCommandSpan {
+                    owner,
+                    start: 0,
+                    end: command_count.min(2),
+                    bounds: span.local_bounds,
+                    command_count: command_count.min(2),
+                    includes_scrollbars: command_count > 1,
+                });
+            } else {
+                command_spans.push(RetainedCommandSpan {
+                    owner,
+                    start: 0,
+                    end: 1,
+                    bounds: span.local_bounds,
+                    command_count: 1,
+                    includes_scrollbars: false,
+                });
+                if span.includes_scrollbars {
+                    let scrollbar_index = self.commands.len().saturating_sub(1);
+                    command_spans.push(RetainedCommandSpan {
+                        owner,
+                        start: scrollbar_index,
+                        end: scrollbar_index.saturating_add(1),
+                        bounds: span.local_bounds,
+                        command_count: 1,
+                        includes_scrollbars: true,
+                    });
+                }
+            }
+        }
+        command_spans.extend(self.child_command_spans);
         RetainedPaintSubtree {
             commands: self.commands.into(),
             kinds: self.kinds.into(),
+            command_spans: command_spans.into(),
+            effect_overflow_count: self.effect_overflow_count,
             pruning: self.pruning,
             command_span,
+            #[cfg(test)]
             child_order: self.child_order,
         }
     }
@@ -795,7 +860,15 @@ impl RetainedDisplayList {
             surface.width,
             surface.height,
         );
-        let (paint_commands, command_kinds, pruning, subtrees, local_metrics) = match decision {
+        let (
+            paint_commands,
+            command_kinds,
+            command_spans,
+            effect_overflow_count,
+            pruning,
+            subtrees,
+            local_metrics,
+        ) = match decision {
             LocalReuseDecision::RebuildDirtySubtrees => {
                 let rebuild_ancestors = collect_dirty_ancestor_ids(root, dirty_node_ids);
                 let mut next_subtrees = std::mem::take(&mut self.next_subtrees_scratch);
@@ -818,6 +891,8 @@ impl RetainedDisplayList {
                 (
                     Arc::clone(&subtree.commands),
                     Arc::clone(&subtree.kinds),
+                    Arc::clone(&subtree.command_spans),
+                    subtree.effect_overflow_count,
                     subtree.pruning,
                     next_subtrees,
                     local_metrics,
@@ -844,6 +919,8 @@ impl RetainedDisplayList {
                 (
                     Arc::clone(&subtree.commands),
                     Arc::clone(&subtree.kinds),
+                    Arc::clone(&subtree.command_spans),
+                    subtree.effect_overflow_count,
                     subtree.pruning,
                     next_subtrees,
                     local_metrics,
@@ -905,8 +982,6 @@ impl RetainedDisplayList {
         let batch_metrics = compute_batch_metrics(&ordered_entries);
         #[cfg(not(debug_assertions))]
         let batch_metrics = DisplayListMetrics::default();
-        let command_spans = build_command_spans(root, &subtrees);
-        let effect_overflow_count = count_effect_overflow_commands(paint_commands.as_ref());
 
         if rebuilt > 0 || removed > 0 || force_full_damage {
             self.generation = self.generation.saturating_add(1);
@@ -999,7 +1074,7 @@ impl RetainedDisplayList {
         } else {
             0
         };
-        let effect_overflow_count = count_effect_overflow_commands(self.paint_commands.as_ref());
+        let effect_overflow_count = self.last_metrics.effect_overflow_count;
         self.last_metrics = DisplayListMetrics {
             retained_generation: self.generation,
             entries_total: self.entries.len() as u64,
@@ -1122,7 +1197,7 @@ impl RetainedDisplayList {
 
         let mut selected_spans = Vec::with_capacity(self.command_spans.len().min(32));
         let mut matched_spans = 0u64;
-        for span in &self.command_spans {
+        for span in self.command_spans.iter() {
             if span.bounds.intersects(damage) {
                 matched_spans = matched_spans.saturating_add(1);
                 insert_selected_command_span(
@@ -1225,7 +1300,7 @@ impl RetainedDisplayList {
 
         let mut selected_spans = Vec::with_capacity(self.command_spans.len().min(32));
         let mut matched_spans = 0u64;
-        for span in &self.command_spans {
+        for span in self.command_spans.iter() {
             if rects_intersect_any(span.bounds, damages) {
                 matched_spans = matched_spans.saturating_add(1);
                 insert_selected_command_span(
@@ -1480,16 +1555,9 @@ fn collect_display_entries(
         });
     }
 
-    let scroll_x = node
-        .attributes
-        .get("_mesh_scroll_x")
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0);
-    let scroll_y = node
-        .attributes
-        .get("_mesh_scroll_y")
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0);
+    let scroll = node.resolved_scroll_metrics();
+    let scroll_x = scroll.x;
+    let scroll_y = scroll.y;
     let child_offset_x = offset_x - scroll_x;
     let child_offset_y = offset_y - scroll_y;
 
@@ -1601,16 +1669,9 @@ fn build_paint_subtree(
     });
     metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
 
-    let scroll_x = node
-        .attributes
-        .get("_mesh_scroll_x")
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0);
-    let scroll_y = node
-        .attributes
-        .get("_mesh_scroll_y")
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0);
+    let scroll = node.resolved_scroll_metrics();
+    let scroll_x = scroll.x;
+    let scroll_y = scroll.y;
     let child_offset_x = offset_x - scroll_x;
     let child_offset_y = offset_y - scroll_y;
     let child_clip = if node.computed_style.overflow_x.clips_contents()
@@ -1642,7 +1703,10 @@ fn build_paint_subtree(
             metrics,
         );
     });
-    subtree.child_order = child_order;
+    #[cfg(test)]
+    {
+        subtree.child_order = child_order;
+    }
 
     if display_node_may_show_scrollbars(&paint_node) {
         subtree.push_command(DisplayPaintCommand {
@@ -1652,7 +1716,7 @@ fn build_paint_subtree(
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
-    let subtree = Arc::new(subtree.into_retained());
+    let subtree = Arc::new(subtree.into_retained(node.id));
     next_subtrees.insert(node.id, Arc::clone(&subtree));
     subtree
 }
@@ -1830,8 +1894,9 @@ fn subtree_bounds_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Option<
     let offset_x = offset_x + transform.translate_x;
     let offset_y = offset_y + transform.translate_y;
     let mut bounds = node_visual_bounds_at(node, offset_x, offset_y);
-    let scroll_x = attr_f32(node, "_mesh_scroll_x");
-    let scroll_y = attr_f32(node, "_mesh_scroll_y");
+    let scroll = node.resolved_scroll_metrics();
+    let scroll_x = scroll.x;
+    let scroll_y = scroll.y;
     let child_offset_x = offset_x - scroll_x;
     let child_offset_y = offset_y - scroll_y;
     for child in &node.children {
@@ -1876,8 +1941,9 @@ fn count_pruned_subtree(
         counts.nodes = 1;
         counts.commands = 2;
     }
-    let scroll_x = attr_f32(node, "_mesh_scroll_x");
-    let scroll_y = attr_f32(node, "_mesh_scroll_y");
+    let scroll = node.resolved_scroll_metrics();
+    let scroll_x = scroll.x;
+    let scroll_y = scroll.y;
     let child_offset_x = offset_x - scroll_x;
     let child_offset_y = offset_y - scroll_y;
     for child in &node.children {
@@ -1952,11 +2018,16 @@ fn command_bounds(command: &DisplayPaintCommand) -> DamageRect {
     }
 }
 
+fn command_has_effect_overflow(command: &DisplayPaintCommand) -> bool {
+    command.kind == DisplayPaintCommandKind::Node
+        && visual_clip_for(&command.node) != node_clip_for(&command.node)
+}
+
+#[cfg(test)]
 fn count_effect_overflow_commands(commands: &[DisplayPaintCommand]) -> u64 {
     commands
         .iter()
-        .filter(|command| command.kind == DisplayPaintCommandKind::Node)
-        .filter(|command| visual_clip_for(&command.node) != node_clip_for(&command.node))
+        .filter(|command| command_has_effect_overflow(command))
         .count() as u64
 }
 
@@ -1986,6 +2057,7 @@ fn changed_paint_count(dirty_summary: RenderObjectDirtySummary) -> u64 {
     .sum()
 }
 
+#[cfg(test)]
 fn build_command_spans(
     root: &WidgetNode,
     subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
@@ -1999,6 +2071,7 @@ fn build_command_spans(
     spans
 }
 
+#[cfg(test)]
 fn collect_command_spans(
     node: &WidgetNode,
     subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
@@ -2130,13 +2203,16 @@ fn build_paint_node(node: &WidgetNode, offset_x: f32, offset_y: f32) -> DisplayP
             icon_optical_size: node.computed_style.icon_optical_size,
         },
         content: build_paint_content(node),
-        scrollbars: DisplayScrollbars {
-            max_x: attr_f32(node, "_mesh_scroll_max_x"),
-            max_y: attr_f32(node, "_mesh_scroll_max_y"),
-            scroll_x: attr_f32(node, "_mesh_scroll_x"),
-            scroll_y: attr_f32(node, "_mesh_scroll_y"),
-            content_width: attr_f32(node, "_mesh_content_width"),
-            content_height: attr_f32(node, "_mesh_content_height"),
+        scrollbars: {
+            let scroll = node.resolved_scroll_metrics();
+            DisplayScrollbars {
+                max_x: scroll.max_x,
+                max_y: scroll.max_y,
+                scroll_x: scroll.x,
+                scroll_y: scroll.y,
+                content_width: scroll.content_width,
+                content_height: scroll.content_height,
+            }
         },
     }
 }
@@ -3017,6 +3093,8 @@ mod tests {
             }]
             .into(),
             kinds: vec![DisplayPaintCommandKind::Node].into(),
+            command_spans: Vec::new().into(),
+            effect_overflow_count: 0,
             pruning: PruningMetrics::default(),
             command_span: Some(RetainedSubtreeSpan {
                 bounds: DamageRect {
@@ -3744,6 +3822,11 @@ mod tests {
         let mut list = RetainedDisplayList::default();
         list.update(&root, 120, 40, false, true);
 
+        assert_eq!(
+            list.command_spans.as_ref(),
+            build_command_spans(&root, &list.subtrees)
+        );
+
         let left_spans: Vec<_> = list
             .command_spans
             .iter()
@@ -4389,6 +4472,91 @@ mod tests {
 
         eprintln!(
             "display entry debug sink: ordered {old_time:?}; release sink omitted {new_time:?}; ratio {:.2}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-render --release -- retained_effect_count_beats_command_scan --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained effect-count microbenchmark"]
+    fn retained_effect_count_beats_command_scan() {
+        let mut tree = display_entry_benchmark_tree(120, 20);
+        for (index, child) in tree.children.iter_mut().enumerate() {
+            if index % 8 == 0 {
+                child.computed_style.box_shadow.blur_radius = 4.0;
+                child.computed_style.box_shadow.color = Color::BLACK;
+            }
+        }
+        let mut list = RetainedDisplayList::default();
+        list.update(&tree, 4096, 4096, false, false);
+        let retained_count = list
+            .subtrees
+            .get(&tree.id)
+            .expect("retained root subtree")
+            .effect_overflow_count;
+        assert!(retained_count > 0);
+        assert_eq!(
+            retained_count,
+            count_effect_overflow_commands(list.paint_commands.as_ref())
+        );
+        let iterations = 20_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0_u64;
+        for _ in 0..iterations {
+            old_total = old_total.wrapping_add(std::hint::black_box(
+                count_effect_overflow_commands(std::hint::black_box(list.paint_commands.as_ref())),
+            ));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0_u64;
+        for _ in 0..iterations {
+            new_total = new_total.wrapping_add(std::hint::black_box(retained_count));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "effect overflow metric: command scan {old_time:?}; retained count {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-render --release -- retained_command_spans_beat_tree_walk --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained command-span microbenchmark"]
+    fn retained_command_spans_beat_tree_walk() {
+        let tree = display_entry_benchmark_tree(120, 20);
+        let mut list = RetainedDisplayList::default();
+        list.update(&tree, 4096, 4096, false, false);
+        let traversed = build_command_spans(&tree, &list.subtrees);
+        assert_eq!(list.command_spans.as_ref(), traversed);
+        let iterations = 10_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0_usize;
+        for _ in 0..iterations {
+            old_total = old_total.saturating_add(std::hint::black_box(
+                build_command_spans(std::hint::black_box(&tree), &list.subtrees).len(),
+            ));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0_usize;
+        for _ in 0..iterations {
+            let spans = std::hint::black_box(Arc::clone(&list.command_spans));
+            new_total = new_total.saturating_add(std::hint::black_box(spans.len()));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "command span assembly: tree walk {old_time:?}; retained root handle {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_total, new_total);

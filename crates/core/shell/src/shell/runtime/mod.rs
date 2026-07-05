@@ -151,9 +151,6 @@ impl Shell {
     }
 
     fn components_have_ready_render_work(&self) -> bool {
-        if !self.presented_last_frame {
-            return false;
-        }
         self.components.iter().any(|runtime| {
             if !runtime.component.wants_render() {
                 return false;

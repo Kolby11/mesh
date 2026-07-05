@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 
 use bitflags::bitflags;
 use mesh_core_elements::style::{Color, ComputedStyle, Corners, Dimension, Edges, Transform2D};
-use mesh_core_elements::{ElementState, LayoutRect, NodeId, WidgetNode, element_snapshot_json};
+use mesh_core_elements::{ElementState, NodeId, WidgetNode, element_snapshot_json};
 use mesh_core_interaction::{ScrollOffsetState, node_is_source, source_element_tag};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
 use smallvec::SmallVec;
@@ -235,7 +235,7 @@ struct RetainedNodeSnapshot {
     state: ElementState,
 }
 
-type LayoutFingerprint = (u32, u32, u32, u32);
+type LayoutFingerprint = (u32, u32, u32, u32, u32, u32, u32, u32, u32, u32);
 
 impl RetainedNodeSnapshot {
     fn diff_flags(&self, next: &Self) -> (RetainedNodeDirtyFlags, u32) {
@@ -378,7 +378,7 @@ fn collect_retained_snapshots(
 
 fn retained_snapshot(node: &WidgetNode) -> RetainedNodeSnapshot {
     RetainedNodeSnapshot {
-        layout: layout_fingerprint(node.layout),
+        layout: layout_fingerprint(node),
         style_hash: style_fingerprint(&node.computed_style),
         attributes_hash: attributes_fingerprint(node),
         child_ids: node.children.iter().map(|child| child.id).collect(),
@@ -386,12 +386,20 @@ fn retained_snapshot(node: &WidgetNode) -> RetainedNodeSnapshot {
     }
 }
 
-fn layout_fingerprint(layout: LayoutRect) -> LayoutFingerprint {
+fn layout_fingerprint(node: &WidgetNode) -> LayoutFingerprint {
+    let layout = node.layout;
+    let scroll = node.resolved_scroll_metrics();
     (
         layout.x.to_bits(),
         layout.y.to_bits(),
         layout.width.to_bits(),
         layout.height.to_bits(),
+        scroll.x.to_bits(),
+        scroll.y.to_bits(),
+        scroll.max_x.to_bits(),
+        scroll.max_y.to_bits(),
+        scroll.content_width.to_bits(),
+        scroll.content_height.to_bits(),
     )
 }
 
@@ -687,8 +695,9 @@ pub(super) fn collect_element_metrics(
         }
     }
 
-    let scroll_x = node_attr_f32(node, "_mesh_scroll_x");
-    let scroll_y = node_attr_f32(node, "_mesh_scroll_y");
+    let scroll = node.resolved_scroll_metrics();
+    let scroll_x = scroll.x;
+    let scroll_y = scroll.y;
     let child_offset_x = offset_x - scroll_x;
     let child_offset_y = offset_y - scroll_y;
     for child in &node.children {
@@ -703,13 +712,6 @@ pub(super) fn collect_element_metrics(
             ref_keys,
         );
     }
-}
-
-fn node_attr_f32(node: &WidgetNode, key: &str) -> f32 {
-    node.attributes
-        .get(key)
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0)
 }
 
 pub(super) struct RuntimeAnnotationContext<'a> {
@@ -876,21 +878,9 @@ fn annotate_runtime_tree_inner(
         .get(&key)
         .copied()
         .unwrap_or_default();
-    {
-        use std::fmt::Write as _;
-        let ex = node
-            .attributes
-            .entry("_mesh_scroll_x".into())
-            .or_insert_with(String::new);
-        ex.clear();
-        let _ = write!(ex, "{:.2}", offset.x);
-        let ey = node
-            .attributes
-            .entry("_mesh_scroll_y".into())
-            .or_insert_with(String::new);
-        ey.clear();
-        let _ = write!(ey, "{:.2}", offset.y);
-    }
+    let scroll = node.scroll_metrics.get_or_insert_default();
+    scroll.x = offset.x;
+    scroll.y = offset.y;
 
     for (index, child) in node.children.iter_mut().enumerate() {
         annotate_runtime_tree_inner(
@@ -1401,7 +1391,7 @@ mod tests {
         let keys = (0..128)
             .map(|_| {
                 nodes.insert(RetainedNodeSnapshot {
-                    layout: (0, 0, 0, 0),
+                    layout: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
                     style_hash: 0,
                     attributes_hash: 0,
                     child_ids: SmallVec::new(),
@@ -1453,7 +1443,7 @@ mod tests {
                 (
                     index,
                     RetainedNodeSnapshot {
-                        layout: (index as u32, 1, 2, 3),
+                        layout: (index as u32, 1, 2, 3, 0, 0, 0, 0, 0, 0),
                         style_hash: index.wrapping_mul(31),
                         attributes_hash: index.wrapping_mul(131),
                         child_ids,

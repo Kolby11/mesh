@@ -47,6 +47,16 @@ pub struct EventHandlerCall {
     pub args: Vec<serde_json::Value>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct WidgetScrollMetrics {
+    pub x: f32,
+    pub y: f32,
+    pub max_x: f32,
+    pub max_y: f32,
+    pub content_width: f32,
+    pub content_height: f32,
+}
+
 /// A single node in the widget tree.
 ///
 /// Produced by evaluating a template against script state. Each node has
@@ -72,6 +82,8 @@ pub struct WidgetNode {
     pub event_handler_calls: BTreeMap<String, EventHandlerCall>,
     /// Live interaction state (hover, focus, active, etc.).
     pub state: ElementState,
+    /// Typed runtime scroll state, kept out of the string attribute map.
+    pub scroll_metrics: Option<WidgetScrollMetrics>,
     /// Service field reads captured during template evaluation.
     /// Each entry is a (service_name, field_name) pair read by this node's expressions.
     pub service_field_reads: Vec<(String, String)>,
@@ -94,9 +106,30 @@ impl WidgetNode {
             event_handlers: BTreeMap::new(),
             event_handler_calls: BTreeMap::new(),
             state: ElementState::default(),
+            scroll_metrics: None,
             service_field_reads: Vec::new(),
             cached_class_attr: None,
             cached_classes: Vec::new(),
+        }
+    }
+
+    pub fn resolved_scroll_metrics(&self) -> WidgetScrollMetrics {
+        if let Some(scroll_metrics) = self.scroll_metrics {
+            return scroll_metrics;
+        }
+        let value = |key: &str| {
+            self.attributes
+                .get(key)
+                .and_then(|value| value.parse::<f32>().ok())
+                .unwrap_or(0.0)
+        };
+        WidgetScrollMetrics {
+            x: value("_mesh_scroll_x"),
+            y: value("_mesh_scroll_y"),
+            max_x: value("_mesh_scroll_max_x"),
+            max_y: value("_mesh_scroll_max_y"),
+            content_width: value("_mesh_content_width"),
+            content_height: value("_mesh_content_height"),
         }
     }
 

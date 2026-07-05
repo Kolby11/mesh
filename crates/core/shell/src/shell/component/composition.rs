@@ -9,6 +9,32 @@ use mesh_core_module::ModuleType;
 use super::{FrontendSurfaceComponent, PROMOTED_POPOVER_MARKER};
 
 impl FrontendCompositionResolver for FrontendSurfaceComponent {
+    fn evaluate_template_expression(
+        &self,
+        instance_key: &str,
+        expression: &str,
+        locals: &serde_json::Map<String, serde_json::Value>,
+    ) -> Option<mesh_core_frontend::TemplateExpressionResult> {
+        let runtimes = self.runtimes.lock().ok()?;
+        let runtime = runtimes.get(instance_key)?;
+        match runtime
+            .script_ctx
+            .evaluate_template_expression(expression, locals)
+        {
+            Ok((value, service_reads)) => Some(mesh_core_frontend::TemplateExpressionResult {
+                value,
+                service_reads,
+            }),
+            Err(error) => {
+                tracing::warn!(instance_key, expression, %error, "template expression failed");
+                Some(mesh_core_frontend::TemplateExpressionResult {
+                    value: serde_json::Value::Null,
+                    service_reads: Vec::new(),
+                })
+            }
+        }
+    }
+
     fn render_import(
         &self,
         host: &mesh_core_module::Manifest,

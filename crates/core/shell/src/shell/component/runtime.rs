@@ -5,10 +5,18 @@ fn apply_runtime_props(
     props: &HashMap<String, serde_json::Value>,
 ) {
     for (key, value) in props {
-        runtime
-            .script_ctx
-            .state_mut()
-            .set(key.clone(), value.clone());
+        if let Err(err) = runtime.script_ctx.set_member_state(key, value.clone()) {
+            tracing::warn!(
+                module_id = %runtime.module_id,
+                prop = %key,
+                error = %err,
+                "failed to apply embedded component prop to script member"
+            );
+            runtime
+                .script_ctx
+                .state_mut()
+                .set(key.clone(), value.clone());
+        }
     }
 }
 
@@ -279,7 +287,8 @@ impl FrontendSurfaceComponent {
             }
         }
 
-        if let Some(script) = &component.script {
+        let template_expressions = mesh_core_frontend::collect_template_expressions(component);
+        if component.script.is_some() || !template_expressions.is_empty() {
             let interface_imports = component
                 .imports
                 .iter()
@@ -296,17 +305,26 @@ impl FrontendSurfaceComponent {
                 })
                 .collect::<Vec<_>>();
             script_ctx
-                .compile_and_execute(&script.source, &interface_imports)
+                .compile_and_execute_component(
+                    component
+                        .script
+                        .as_ref()
+                        .map_or("", |script| script.source.as_str()),
+                    &interface_imports,
+                    &template_expressions,
+                )
                 .map_err(|source| ComponentError::Script {
                     component_id: component_id.clone(),
                     source,
                 })?;
-            script_ctx
-                .call_init()
-                .map_err(|source| ComponentError::Script {
-                    component_id: component_id.clone(),
-                    source,
-                })?;
+            if component.script.is_some() {
+                script_ctx
+                    .call_init()
+                    .map_err(|source| ComponentError::Script {
+                        component_id: component_id.clone(),
+                        source,
+                    })?;
+            }
         }
 
         Ok(EmbeddedFrontendRuntime {

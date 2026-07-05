@@ -129,19 +129,28 @@ onscroll = nil
         transition-delay: 90ms;
     }
 
-    .bubble-options-motion-left.mesh-surface-entering,
+    .bubble-options-motion-left.mesh-surface-entering {
+        transform: translate(46px, 4px) scale(0.12);
+    }
+
     .bubble-options-motion-left.mesh-surface-exiting {
         transform: translate(46px, 4px) scale(0.12);
         opacity: 0;
     }
 
-    .bubble-options-motion-center.mesh-surface-entering,
+    .bubble-options-motion-center.mesh-surface-entering {
+        transform: translate(18px, -20px) scale(0.12);
+    }
+
     .bubble-options-motion-center.mesh-surface-exiting {
         transform: translate(18px, -20px) scale(0.12);
         opacity: 0;
     }
 
-    .bubble-options-motion-right.mesh-surface-entering,
+    .bubble-options-motion-right.mesh-surface-entering {
+        transform: translate(-10px, 4px) scale(0.12);
+    }
+
     .bubble-options-motion-right.mesh-surface-exiting {
         transform: translate(-10px, 4px) scale(0.12);
         opacity: 0;

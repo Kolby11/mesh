@@ -32,6 +32,34 @@ struct SharedInterfaceBindings {
     generation: u64,
 }
 
+fn component_source_with_template_expressions(source: &str, expressions: &[String]) -> String {
+    if expressions.is_empty() {
+        return source.to_owned();
+    }
+    let mut combined = String::with_capacity(source.len() + expressions.len() * 192);
+    combined.push_str(source);
+    combined.push_str(
+        "\nlocal __mesh_component_env = getfenv(1)\nlocal __mesh_setfenv = setfenv\nlocal __mesh_setmetatable = setmetatable\n__mesh_template_expressions = {}\n",
+    );
+    for expression in expressions {
+        let key = serde_json::to_string(expression).expect("template expression string");
+        combined.push_str("__mesh_template_expressions[");
+        combined.push_str(&key);
+        combined.push_str("] = function(__mesh_locals)\n");
+        combined.push_str("  __mesh_locals = __mesh_locals or {}\n");
+        combined.push_str("  local __mesh_expression_env = __mesh_setmetatable({}, { __index = function(_, name)\n");
+        combined.push_str("    local value = __mesh_locals[name]\n");
+        combined.push_str("    if value ~= nil then return value end\n");
+        combined.push_str("    return __mesh_component_env[name]\n");
+        combined.push_str("  end })\n");
+        combined.push_str("  __mesh_setfenv(1, __mesh_expression_env)\n");
+        combined.push_str("  return (");
+        combined.push_str(expression);
+        combined.push_str(")\nend\n");
+    }
+    combined
+}
+
 /// Backing VM for a [`ScriptContext`].
 ///
 /// A standalone context (backend modules, tests) owns a private pool VM. A
@@ -474,6 +502,59 @@ impl ScriptContext {
         // ChunkCache::remove(hash) to evict on .mesh file change.
         ChunkCache::get_or_insert(source);
         self.load_script_with_interface_imports(source, imports)
+    }
+
+    pub fn compile_and_execute_component(
+        &mut self,
+        source: &str,
+        imports: &[ScriptInterfaceImport],
+        template_expressions: &[String],
+    ) -> Result<(), ScriptError> {
+        let source = component_source_with_template_expressions(source, template_expressions);
+        ChunkCache::get_or_insert(&source);
+        self.load_script_with_interface_imports(&source, imports)
+    }
+
+    pub fn evaluate_template_expression(
+        &self,
+        expression: &str,
+        locals: &serde_json::Map<String, Value>,
+    ) -> Result<(Value, Vec<(String, String)>), ScriptError> {
+        let closures: Table = self
+            .env()
+            .get("__mesh_template_expressions")
+            .map_err(map_lua_error)?;
+        let closure: mlua::Function = closures.get(expression).map_err(map_lua_error)?;
+        let locals = self.lua().to_value(locals).map_err(lua_err)?;
+        let previous_reads = {
+            let mut tracked = self.tracked_service_fields.lock().unwrap();
+            std::mem::take(&mut *tracked)
+        };
+        let evaluated = closure.call::<LuaValue>(locals).map_err(map_lua_error);
+        let expression_reads = {
+            let mut tracked = self.tracked_service_fields.lock().unwrap();
+            let expression_reads = std::mem::take(&mut *tracked);
+            for (service, fields) in previous_reads {
+                tracked.entry(service).or_default().extend(fields);
+            }
+            for (service, fields) in &expression_reads {
+                tracked
+                    .entry(service.clone())
+                    .or_default()
+                    .extend(fields.iter().cloned());
+            }
+            expression_reads
+        };
+        let value = self.lua().from_value(evaluated?).map_err(lua_err)?;
+        let reads = expression_reads
+            .into_iter()
+            .flat_map(|(service, fields)| {
+                fields
+                    .into_iter()
+                    .map(move |field| (service.clone(), field))
+            })
+            .collect();
+        Ok((value, reads))
     }
 
     /// Copy the latest service payload into the Lua runtime for proxy reads.

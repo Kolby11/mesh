@@ -51,6 +51,7 @@ pub struct StyleResolver<'a> {
     /// (`--mesh-prop-<name>`). Seeded into the variable scratch so `prop(name)`
     /// references resolve. Empty for components without a `<props>` block.
     props: HashMap<String, StyleValue>,
+    module_variable_cache: RefCell<HashMap<String, Vec<(String, StyleValue)>>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -332,6 +333,7 @@ impl<'a> StyleResolver<'a> {
         Self {
             theme,
             props: HashMap::new(),
+            module_variable_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -862,16 +864,27 @@ impl<'a> StyleResolver<'a> {
         let Some(module) = self.theme.modules.get(module_id) else {
             return;
         };
-        for (name, value) in &module.tokens {
+        let mut cache = self.module_variable_cache.borrow_mut();
+        let entries = cache.entry(module_id.to_owned()).or_insert_with(|| {
+            module
+                .tokens
+                .iter()
+                .map(|(name, value)| {
+                    (
+                        format!("--{}", name.replace('.', "-")),
+                        StyleValue::Literal(match value {
+                            TokenValue::String(value) => value.clone(),
+                            TokenValue::Number(value) => format!("{value}"),
+                            TokenValue::Bool(value) => format!("{value}"),
+                        }),
+                    )
+                })
+                .collect()
+        });
+        for (key, value) in entries {
             variables
-                .entry(format!("--{}", name.replace('.', "-")))
-                .or_insert_with(|| {
-                    StyleValue::Literal(match value {
-                        TokenValue::String(value) => value.clone(),
-                        TokenValue::Number(value) => format!("{value}"),
-                        TokenValue::Bool(value) => format!("{value}"),
-                    })
-                });
+                .entry(key.clone())
+                .or_insert_with(|| value.clone());
         }
     }
 
@@ -2153,6 +2166,60 @@ mod tests {
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- cached_module_theme_variables_beat_reformatting --ignored --nocapture
+    #[test]
+    #[ignore = "release-only module theme variable cache microbenchmark"]
+    fn cached_module_theme_variables_beat_reformatting() {
+        let mut theme = mesh_core_theme::default_theme();
+        let module = theme.modules.entry("benchmark".into()).or_default();
+        for index in 0..32 {
+            module.tokens.insert(
+                format!("palette.group{index}.accent"),
+                TokenValue::String(format!("#{index:06x}")),
+            );
+        }
+        let resolver = StyleResolver::new(&theme);
+        let mut warm = HashMap::new();
+        resolver.seed_module_theme_variables("benchmark", &mut warm);
+        let iterations = 100_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0_usize;
+        let mut old_variables = HashMap::new();
+        for _ in 0..iterations {
+            old_variables.clear();
+            for (name, value) in &theme.modules["benchmark"].tokens {
+                old_variables.insert(
+                    format!("--{}", name.replace('.', "-")),
+                    StyleValue::Literal(match value {
+                        TokenValue::String(value) => value.clone(),
+                        TokenValue::Number(value) => format!("{value}"),
+                        TokenValue::Bool(value) => format!("{value}"),
+                    }),
+                );
+            }
+            old_total = old_total.saturating_add(std::hint::black_box(old_variables.len()));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0_usize;
+        let mut new_variables = HashMap::new();
+        for _ in 0..iterations {
+            new_variables.clear();
+            resolver.seed_module_theme_variables("benchmark", &mut new_variables);
+            new_total = new_total.saturating_add(std::hint::black_box(new_variables.len()));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "module theme variables: reformat {old_time:?}; cached {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
         assert!(new_time < old_time);
     }
 

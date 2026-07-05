@@ -140,7 +140,7 @@ end
     }
 
     .theme-float-shell.mesh-surface-entering {
-        opacity: 0;
+        opacity: 1;
         transform: translateY(-8px) scale(0.92);
     }
 

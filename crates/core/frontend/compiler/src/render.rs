@@ -218,6 +218,37 @@ impl VariableStore for TrackingVariableStore<'_> {
     fn translate(&self, key: &str) -> Option<String> {
         self.inner.translate(key)
     }
+    fn template_locals(&self) -> serde_json::Map<String, serde_json::Value> {
+        self.inner.template_locals()
+    }
+    fn record_template_service_reads(&self, reads: &[(String, String)]) {
+        self.reads.borrow_mut().extend_from_slice(reads);
+    }
+}
+
+fn evaluate_template_expression(
+    expression: &str,
+    state: Option<&dyn VariableStore>,
+    instance_key: &str,
+    composition: Option<&dyn FrontendCompositionResolver>,
+) -> serde_json::Value {
+    if let (Some(state), Some(composition)) = (state, composition)
+        && let Some(result) = composition.evaluate_template_expression(
+            instance_key,
+            expression,
+            &state.template_locals(),
+        )
+    {
+        state.record_template_service_reads(&result.service_reads);
+        return result.value;
+    }
+    state
+        .map(|store| serde_json::Value::String(eval_expr(expression, store)))
+        .unwrap_or(serde_json::Value::Null)
+}
+
+fn template_value_to_string(value: serde_json::Value) -> String {
+    crate::expr::json_value_to_string(value)
 }
 
 pub(crate) fn collect_component_tags(nodes: &[TemplateNode], tags: &mut Vec<String>) {
@@ -364,7 +395,14 @@ pub(crate) fn build_widget_node(
             let effective = tracking_store.as_ref().map(|t| t as &dyn VariableStore);
             let content = effective
                 .or(state)
-                .map(|store| eval_expr(&expr.expression, store))
+                .map(|store| {
+                    template_value_to_string(evaluate_template_expression(
+                        &expr.expression,
+                        Some(store),
+                        instance_key,
+                        composition,
+                    ))
+                })
                 .unwrap_or_else(|| format!("{{ {} }}", expr.expression));
             node.attributes.insert("content".into(), content);
             node.service_field_reads = tracking_store.map(|t| t.into_reads()).unwrap_or_default();
@@ -380,10 +418,15 @@ pub(crate) fn build_widget_node(
         }
         TemplateNode::If(if_node) => {
             let show_then = match state {
-                Some(store) => {
-                    let result = eval_expr(&if_node.condition, store);
-                    !matches!(result.as_str(), "false" | "nil" | "" | "0")
-                }
+                Some(store) => !matches!(
+                    evaluate_template_expression(
+                        &if_node.condition,
+                        Some(store),
+                        instance_key,
+                        composition,
+                    ),
+                    serde_json::Value::Null | serde_json::Value::Bool(false)
+                ),
                 None => true,
             };
             let active_children = if show_then {
@@ -426,7 +469,19 @@ pub(crate) fn build_widget_node(
             let child_context = child_style_context(&node.computed_style, container_context);
 
             if let Some(store) = state {
-                if let Some(serde_json::Value::Array(items)) = store.get(&for_node.iterable) {
+                let iterable = if composition.is_some() {
+                    evaluate_template_expression(
+                        &for_node.iterable,
+                        Some(store),
+                        instance_key,
+                        composition,
+                    )
+                } else {
+                    store
+                        .get(&for_node.iterable)
+                        .unwrap_or(serde_json::Value::Null)
+                };
+                if let serde_json::Value::Array(items) = iterable {
                     for item_val in items {
                         let item_store = LayeredStore {
                             base: store,
@@ -526,7 +581,12 @@ fn build_element_node(
     let effective_state = tracking_state.or(state);
 
     let (classes, id, mut attributes, event_handlers, event_handler_calls) =
-        parse_attributes(&element.attributes, effective_state);
+        parse_attributes_runtime(
+            &element.attributes,
+            effective_state,
+            instance_key,
+            composition,
+        );
     if let Some(binding) = element.attributes.iter().find_map(|attribute| {
         if let AttributeValue::InstanceBinding(binding) = &attribute.value {
             Some(binding.as_str())
@@ -588,7 +648,7 @@ fn build_element_node(
         let content: String = element
             .children
             .iter()
-            .map(|child| resolve_inline_content(child, effective_state))
+            .map(|child| resolve_inline_content(child, effective_state, instance_key, composition))
             .collect();
         node.attributes.insert("content".into(), content);
         node.service_field_reads = tracking_store.map(|t| t.into_reads()).unwrap_or_default();
@@ -659,11 +719,23 @@ fn apply_source_tag_defaults(source_tag: &SourceTag, attributes: &mut BTreeMap<S
     }
 }
 
-fn resolve_inline_content(node: &TemplateNode, state: Option<&dyn VariableStore>) -> String {
+fn resolve_inline_content(
+    node: &TemplateNode,
+    state: Option<&dyn VariableStore>,
+    instance_key: &str,
+    composition: Option<&dyn FrontendCompositionResolver>,
+) -> String {
     match node {
         TemplateNode::Text(text) => text.content.clone(),
         TemplateNode::Expr(expr) => state
-            .map(|store| eval_expr(&expr.expression, store))
+            .map(|store| {
+                template_value_to_string(evaluate_template_expression(
+                    &expr.expression,
+                    Some(store),
+                    instance_key,
+                    composition,
+                ))
+            })
             .unwrap_or_else(|| format!("{{ {} }}", expr.expression)),
         _ => String::new(),
     }
@@ -679,7 +751,8 @@ fn build_component_ref(
     host_instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
 ) -> WidgetNode {
-    let (_, _, mut props, _, prop_handler_calls) = parse_attributes(&component.props, state);
+    let (_, _, mut props, _, prop_handler_calls) =
+        parse_attributes_runtime(&component.props, state, host_instance_key, composition);
     for attr in &component.props {
         if let AttributeValue::EventHandler(handler) = &attr.value {
             props.insert(
@@ -739,9 +812,25 @@ fn attach_module_id(node: &mut WidgetNode, module_id: &str) {
         .insert("_mesh_module_id".into(), module_id.to_string());
 }
 
+#[cfg(test)]
 pub(crate) fn parse_attributes(
     attrs: &[Attribute],
     state: Option<&dyn VariableStore>,
+) -> (
+    Vec<String>,
+    Option<String>,
+    BTreeMap<String, String>,
+    BTreeMap<String, String>,
+    BTreeMap<String, EventHandlerCall>,
+) {
+    parse_attributes_runtime(attrs, state, "", None)
+}
+
+fn parse_attributes_runtime(
+    attrs: &[Attribute],
+    state: Option<&dyn VariableStore>,
+    instance_key: &str,
+    composition: Option<&dyn FrontendCompositionResolver>,
 ) -> (
     Vec<String>,
     Option<String>,
@@ -767,14 +856,24 @@ pub(crate) fn parse_attributes(
                 }
             }
             AttributeValue::Binding(binding) | AttributeValue::TwoWayBinding(binding) => {
-                let value = state
-                    .map(|store| eval_expr(binding, store))
-                    .unwrap_or_default();
                 if is_event_handler_attribute(&attr.name) {
-                    event_handlers.insert(normalize_event_handler_name(&attr.name), value);
-                } else {
-                    resolved.insert(attr.name.clone(), value);
+                    event_handlers.insert(
+                        normalize_event_handler_name(&attr.name),
+                        resolve_event_handler_value(state, binding),
+                    );
+                    continue;
                 }
+                let value = state
+                    .map(|store| {
+                        template_value_to_string(evaluate_template_expression(
+                            binding,
+                            Some(store),
+                            instance_key,
+                            composition,
+                        ))
+                    })
+                    .unwrap_or_default();
+                resolved.insert(attr.name.clone(), value);
             }
             AttributeValue::InstanceBinding(_) => {}
             AttributeValue::EventHandler(handler) => {
@@ -786,8 +885,16 @@ pub(crate) fn parse_attributes(
                 let resolved_args: Vec<serde_json::Value> = args
                     .iter()
                     .map(|arg| {
-                        let val = state.map(|store| eval_expr(arg, store)).unwrap_or_default();
-                        serde_json::Value::String(val)
+                        state
+                            .map(|store| {
+                                evaluate_template_expression(
+                                    arg,
+                                    Some(store),
+                                    instance_key,
+                                    composition,
+                                )
+                            })
+                            .unwrap_or(serde_json::Value::Null)
                     })
                     .collect();
                 event_handler_calls.insert(

@@ -426,17 +426,8 @@ fn layout_contains_with_offset(
 }
 
 fn child_offsets_with_scroll(node: &WidgetNode, offset_x: f32, offset_y: f32) -> (f32, f32) {
-    (
-        offset_x - node_attr_f32(node, "_mesh_scroll_x"),
-        offset_y - node_attr_f32(node, "_mesh_scroll_y"),
-    )
-}
-
-fn node_attr_f32(node: &WidgetNode, key: &str) -> f32 {
-    node.attributes
-        .get(key)
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0)
+    let scroll = node.resolved_scroll_metrics();
+    (offset_x - scroll.x, offset_y - scroll.y)
 }
 
 fn node_clips_children(node: &WidgetNode) -> bool {

@@ -219,13 +219,25 @@ fn preprocess_template(source: &str) -> String {
             out.push('=');
             out.push('"');
             i += 1; // skip '=', now pointing at '{'
+            let expression_start = i;
             let mut depth: i32 = 0;
+            let mut expression_quote: Option<u8> = None;
+            let mut escaped = false;
             while i < len {
-                let c = bytes[i] as char;
-                out.push(c);
-                if c == '{' {
+                let c = bytes[i];
+                if let Some(quote) = expression_quote {
+                    if escaped {
+                        escaped = false;
+                    } else if c == b'\\' {
+                        escaped = true;
+                    } else if c == quote {
+                        expression_quote = None;
+                    }
+                } else if c == b'"' || c == b'\'' {
+                    expression_quote = Some(c);
+                } else if c == b'{' {
                     depth += 1;
-                } else if c == '}' {
+                } else if c == b'}' {
                     depth -= 1;
                     if depth == 0 {
                         i += 1;
@@ -234,6 +246,7 @@ fn preprocess_template(source: &str) -> String {
                 }
                 i += 1;
             }
+            out.push_str(&xml_attr_escape(&source[expression_start..i]));
             out.push('"');
         } else {
             out.push(b as char);

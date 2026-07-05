@@ -6,10 +6,8 @@ pub fn find_scrollable_at(node: &WidgetNode, x: f32, y: f32) -> Option<String> {
 }
 
 pub fn scroll_limits(node: &WidgetNode) -> (f32, f32) {
-    (
-        parse_node_attr_f32(node, "_mesh_scroll_max_x"),
-        parse_node_attr_f32(node, "_mesh_scroll_max_y"),
-    )
+    let scroll = node.resolved_scroll_metrics();
+    (scroll.max_x, scroll.max_y)
 }
 
 /// Build the chain of nodes from the tree root down to the node whose
@@ -260,20 +258,14 @@ pub fn annotate_overflow_tree(
     offset.x = offset.x.clamp(0.0, max_x);
     offset.y = offset.y.clamp(0.0, max_y);
 
-    node.attributes
-        .insert("_mesh_content_width".into(), format!("{content_width:.2}"));
-    node.attributes.insert(
-        "_mesh_content_height".into(),
-        format!("{content_height:.2}"),
-    );
-    node.attributes
-        .insert("_mesh_scroll_max_x".into(), format!("{max_x:.2}"));
-    node.attributes
-        .insert("_mesh_scroll_max_y".into(), format!("{max_y:.2}"));
-    node.attributes
-        .insert("_mesh_scroll_x".into(), format!("{:.2}", offset.x));
-    node.attributes
-        .insert("_mesh_scroll_y".into(), format!("{:.2}", offset.y));
+    node.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+        x: offset.x,
+        y: offset.y,
+        max_x,
+        max_y,
+        content_width,
+        content_height,
+    });
 
     let own_bounds = (
         node.layout.x,

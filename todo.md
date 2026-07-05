@@ -160,6 +160,30 @@ before editing.
 
 ### Migration tech-debt (flagged by project rules; verify before removing)
 
+- [x] **Evaluate markup `{...}` as full Luau in the component instance
+      environment.** The authoring contract is that braces contain a
+      value-producing Luau expression in the same lexical/runtime scope as the
+      component `<script lang="luau">`, including private locals, functions,
+      standard operators, and `{#for}` locals. Today
+      `frontend/compiler/src/expr.rs` is a hand-written subset evaluator and the
+      compiler receives only a `VariableStore` JSON snapshot, so valid Luau is
+      rejected or evaluated with divergent truthiness/`and`/`or` semantics.
+      Compile/register expression closures inside the component script chunk
+      itself (a second chunk sharing `_ENV` cannot see lexical locals), thread
+      closure invocation through the tree-build/composition boundary by
+      component instance key, pass `{#for}` locals as invocation bindings
+      without mutating persistent globals, and isolate the legacy evaluator to
+      VM-less preview/tooling paths.
+      Completed 2026-07-05: runtime creation collects each component's template
+      expressions and compiles them into closures appended to that component's
+      Luau chunk, preserving lexical access to private locals/functions. Tree
+      rendering invokes closures through the owning instance runtime; loop
+      locals are supplied through a temporary locals-first function
+      environment. Text, attributes, conditionals, loop iterables, component
+      props, and handler-call arguments use typed VM results. The legacy
+      evaluator remains only as a VM-less preview/test fallback. The markup
+      preprocessor is now quote-aware inside brace expressions, including
+      nested double-quoted Luau strings.
 - [ ] Four remaining hand-written `.mesh`/`.luau` source mini-parsers in
       `installed_graph.rs:~908-1051` (`extract_t_keys_from_mesh_source`,
       `extract_mesh_event_publish_channels`, `extract_backend_emit_event_names`,
@@ -575,7 +599,11 @@ duplicating it.
       generic nodes. A mixed 512-node release benchmark over 20k signature
       passes measured 925.336ms for all-payload-attrs hashing versus
       219.760ms for tag-aware hashing (4.2x faster). Actual string sharing
-      remains open.
+      remains open. Rejected experiment 2026-07-05: replacing payload-owned
+      strings with `Arc<str>` made a two-string input-payload clone slower:
+      67.591ms versus 63.400ms for owned `String` clones over 5 million
+      iterations (6.6% regression). A useful solution must avoid node-to-payload
+      allocation without adding atomic bumps to every command clone.
 - [ ] **Storage reads clone per Lua access.** `self.storage.key` reads lock
       the storage mutex and clone the JSON value per access
       (`scripting/storage.rs:275-307`); render hooks that read storage pay
@@ -832,7 +860,7 @@ Performance:
       release runs over 9.842 million collected entries measured 2.943s versus
       2.881s and 2.941s versus 2.930s (0.4-2.1% faster), with identical damage
       map entry counts.
-- [ ] **`RenderObjectTree` allocates per node per dirty frame.** `text_slot`
+- [x] **`RenderObjectTree` allocates per node per dirty frame.** `text_slot`
       clones the text `content` String (`render/src/render_object.rs:307`),
       `accessibility_slot` clones the label, `child_id_slot` allocates a fresh
       `Vec<NodeId>` per node (`render_object.rs:263-271`; the retained tree
@@ -841,6 +869,18 @@ Performance:
       (`render_object.rs:296-301`), and `update_inner` allocates two fresh
       `HashSet`s per update (`render_object.rs:97-98`) instead of scratch-reuse.
       This file predates the D-item optimizations and never got them.
+      Progress 2026-07-05: geometry now consumes typed scroll metrics (34.5x
+      faster than six string parses), dirty-node storage is scratch-reused, and
+      text content, accessibility labels, and custom roles reuse retained
+      `Arc<str>` allocations when unchanged. The retained-string benchmark
+      measured 35.148ms for `String` clones versus 15.648ms for retained arcs
+      over 5 million values (2.2x faster). An eight-entry `SmallVec` child-id
+      experiment was rejected because it regressed the measured six-child case
+      from 28.448ms to 37.879ms. Reusing the retained `Vec` allocation instead
+      measured 54.663ms for fresh vectors versus 13.167ms for clear/refill over
+      5 million six-child updates (4.2x faster), while preserving arbitrary
+      child counts and reorder detection. All listed allocation sources are now
+      addressed.
 - [ ] **Triple full-tree fingerprinting on every dirty frame.** Three parallel
       diff systems each walk the whole tree and hash/compare overlapping data:
       `RetainedWidgetTree` snapshots (layout/style/attrs/children/state,
@@ -871,22 +911,43 @@ Performance:
       shared command/kind/order field plus metadata. A release benchmark over
       10 million reuse clones measured 180.455ms fieldwise versus 28.002ms for
       the whole-subtree handle (6.4x faster).
-- [ ] **Two more full passes per display-list rebuild.**
+- [x] **Two more full passes per display-list rebuild.**
       `build_command_spans(root, &subtrees)` walks the tree and
       `count_effect_overflow_commands` scans all commands
       (`display_list.rs:895-896`) on every rebuild; both derivable
       incrementally from the subtree reuse bookkeeping.
-- [ ] **Scroll state round-trips float→string→float three times per node per
+      Progress 2026-07-05: effect-overflow counts are now accumulated while
+      building each retained subtree, composed from cached child counts, and
+      reused directly on unchanged generations. A release benchmark over
+      20,000 metric queries with nonzero effects measured 746.477ms for the
+      former command scan versus 9.499us for retained reads, with identical
+      totals. Command spans are now composed as subtree-relative metadata and
+      exposed from the root through a shared handle, preserving exact span
+      ordering while removing the second tree walk. A release benchmark over
+      10,000 assemblies measured 608.869ms for traversal versus 36.806us for
+      retained root handles, with identical 25.21 million aggregate spans.
+- [x] **Scroll state round-trips float→string→float three times per node per
       frame.** Written as `"{:.2}"` strings in `annotate_runtime_tree`
       (`runtime_tree.rs:819-832`), re-parsed in `collect_display_entries`
       (`display_list.rs:1417-1426`), `build_paint_node` scrollbars (six
       `attr_f32` calls), and `geometry_slot` (six more). Also quantizes offsets
       to hundredths. The concrete §2 instance of the v1.23/v1.27 typed
       `WidgetNode` fields item.
-- [ ] **Handler-call args re-serialize to JSON strings per fingerprint.**
+      Completed 2026-07-05: `WidgetNode` now carries optional typed scroll
+      metrics used by runtime annotation, overflow measurement, retained-tree
+      invalidation, hit testing, render objects, display-list construction, and
+      both painters. Legacy attributes remain a fallback for hand-built nodes.
+      A release geometry benchmark over 2 million snapshots measured 186.504ms
+      for six string parses versus 5.407ms for typed fields (34.5x faster), and
+      offsets are no longer quantized to hundredths.
+- [x] **Handler-call args re-serialize to JSON strings per fingerprint.**
       `attributes_fingerprint` does `arg.to_string()` per pre-bound arg per
       node per frame (`runtime_tree.rs:479`). Hash the `serde_json::Value`
       structurally instead.
+      Completed 2026-07-05: typed handler arguments are hashed recursively by
+      JSON variant and primitive value without allocating serialized strings.
+      The release benchmark measured 415.585ms for `to_string` hashing versus
+      94.309ms for structural hashing (4.4x faster).
 
 Structure:
 
@@ -972,10 +1033,15 @@ Performance:
       precompute them once per rule into a validated/compiled declaration at
       rule-build time. Cheap first step toward the v1.23 typed-declarations
       item.
-- [ ] **`seed_module_theme_variables` allocates two Strings per module token
+- [x] **`seed_module_theme_variables` allocates two Strings per module token
       per node per pass** — `format!("--{}", name.replace('.', "-"))`
       (`resolve.rs:857-876`). Precompute the CSS-variable-keyed token map once
       per theme load per module and seed by reference.
+      Completed 2026-07-05: each `StyleResolver` now caches normalized
+      CSS-variable keys and converted token values per module, preserving
+      first-writer variable precedence. A release benchmark over 3.2 million
+      token insertions measured 237.080ms for per-node normalization versus
+      132.686ms from cached entries (1.8x faster).
 - [ ] **`seed_prop_variables` clones every prop key+value per node**
       (`resolve.rs:599-603`) even though props are per-instance constants for
       the whole pass. Seed once per pass or resolve through a layered lookup
