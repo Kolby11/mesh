@@ -218,20 +218,26 @@ fn apply_prop_handler_calls(
     if prop_handler_calls.is_empty() {
         return;
     }
-    for (event_name, handler) in node.event_handlers.clone() {
-        let Some((_, call)) = prop_handler_calls
-            .iter()
-            .find(|(prop_name, _)| props.get(*prop_name) == Some(&handler))
-        else {
-            continue;
-        };
-        node.event_handler_calls.insert(
-            event_name,
-            EventHandlerCall {
-                handler,
-                args: call.args.clone(),
-            },
-        );
+    let handler_calls = node
+        .event_handlers
+        .iter()
+        .filter_map(|(event_name, handler)| {
+            prop_handler_calls
+                .iter()
+                .find(|(prop_name, _)| props.get(*prop_name) == Some(handler))
+                .map(|(_, call)| {
+                    (
+                        event_name.clone(),
+                        EventHandlerCall {
+                            handler: handler.clone(),
+                            args: call.args.clone(),
+                        },
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
+    for (event_name, call) in handler_calls {
+        node.event_handler_calls.insert(event_name, call);
     }
     for child in &mut node.children {
         apply_prop_handler_calls(child, props, prop_handler_calls);
@@ -249,6 +255,138 @@ fn simple_state_binding(binding: &str) -> Option<String> {
         return None;
     }
     Some(trimmed.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    fn handler_tree(child_count: usize) -> WidgetNode {
+        let mut root = WidgetNode::new("box");
+        root.event_handlers.insert("click".into(), "onClick".into());
+        root.event_handlers
+            .insert("pointermove".into(), "onMove".into());
+        root.children = (0..child_count)
+            .map(|index| {
+                let mut child = WidgetNode::new("button");
+                child
+                    .event_handlers
+                    .insert("click".into(), format!("onChild{index}"));
+                child
+                    .event_handlers
+                    .insert("pointermove".into(), "onMove".into());
+                child
+            })
+            .collect();
+        root
+    }
+
+    fn old_apply_prop_handler_calls(
+        node: &mut WidgetNode,
+        props: &BTreeMap<String, String>,
+        prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
+    ) {
+        if prop_handler_calls.is_empty() {
+            return;
+        }
+        for (event_name, handler) in node.event_handlers.clone() {
+            let Some((_, call)) = prop_handler_calls
+                .iter()
+                .find(|(prop_name, _)| props.get(*prop_name) == Some(&handler))
+            else {
+                continue;
+            };
+            node.event_handler_calls.insert(
+                event_name,
+                EventHandlerCall {
+                    handler,
+                    args: call.args.clone(),
+                },
+            );
+        }
+        for child in &mut node.children {
+            old_apply_prop_handler_calls(child, props, prop_handler_calls);
+        }
+    }
+
+    #[test]
+    fn prop_handler_calls_still_bind_matching_handlers() {
+        let mut node = handler_tree(2);
+        let props = BTreeMap::from([("onMoveProp".into(), "onMove".into())]);
+        let calls = BTreeMap::from([(
+            "onMoveProp".into(),
+            EventHandlerCall {
+                handler: "handleMove".into(),
+                args: vec![serde_json::json!("bound")],
+            },
+        )]);
+
+        apply_prop_handler_calls(&mut node, &props, &calls);
+
+        assert_eq!(
+            node.event_handler_calls
+                .get("pointermove")
+                .map(|call| call.handler.as_str()),
+            Some("onMove")
+        );
+        assert_eq!(
+            node.children[0]
+                .event_handler_calls
+                .get("pointermove")
+                .map(|call| call.handler.as_str()),
+            Some("onMove")
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- prop_handler_matching_skips_event_handler_map_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only prop handler matching microbenchmark"]
+    fn prop_handler_matching_skips_event_handler_map_clone() {
+        let props = BTreeMap::from([("onSelected".into(), "missingHandler".into())]);
+        let calls = BTreeMap::from([(
+            "onSelected".into(),
+            EventHandlerCall {
+                handler: "select".into(),
+                args: vec![serde_json::json!("alpha")],
+            },
+        )]);
+        let template = handler_tree(64);
+        let iterations = 50_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let mut node = template.clone();
+            old_apply_prop_handler_calls(
+                std::hint::black_box(&mut node),
+                std::hint::black_box(&props),
+                std::hint::black_box(&calls),
+            );
+            old_total += std::hint::black_box(node.event_handler_calls.len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let mut node = template.clone();
+            apply_prop_handler_calls(
+                std::hint::black_box(&mut node),
+                std::hint::black_box(&props),
+                std::hint::black_box(&calls),
+            );
+            new_total += std::hint::black_box(node.event_handler_calls.len());
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "prop handler matching: clone event map {old_time:?}; borrow scan {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
 }
 
 impl FrontendSurfaceComponent {

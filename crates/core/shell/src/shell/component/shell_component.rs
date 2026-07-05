@@ -1,5 +1,5 @@
-use super::*;
 use super::runtime_tree::RetainedTreeDirtySummary;
+use super::*;
 use crate::shell::component::runtime::script_has_service_read;
 
 impl FrontendSurfaceComponent {
@@ -642,8 +642,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         // fingerprinting the full JSON snapshot when the retained diff proves
         // those inputs are unchanged.
         let element_metrics_changed = retained_dirty_affects_element_metrics(retained_dirty);
-        if self.scripts_use_element_metrics && element_metrics_changed {
-            self.publish_element_metrics(&tree);
+        if self.element_metric_usage.any() && element_metrics_changed {
+            self.publish_element_metrics(&tree, self.element_metric_usage);
         }
 
         let effective_damage_area = effective_damage.damage_area(display_list_metrics.surface_area);
@@ -897,7 +897,7 @@ impl ShellComponent for FrontendSurfaceComponent {
 
         let component_id = self.id().to_string();
         self.compiled = recompiled;
-        self.scripts_use_element_metrics = scripts_reference_element_metrics(&self.compiled);
+        self.element_metric_usage = element_metric_usage(&self.compiled);
         if let Some(entry) = self.frontend_catalog.modules.get_mut(&component_id) {
             entry.compiled = self.compiled.clone();
         }
@@ -2356,6 +2356,8 @@ mod tests {
                 std::hint::black_box(&tree),
                 0.0,
                 0.0,
+                true,
+                true,
                 &mut elements,
                 &mut refs,
                 &mut ref_keys,

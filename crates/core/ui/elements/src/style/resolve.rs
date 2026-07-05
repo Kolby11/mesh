@@ -905,11 +905,8 @@ impl<'a> StyleResolver<'a> {
         variables: &mut HashMap<String, StyleValue>,
     ) {
         for (property, value) in defaults {
-            let declaration = Declaration {
-                property: property.clone(),
-                value: classify_theme_style_value(value),
-            };
-            self.apply_declaration_no_diagnostics(style, &declaration, variables);
+            let value = classify_theme_style_value(value);
+            self.apply_property_value_no_diagnostics(style, property, &value, variables);
         }
     }
 
@@ -919,35 +916,45 @@ impl<'a> StyleResolver<'a> {
         decl: &Declaration,
         variables: &mut HashMap<String, StyleValue>,
     ) {
-        if decl.property.starts_with("--") {
-            variables.insert(decl.property.clone(), decl.value.clone());
+        self.apply_property_value_no_diagnostics(style, &decl.property, &decl.value, variables);
+    }
+
+    fn apply_property_value_no_diagnostics(
+        &self,
+        style: &mut ComputedStyle,
+        property: &str,
+        value: &StyleValue,
+        variables: &mut HashMap<String, StyleValue>,
+    ) {
+        if property.starts_with("--") {
+            variables.insert(property.to_string(), value.clone());
             return;
         }
-        if let Some(status) = style_profile_status(&decl.property)
+        if let Some(status) = style_profile_status(property)
             && !matches!(status, StyleProfileStatus::Implemented)
         {
             return;
         }
-        if !is_supported_css_property(&decl.property) {
+        if !is_supported_css_property(property) {
             return;
         }
-        if contains_deprecated_token_reference(&decl.value) {
+        if contains_deprecated_token_reference(value) {
             return;
         }
-        if is_strict_animation_property(&decl.property)
+        if is_strict_animation_property(property)
             && self
-                .validate_animation_value_with_variables(&decl.value, variables)
+                .validate_animation_value_with_variables(value, variables)
                 .is_err()
         {
             return;
         }
-        if decl.property == "background-image" {
-            let resolved = self.resolve_value_with_variables(&decl.value, variables);
+        if property == "background-image" {
+            let resolved = self.resolve_value_with_variables(value, variables);
             if !is_supported_background_image(&resolved) {
                 return;
             }
         }
-        apply_declaration(style, &decl.property, &decl.value, self, variables);
+        apply_declaration(style, property, value, self, variables);
     }
 
     fn apply_declaration_with_diagnostics(
@@ -2075,6 +2082,78 @@ mod tests {
         let index = StyleRuleIndex::new(&rules);
 
         assert_eq!(index.rules_for_state_bit(STATE_HOVERED), &[0]);
+    }
+
+    // cargo test -p mesh-core-elements --release -- theme_default_direct_apply_beats_declaration_allocation --ignored --nocapture
+    #[test]
+    #[ignore = "release-only theme default application microbenchmark"]
+    fn theme_default_direct_apply_beats_declaration_allocation() {
+        fn old_apply_theme_defaults_map_no_diagnostics(
+            resolver: &StyleResolver<'_>,
+            style: &mut ComputedStyle,
+            defaults: &mesh_core_theme::ComponentDefaults,
+            variables: &mut HashMap<String, StyleValue>,
+        ) {
+            for (property, value) in defaults {
+                let declaration = Declaration {
+                    property: property.clone(),
+                    value: classify_theme_style_value(value),
+                };
+                resolver.apply_declaration_no_diagnostics(style, &declaration, variables);
+            }
+        }
+
+        let mut defaults = mesh_core_theme::ComponentDefaults::new();
+        defaults.insert("background-color".into(), "#112233".into());
+        defaults.insert("color".into(), "#ffffff".into());
+        defaults.insert("font-size".into(), "13px".into());
+        defaults.insert("padding".into(), "4px 8px".into());
+        defaults.insert("border-radius".into(), "6px".into());
+        defaults.insert("gap".into(), "5px".into());
+        defaults.insert("opacity".into(), "0.875".into());
+        defaults.insert("--local-accent".into(), "#445566".into());
+
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let iterations = 200_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0u32;
+        for _ in 0..iterations {
+            let mut style = ComputedStyle::default();
+            let mut variables = HashMap::new();
+            old_apply_theme_defaults_map_no_diagnostics(
+                &resolver,
+                std::hint::black_box(&mut style),
+                &defaults,
+                &mut variables,
+            );
+            old_accumulator =
+                old_accumulator.wrapping_add(std::hint::black_box(style.background_color.r as u32));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0u32;
+        for _ in 0..iterations {
+            let mut style = ComputedStyle::default();
+            let mut variables = HashMap::new();
+            resolver.apply_theme_defaults_map_no_diagnostics(
+                std::hint::black_box(&mut style),
+                &defaults,
+                &mut variables,
+            );
+            new_accumulator =
+                new_accumulator.wrapping_add(std::hint::black_box(style.background_color.r as u32));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "theme defaults apply: declaration allocation {old_time:?}; direct property apply {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
     }
 
     #[test]

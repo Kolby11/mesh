@@ -40,35 +40,48 @@ impl FrontendSurfaceComponent {
         }
     }
 
-    pub(super) fn publish_element_metrics(&self, tree: &WidgetNode) {
+    pub(super) fn publish_element_metrics(&self, tree: &WidgetNode, usage: ElementMetricUsage) {
         let mut elements = serde_json::Map::new();
         let mut refs = serde_json::Map::new();
         let mut ref_keys = HashMap::new();
-        collect_element_metrics(tree, 0.0, 0.0, &mut elements, &mut refs, &mut ref_keys);
-        let elements_fingerprint = json_map_fingerprint(&elements);
-        let refs_fingerprint = json_map_fingerprint(&refs);
-        let refs = serde_json::Value::Object(refs);
+        collect_element_metrics(
+            tree,
+            0.0,
+            0.0,
+            usage.elements,
+            usage.refs,
+            &mut elements,
+            &mut refs,
+            &mut ref_keys,
+        );
+        let elements_fingerprint = usage.elements.then(|| json_map_fingerprint(&elements));
+        let refs_fingerprint = usage.refs.then(|| json_map_fingerprint(&refs));
+        let refs = usage.refs.then(|| serde_json::Value::Object(refs));
 
         if let Some(root_runtime) = self.runtimes.lock().unwrap().get_mut(self.id()) {
             // `elements` and the `refs` snapshot stay in script state (templates can
             // bind `{refs.x.width}`); `apply_element_metrics` additionally feeds the
             // live `refs.<name>` proxy that scripts read, which also exposes
             // imperative methods (`refs.x:focus()`).
-            root_runtime
-                .script_ctx
-                .state_mut()
-                .set_host_value_with_fingerprint(
-                    "elements",
-                    serde_json::Value::Object(elements),
-                    elements_fingerprint,
-                );
-            root_runtime
-                .script_ctx
-                .state_mut()
-                .set_host_value_with_fingerprint("refs", refs.clone(), refs_fingerprint);
-            root_runtime
-                .script_ctx
-                .apply_element_metrics_with_fingerprint(&refs, refs_fingerprint);
+            if let Some(fingerprint) = elements_fingerprint {
+                root_runtime
+                    .script_ctx
+                    .state_mut()
+                    .set_host_value_with_fingerprint(
+                        "elements",
+                        serde_json::Value::Object(elements),
+                        fingerprint,
+                    );
+            }
+            if let (Some(refs), Some(fingerprint)) = (refs, refs_fingerprint) {
+                root_runtime
+                    .script_ctx
+                    .state_mut()
+                    .set_host_value_with_fingerprint("refs", refs.clone(), fingerprint);
+                root_runtime
+                    .script_ctx
+                    .apply_element_metrics_with_fingerprint(&refs, fingerprint);
+            }
         }
         // Remember name -> node key so drained element actions resolve their target.
         *self.ref_node_keys.borrow_mut() = ref_keys;

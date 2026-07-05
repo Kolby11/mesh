@@ -33,7 +33,7 @@ fn json_value_ref_to_string(value: &serde_json::Value) -> String {
 /// memoized per expression string; only evaluation runs per frame.
 pub(crate) fn eval_expr(expr: &str, store: &dyn mesh_core_elements::VariableStore) -> String {
     let compiled = compiled_expr(expr);
-    eval_compiled(&compiled, store)
+    eval_compiled(&compiled, store).into_string()
 }
 
 /// Upper bound on memoized expressions. Template expressions are a fixed set
@@ -95,6 +95,89 @@ enum CompiledExpr {
     Literal(String),
     /// Bare variable or dotted path lookup.
     Path(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ExprValue {
+    Bool(bool),
+    Number {
+        value: f64,
+        source: Option<NumberSource>,
+    },
+    String(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum NumberSource {
+    Json(serde_json::Number),
+    Literal(String),
+}
+
+impl NumberSource {
+    fn into_string(self) -> String {
+        match self {
+            Self::Json(value) => value.to_string(),
+            Self::Literal(value) => value,
+        }
+    }
+
+    fn as_string(&self) -> String {
+        match self {
+            Self::Json(value) => value.to_string(),
+            Self::Literal(value) => value.clone(),
+        }
+    }
+}
+
+impl ExprValue {
+    fn into_string(self) -> String {
+        match self {
+            Self::Bool(value) => {
+                if value {
+                    "true".into()
+                } else {
+                    "false".into()
+                }
+            }
+            Self::Number { value, source } => {
+                source.map_or_else(|| format_number(value), NumberSource::into_string)
+            }
+            Self::String(value) => value,
+        }
+    }
+
+    fn as_string(&self) -> String {
+        match self {
+            Self::Bool(value) => {
+                if *value {
+                    "true".into()
+                } else {
+                    "false".into()
+                }
+            }
+            Self::Number { value, source } => source
+                .as_ref()
+                .map(NumberSource::as_string)
+                .unwrap_or_else(|| format_number(*value)),
+            Self::String(value) => value.clone(),
+        }
+    }
+
+    fn is_truthy(&self) -> bool {
+        match self {
+            Self::Bool(value) => *value,
+            Self::Number { value, .. } => *value != 0.0,
+            Self::String(value) => !matches!(value.as_str(), "false" | "nil" | "" | "0"),
+        }
+    }
+
+    fn numeric_value(&self) -> Option<f64> {
+        match self {
+            Self::Number { value, .. } => Some(*value),
+            Self::String(value) => value.parse::<f64>().ok(),
+            Self::Bool(_) => None,
+        }
+    }
 }
 
 fn parse_expr(expr: &str) -> CompiledExpr {
@@ -159,53 +242,54 @@ fn parse_expr(expr: &str) -> CompiledExpr {
     CompiledExpr::Path(expr.to_string())
 }
 
-fn is_truthy(value: &str) -> bool {
-    !matches!(value, "false" | "nil" | "" | "0")
-}
-
-fn bool_str(value: bool) -> String {
-    if value { "true".into() } else { "false".into() }
-}
-
-fn eval_compiled(expr: &CompiledExpr, store: &dyn mesh_core_elements::VariableStore) -> String {
+fn eval_compiled(expr: &CompiledExpr, store: &dyn mesh_core_elements::VariableStore) -> ExprValue {
     match expr {
         CompiledExpr::Length(name) => {
             if let Some(value) = store.get_ref(name) {
-                return json_value_len(value).to_string();
+                return ExprValue::Number {
+                    value: json_value_len(value) as f64,
+                    source: None,
+                };
             }
             match store.get(name) {
-                Some(value) => json_value_len(&value).to_string(),
-                _ => "0".into(),
+                Some(value) => ExprValue::Number {
+                    value: json_value_len(&value) as f64,
+                    source: None,
+                },
+                _ => ExprValue::Number {
+                    value: 0.0,
+                    source: None,
+                },
             }
         }
-        CompiledExpr::Not(inner) => bool_str(!is_truthy(&eval_compiled(inner, store))),
+        CompiledExpr::Not(inner) => ExprValue::Bool(!eval_compiled(inner, store).is_truthy()),
         CompiledExpr::Ternary {
             cond,
             then_val,
             else_val,
         } => {
-            if is_truthy(&eval_compiled(cond, store)) {
+            if eval_compiled(cond, store).is_truthy() {
                 eval_compiled(then_val, store)
             } else {
                 eval_compiled(else_val, store)
             }
         }
         CompiledExpr::And(lhs, rhs) => {
-            if !is_truthy(&eval_compiled(lhs, store)) {
-                return "false".into();
+            if !eval_compiled(lhs, store).is_truthy() {
+                return ExprValue::Bool(false);
             }
-            bool_str(is_truthy(&eval_compiled(rhs, store)))
+            ExprValue::Bool(eval_compiled(rhs, store).is_truthy())
         }
         CompiledExpr::Or(lhs, rhs) => {
-            if is_truthy(&eval_compiled(lhs, store)) {
-                return "true".into();
+            if eval_compiled(lhs, store).is_truthy() {
+                return ExprValue::Bool(true);
             }
-            bool_str(is_truthy(&eval_compiled(rhs, store)))
+            ExprValue::Bool(eval_compiled(rhs, store).is_truthy())
         }
         CompiledExpr::Compare { op, lhs, rhs } => {
             let l = eval_compiled(lhs, store);
             let r = eval_compiled(rhs, store);
-            let result = if let (Ok(ln), Ok(rn)) = (l.parse::<f64>(), r.parse::<f64>()) {
+            let result = if let (Some(ln), Some(rn)) = (l.numeric_value(), r.numeric_value()) {
                 match op {
                     CompareOp::Eq => (ln - rn).abs() < f64::EPSILON,
                     CompareOp::NotEq => (ln - rn).abs() >= f64::EPSILON,
@@ -215,24 +299,26 @@ fn eval_compiled(expr: &CompiledExpr, store: &dyn mesh_core_elements::VariableSt
                     CompareOp::Lt => ln < rn,
                 }
             } else {
+                let l = l.as_string();
+                let r = r.as_string();
                 match op {
                     CompareOp::Eq => l == r,
                     CompareOp::NotEq => l != r,
                     _ => false,
                 }
             };
-            bool_str(result)
+            ExprValue::Bool(result)
         }
         CompiledExpr::Concat(lhs, rhs) => {
-            let l = eval_compiled(lhs, store);
-            let r = eval_compiled(rhs, store);
-            format!("{l}{r}")
+            let l = eval_compiled(lhs, store).into_string();
+            let r = eval_compiled(rhs, store).into_string();
+            ExprValue::String(format!("{l}{r}"))
         }
         CompiledExpr::TranslateExpr(inner) => {
-            let resolved = eval_compiled(inner, store);
-            store.translate(&resolved).unwrap_or(resolved)
+            let resolved = eval_compiled(inner, store).into_string();
+            ExprValue::String(store.translate(&resolved).unwrap_or(resolved))
         }
-        CompiledExpr::Literal(s) => s.clone(),
+        CompiledExpr::Literal(s) => ExprValue::String(s.clone()),
         CompiledExpr::Path(path) => eval_path(path, store),
     }
 }
@@ -292,33 +378,79 @@ fn balanced_parens(expr: &str) -> bool {
     depth == 0
 }
 
-fn eval_path(expr: &str, store: &dyn mesh_core_elements::VariableStore) -> String {
+fn eval_path(expr: &str, store: &dyn mesh_core_elements::VariableStore) -> ExprValue {
     if let Some(value) = store.get_ref(expr) {
-        return json_value_ref_to_string(value);
+        return json_value_ref_to_expr_value(value);
     }
 
     let parts: Vec<&str> = expr.splitn(2, '.').collect();
     if parts.len() == 2 {
         if let Some(root) = store.get_ref(parts[0]) {
             if let Some(nested) = json_path_ref(root, parts[1]) {
-                return json_value_ref_to_string(nested);
+                return json_value_ref_to_expr_value(nested);
             }
         }
     }
 
     if let Some(value) = store.get(expr) {
-        return json_value_to_string(value);
+        return json_value_to_expr_value(value);
     }
 
     if parts.len() == 2 {
         if let Some(root) = store.get(parts[0]) {
             if let Some(nested) = json_path(root, parts[1]) {
-                return json_value_to_string(nested);
+                return json_value_to_expr_value(nested);
             }
         }
     }
 
-    expr.to_string()
+    if let Ok(value) = expr.parse::<f64>() {
+        return ExprValue::Number {
+            value,
+            source: Some(NumberSource::Literal(expr.to_string())),
+        };
+    }
+
+    ExprValue::String(expr.to_string())
+}
+
+fn json_value_to_expr_value(value: serde_json::Value) -> ExprValue {
+    match value {
+        serde_json::Value::Bool(value) => ExprValue::Bool(value),
+        serde_json::Value::Number(value) => {
+            if let Some(number) = value.as_f64() {
+                ExprValue::Number {
+                    value: number,
+                    source: Some(NumberSource::Json(value)),
+                }
+            } else {
+                ExprValue::String(value.to_string())
+            }
+        }
+        other => ExprValue::String(json_value_to_string(other)),
+    }
+}
+
+fn json_value_ref_to_expr_value(value: &serde_json::Value) -> ExprValue {
+    match value {
+        serde_json::Value::Bool(value) => ExprValue::Bool(*value),
+        serde_json::Value::Number(value) => value
+            .as_f64()
+            .map(|number| ExprValue::Number {
+                value: number,
+                source: Some(NumberSource::Json(value.clone())),
+            })
+            .unwrap_or_else(|| ExprValue::String(value.to_string())),
+        other => ExprValue::String(json_value_ref_to_string(other)),
+    }
+}
+
+fn format_number(value: f64) -> String {
+    if value.fract() == 0.0 && value >= i64::MIN as f64 && value <= i64::MAX as f64 {
+        (value as i64).to_string()
+    } else {
+        value.to_string()
+    }
 }
 
 fn json_value_len(value: &serde_json::Value) -> usize {

@@ -9,9 +9,9 @@ use mesh_core_interaction::{
     annotate_overflow_tree, collect_focus_traversal, find_click_handler, find_event_handler,
     find_focusable_at, find_node_bounds_by_key, find_node_by_key, find_node_path_at,
     find_scrollable_at, find_tooltip_by_key, find_tooltip_container_bounds, is_input_key,
-    is_slider_key, measure_content_size,
-    namespace_event_handlers, next_focus_target, node_is_source, parse_namespaced_handler,
-    scroll_into_view_offsets, scroll_limits, source_element_tag,
+    is_slider_key, measure_content_size, namespace_event_handlers, next_focus_target,
+    node_is_source, parse_namespaced_handler, scroll_into_view_offsets, scroll_limits,
+    source_element_tag,
 };
 mod animation;
 mod catalog;
@@ -86,7 +86,11 @@ pub(in crate::shell) fn tooltip_overlay_extra_for_content(width: u32, height: u3
     } else {
         0
     };
-    let extra_h = if height > 0 { TOOLTIP_OVERLAY_HEIGHT } else { 0 };
+    let extra_h = if height > 0 {
+        TOOLTIP_OVERLAY_HEIGHT
+    } else {
+        0
+    };
     (extra_w, extra_h)
 }
 
@@ -512,12 +516,23 @@ pub(super) struct FrontendSurfaceComponent {
     /// across restyle passes; `is_for()` verifies identity against the rules
     /// slice before each restyle so a rules rebuild forces a rebuild here too.
     cached_style_rule_index: Option<mesh_core_elements::style::StyleRuleIndex>,
-    /// Whether any script in the compiled module references `elements` or
-    /// `refs`. When false, `publish_element_metrics` is skipped: building the
-    /// per-element JSON snapshot every paint costs ~10% of an interaction
-    /// frame and is wasted on scripts that never read it. Recomputed on
-    /// source reload.
-    scripts_use_element_metrics: bool,
+    /// Which per-element host metric tables this module can observe. When both
+    /// flags are false, `publish_element_metrics` is skipped: building the JSON
+    /// snapshots costs meaningful interaction-frame time and is wasted on
+    /// scripts that never read them. Recomputed on source reload.
+    element_metric_usage: ElementMetricUsage,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ElementMetricUsage {
+    elements: bool,
+    refs: bool,
+}
+
+impl ElementMetricUsage {
+    fn any(self) -> bool {
+        self.elements || self.refs
+    }
 }
 
 #[derive(Debug)]
@@ -542,7 +557,7 @@ impl FrontendSurfaceComponent {
         let settings_state =
             load_frontend_module_settings(&module_settings_file, &compiled.manifest);
         let service_payload_capacity = service_payload_cache_capacity(&compiled.manifest);
-        let scripts_use_element_metrics = scripts_reference_element_metrics(&compiled);
+        let element_metric_usage = element_metric_usage(&compiled);
         let has_animatable_style_rules = compiled_module_has_animatable_style_rules(&compiled);
         Self {
             compiled,
@@ -643,7 +658,7 @@ impl FrontendSurfaceComponent {
             effective_damage_scratch: Vec::new(),
             cached_restyle_rules: None,
             cached_style_rule_index: None,
-            scripts_use_element_metrics,
+            element_metric_usage,
         }
     }
 
@@ -843,88 +858,126 @@ fn tracked_service_fields_changed(
     })
 }
 
-/// Whether any script block in the module references the `elements` or `refs`
-/// host tables. Substring match over the raw sources: a false positive only
-/// re-enables the old always-publish behavior, never breaks a consumer.
-fn scripts_reference_element_metrics(compiled: &CompiledFrontendModule) -> bool {
-    let uses_metrics = |source: &str| {
-        ["refs.", "refs[", "elements.", "elements["]
-            .iter()
-            .any(|pattern| source.contains(pattern))
-    };
-    compiled
-        .component
-        .script
+/// Which element metric host tables a module can observe. Substring matches over
+/// raw script/expression sources are intentionally conservative: a false
+/// positive only re-enables publication, never breaks a consumer.
+fn element_metric_usage(compiled: &CompiledFrontendModule) -> ElementMetricUsage {
+    let mut usage =
+        component_element_metric_usage(&compiled.component.script, &compiled.component.template);
+    for component in compiled.local_components.values() {
+        let component_usage =
+            component_element_metric_usage(&component.script, &component.template);
+        usage.elements |= component_usage.elements;
+        usage.refs |= component_usage.refs;
+    }
+    usage
+}
+
+fn component_element_metric_usage(
+    script: &Option<mesh_core_component::ScriptBlock>,
+    template: &Option<mesh_core_component::template::TemplateBlock>,
+) -> ElementMetricUsage {
+    let mut usage = ElementMetricUsage::default();
+    if let Some(script) = script {
+        usage.elements |= source_uses_element_metrics_table(&script.source, "elements");
+        usage.refs |= source_uses_element_metrics_table(&script.source, "refs");
+    }
+    let template_usage = template_element_metric_usage(template);
+    usage.elements |= template_usage.elements;
+    usage.refs |= template_usage.refs;
+    usage.refs |= template_declares_element_refs(template) || template_uses_bind_this(template);
+    usage
+}
+
+fn source_uses_element_metrics_table(source: &str, table: &str) -> bool {
+    match table {
+        "elements" => source.contains("elements.") || source.contains("elements["),
+        "refs" => source.contains("refs.") || source.contains("refs["),
+        _ => false,
+    }
+}
+
+fn template_element_metric_usage(
+    template: &Option<mesh_core_component::template::TemplateBlock>,
+) -> ElementMetricUsage {
+    template
         .as_ref()
-        .is_some_and(|script| uses_metrics(&script.source))
-        || template_references_element_metrics(&compiled.component.template, &uses_metrics)
-        || template_declares_element_refs(&compiled.component.template)
-        || template_uses_bind_this(&compiled.component.template)
-        || compiled.local_components.values().any(|component| {
-            component
-                .script
-                .as_ref()
-                .is_some_and(|script| uses_metrics(&script.source))
-                || template_references_element_metrics(&component.template, &uses_metrics)
-                || template_declares_element_refs(&component.template)
-                || template_uses_bind_this(&component.template)
+        .map_or_else(ElementMetricUsage::default, |template| {
+            nodes_element_metric_usage(&template.root)
         })
 }
 
-fn template_references_element_metrics(
-    template: &Option<mesh_core_component::template::TemplateBlock>,
-    uses_metrics: &impl Fn(&str) -> bool,
-) -> bool {
-    template
-        .as_ref()
-        .is_some_and(|template| nodes_reference_element_metrics(&template.root, uses_metrics))
+fn nodes_element_metric_usage(nodes: &[TemplateNode]) -> ElementMetricUsage {
+    let mut usage = ElementMetricUsage::default();
+    for node in nodes {
+        let node_usage = match node {
+            TemplateNode::Element(element) => {
+                let mut usage = attributes_element_metric_usage(&element.attributes);
+                let child_usage = nodes_element_metric_usage(&element.children);
+                usage.elements |= child_usage.elements;
+                usage.refs |= child_usage.refs;
+                usage
+            }
+            TemplateNode::Component(component) => {
+                let mut usage = attributes_element_metric_usage(&component.props);
+                let child_usage = nodes_element_metric_usage(&component.children);
+                usage.elements |= child_usage.elements;
+                usage.refs |= child_usage.refs;
+                usage
+            }
+            TemplateNode::If(if_node) => {
+                let mut usage = nodes_element_metric_usage(&if_node.then_children);
+                let else_usage = nodes_element_metric_usage(&if_node.else_children);
+                usage.elements |= else_usage.elements;
+                usage.refs |= else_usage.refs;
+                usage
+            }
+            TemplateNode::For(for_node) => nodes_element_metric_usage(&for_node.children),
+            TemplateNode::Text(text) => string_element_metric_usage(&text.content),
+            TemplateNode::Expr(expr) => string_element_metric_usage(&expr.expression),
+            TemplateNode::Slot(_) => ElementMetricUsage::default(),
+        };
+        usage.elements |= node_usage.elements;
+        usage.refs |= node_usage.refs;
+    }
+    usage
 }
 
-fn nodes_reference_element_metrics(
-    nodes: &[TemplateNode],
-    uses_metrics: &impl Fn(&str) -> bool,
-) -> bool {
-    nodes.iter().any(|node| match node {
-        TemplateNode::Element(element) => {
-            element
-                .attributes
-                .iter()
-                .any(|attribute| attribute_value_references_metrics(&attribute.value, uses_metrics))
-                || nodes_reference_element_metrics(&element.children, uses_metrics)
-        }
-        TemplateNode::Component(component) => {
-            component
-                .props
-                .iter()
-                .any(|attribute| attribute_value_references_metrics(&attribute.value, uses_metrics))
-                || nodes_reference_element_metrics(&component.children, uses_metrics)
-        }
-        TemplateNode::If(if_node) => {
-            nodes_reference_element_metrics(&if_node.then_children, uses_metrics)
-                || nodes_reference_element_metrics(&if_node.else_children, uses_metrics)
-        }
-        TemplateNode::For(for_node) => {
-            nodes_reference_element_metrics(&for_node.children, uses_metrics)
-        }
-        TemplateNode::Text(text) => uses_metrics(&text.content),
-        TemplateNode::Expr(expr) => uses_metrics(&expr.expression),
-        TemplateNode::Slot(_) => false,
-    })
+fn attributes_element_metric_usage(
+    attributes: &[mesh_core_component::template::Attribute],
+) -> ElementMetricUsage {
+    let mut usage = ElementMetricUsage::default();
+    for attribute in attributes {
+        let attribute_usage = attribute_value_element_metric_usage(&attribute.value);
+        usage.elements |= attribute_usage.elements;
+        usage.refs |= attribute_usage.refs;
+    }
+    usage
 }
 
-fn attribute_value_references_metrics(
-    value: &AttributeValue,
-    uses_metrics: &impl Fn(&str) -> bool,
-) -> bool {
+fn attribute_value_element_metric_usage(value: &AttributeValue) -> ElementMetricUsage {
     match value {
         AttributeValue::Static(value)
         | AttributeValue::Binding(value)
         | AttributeValue::TwoWayBinding(value)
         | AttributeValue::InstanceBinding(value)
-        | AttributeValue::EventHandler(value) => uses_metrics(value),
+        | AttributeValue::EventHandler(value) => string_element_metric_usage(value),
         AttributeValue::EventHandlerCall { handler, args } => {
-            uses_metrics(handler) || args.iter().any(|arg| uses_metrics(arg))
+            let mut usage = string_element_metric_usage(handler);
+            for arg in args {
+                let arg_usage = string_element_metric_usage(arg);
+                usage.elements |= arg_usage.elements;
+                usage.refs |= arg_usage.refs;
+            }
+            usage
         }
+    }
+}
+
+fn string_element_metric_usage(value: &str) -> ElementMetricUsage {
+    ElementMetricUsage {
+        elements: source_uses_element_metrics_table(value, "elements"),
+        refs: source_uses_element_metrics_table(value, "refs"),
     }
 }
 

@@ -472,6 +472,95 @@ mod tests {
     }
 
     #[test]
+    fn eval_expr_preserves_numeric_and_boolean_semantics() {
+        let store = MapStore(
+            [
+                ("count".to_string(), serde_json::json!(12)),
+                ("limit".to_string(), serde_json::json!(8)),
+                ("ratio".to_string(), serde_json::json!(12.0)),
+                ("enabled".to_string(), serde_json::json!(true)),
+                ("empty".to_string(), serde_json::json!(0)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+
+        assert_eq!(expr::eval_expr("count", &store), "12");
+        assert_eq!(
+            expr::eval_expr("ratio", &store),
+            serde_json::json!(12.0).to_string()
+        );
+        assert_eq!(expr::eval_expr("count > limit", &store), "true");
+        assert_eq!(expr::eval_expr("count == '12'", &store), "true");
+        assert_eq!(expr::eval_expr("enabled and count > limit", &store), "true");
+        assert_eq!(expr::eval_expr("not empty", &store), "true");
+    }
+
+    // Run with:
+    // cargo test -p mesh-core-frontend --release -- eval_expr_typed_compare_beats_string_parse_compare --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn eval_expr_typed_compare_beats_string_parse_compare() {
+        use std::time::Instant;
+
+        fn old_string_compare(left: &serde_json::Value, right: &serde_json::Value) -> bool {
+            let left = match left {
+                serde_json::Value::String(value) => value.clone(),
+                serde_json::Value::Null => String::new(),
+                other => other.to_string(),
+            };
+            let right = match right {
+                serde_json::Value::String(value) => value.clone(),
+                serde_json::Value::Null => String::new(),
+                other => other.to_string(),
+            };
+            if let (Ok(left), Ok(right)) = (left.parse::<f64>(), right.parse::<f64>()) {
+                left > right
+            } else {
+                false
+            }
+        }
+
+        let store = MapStore(
+            [
+                ("count".to_string(), serde_json::json!(12.5)),
+                ("limit".to_string(), serde_json::json!(8.25)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let left = serde_json::json!(12.5);
+        let right = serde_json::json!(8.25);
+        let iterations = 500_000usize;
+
+        let old_start = Instant::now();
+        let mut old_count = 0usize;
+        for _ in 0..iterations {
+            old_count += usize::from(old_string_compare(
+                std::hint::black_box(&left),
+                std::hint::black_box(&right),
+            ));
+        }
+        let old_time = old_start.elapsed();
+
+        let typed_start = Instant::now();
+        let mut typed_count = 0usize;
+        for _ in 0..iterations {
+            typed_count += usize::from(
+                expr::eval_expr("count > limit", std::hint::black_box(&store)) == "true",
+            );
+        }
+        let typed_time = typed_start.elapsed();
+
+        eprintln!(
+            "typed expression compare: string-parse {old_time:?}; typed {typed_time:?}; ratio {:.1}x; counts={old_count}/{typed_count}",
+            old_time.as_secs_f64() / typed_time.as_secs_f64()
+        );
+        assert_eq!(old_count, typed_count);
+        assert!(typed_time < old_time);
+    }
+
+    #[test]
     fn for_node_iterates_over_list() {
         let source = r#"
 <template>

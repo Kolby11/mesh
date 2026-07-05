@@ -110,37 +110,9 @@ impl RetainedWidgetTree {
         let mut next_dirty = std::mem::take(&mut self.next_dirty_scratch);
         next_dirty.clear();
 
-        for (&node_id, next) in &next_nodes {
-            match self.node_keys.get(&node_id).copied() {
-                Some(previous) => {
-                    if let Some(previous_snapshot) = self.nodes.get(previous) {
-                        let (flags, node_state_bits) = previous_snapshot.diff_flags(next);
-                        if flags.is_empty() {
-                            continue;
-                        }
-                        dirty.add_flags(flags);
-                        dirty.changed_state_bits |= node_state_bits;
-                        next_dirty.insert(previous, flags);
-                        if let Some(slot) = self.nodes.get_mut(previous) {
-                            *slot = next.clone();
-                        }
-                    } else {
-                        let key = self.nodes.insert(next.clone());
-                        self.node_keys.insert(node_id, key);
-                        next_dirty.insert(key, RetainedNodeDirtyFlags::INSERTED);
-                        dirty.inserted += 1;
-                    }
-                }
-                None => {
-                    let key = self.nodes.insert(next.clone());
-                    self.node_keys.insert(node_id, key);
-                    next_dirty.insert(key, RetainedNodeDirtyFlags::INSERTED);
-                    dirty.inserted += 1;
-                }
-            }
-        }
-
-        // Remove nodes no longer in the tree — retain avoids the intermediate Vec.
+        // Remove stale nodes before draining the scratch map. This lets the
+        // update loop move changed snapshots into retained storage instead of
+        // cloning them while still reusing the scratch map allocation.
         {
             let RetainedWidgetTree {
                 ref mut nodes,
@@ -155,6 +127,36 @@ impl RetainedWidgetTree {
                 dirty.removed += 1;
                 false
             });
+        }
+
+        for (node_id, next) in next_nodes.drain() {
+            match self.node_keys.get(&node_id).copied() {
+                Some(previous) => {
+                    if let Some(previous_snapshot) = self.nodes.get(previous) {
+                        let (flags, node_state_bits) = previous_snapshot.diff_flags(&next);
+                        if flags.is_empty() {
+                            continue;
+                        }
+                        dirty.add_flags(flags);
+                        dirty.changed_state_bits |= node_state_bits;
+                        next_dirty.insert(previous, flags);
+                        if let Some(slot) = self.nodes.get_mut(previous) {
+                            *slot = next;
+                        }
+                    } else {
+                        let key = self.nodes.insert(next);
+                        self.node_keys.insert(node_id, key);
+                        next_dirty.insert(key, RetainedNodeDirtyFlags::INSERTED);
+                        dirty.inserted += 1;
+                    }
+                }
+                None => {
+                    let key = self.nodes.insert(next);
+                    self.node_keys.insert(node_id, key);
+                    next_dirty.insert(key, RetainedNodeDirtyFlags::INSERTED);
+                    dirty.inserted += 1;
+                }
+            }
         }
 
         if dirty.any() {
@@ -476,10 +478,55 @@ fn attributes_fingerprint(node: &WidgetNode) -> u64 {
         event.hash(&mut hasher);
         call.handler.hash(&mut hasher);
         for arg in &call.args {
-            arg.to_string().hash(&mut hasher);
+            hash_json_value(arg, &mut hasher);
         }
     }
     hasher.finish()
+}
+
+fn hash_json_value(value: &serde_json::Value, hasher: &mut impl Hasher) {
+    match value {
+        serde_json::Value::Null => 0u8.hash(hasher),
+        serde_json::Value::Bool(value) => {
+            1u8.hash(hasher);
+            value.hash(hasher);
+        }
+        serde_json::Value::Number(value) => {
+            2u8.hash(hasher);
+            if let Some(value) = value.as_i64() {
+                0u8.hash(hasher);
+                value.hash(hasher);
+            } else if let Some(value) = value.as_u64() {
+                1u8.hash(hasher);
+                value.hash(hasher);
+            } else if let Some(value) = value.as_f64() {
+                2u8.hash(hasher);
+                value.to_bits().hash(hasher);
+            } else {
+                3u8.hash(hasher);
+                value.to_string().hash(hasher);
+            }
+        }
+        serde_json::Value::String(value) => {
+            3u8.hash(hasher);
+            value.hash(hasher);
+        }
+        serde_json::Value::Array(values) => {
+            4u8.hash(hasher);
+            values.len().hash(hasher);
+            for value in values {
+                hash_json_value(value, hasher);
+            }
+        }
+        serde_json::Value::Object(values) => {
+            5u8.hash(hasher);
+            values.len().hash(hasher);
+            for (key, value) in values {
+                key.hash(hasher);
+                hash_json_value(value, hasher);
+            }
+        }
+    }
 }
 
 /// Converts ElementState to a u32 bitmask using stable bit positions.
@@ -598,45 +645,50 @@ pub(super) fn collect_element_metrics(
     node: &WidgetNode,
     offset_x: f32,
     offset_y: f32,
+    collect_elements: bool,
+    collect_refs: bool,
     elements: &mut serde_json::Map<String, serde_json::Value>,
     refs: &mut serde_json::Map<String, serde_json::Value>,
     ref_keys: &mut HashMap<String, String>,
 ) {
-    let metrics = element_snapshot_json(node, offset_x, offset_y);
-    let scroll_x = metrics
-        .get("scroll_x")
-        .and_then(serde_json::Value::as_f64)
-        .unwrap_or(0.0) as f32;
-    let scroll_y = metrics
-        .get("scroll_y")
-        .and_then(serde_json::Value::as_f64)
-        .unwrap_or(0.0) as f32;
-
     let node_key = node.attributes.get("_mesh_key");
-    if let Some(key) = node_key {
+    let publishes_element = collect_elements && node_key.is_some();
+    let publishes_ref = collect_refs
+        && (node.attributes.contains_key("id")
+            || node.attributes.contains_key("ref")
+            || node.attributes.contains_key("_mesh_bind_this"));
+
+    let metrics = (publishes_element || publishes_ref)
+        .then(|| element_snapshot_json(node, offset_x, offset_y));
+
+    if collect_elements && let (Some(key), Some(metrics)) = (node_key, metrics.as_ref()) {
         elements.insert(key.clone(), metrics.clone());
     }
     // Map each `refs.<name>` to the node's runtime key so imperative element
     // actions (focus/blur/…) can resolve a name back to the live widget node.
-    if let Some(id) = node.attributes.get("id") {
-        refs.insert(id.clone(), metrics.clone());
-        if let Some(key) = node_key {
-            ref_keys.insert(id.clone(), key.clone());
+    if collect_refs && let Some(metrics) = metrics.as_ref() {
+        if let Some(id) = node.attributes.get("id") {
+            refs.insert(id.clone(), metrics.clone());
+            if let Some(key) = node_key {
+                ref_keys.insert(id.clone(), key.clone());
+            }
         }
-    }
-    if let Some(reference) = node.attributes.get("ref") {
-        refs.insert(reference.clone(), metrics.clone());
-        if let Some(key) = node_key {
-            ref_keys.insert(reference.clone(), key.clone());
+        if let Some(reference) = node.attributes.get("ref") {
+            refs.insert(reference.clone(), metrics.clone());
+            if let Some(key) = node_key {
+                ref_keys.insert(reference.clone(), key.clone());
+            }
         }
-    }
-    if let Some(binding) = node.attributes.get("_mesh_bind_this") {
-        refs.insert(binding.clone(), metrics);
-        if let Some(key) = node_key {
-            ref_keys.insert(binding.clone(), key.clone());
+        if let Some(binding) = node.attributes.get("_mesh_bind_this") {
+            refs.insert(binding.clone(), metrics.clone());
+            if let Some(key) = node_key {
+                ref_keys.insert(binding.clone(), key.clone());
+            }
         }
     }
 
+    let scroll_x = node_attr_f32(node, "_mesh_scroll_x");
+    let scroll_y = node_attr_f32(node, "_mesh_scroll_y");
     let child_offset_x = offset_x - scroll_x;
     let child_offset_y = offset_y - scroll_y;
     for child in &node.children {
@@ -644,11 +696,20 @@ pub(super) fn collect_element_metrics(
             child,
             child_offset_x,
             child_offset_y,
+            collect_elements,
+            collect_refs,
             elements,
             refs,
             ref_keys,
         );
     }
+}
+
+fn node_attr_f32(node: &WidgetNode, key: &str) -> f32 {
+    node.attributes
+        .get(key)
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0)
 }
 
 pub(super) struct RuntimeAnnotationContext<'a> {
@@ -1165,6 +1226,78 @@ mod tests {
         assert_ne!(attributes_fingerprint(&node), original);
     }
 
+    #[test]
+    fn attribute_fingerprint_tracks_typed_handler_arg_changes() {
+        let mut node = WidgetNode::new("button");
+        node.event_handler_calls.insert(
+            "click".into(),
+            mesh_core_elements::EventHandlerCall {
+                handler: "select".into(),
+                args: vec![serde_json::json!({
+                    "id": "alpha",
+                    "meta": { "index": 1, "enabled": true },
+                    "tags": ["a", "b"]
+                })],
+            },
+        );
+        let original = attributes_fingerprint(&node);
+
+        node.event_handler_calls
+            .get_mut("click")
+            .expect("call")
+            .args[0]["meta"]["index"] = serde_json::json!(2);
+
+        assert_ne!(attributes_fingerprint(&node), original);
+    }
+
+    // cargo test -p mesh-core-shell --release -- typed_json_arg_hashing_beats_to_string_fingerprint --ignored --nocapture
+    #[test]
+    #[ignore = "release-only JSON handler arg fingerprint microbenchmark"]
+    fn typed_json_arg_hashing_beats_to_string_fingerprint() {
+        fn old_hash_json_value(value: &serde_json::Value, hasher: &mut impl Hasher) {
+            value.to_string().hash(hasher);
+        }
+
+        let arg = serde_json::json!({
+            "id": "alpha",
+            "meta": {
+                "index": 42,
+                "enabled": true,
+                "ratio": 0.875,
+                "label": "A moderately long label used by a pre-bound handler"
+            },
+            "tags": ["audio", "primary", "interactive", "toolbar"],
+            "bounds": { "x": 10, "y": 20, "width": 140, "height": 32 }
+        });
+        let iterations = 500_000;
+
+        let old_started = Instant::now();
+        let mut old_accumulator = 0u64;
+        for _ in 0..iterations {
+            let mut hasher = RuntimeTreeHasher::default();
+            old_hash_json_value(std::hint::black_box(&arg), &mut hasher);
+            old_accumulator = old_accumulator.wrapping_add(std::hint::black_box(hasher.finish()));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_accumulator = 0u64;
+        for _ in 0..iterations {
+            let mut hasher = RuntimeTreeHasher::default();
+            hash_json_value(std::hint::black_box(&arg), &mut hasher);
+            new_accumulator = new_accumulator.wrapping_add(std::hint::black_box(hasher.finish()));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "typed JSON arg fingerprint: to_string {old_time:?}; direct hash {new_time:?}; ratio {:.1}x; accumulators={old_accumulator:x}/{new_accumulator:x}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_ne!(old_accumulator, 0);
+        assert_ne!(new_accumulator, 0);
+        assert!(new_time < old_time);
+    }
+
     // cargo test -p mesh-core-shell --release -- attribute_fingerprint_skips_redundant_runtime_key_hash --ignored --nocapture
     #[test]
     #[ignore = "release-only attribute fingerprint microbenchmark"]
@@ -1307,6 +1440,64 @@ mod tests {
         );
         assert_eq!(old_count, new_count);
         assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- drained_retained_snapshot_map_beats_clone_transfer --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained snapshot update microbenchmark"]
+    fn drained_retained_snapshot_map_beats_clone_transfer() {
+        let snapshots = (0..256_u64)
+            .map(|index| {
+                let mut child_ids = SmallVec::<[NodeId; 8]>::new();
+                child_ids.extend((0..6).map(|child| index * 16 + child));
+                (
+                    index,
+                    RetainedNodeSnapshot {
+                        layout: (index as u32, 1, 2, 3),
+                        style_hash: index.wrapping_mul(31),
+                        attributes_hash: index.wrapping_mul(131),
+                        child_ids,
+                        state: ElementState {
+                            hovered: index % 2 == 0,
+                            focused: index % 3 == 0,
+                            ..ElementState::default()
+                        },
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let iterations = 20_000;
+
+        let clone_started = Instant::now();
+        let mut clone_total = 0usize;
+        for _ in 0..iterations {
+            let source = snapshots.clone();
+            let mut slots = HashMap::with_capacity(source.len());
+            for (&id, snapshot) in &source {
+                slots.insert(id, snapshot.clone());
+            }
+            clone_total += std::hint::black_box(slots.len());
+        }
+        let clone_time = clone_started.elapsed();
+
+        let move_started = Instant::now();
+        let mut move_total = 0usize;
+        for _ in 0..iterations {
+            let mut source = snapshots.clone();
+            let mut slots = HashMap::with_capacity(source.len());
+            for (id, snapshot) in source.drain() {
+                slots.insert(id, snapshot);
+            }
+            move_total += std::hint::black_box(slots.len());
+        }
+        let move_time = move_started.elapsed();
+
+        eprintln!(
+            "retained snapshot map transfer: clone {clone_time:?}; drain-move {move_time:?}; ratio {:.1}x; counts={clone_total}/{move_total}",
+            clone_time.as_secs_f64() / move_time.as_secs_f64()
+        );
+        assert_eq!(clone_total, move_total);
+        assert!(move_time < clone_time);
     }
 
     #[test]

@@ -552,12 +552,14 @@ impl FrontendSurfaceComponent {
             .or_else(|| theme.token("color.on-primary"))
             .map(ToString::to_string)
             .unwrap_or_else(|| "#FFFFFF".to_string());
-        annotate_selection_node(
-            tree,
-            selection,
-            &selection_background,
-            &selection_foreground,
-        );
+        if let Some(node) = find_node_by_key_mut(tree, &selection.anchor.node_key) {
+            annotate_selected_text_node(
+                node,
+                selection,
+                &selection_background,
+                &selection_foreground,
+            );
+        }
     }
 
     fn record_runtime_style_diagnostics(
@@ -710,6 +712,82 @@ mod interaction_changed_key_tests {
         build(0, width, depth)
     }
 
+    fn broad_keyed_tree_with_selected_text(width: usize, depth: usize) -> (WidgetNode, String) {
+        fn build(key: String, width: usize, depth: usize, target: &str) -> WidgetNode {
+            let mut node = if key == target {
+                let mut text = WidgetNode::new("text");
+                text.attributes.insert("selectable".into(), "true".into());
+                text.attributes.insert("content".into(), "selected".into());
+                text
+            } else {
+                WidgetNode::new("box")
+            };
+            node.attributes.insert("_mesh_key".into(), key.clone());
+            node.layout.x = key.len() as f32;
+            node.layout.y = key.len() as f32 * 0.5;
+            if depth > 0 {
+                node.children = (0..width)
+                    .map(|index| build(format!("{key}/{index}"), width, depth - 1, target))
+                    .collect();
+            }
+            node
+        }
+
+        let target = "root/3/3/3/3/3".to_string();
+        (build("root".into(), width, depth, &target), target)
+    }
+
+    fn old_annotate_selection_node(
+        node: &mut WidgetNode,
+        selection: &TextSelectionState,
+        selection_background: &str,
+        selection_foreground: &str,
+    ) -> bool {
+        let matches_selection = node
+            .attributes
+            .get("_mesh_key")
+            .is_some_and(|key| key == &selection.anchor.node_key);
+        if matches_selection
+            && annotate_selected_text_node(
+                node,
+                selection,
+                selection_background,
+                selection_foreground,
+            )
+        {
+            return true;
+        }
+
+        for child in &mut node.children {
+            if old_annotate_selection_node(
+                child,
+                selection,
+                selection_background,
+                selection_foreground,
+            ) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn benchmark_selection(target: String) -> TextSelectionState {
+        TextSelectionState {
+            anchor: TextSelectionPoint {
+                node_key: target.clone(),
+                x: 2.0,
+                y: 3.0,
+            },
+            focus: TextSelectionPoint {
+                node_key: target,
+                x: 18.0,
+                y: 3.0,
+            },
+            dragging: true,
+        }
+    }
+
     #[test]
     fn collect_changed_subtree_node_ids_collects_descendants_in_one_walk() {
         let tree = keyed_node(
@@ -837,6 +915,88 @@ mod interaction_changed_key_tests {
         );
         assert!(gated_time * 10 < old_time);
     }
+
+    #[test]
+    fn keyed_selection_annotation_only_marks_selectable_text_target() {
+        let target = "root/0".to_string();
+        let selection = benchmark_selection(target.clone());
+        let mut selectable = WidgetNode::new("text");
+        selectable.attributes.insert("_mesh_key".into(), target);
+        selectable
+            .attributes
+            .insert("selectable".into(), "true".into());
+        assert!(annotate_selected_text_node(
+            &mut selectable,
+            &selection,
+            "#112233",
+            "#ffffff"
+        ));
+        assert!(
+            selectable
+                .attributes
+                .contains_key("_mesh_selection_background")
+        );
+
+        let mut non_selectable = WidgetNode::new("text");
+        non_selectable
+            .attributes
+            .insert("_mesh_key".into(), "root/0".into());
+        assert!(!annotate_selected_text_node(
+            &mut non_selectable,
+            &selection,
+            "#112233",
+            "#ffffff"
+        ));
+        assert!(
+            !non_selectable
+                .attributes
+                .contains_key("_mesh_selection_background")
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- keyed_selection_annotation_beats_recursive_tree_walk --ignored --nocapture
+    #[test]
+    #[ignore = "release-only selection annotation microbenchmark"]
+    fn keyed_selection_annotation_beats_recursive_tree_walk() {
+        let (tree, target) = broad_keyed_tree_with_selected_text(4, 5);
+        let selection = benchmark_selection(target);
+        let iterations = 10_000;
+
+        let old_started = Instant::now();
+        let mut old_count = 0usize;
+        for _ in 0..iterations {
+            let mut tree = tree.clone();
+            old_count += usize::from(old_annotate_selection_node(
+                std::hint::black_box(&mut tree),
+                &selection,
+                "#112233",
+                "#ffffff",
+            ));
+        }
+        let old_time = old_started.elapsed();
+
+        let keyed_started = Instant::now();
+        let mut keyed_count = 0usize;
+        for _ in 0..iterations {
+            let mut tree = tree.clone();
+            if let Some(node) = find_node_by_key_mut(&mut tree, &selection.anchor.node_key) {
+                keyed_count += usize::from(annotate_selected_text_node(
+                    std::hint::black_box(node),
+                    &selection,
+                    "#112233",
+                    "#ffffff",
+                ));
+            }
+        }
+        let keyed_time = keyed_started.elapsed();
+
+        eprintln!(
+            "selection annotation: recursive {old_time:?}; keyed {keyed_time:?}; ratio {:.1}x; counts={old_count}/{keyed_count}",
+            old_time.as_secs_f64() / keyed_time.as_secs_f64()
+        );
+        assert_eq!(old_count, keyed_count);
+        assert!(keyed_time < old_time);
+    }
 }
 
 fn selector_contains_state(selector: &mesh_core_component::style::Selector) -> bool {
@@ -886,17 +1046,13 @@ fn find_node_by_key_mut<'a>(node: &'a mut WidgetNode, key: &str) -> Option<&'a m
     None
 }
 
-fn annotate_selection_node(
+fn annotate_selected_text_node(
     node: &mut WidgetNode,
     selection: &TextSelectionState,
     selection_background: &str,
     selection_foreground: &str,
 ) -> bool {
-    let matches_selection = node
-        .attributes
-        .get("_mesh_key")
-        .is_some_and(|key| key == &selection.anchor.node_key)
-        && node.tag == "text"
+    let matches_selection = node.tag == "text"
         && node
             .attributes
             .get("selectable")
@@ -935,12 +1091,6 @@ fn annotate_selection_node(
             format!("{:.2}", node.layout.y + node.computed_style.padding.top),
         );
         return true;
-    }
-
-    for child in &mut node.children {
-        if annotate_selection_node(child, selection, selection_background, selection_foreground) {
-            return true;
-        }
     }
 
     false

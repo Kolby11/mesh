@@ -42,6 +42,7 @@ impl RenderObjectDirtySummary {
 pub struct RenderObjectTree {
     generation: u64,
     retained_tree_generation: Option<u64>,
+    update_epoch: u64,
     objects: HashMap<NodeId, RenderObjectPaintData>,
     root: Option<NodeId>,
     last_dirty: RenderObjectDirtySummary,
@@ -66,6 +67,53 @@ impl Hasher for RenderObjectHasher {
             self.0 ^= u64::from(*byte);
             self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
         }
+    }
+
+    fn write_u8(&mut self, value: u8) {
+        self.write_mix(u64::from(value));
+    }
+    fn write_u16(&mut self, value: u16) {
+        self.write_mix(u64::from(value));
+    }
+    fn write_u32(&mut self, value: u32) {
+        self.write_mix(u64::from(value));
+    }
+    fn write_u64(&mut self, value: u64) {
+        self.write_mix(value);
+    }
+    fn write_u128(&mut self, value: u128) {
+        self.write_mix(value as u64);
+        self.write_mix((value >> 64) as u64);
+    }
+    fn write_usize(&mut self, value: usize) {
+        self.write_mix(value as u64);
+    }
+    fn write_i8(&mut self, value: i8) {
+        self.write_mix(value as u8 as u64);
+    }
+    fn write_i16(&mut self, value: i16) {
+        self.write_mix(value as u16 as u64);
+    }
+    fn write_i32(&mut self, value: i32) {
+        self.write_mix(value as u32 as u64);
+    }
+    fn write_i64(&mut self, value: i64) {
+        self.write_mix(value as u64);
+    }
+    fn write_i128(&mut self, value: i128) {
+        self.write_u128(value as u128);
+    }
+    fn write_isize(&mut self, value: isize) {
+        self.write_mix(value as usize as u64);
+    }
+}
+
+impl RenderObjectHasher {
+    #[inline]
+    fn write_mix(&mut self, value: u64) {
+        self.0 ^= value;
+        self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        self.0 ^= self.0 >> 32;
     }
 }
 
@@ -94,20 +142,32 @@ impl RenderObjectTree {
     ) -> RenderObjectDirtySummary {
         let mut dirty = RenderObjectDirtySummary::default();
         let retained_len = self.objects.len();
-        let mut dirty_nodes = HashSet::with_capacity(retained_len.min(1024));
-        let mut visited = HashSet::with_capacity(retained_len);
+        let mut dirty_nodes = std::mem::take(&mut self.dirty_nodes);
+        dirty_nodes.clear();
+        if dirty_nodes.capacity() < retained_len.min(1024) {
+            dirty_nodes.reserve(retained_len.min(1024) - dirty_nodes.capacity());
+        }
+        if self.update_epoch == u64::MAX {
+            self.update_epoch = 0;
+            for object in self.objects.values_mut() {
+                object.last_seen_epoch = 0;
+            }
+        }
+        self.update_epoch += 1;
+        let update_epoch = self.update_epoch;
 
         update_retained_render_objects(
             root,
             None,
             &mut self.objects,
-            &mut visited,
+            update_epoch,
             &mut dirty,
             &mut dirty_nodes,
         );
 
         let before_remove = self.objects.len();
-        self.objects.retain(|id, _| visited.contains(id));
+        self.objects
+            .retain(|_, object| object.last_seen_epoch == update_epoch);
         dirty.removed = before_remove.saturating_sub(self.objects.len());
 
         if self.root != Some(root.id) {
@@ -178,6 +238,7 @@ impl RenderObjectDirtySummary {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RenderObjectPaintData {
+    last_seen_epoch: u64,
     parent: Option<NodeId>,
     child_ids: Vec<NodeId>,
     transform: TransformSlot,
@@ -217,11 +278,10 @@ fn update_retained_render_objects(
     node: &WidgetNode,
     parent: Option<NodeId>,
     objects: &mut HashMap<NodeId, RenderObjectPaintData>,
-    visited: &mut HashSet<NodeId>,
+    update_epoch: u64,
     dirty: &mut RenderObjectDirtySummary,
     dirty_nodes: &mut HashSet<NodeId>,
 ) {
-    visited.insert(node.id);
     let next = render_object_paint_data(node, parent);
     match objects.get_mut(&node.id) {
         Some(current) => {
@@ -230,23 +290,40 @@ fn update_retained_render_objects(
             if *dirty != before {
                 dirty_nodes.insert(node.id);
             }
-            *current = next;
+            *current = RenderObjectPaintData {
+                last_seen_epoch: update_epoch,
+                ..next
+            };
         }
         None => {
             dirty.inserted += 1;
             dirty_nodes.insert(node.id);
-            objects.insert(node.id, next);
+            objects.insert(
+                node.id,
+                RenderObjectPaintData {
+                    last_seen_epoch: update_epoch,
+                    ..next
+                },
+            );
         }
     }
 
     for child in &node.children {
-        update_retained_render_objects(child, Some(node.id), objects, visited, dirty, dirty_nodes);
+        update_retained_render_objects(
+            child,
+            Some(node.id),
+            objects,
+            update_epoch,
+            dirty,
+            dirty_nodes,
+        );
     }
 }
 
 fn render_object_paint_data(node: &WidgetNode, parent: Option<NodeId>) -> RenderObjectPaintData {
     let geometry = geometry_slot(node);
     RenderObjectPaintData {
+        last_seen_epoch: 0,
         parent,
         child_ids: child_id_slot(node),
         transform: transform_slot(node.computed_style.transform),
@@ -458,6 +535,7 @@ fn attr_f32_with_default(node: &WidgetNode, key: &str, default: f32) -> f32 {
 mod tests {
     use super::*;
     use mesh_core_elements::WidgetNode;
+    use std::time::Instant;
 
     fn retained_visual_node() -> WidgetNode {
         let mut node = WidgetNode::new("box");
@@ -467,6 +545,62 @@ mod tests {
         node.layout.width = 100.0;
         node.layout.height = 40.0;
         node
+    }
+
+    // cargo test -p mesh-core-render --release -- render_object_epoch_marks_beat_visited_set --ignored --nocapture
+    #[test]
+    #[ignore = "release-only render-object visited-state microbenchmark"]
+    fn render_object_epoch_marks_beat_visited_set() {
+        let ids = (0..512_u64).collect::<Vec<_>>();
+        let iterations = 20_000;
+
+        let visited_started = Instant::now();
+        let mut visited_count = 0usize;
+        let mut visited = HashSet::with_capacity(ids.len());
+        let mut dirty = HashSet::with_capacity(ids.len().min(1024));
+        for _ in 0..iterations {
+            visited.clear();
+            dirty.clear();
+            for id in &ids {
+                visited.insert(*id);
+                if id % 4 == 0 {
+                    dirty.insert(*id);
+                }
+            }
+            visited_count += std::hint::black_box(
+                ids.iter().filter(|id| visited.contains(id)).count() + dirty.len(),
+            );
+        }
+        let visited_time = visited_started.elapsed();
+
+        let epoch_started = Instant::now();
+        let mut epoch_count = 0usize;
+        let mut epochs = ids
+            .iter()
+            .copied()
+            .map(|id| (id, 0_u64))
+            .collect::<HashMap<_, _>>();
+        let mut dirty = HashSet::with_capacity(ids.len().min(1024));
+        for epoch in 1..=iterations as u64 {
+            dirty.clear();
+            for id in &ids {
+                *epochs.get_mut(id).expect("id present") = epoch;
+                if id % 4 == 0 {
+                    dirty.insert(*id);
+                }
+            }
+            epoch_count += std::hint::black_box(
+                epochs.values().filter(|seen| **seen == epoch).count() + dirty.len(),
+            );
+        }
+        let epoch_time = epoch_started.elapsed();
+
+        eprintln!(
+            "render object visited state: set {visited_time:?}; epoch {epoch_time:?}; ratio {:.1}x; counts={visited_count}/{epoch_count}",
+            visited_time.as_secs_f64() / epoch_time.as_secs_f64()
+        );
+        assert_eq!(visited_count, epoch_count);
+        assert!(epoch_time < visited_time);
     }
 
     #[test]

@@ -1,5 +1,17 @@
 use super::*;
 
+fn apply_runtime_props(
+    runtime: &mut EmbeddedFrontendRuntime,
+    props: &HashMap<String, serde_json::Value>,
+) {
+    for (key, value) in props {
+        runtime
+            .script_ctx
+            .state_mut()
+            .set(key.clone(), value.clone());
+    }
+}
+
 impl FrontendSurfaceComponent {
     fn drain_local_script_events(
         &mut self,
@@ -336,30 +348,27 @@ impl FrontendSurfaceComponent {
         module_id: &str,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<(), ComponentError> {
-        if !self.runtimes.lock().unwrap().contains_key(instance_key) {
-            let Some(entry) = self.frontend_catalog.modules.get(module_id) else {
-                return Err(ComponentError::Failed {
-                    component_id: self.id().to_string(),
-                    message: format!("missing embedded frontend module '{module_id}'"),
-                });
-            };
-            let runtime = self.create_runtime(instance_key, &entry.compiled, props)?;
-            let mut runtime = runtime;
-            Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
-            self.runtimes
-                .lock()
-                .unwrap()
-                .insert(instance_key.to_string(), runtime);
-        }
-
-        if let Some(runtime) = self.runtimes.lock().unwrap().get_mut(instance_key) {
-            for (key, value) in props {
-                runtime
-                    .script_ctx
-                    .state_mut()
-                    .set(key.clone(), value.clone());
+        {
+            let mut runtimes = self.runtimes.lock().unwrap();
+            if let Some(runtime) = runtimes.get_mut(instance_key) {
+                apply_runtime_props(runtime, props);
+                return Ok(());
             }
         }
+
+        let Some(entry) = self.frontend_catalog.modules.get(module_id) else {
+            return Err(ComponentError::Failed {
+                component_id: self.id().to_string(),
+                message: format!("missing embedded frontend module '{module_id}'"),
+            });
+        };
+        let mut runtime = self.create_runtime(instance_key, &entry.compiled, props)?;
+        Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
+        apply_runtime_props(&mut runtime, props);
+        self.runtimes
+            .lock()
+            .unwrap()
+            .insert(instance_key.to_string(), runtime);
 
         Ok(())
     }
@@ -377,42 +386,39 @@ impl FrontendSurfaceComponent {
         alias: &str,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<(), ComponentError> {
-        if !self.runtimes.lock().unwrap().contains_key(instance_key) {
-            let Some(entry) = self.frontend_catalog.modules.get(host_module_id) else {
-                return Err(ComponentError::Failed {
-                    component_id: self.id().to_string(),
-                    message: format!("missing host module '{host_module_id}'"),
-                });
-            };
-            let Some(component) = entry.compiled.local_components.get(alias) else {
-                return Err(ComponentError::Failed {
-                    component_id: self.id().to_string(),
-                    message: format!("missing local component import '{alias}'"),
-                });
-            };
-            let runtime = self.create_runtime_for_component(
-                instance_key,
-                format!("{host_module_id}::{alias}"),
-                host_manifest,
-                component,
-                props,
-            )?;
-            let mut runtime = runtime;
-            Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
-            self.runtimes
-                .lock()
-                .unwrap()
-                .insert(instance_key.to_string(), runtime);
-        }
-
-        if let Some(runtime) = self.runtimes.lock().unwrap().get_mut(instance_key) {
-            for (key, value) in props {
-                runtime
-                    .script_ctx
-                    .state_mut()
-                    .set(key.clone(), value.clone());
+        {
+            let mut runtimes = self.runtimes.lock().unwrap();
+            if let Some(runtime) = runtimes.get_mut(instance_key) {
+                apply_runtime_props(runtime, props);
+                return Ok(());
             }
         }
+
+        let Some(entry) = self.frontend_catalog.modules.get(host_module_id) else {
+            return Err(ComponentError::Failed {
+                component_id: self.id().to_string(),
+                message: format!("missing host module '{host_module_id}'"),
+            });
+        };
+        let Some(component) = entry.compiled.local_components.get(alias) else {
+            return Err(ComponentError::Failed {
+                component_id: self.id().to_string(),
+                message: format!("missing local component import '{alias}'"),
+            });
+        };
+        let mut runtime = self.create_runtime_for_component(
+            instance_key,
+            format!("{host_module_id}::{alias}"),
+            host_manifest,
+            component,
+            props,
+        )?;
+        Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
+        apply_runtime_props(&mut runtime, props);
+        self.runtimes
+            .lock()
+            .unwrap()
+            .insert(instance_key.to_string(), runtime);
 
         Ok(())
     }
@@ -545,7 +551,10 @@ impl FrontendSurfaceComponent {
         let Some(runtime) = runtimes.get_mut(&instance_key) else {
             return Ok(Vec::new());
         };
-        if let Err(source) = runtime.script_ctx.call_handler(&handler_name, &merged_args) {
+        if let Err(source) = runtime
+            .script_ctx
+            .call_handler(handler_name.as_ref(), merged_args.as_ref())
+        {
             let error_message = source.to_string();
             tracing::warn!(
                 component_id = %component_id,
@@ -556,7 +565,7 @@ impl FrontendSurfaceComponent {
             if let Some(diagnostics) = &self.diagnostics {
                 diagnostics.record_handler_error(
                     component_id.clone(),
-                    handler_name.clone(),
+                    handler_name.to_string(),
                     error_message,
                 );
             }
@@ -641,10 +650,13 @@ impl FrontendSurfaceComponent {
 /// If `handler_name` is a JSON object with `h` and `a` fields, unpack it into
 /// the real handler name and pre-bound arguments. Otherwise, return as-is.
 /// Pre-bound args are prepended to the event args.
-fn unpack_handler_args(
-    handler_name: &str,
-    event_args: &[serde_json::Value],
-) -> (String, Vec<serde_json::Value>) {
+fn unpack_handler_args<'a>(
+    handler_name: &'a str,
+    event_args: &'a [serde_json::Value],
+) -> (
+    std::borrow::Cow<'a, str>,
+    std::borrow::Cow<'a, [serde_json::Value]>,
+) {
     // Legacy pre-bound descriptors are JSON objects. Ordinary handler names
     // dominate event dispatch, so avoid constructing a JSON parser/error for
     // names that cannot possibly be descriptors.
@@ -657,26 +669,31 @@ fn unpack_handler_args(
         ) {
             let mut merged: Vec<serde_json::Value> = a.clone();
             merged.extend_from_slice(event_args);
-            return (h.to_string(), merged);
+            return (
+                std::borrow::Cow::Owned(h.to_string()),
+                std::borrow::Cow::Owned(merged),
+            );
         }
     }
-    (handler_name.to_string(), event_args.to_vec())
+    (
+        std::borrow::Cow::Borrowed(handler_name),
+        std::borrow::Cow::Borrowed(event_args),
+    )
 }
 
-fn node_handler_and_args(
-    node: &WidgetNode,
+fn node_handler_and_args<'a>(
+    node: &'a WidgetNode,
     event_name: &str,
-    event_args: &[serde_json::Value],
-) -> Option<(String, Vec<serde_json::Value>)> {
+    event_args: &'a [serde_json::Value],
+) -> Option<(&'a str, std::borrow::Cow<'a, [serde_json::Value]>)> {
     if let Some(call) = node.event_handler_calls.get(event_name) {
         let mut merged = call.args.clone();
         merged.extend_from_slice(event_args);
-        return Some((call.handler.clone(), merged));
+        return Some((call.handler.as_str(), std::borrow::Cow::Owned(merged)));
     }
     node.event_handlers
         .get(event_name)
-        .cloned()
-        .map(|handler| (handler, event_args.to_vec()))
+        .map(|handler| (handler.as_str(), std::borrow::Cow::Borrowed(event_args)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -704,9 +721,8 @@ mod handler_call_tests {
             },
         );
 
-        let (handler, args) =
-            node_handler_and_args(&node, "click", &[serde_json::json!({ "type": "click" })])
-                .expect("handler");
+        let event_args = [serde_json::json!({ "type": "click" })];
+        let (handler, args) = node_handler_and_args(&node, "click", &event_args).expect("handler");
 
         assert_eq!(handler, "__mesh_embed__::host::typed");
         assert_eq!(args[0], serde_json::json!("prebound"));
@@ -716,19 +732,21 @@ mod handler_call_tests {
     #[test]
     fn unpack_handler_args_preserves_plain_and_legacy_descriptor_forms() {
         let event_args = [serde_json::json!({ "type": "click" })];
-        assert_eq!(
-            unpack_handler_args("onClick", &event_args),
-            ("onClick".to_string(), event_args.to_vec())
-        );
+        let (handler, args) = unpack_handler_args("onClick", &event_args);
+        assert_eq!(handler.as_ref(), "onClick");
+        assert!(matches!(handler, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(args.as_ref(), event_args.as_slice());
+        assert!(matches!(args, std::borrow::Cow::Borrowed(_)));
 
         let descriptor = r#"{"h":"selectItem","a":["alpha"]}"#;
+        let (handler, args) = unpack_handler_args(descriptor, &event_args);
+        assert_eq!(handler.as_ref(), "selectItem");
+        assert!(matches!(handler, std::borrow::Cow::Owned(_)));
         assert_eq!(
-            unpack_handler_args(descriptor, &event_args),
-            (
-                "selectItem".to_string(),
-                vec![serde_json::json!("alpha"), event_args[0].clone()]
-            )
+            args.as_ref(),
+            [serde_json::json!("alpha"), event_args[0].clone()].as_slice()
         );
+        assert!(matches!(args, std::borrow::Cow::Owned(_)));
     }
 
     // cargo test -p mesh-core-shell --release -- plain_handler_syntax_gate_beats_failed_json_parse --ignored --nocapture
@@ -759,6 +777,39 @@ mod handler_call_tests {
 
         eprintln!(
             "plain handler unpack: failed JSON parse {old_time:?}; syntax gate {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- plain_handler_borrowing_beats_clone_unpack --ignored --nocapture
+    #[test]
+    #[ignore = "release-only plain handler borrowing microbenchmark"]
+    fn plain_handler_borrowing_beats_clone_unpack() {
+        fn old_plain_unpack(
+            handler_name: &str,
+            event_args: &[serde_json::Value],
+        ) -> (String, Vec<serde_json::Value>) {
+            (handler_name.to_string(), event_args.to_vec())
+        }
+
+        let iterations = 500_000;
+        let event_args = [serde_json::json!({ "type": "pointermove", "x": 12, "y": 34 })];
+        let old_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(old_plain_unpack("onPointerMove", &event_args));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            let (handler, args) = unpack_handler_args("onPointerMove", &event_args);
+            std::hint::black_box((handler.as_ref(), args.as_ref()));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "plain handler arg transfer: clone {old_time:?}; borrow {new_time:?}; ratio {:.1}x",
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert!(new_time < old_time);

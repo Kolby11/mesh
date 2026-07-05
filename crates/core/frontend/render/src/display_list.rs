@@ -178,10 +178,11 @@ pub struct RetainedDisplayList {
     root_id: Option<NodeId>,
     surface_size: Option<(u32, u32)>,
     entries: HashMap<DisplayListKey, DisplayListEntry>,
-    subtrees: HashMap<NodeId, RetainedPaintSubtree>,
+    subtrees: HashMap<NodeId, Arc<RetainedPaintSubtree>>,
+    #[cfg(debug_assertions)]
     ordered_entries_scratch: Vec<(DisplayListKey, DisplayListEntry)>,
     next_entries_scratch: HashMap<DisplayListKey, DisplayListEntry>,
-    next_subtrees_scratch: HashMap<NodeId, RetainedPaintSubtree>,
+    next_subtrees_scratch: HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     command_spans: Vec<RetainedCommandSpan>,
     paint_commands: Arc<[DisplayPaintCommand]>,
     command_kinds: Arc<[DisplayPaintCommandKind]>,
@@ -198,6 +199,7 @@ impl Default for RetainedDisplayList {
             surface_size: None,
             entries: HashMap::new(),
             subtrees: HashMap::new(),
+            #[cfg(debug_assertions)]
             ordered_entries_scratch: Vec::new(),
             next_entries_scratch: HashMap::new(),
             next_subtrees_scratch: HashMap::new(),
@@ -767,11 +769,22 @@ impl RetainedDisplayList {
             );
         }
 
+        #[cfg(debug_assertions)]
         let mut ordered_entries = std::mem::take(&mut self.ordered_entries_scratch);
+        #[cfg(debug_assertions)]
         ordered_entries.clear();
         let mut next = std::mem::take(&mut self.next_entries_scratch);
         next.clear();
-        collect_display_entries(root, 0.0, 0.0, &mut ordered_entries, &mut next);
+        collect_display_entries(
+            root,
+            0.0,
+            0.0,
+            #[cfg(debug_assertions)]
+            Some(&mut ordered_entries),
+            #[cfg(not(debug_assertions))]
+            None,
+            &mut next,
+        );
         let dirty_summary = dirty_summary.unwrap_or_default();
         let empty_dirty_nodes = HashSet::new();
         let dirty_node_ids = dirty_node_ids.unwrap_or(&empty_dirty_nodes);
@@ -803,8 +816,8 @@ impl RetainedDisplayList {
                     &mut local_metrics,
                 );
                 (
-                    subtree.commands,
-                    subtree.kinds,
+                    Arc::clone(&subtree.commands),
+                    Arc::clone(&subtree.kinds),
                     subtree.pruning,
                     next_subtrees,
                     local_metrics,
@@ -829,8 +842,8 @@ impl RetainedDisplayList {
                     &mut local_metrics,
                 );
                 (
-                    subtree.commands,
-                    subtree.kinds,
+                    Arc::clone(&subtree.commands),
+                    Arc::clone(&subtree.kinds),
                     subtree.pruning,
                     next_subtrees,
                     local_metrics,
@@ -904,7 +917,10 @@ impl RetainedDisplayList {
         let mut previous_subtrees = std::mem::replace(&mut self.subtrees, subtrees);
         previous_subtrees.clear();
         self.next_subtrees_scratch = previous_subtrees;
-        self.ordered_entries_scratch = ordered_entries;
+        #[cfg(debug_assertions)]
+        {
+            self.ordered_entries_scratch = ordered_entries;
+        }
         self.command_spans = command_spans;
         self.paint_commands = paint_commands;
         self.command_kinds = command_kinds;
@@ -1321,6 +1337,53 @@ impl Hasher for DisplaySignatureHasher {
             self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
         }
     }
+
+    fn write_u8(&mut self, value: u8) {
+        self.write_mix(u64::from(value));
+    }
+    fn write_u16(&mut self, value: u16) {
+        self.write_mix(u64::from(value));
+    }
+    fn write_u32(&mut self, value: u32) {
+        self.write_mix(u64::from(value));
+    }
+    fn write_u64(&mut self, value: u64) {
+        self.write_mix(value);
+    }
+    fn write_u128(&mut self, value: u128) {
+        self.write_mix(value as u64);
+        self.write_mix((value >> 64) as u64);
+    }
+    fn write_usize(&mut self, value: usize) {
+        self.write_mix(value as u64);
+    }
+    fn write_i8(&mut self, value: i8) {
+        self.write_mix(value as u8 as u64);
+    }
+    fn write_i16(&mut self, value: i16) {
+        self.write_mix(value as u16 as u64);
+    }
+    fn write_i32(&mut self, value: i32) {
+        self.write_mix(value as u32 as u64);
+    }
+    fn write_i64(&mut self, value: i64) {
+        self.write_mix(value as u64);
+    }
+    fn write_i128(&mut self, value: i128) {
+        self.write_u128(value as u128);
+    }
+    fn write_isize(&mut self, value: isize) {
+        self.write_mix(value as usize as u64);
+    }
+}
+
+impl DisplaySignatureHasher {
+    #[inline]
+    fn write_mix(&mut self, value: u64) {
+        self.0 ^= value;
+        self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        self.0 ^= self.0 >> 32;
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1385,7 +1448,7 @@ fn collect_display_entries(
     node: &WidgetNode,
     offset_x: f32,
     offset_y: f32,
-    out: &mut Vec<(DisplayListKey, DisplayListEntry)>,
+    mut ordered_entries: Option<&mut Vec<(DisplayListKey, DisplayListEntry)>>,
     next: &mut HashMap<DisplayListKey, DisplayListEntry>,
 ) {
     if node_is_explicitly_hidden(node) {
@@ -1403,13 +1466,16 @@ fn collect_display_entries(
                 node_id: node.id,
                 slot,
             };
+            let barrier = batch_barrier(node, slot);
             let entry = DisplayListEntry {
                 bounds,
                 signature: primitive_signature(node, slot),
-                batch_signature: batch_signature(node, slot),
-                barrier: batch_barrier(node, slot),
+                batch_signature: barrier.map_or_else(|| batch_signature(node, slot), |_| 0),
+                barrier,
             };
-            out.push((key, entry));
+            if let Some(entries) = ordered_entries.as_deref_mut() {
+                entries.push((key, entry));
+            }
             next.insert(key, entry);
         });
     }
@@ -1428,7 +1494,13 @@ fn collect_display_entries(
     let child_offset_y = offset_y - scroll_y;
 
     for child in &node.children {
-        collect_display_entries(child, child_offset_x, child_offset_y, out, next);
+        collect_display_entries(
+            child,
+            child_offset_x,
+            child_offset_y,
+            ordered_entries.as_deref_mut(),
+            next,
+        );
     }
 }
 
@@ -1474,10 +1546,10 @@ fn build_paint_subtree(
     force_rebuild: bool,
     dirty_node_ids: &HashSet<NodeId>,
     dirty_ancestors: &HashSet<NodeId>,
-    previous_subtrees: &HashMap<NodeId, RetainedPaintSubtree>,
-    next_subtrees: &mut HashMap<NodeId, RetainedPaintSubtree>,
+    previous_subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
+    next_subtrees: &mut HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     metrics: &mut LocalReuseMetrics,
-) -> RetainedPaintSubtree {
+) -> Arc<RetainedPaintSubtree> {
     let node_is_dirty = dirty_node_ids.contains(&node.id);
     let node_is_ancestor = dirty_ancestors.contains(&node.id);
     if !force_rebuild
@@ -1486,8 +1558,8 @@ fn build_paint_subtree(
         && let Some(previous) = previous_subtrees.get(&node.id)
     {
         metrics.reused_segments = metrics.reused_segments.saturating_add(1);
-        let reused = previous.clone();
-        next_subtrees.insert(node.id, reused.clone());
+        let reused = Arc::clone(previous);
+        next_subtrees.insert(node.id, Arc::clone(&reused));
         return reused;
     }
 
@@ -1498,7 +1570,8 @@ fn build_paint_subtree(
         subtree
             .pruning
             .record_omitted_subtree(count_pruned_subtree(node, offset_x, offset_y, true), false);
-        next_subtrees.insert(node.id, subtree.clone());
+        let subtree = Arc::new(subtree);
+        next_subtrees.insert(node.id, Arc::clone(&subtree));
         return subtree;
     }
 
@@ -1515,7 +1588,8 @@ fn build_paint_subtree(
         subtree
             .pruning
             .record_omitted_subtree(count_pruned_subtree(node, offset_x, offset_y, false), true);
-        next_subtrees.insert(node.id, subtree.clone());
+        let subtree = Arc::new(subtree);
+        next_subtrees.insert(node.id, Arc::clone(&subtree));
         return subtree;
     }
 
@@ -1578,8 +1652,8 @@ fn build_paint_subtree(
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
-    let subtree = subtree.into_retained();
-    next_subtrees.insert(node.id, subtree.clone());
+    let subtree = Arc::new(subtree.into_retained());
+    next_subtrees.insert(node.id, Arc::clone(&subtree));
     subtree
 }
 
@@ -1653,8 +1727,8 @@ fn append_child_paint_subtree(
     force_rebuild: bool,
     dirty_node_ids: &HashSet<NodeId>,
     dirty_ancestors: &HashSet<NodeId>,
-    previous_subtrees: &HashMap<NodeId, RetainedPaintSubtree>,
-    next_subtrees: &mut HashMap<NodeId, RetainedPaintSubtree>,
+    previous_subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
+    next_subtrees: &mut HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     metrics: &mut LocalReuseMetrics,
 ) {
     if should_preclip_child_subtree(child, child_offset_x, child_offset_y, child_clip) {
@@ -1914,7 +1988,7 @@ fn changed_paint_count(dirty_summary: RenderObjectDirtySummary) -> u64 {
 
 fn build_command_spans(
     root: &WidgetNode,
-    subtrees: &HashMap<NodeId, RetainedPaintSubtree>,
+    subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
 ) -> Vec<RetainedCommandSpan> {
     let mut spans = Vec::new();
     if subtrees.is_empty() || !subtrees.contains_key(&root.id) {
@@ -1927,7 +2001,7 @@ fn build_command_spans(
 
 fn collect_command_spans(
     node: &WidgetNode,
-    subtrees: &HashMap<NodeId, RetainedPaintSubtree>,
+    subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     command_start: usize,
     spans: &mut Vec<RetainedCommandSpan>,
 ) -> usize {
@@ -2344,17 +2418,7 @@ fn primitive_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
     let mut hasher = DisplaySignatureHasher::default();
     slot.hash(&mut hasher);
     node.tag.hash(&mut hasher);
-    hash_attribute(node, "content", &mut hasher);
-    hash_attribute(node, "text", &mut hasher);
-    hash_attribute(node, "name", &mut hasher);
-    hash_attribute(node, "value", &mut hasher);
-    hash_attribute(node, "placeholder", &mut hasher);
-    hash_attribute(node, "type", &mut hasher);
-    hash_attribute(node, "min", &mut hasher);
-    hash_attribute(node, "max", &mut hasher);
-    hash_attribute(node, "orient", &mut hasher);
-    hash_attribute(node, "src", &mut hasher);
-    hash_attribute(node, "size", &mut hasher);
+    hash_paint_content_attributes(node, &mut hasher);
     node.computed_style.background_color.r.hash(&mut hasher);
     node.computed_style.background_color.g.hash(&mut hasher);
     node.computed_style.background_color.b.hash(&mut hasher);
@@ -2466,36 +2530,109 @@ fn primitive_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
     hasher.finish()
 }
 
+fn hash_paint_content_attributes(node: &WidgetNode, hasher: &mut DisplaySignatureHasher) {
+    match node.tag.as_str() {
+        "text" => {
+            hash_attribute(node, "content", hasher);
+            hash_attribute(node, "text", hasher);
+            hash_attribute(node, "_mesh_selection_anchor_x", hasher);
+            hash_attribute(node, "_mesh_selection_anchor_y", hasher);
+            hash_attribute(node, "_mesh_selection_focus_x", hasher);
+            hash_attribute(node, "_mesh_selection_focus_y", hasher);
+            hash_attribute(node, "_mesh_selection_text_x", hasher);
+            hash_attribute(node, "_mesh_selection_text_y", hasher);
+        }
+        "input" => {
+            hash_attribute(node, "value", hasher);
+            hash_attribute(node, "placeholder", hasher);
+            hash_attribute(node, "type", hasher);
+            hash_attribute(node, "_mesh_focused", hasher);
+        }
+        "slider" => {
+            hash_attribute(node, "min", hasher);
+            hash_attribute(node, "max", hasher);
+            hash_attribute(node, "value", hasher);
+            hash_attribute(node, "orient", hasher);
+        }
+        "icon" => {
+            hash_attribute(node, "src", hasher);
+            hash_attribute(node, "name", hasher);
+            hash_attribute(node, "size", hasher);
+        }
+        "checkbox" | "radio" => {
+            hash_attribute(node, "checked", hasher);
+        }
+        _ => {}
+    }
+}
+
 fn batch_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
     let mut hasher = DisplaySignatureHasher::default();
     slot.hash(&mut hasher);
-    node.computed_style.background_color.r.hash(&mut hasher);
-    node.computed_style.background_color.g.hash(&mut hasher);
-    node.computed_style.background_color.b.hash(&mut hasher);
-    node.computed_style.background_color.a.hash(&mut hasher);
-    node.computed_style.border_color.r.hash(&mut hasher);
-    node.computed_style.border_color.g.hash(&mut hasher);
-    node.computed_style.border_color.b.hash(&mut hasher);
-    node.computed_style.border_color.a.hash(&mut hasher);
-    node.computed_style.color.r.hash(&mut hasher);
-    node.computed_style.color.g.hash(&mut hasher);
-    node.computed_style.color.b.hash(&mut hasher);
-    node.computed_style.color.a.hash(&mut hasher);
-    node.computed_style.font_family.hash(&mut hasher);
-    node.computed_style.font_size.to_bits().hash(&mut hasher);
-    hash_box_shadow(node.computed_style.box_shadow, &mut hasher);
-    hash_background_paint(&node.computed_style.background_paint, &mut hasher);
-    node.computed_style
-        .filter
-        .blur_radius
-        .to_bits()
-        .hash(&mut hasher);
-    node.computed_style
-        .backdrop_filter
-        .blur_radius
-        .to_bits()
-        .hash(&mut hasher);
+    hash_batch_material(node, slot, &mut hasher);
     hasher.finish()
+}
+
+fn hash_batch_material(
+    node: &WidgetNode,
+    slot: DisplayPrimitiveSlot,
+    hasher: &mut DisplaySignatureHasher,
+) {
+    match slot {
+        DisplayPrimitiveSlot::Background => {
+            hash_color(node.computed_style.background_color, hasher);
+            hash_background_paint(&node.computed_style.background_paint, hasher);
+        }
+        DisplayPrimitiveSlot::Border => {
+            hash_color(node.computed_style.border_color, hasher);
+        }
+        DisplayPrimitiveSlot::Icon => {
+            hash_color(node.computed_style.color, hasher);
+            node.computed_style.icon_fill.map(f32::to_bits).hash(hasher);
+            node.computed_style
+                .icon_weight
+                .map(f32::to_bits)
+                .hash(hasher);
+            node.computed_style
+                .icon_grade
+                .map(f32::to_bits)
+                .hash(hasher);
+            node.computed_style
+                .icon_optical_size
+                .map(f32::to_bits)
+                .hash(hasher);
+        }
+        DisplayPrimitiveSlot::Generic => {
+            hash_generic_batch_material(node, hasher);
+        }
+        DisplayPrimitiveSlot::Text => {
+            hash_text_batch_material(node, hasher);
+        }
+    }
+}
+
+fn hash_generic_batch_material(node: &WidgetNode, hasher: &mut DisplaySignatureHasher) {
+    match node.tag.as_str() {
+        "input" => hash_text_batch_material(node, hasher),
+        "slider" | "checkbox" | "radio" => hash_color(node.computed_style.color, hasher),
+        _ => {}
+    }
+}
+
+fn hash_text_batch_material(node: &WidgetNode, hasher: &mut DisplaySignatureHasher) {
+    hash_color(node.computed_style.color, hasher);
+    node.computed_style.font_family.hash(hasher);
+    node.computed_style.font_size.to_bits().hash(hasher);
+    node.computed_style.font_weight.hash(hasher);
+    node.computed_style.line_height.to_bits().hash(hasher);
+    std::mem::discriminant(&node.computed_style.text_align).hash(hasher);
+}
+
+fn hash_color(color: Color, hasher: &mut DisplaySignatureHasher) {
+    color.r.hash(hasher);
+    color.g.hash(hasher);
+    color.b.hash(hasher);
+    color.a.hash(hasher);
 }
 
 fn hash_box_shadow(shadow: BoxShadow, hasher: &mut DisplaySignatureHasher) {
@@ -2713,6 +2850,370 @@ mod tests {
         let mut falsey = node(4, "checkbox", 0.0, 0.0, 18.0, 18.0);
         falsey.attributes.insert("checked".into(), "false".into());
         assert_eq!(build_paint_content(&falsey), DisplayPaintContent::None);
+    }
+
+    #[test]
+    fn primitive_signature_ignores_irrelevant_payload_attrs_for_generic_nodes() {
+        let mut base = node(1, "box", 0.0, 0.0, 20.0, 20.0);
+        let original = primitive_signature(&base, DisplayPrimitiveSlot::Generic);
+
+        base.attributes.insert("content".into(), "ignored".into());
+        base.attributes.insert("value".into(), "ignored".into());
+        base.attributes.insert("src".into(), "ignored.png".into());
+
+        assert_eq!(
+            primitive_signature(&base, DisplayPrimitiveSlot::Generic),
+            original
+        );
+    }
+
+    #[test]
+    fn primitive_signature_tracks_relevant_paint_payload_attrs() {
+        let mut text = node(1, "text", 0.0, 0.0, 20.0, 20.0);
+        let original_text = primitive_signature(&text, DisplayPrimitiveSlot::Generic);
+        text.attributes.insert("content".into(), "changed".into());
+        assert_ne!(
+            primitive_signature(&text, DisplayPrimitiveSlot::Generic),
+            original_text
+        );
+
+        let mut checkbox = node(2, "checkbox", 0.0, 0.0, 20.0, 20.0);
+        let original_checkbox = primitive_signature(&checkbox, DisplayPrimitiveSlot::Generic);
+        checkbox.attributes.insert("checked".into(), "true".into());
+        assert_ne!(
+            primitive_signature(&checkbox, DisplayPrimitiveSlot::Generic),
+            original_checkbox
+        );
+    }
+
+    #[test]
+    fn batch_signature_uses_only_slot_material() {
+        let mut background = node(1, "box", 0.0, 0.0, 20.0, 20.0);
+        let original_background = batch_signature(&background, DisplayPrimitiveSlot::Background);
+
+        background.computed_style.color = Color::from_hex("#ff00ff").unwrap();
+        background.computed_style.font_size = 48.0;
+        background.computed_style.border_color = Color::from_hex("#00ffff").unwrap();
+        assert_eq!(
+            batch_signature(&background, DisplayPrimitiveSlot::Background),
+            original_background
+        );
+
+        background.computed_style.background_color = Color::from_hex("#123456").unwrap();
+        assert_ne!(
+            batch_signature(&background, DisplayPrimitiveSlot::Background),
+            original_background
+        );
+    }
+
+    #[test]
+    fn batch_signature_tracks_generic_content_material() {
+        let mut slider = node(1, "slider", 0.0, 0.0, 20.0, 20.0);
+        slider.computed_style.background_color.a = 0;
+        let original = batch_signature(&slider, DisplayPrimitiveSlot::Generic);
+
+        slider.computed_style.font_size = 42.0;
+        assert_eq!(
+            batch_signature(&slider, DisplayPrimitiveSlot::Generic),
+            original
+        );
+
+        slider.computed_style.color = Color::from_hex("#336699").unwrap();
+        assert_ne!(
+            batch_signature(&slider, DisplayPrimitiveSlot::Generic),
+            original
+        );
+    }
+
+    #[test]
+    fn display_entries_skip_batch_signature_for_barriers() {
+        let mut text = node(1, "text", 0.0, 0.0, 20.0, 20.0);
+        text.computed_style.background_color.a = 0;
+        text.attributes.insert("content".into(), "barrier".into());
+        let mut out = Vec::new();
+        let mut next = HashMap::new();
+
+        collect_display_entries(&text, 0.0, 0.0, Some(&mut out), &mut next);
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].0.slot, DisplayPrimitiveSlot::Text);
+        assert_eq!(out[0].1.barrier, Some(DisplayBatchBarrier::Text));
+        assert_eq!(out[0].1.batch_signature, 0);
+    }
+
+    // cargo test -p mesh-core-render --release -- display_primitive_hashing_beats_byte_fallback --ignored --nocapture
+    #[test]
+    #[ignore = "release-only display signature primitive hashing microbenchmark"]
+    fn display_primitive_hashing_beats_byte_fallback() {
+        #[derive(Default)]
+        struct ByteOnlyHasher(u64);
+
+        impl Hasher for ByteOnlyHasher {
+            fn finish(&self) -> u64 {
+                self.0
+            }
+
+            fn write(&mut self, bytes: &[u8]) {
+                for byte in bytes {
+                    self.0 ^= u64::from(*byte);
+                    self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+                }
+            }
+        }
+
+        fn hash_fields(hasher: &mut impl Hasher) {
+            4_u8.hash(hasher);
+            0x1234_u16.hash(hasher);
+            0x1234_5678_u32.hash(hasher);
+            0x1234_5678_9abc_def0_u64.hash(hasher);
+            0x1234_5678_9abc_def0_1234_5678_9abc_def0_u128.hash(hasher);
+            1920_usize.hash(hasher);
+            (-42_i32).hash(hasher);
+            (-9001_i64).hash(hasher);
+        }
+
+        let iterations = 5_000_000;
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0_u64;
+        for _ in 0..iterations {
+            let mut hasher = ByteOnlyHasher(0xcbf2_9ce4_8422_2325);
+            hash_fields(&mut hasher);
+            old_accumulator = old_accumulator.wrapping_add(std::hint::black_box(hasher.finish()));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0_u64;
+        for _ in 0..iterations {
+            let mut hasher = DisplaySignatureHasher::default();
+            hash_fields(&mut hasher);
+            new_accumulator = new_accumulator.wrapping_add(std::hint::black_box(hasher.finish()));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "display primitive hashing: byte fallback {old_time:?}; word-at-a-time {new_time:?}; ratio {:.1}x; accumulators={old_accumulator:x}/{new_accumulator:x}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_ne!(old_accumulator, 0);
+        assert_ne!(new_accumulator, 0);
+        assert!(new_time * 5 < old_time * 4);
+    }
+
+    // cargo test -p mesh-core-render --release -- retained_subtree_handle_beats_fieldwise_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained paint-subtree clone microbenchmark"]
+    fn retained_subtree_handle_beats_fieldwise_clone() {
+        let subtree = RetainedPaintSubtree {
+            commands: vec![DisplayPaintCommand {
+                node: build_paint_node(&node(1, "box", 0.0, 0.0, 20.0, 20.0), 0.0, 0.0),
+                clip: DisplayListClip {
+                    x: 0,
+                    y: 0,
+                    width: 20,
+                    height: 20,
+                },
+                kind: DisplayPaintCommandKind::Node,
+            }]
+            .into(),
+            kinds: vec![DisplayPaintCommandKind::Node].into(),
+            pruning: PruningMetrics::default(),
+            command_span: Some(RetainedSubtreeSpan {
+                bounds: DamageRect {
+                    x: 0,
+                    y: 0,
+                    width: 20,
+                    height: 20,
+                },
+                local_bounds: DamageRect {
+                    x: 0,
+                    y: 0,
+                    width: 20,
+                    height: 20,
+                },
+                command_count: 1,
+                includes_scrollbars: false,
+            }),
+            child_order: Some(vec![0, 1, 2, 3].into()),
+        };
+        let retained = Arc::new(subtree.clone());
+        let iterations = 10_000_000;
+
+        let old_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(std::hint::black_box(&subtree).clone());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(Arc::clone(std::hint::black_box(&retained)));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "retained subtree reuse clone: fieldwise {old_time:?}; whole-subtree handle {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time * 5 < old_time * 4);
+    }
+
+    // cargo test -p mesh-core-render --release -- tag_aware_payload_signature_skips_irrelevant_attr_hashes --ignored --nocapture
+    #[test]
+    #[ignore = "release-only display signature payload hashing microbenchmark"]
+    fn tag_aware_payload_signature_skips_irrelevant_attr_hashes() {
+        fn old_hash_all_payload_attrs(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
+            let mut hasher = DisplaySignatureHasher::default();
+            slot.hash(&mut hasher);
+            node.tag.hash(&mut hasher);
+            hash_attribute(node, "content", &mut hasher);
+            hash_attribute(node, "text", &mut hasher);
+            hash_attribute(node, "name", &mut hasher);
+            hash_attribute(node, "value", &mut hasher);
+            hash_attribute(node, "placeholder", &mut hasher);
+            hash_attribute(node, "type", &mut hasher);
+            hash_attribute(node, "min", &mut hasher);
+            hash_attribute(node, "max", &mut hasher);
+            hash_attribute(node, "orient", &mut hasher);
+            hash_attribute(node, "src", &mut hasher);
+            hash_attribute(node, "size", &mut hasher);
+            hasher.finish()
+        }
+
+        let mut nodes = Vec::new();
+        for index in 0..512_u64 {
+            let tag = if index % 8 == 0 { "text" } else { "box" };
+            let mut item = node(index + 1, tag, 0.0, 0.0, 20.0, 20.0);
+            item.attributes
+                .insert("content".into(), format!("row {index}"));
+            item.attributes.insert("value".into(), index.to_string());
+            item.attributes.insert("src".into(), "icon.png".into());
+            nodes.push(item);
+        }
+        let iterations = 20_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0u64;
+        for _ in 0..iterations {
+            for item in &nodes {
+                old_accumulator = old_accumulator.wrapping_add(std::hint::black_box(
+                    old_hash_all_payload_attrs(item, DisplayPrimitiveSlot::Generic),
+                ));
+            }
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0u64;
+        for _ in 0..iterations {
+            for item in &nodes {
+                let mut hasher = DisplaySignatureHasher::default();
+                DisplayPrimitiveSlot::Generic.hash(&mut hasher);
+                item.tag.hash(&mut hasher);
+                hash_paint_content_attributes(item, &mut hasher);
+                new_accumulator =
+                    new_accumulator.wrapping_add(std::hint::black_box(hasher.finish()));
+            }
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "display payload signature attrs: all attrs {old_time:?}; tag-aware {new_time:?}; ratio {:.1}x; accumulators={old_accumulator:x}/{new_accumulator:x}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_ne!(old_accumulator, 0);
+        assert_ne!(new_accumulator, 0);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-render --release -- slot_aware_batch_signature_skips_irrelevant_material_hashes --ignored --nocapture
+    #[test]
+    #[ignore = "release-only display batch signature material hashing microbenchmark"]
+    fn slot_aware_batch_signature_skips_irrelevant_material_hashes() {
+        fn old_batch_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
+            let mut hasher = DisplaySignatureHasher::default();
+            slot.hash(&mut hasher);
+            hash_color(node.computed_style.background_color, &mut hasher);
+            hash_color(node.computed_style.border_color, &mut hasher);
+            hash_color(node.computed_style.color, &mut hasher);
+            node.computed_style.font_family.hash(&mut hasher);
+            node.computed_style.font_size.to_bits().hash(&mut hasher);
+            hash_box_shadow(node.computed_style.box_shadow, &mut hasher);
+            hash_background_paint(&node.computed_style.background_paint, &mut hasher);
+            node.computed_style
+                .filter
+                .blur_radius
+                .to_bits()
+                .hash(&mut hasher);
+            node.computed_style
+                .backdrop_filter
+                .blur_radius
+                .to_bits()
+                .hash(&mut hasher);
+            hasher.finish()
+        }
+
+        let mut nodes = Vec::new();
+        for index in 0..512_u64 {
+            let mut item = node(index + 1, "box", 0.0, 0.0, 20.0, 20.0);
+            item.computed_style.background_color = Color {
+                r: (index % 251) as u8,
+                g: ((index * 3) % 251) as u8,
+                b: ((index * 7) % 251) as u8,
+                a: 255,
+            };
+            item.computed_style.border_color = Color {
+                r: ((index * 11) % 251) as u8,
+                g: ((index * 13) % 251) as u8,
+                b: ((index * 17) % 251) as u8,
+                a: 255,
+            };
+            item.computed_style.color = Color {
+                r: ((index * 19) % 251) as u8,
+                g: ((index * 23) % 251) as u8,
+                b: ((index * 29) % 251) as u8,
+                a: 255,
+            };
+            if index % 4 == 0 {
+                item.computed_style.background_paint =
+                    BackgroundPaint::LinearGradient(StyleLinearGradient {
+                        from: Color::from_hex("#112233").unwrap(),
+                        to: Color::from_hex("#445566").unwrap(),
+                    });
+            }
+            nodes.push(item);
+        }
+        let iterations = 50_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0u64;
+        for _ in 0..iterations {
+            for item in &nodes {
+                old_accumulator = old_accumulator.wrapping_add(std::hint::black_box(
+                    old_batch_signature(item, DisplayPrimitiveSlot::Background),
+                ));
+            }
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0u64;
+        for _ in 0..iterations {
+            for item in &nodes {
+                new_accumulator = new_accumulator.wrapping_add(std::hint::black_box(
+                    batch_signature(item, DisplayPrimitiveSlot::Background),
+                ));
+            }
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "display batch signature material: broad {old_time:?}; slot-aware {new_time:?}; ratio {:.1}x; accumulators={old_accumulator:x}/{new_accumulator:x}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_ne!(old_accumulator, 0);
+        assert_ne!(new_accumulator, 0);
+        assert!(new_time < old_time);
     }
 
     #[test]
@@ -3825,7 +4326,7 @@ mod tests {
         for _ in 0..iterations {
             let mut ordered_entries = Vec::new();
             let mut next = HashMap::new();
-            collect_display_entries(&tree, 0.0, 0.0, &mut ordered_entries, &mut next);
+            collect_display_entries(&tree, 0.0, 0.0, Some(&mut ordered_entries), &mut next);
             old_total = old_total
                 .saturating_add(std::hint::black_box(ordered_entries.len()))
                 .saturating_add(std::hint::black_box(next.len()));
@@ -3839,7 +4340,7 @@ mod tests {
         for _ in 0..iterations {
             ordered_entries.clear();
             next.clear();
-            collect_display_entries(&tree, 0.0, 0.0, &mut ordered_entries, &mut next);
+            collect_display_entries(&tree, 0.0, 0.0, Some(&mut ordered_entries), &mut next);
             new_total = new_total
                 .saturating_add(std::hint::black_box(ordered_entries.len()))
                 .saturating_add(std::hint::black_box(next.len()));
@@ -3855,5 +4356,42 @@ mod tests {
             new_elapsed < old_elapsed,
             "scratch reuse should be faster than fresh allocations"
         );
+    }
+
+    // cargo test -p mesh-core-render --release -- release_entry_collection_skips_debug_ordered_sink --ignored --nocapture
+    #[test]
+    #[ignore = "release-only display-list debug sink microbenchmark"]
+    fn release_entry_collection_skips_debug_ordered_sink() {
+        let tree = display_entry_benchmark_tree(120, 20);
+        let iterations = 2_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0_usize;
+        let mut ordered_entries = Vec::new();
+        let mut old_next = HashMap::new();
+        for _ in 0..iterations {
+            ordered_entries.clear();
+            old_next.clear();
+            collect_display_entries(&tree, 0.0, 0.0, Some(&mut ordered_entries), &mut old_next);
+            old_total = old_total.saturating_add(std::hint::black_box(old_next.len()));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0_usize;
+        let mut new_next = HashMap::new();
+        for _ in 0..iterations {
+            new_next.clear();
+            collect_display_entries(&tree, 0.0, 0.0, None, &mut new_next);
+            new_total = new_total.saturating_add(std::hint::black_box(new_next.len()));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "display entry debug sink: ordered {old_time:?}; release sink omitted {new_time:?}; ratio {:.2}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 }

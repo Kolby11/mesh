@@ -248,7 +248,18 @@ duplicating it.
       A 1,365-node release microbenchmark over 2,000 unchanged passes measured
       23.236s for rebuilding snapshots versus 1.188us for the dirty-summary
       gate. Lazy field resolution remains open for frames where metrics really
-      changed.
+      changed. Progress 2026-07-05: metric usage is now split between
+      `elements` and `refs`, so ref/id-only components keep publishing the
+      public `refs` table and live proxies without also building the all-node
+      `elements` snapshot. A 341-node release benchmark over 2,000 changed
+      publications measured 6.069s for collect-both versus 3.823s for
+      refs-only (1.6x faster). Progress 2026-07-05: the collector now builds
+      full JSON snapshots lazily only for nodes that actually publish to
+      `elements` or `refs`, while reading scroll offsets directly for traversal
+      through unpublished ancestors. A sparse-ref 341-node release benchmark
+      over 2,000 publications measured 1.872s for eager per-node snapshots
+      versus 205.920ms for lazy snapshots (9.1x faster). Lazy field resolution
+      remains open for frames where metrics really changed.
 - [ ] **Stringly-typed template expression values.** `eval_expr` returns
       `String` for everything (`frontend/compiler/src/expr.rs:26,162`);
       numeric ops re-`parse::<f64>` both sides per evaluation
@@ -258,6 +269,16 @@ duplicating it.
       (bool/number/string) for compiled-expression evaluation and only
       stringify at the attribute boundary — this also removes false
       attribute-hash dirtiness from float formatting.
+  - [x] 2026-07-04: compiled expression evaluation now carries an internal
+        bool/number/string value enum through boolean operators, ternaries,
+        comparisons, concatenation, translation, and JSON variable reads, then
+        stringifies only at the public `eval_expr` boundary. Numeric JSON
+        comparisons avoid per-evaluation string allocation and `parse::<f64>`.
+        A release benchmark over 500k numeric comparisons measured 36.848ms for
+        the old string-parse shape versus 29.394ms for typed comparison (1.3x
+        faster).
+  - [ ] Attribute storage remains string-based until the downstream
+        `WidgetNode`/style contracts are typed.
 
 ### B. Component communication & input
 
@@ -282,7 +303,14 @@ duplicating it.
       `bind_this_event_handler_calls_child_live_and_resyncs_it`. A release
       benchmark over 2k untouched-neighbor checks measured 3.194ms for
       unconditional child resync versus 42.743us for the flag-gated skip
-      (74.7x faster). Instance-key interning remains open.
+      (74.7x faster).
+  - [x] 2026-07-04: plain handler argument unpacking now borrows the handler
+        name and event args instead of cloning them into a fresh `String`/`Vec`
+        on every dispatch; legacy JSON descriptors and typed pre-bound handler
+        args still allocate only when merging is needed. A release benchmark
+        over 500k plain handler transfers measured 40.768ms for clone-transfer
+        versus 2.548ms for borrowed transfer (16.0x faster).
+  - [ ] Instance-key interning remains open.
 - [ ] **`bind:this`/live-binding writes mark the whole surface dirty.** Any
       handler that touches state invalidates via `invalidate_script_state()`
       → full template re-eval + tree rebuild (narrow path still rebuilds the
@@ -363,7 +391,18 @@ duplicating it.
       The transient retained dirty `SecondaryMap` now also swaps through a
       scratch slot instead of reallocating on each interaction update; a
       128-dirty-node release benchmark over 20k updates measured 6.622ms fresh
-      versus 3.419ms reused (1.9x faster).
+      versus 3.419ms reused (1.9x faster). Progress 2026-07-04: retained
+      snapshot updates now remove stale nodes before draining the per-frame
+      scratch map, then move changed/inserted `RetainedNodeSnapshot`s into
+      slotmap storage instead of cloning them. Release benchmark:
+      clone-transfer 216.847ms vs drain-move 177.698ms over 5.12M snapshot
+      transfers (1.2x faster). Broader clean-subtree skipping and slotmap-keyed
+      snapshot reuse remain open. Progress 2026-07-04: pre-bound event handler
+      args in retained attribute fingerprints now hash `serde_json::Value`
+      structure directly instead of allocating a serialized string for every
+      arg. A release benchmark over 500k nested JSON arg fingerprints measured
+      433.760ms for `to_string` hashing versus 92.355ms for direct typed
+      hashing (4.7x faster).
 - [ ] **`WidgetNode` allocation profile.** Every node carries `tag: String`,
       `attributes: BTreeMap<String,String>`, `event_handlers:
     BTreeMap<String,String>` (`ui/elements/src/tree.rs:44-68`), rebuilt
@@ -397,11 +436,21 @@ duplicating it.
       fusing surface and child enter/exit class annotation into one full-tree
       traversal measured 87.249ms versus 52.903ms for the existing targeted
       searches/subtree walks (0.6x). The prototype was reverted; any future
-      fusion needs to avoid scanning unrelated branches.
+      fusion needs to avoid scanning unrelated branches. Progress 2026-07-04:
+      text-selection annotation now resolves the selected `_mesh_key` with the
+      existing keyed node lookup and annotates only that node instead of running
+      a selection-specific recursive tree walk. Release benchmark on a broad
+      tree: recursive 4.072s vs keyed 3.857s over 10k iterations (1.1x faster).
 - [ ] **Layout + display list**: Taffy tree rebuilt per layout pass and
       display-list subtree flattening per update are already tracked
       (v1.21). Reaffirmed as the dominant structural-frame costs behind
-      restyle in this scan; no new sub-findings.
+      restyle in this scan; no new sub-findings. Progress 2026-07-04:
+      render-object sync now reuses the per-update `dirty_nodes` allocation
+      and replaces the separate `visited` hash set with an epoch mark stored on
+      each retained render object. Release benchmark: visited set 158.594ms vs
+      epoch marks 89.300ms over 20k synthetic updates (1.8x faster). Rejected
+      experiment: changing render-object child IDs from `Vec` to `SmallVec`
+      measured slower (11.285ms `Vec` vs 21.992ms `SmallVec`) and was reverted.
 - [ ] **CPU Skia raster + SHM is the ceiling.** Painting is skia-safe CPU
       raster into `PixelBuffer` + SHM upload (`render/src/surface/painter/backend.rs`);
       blur/shadows/gradients are CPU per damaged pixel. GPU rendering is
@@ -428,6 +477,12 @@ duplicating it.
       `ComputedStyle` prototypes once per theme change and start resolution
       from a memcpy of the prototype instead of re-applying string
       declarations.
+  - [x] 2026-07-05: no-diagnostics theme default application now applies
+        borrowed property names directly instead of constructing a temporary
+        `Declaration` for every default on every node. A release benchmark over
+        200k default applications measured 165.045ms for declaration allocation
+        versus 154.446ms for direct property application (1.1x faster). Full
+        pre-baked `ComputedStyle` prototypes remain open.
 ### F. Animation & layout per-frame overhead
 
 - [ ] **Retained Taffy layout still re-syncs every node's style per pass.**
@@ -496,12 +551,31 @@ duplicating it.
       generation) and reuse it wholesale on rebuild. This is the
       component-granular complement to the v1.27 node-level narrow re-eval
       and probably the single largest structural win for complex surfaces.
+      Progress 2026-07-05: embedded/local runtime prop sync now uses a single
+      runtime-map lock for existing instances and applies props directly to a
+      newly-created runtime after its render hook, instead of inserting and
+      looking it up again. A release microbenchmark over 1M existing-instance
+      updates measured 26.851ms for `contains_key` + second `get_mut` lock
+      versus 12.362ms for one `get_mut` lock (2.2x faster). Full subtree
+      memoization remains open. Progress 2026-07-05: prop-bound handler
+      matching now scans borrowed event-handler maps and only clones matched
+      handler entries instead of cloning each node's full handler map before
+      checking for matches. A 65-node no-match release benchmark over 50k
+      passes measured 1.089s for clone-then-scan versus 877.216ms for borrowed
+      scan (1.2x faster). Full subtree memoization remains open.
 - [ ] **Display payload text still clones string attributes.** Display-entry
       comparison and paint-node creation still clone/deep-compare per-entry
       strings (`content`/`value`/`src`/`name`). Consider sharing node text via
       `Arc<str>` between `WidgetNode` and display entries, or introducing a
       compact interned attribute payload, after auditing the `WidgetNode` and
-      renderer payload contract.
+      renderer payload contract. Progress 2026-07-05: display primitive
+      signatures now hash paint payload attributes by tag instead of hashing
+      text/input/icon/slider attributes for every node. This also avoids
+      display-list churn when irrelevant payload-like attributes change on
+      generic nodes. A mixed 512-node release benchmark over 20k signature
+      passes measured 925.336ms for all-payload-attrs hashing versus
+      219.760ms for tag-aware hashing (4.2x faster). Actual string sharing
+      remains open.
 - [ ] **Storage reads clone per Lua access.** `self.storage.key` reads lock
       the storage mutex and clone the JSON value per access
       (`scripting/storage.rs:275-307`); render hooks that read storage pay
@@ -536,7 +610,11 @@ multiplied by O(n) tree clones is where interaction latency actually goes.
 - [ ] **`finalize_tree` closing-popover pass: O(closing-keys × tree)**
       `find_node_by_key_mut` per closing key (`rendering.rs:273-279`).
       Trivial count in practice; fold into the fused annotation walk (D)
-      rather than fixing separately.
+      rather than fixing separately. Rejected experiment 2026-07-05: replacing
+      the per-key searches with one full-tree inherited-state traversal was
+      slower for the realistic small-key case (855.098ms existing per-key
+      search vs 1.035s one-walk over 2k broad-tree iterations), so the
+      prototype was reverted.
 - [ ] **Slider drag worst case = every quadratic above at once.** Each
       uncoalesced motion during a drag runs slider-value tree walks ×3, a
       handler call (Lua + full `sync_state_from_lua`), then
@@ -742,13 +820,18 @@ findings beyond the D/I/J items; `file:line` as of this scan.
 
 Performance:
 
-- [ ] **`ordered_entries` is built per display-list rebuild but consumed only in
+- [x] **`ordered_entries` is built per display-list rebuild but consumed only in
       debug builds.** `collect_display_entries` pushes every `(key, entry)` pair
       into a Vec (`render/src/display_list.rs:770-774`) whose sole consumer is
       `compute_batch_metrics` behind `#[cfg(debug_assertions)]`
       (`display_list.rs:891-894`). Release builds pay a full per-entry Vec push
       every rebuild frame for nothing. Gate the collection itself (pass
       `Option<&mut Vec<_>>` or a debug-only sink). Free win.
+      Completed 2026-07-05: release builds now compile out the ordered-entry
+      scratch buffer and pass no debug sink during entry collection. Two
+      release runs over 9.842 million collected entries measured 2.943s versus
+      2.881s and 2.941s versus 2.930s (0.4-2.1% faster), with identical damage
+      map entry counts.
 - [ ] **`RenderObjectTree` allocates per node per dirty frame.** `text_slot`
       clones the text `content` String (`render/src/render_object.rs:307`),
       `accessibility_slot` clones the label, `child_id_slot` allocates a fresh
@@ -771,12 +854,23 @@ Performance:
       object tree and display entries consume its per-node dirty flags,
       re-signing entries only inside dirty subtrees (plus scrolled/moved
       ancestors). This is the §2 complement of the v1.27 generation-aware diff.
-- [ ] **Reused paint subtrees are cloned twice per clean node.**
+      Progress 2026-07-05: display-list batch signatures now hash only the
+      material fields relevant to each primitive slot, and entries that already
+      carry a batch barrier skip batch-signature hashing entirely because the
+      metric never compares them. A 512-node release benchmark over 50k
+      background-slot signature passes measured 804.926ms for the previous broad
+      material hash versus 69.806ms for the slot-aware hash (11.5x faster).
+- [x] **Reused paint subtrees are cloned twice per clean node.**
       `build_paint_subtree`'s reuse path does `previous.clone()` then
       `next_subtrees.insert(id, reused.clone())`
       (`display_list.rs:1488-1491`) — Arc bumps plus span/kind vec copies for
       every clean node on every incremental rebuild. Insert once and return a
       cheap handle/index instead.
+      Completed 2026-07-05: retained subtree maps now own whole-subtree `Arc`
+      handles, so clean-node reuse clones one handle rather than cloning each
+      shared command/kind/order field plus metadata. A release benchmark over
+      10 million reuse clones measured 180.455ms fieldwise versus 28.002ms for
+      the whole-subtree handle (6.4x faster).
 - [ ] **Two more full passes per display-list rebuild.**
       `build_command_spans(root, &subtrees)` walks the tree and
       `count_effect_overflow_commands` scans all commands
@@ -796,13 +890,18 @@ Performance:
 
 Structure:
 
-- [ ] **The primitive-aware hasher improvement never reached the render crate.**
+- [x] **The primitive-aware hasher improvement never reached the render crate.**
       `RuntimeTreeHasher` got word-at-a-time `write_*` methods (D, 1.9x), but
       `DisplaySignatureHasher` (`display_list.rs:1305-1325`) and
       `RenderObjectHasher` (`render_object.rs:51-70`) are still byte-at-a-time
       FNV copies. Either port the primitive methods or — better — share one
       hasher type; three hand-rolled FNV implementations is the maintenance
       smell that let this drift.
+      Completed 2026-07-05: both render hashers now mix primitive values in one
+      operation while preserving byte-wise hashing for strings and slices. A
+      release benchmark over a representative primitive field mix measured
+      3.072ms for the byte fallback versus 2.232ms word-at-a-time (1.4x
+      faster across 5 million iterations).
 - [ ] **No `NodeId` collision detection.** Runtime ids are FNV/chained hashes
       of key paths (`runtime_tree.rs:346-365`) used as identity keys by all
       three retained systems and the display-list keys; a collision silently
