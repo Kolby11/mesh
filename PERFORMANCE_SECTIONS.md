@@ -44,7 +44,11 @@ Perf:
   (+1 per nesting level). Verify nothing reads `node.layout` between build and
   finalize, then skip layout in `FrontendRenderMode::Embedded` (and likely for
   the surface build too).
-- **`{#for}` deep-clones the whole items array every rebuild.**
+- **`{#for}` deep-clones the whole items array every rebuild.** Completed
+  2026-07-06: borrowed iterable arrays through `VariableStore::get_ref` when
+  available, with an owned fallback for older stores. Release-only benchmark on
+  a clone-heavy 1k-item array measured ~1.2x faster locally (5.12s → 4.25s for
+  80 rebuilds); small-payload full-render was layout/tree-build dominated.
   `store.get(&for_node.iterable)` (`render.rs:429`) uses the owned `get` even
   though borrowed `get_ref` exists; switch to `get_ref`.
 - **Three post-hoc full-subtree walks per embedded instance:**
@@ -160,7 +164,13 @@ gate for hover invalidation (K).
 
 ### Section 3 deep dive — 2026-07-04 (new findings; full list in todo.md §O)
 
-- **Hidden second full restyle on every rebuild frame**: the runtime style
+- **Hidden second full restyle on every rebuild frame**: first stage completed
+  2026-07-06. Runtime style diagnostics now reuse the cached `StyleRuleIndex`
+  instead of rebuilding one per node; indexed-vs-uncached parity is covered and
+  a release-only microbenchmark measured ~2.4x faster diagnostics locally
+  (652.3ms → 270.3ms for 20k resolutions over 80 rules). Remaining follow-up:
+  gate diagnostics by rules/tree generation or move static validation to compile
+  time. The runtime style
   diagnostics pass (always on in production) re-resolves every node through
   the diagnostics path, which still builds a `StyleRuleIndex` **per node** —
   the O(nodes × rules) pattern the build path already fixed. Likely the

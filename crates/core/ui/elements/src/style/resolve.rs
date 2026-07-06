@@ -769,6 +769,24 @@ impl<'a> StyleResolver<'a> {
         self.resolve_node_style_with_attrs(rules, &attrs, context)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_node_style_with_diagnostics_for_module_indexed(
+        &self,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
+        tag: &str,
+        classes: &[String],
+        id: Option<&str>,
+        context: StyleContext,
+        state: ElementState,
+        module_id: Option<&str>,
+    ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
+        debug_assert!(index.is_for(rules));
+        let mut attrs = StyleNodeAttrs::new(tag, classes, id, state);
+        attrs.module_id = module_id;
+        self.resolve_node_style_with_attrs_indexed(rules, index, &attrs, context)
+    }
+
     fn resolve_node_style_with_attrs(
         &self,
         rules: &[StyleRule],
@@ -2396,6 +2414,124 @@ mod tests {
                 &uncached_variables,
             )
         );
+    }
+
+    #[test]
+    fn indexed_diagnostics_match_uncached_diagnostics() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![
+            StyleRule {
+                selector: Selector::Class("panel".to_string()),
+                declarations: vec![Declaration {
+                    property: "grid-template-columns".to_string(),
+                    value: StyleValue::Literal("1fr 1fr".to_string()),
+                }],
+                container_query: None,
+            },
+            StyleRule {
+                selector: Selector::Tag("box".to_string()),
+                declarations: vec![Declaration {
+                    property: "color".to_string(),
+                    value: StyleValue::Literal("#112233".to_string()),
+                }],
+                container_query: None,
+            },
+        ];
+        let index = StyleRuleIndex::new(&rules);
+        let classes = vec!["panel".to_string()];
+
+        let (_uncached_style, uncached) = resolver.resolve_node_style_with_diagnostics_for_module(
+            &rules,
+            "box",
+            &classes,
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+            Some("@test/module"),
+        );
+        let (_indexed_style, indexed) = resolver
+            .resolve_node_style_with_diagnostics_for_module_indexed(
+                &rules,
+                &index,
+                "box",
+                &classes,
+                None,
+                StyleContext::default(),
+                ElementState::default(),
+                Some("@test/module"),
+            );
+
+        assert_eq!(indexed, uncached);
+    }
+
+    // cargo test -p mesh-core-elements --release -- indexed_diagnostics_beat_per_node_index_rebuild --ignored --nocapture
+    #[test]
+    #[ignore = "release-only indexed diagnostics microbenchmark"]
+    fn indexed_diagnostics_beat_per_node_index_rebuild() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let mut rules = Vec::new();
+        for index in 0..80 {
+            rules.push(StyleRule {
+                selector: Selector::Class(format!("panel-{index}")),
+                declarations: vec![
+                    Declaration {
+                        property: "color".to_string(),
+                        value: StyleValue::Literal("#112233".to_string()),
+                    },
+                    Declaration {
+                        property: "grid-template-columns".to_string(),
+                        value: StyleValue::Literal("1fr 1fr".to_string()),
+                    },
+                ],
+                container_query: None,
+            });
+        }
+        let index = StyleRuleIndex::new(&rules);
+        let classes = vec!["panel-79".to_string()];
+        let iterations = 20_000usize;
+
+        let old_started = std::time::Instant::now();
+        let mut old_count = 0usize;
+        for _ in 0..iterations {
+            let (_style, diagnostics) = resolver.resolve_node_style_with_diagnostics_for_module(
+                std::hint::black_box(&rules),
+                "box",
+                std::hint::black_box(&classes),
+                None,
+                StyleContext::default(),
+                ElementState::default(),
+                Some("@test/module"),
+            );
+            old_count = old_count.wrapping_add(diagnostics.len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_count = 0usize;
+        for _ in 0..iterations {
+            let (_style, diagnostics) = resolver
+                .resolve_node_style_with_diagnostics_for_module_indexed(
+                    std::hint::black_box(&rules),
+                    std::hint::black_box(&index),
+                    "box",
+                    std::hint::black_box(&classes),
+                    None,
+                    StyleContext::default(),
+                    ElementState::default(),
+                    Some("@test/module"),
+                );
+            new_count = new_count.wrapping_add(diagnostics.len());
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "style diagnostics: per-node index rebuild {old_time:?}; cached index {new_time:?}; ratio {:.1}x; counts={old_count}/{new_count}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_count, new_count);
+        assert!(new_time < old_time);
     }
 
     #[test]

@@ -28,7 +28,7 @@ pub use tags::UiTag;
 struct LayeredStore<'a> {
     base: &'a dyn VariableStore,
     item_name: &'a str,
-    item_value: serde_json::Value,
+    item_value: &'a serde_json::Value,
 }
 
 impl VariableStore for LayeredStore<'_> {
@@ -722,6 +722,181 @@ mod tests {
             texts.contains(&"Bob".to_string()),
             "expected Bob in {texts:?}"
         );
+    }
+
+    #[test]
+    fn for_node_borrows_iterable_without_owned_root_clone() {
+        use std::cell::Cell;
+
+        struct CountingStore {
+            values: HashMap<String, serde_json::Value>,
+            owned_gets: Cell<usize>,
+        }
+
+        impl mesh_core_elements::VariableStore for CountingStore {
+            fn get(&self, name: &str) -> Option<serde_json::Value> {
+                if name == "items" {
+                    self.owned_gets.set(self.owned_gets.get() + 1);
+                }
+                self.values.get(name).cloned()
+            }
+
+            fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
+                self.values.get(name)
+            }
+
+            fn keys(&self) -> Vec<String> {
+                self.values.keys().cloned().collect()
+            }
+        }
+
+        let source = r#"
+<template>
+  <box>
+    {#for item in items}
+      <text>{item.name}</text>
+    {/for}
+  </box>
+</template>
+"#;
+        let compiled = make_test_module(source);
+        let theme = mesh_core_theme::default_theme();
+        let items = (0..256)
+            .map(|index| serde_json::json!({ "name": format!("Item {index}") }))
+            .collect::<Vec<_>>();
+        let store = CountingStore {
+            values: [("items".to_string(), serde_json::Value::Array(items))]
+                .into_iter()
+                .collect(),
+            owned_gets: Cell::new(0),
+        };
+
+        let tree = compiled.build_preview_tree_with_state(&theme, 400, 300, Some(&store));
+        let texts = collect_text_content(&tree);
+        assert!(texts.contains(&"Item 255".to_string()));
+        assert_eq!(
+            store.owned_gets.get(),
+            0,
+            "loop iteration should borrow the iterable instead of cloning the root array"
+        );
+    }
+
+    #[test]
+    fn for_node_falls_back_to_owned_iterable_store() {
+        struct OwnedOnlyStore(HashMap<String, serde_json::Value>);
+
+        impl mesh_core_elements::VariableStore for OwnedOnlyStore {
+            fn get(&self, name: &str) -> Option<serde_json::Value> {
+                self.0.get(name).cloned()
+            }
+
+            fn keys(&self) -> Vec<String> {
+                self.0.keys().cloned().collect()
+            }
+        }
+
+        let source = r#"
+<template>
+  <box>
+    {#for item in items}
+      <text>{item.name}</text>
+    {/for}
+  </box>
+</template>
+"#;
+        let compiled = make_test_module(source);
+        let theme = mesh_core_theme::default_theme();
+        let store = OwnedOnlyStore(
+            [(
+                "items".to_string(),
+                serde_json::json!([{"name": "Fallback"}]),
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        let tree = compiled.build_preview_tree_with_state(&theme, 400, 300, Some(&store));
+        let texts = collect_text_content(&tree);
+        assert!(
+            texts.contains(&"Fallback".to_string()),
+            "owned-only stores should continue to render loop items"
+        );
+    }
+
+    // Run with:
+    // cargo test -p mesh-core-frontend --release -- for_node_borrowed_iterable_beats_owned_array_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only for-loop iterable lookup microbenchmark"]
+    fn for_node_borrowed_iterable_beats_owned_array_clone() {
+        use std::time::Instant;
+
+        struct OwnedOnlyStore(HashMap<String, serde_json::Value>);
+        impl mesh_core_elements::VariableStore for OwnedOnlyStore {
+            fn get(&self, name: &str) -> Option<serde_json::Value> {
+                self.0.get(name).cloned()
+            }
+
+            fn keys(&self) -> Vec<String> {
+                self.0.keys().cloned().collect()
+            }
+        }
+
+        let source = r#"
+<template>
+  <box>
+    {#for item in items}
+      <row>
+        <text>{item.name}</text>
+        <text>{item.value}</text>
+      </row>
+    {/for}
+  </box>
+</template>
+"#;
+        let compiled = make_test_module(source);
+        let theme = mesh_core_theme::default_theme();
+        let unused_payload = "x".repeat(1_024);
+        let items = (0..1_000)
+            .map(|index| {
+                serde_json::json!({
+                    "name": format!("Item {index}"),
+                    "value": index,
+                    "unused": {
+                        "description": unused_payload,
+                        "metrics": (0..32).collect::<Vec<_>>()
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        let map = [("items".to_string(), serde_json::Value::Array(items))]
+            .into_iter()
+            .collect::<HashMap<_, _>>();
+        let owned = OwnedOnlyStore(map.clone());
+        let borrowed = MapStore(map);
+        let iterations = 80usize;
+
+        let owned_started = Instant::now();
+        let mut owned_count = 0usize;
+        for _ in 0..iterations {
+            let tree = compiled.build_preview_tree_with_state(&theme, 400, 300, Some(&owned));
+            owned_count = owned_count.wrapping_add(collect_text_content(&tree).len());
+        }
+        let owned_time = owned_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_count = 0usize;
+        for _ in 0..iterations {
+            let tree = compiled.build_preview_tree_with_state(&theme, 400, 300, Some(&borrowed));
+            borrowed_count = borrowed_count.wrapping_add(collect_text_content(&tree).len());
+        }
+        let borrowed_time = borrowed_started.elapsed();
+
+        eprintln!(
+            "for iterable lookup: owned clone {owned_time:?}; borrowed ref {borrowed_time:?}; ratio {:.1}x; counts={owned_count}/{borrowed_count}",
+            owned_time.as_secs_f64() / borrowed_time.as_secs_f64()
+        );
+        assert_eq!(owned_count, borrowed_count);
+        assert!(borrowed_time < owned_time);
     }
 
     fn collect_text_content(node: &mesh_core_elements::WidgetNode) -> Vec<String> {

@@ -8,7 +8,7 @@ use crate::{FrontendCompositionResolver, LayeredStore};
 
 use mesh_core_component::style::{StyleRule, StyleValue, prop_variable_key};
 use mesh_core_component::template::{
-    Attribute, AttributeValue, ComponentRef, ElementNode, SourceTag, TemplateNode,
+    Attribute, AttributeValue, ComponentRef, ElementNode, ForNode, SourceTag, TemplateNode,
 };
 use mesh_core_component::{PropValue, PropsBlock};
 use mesh_core_elements::accessibility::AccessibilityInfo;
@@ -474,33 +474,59 @@ pub(crate) fn build_widget_node(
             let child_context = child_style_context(&node.computed_style, container_context);
 
             if let Some(store) = state {
-                let iterable = if composition.is_some() {
-                    evaluate_template_expression(
+                if let Some(composition) = composition {
+                    let iterable = evaluate_template_expression(
                         &for_node.iterable,
                         Some(store),
                         instance_key,
-                        composition,
-                    )
+                        Some(composition),
+                    );
+                    if let serde_json::Value::Array(items) = iterable {
+                        node.children.extend(build_for_children(
+                            &items,
+                            for_node,
+                            manifest,
+                            build_style,
+                            &node.computed_style,
+                            child_context,
+                            store,
+                            instance_key,
+                            Some(composition),
+                        ));
+                    }
                 } else {
-                    store
-                        .get(&for_node.iterable)
-                        .unwrap_or(serde_json::Value::Null)
-                };
-                if let serde_json::Value::Array(items) = iterable {
-                    for item_val in items {
-                        let item_store = LayeredStore {
-                            base: store,
-                            item_name: &for_node.item_name,
-                            item_value: item_val,
-                        };
-                        for child in &for_node.children {
-                            node.children.push(build_widget_node(
-                                child,
+                    let borrowed_items = store.get_ref(&for_node.iterable).and_then(|value| {
+                        if let serde_json::Value::Array(items) = value {
+                            Some(items.as_slice())
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(items) = borrowed_items {
+                        node.children.extend(build_for_children(
+                            items,
+                            for_node,
+                            manifest,
+                            build_style,
+                            &node.computed_style,
+                            child_context,
+                            store,
+                            instance_key,
+                            composition,
+                        ));
+                    } else {
+                        let iterable = store
+                            .get(&for_node.iterable)
+                            .unwrap_or(serde_json::Value::Null);
+                        if let serde_json::Value::Array(items) = iterable {
+                            node.children.extend(build_for_children(
+                                &items,
+                                for_node,
                                 manifest,
                                 build_style,
-                                Some(&node.computed_style),
+                                &node.computed_style,
                                 child_context,
-                                Some(&item_store as &dyn VariableStore),
+                                store,
                                 instance_key,
                                 composition,
                             ));
@@ -563,6 +589,43 @@ pub(crate) fn build_widget_node(
             node
         }
     }
+}
+
+fn build_for_children<'items, I>(
+    items: I,
+    for_node: &ForNode,
+    manifest: &Manifest,
+    build_style: &BuildStyleContext<'_, '_>,
+    parent_style: &ComputedStyle,
+    child_context: StyleContext,
+    store: &dyn VariableStore,
+    instance_key: &str,
+    composition: Option<&dyn FrontendCompositionResolver>,
+) -> Vec<WidgetNode>
+where
+    I: IntoIterator<Item = &'items serde_json::Value>,
+{
+    let mut children = Vec::new();
+    for item_val in items {
+        let item_store = LayeredStore {
+            base: store,
+            item_name: &for_node.item_name,
+            item_value: item_val,
+        };
+        for child in &for_node.children {
+            children.push(build_widget_node(
+                child,
+                manifest,
+                build_style,
+                Some(parent_style),
+                child_context,
+                Some(&item_store as &dyn VariableStore),
+                instance_key,
+                composition,
+            ));
+        }
+    }
+    children
 }
 
 fn build_element_node(

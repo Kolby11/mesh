@@ -427,7 +427,17 @@ impl FrontendSurfaceComponent {
         // every restyle frame (hover transitions, animations) only burns CPU;
         // run the pass when the tree was rebuilt.
         if trigger_kind == "rebuild" {
-            self.record_runtime_style_diagnostics(tree, restyle_rules, &resolver, context);
+            let style_index = self
+                .cached_style_rule_index
+                .as_ref()
+                .expect("style index cache populated by restyle");
+            self.record_runtime_style_diagnostics(
+                tree,
+                restyle_rules,
+                style_index,
+                &resolver,
+                context,
+            );
         }
 
         if tree.tag == "surface" {
@@ -566,6 +576,7 @@ impl FrontendSurfaceComponent {
         &self,
         tree: &WidgetNode,
         rules: &[mesh_core_component::style::StyleRule],
+        index: &mesh_core_elements::StyleRuleIndex,
         resolver: &StyleResolver,
         context: StyleContext,
     ) {
@@ -576,13 +587,14 @@ impl FrontendSurfaceComponent {
         if self.diagnostics.is_none() {
             return;
         }
-        self.record_runtime_style_diagnostics_for_node(tree, rules, resolver, context);
+        self.record_runtime_style_diagnostics_for_node(tree, rules, index, resolver, context);
     }
 
     fn record_runtime_style_diagnostics_for_node(
         &self,
         node: &WidgetNode,
         rules: &[mesh_core_component::style::StyleRule],
+        index: &mesh_core_elements::StyleRuleIndex,
         resolver: &StyleResolver,
         context: StyleContext,
     ) {
@@ -593,9 +605,10 @@ impl FrontendSurfaceComponent {
             .unwrap_or_default();
         let id = node.attributes.get("id").map(|value| value.as_str());
         let module_id = node.attributes.get("_mesh_module_id").map(String::as_str);
-        let (_style, diagnostics) = resolver.resolve_node_style_with_diagnostics_for_module(
-            rules, &node.tag, &classes, id, context, node.state, module_id,
-        );
+        let (_style, diagnostics) = resolver
+            .resolve_node_style_with_diagnostics_for_module_indexed(
+                rules, index, &node.tag, &classes, id, context, node.state, module_id,
+            );
 
         for diagnostic in diagnostics {
             if diagnostic.message.contains("animation.")
@@ -606,7 +619,7 @@ impl FrontendSurfaceComponent {
         }
 
         for child in &node.children {
-            self.record_runtime_style_diagnostics_for_node(child, rules, resolver, context);
+            self.record_runtime_style_diagnostics_for_node(child, rules, index, resolver, context);
         }
     }
 }

@@ -840,10 +840,19 @@ Performance:
       ≥3 layout passes per rebuild (+1 per nesting level). Verify nothing reads
       `node.layout` between build and finalize, then skip the build-time layout
       for `FrontendRenderMode::Embedded` (and likely the surface build too).
-- [ ] **`{#for}` deep-clones the whole items array every rebuild.**
+- [x] **`{#for}` deep-clones the whole items array every rebuild.**
       `store.get(&for_node.iterable)` (`frontend/compiler/src/render.rs:429`)
       uses owned `get` although borrowed `get_ref` exists and is already used by
-      `eval_path`. Switch to `get_ref`; trivial diff.
+      `eval_path`. Switch to `get_ref`; trivial diff. Completed 2026-07-06:
+      `{#for}` now borrows iterable arrays through `VariableStore::get_ref`
+      when available, keeps an owned fallback for stores that only implement
+      `get`, and stores loop items by reference in `LayeredStore`. Added
+      regression coverage for the no-owned-root-clone path plus fallback
+      coverage for owned-only stores. Release-only benchmark on a clone-heavy
+      1k-item array showed borrowed iteration ~1.2x faster locally
+      (5.12s -> 4.25s for 80 rebuilds); a small-payload full-render benchmark
+      was layout/tree-build dominated and did not show a win, so this is
+      specifically an allocation/clone-heavy iterable improvement.
 - [ ] **Post-hoc full-subtree walks per embedded instance.**
       `namespace_event_handlers` re-`format!`s every handler string on every
       rebuild (`ui/interaction/src/hit_test.rs:359`) even though
@@ -1087,7 +1096,7 @@ See `PERFORMANCE_SECTIONS.md` §3. `file:line` as of this scan.
 
 Performance:
 
-- [ ] **Hidden second full restyle with per-node index construction on every
+- [x] **Hidden second full restyle with per-node index construction on every
       rebuild frame.** `record_runtime_style_diagnostics` runs whenever a
       diagnostics sink is attached — which is always in production
       (`shell_component.rs:60`) — on every `"rebuild"`-trigger finalize
@@ -1101,6 +1110,14 @@ Performance:
       index through the diagnostics path; gate the pass on (rules generation,
       tree-structure generation) instead of every rebuild; long-term validate
       declarations once per rule at compile time and delete the runtime pass.
+      Completed first stage 2026-07-06: added an indexed diagnostics resolver
+      and threaded the existing cached `StyleRuleIndex` through the shell
+      runtime style diagnostics walk, removing per-node index construction on
+      rebuild diagnostics. Added parity coverage for indexed vs uncached
+      diagnostics. Release-only microbenchmark showed cached-index diagnostics
+      ~2.4x faster locally (652.3ms -> 270.3ms for 20k diagnostic resolutions
+      over 80 rules). Remaining follow-up: gate diagnostics by rules/tree
+      generation or move unsupported CSS validation fully static.
 - [ ] **Per-declaration static validation re-runs per node per pass.**
       `apply_declaration_no_diagnostics` runs `style_profile_status`,
       `is_supported_css_property`, `contains_deprecated_token_reference` (a
