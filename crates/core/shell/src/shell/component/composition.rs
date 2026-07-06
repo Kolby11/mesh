@@ -46,7 +46,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         container_height: f32,
     ) -> Option<WidgetNode> {
         if let Some(entry) = self.frontend_catalog.modules.get(&host.package.id) {
-            if entry.compiled.local_components.contains_key(alias) {
+            if let Some(component) = entry.compiled.local_components.get(alias) {
                 let bind_this = props.get("__mesh_bind_this").cloned();
                 let props_json: HashMap<String, serde_json::Value> = props
                     .iter()
@@ -59,10 +59,18 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 let mut node = self.render_local_component(
                     &entry.compiled.manifest,
                     alias,
+                    component,
                     &instance_key,
                     &props_json,
                     container_width,
                     container_height,
+                    entry
+                        .compiled
+                        .component
+                        .style
+                        .as_ref()
+                        .map(|style| style.rules.as_slice())
+                        .unwrap_or(&[]),
                 );
                 apply_prop_handler_calls(&mut node, props, prop_handler_calls);
                 if let Some(binding) = bind_this.and_then(|value| simple_state_binding(&value)) {

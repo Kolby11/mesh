@@ -402,6 +402,7 @@ impl FrontendSurfaceComponent {
         host_module_id: &str,
         host_manifest: &mesh_core_module::Manifest,
         alias: &str,
+        component: &mesh_core_component::ComponentFile,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<(), ComponentError> {
         {
@@ -412,18 +413,6 @@ impl FrontendSurfaceComponent {
             }
         }
 
-        let Some(entry) = self.frontend_catalog.modules.get(host_module_id) else {
-            return Err(ComponentError::Failed {
-                component_id: self.id().to_string(),
-                message: format!("missing host module '{host_module_id}'"),
-            });
-        };
-        let Some(component) = entry.compiled.local_components.get(alias) else {
-            return Err(ComponentError::Failed {
-                component_id: self.id().to_string(),
-                message: format!("missing local component import '{alias}'"),
-            });
-        };
         let mut runtime = self.create_runtime_for_component(
             instance_key,
             format!("{host_module_id}::{alias}"),
@@ -445,34 +434,27 @@ impl FrontendSurfaceComponent {
         &self,
         host: &mesh_core_module::Manifest,
         alias: &str,
+        component: &mesh_core_component::ComponentFile,
         instance_key: &str,
         props: &HashMap<String, serde_json::Value>,
         container_width: f32,
         container_height: f32,
+        host_rules: &[mesh_core_component::style::StyleRule],
     ) -> WidgetNode {
-        if let Err(err) =
-            self.ensure_local_component_runtime(instance_key, &host.package.id, host, alias, props)
-        {
+        if let Err(err) = self.ensure_local_component_runtime(
+            instance_key,
+            &host.package.id,
+            host,
+            alias,
+            component,
+            props,
+        ) {
             return self.build_error_widget(err.to_string());
         }
-
-        let Some(entry) = self.frontend_catalog.modules.get(&host.package.id) else {
-            return self.build_error_widget(format!("missing host module '{}'", host.package.id));
-        };
-        let Some(component) = entry.compiled.local_components.get(alias) else {
-            return self.build_error_widget(format!("missing local component import '{alias}'"));
-        };
 
         let theme = self.active_theme.borrow().clone();
         let state = self.runtime_state(instance_key).unwrap_or_default();
         let bound = LocaleBoundState::new(&state, &self.locale);
-        let host_rules = entry
-            .compiled
-            .component
-            .style
-            .as_ref()
-            .map(|style| style.rules.as_slice())
-            .unwrap_or(&[]);
         let mut node = mesh_core_frontend::build_widget_tree_from_component(
             component,
             host,
@@ -541,32 +523,19 @@ impl FrontendSurfaceComponent {
         args: &[serde_json::Value],
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let _span = tracing::debug_span!("call_handler", surface = %self.id(), handler).entered();
-        let (instance_key, raw_handler_name, component_id) =
+        let root_instance_key;
+        let (instance_key, raw_handler_name) =
             if let Some((instance_key, handler_name)) = parse_namespaced_handler(handler) {
-                let component_id = self
-                    .runtimes
-                    .lock()
-                    .unwrap()
-                    .get(instance_key)
-                    .map(|runtime| runtime.module_id.clone())
-                    .unwrap_or_else(|| self.id().to_string());
-                (
-                    instance_key.to_string(),
-                    handler_name.to_string(),
-                    component_id,
-                )
+                (instance_key, handler_name)
             } else {
-                (
-                    self.id().to_string(),
-                    handler.to_string(),
-                    self.id().to_string(),
-                )
+                root_instance_key = self.id().to_string();
+                (root_instance_key.as_str(), handler)
             };
 
-        let (handler_name, merged_args) = unpack_handler_args(&raw_handler_name, args);
+        let (handler_name, merged_args) = unpack_handler_args(raw_handler_name, args);
 
         let mut runtimes = self.runtimes.lock().unwrap();
-        let Some(runtime) = runtimes.get_mut(&instance_key) else {
+        let Some(runtime) = runtimes.get_mut(instance_key) else {
             return Ok(Vec::new());
         };
         if let Err(source) = runtime
@@ -574,6 +543,7 @@ impl FrontendSurfaceComponent {
             .call_handler(handler_name.as_ref(), merged_args.as_ref())
         {
             let error_message = source.to_string();
+            let component_id = runtime.module_id.clone();
             tracing::warn!(
                 component_id = %component_id,
                 handler = %handler_name,
@@ -594,12 +564,12 @@ impl FrontendSurfaceComponent {
         let state_dirty = runtime.script_ctx.state().is_dirty();
         let published = runtime.script_ctx.drain_published_events();
         drop(runtimes);
-        let mut events = self.drain_local_script_events(&instance_key, published);
+        let mut events = self.drain_local_script_events(instance_key, published);
         // A live `bind:this` cross-call mutated another instance's `_ENV` directly
         // during this handler — a parent calling `child.fn()` (parent→child) or a
         // child firing `self.Event` to a subscribed parent (child→parent). Re-sync
         // every instance linked to this one so its reactive state catches up.
-        let (neighbors_dirty, mut neighbor_events) = self.resync_binding_neighbors(&instance_key);
+        let (neighbors_dirty, mut neighbor_events) = self.resync_binding_neighbors(instance_key);
         events.append(&mut neighbor_events);
         if state_dirty || neighbors_dirty {
             self.invalidate_script_state();
@@ -665,9 +635,6 @@ impl FrontendSurfaceComponent {
     }
 }
 
-/// If `handler_name` is a JSON object with `h` and `a` fields, unpack it into
-/// the real handler name and pre-bound arguments. Otherwise, return as-is.
-/// Pre-bound args are prepended to the event args.
 fn unpack_handler_args<'a>(
     handler_name: &'a str,
     event_args: &'a [serde_json::Value],
@@ -675,24 +642,6 @@ fn unpack_handler_args<'a>(
     std::borrow::Cow<'a, str>,
     std::borrow::Cow<'a, [serde_json::Value]>,
 ) {
-    // Legacy pre-bound descriptors are JSON objects. Ordinary handler names
-    // dominate event dispatch, so avoid constructing a JSON parser/error for
-    // names that cannot possibly be descriptors.
-    if handler_name.as_bytes().first() == Some(&b'{')
-        && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(handler_name)
-    {
-        if let (Some(h), Some(a)) = (
-            parsed.get("h").and_then(serde_json::Value::as_str),
-            parsed.get("a").and_then(serde_json::Value::as_array),
-        ) {
-            let mut merged: Vec<serde_json::Value> = a.clone();
-            merged.extend_from_slice(event_args);
-            return (
-                std::borrow::Cow::Owned(h.to_string()),
-                std::borrow::Cow::Owned(merged),
-            );
-        }
-    }
     (
         std::borrow::Cow::Borrowed(handler_name),
         std::borrow::Cow::Borrowed(event_args),
@@ -748,23 +697,13 @@ mod handler_call_tests {
     }
 
     #[test]
-    fn unpack_handler_args_preserves_plain_and_legacy_descriptor_forms() {
+    fn unpack_handler_args_borrows_plain_handler_forms() {
         let event_args = [serde_json::json!({ "type": "click" })];
         let (handler, args) = unpack_handler_args("onClick", &event_args);
         assert_eq!(handler.as_ref(), "onClick");
         assert!(matches!(handler, std::borrow::Cow::Borrowed(_)));
         assert_eq!(args.as_ref(), event_args.as_slice());
         assert!(matches!(args, std::borrow::Cow::Borrowed(_)));
-
-        let descriptor = r#"{"h":"selectItem","a":["alpha"]}"#;
-        let (handler, args) = unpack_handler_args(descriptor, &event_args);
-        assert_eq!(handler.as_ref(), "selectItem");
-        assert!(matches!(handler, std::borrow::Cow::Owned(_)));
-        assert_eq!(
-            args.as_ref(),
-            [serde_json::json!("alpha"), event_args[0].clone()].as_slice()
-        );
-        assert!(matches!(args, std::borrow::Cow::Owned(_)));
     }
 
     // cargo test -p mesh-core-shell --release -- plain_handler_syntax_gate_beats_failed_json_parse --ignored --nocapture
@@ -833,12 +772,85 @@ mod handler_call_tests {
         assert!(new_time < old_time);
     }
 
+    // cargo test -p mesh-core-shell --release -- namespaced_handler_resolution_borrows_parts --ignored --nocapture
+    #[test]
+    #[ignore = "release-only namespaced handler target microbenchmark"]
+    fn namespaced_handler_resolution_borrows_parts() {
+        fn old_resolve(handler: &str, fallback_id: &str) -> (String, String, String) {
+            if let Some((instance_key, handler_name)) = parse_namespaced_handler(handler) {
+                (
+                    instance_key.to_string(),
+                    handler_name.to_string(),
+                    format!("{instance_key}:component"),
+                )
+            } else {
+                (
+                    fallback_id.to_string(),
+                    handler.to_string(),
+                    fallback_id.to_string(),
+                )
+            }
+        }
+
+        fn new_resolve<'a>(
+            handler: &'a str,
+            fallback_id: &'a str,
+        ) -> (&'a str, &'a str, Option<String>) {
+            if let Some((instance_key, handler_name)) = parse_namespaced_handler(handler) {
+                (instance_key, handler_name, None)
+            } else {
+                (fallback_id, handler, None)
+            }
+        }
+
+        let iterations = 500_000;
+        let handler = "__mesh_embed__::@mesh/settings/local:theme-selector::onThemeLight";
+        let fallback = "@mesh/settings";
+
+        let old_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(old_resolve(handler, fallback));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(new_resolve(handler, fallback));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "namespaced handler target: clone {old_time:?}; borrow {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
+    }
+
     // Run with:
     // nix develop --command cargo test -p mesh-core-shell --release -- typed_handler_call_args_beat_json_unpack --ignored --nocapture
     #[test]
     #[ignore]
     fn typed_handler_call_args_beat_json_unpack() {
         use std::time::Instant;
+
+        fn old_json_descriptor_unpack(
+            handler_name: &str,
+            event_args: &[serde_json::Value],
+        ) -> (String, Vec<serde_json::Value>) {
+            let parsed = serde_json::from_str::<serde_json::Value>(handler_name).unwrap();
+            let handler = parsed
+                .get("h")
+                .and_then(serde_json::Value::as_str)
+                .unwrap()
+                .to_string();
+            let mut args = parsed
+                .get("a")
+                .and_then(serde_json::Value::as_array)
+                .unwrap()
+                .clone();
+            args.extend_from_slice(event_args);
+            (handler, args)
+        }
 
         let iterations = 200_000usize;
         let legacy_handler = serde_json::json!({
@@ -850,7 +862,7 @@ mod handler_call_tests {
 
         let legacy_start = Instant::now();
         for _ in 0..iterations {
-            let (handler, args) = unpack_handler_args(&legacy_handler, &event_args);
+            let (handler, args) = old_json_descriptor_unpack(&legacy_handler, &event_args);
             assert_eq!(handler, "__mesh_embed__::host::selectItem");
             assert_eq!(args.len(), 4);
         }

@@ -6,6 +6,7 @@ mod widgets;
 
 #[cfg(test)]
 pub(crate) use keyboard::KeybindResolutionSource;
+pub(in crate::shell::component) use keyboard::ResolvedSurfaceShortcut;
 
 fn point_in_bounds(x: f32, y: f32, (left, top, right, bottom): (f32, f32, f32, f32)) -> bool {
     x >= left && x <= right && y >= top && y <= bottom

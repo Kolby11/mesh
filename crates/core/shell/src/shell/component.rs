@@ -28,6 +28,7 @@ mod tooltip;
 pub(in crate::shell) use catalog::FrontendCatalog;
 #[cfg(test)]
 pub(crate) use input::KeybindResolutionSource;
+use input::ResolvedSurfaceShortcut;
 use mesh_core_animation::transition::TransitionAnimator;
 pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
 use runtime_tree::{
@@ -528,6 +529,11 @@ pub(super) struct FrontendSurfaceComponent {
     /// parse + merge per keystroke. Invalidated by re-stat, not a full
     /// re-parse, so it stays correct across live settings edits.
     keyboard_settings_cache: RefCell<Option<KeyboardSettingsCache>>,
+    /// Cache of resolved surface shortcuts keyed by the already-cached
+    /// `KeyboardSettings` plus active locale. Resolution clones manifest
+    /// declarations, checks overrides, and localizes triggers, so avoid doing
+    /// that again for every key event when neither input changed.
+    resolved_surface_shortcuts_cache: RefCell<Option<ResolvedSurfaceShortcutsCache>>,
 }
 
 #[derive(Debug, Clone)]
@@ -535,6 +541,13 @@ struct KeyboardSettingsCache {
     defaults_mtime: Option<std::time::SystemTime>,
     user_mtime: Option<std::time::SystemTime>,
     settings: mesh_core_config::KeyboardSettings,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedSurfaceShortcutsCache {
+    keyboard_settings: mesh_core_config::KeyboardSettings,
+    locale: String,
+    shortcuts: Vec<ResolvedSurfaceShortcut>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -674,6 +687,7 @@ impl FrontendSurfaceComponent {
             cached_style_rule_index: None,
             element_metric_usage,
             keyboard_settings_cache: RefCell::new(None),
+            resolved_surface_shortcuts_cache: RefCell::new(None),
         }
     }
 

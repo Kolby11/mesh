@@ -334,7 +334,13 @@ duplicating it.
         args still allocate only when merging is needed. A release benchmark
         over 500k plain handler transfers measured 40.768ms for clone-transfer
         versus 2.548ms for borrowed transfer (16.0x faster).
-  - [ ] Instance-key interning remains open.
+  - [ ] Instance-key interning remains open. Progress 2026-07-06:
+        namespaced handler dispatch now borrows the parsed instance key and
+        raw handler name directly from the already-namespaced handler string,
+        and clones the component id only on the error/diagnostics path. A
+        release benchmark over 500k target resolutions measured 44.668ms for
+        clone-heavy resolution versus 10.224ms for borrowed resolution (4.4x
+        faster). Full graph-wide instance-key interning remains open.
 - [ ] **`bind:this`/live-binding writes mark the whole surface dirty.** Any
       handler that touches state invalidates via `invalidate_script_state()`
       → full template re-eval + tree rebuild (narrow path still rebuilds the
@@ -867,7 +873,13 @@ Performance:
       `render_import` rebuilds `props_json` maps and `format!`s instance keys per
       frame (`composition.rs:25-38,90-98`); host+component style-rule slices are
       re-cloned into a merged `Vec` per instance per rebuild
-      (`render.rs:266-278`) — cacheable per (host, alias).
+      (`render.rs:266-278`) — cacheable per (host, alias). Progress
+      2026-07-06: local-component rendering now threads the already-resolved
+      `ComponentFile` and host style-rule slice from `render_import` into
+      `render_local_component`/`ensure_local_component_runtime`, removing the
+      duplicate host-module and local-component catalog lookups from each local
+      component rebuild. Prop map construction, prop state writes, and style-rule
+      merge caching remain open.
 - [ ] **Per-node build allocations.** `attach_module_id` inserts a fresh
       `_mesh_module_id` String on every node; `TrackingVariableStore` pushes two
       fresh Strings per dotted read per node; `resolve_event_handler_value` does
@@ -899,10 +911,16 @@ Structure / correctness:
       comparing resolved handler *values* to prop values
       (`composition.rs:221-235`); two props bound to the same handler name get
       the wrong args. Link by prop name through the child build instead.
-- [ ] **Remove the legacy JSON handler-descriptor path.** `unpack_handler_args`
+- [x] **Remove the legacy JSON handler-descriptor path.** `unpack_handler_args`
       still parses `{"h":…,"a":…}` strings (`shell/component/runtime.rs:644-664`)
       after typed `EventHandlerCall` landed (section G). Per the
       no-backward-compat project rule, verify nothing produces them and delete.
+      Completed 2026-07-06: verified the compiler/shell emit typed
+      `EventHandlerCall`s and removed JSON descriptor parsing from dispatch;
+      `unpack_handler_args` now always borrows the handler name and event args.
+      Release benchmark over 200,000 pre-bound calls measured 95.353ms for the
+      old JSON descriptor unpack versus 27.112ms for typed handler-call args
+      (3.5x faster).
 - [ ] **`{#if}`/`{#for}` always wrap children in a synthetic `column` node**
       (`render.rs:394,423`) — one extra node per conditional/loop paying layout,
       style, hash, and paint, and it forces column flow inside row parents.
@@ -1181,7 +1199,7 @@ display-list replay → Skia session → text/glyph/icon caches → buffer. See
 
 Performance:
 
-- [ ] **File-backed icon draws stat() the filesystem every paint, even on
+- [x] **File-backed icon draws stat() the filesystem every paint, even on
       cache hits.** Every draw computes `raster_file_key` → `file_freshness`
       → `std::fs::metadata` (`render/src/surface/icon.rs:134-145,179-190`),
       and SVG sources add a second freshness check via `svg_file_cacheability`
@@ -1193,7 +1211,15 @@ Performance:
       (re-stat at most every ~1s) or make invalidation event-driven through
       the shell's existing inotify hot-reload watcher, so steady-state paints
       do zero filesystem calls. Named-icon *font glyph* draws are unaffected
-      (glyph caches key by path hash + axes).
+      (glyph caches key by path hash + axes). Completed 2026-07-06: file
+      freshness probes now use a 1s TTL-backed LRU shared by image loading,
+      raster-cache keys, SVG cacheability checks, and cached opacity lookups,
+      so steady-state file-backed icon paints reuse the cached `(len, mtime)`
+      instead of calling `metadata` per draw. Added focused regression coverage
+      proving repeated raster keys reuse one freshness probe inside the TTL and
+      still re-stat after expiry. Release-only benchmark over 50k raster keys
+      measured 69.051ms with per-draw `metadata` versus 7.274ms with the TTL
+      cache (9.5x faster, one real probe).
 - [ ] **Child popup surfaces bypass the whole retained pipeline.**
       `paint_child_surface` (`shell/component/shell_component.rs:992-1027`)
       clears the entire child buffer and repaints the popover subtree through
@@ -1222,7 +1248,14 @@ Performance:
       (`painter/backend.rs:479-480`); the gradient shader cache key includes
       absolute rect position (`backend.rs:18`), so an animated/moving gradient
       re-creates its shader every frame and can thrash the 64-entry LRU — key
-      by size only and translate the canvas, or accept and document.
+      by size only and translate the canvas, or accept and document. Progress
+      2026-07-06: linear-gradient shaders are now local to the gradient box
+      and cached by `(from, to, width, height)`, with the canvas translated for
+      drawing. Same-sized moving gradients now keep one cached shader while
+      preserving sampled top/bottom colors. Release-only benchmark over 5k
+      moving-gradient draws measured 13.653ms with position-churned shader
+      creation versus 12.524ms with size-key reuse (1.1x faster, one shader
+      creation). Clip/layer stack allocation remains open.
 
 Structure:
 
@@ -1250,7 +1283,7 @@ remains. `file:line` as of this scan.
 
 Performance:
 
-- [ ] **Keyboard input reads and JSON-parses settings files from disk on
+- [x] **Keyboard input reads and JSON-parses settings files from disk on
       every key event.** `current_keyboard_settings()` calls
       `load_shell_settings()` (`input/keyboard.rs:340-344`), which does up to
       two `fs::read_to_string` + JSON parse + merge (`config/src/lib.rs:374-390`)
@@ -1268,7 +1301,11 @@ Performance:
       `fs::read_to_string` + JSON parse + merge entirely and only pay two
       `stat()` calls. A release benchmark over 20,000 calls measured 218.6ms
       reloading every call versus 50.1ms mtime-cached (~4.4x faster).
-      `resolved_surface_shortcuts` caching remains open.
+      Completed 2026-07-06: `resolved_surface_shortcuts` now caches resolved
+      keybinds by `KeyboardSettings` + active locale, so repeated key events
+      reuse declaration/override/localized-trigger resolution. Release
+      benchmark over 50,000 calls with 24 actions measured 693.588ms rebuilding
+      each call versus 128.437ms cached (5.4x faster).
 - [ ] **Click press/release still runs ~5–8 separate full-tree walks.**
       Press: `selectable_text_target_key`, `pointer_event_target_key`,
       `find_node_bounds_by_key`, `find_focusable_at`, then per-kind probes
@@ -1653,7 +1690,12 @@ Performance:
       single-element `VecDeque` (`wayland.rs:216-219`). Bounded by the
       32-events-per-frame cap and input coalescing, so this is allocation
       hygiene, not a hot bug — retire together with the §U `Arc<str>`
-      surface-id change so ids stop being re-allocated at each layer.
+      surface-id change so ids stop being re-allocated at each layer. Progress
+      2026-07-06: `dispatch_wayland` now borrows the physical event surface id
+      instead of allocating it per event, clones keyboard focus only for
+      keyboard routing, and drains emitted requests as one `VecDeque` instead
+      of wrapping each request separately. Target-surface clone and redundant
+      size-change calls remain open.
 - [ ] Minor idle-loop hygiene in `render_components`: the surface id String
       is cloned for every component before the `wants_render` gate
       (`runtime/render.rs:23`), and `component.id().to_string()` runs per
@@ -1661,7 +1703,11 @@ Performance:
       _requests` rebuilds `requested_keys`/`closing_keys` HashSets and
       re-clones entering-key sets per frame while any popover is open
       (`render.rs:432-499,524-527,669-673`). All small; fold into the v1.23
-      interning pass.
+      interning pass. Progress 2026-07-06: `render_components` now checks
+      `wants_render()` before cloning the parent surface id, so idle components
+      do not allocate a surface-id `String` on each render pass. The remaining
+      per-rendering-component id clone and popover reconciliation sets remain
+      open.
 
 Structure:
 

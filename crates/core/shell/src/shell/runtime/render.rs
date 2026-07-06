@@ -20,10 +20,10 @@ impl Shell {
         let mut components_want_render_after_frame = false;
         let mut any_component_presented = false;
         for index in 0..self.components.len() {
-            let surface_id = self.components[index].surface_id.clone();
             if !self.components[index].component.wants_render() {
                 continue;
             }
+            let surface_id = self.components[index].surface_id.clone();
             let visible = self.surface_is_effectively_visible(&surface_id);
             if !visible
                 && self.components[index].parent.last_surface_config.is_none()

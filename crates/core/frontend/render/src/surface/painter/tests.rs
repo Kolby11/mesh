@@ -1508,6 +1508,120 @@ fn skia_effect_linear_gradient_draws_top_and_bottom_colors() {
 }
 
 #[test]
+fn skia_effect_linear_gradient_reuses_shader_for_moving_same_size_rects() {
+    super::backend::reset_gradient_shader_cache_for_tests();
+    let mut buffer = PixelBuffer::new(24, 20);
+    let mut diagnostics = Vec::new();
+    let gradient = PainterLinearGradient {
+        from: Color::from_hex("#ff0000").unwrap(),
+        to: Color::from_hex("#0000ff").unwrap(),
+    };
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[
+            PainterCommand::DrawLinearGradient {
+                gradient,
+                rect: ClipRect {
+                    x: 0,
+                    y: 0,
+                    width: 8,
+                    height: 12,
+                },
+                radius: 0.0,
+                clip: full_clip(24, 20),
+            },
+            PainterCommand::DrawLinearGradient {
+                gradient,
+                rect: ClipRect {
+                    x: 12,
+                    y: 4,
+                    width: 8,
+                    height: 12,
+                },
+                radius: 0.0,
+                clip: full_clip(24, 20),
+            },
+        ],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let moved_top = pixel(&buffer, 16, 5);
+    let moved_bottom = pixel(&buffer, 16, 14);
+    assert!(moved_top.r > moved_top.b, "{moved_top:?}");
+    assert!(moved_bottom.b > moved_bottom.r, "{moved_bottom:?}");
+    assert_eq!(super::backend::gradient_shader_creations_for_tests(), 1);
+}
+
+#[test]
+#[ignore = "release-only moving gradient shader cache microbenchmark"]
+fn moving_gradient_shader_size_key_beats_position_churn_benchmark() {
+    let iterations = 5_000;
+    let gradient = PainterLinearGradient {
+        from: Color::from_hex("#ff0000").unwrap(),
+        to: Color::from_hex("#0000ff").unwrap(),
+    };
+    let mut buffer = PixelBuffer::new(96, 48);
+    let mut diagnostics = Vec::new();
+
+    let old_started = std::time::Instant::now();
+    for i in 0..iterations {
+        super::backend::reset_gradient_shader_cache_for_tests();
+        SkiaPaintBackend.execute_commands(
+            &mut buffer,
+            &[PainterCommand::DrawLinearGradient {
+                gradient,
+                rect: ClipRect {
+                    x: (i % 72) as i32,
+                    y: (i % 24) as i32,
+                    width: 24,
+                    height: 24,
+                },
+                radius: 0.0,
+                clip: full_clip(96, 48),
+            }],
+            &mut diagnostics,
+        );
+    }
+    let old_time = old_started.elapsed();
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+    diagnostics.clear();
+    super::backend::reset_gradient_shader_cache_for_tests();
+    let new_started = std::time::Instant::now();
+    for i in 0..iterations {
+        SkiaPaintBackend.execute_commands(
+            &mut buffer,
+            &[PainterCommand::DrawLinearGradient {
+                gradient,
+                rect: ClipRect {
+                    x: (i % 72) as i32,
+                    y: (i % 24) as i32,
+                    width: 24,
+                    height: 24,
+                },
+                radius: 0.0,
+                clip: full_clip(96, 48),
+            }],
+            &mut diagnostics,
+        );
+    }
+    let new_time = new_started.elapsed();
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    println!(
+        "moving gradient shader cache: position churn {old_time:?}; size-key reuse {new_time:?}; ratio {:.1}x; shader_creations={}",
+        old_time.as_secs_f64() / new_time.as_secs_f64(),
+        super::backend::gradient_shader_creations_for_tests()
+    );
+    assert!(
+        new_time < old_time,
+        "size-keyed moving gradients should beat position-churned shader creation"
+    );
+}
+
+#[test]
 fn skia_effect_image_draws_source_pixels() {
     let path = write_effect_test_image("phase55-image-source.png");
     let mut buffer = PixelBuffer::new(20, 10);

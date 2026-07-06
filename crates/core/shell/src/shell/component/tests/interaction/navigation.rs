@@ -3178,4 +3178,61 @@ mod keyboard_settings_cache {
             "mtime-cached settings lookup should beat reloading from disk every call"
         );
     }
+
+    // cargo test -p mesh-core-shell --release -- resolved_surface_shortcuts_cache_beats_rebuild --ignored --nocapture
+    #[test]
+    #[ignore = "release-only resolved shortcut cache microbenchmark"]
+    fn resolved_surface_shortcuts_cache_beats_rebuild() {
+        let mut component = test_frontend_component("<template><box/></template>");
+        for index in 0..24 {
+            component.compiled.manifest.keybinds.actions.insert(
+                format!("action-{index}"),
+                mesh_core_module::KeybindAction {
+                    trigger: mesh_core_module::KeybindTrigger {
+                        kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                        key: Some(format!("Key{index}")),
+                        modifiers: vec!["Ctrl".into()],
+                    },
+                    localized_triggers: HashMap::new(),
+                    ..mesh_core_module::KeybindAction::default()
+                },
+            );
+        }
+        let keyboard_settings = mesh_core_config::KeyboardSettings::default();
+        let iterations = 50_000usize;
+
+        let uncached_started = Instant::now();
+        let mut uncached_total = 0usize;
+        for _ in 0..iterations {
+            *component.resolved_surface_shortcuts_cache.borrow_mut() = None;
+            uncached_total = uncached_total.saturating_add(std::hint::black_box(
+                component
+                    .resolved_surface_shortcuts(&keyboard_settings)
+                    .len(),
+            ));
+        }
+        let uncached_time = uncached_started.elapsed();
+
+        *component.resolved_surface_shortcuts_cache.borrow_mut() = None;
+        let cached_started = Instant::now();
+        let mut cached_total = 0usize;
+        for _ in 0..iterations {
+            cached_total = cached_total.saturating_add(std::hint::black_box(
+                component
+                    .resolved_surface_shortcuts(&keyboard_settings)
+                    .len(),
+            ));
+        }
+        let cached_time = cached_started.elapsed();
+
+        assert_eq!(uncached_total, cached_total);
+        eprintln!(
+            "resolved surface shortcuts over {iterations} calls: rebuild {uncached_time:?}; cached {cached_time:?}; ratio {:.1}x",
+            uncached_time.as_secs_f64() / cached_time.as_secs_f64()
+        );
+        assert!(
+            cached_time < uncached_time,
+            "resolved shortcut cache should beat rebuilding declarations and localized triggers"
+        );
+    }
 }

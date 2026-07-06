@@ -10,8 +10,10 @@ use skia_safe::{
 };
 use std::cell::RefCell;
 use std::path::Path;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 static IMAGE_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedImage>>> = OnceLock::new();
 static RASTER_CACHE: OnceLock<Mutex<LruCache<RasterCacheKey, RasterVariant>>> = OnceLock::new();
@@ -19,10 +21,16 @@ static SOURCE_IDENTITY_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedSourceIde
     OnceLock::new();
 static SVG_CACHEABILITY_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedSvgCacheability>>> =
     OnceLock::new();
+static FILE_FRESHNESS_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedFileFreshness>>> =
+    OnceLock::new();
 const RASTER_CACHE_CAPACITY: usize = 256;
 const IMAGE_CACHE_CAPACITY: usize = 256;
 const SOURCE_IDENTITY_CACHE_CAPACITY: usize = 1024;
 const SVG_CACHEABILITY_CACHE_CAPACITY: usize = 1024;
+const FILE_FRESHNESS_CACHE_CAPACITY: usize = 2048;
+const FILE_FRESHNESS_TTL: Duration = Duration::from_secs(1);
+#[cfg(test)]
+static FILE_FRESHNESS_STAT_PROBES: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CachedResourceOpacity {
@@ -59,6 +67,12 @@ struct CachedSourceIdentity {
 struct CachedSvgCacheability {
     freshness: FileFreshness,
     cacheable: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CachedFileFreshness {
+    freshness: FileFreshness,
+    checked_at: Instant,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -98,6 +112,10 @@ fn svg_cacheability_cache() -> &'static Mutex<LruCache<Arc<Path>, CachedSvgCache
         .get_or_init(|| Mutex::new(LruCache::new(SVG_CACHEABILITY_CACHE_CAPACITY)))
 }
 
+fn file_freshness_cache() -> &'static Mutex<LruCache<Arc<Path>, CachedFileFreshness>> {
+    FILE_FRESHNESS_CACHE.get_or_init(|| Mutex::new(LruCache::new(FILE_FRESHNESS_CACHE_CAPACITY)))
+}
+
 fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
     let Some(freshness) = file_freshness(path) else {
         return image::open(path)
@@ -132,6 +150,17 @@ fn encode_tint(color: Color) -> u32 {
 }
 
 fn file_freshness(path: &Path) -> Option<FileFreshness> {
+    let now = Instant::now();
+    if let Ok(mut guard) = file_freshness_cache().lock()
+        && let Some(cached) = guard.get(path)
+        && now.duration_since(cached.checked_at) < FILE_FRESHNESS_TTL
+    {
+        return Some(cached.freshness);
+    }
+
+    #[cfg(test)]
+    FILE_FRESHNESS_STAT_PROBES.fetch_add(1, Ordering::Relaxed);
+
     let metadata = std::fs::metadata(path).ok()?;
     let modified = metadata.modified().ok()?;
     let modified_nanos = modified
@@ -141,6 +170,17 @@ fn file_freshness(path: &Path) -> Option<FileFreshness> {
     Some(FileFreshness {
         len: metadata.len(),
         modified_nanos,
+    })
+    .inspect(|freshness| {
+        if let Ok(mut guard) = file_freshness_cache().lock() {
+            guard.insert(
+                Arc::from(path),
+                CachedFileFreshness {
+                    freshness: *freshness,
+                    checked_at: now,
+                },
+            );
+        }
     })
 }
 
@@ -1042,7 +1082,45 @@ mod tests {
         if let Some(cache) = IMAGE_CACHE.get() {
             cache.lock().unwrap().clear();
         }
+        if let Some(cache) = SOURCE_IDENTITY_CACHE.get() {
+            cache.lock().unwrap().clear();
+        }
+        if let Some(cache) = SVG_CACHEABILITY_CACHE.get() {
+            cache.lock().unwrap().clear();
+        }
+        if let Some(cache) = FILE_FRESHNESS_CACHE.get() {
+            cache.lock().unwrap().clear();
+        }
+        FILE_FRESHNESS_STAT_PROBES.store(0, Ordering::Relaxed);
         profiling::reset_raster_metrics();
+    }
+
+    fn expire_file_freshness(path: &Path) {
+        let Some(cache) = FILE_FRESHNESS_CACHE.get() else {
+            return;
+        };
+        let mut guard = cache.lock().unwrap();
+        if let Some(mut cached) = guard.remove(path) {
+            cached.checked_at = Instant::now() - FILE_FRESHNESS_TTL - Duration::from_millis(1);
+            guard.insert(Arc::from(path), cached);
+        }
+    }
+
+    fn file_freshness_stat_probes() -> usize {
+        FILE_FRESHNESS_STAT_PROBES.load(Ordering::Relaxed)
+    }
+
+    fn file_freshness_uncached_for_benchmark(path: &Path) -> Option<FileFreshness> {
+        let metadata = std::fs::metadata(path).ok()?;
+        let modified = metadata.modified().ok()?;
+        let modified_nanos = modified
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .ok()?
+            .as_nanos();
+        Some(FileFreshness {
+            len: metadata.len(),
+            modified_nanos,
+        })
     }
 
     fn write_test_svg(path: &Path) {
@@ -1077,6 +1155,73 @@ mod tests {
         assert_eq!(metrics.raster_cache_hits, 0);
         assert_eq!(metrics.raster_cache_misses, 0);
         assert_eq!(metrics.raster_cache_bypasses, 2);
+    }
+
+    #[test]
+    fn raster_file_key_reuses_freshness_probe_inside_ttl() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("logo.png");
+        ImageBuffer::from_fn(1, 1, |_, _| Rgba([255u8, 0, 0, 255]))
+            .save(&path)
+            .unwrap();
+
+        let first_key = raster_file_key(&path, 8, 8, tint(), true).unwrap();
+        let second_key = raster_file_key(&path, 8, 8, tint(), true).unwrap();
+
+        assert_eq!(first_key, second_key);
+        assert_eq!(file_freshness_stat_probes(), 1);
+
+        expire_file_freshness(&path);
+        let third_key = raster_file_key(&path, 8, 8, tint(), true).unwrap();
+
+        assert_eq!(first_key, third_key);
+        assert_eq!(file_freshness_stat_probes(), 2);
+    }
+
+    #[test]
+    #[ignore = "release-only file freshness TTL microbenchmark"]
+    fn file_freshness_ttl_beats_per_draw_stat_benchmark() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("logo.png");
+        ImageBuffer::from_fn(1, 1, |_, _| Rgba([255u8, 0, 0, 255]))
+            .save(&path)
+            .unwrap();
+        let iterations = 50_000;
+
+        let old_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            let freshness = file_freshness_uncached_for_benchmark(&path).unwrap();
+            std::hint::black_box(raster_file_key_with_freshness(
+                &path,
+                16,
+                16,
+                tint(),
+                true,
+                freshness,
+            ));
+        }
+        let old_time = old_started.elapsed();
+
+        clear_icon_caches();
+        let new_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(raster_file_key(&path, 16, 16, tint(), true).unwrap());
+        }
+        let new_time = new_started.elapsed();
+
+        println!(
+            "file freshness TTL: per-draw stat {old_time:?}; ttl cached {new_time:?}; ratio {:.1}x; probes={}",
+            old_time.as_secs_f64() / new_time.as_secs_f64(),
+            file_freshness_stat_probes()
+        );
+        assert!(
+            new_time < old_time,
+            "ttl cached path should beat per-draw metadata probes"
+        );
     }
 
     #[cfg(unix)]
@@ -1260,6 +1405,7 @@ mod tests {
 
         let replacement = ImageBuffer::from_fn(5, 4, |_, _| Rgba([0u8, 255, 0, 255]));
         replacement.save(&path).unwrap();
+        expire_file_freshness(&path);
 
         profiling::reset_raster_metrics();
         draw_icon_from_path_with_options(&mut buffer, &path, 2, 2, 12, 12, tint(), true);

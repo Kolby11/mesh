@@ -383,9 +383,16 @@ impl FrontendSurfaceComponent {
         &self,
         keyboard_settings: &mesh_core_config::KeyboardSettings,
     ) -> Vec<ResolvedSurfaceShortcut> {
+        let active_locale = self.locale.current().to_string();
+        if let Some(cached) = self.resolved_surface_shortcuts_cache.borrow().as_ref()
+            && cached.locale == active_locale
+            && cached.keyboard_settings == *keyboard_settings
+        {
+            return cached.shortcuts.clone();
+        }
+
         let declarations = self.surface_shortcut_declarations();
         let overrides = keyboard_settings.surface_shortcuts.get(self.surface_id());
-        let active_locale = self.locale.current();
         let declared_ids = declarations
             .iter()
             .map(|declaration| declaration.keybind_id.as_str())
@@ -412,11 +419,20 @@ impl FrontendSurfaceComponent {
                 let override_key = overrides
                     .and_then(|surface| surface.get(&declaration.keybind_id))
                     .and_then(|shortcut| shortcut.key.clone());
-                self.resolve_surface_shortcut_declaration(declaration, override_key, active_locale)
+                self.resolve_surface_shortcut_declaration(
+                    &declaration,
+                    override_key,
+                    &active_locale,
+                )
             })
             .collect::<Vec<_>>();
 
         self.record_duplicate_surface_shortcut_diagnostics(&resolved);
+        *self.resolved_surface_shortcuts_cache.borrow_mut() = Some(ResolvedSurfaceShortcutsCache {
+            keyboard_settings: keyboard_settings.clone(),
+            locale: active_locale,
+            shortcuts: resolved.clone(),
+        });
         resolved
     }
 
@@ -622,7 +638,7 @@ impl FrontendSurfaceComponent {
 
     fn resolve_surface_shortcut_declaration(
         &self,
-        declaration: SurfaceShortcutDeclaration,
+        declaration: &SurfaceShortcutDeclaration,
         override_key: Option<String>,
         active_locale: &str,
     ) -> Option<ResolvedSurfaceShortcut> {
@@ -705,7 +721,7 @@ fn surface_shortcut_declarations_from_settings(
 }
 
 fn resolve_surface_shortcut_declaration_without_override(
-    declaration: SurfaceShortcutDeclaration,
+    declaration: &SurfaceShortcutDeclaration,
     active_locale: &str,
     component: &FrontendSurfaceComponent,
 ) -> Option<ResolvedSurfaceShortcut> {
@@ -731,7 +747,7 @@ fn resolve_surface_shortcut_declaration_without_override(
             return resolved_surface_shortcut(
                 declaration,
                 key,
-                trigger.modifiers,
+                trigger.modifiers.clone(),
                 trigger.kind,
                 KeybindResolutionSource::LocaleDefault { locale },
                 component,
@@ -756,7 +772,7 @@ fn resolve_surface_shortcut_declaration_without_override(
 }
 
 fn resolved_surface_shortcut(
-    declaration: SurfaceShortcutDeclaration,
+    declaration: &SurfaceShortcutDeclaration,
     key: String,
     modifiers: Vec<String>,
     trigger_kind: mesh_core_module::KeybindTriggerKind,
@@ -777,7 +793,7 @@ fn resolved_surface_shortcut(
     }
 
     Some(ResolvedSurfaceShortcut {
-        keybind_id: declaration.keybind_id,
+        keybind_id: declaration.keybind_id.clone(),
         key,
         modifiers,
         trigger_kind,

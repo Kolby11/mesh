@@ -21,32 +21,37 @@ impl Shell {
                 "[hover] dispatch_wayland: got event {:?}",
                 std::mem::discriminant(&event)
             );
-            let physical_surface_id = event_surface_id(&event).to_string();
+            let physical_surface_id = event_surface_id(&event);
             let is_keyboard_event =
                 matches!(&event, WindowEvent::Key { .. } | WindowEvent::Char { .. });
+            let keyboard_focus_surface = if is_keyboard_event {
+                self.keyboard_focus_surface.clone()
+            } else {
+                None
+            };
             let route_surface_id = if is_keyboard_event {
-                if let Some(surface_id) = self.keyboard_focus_surface.clone() {
+                if let Some(surface_id) = keyboard_focus_surface.as_deref() {
                     let focused_surface_visible = self
                         .core
                         .surfaces
-                        .get(&surface_id)
+                        .get(surface_id)
                         .map(|state| state.visible)
                         .unwrap_or(true);
                     if focused_surface_visible
-                        && self.component_index_for_surface(&surface_id).is_some()
+                        && self.component_index_for_surface(surface_id).is_some()
                     {
                         surface_id
                     } else {
-                        physical_surface_id.clone()
+                        physical_surface_id
                     }
                 } else {
-                    physical_surface_id.clone()
+                    physical_surface_id
                 }
             } else {
                 physical_surface_id
             };
 
-            let Some((index, target)) = self.component_target_for_surface(&route_surface_id) else {
+            let Some((index, target)) = self.component_target_for_surface(route_surface_id) else {
                 continue;
             };
 
@@ -213,8 +218,8 @@ impl Shell {
                     Some(trigger_kind),
                 );
             }
-            for request in emitted {
-                let mut pending = VecDeque::from([request]);
+            if !emitted.is_empty() {
+                let mut pending = VecDeque::from(emitted);
                 self.drain_requests(&mut pending)?;
             }
         }

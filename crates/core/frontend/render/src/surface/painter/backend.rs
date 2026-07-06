@@ -12,10 +12,14 @@ use mesh_core_elements::lru::LruCache;
 use skia_safe::SamplingOptions;
 use std::cell::RefCell;
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const SKIA_IMAGE_CACHE_CAPACITY: usize = 128;
 const GRADIENT_SHADER_CACHE_CAPACITY: usize = 64;
-type GradientShaderCacheKey = (u32, u32, i32, i32, i32, i32);
+type GradientShaderCacheKey = (u32, u32, i32, i32);
+#[cfg(test)]
+static GRADIENT_SHADER_CREATIONS: AtomicUsize = AtomicUsize::new(0);
 
 // Cached Skia image keyed by the raw pointer of the underlying
 // `Arc<RgbaImage>` allocation. Holds a strong `Arc` reference in the value so
@@ -30,10 +34,22 @@ thread_local! {
     static SKIA_IMAGE_CACHE: RefCell<LruCache<usize, CachedSkiaImage>> =
         RefCell::new(LruCache::new(SKIA_IMAGE_CACHE_CAPACITY));
 
-    // Cache for linear-gradient shaders keyed by (from_rgba, to_rgba, x, y, w, h).
-    // A panel with a static background gradient reuses the same shader every frame.
+    // Cache for linear-gradient shaders keyed by (from_rgba, to_rgba, w, h).
+    // The shader is local to the gradient box, so moving same-sized gradients
+    // reuse the same shader instead of churning the cache on every frame.
     static GRADIENT_SHADER_CACHE: RefCell<LruCache<GradientShaderCacheKey, skia_safe::Shader>> =
         RefCell::new(LruCache::new(GRADIENT_SHADER_CACHE_CAPACITY));
+}
+
+#[cfg(test)]
+pub(super) fn reset_gradient_shader_cache_for_tests() {
+    GRADIENT_SHADER_CACHE.with(|cache| cache.borrow_mut().clear());
+    GRADIENT_SHADER_CREATIONS.store(0, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+pub(super) fn gradient_shader_creations_for_tests() -> usize {
+    GRADIENT_SHADER_CREATIONS.load(Ordering::Relaxed)
 }
 
 #[allow(dead_code)]
@@ -1143,7 +1159,7 @@ impl SkiaPaintBackend {
         ]);
         let to_rgba =
             u32::from_be_bytes([gradient.to.r, gradient.to.g, gradient.to.b, gradient.to.a]);
-        let grad_cache_key = (from_rgba, to_rgba, rect.x, rect.y, rect.width, rect.height);
+        let grad_cache_key = (from_rgba, to_rgba, rect.width, rect.height);
         let save_count = canvas.save();
         canvas.clip_rect(
             Rect::from_xywh(
@@ -1155,12 +1171,8 @@ impl SkiaPaintBackend {
             None,
             false,
         );
-        let rect = Rect::from_xywh(
-            rect.x as f32,
-            rect.y as f32,
-            rect.width as f32,
-            rect.height as f32,
-        );
+        canvas.translate((rect.x as f32, rect.y as f32));
+        let rect = Rect::from_xywh(0.0, 0.0, rect.width as f32, rect.height as f32);
         let cache_key = grad_cache_key;
         let cached_shader = GRADIENT_SHADER_CACHE.with(|c| c.borrow_mut().get(&cache_key).cloned());
         let shader = if let Some(s) = cached_shader {
@@ -1177,16 +1189,15 @@ impl SkiaPaintBackend {
                 skia_gradient::Interpolation::default(),
             );
             let Some(new_shader) = skia_gradient::shaders::linear_gradient(
-                (
-                    Point::new(rect.left(), rect.top()),
-                    Point::new(rect.left(), rect.bottom()),
-                ),
+                (Point::new(0.0, 0.0), Point::new(0.0, rect.height())),
                 &shader_gradient,
                 None,
             ) else {
                 canvas.restore_to_count(save_count);
                 return;
             };
+            #[cfg(test)]
+            GRADIENT_SHADER_CREATIONS.fetch_add(1, Ordering::Relaxed);
             GRADIENT_SHADER_CACHE.with(|c| c.borrow_mut().insert(cache_key, new_shader.clone()));
             new_shader
         };
