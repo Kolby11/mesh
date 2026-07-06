@@ -346,7 +346,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// is harmless (the layer-surface `configure()` is skipped for popups) but
     /// noisy. Set/cleared alongside the wrapper's `popup_config`.
     pub(super) popup_promoted: bool,
-    pub(super) frontend_catalog: FrontendCatalog,
+    pub(super) frontend_catalog: Arc<FrontendCatalog>,
     graph_i18n_catalogs: Vec<(String, String, PathBuf)>,
     pub(super) visible: bool,
     surface_exiting: bool,
@@ -449,7 +449,7 @@ pub(super) struct FrontendSurfaceComponent {
     last_surface_size: Option<(u32, u32)>,
     surface_pixels_invalid: bool,
     locale: LocaleEngine,
-    interface_catalog: mesh_core_service::InterfaceCatalog,
+    interface_catalog: Arc<mesh_core_service::InterfaceCatalog>,
     last_tree: Option<WidgetNode>,
     intrinsic_layout_cache: IntrinsicLayoutCache,
     layout_state: PerSurfaceLayoutState,
@@ -521,6 +521,20 @@ pub(super) struct FrontendSurfaceComponent {
     /// snapshots costs meaningful interaction-frame time and is wasted on
     /// scripts that never read them. Recomputed on source reload.
     element_metric_usage: ElementMetricUsage,
+    /// Cache of the global `KeyboardSettings` (button/toggle/slider activation
+    /// keys, surface shortcut overrides) keyed by the mtimes of the two files
+    /// `load_shell_settings` reads. Every key press/release re-derives this,
+    /// so without a cache typing in a launcher input pays a file read + JSON
+    /// parse + merge per keystroke. Invalidated by re-stat, not a full
+    /// re-parse, so it stays correct across live settings edits.
+    keyboard_settings_cache: RefCell<Option<KeyboardSettingsCache>>,
+}
+
+#[derive(Debug, Clone)]
+struct KeyboardSettingsCache {
+    defaults_mtime: Option<std::time::SystemTime>,
+    user_mtime: Option<std::time::SystemTime>,
+    settings: mesh_core_config::KeyboardSettings,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -550,8 +564,8 @@ impl FrontendSurfaceComponent {
     pub(super) fn new(
         compiled: CompiledFrontendModule,
         module_dir: PathBuf,
-        frontend_catalog: FrontendCatalog,
-        interface_catalog: mesh_core_service::InterfaceCatalog,
+        frontend_catalog: impl Into<Arc<FrontendCatalog>>,
+        interface_catalog: impl Into<Arc<mesh_core_service::InterfaceCatalog>>,
     ) -> Self {
         let module_settings_file = module_dir.join("config/settings.json");
         let settings_state =
@@ -567,7 +581,7 @@ impl FrontendSurfaceComponent {
             surface_layout: settings_state.layout.clone(),
             keyboard_mode_override: None,
             popup_promoted: false,
-            frontend_catalog,
+            frontend_catalog: frontend_catalog.into(),
             graph_i18n_catalogs: Vec::new(),
             visible: settings_state.layout.visible_on_start,
             surface_exiting: false,
@@ -621,7 +635,7 @@ impl FrontendSurfaceComponent {
             last_surface_size: None,
             surface_pixels_invalid: true,
             locale: LocaleEngine::new("en"),
-            interface_catalog,
+            interface_catalog: interface_catalog.into(),
             last_tree: None,
             intrinsic_layout_cache: IntrinsicLayoutCache::default(),
             layout_state: PerSurfaceLayoutState::default(),
@@ -659,6 +673,7 @@ impl FrontendSurfaceComponent {
             cached_restyle_rules: None,
             cached_style_rule_index: None,
             element_metric_usage,
+            keyboard_settings_cache: RefCell::new(None),
         }
     }
 

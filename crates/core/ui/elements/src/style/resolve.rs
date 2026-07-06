@@ -194,6 +194,7 @@ pub struct StyleRuleIndex {
     /// in `state` used for forward candidate-rule lookup.
     state_to_rules: HashMap<u32, Vec<usize>>,
     fallback: Vec<usize>,
+    no_diagnostics_declarations: Vec<Vec<IndexedDeclaration>>,
 }
 
 impl StyleRuleIndex {
@@ -207,6 +208,15 @@ impl StyleRuleIndex {
             state: Vec::new(),
             state_to_rules: HashMap::new(),
             fallback: Vec::new(),
+            no_diagnostics_declarations: rules
+                .iter()
+                .map(|rule| {
+                    rule.declarations
+                        .iter()
+                        .map(IndexedDeclaration::from_declaration)
+                        .collect()
+                })
+                .collect(),
         };
         for (idx, rule) in rules.iter().enumerate() {
             index.index_selector(idx, &rule.selector);
@@ -258,6 +268,44 @@ impl StyleRuleIndex {
         });
     }
 
+    fn for_each_candidate_rule_index(&self, attrs: &StyleNodeAttrs, mut visit: impl FnMut(usize)) {
+        CANDIDATE_RULE_SCRATCH.with(|scratch| {
+            let mut ids = scratch.borrow_mut();
+            ids.clear();
+            ids.extend_from_slice(&self.fallback);
+            if let Some(tag) = self.tag.get(attrs.tag) {
+                ids.extend_from_slice(tag);
+            }
+            for class in attrs.classes.iter() {
+                if let Some(class_ids) = self.class.get(class) {
+                    ids.extend_from_slice(class_ids);
+                }
+            }
+            if let Some(id) = attrs.id()
+                && let Some(id_ids) = self.id.get(id)
+            {
+                ids.extend_from_slice(id_ids);
+            }
+            for (state_bit, state_ids) in &self.state {
+                if attrs.state_mask & *state_bit != 0 {
+                    ids.extend_from_slice(state_ids);
+                }
+            }
+            ids.sort_unstable();
+            ids.dedup();
+            for &idx in ids.iter() {
+                visit(idx);
+            }
+        });
+    }
+
+    fn no_diagnostics_declarations(&self, rule_idx: usize) -> &[IndexedDeclaration] {
+        self.no_diagnostics_declarations
+            .get(rule_idx)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
     fn index_selector(&mut self, idx: usize, selector: &Selector) {
         // Index state bits from compound selector parts so that
         // compound rules like `button:hover` also populate state_to_rules.
@@ -307,6 +355,53 @@ impl StyleRuleIndex {
             .get(&bit)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
+    }
+}
+
+#[derive(Debug, Clone)]
+struct IndexedDeclaration {
+    property: IndexedProperty,
+    value: StyleValue,
+}
+
+#[derive(Debug, Clone)]
+enum IndexedProperty {
+    Custom(String),
+    Lowered {
+        name: String,
+        strict_animation: bool,
+        background_image: bool,
+    },
+    Ignored,
+}
+
+impl IndexedDeclaration {
+    fn from_declaration(decl: &Declaration) -> Self {
+        Self {
+            property: IndexedProperty::from_property(&decl.property, &decl.value),
+            value: decl.value.clone(),
+        }
+    }
+}
+
+impl IndexedProperty {
+    fn from_property(property: &str, value: &StyleValue) -> Self {
+        if property.starts_with("--") {
+            return Self::Custom(property.to_owned());
+        }
+        if let Some(status) = style_profile_status(property)
+            && !matches!(status, StyleProfileStatus::Implemented)
+        {
+            return Self::Ignored;
+        }
+        if !is_supported_css_property(property) || contains_deprecated_token_reference(value) {
+            return Self::Ignored;
+        }
+        Self::Lowered {
+            name: property.to_owned(),
+            strict_animation: is_strict_animation_property(property),
+            background_image: property == "background-image",
+        }
     }
 }
 
@@ -393,6 +488,56 @@ impl<'a> StyleResolver<'a> {
         }
     }
 
+    fn with_resolved_str<R>(
+        &self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+        read: impl FnOnce(&str) -> R,
+    ) -> R {
+        if let Some(resolved) = self.resolve_simple_str_with_variables(value, variables, 0) {
+            return read(resolved);
+        }
+        let resolved = self.resolve_value_with_variables(value, variables);
+        read(&resolved)
+    }
+
+    fn resolve_simple_str_with_variables<'b>(
+        &'b self,
+        value: &'b StyleValue,
+        variables: &'b HashMap<String, StyleValue>,
+        depth: u8,
+    ) -> Option<&'b str> {
+        if depth > 16 {
+            return None;
+        }
+        match value {
+            StyleValue::Literal(value) => {
+                if value.contains("var(") || value.contains("prop(") {
+                    None
+                } else {
+                    Some(value.as_str())
+                }
+            }
+            StyleValue::Var(name) => {
+                if let Some(value) = variables.get(name) {
+                    return self.resolve_simple_str_with_variables(
+                        value,
+                        variables,
+                        depth.saturating_add(1),
+                    );
+                }
+                let token_name = theme_reference_to_token_name(name);
+                match self.theme.token(&token_name) {
+                    Some(TokenValue::String(value)) => Some(value.as_str()),
+                    Some(TokenValue::Number(_)) | Some(TokenValue::Bool(_)) | None => None,
+                }
+            }
+            StyleValue::Prop(name) => variables.get(&prop_variable_key(name)).and_then(|value| {
+                self.resolve_simple_str_with_variables(value, variables, depth.saturating_add(1))
+            }),
+        }
+    }
+
     fn resolve_theme_reference(
         &self,
         name: &str,
@@ -450,8 +595,53 @@ impl<'a> StyleResolver<'a> {
         value: &StyleValue,
         variables: &HashMap<String, StyleValue>,
     ) -> Color {
-        let resolved = self.resolve_value_with_variables(value, variables);
-        Color::from_hex(&resolved).unwrap_or(Color::TRANSPARENT)
+        self.resolve_color_with_variables_inner(value, variables, 0)
+            .unwrap_or_else(|| {
+                let resolved = self.resolve_value_with_variables(value, variables);
+                Color::from_hex(&resolved).unwrap_or(Color::TRANSPARENT)
+            })
+    }
+
+    fn resolve_color_with_variables_inner(
+        &self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+        depth: u8,
+    ) -> Option<Color> {
+        if depth > 16 {
+            return None;
+        }
+        match value {
+            StyleValue::Literal(value) => {
+                if value.contains("var(") || value.contains("prop(") {
+                    None
+                } else {
+                    Some(Color::from_hex(value).unwrap_or(Color::TRANSPARENT))
+                }
+            }
+            StyleValue::Var(name) => {
+                if let Some(value) = variables.get(name) {
+                    return self.resolve_color_with_variables_inner(
+                        value,
+                        variables,
+                        depth.saturating_add(1),
+                    );
+                }
+                let token_name = theme_reference_to_token_name(name);
+                match self.theme.token(&token_name) {
+                    Some(TokenValue::String(value)) => {
+                        Some(Color::from_hex(value).unwrap_or(Color::TRANSPARENT))
+                    }
+                    Some(TokenValue::Number(_)) | Some(TokenValue::Bool(_)) => {
+                        Some(Color::TRANSPARENT)
+                    }
+                    None => None,
+                }
+            }
+            StyleValue::Prop(name) => variables.get(&prop_variable_key(name)).and_then(|value| {
+                self.resolve_color_with_variables_inner(value, variables, depth.saturating_add(1))
+            }),
+        }
     }
 
     fn resolve_number_with_variables(
@@ -459,7 +649,47 @@ impl<'a> StyleResolver<'a> {
         value: &StyleValue,
         variables: &HashMap<String, StyleValue>,
     ) -> f32 {
-        parse_px(&self.resolve_value_with_variables(value, variables))
+        self.resolve_number_with_variables_inner(value, variables, 0)
+            .unwrap_or_else(|| parse_px(&self.resolve_value_with_variables(value, variables)))
+    }
+
+    fn resolve_number_with_variables_inner(
+        &self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+        depth: u8,
+    ) -> Option<f32> {
+        if depth > 16 {
+            return None;
+        }
+        match value {
+            StyleValue::Literal(value) => {
+                if value.contains("var(") || value.contains("prop(") {
+                    None
+                } else {
+                    Some(parse_px(value))
+                }
+            }
+            StyleValue::Var(name) => {
+                if let Some(value) = variables.get(name) {
+                    return self.resolve_number_with_variables_inner(
+                        value,
+                        variables,
+                        depth.saturating_add(1),
+                    );
+                }
+                let token_name = theme_reference_to_token_name(name);
+                match self.theme.token(&token_name) {
+                    Some(TokenValue::Number(value)) => Some(*value as f32),
+                    Some(TokenValue::String(value)) => Some(parse_px(value)),
+                    Some(TokenValue::Bool(_)) => Some(0.0),
+                    None => None,
+                }
+            }
+            StyleValue::Prop(name) => variables.get(&prop_variable_key(name)).and_then(|value| {
+                self.resolve_number_with_variables_inner(value, variables, depth.saturating_add(1))
+            }),
+        }
     }
 
     pub fn resolve_node_style(
@@ -584,10 +814,17 @@ impl<'a> StyleResolver<'a> {
             );
             self.seed_prop_variables(&mut variables);
 
-            index.for_each_candidate_rule(rules, attrs, |rule| {
+            index.for_each_candidate_rule_index(attrs, |rule_idx| {
+                let Some(rule) = rules.get(rule_idx) else {
+                    return;
+                };
                 if rule_matches_attrs(rule, attrs, context) {
-                    for decl in &rule.declarations {
-                        self.apply_declaration_no_diagnostics(&mut style, decl, &mut variables);
+                    for decl in index.no_diagnostics_declarations(rule_idx) {
+                        self.apply_indexed_declaration_no_diagnostics(
+                            &mut style,
+                            decl,
+                            &mut variables,
+                        );
                     }
                 }
             });
@@ -923,6 +1160,7 @@ impl<'a> StyleResolver<'a> {
         }
     }
 
+    #[cfg(test)]
     fn apply_declaration_no_diagnostics(
         &self,
         style: &mut ComputedStyle,
@@ -930,6 +1168,40 @@ impl<'a> StyleResolver<'a> {
         variables: &mut HashMap<String, StyleValue>,
     ) {
         self.apply_property_value_no_diagnostics(style, &decl.property, &decl.value, variables);
+    }
+
+    fn apply_indexed_declaration_no_diagnostics(
+        &self,
+        style: &mut ComputedStyle,
+        decl: &IndexedDeclaration,
+        variables: &mut HashMap<String, StyleValue>,
+    ) {
+        match &decl.property {
+            IndexedProperty::Custom(property) => {
+                variables.insert(property.clone(), decl.value.clone());
+            }
+            IndexedProperty::Ignored => {}
+            IndexedProperty::Lowered {
+                name,
+                strict_animation,
+                background_image,
+            } => {
+                if *strict_animation
+                    && self
+                        .validate_animation_value_with_variables(&decl.value, variables)
+                        .is_err()
+                {
+                    return;
+                }
+                if *background_image {
+                    let resolved = self.resolve_value_with_variables(&decl.value, variables);
+                    if !is_supported_background_image(&resolved) {
+                        return;
+                    }
+                }
+                apply_declaration(style, name, &decl.value, self, variables);
+            }
+        }
     }
 
     fn apply_property_value_no_diagnostics(
@@ -1348,14 +1620,13 @@ fn apply_declaration(
             style.background_color = resolver.resolve_color_with_variables(value, variables)
         }
         "color" => style.color = resolver.resolve_color_with_variables(value, variables),
-        "border" => apply_border_shorthand(
-            style,
-            &resolver.resolve_value_with_variables(value, variables),
-        ),
+        "border" => resolver.with_resolved_str(value, variables, |resolved| {
+            apply_border_shorthand(style, resolved)
+        }),
         "border-color" => {
-            style.border_color = parse_border_color_shorthand(
-                &resolver.resolve_value_with_variables(value, variables),
-            )
+            style.border_color = resolver.with_resolved_str(value, variables, |resolved| {
+                parse_border_color_shorthand(resolved)
+            })
         }
         "font" => apply_font_shorthand(
             style,
@@ -1371,41 +1642,32 @@ fn apply_declaration(
                 .into()
         }
         "font-style" => {
-            style.font_style = match resolver
-                .resolve_value_with_variables(value, variables)
-                .as_str()
-            {
+            style.font_style = resolver.with_resolved_str(value, variables, |resolved| match resolved {
                 "italic" | "oblique" => FontStyle::Italic,
                 _ => FontStyle::Normal,
-            };
+            });
         }
         "letter-spacing" => {
             style.letter_spacing = resolver.resolve_number_with_variables(value, variables)
         }
         "text-overflow" => {
-            style.text_overflow = match resolver
-                .resolve_value_with_variables(value, variables)
-                .as_str()
-            {
+            style.text_overflow = resolver.with_resolved_str(value, variables, |resolved| match resolved {
                 "ellipsis" => TextOverflow::Ellipsis,
                 _ => TextOverflow::Clip,
-            };
+            });
         }
         "white-space" => {
-            style.white_space = match resolver
-                .resolve_value_with_variables(value, variables)
-                .as_str()
-            {
+            style.white_space = resolver.with_resolved_str(value, variables, |resolved| match resolved {
                 "nowrap" => WhiteSpace::Nowrap,
                 _ => WhiteSpace::Normal,
-            };
+            });
         }
         "line-height" => {
             style.line_height = resolver.resolve_number_with_variables(value, variables)
         }
         "padding" => {
-            style.padding =
-                parse_edges_shorthand(&resolver.resolve_value_with_variables(value, variables))
+            style.padding = resolver
+                .with_resolved_str(value, variables, |resolved| parse_edges_shorthand(resolved))
         }
         "padding-top" => {
             style.padding.top = resolver.resolve_number_with_variables(value, variables)
@@ -1430,8 +1692,8 @@ fn apply_declaration(
             style.padding.bottom = v;
         }
         "margin" => {
-            style.margin =
-                parse_edges_shorthand(&resolver.resolve_value_with_variables(value, variables))
+            style.margin = resolver
+                .with_resolved_str(value, variables, |resolved| parse_edges_shorthand(resolved))
         }
         "margin-top" => style.margin.top = resolver.resolve_number_with_variables(value, variables),
         "margin-right" => {
@@ -1458,8 +1720,8 @@ fn apply_declaration(
             style.gap = resolver.resolve_number_with_variables(value, variables)
         }
         "border-radius" => {
-            style.border_radius =
-                parse_corners_shorthand(&resolver.resolve_value_with_variables(value, variables))
+            style.border_radius = resolver
+                .with_resolved_str(value, variables, |resolved| parse_corners_shorthand(resolved))
         }
         "border-top-left-radius" => {
             style.border_radius.top_left = resolver.resolve_number_with_variables(value, variables)
@@ -1476,8 +1738,8 @@ fn apply_declaration(
                 resolver.resolve_number_with_variables(value, variables)
         }
         "border-width" => {
-            style.border_width =
-                parse_edges_shorthand(&resolver.resolve_value_with_variables(value, variables))
+            style.border_width = resolver
+                .with_resolved_str(value, variables, |resolved| parse_edges_shorthand(resolved))
         }
         "border-top-width" => {
             style.border_width.top = resolver.resolve_number_with_variables(value, variables)
@@ -1494,30 +1756,32 @@ fn apply_declaration(
         "opacity" => style.opacity = resolver.resolve_number_with_variables(value, variables),
         "transform" => {
             style.transform =
-                parse_transform(&resolver.resolve_value_with_variables(value, variables))
+                resolver.with_resolved_str(value, variables, |resolved| parse_transform(resolved))
         }
         "box-shadow" => {
             style.box_shadow =
-                parse_box_shadow(&resolver.resolve_value_with_variables(value, variables))
+                resolver.with_resolved_str(value, variables, |resolved| parse_box_shadow(resolved))
         }
         "background-image" => {
-            let resolved = resolver.resolve_value_with_variables(value, variables);
-            style.background_paint = parse_background_image(&resolved);
+            style.background_paint = resolver.with_resolved_str(value, variables, |resolved| {
+                parse_background_image(resolved)
+            });
         }
         "filter" => {
-            style.filter = parse_filter(&resolver.resolve_value_with_variables(value, variables))
+            style.filter =
+                resolver.with_resolved_str(value, variables, |resolved| parse_filter(resolved))
         }
         "backdrop-filter" => {
             style.backdrop_filter =
-                parse_filter(&resolver.resolve_value_with_variables(value, variables))
+                resolver.with_resolved_str(value, variables, |resolved| parse_filter(resolved))
         }
         "transition-duration" => {
             first_transition_mut(&mut style.transitions).duration_ms =
-                parse_first_time_ms(&resolver.resolve_value_with_variables(value, variables))
+                resolver.with_resolved_str(value, variables, |resolved| parse_first_time_ms(resolved))
         }
         "transition-delay" => {
             first_transition_mut(&mut style.transitions).delay_ms =
-                parse_first_time_ms(&resolver.resolve_value_with_variables(value, variables))
+                resolver.with_resolved_str(value, variables, |resolved| parse_first_time_ms(resolved))
         }
         "transition-timing-function" => {
             first_transition_mut(&mut style.transitions).easing = parse_easing_keyword(
@@ -1525,9 +1789,10 @@ fn apply_declaration(
             )
         }
         "transition-property" => {
-            first_transition_mut(&mut style.transitions).properties = parse_transition_properties(
-                &resolver.resolve_value_with_variables(value, variables),
-            )
+            first_transition_mut(&mut style.transitions).properties =
+                resolver.with_resolved_str(value, variables, |resolved| {
+                    parse_transition_properties(resolved)
+                })
         }
         "transition" => {
             let resolved = resolver.resolve_value_with_variables(value, variables);
@@ -1540,11 +1805,11 @@ fn apply_declaration(
         }
         "animation-duration" => {
             first_animation_mut(&mut style.animations).duration_ms =
-                parse_first_time_ms(&resolver.resolve_value_with_variables(value, variables))
+                resolver.with_resolved_str(value, variables, |resolved| parse_first_time_ms(resolved))
         }
         "animation-delay" => {
             first_animation_mut(&mut style.animations).delay_ms =
-                parse_first_time_ms(&resolver.resolve_value_with_variables(value, variables))
+                resolver.with_resolved_str(value, variables, |resolved| parse_first_time_ms(resolved))
         }
         "animation-timing-function" => {
             first_animation_mut(&mut style.animations).easing = parse_easing_keyword(
@@ -1577,28 +1842,31 @@ fn apply_declaration(
                 parse_animation_shorthand(&resolver.resolve_value_with_variables(value, variables))
         }
         "transform-origin" => {
-            style.transform_origin =
-                parse_transform_origin(&resolver.resolve_value_with_variables(value, variables))
+            style.transform_origin = resolver
+                .with_resolved_str(value, variables, |resolved| parse_transform_origin(resolved))
         }
         "overflow" => {
-            let (x, y) =
-                parse_overflow_shorthand(&resolver.resolve_value_with_variables(value, variables));
+            let (x, y) = resolver.with_resolved_str(value, variables, |resolved| {
+                parse_overflow_shorthand(resolved)
+            });
             style.overflow_x = x;
             style.overflow_y = y;
         }
         "overflow-x" => {
             style.overflow_x =
-                parse_overflow(&resolver.resolve_value_with_variables(value, variables))
+                resolver.with_resolved_str(value, variables, |resolved| parse_overflow(resolved))
         }
         "overflow-y" => {
             style.overflow_y =
-                parse_overflow(&resolver.resolve_value_with_variables(value, variables))
+                resolver.with_resolved_str(value, variables, |resolved| parse_overflow(resolved))
         }
         "width" => {
-            style.width = parse_dimension(&resolver.resolve_value_with_variables(value, variables))
+            style.width =
+                resolver.with_resolved_str(value, variables, |resolved| parse_dimension(resolved))
         }
         "height" => {
-            style.height = parse_dimension(&resolver.resolve_value_with_variables(value, variables))
+            style.height =
+                resolver.with_resolved_str(value, variables, |resolved| parse_dimension(resolved))
         }
         "min-width" => {
             style.min_width = Some(resolver.resolve_number_with_variables(value, variables))
@@ -1618,160 +1886,125 @@ fn apply_declaration(
         }
         "flex-basis" => {
             style.flex_basis =
-                parse_dimension(&resolver.resolve_value_with_variables(value, variables))
+                resolver.with_resolved_str(value, variables, |resolved| parse_dimension(resolved))
         }
         "flex" => {
-            let v = resolver.resolve_value_with_variables(value, variables);
-            let v = v.trim();
-            if v == "none" {
-                style.flex_grow = 0.0;
-                style.flex_shrink = 0.0;
-                style.flex_basis = Dimension::Auto;
-            } else if v == "auto" {
-                style.flex_grow = 1.0;
-                style.flex_shrink = 1.0;
-                style.flex_basis = Dimension::Auto;
-            } else if let Ok(n) = v.parse::<f32>() {
-                style.flex_grow = n;
-                style.flex_shrink = 1.0;
-                style.flex_basis = Dimension::Px(0.0);
-            } else {
-                apply_flex_shorthand(style, v);
-            }
+            resolver.with_resolved_str(value, variables, |resolved| {
+                let v = resolved.trim();
+                if v == "none" {
+                    style.flex_grow = 0.0;
+                    style.flex_shrink = 0.0;
+                    style.flex_basis = Dimension::Auto;
+                } else if v == "auto" {
+                    style.flex_grow = 1.0;
+                    style.flex_shrink = 1.0;
+                    style.flex_basis = Dimension::Auto;
+                } else if let Ok(n) = v.parse::<f32>() {
+                    style.flex_grow = n;
+                    style.flex_shrink = 1.0;
+                    style.flex_basis = Dimension::Px(0.0);
+                } else {
+                    apply_flex_shorthand(style, v);
+                }
+            });
         }
         "flex-wrap" => {
-            style.flex_wrap = match resolver
-                .resolve_value_with_variables(value, variables)
-                .as_str()
-            {
+            style.flex_wrap = resolver.with_resolved_str(value, variables, |resolved| match resolved {
                 "wrap" => FlexWrap::Wrap,
                 "wrap-reverse" => FlexWrap::WrapReverse,
                 _ => FlexWrap::NoWrap,
-            };
+            });
         }
         "align-self" => {
-            style.align_self = match resolver
-                .resolve_value_with_variables(value, variables)
-                .as_str()
-            {
+            style.align_self = resolver.with_resolved_str(value, variables, |resolved| match resolved {
                 "auto" => AlignSelf::Auto,
                 "start" | "flex-start" => AlignSelf::Start,
                 "end" | "flex-end" => AlignSelf::End,
                 "center" => AlignSelf::Center,
                 "baseline" => AlignSelf::Baseline,
                 _ => AlignSelf::Stretch,
-            };
+            });
         }
         "align-content" => {
-            style.align_content = match resolver
-                .resolve_value_with_variables(value, variables)
-                .as_str()
-            {
+            style.align_content = resolver.with_resolved_str(value, variables, |resolved| match resolved {
                 "start" | "flex-start" => AlignContent::Start,
                 "end" | "flex-end" => AlignContent::End,
                 "center" => AlignContent::Center,
                 "space-between" => AlignContent::SpaceBetween,
                 "space-around" => AlignContent::SpaceAround,
                 _ => AlignContent::Stretch,
-            };
+            });
         }
         "flex-direction" => {
-            style.direction = match resolver
-                .resolve_value_with_variables(value, variables)
-                .as_str()
-            {
+            style.direction = resolver.with_resolved_str(value, variables, |resolved| match resolved {
                 "column" | "column-reverse" => FlexDirection::Column,
                 _ => FlexDirection::Row,
-            };
+            });
         }
         "direction" => {
-            match resolver
-                .resolve_value_with_variables(value, variables)
-                .as_str()
-            {
+            resolver.with_resolved_str(value, variables, |resolved| match resolved {
                 "rtl" => style.text_direction = TextDirection::Rtl,
                 "ltr" => style.text_direction = TextDirection::Ltr,
                 other => tracing::warn!(
                     "direction: {other} is not valid; use flex-direction for layout direction"
                 ),
-            }
+            });
         }
         "justify-content" => {
-            style.justify_content = match resolver
-                .resolve_value_with_variables(value, variables)
-                .as_str()
-            {
+            style.justify_content = resolver.with_resolved_str(value, variables, |resolved| match resolved {
                 "center" => JustifyContent::Center,
                 "end" | "flex-end" => JustifyContent::End,
                 "space-between" => JustifyContent::SpaceBetween,
                 "space-around" => JustifyContent::SpaceAround,
                 _ => JustifyContent::Start,
-            };
+            });
         }
         "align-items" => {
-            style.align_items = match resolver
-                .resolve_value_with_variables(value, variables)
-                .as_str()
-            {
+            style.align_items = resolver.with_resolved_str(value, variables, |resolved| match resolved {
                 "center" => AlignItems::Center,
                 "start" | "flex-start" => AlignItems::Start,
                 "end" | "flex-end" => AlignItems::End,
                 _ => AlignItems::Stretch,
-            };
+            });
         }
         "text-align" => {
-            style.text_align = match resolver
-                .resolve_value_with_variables(value, variables)
-                .as_str()
-            {
+            style.text_align = resolver.with_resolved_str(value, variables, |resolved| match resolved {
                 "center" => TextAlign::Center,
                 "right" => TextAlign::Right,
                 _ => TextAlign::Left,
-            };
+            });
         }
         "display" => {
-            style.display = match resolver
-                .resolve_value_with_variables(value, variables)
-                .as_str()
-            {
+            style.display = resolver.with_resolved_str(value, variables, |resolved| match resolved {
                 "none" => Display::None,
                 _ => Display::Flex,
-            };
+            });
         }
         "visibility" => {
-            style.visibility = match resolver
-                .resolve_value_with_variables(value, variables)
-                .as_str()
-            {
+            style.visibility = resolver.with_resolved_str(value, variables, |resolved| match resolved {
                 "hidden" => Visibility::Hidden,
                 "collapse" => Visibility::Collapse,
                 _ => Visibility::Visible,
-            };
+            });
         }
         "position" => {
-            style.position = match resolver
-                .resolve_value_with_variables(value, variables)
-                .as_str()
-            {
+            style.position = resolver.with_resolved_str(value, variables, |resolved| match resolved {
                 "relative" => Position::Relative,
                 "absolute" => Position::Absolute,
                 "fixed" => Position::Fixed,
                 _ => Position::Static,
-            };
+            });
         }
         "z-index" => {
             let v = resolver.resolve_value_with_variables(value, variables);
             style.z_index = v.trim().parse::<i32>().unwrap_or(0);
         }
         "mix-blend-mode" => {
-            style.mix_blend_mode = match resolver
-                .resolve_value_with_variables(value, variables)
-                .trim()
-            {
+            style.mix_blend_mode = resolver.with_resolved_str(value, variables, |resolved| match resolved.trim() {
                 "multiply" => BlendMode::Multiply,
                 "screen" => BlendMode::Screen,
                 _ => BlendMode::Normal,
-            };
+            });
         }
         "top" => style.inset_top = Some(resolver.resolve_number_with_variables(value, variables)),
         "right" => {
@@ -1782,8 +2015,8 @@ fn apply_declaration(
         }
         "left" => style.inset_left = Some(resolver.resolve_number_with_variables(value, variables)),
         "inset" => {
-            let edges =
-                parse_edges_shorthand(&resolver.resolve_value_with_variables(value, variables));
+            let edges = resolver
+                .with_resolved_str(value, variables, |resolved| parse_edges_shorthand(resolved));
             style.inset_top = Some(edges.top);
             style.inset_right = Some(edges.right);
             style.inset_bottom = Some(edges.bottom);
@@ -2097,6 +2330,1437 @@ mod tests {
         assert_eq!(index.rules_for_state_bit(STATE_HOVERED), &[0]);
     }
 
+    #[test]
+    fn indexed_declarations_match_uncached_no_diagnostics_application() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let declarations = vec![
+            Declaration {
+                property: "--accent".to_string(),
+                value: StyleValue::Literal("#112233".to_string()),
+            },
+            Declaration {
+                property: "background-color".to_string(),
+                value: StyleValue::Var("--accent".to_string()),
+            },
+            Declaration {
+                property: "padding".to_string(),
+                value: StyleValue::Literal("2px 4px".to_string()),
+            },
+            Declaration {
+                property: "unknown-property".to_string(),
+                value: StyleValue::Literal("ignored".to_string()),
+            },
+            Declaration {
+                property: "transition-duration".to_string(),
+                value: StyleValue::Var("--animation-missing-duration".to_string()),
+            },
+        ];
+        let rules = vec![StyleRule {
+            selector: Selector::Tag("button".to_string()),
+            declarations: declarations.clone(),
+            container_query: None,
+        }];
+        let index = StyleRuleIndex::new(&rules);
+
+        let mut uncached = ComputedStyle::default();
+        let mut uncached_variables = HashMap::new();
+        for declaration in &declarations {
+            resolver.apply_declaration_no_diagnostics(
+                &mut uncached,
+                declaration,
+                &mut uncached_variables,
+            );
+        }
+
+        let mut indexed = ComputedStyle::default();
+        let mut indexed_variables = HashMap::new();
+        for declaration in index.no_diagnostics_declarations(0) {
+            resolver.apply_indexed_declaration_no_diagnostics(
+                &mut indexed,
+                declaration,
+                &mut indexed_variables,
+            );
+        }
+
+        assert_eq!(indexed.background_color, uncached.background_color);
+        assert_eq!(indexed.padding, uncached.padding);
+        assert_eq!(indexed.transitions, uncached.transitions);
+        assert_eq!(
+            resolver.resolve_value_with_variables(
+                &StyleValue::Var("--accent".to_string()),
+                &indexed_variables,
+            ),
+            resolver.resolve_value_with_variables(
+                &StyleValue::Var("--accent".to_string()),
+                &uncached_variables,
+            )
+        );
+    }
+
+    #[test]
+    fn numeric_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme
+            .tokens
+            .insert("spacing.large".into(), TokenValue::Number(18.0));
+        theme
+            .tokens
+            .insert("opacity.enabled".into(), TokenValue::Bool(true));
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert("--local-size".into(), StyleValue::Literal("14px".into()));
+        variables.insert(
+            prop_variable_key("gap"),
+            StyleValue::Var("--spacing-large".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("12px".into()),
+            StyleValue::Var("--local-size".into()),
+            StyleValue::Var("--spacing-large".into()),
+            StyleValue::Var("--opacity-enabled".into()),
+            StyleValue::Prop("gap".into()),
+        ] {
+            let string_resolved =
+                parse_px(&resolver.resolve_value_with_variables(&value, &variables));
+            let numeric_resolved = resolver.resolve_number_with_variables(&value, &variables);
+            assert_eq!(numeric_resolved, string_resolved);
+        }
+    }
+
+    #[test]
+    fn color_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme
+            .tokens
+            .insert("color.primary".into(), TokenValue::String("#112233".into()));
+        theme
+            .tokens
+            .insert("spacing.large".into(), TokenValue::Number(18.0));
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert(
+            "--local-color".into(),
+            StyleValue::Literal("#445566".into()),
+        );
+        variables.insert(
+            prop_variable_key("accent"),
+            StyleValue::Var("--color-primary".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("#abcdef".into()),
+            StyleValue::Literal("not-a-color".into()),
+            StyleValue::Var("--local-color".into()),
+            StyleValue::Var("--color-primary".into()),
+            StyleValue::Var("--spacing-large".into()),
+            StyleValue::Prop("accent".into()),
+        ] {
+            let resolved = resolver.resolve_value_with_variables(&value, &variables);
+            let string_resolved = Color::from_hex(&resolved).unwrap_or(Color::TRANSPARENT);
+            let color_resolved = resolver.resolve_color_with_variables(&value, &variables);
+            assert_eq!(color_resolved, string_resolved);
+        }
+    }
+
+    #[test]
+    fn keyword_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme
+            .tokens
+            .insert("display.hidden".into(), TokenValue::String("none".into()));
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert("--local-display".into(), StyleValue::Literal("none".into()));
+        variables.insert(
+            prop_variable_key("display"),
+            StyleValue::Var("--display-hidden".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("none".into()),
+            StyleValue::Literal("flex".into()),
+            StyleValue::Var("--local-display".into()),
+            StyleValue::Var("--display-hidden".into()),
+            StyleValue::Prop("display".into()),
+        ] {
+            let string_resolved = match resolver
+                .resolve_value_with_variables(&value, &variables)
+                .as_str()
+            {
+                "none" => Display::None,
+                _ => Display::Flex,
+            };
+            let borrowed_resolved =
+                resolver.with_resolved_str(&value, &variables, |resolved| match resolved {
+                    "none" => Display::None,
+                    _ => Display::Flex,
+                });
+            assert_eq!(borrowed_resolved, string_resolved);
+        }
+    }
+
+    #[test]
+    fn dimension_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme
+            .tokens
+            .insert("size.panel".into(), TokenValue::String("320px".into()));
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert("--local-width".into(), StyleValue::Literal("75%".into()));
+        variables.insert(
+            prop_variable_key("width"),
+            StyleValue::Var("--size-panel".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("auto".into()),
+            StyleValue::Literal("240px".into()),
+            StyleValue::Literal("50%".into()),
+            StyleValue::Var("--local-width".into()),
+            StyleValue::Var("--size-panel".into()),
+            StyleValue::Prop("width".into()),
+        ] {
+            let string_resolved =
+                parse_dimension(&resolver.resolve_value_with_variables(&value, &variables));
+            let borrowed_resolved = resolver
+                .with_resolved_str(&value, &variables, |resolved| parse_dimension(resolved));
+            assert_eq!(borrowed_resolved, string_resolved);
+        }
+    }
+
+    #[test]
+    fn overflow_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "overflow.panel".into(),
+            TokenValue::String("hidden auto".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert(
+            "--local-overflow".into(),
+            StyleValue::Literal("scroll".into()),
+        );
+        variables.insert(
+            prop_variable_key("overflow"),
+            StyleValue::Var("--overflow-panel".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("hidden".into()),
+            StyleValue::Literal("hidden auto".into()),
+            StyleValue::Var("--local-overflow".into()),
+            StyleValue::Var("--overflow-panel".into()),
+            StyleValue::Prop("overflow".into()),
+        ] {
+            let string_resolved = parse_overflow_shorthand(
+                &resolver.resolve_value_with_variables(&value, &variables),
+            );
+            let borrowed_resolved = resolver.with_resolved_str(&value, &variables, |resolved| {
+                parse_overflow_shorthand(resolved)
+            });
+            assert_eq!(borrowed_resolved, string_resolved);
+        }
+    }
+
+    #[test]
+    fn time_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "animation.duration.fast".into(),
+            TokenValue::String("120ms".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert(
+            "--local-duration".into(),
+            StyleValue::Literal("0.2s".into()),
+        );
+        variables.insert(
+            prop_variable_key("duration"),
+            StyleValue::Var("--animation-duration-fast".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("120ms".into()),
+            StyleValue::Literal("0.2s".into()),
+            StyleValue::Literal("300".into()),
+            StyleValue::Var("--local-duration".into()),
+            StyleValue::Var("--animation-duration-fast".into()),
+            StyleValue::Prop("duration".into()),
+        ] {
+            let string_resolved =
+                parse_first_time_ms(&resolver.resolve_value_with_variables(&value, &variables));
+            let borrowed_resolved = resolver
+                .with_resolved_str(&value, &variables, |resolved| parse_first_time_ms(resolved));
+            assert_eq!(borrowed_resolved, string_resolved);
+        }
+    }
+
+    #[test]
+    fn transition_property_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "transition.properties.common".into(),
+            TokenValue::String("opacity, transform, width".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert(
+            "--local-properties".into(),
+            StyleValue::Literal("all".into()),
+        );
+        variables.insert(
+            prop_variable_key("properties"),
+            StyleValue::Var("--transition-properties-common".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("opacity".into()),
+            StyleValue::Literal("opacity, transform, width".into()),
+            StyleValue::Var("--local-properties".into()),
+            StyleValue::Var("--transition-properties-common".into()),
+            StyleValue::Prop("properties".into()),
+        ] {
+            let string_resolved = parse_transition_properties(
+                &resolver.resolve_value_with_variables(&value, &variables),
+            );
+            let borrowed_resolved = resolver.with_resolved_str(&value, &variables, |resolved| {
+                parse_transition_properties(resolved)
+            });
+            assert_eq!(borrowed_resolved, string_resolved);
+        }
+    }
+
+    #[test]
+    fn filter_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "filter.blur.medium".into(),
+            TokenValue::String("blur(12px)".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert("--local-filter".into(), StyleValue::Literal("none".into()));
+        variables.insert(
+            prop_variable_key("filter"),
+            StyleValue::Var("--filter-blur-medium".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("none".into()),
+            StyleValue::Literal("blur(4px)".into()),
+            StyleValue::Var("--local-filter".into()),
+            StyleValue::Var("--filter-blur-medium".into()),
+            StyleValue::Prop("filter".into()),
+        ] {
+            let string_resolved =
+                parse_filter(&resolver.resolve_value_with_variables(&value, &variables));
+            let borrowed_resolved =
+                resolver.with_resolved_str(&value, &variables, |resolved| parse_filter(resolved));
+            assert_eq!(borrowed_resolved, string_resolved);
+        }
+    }
+
+    #[test]
+    fn background_image_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "background.gradient.accent".into(),
+            TokenValue::String("linear-gradient(#112233, #445566)".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert(
+            "--local-background".into(),
+            StyleValue::Literal("none".into()),
+        );
+        variables.insert(
+            prop_variable_key("background"),
+            StyleValue::Var("--background-gradient-accent".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("none".into()),
+            StyleValue::Literal("url(assets/panel.png)".into()),
+            StyleValue::Literal("linear-gradient(#112233, #445566)".into()),
+            StyleValue::Var("--local-background".into()),
+            StyleValue::Var("--background-gradient-accent".into()),
+            StyleValue::Prop("background".into()),
+        ] {
+            let string_resolved =
+                parse_background_image(&resolver.resolve_value_with_variables(&value, &variables));
+            let borrowed_resolved = resolver.with_resolved_str(&value, &variables, |resolved| {
+                parse_background_image(resolved)
+            });
+            assert_eq!(borrowed_resolved, string_resolved);
+        }
+    }
+
+    #[test]
+    fn edge_shorthand_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "spacing.inset.panel".into(),
+            TokenValue::String("4px 8px 12px 16px".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert(
+            "--local-inset".into(),
+            StyleValue::Literal("2px 6px".into()),
+        );
+        variables.insert(
+            prop_variable_key("inset"),
+            StyleValue::Var("--spacing-inset-panel".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("4px".into()),
+            StyleValue::Literal("4px 8px".into()),
+            StyleValue::Literal("4px 8px 12px 16px".into()),
+            StyleValue::Var("--local-inset".into()),
+            StyleValue::Var("--spacing-inset-panel".into()),
+            StyleValue::Prop("inset".into()),
+        ] {
+            let string_resolved =
+                parse_edges_shorthand(&resolver.resolve_value_with_variables(&value, &variables));
+            let borrowed_resolved = resolver.with_resolved_str(&value, &variables, |resolved| {
+                parse_edges_shorthand(resolved)
+            });
+            assert_eq!(borrowed_resolved, string_resolved);
+        }
+    }
+
+    #[test]
+    fn corner_shorthand_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "radius.panel".into(),
+            TokenValue::String("4px 8px 12px 16px".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert(
+            "--local-radius".into(),
+            StyleValue::Literal("2px 6px".into()),
+        );
+        variables.insert(
+            prop_variable_key("radius"),
+            StyleValue::Var("--radius-panel".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("4px".into()),
+            StyleValue::Literal("4px 8px".into()),
+            StyleValue::Literal("4px 8px 12px 16px".into()),
+            StyleValue::Var("--local-radius".into()),
+            StyleValue::Var("--radius-panel".into()),
+            StyleValue::Prop("radius".into()),
+        ] {
+            let string_resolved =
+                parse_corners_shorthand(&resolver.resolve_value_with_variables(&value, &variables));
+            let borrowed_resolved = resolver.with_resolved_str(&value, &variables, |resolved| {
+                parse_corners_shorthand(resolved)
+            });
+            assert_eq!(borrowed_resolved, string_resolved);
+        }
+    }
+
+    #[test]
+    fn border_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "border.panel".into(),
+            TokenValue::String("2px solid #112233".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert("--local-border".into(), StyleValue::Literal("none".into()));
+        variables.insert(
+            prop_variable_key("border"),
+            StyleValue::Var("--border-panel".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("none".into()),
+            StyleValue::Literal("1px solid #445566".into()),
+            StyleValue::Var("--local-border".into()),
+            StyleValue::Var("--border-panel".into()),
+            StyleValue::Prop("border".into()),
+        ] {
+            let mut string_style = ComputedStyle::default();
+            apply_border_shorthand(
+                &mut string_style,
+                &resolver.resolve_value_with_variables(&value, &variables),
+            );
+            let mut borrowed_style = ComputedStyle::default();
+            resolver.with_resolved_str(&value, &variables, |resolved| {
+                apply_border_shorthand(&mut borrowed_style, resolved);
+            });
+            assert_eq!(borrowed_style.border_width, string_style.border_width);
+            assert_eq!(borrowed_style.border_color, string_style.border_color);
+        }
+
+        let color = StyleValue::Var("--border-panel".into());
+        let string_color = parse_border_color_shorthand(
+            &resolver.resolve_value_with_variables(&color, &variables),
+        );
+        let borrowed_color = resolver.with_resolved_str(&color, &variables, |resolved| {
+            parse_border_color_shorthand(resolved)
+        });
+        assert_eq!(borrowed_color, string_color);
+    }
+
+    #[test]
+    fn transform_origin_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "transform.origin.panel".into(),
+            TokenValue::String("25% 75%".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert(
+            "--local-origin".into(),
+            StyleValue::Literal("left top".into()),
+        );
+        variables.insert(
+            prop_variable_key("origin"),
+            StyleValue::Var("--transform-origin-panel".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("center".into()),
+            StyleValue::Literal("10px 20px".into()),
+            StyleValue::Var("--local-origin".into()),
+            StyleValue::Var("--transform-origin-panel".into()),
+            StyleValue::Prop("origin".into()),
+        ] {
+            let string_resolved =
+                parse_transform_origin(&resolver.resolve_value_with_variables(&value, &variables));
+            let borrowed_resolved = resolver.with_resolved_str(&value, &variables, |resolved| {
+                parse_transform_origin(resolved)
+            });
+            assert_eq!(borrowed_resolved, string_resolved);
+        }
+    }
+
+    #[test]
+    fn transform_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "transform.panel".into(),
+            TokenValue::String("translate(12px, 8px) scale(1.2) rotate(15deg)".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert(
+            "--local-transform".into(),
+            StyleValue::Literal("translateX(4px)".into()),
+        );
+        variables.insert(
+            prop_variable_key("transform"),
+            StyleValue::Var("--transform-panel".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("none".into()),
+            StyleValue::Literal("translate(10px, 20px) rotate(0.25turn)".into()),
+            StyleValue::Var("--local-transform".into()),
+            StyleValue::Var("--transform-panel".into()),
+            StyleValue::Prop("transform".into()),
+        ] {
+            let string_resolved =
+                parse_transform(&resolver.resolve_value_with_variables(&value, &variables));
+            let borrowed_resolved = resolver
+                .with_resolved_str(&value, &variables, |resolved| parse_transform(resolved));
+            assert_eq!(borrowed_resolved, string_resolved);
+        }
+    }
+
+    #[test]
+    fn box_shadow_resolution_matches_string_resolution_for_simple_references() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "shadow.panel".into(),
+            TokenValue::String("2px 4px 8px 1px #112233".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert("--local-shadow".into(), StyleValue::Literal("none".into()));
+        variables.insert(
+            prop_variable_key("shadow"),
+            StyleValue::Var("--shadow-panel".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("none".into()),
+            StyleValue::Literal("1px 2px 3px #445566".into()),
+            StyleValue::Var("--local-shadow".into()),
+            StyleValue::Var("--shadow-panel".into()),
+            StyleValue::Prop("shadow".into()),
+        ] {
+            let string_resolved =
+                parse_box_shadow(&resolver.resolve_value_with_variables(&value, &variables));
+            let borrowed_resolved = resolver
+                .with_resolved_str(&value, &variables, |resolved| parse_box_shadow(resolved));
+            assert_eq!(borrowed_resolved, string_resolved);
+        }
+    }
+
+    #[test]
+    fn flex_resolution_matches_string_resolution_for_simple_references() {
+        fn apply_flex_value(style: &mut ComputedStyle, value: &str) {
+            let value = value.trim();
+            if value == "none" {
+                style.flex_grow = 0.0;
+                style.flex_shrink = 0.0;
+                style.flex_basis = Dimension::Auto;
+            } else if value == "auto" {
+                style.flex_grow = 1.0;
+                style.flex_shrink = 1.0;
+                style.flex_basis = Dimension::Auto;
+            } else if let Ok(n) = value.parse::<f32>() {
+                style.flex_grow = n;
+                style.flex_shrink = 1.0;
+                style.flex_basis = Dimension::Px(0.0);
+            } else {
+                apply_flex_shorthand(style, value);
+            }
+        }
+
+        let mut theme = mesh_core_theme::default_theme();
+        theme
+            .tokens
+            .insert("flex.panel".into(), TokenValue::String("2 1 240px".into()));
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert("--local-flex".into(), StyleValue::Literal("auto".into()));
+        variables.insert(
+            prop_variable_key("flex"),
+            StyleValue::Var("--flex-panel".into()),
+        );
+
+        for value in [
+            StyleValue::Literal("none".into()),
+            StyleValue::Literal("1".into()),
+            StyleValue::Literal("2 1 240px".into()),
+            StyleValue::Var("--local-flex".into()),
+            StyleValue::Var("--flex-panel".into()),
+            StyleValue::Prop("flex".into()),
+        ] {
+            let mut string_style = ComputedStyle::default();
+            apply_flex_value(
+                &mut string_style,
+                &resolver.resolve_value_with_variables(&value, &variables),
+            );
+            let mut borrowed_style = ComputedStyle::default();
+            resolver.with_resolved_str(&value, &variables, |resolved| {
+                apply_flex_value(&mut borrowed_style, resolved);
+            });
+            assert_eq!(borrowed_style.flex_grow, string_style.flex_grow);
+            assert_eq!(borrowed_style.flex_shrink, string_style.flex_shrink);
+            assert_eq!(borrowed_style.flex_basis, string_style.flex_basis);
+        }
+    }
+
+    // cargo test -p mesh-core-elements --release -- numeric_theme_token_resolution_beats_string_roundtrip --ignored --nocapture
+    #[test]
+    #[ignore = "release-only numeric token resolution microbenchmark"]
+    fn numeric_theme_token_resolution_beats_string_roundtrip() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme
+            .tokens
+            .insert("spacing.large".into(), TokenValue::Number(18.0));
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--spacing-large".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            old_accumulator += parse_px(
+                &resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables),
+            );
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            new_accumulator +=
+                resolver.resolve_number_with_variables(std::hint::black_box(&value), &variables);
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "numeric token resolution: string roundtrip {old_time:?}; typed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- time_theme_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only time token resolution microbenchmark"]
+    fn time_theme_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "animation.duration.fast".into(),
+            TokenValue::String("120ms".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--animation-duration-fast".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0u32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            old_accumulator =
+                old_accumulator.wrapping_add(std::hint::black_box(parse_first_time_ms(&resolved)));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0u32;
+        for _ in 0..iterations {
+            let parsed =
+                resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                    parse_first_time_ms(resolved)
+                });
+            new_accumulator = new_accumulator.wrapping_add(std::hint::black_box(parsed));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "time token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- transition_property_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only transition property token resolution microbenchmark"]
+    fn transition_property_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "transition.properties.common".into(),
+            TokenValue::String("opacity, transform, width".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--transition-properties-common".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0u32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            old_accumulator = old_accumulator.wrapping_add(std::hint::black_box(
+                transition_property_score(parse_transition_properties(&resolved)),
+            ));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0u32;
+        for _ in 0..iterations {
+            let properties =
+                resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                    parse_transition_properties(resolved)
+                });
+            new_accumulator = new_accumulator
+                .wrapping_add(std::hint::black_box(transition_property_score(properties)));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "transition property token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    fn transition_property_score(properties: TransitionProperties) -> u32 {
+        u32::from(properties.all)
+            + u32::from(properties.opacity)
+            + u32::from(properties.transform)
+            + u32::from(properties.width)
+            + u32::from(properties.height)
+            + u32::from(properties.background_color)
+            + u32::from(properties.color)
+    }
+
+    // cargo test -p mesh-core-elements --release -- filter_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only filter token resolution microbenchmark"]
+    fn filter_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "filter.blur.medium".into(),
+            TokenValue::String("blur(12px)".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--filter-blur-medium".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            old_accumulator += std::hint::black_box(parse_filter(&resolved).blur_radius);
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let filter =
+                resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                    parse_filter(resolved)
+                });
+            new_accumulator += std::hint::black_box(filter.blur_radius);
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "filter token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- background_image_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only background-image token resolution microbenchmark"]
+    fn background_image_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "background.gradient.accent".into(),
+            TokenValue::String("linear-gradient(#112233, #445566)".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--background-gradient-accent".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0u32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            old_accumulator = old_accumulator.wrapping_add(std::hint::black_box(
+                background_paint_score(&parse_background_image(&resolved)),
+            ));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0u32;
+        for _ in 0..iterations {
+            let paint =
+                resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                    parse_background_image(resolved)
+                });
+            new_accumulator =
+                new_accumulator.wrapping_add(std::hint::black_box(background_paint_score(&paint)));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "background-image token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    fn background_paint_score(paint: &BackgroundPaint) -> u32 {
+        match paint {
+            BackgroundPaint::None => 1,
+            BackgroundPaint::Image(source) => 2_u32.saturating_add(source.path.len() as u32),
+            BackgroundPaint::LinearGradient(gradient) => 3_u32
+                .saturating_add(u32::from(gradient.from.r))
+                .saturating_add(u32::from(gradient.to.r)),
+        }
+    }
+
+    // cargo test -p mesh-core-elements --release -- edge_shorthand_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only edge shorthand token resolution microbenchmark"]
+    fn edge_shorthand_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "spacing.inset.panel".into(),
+            TokenValue::String("4px 8px 12px 16px".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--spacing-inset-panel".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            old_accumulator += std::hint::black_box(edge_score(parse_edges_shorthand(&resolved)));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let edges =
+                resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                    parse_edges_shorthand(resolved)
+                });
+            new_accumulator += std::hint::black_box(edge_score(edges));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "edge shorthand token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    fn edge_score(edges: Edges) -> f32 {
+        edges.top + edges.right + edges.bottom + edges.left
+    }
+
+    // cargo test -p mesh-core-elements --release -- corner_shorthand_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only corner shorthand token resolution microbenchmark"]
+    fn corner_shorthand_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "radius.panel".into(),
+            TokenValue::String("4px 8px 12px 16px".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--radius-panel".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            old_accumulator +=
+                std::hint::black_box(corner_score(parse_corners_shorthand(&resolved)));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let corners =
+                resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                    parse_corners_shorthand(resolved)
+                });
+            new_accumulator += std::hint::black_box(corner_score(corners));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "corner shorthand token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    fn corner_score(corners: Corners) -> f32 {
+        corners.top_left + corners.top_right + corners.bottom_right + corners.bottom_left
+    }
+
+    // cargo test -p mesh-core-elements --release -- border_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only border token resolution microbenchmark"]
+    fn border_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "border.panel".into(),
+            TokenValue::String("2px solid #112233".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--border-panel".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            let mut style = ComputedStyle::default();
+            apply_border_shorthand(&mut style, &resolved);
+            old_accumulator += std::hint::black_box(border_score(&style));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let mut style = ComputedStyle::default();
+            resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                apply_border_shorthand(&mut style, resolved);
+            });
+            new_accumulator += std::hint::black_box(border_score(&style));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "border token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    fn border_score(style: &ComputedStyle) -> f32 {
+        edge_score(style.border_width) + f32::from(style.border_color.r)
+    }
+
+    // cargo test -p mesh-core-elements --release -- transform_origin_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only transform-origin token resolution microbenchmark"]
+    fn transform_origin_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "transform.origin.panel".into(),
+            TokenValue::String("25% 75%".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--transform-origin-panel".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            old_accumulator +=
+                std::hint::black_box(transform_origin_score(parse_transform_origin(&resolved)));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let origin =
+                resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                    parse_transform_origin(resolved)
+                });
+            new_accumulator += std::hint::black_box(transform_origin_score(origin));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "transform-origin token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    fn transform_origin_score(origin: TransformOrigin) -> f32 {
+        fn axis_score(value: TransformOriginValue) -> f32 {
+            match value {
+                TransformOriginValue::Percent(value) | TransformOriginValue::Px(value) => value,
+            }
+        }
+        axis_score(origin.x) + axis_score(origin.y)
+    }
+
+    // cargo test -p mesh-core-elements --release -- transform_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only transform token resolution microbenchmark"]
+    fn transform_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "transform.panel".into(),
+            TokenValue::String("translate(12px, 8px) scale(1.2) rotate(15deg)".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--transform-panel".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            old_accumulator += std::hint::black_box(transform_score(parse_transform(&resolved)));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let transform =
+                resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                    parse_transform(resolved)
+                });
+            new_accumulator += std::hint::black_box(transform_score(transform));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "transform token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    fn transform_score(transform: Transform2D) -> f32 {
+        transform.translate_x
+            + transform.translate_y
+            + transform.scale_x
+            + transform.scale_y
+            + transform.rotation
+    }
+
+    // cargo test -p mesh-core-elements --release -- box_shadow_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only box-shadow token resolution microbenchmark"]
+    fn box_shadow_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "shadow.panel".into(),
+            TokenValue::String("2px 4px 8px 1px #112233".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--shadow-panel".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            old_accumulator += std::hint::black_box(box_shadow_score(parse_box_shadow(&resolved)));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let shadow =
+                resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                    parse_box_shadow(resolved)
+                });
+            new_accumulator += std::hint::black_box(box_shadow_score(shadow));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "box-shadow token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    fn box_shadow_score(shadow: BoxShadow) -> f32 {
+        shadow.offset_x
+            + shadow.offset_y
+            + shadow.blur_radius
+            + shadow.spread_radius
+            + f32::from(shadow.color.r)
+            + f32::from(shadow.inset)
+    }
+
+    // cargo test -p mesh-core-elements --release -- flex_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only flex token resolution microbenchmark"]
+    fn flex_token_resolution_beats_string_clone() {
+        fn apply_flex_value(style: &mut ComputedStyle, value: &str) {
+            let value = value.trim();
+            if value == "none" {
+                style.flex_grow = 0.0;
+                style.flex_shrink = 0.0;
+                style.flex_basis = Dimension::Auto;
+            } else if value == "auto" {
+                style.flex_grow = 1.0;
+                style.flex_shrink = 1.0;
+                style.flex_basis = Dimension::Auto;
+            } else if let Ok(n) = value.parse::<f32>() {
+                style.flex_grow = n;
+                style.flex_shrink = 1.0;
+                style.flex_basis = Dimension::Px(0.0);
+            } else {
+                apply_flex_shorthand(style, value);
+            }
+        }
+
+        let mut theme = mesh_core_theme::default_theme();
+        theme
+            .tokens
+            .insert("flex.panel".into(), TokenValue::String("2 1 240px".into()));
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--flex-panel".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            let mut style = ComputedStyle::default();
+            apply_flex_value(&mut style, &resolved);
+            old_accumulator += std::hint::black_box(flex_score(&style));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let mut style = ComputedStyle::default();
+            resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                apply_flex_value(&mut style, resolved);
+            });
+            new_accumulator += std::hint::black_box(flex_score(&style));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "flex token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    fn flex_score(style: &ComputedStyle) -> f32 {
+        let basis = match style.flex_basis {
+            Dimension::Px(value) | Dimension::Percent(value) => value,
+            Dimension::Auto => 1.0,
+            Dimension::Content => 2.0,
+        };
+        style.flex_grow + style.flex_shrink + basis
+    }
+
+    // cargo test -p mesh-core-elements --release -- overflow_theme_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only overflow token resolution microbenchmark"]
+    fn overflow_theme_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "overflow.panel".into(),
+            TokenValue::String("hidden auto".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--overflow-panel".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0u32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            let (x, y) = parse_overflow_shorthand(&resolved);
+            old_accumulator = old_accumulator.wrapping_add(std::hint::black_box(
+                overflow_score(x).saturating_add(overflow_score(y)),
+            ));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0u32;
+        for _ in 0..iterations {
+            let (x, y) =
+                resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                    parse_overflow_shorthand(resolved)
+                });
+            new_accumulator = new_accumulator.wrapping_add(std::hint::black_box(
+                overflow_score(x).saturating_add(overflow_score(y)),
+            ));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "overflow token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    fn overflow_score(value: Overflow) -> u32 {
+        match value {
+            Overflow::Visible => 1,
+            Overflow::Hidden => 2,
+            Overflow::Auto => 3,
+            Overflow::Scroll => 4,
+        }
+    }
+
+    // cargo test -p mesh-core-elements --release -- dimension_theme_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only dimension token resolution microbenchmark"]
+    fn dimension_theme_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme
+            .tokens
+            .insert("size.panel".into(), TokenValue::String("320px".into()));
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--size-panel".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            if let Dimension::Px(px) = parse_dimension(&resolved) {
+                old_accumulator += std::hint::black_box(px);
+            }
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0.0f32;
+        for _ in 0..iterations {
+            let dimension =
+                resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                    parse_dimension(resolved)
+                });
+            if let Dimension::Px(px) = dimension {
+                new_accumulator += std::hint::black_box(px);
+            }
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "dimension token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- keyword_theme_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only keyword token resolution microbenchmark"]
+    fn keyword_theme_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme
+            .tokens
+            .insert("display.hidden".into(), TokenValue::String("none".into()));
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--display-hidden".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0u32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            let display = match resolved.as_str() {
+                "none" => Display::None,
+                _ => Display::Flex,
+            };
+            old_accumulator = old_accumulator.wrapping_add(std::hint::black_box(match display {
+                Display::None => 1,
+                Display::Flex => 2,
+            }));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0u32;
+        for _ in 0..iterations {
+            let display =
+                resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                    match resolved {
+                        "none" => Display::None,
+                        _ => Display::Flex,
+                    }
+                });
+            new_accumulator = new_accumulator.wrapping_add(std::hint::black_box(match display {
+                Display::None => 1,
+                Display::Flex => 2,
+            }));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "keyword token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- color_theme_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only color token resolution microbenchmark"]
+    fn color_theme_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme
+            .tokens
+            .insert("color.primary".into(), TokenValue::String("#112233".into()));
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--color-primary".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0u32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            let color = Color::from_hex(&resolved).unwrap_or(Color::TRANSPARENT);
+            old_accumulator = old_accumulator.wrapping_add(std::hint::black_box(color.r as u32));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0u32;
+        for _ in 0..iterations {
+            let color =
+                resolver.resolve_color_with_variables(std::hint::black_box(&value), &variables);
+            new_accumulator = new_accumulator.wrapping_add(std::hint::black_box(color.r as u32));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "color token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
     // cargo test -p mesh-core-elements --release -- theme_default_direct_apply_beats_declaration_allocation --ignored --nocapture
     #[test]
     #[ignore = "release-only theme default application microbenchmark"]
@@ -2163,6 +3827,101 @@ mod tests {
 
         eprintln!(
             "theme defaults apply: declaration allocation {old_time:?}; direct property apply {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- indexed_declaration_application_beats_uncached_validation --ignored --nocapture
+    #[test]
+    #[ignore = "release-only indexed declaration application microbenchmark"]
+    fn indexed_declaration_application_beats_uncached_validation() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let declarations = vec![
+            Declaration {
+                property: "--accent".to_string(),
+                value: StyleValue::Literal("#112233".to_string()),
+            },
+            Declaration {
+                property: "background-color".to_string(),
+                value: StyleValue::Var("--accent".to_string()),
+            },
+            Declaration {
+                property: "color".to_string(),
+                value: StyleValue::Literal("#ffffff".to_string()),
+            },
+            Declaration {
+                property: "font-size".to_string(),
+                value: StyleValue::Literal("13px".to_string()),
+            },
+            Declaration {
+                property: "padding".to_string(),
+                value: StyleValue::Literal("4px 8px".to_string()),
+            },
+            Declaration {
+                property: "border-radius".to_string(),
+                value: StyleValue::Literal("6px".to_string()),
+            },
+            Declaration {
+                property: "gap".to_string(),
+                value: StyleValue::Literal("5px".to_string()),
+            },
+            Declaration {
+                property: "opacity".to_string(),
+                value: StyleValue::Literal("0.875".to_string()),
+            },
+            Declaration {
+                property: "unknown-property".to_string(),
+                value: StyleValue::Literal("ignored".to_string()),
+            },
+        ];
+        let rules = vec![StyleRule {
+            selector: Selector::Tag("button".to_string()),
+            declarations: declarations.clone(),
+            container_query: None,
+        }];
+        let index = StyleRuleIndex::new(&rules);
+        let indexed_declarations = index.no_diagnostics_declarations(0);
+        let iterations = 200_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0u32;
+        for _ in 0..iterations {
+            let mut style = ComputedStyle::default();
+            let mut variables = HashMap::new();
+            for declaration in &declarations {
+                resolver.apply_declaration_no_diagnostics(
+                    std::hint::black_box(&mut style),
+                    declaration,
+                    &mut variables,
+                );
+            }
+            old_accumulator =
+                old_accumulator.wrapping_add(std::hint::black_box(style.background_color.r as u32));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0u32;
+        for _ in 0..iterations {
+            let mut style = ComputedStyle::default();
+            let mut variables = HashMap::new();
+            for declaration in indexed_declarations {
+                resolver.apply_indexed_declaration_no_diagnostics(
+                    std::hint::black_box(&mut style),
+                    declaration,
+                    &mut variables,
+                );
+            }
+            new_accumulator =
+                new_accumulator.wrapping_add(std::hint::black_box(style.background_color.r as u32));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "declaration apply: uncached validation {old_time:?}; indexed metadata {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_accumulator, new_accumulator);

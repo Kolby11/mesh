@@ -850,6 +850,23 @@ impl RetainedDisplayList {
             None,
             &mut next,
         );
+        if self.root_id == Some(root.id)
+            && self.surface_size == Some((surface.width, surface.height))
+            && self.entries == next
+        {
+            next.clear();
+            self.next_entries_scratch = next;
+            #[cfg(debug_assertions)]
+            {
+                ordered_entries.clear();
+                self.ordered_entries_scratch = ordered_entries;
+            }
+            return self.update_metrics_without_rebuild(
+                surface,
+                force_full_damage,
+                partial_present_supported,
+            );
+        }
         let dirty_summary = dirty_summary.unwrap_or_default();
         let empty_dirty_nodes = HashSet::new();
         let dirty_node_ids = dirty_node_ids.unwrap_or(&empty_dirty_nodes);
@@ -3136,6 +3153,44 @@ mod tests {
         assert!(new_time * 5 < old_time * 4);
     }
 
+    // cargo test -p mesh-core-render --release -- unchanged_display_list_update_beats_flat_rebuild --ignored --nocapture
+    #[test]
+    #[ignore = "release-only unchanged display-list update microbenchmark"]
+    fn unchanged_display_list_update_beats_flat_rebuild() {
+        let root = display_entry_benchmark_tree(24, 24);
+        let iterations = 1_000;
+
+        let mut retained = RetainedDisplayList::default();
+        retained.update(&root, 1200, 800, false, true);
+
+        let no_op_started = std::time::Instant::now();
+        let mut no_op_accumulator = 0u64;
+        for _ in 0..iterations {
+            let metrics = retained.update(&root, 1200, 800, false, true);
+            no_op_accumulator =
+                no_op_accumulator.wrapping_add(std::hint::black_box(metrics.entries_reused));
+        }
+        let no_op_time = no_op_started.elapsed();
+
+        let rebuild_started = std::time::Instant::now();
+        let mut rebuild_accumulator = 0u64;
+        for _ in 0..iterations {
+            let mut rebuilt = RetainedDisplayList::default();
+            let metrics = rebuilt.update(&root, 1200, 800, false, true);
+            rebuild_accumulator =
+                rebuild_accumulator.wrapping_add(std::hint::black_box(metrics.entries_rebuilt));
+        }
+        let rebuild_time = rebuild_started.elapsed();
+
+        eprintln!(
+            "unchanged display-list update: no-op {no_op_time:?}; fresh flat rebuild {rebuild_time:?}; ratio {:.1}x; accumulators={no_op_accumulator}/{rebuild_accumulator}",
+            rebuild_time.as_secs_f64() / no_op_time.as_secs_f64()
+        );
+        assert_ne!(no_op_accumulator, 0);
+        assert_ne!(rebuild_accumulator, 0);
+        assert!(no_op_time < rebuild_time);
+    }
+
     // cargo test -p mesh-core-render --release -- tag_aware_payload_signature_skips_irrelevant_attr_hashes --ignored --nocapture
     #[test]
     #[ignore = "release-only display signature payload hashing microbenchmark"]
@@ -3725,6 +3780,24 @@ mod tests {
         assert!(metrics.subtree_segments_reused > 0);
         assert!(metrics.subtree_segments_rebuilt > 0);
         assert_eq!(metrics.full_fallback_count, 0);
+    }
+
+    #[test]
+    fn display_list_unchanged_tree_skips_flat_command_rebuild() {
+        let root = display_entry_benchmark_tree(8, 8);
+        let mut list = RetainedDisplayList::default();
+        let first = list.update(&root, 800, 400, false, true);
+        let initial_commands = format!("{:?}", list.paint_commands());
+
+        let second = list.update(&root, 800, 400, false, true);
+
+        assert!(first.subtree_commands_rebuilt > 0);
+        assert_eq!(second.entries_rebuilt, 0);
+        assert_eq!(second.entries_reused, first.entries_total);
+        assert_eq!(second.subtree_segments_rebuilt, 0);
+        assert_eq!(second.subtree_commands_rebuilt, 0);
+        assert_eq!(second.damage_area, 0);
+        assert_eq!(format!("{:?}", list.paint_commands()), initial_commands);
     }
 
     #[test]

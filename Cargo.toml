@@ -89,3 +89,4 @@ parley = { version = "0.7.0", default-features = false, features = ["std"] }
 accesskit = { version = "0.24.0", default-features = false }
 anyrender = { version = "0.10.0", default-features = false }
 vello_encoding = { version = "0.5.1", default-features = false }
+rayon = "1"

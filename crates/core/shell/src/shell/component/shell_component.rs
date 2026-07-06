@@ -898,7 +898,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         let component_id = self.id().to_string();
         self.compiled = recompiled;
         self.element_metric_usage = element_metric_usage(&self.compiled);
-        if let Some(entry) = self.frontend_catalog.modules.get_mut(&component_id) {
+        if let Some(entry) = Arc::make_mut(&mut self.frontend_catalog)
+            .modules
+            .get_mut(&component_id)
+        {
             entry.compiled = self.compiled.clone();
         }
         self.runtimes.lock().unwrap().clear();

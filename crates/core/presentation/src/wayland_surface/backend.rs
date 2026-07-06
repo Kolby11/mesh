@@ -1,5 +1,7 @@
 use super::*;
 use mesh_core_render::DamageRect;
+use smallvec::{SmallVec, smallvec};
+use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 
 /// Configuration passed from the shell before each present.
@@ -72,7 +74,7 @@ struct ShmPoolConfig {
 #[derive(Debug)]
 pub(super) struct SurfaceShmBuffer {
     buffer: Buffer,
-    pending_damage: Option<DamageRect>,
+    pending_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]>,
 }
 
 /// The compositor-side role backing a [`SurfaceEntry`]. Layer surfaces own
@@ -131,6 +133,7 @@ pub(super) struct SurfaceEntry {
     pub(super) kde_blur: Option<OrgKdeKwinBlur>,
     pub(super) blur_region: Option<DamageRect>,
     pub(super) blur_committed: bool,
+    pub(super) blur_region_dirty: bool,
     /// Desired input region in surface-local logical coordinates. `None`
     /// means whole-surface input (the wl_surface default). Persisted here and
     /// applied with the next present commit so it can never be lost to
@@ -186,6 +189,7 @@ impl SurfaceEntry {
             kde_blur: None,
             blur_region: None,
             blur_committed: false,
+            blur_region_dirty: false,
             input_region_rect: None,
             input_region_dirty: false,
         }
@@ -242,15 +246,12 @@ impl SurfaceEntry {
         src: &[u8],
         width: u32,
         height: u32,
-        damage: Option<DamageRect>,
-    ) -> Result<(usize, DamageRect), PresentationError> {
+        damage: &[DamageRect],
+    ) -> Result<(usize, SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]>), PresentationError> {
         let width = width.max(1);
         let height = height.max(1);
         let stride = width as i32 * 4;
         let full = full_damage(width, height);
-        let frame_damage = damage
-            .and_then(|rect| clip_damage(rect, full))
-            .unwrap_or(full);
         let pool_config = ShmPoolConfig {
             width,
             height,
@@ -268,18 +269,17 @@ impl SurfaceEntry {
         }
 
         for slot in &mut self.shm_buffers {
-            slot.pending_damage = Some(union_damage(slot.pending_damage, frame_damage));
+            extend_pending_damage(&mut slot.pending_damage, damage, full);
         }
 
         let len = self.shm_buffers.len();
         for offset in 0..len {
             let index = (self.next_shm_buffer + offset) % len;
-            let copy_damage = self.shm_buffers[index]
-                .pending_damage
-                .unwrap_or(frame_damage);
             if let Some(canvas) = pool.canvas(&self.shm_buffers[index].buffer) {
-                copy_bgra_damage_to_canvas(src, canvas, width, height, copy_damage);
-                self.shm_buffers[index].pending_damage = None;
+                let copy_damage = std::mem::take(&mut self.shm_buffers[index].pending_damage);
+                for rect in &copy_damage {
+                    copy_bgra_damage_to_canvas(src, canvas, width, height, *rect);
+                }
                 self.next_shm_buffer = (index + 1) % self.shm_buffers.len();
                 // When a buffer is reused while older frame callbacks are still
                 // outstanding, `pending_damage` can be larger than the current
@@ -309,10 +309,10 @@ impl SurfaceEntry {
         copy_bgra_to_canvas(src, canvas, width, height);
         self.shm_buffers.push(SurfaceShmBuffer {
             buffer: wl_buffer,
-            pending_damage: None,
+            pending_damage: SmallVec::new(),
         });
         self.next_shm_buffer = (index + 1) % self.shm_buffers.len();
-        Ok((index, full))
+        Ok((index, smallvec![full]))
     }
 
     fn attach_shm_buffer(
@@ -324,22 +324,18 @@ impl SurfaceEntry {
         physical_width: u32,
         physical_height: u32,
         damage_rects: &[DamageRect],
-        copy_damage: DamageRect,
+        copy_damage: &[DamageRect],
         scale: f32,
     ) {
         let buffer = &self.shm_buffers[index].buffer;
         let wl_surface = self.role.wl_surface();
 
-        // Scale damage rects from logical to physical coordinates
-        let physical_damage: Vec<DamageRect> = damage_rects
+        // Scale and clip in one pass so ordinary presents allocate one scratch
+        // vector instead of separate physical and clipped vectors.
+        let mut clipped_damage: Vec<DamageRect> = damage_rects
             .iter()
             .map(|r| scale_damage_rect_to_physical(*r, scale))
-            .collect();
-
-        // Clip scaled rects to physical buffer bounds (T-102-06)
-        let mut clipped_damage: Vec<DamageRect> = physical_damage
-            .iter()
-            .map(|r| clip_damage_rect_to_buffer(*r, physical_width, physical_height))
+            .map(|r| clip_damage_rect_to_buffer(r, physical_width, physical_height))
             .collect();
 
         // The region actually copied into THIS shm buffer (`copy_damage`, already
@@ -349,14 +345,16 @@ impl SurfaceEntry {
         // re-composites the regions we report here, so we must include the full
         // copied region — otherwise the stale pixels outside `damage_rects` keep
         // showing the previous buffer's content (the transparent rectangular cutout).
-        clipped_damage.push(clip_damage_rect_to_buffer(
-            copy_damage,
-            physical_width,
-            physical_height,
-        ));
+        clipped_damage.extend(
+            copy_damage
+                .iter()
+                .map(|rect| clip_damage_rect_to_buffer(*rect, physical_width, physical_height)),
+        );
 
         // Emit damage_buffer calls with physical coordinates
-        for rect in protocol_damage_rects(&clipped_damage, physical_width, physical_height) {
+        let protocol_damage =
+            protocol_damage_rects(&clipped_damage, physical_width, physical_height);
+        for rect in protocol_damage.iter().copied() {
             wl_surface.damage_buffer(
                 rect.x as i32,
                 rect.y as i32,
@@ -515,7 +513,7 @@ fn create_surface_shm_buffer(
         .map_err(|e| PresentationError::BufferAlloc(format!("create_buffer: {e}")))?;
     Ok(SurfaceShmBuffer {
         buffer,
-        pending_damage: Some(full_damage(width, height)),
+        pending_damage: smallvec![full_damage(width, height)],
     })
 }
 
@@ -555,6 +553,41 @@ fn clip_damage(rect: DamageRect, bounds: DamageRect) -> Option<DamageRect> {
     })
 }
 
+fn extend_pending_damage(
+    pending: &mut SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]>,
+    damage: &[DamageRect],
+    bounds: DamageRect,
+) {
+    if pending.as_slice() == [bounds] {
+        return;
+    }
+
+    if damage.is_empty() {
+        pending.clear();
+        pending.push(bounds);
+        return;
+    }
+
+    for rect in damage.iter().filter_map(|rect| clip_damage(*rect, bounds)) {
+        if rect == bounds {
+            pending.clear();
+            pending.push(bounds);
+            return;
+        }
+        pending.push(rect);
+    }
+
+    if pending.len() > MAX_PROTOCOL_DAMAGE_RECTS {
+        let union = pending
+            .iter()
+            .copied()
+            .fold(None, |acc, rect| Some(union_damage(acc, rect)))
+            .unwrap_or(bounds);
+        pending.clear();
+        pending.push(union);
+    }
+}
+
 /// Maximum number of `wl_surface::damage_buffer` calls allowed per commit.
 /// When the damage list exceeds this cap the entire surface is marked dirty
 /// with a single bounding-union call to avoid unbounded protocol overhead.
@@ -566,19 +599,19 @@ const MAX_PROTOCOL_DAMAGE_RECTS: usize = 16;
 /// unchanged (same count, same order). When the count exceeds the cap all
 /// rects are collapsed into a single bounding union. An empty input yields
 /// an empty output — the caller is responsible for skipping the present.
-fn protocol_damage_rects(rects: &[DamageRect], width: u32, height: u32) -> Vec<DamageRect> {
+fn protocol_damage_rects(rects: &[DamageRect], width: u32, height: u32) -> Cow<'_, [DamageRect]> {
     if rects.is_empty() {
-        return Vec::new();
+        return Cow::Borrowed(&[]);
     }
     if rects.len() <= MAX_PROTOCOL_DAMAGE_RECTS {
-        return rects.to_vec();
+        return Cow::Borrowed(rects);
     }
     let union = rects
         .iter()
         .copied()
         .fold(None, |acc, r| Some(union_damage(acc, r)))
         .unwrap_or_else(|| full_damage(width, height));
-    vec![union]
+    Cow::Owned(vec![union])
 }
 
 fn union_damage(current: Option<DamageRect>, next: DamageRect) -> DamageRect {
@@ -1114,6 +1147,7 @@ impl LayerShellBackend {
                         kde_blur.set_region(None);
                         kde_blur.commit();
                         entry.blur_committed = false;
+                        entry.blur_region_dirty = false;
                     }
                 }
                 entry.blur_region = None;
@@ -1167,29 +1201,30 @@ impl LayerShellBackend {
         let physical_h = buffer.height.max(1);
 
         // SHM copy region must always be a union (Pitfall 1) — fold all rects
-        // into a single DamageRect for the buffer copy, then forward the
-        // original rect slice for the per-rect damage_buffer calls.
         // Damage rects arrive in logical/CSS coordinates; scale to physical
-        // before the copy so the region matches the physical buffer dimensions.
-        let shm_copy_damage = damage_rects
+        // before the copy so each SHM buffer can retain disjoint pending
+        // regions without expanding them into one bounding rectangle.
+        let mut shm_copy_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]> = damage_rects
             .iter()
             .copied()
             .map(|r| scale_damage_rect_to_physical(r, scale))
-            .fold(None, |acc, r| Some(union_damage(acc, r)))
-            .or_else(|| {
-                // If the slice is empty (shouldn't normally reach here due to
-                // the skip gate in render.rs), upload the full buffer.
-                Some(full_damage(physical_w, physical_h))
-            });
+            .collect();
+        if shm_copy_damage.is_empty() {
+            // If the slice is empty (shouldn't normally reach here due to the
+            // skip gate in render.rs), upload the full buffer.
+            shm_copy_damage.push(full_damage(physical_w, physical_h));
+        }
         let (buffer_index, copy_damage) = entry.copy_into_shm_buffer(
             pool,
             &buffer.data,
             physical_w,
             physical_h,
-            shm_copy_damage,
+            &shm_copy_damage,
         )?;
         // Commit kde_blur region before wl_surface commit (BLUR-02, BLUR-04, CR-01)
-        if let Some(ref kde_blur) = entry.kde_blur {
+        if entry.blur_region_dirty
+            && let Some(ref kde_blur) = entry.kde_blur
+        {
             match entry.blur_region {
                 Some(region_rect) => {
                     if let Ok(region) = Region::new(&state.compositor_state) {
@@ -1202,6 +1237,7 @@ impl LayerShellBackend {
                         kde_blur.set_region(Some(region.wl_region()));
                         kde_blur.commit();
                         entry.blur_committed = true;
+                        entry.blur_region_dirty = false;
                     }
                 }
                 None if entry.blur_committed => {
@@ -1209,8 +1245,9 @@ impl LayerShellBackend {
                     kde_blur.set_region(None);
                     kde_blur.commit();
                     entry.blur_committed = false;
+                    entry.blur_region_dirty = false;
                 }
-                None => {}
+                None => entry.blur_region_dirty = false,
             }
         }
         // Apply the persisted input region as pending state so the present
@@ -1247,7 +1284,7 @@ impl LayerShellBackend {
             physical_w,
             physical_h,
             damage_rects,
-            copy_damage,
+            &copy_damage,
             scale,
         );
 
@@ -1316,7 +1353,11 @@ impl LayerShellBackend {
         let Some(entry) = self.state.surfaces.get_mut(surface_id) else {
             return;
         };
-        entry.blur_region = blur_region;
+        set_pending_blur_region(
+            &mut entry.blur_region,
+            &mut entry.blur_region_dirty,
+            blur_region,
+        );
     }
 
     pub fn surface_size(
@@ -1602,6 +1643,18 @@ impl LayerShellBackend {
             reason: wake_reason,
         })
     }
+}
+
+fn set_pending_blur_region(
+    current: &mut Option<DamageRect>,
+    dirty: &mut bool,
+    next: Option<DamageRect>,
+) {
+    if *current == next && !*dirty {
+        return;
+    }
+    *current = next;
+    *dirty = true;
 }
 
 /// Build and configure an `xdg_positioner` from a [`PopupPlacement`]. Every
@@ -2216,5 +2269,184 @@ mod tests {
         assert_eq!(scale.ceil() as i32, 2);
         let scale: f32 = 1.25;
         assert_eq!(scale.ceil() as i32, 2);
+    }
+
+    #[test]
+    fn unchanged_blur_region_is_committed_only_once() {
+        let region = Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 48,
+        });
+        let mut current = None;
+        let mut dirty = false;
+        let mut commits = 0;
+
+        for _ in 0..1_000 {
+            set_pending_blur_region(&mut current, &mut dirty, region);
+            if dirty {
+                commits += 1;
+                dirty = false;
+            }
+        }
+        assert_eq!(commits, 1);
+
+        set_pending_blur_region(&mut current, &mut dirty, None);
+        assert!(dirty, "removing blur must produce a clearing commit");
+    }
+
+    #[test]
+    #[ignore = "release-only present damage allocation benchmark"]
+    fn borrowed_protocol_damage_beats_cloned_passthrough() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let rects = [
+            DamageRect {
+                x: 0,
+                y: 0,
+                width: 20,
+                height: 20,
+            },
+            DamageRect {
+                x: 200,
+                y: 0,
+                width: 20,
+                height: 20,
+            },
+            DamageRect {
+                x: 400,
+                y: 0,
+                width: 20,
+                height: 20,
+            },
+            DamageRect {
+                x: 600,
+                y: 0,
+                width: 20,
+                height: 20,
+            },
+        ];
+        let iterations = 1_000_000;
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(black_box(&rects).to_vec());
+        }
+        let cloned = started.elapsed();
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(protocol_damage_rects(black_box(&rects), 800, 48));
+        }
+        let borrowed = started.elapsed();
+
+        eprintln!(
+            "protocol damage passthrough over {iterations} iterations: cloned {cloned:?}, borrowed {borrowed:?}"
+        );
+    }
+
+    #[test]
+    fn pending_buffer_damage_preserves_disjoint_rectangles() {
+        let bounds = full_damage(1_920, 100);
+        let damage = [
+            DamageRect {
+                x: 0,
+                y: 0,
+                width: 20,
+                height: 100,
+            },
+            DamageRect {
+                x: 1_900,
+                y: 0,
+                width: 20,
+                height: 100,
+            },
+        ];
+        let mut pending = SmallVec::new();
+
+        extend_pending_damage(&mut pending, &damage, bounds);
+
+        assert_eq!(pending.as_slice(), damage.as_slice());
+        let copied_area: u32 = pending.iter().map(|rect| rect.width * rect.height).sum();
+        assert_eq!(copied_area, 4_000);
+        assert_eq!(union_damage(Some(damage[0]), damage[1]).width, 1_920);
+    }
+
+    #[test]
+    fn pending_buffer_damage_collapses_when_rect_cap_is_exceeded() {
+        let bounds = full_damage(1_920, 100);
+        let damage: Vec<_> = (0..=MAX_PROTOCOL_DAMAGE_RECTS)
+            .map(|index| DamageRect {
+                x: index as u32 * 10,
+                y: 0,
+                width: 5,
+                height: 5,
+            })
+            .collect();
+        let mut pending = SmallVec::new();
+
+        extend_pending_damage(&mut pending, &damage, bounds);
+
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].x, 0);
+        assert_eq!(pending[0].width, 165);
+    }
+
+    #[test]
+    #[ignore = "release-only disjoint SHM copy benchmark"]
+    fn disjoint_damage_copy_beats_bounding_union_copy() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let width = 1_920;
+        let height = 100;
+        let src = vec![0x7f; width as usize * height as usize * 4];
+        let mut canvas = vec![0; src.len()];
+        let left = DamageRect {
+            x: 0,
+            y: 0,
+            width: 20,
+            height,
+        };
+        let right = DamageRect {
+            x: width - 20,
+            y: 0,
+            width: 20,
+            height,
+        };
+        let union = union_damage(Some(left), right);
+        let iterations = 1_000;
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            copy_bgra_damage_to_canvas(
+                black_box(&src),
+                black_box(&mut canvas),
+                width,
+                height,
+                union,
+            );
+        }
+        let union_elapsed = started.elapsed();
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            for rect in [left, right] {
+                copy_bgra_damage_to_canvas(
+                    black_box(&src),
+                    black_box(&mut canvas),
+                    width,
+                    height,
+                    rect,
+                );
+            }
+        }
+        let disjoint_elapsed = started.elapsed();
+
+        eprintln!(
+            "SHM copy over {iterations} disjoint frames: bounding union {union_elapsed:?}, rect list {disjoint_elapsed:?}"
+        );
     }
 }

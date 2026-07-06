@@ -40,7 +40,7 @@ pub(super) fn create_service_proxy(
     lua: &Lua,
     scope: &Table,
     service_name: String,
-    contract: Option<InterfaceContract>,
+    contract: Option<Arc<InterfaceContract>>,
     interface_name: String,
     source_module_id: String,
     source_capabilities: CapabilitySet,

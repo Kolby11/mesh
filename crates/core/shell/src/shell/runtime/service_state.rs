@@ -355,7 +355,7 @@ fn event_payload_contract_warnings(
 
     let mut warnings = Vec::new();
     for (field_name, field_type) in fields {
-        let Some(value) = object.get(&field_name) else {
+        let Some(value) = object.get(field_name) else {
             warnings.push(format!(
                 "event '{event_name}' for {interface} missing required payload field '{field_name}'"
             ));
@@ -372,7 +372,7 @@ fn event_payload_contract_warnings(
     warnings
 }
 
-fn parse_inline_object_schema(schema: &str) -> Vec<(String, String)> {
+fn parse_inline_object_schema(schema: &str) -> Vec<(&str, &str)> {
     let trimmed = schema.trim();
     let Some(inner) = trimmed
         .strip_prefix('{')
@@ -389,7 +389,7 @@ fn parse_inline_object_schema(schema: &str) -> Vec<(String, String)> {
             if name.is_empty() || field_type.is_empty() {
                 return None;
             }
-            Some((name.to_string(), field_type.to_string()))
+            Some((name, field_type))
         })
         .collect()
 }
@@ -399,18 +399,29 @@ fn is_runtime_metadata_state_field(name: &str) -> bool {
 }
 
 fn json_value_matches_contract_type(value: &serde_json::Value, field_type: &str) -> bool {
-    let normalized = field_type.trim().to_ascii_lowercase();
+    let normalized = field_type.trim();
     if normalized.starts_with('[') && normalized.ends_with(']') {
         return value.is_array();
     }
 
-    match normalized.as_str() {
-        "bool" | "boolean" => value.is_boolean(),
-        "float" | "double" | "number" => value.is_number(),
-        "int" | "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
-        "string" => value.is_string(),
-        "object" | "table" | "map" => value.is_object(),
-        _ => true,
+    if normalized.eq_ignore_ascii_case("bool") || normalized.eq_ignore_ascii_case("boolean") {
+        value.is_boolean()
+    } else if normalized.eq_ignore_ascii_case("float")
+        || normalized.eq_ignore_ascii_case("double")
+        || normalized.eq_ignore_ascii_case("number")
+    {
+        value.is_number()
+    } else if normalized.eq_ignore_ascii_case("int") || normalized.eq_ignore_ascii_case("integer") {
+        value.as_i64().is_some() || value.as_u64().is_some()
+    } else if normalized.eq_ignore_ascii_case("string") {
+        value.is_string()
+    } else if normalized.eq_ignore_ascii_case("object")
+        || normalized.eq_ignore_ascii_case("table")
+        || normalized.eq_ignore_ascii_case("map")
+    {
+        value.is_object()
+    } else {
+        true
     }
 }
 
@@ -422,5 +433,76 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
         serde_json::Value::String(_) => "string",
         serde_json::Value::Array(_) => "array",
         serde_json::Value::Object(_) => "object",
+    }
+}
+
+#[cfg(test)]
+mod contract_validation_performance_tests {
+    use super::*;
+
+    #[test]
+    fn borrowed_inline_schema_parser_preserves_trimmed_fields() {
+        assert_eq!(
+            parse_inline_object_schema("{ device_id: string, level: FLOAT }").as_slice(),
+            &[("device_id", "string"), ("level", "FLOAT")]
+        );
+        assert!(parse_inline_object_schema("string").is_empty());
+    }
+
+    #[test]
+    fn allocation_free_type_matching_preserves_supported_aliases() {
+        let cases = [
+            (serde_json::json!(true), " BOOLEAN ", true),
+            (serde_json::json!(1.5), "FLOAT", true),
+            (serde_json::json!(1.5), "integer", false),
+            (serde_json::json!(1), "INT", true),
+            (serde_json::json!("value"), "String", true),
+            (serde_json::json!({}), "MAP", true),
+            (serde_json::json!([]), "[string]", true),
+            (serde_json::json!(null), "custom_type", true),
+        ];
+        for (value, field_type, expected) in cases {
+            assert_eq!(
+                json_value_matches_contract_type(&value, field_type),
+                expected,
+                "type {field_type}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "release-only contract validation microbenchmark"]
+    fn allocation_free_contract_type_matching_beats_lowercase_allocation() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        fn old_matches(value: &serde_json::Value, field_type: &str) -> bool {
+            let normalized = field_type.trim().to_ascii_lowercase();
+            match normalized.as_str() {
+                "float" | "double" | "number" => value.is_number(),
+                _ => true,
+            }
+        }
+
+        let value = serde_json::json!(42.5);
+        let iterations = 1_000_000;
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(old_matches(&value, black_box(" NUMBER ")));
+        }
+        let allocating = started.elapsed();
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(json_value_matches_contract_type(
+                &value,
+                black_box(" NUMBER "),
+            ));
+        }
+        let allocation_free = started.elapsed();
+
+        eprintln!(
+            "contract type checks over {iterations} iterations: lowercase allocation {allocating:?}, allocation-free {allocation_free:?}"
+        );
     }
 }

@@ -337,10 +337,36 @@ impl FrontendSurfaceComponent {
         self.call_node_handler(tree, node_key, "click", &[event])
     }
 
-    pub(super) fn current_keyboard_settings(&self) -> mesh_core_config::KeyboardSettings {
-        mesh_core_config::load_shell_settings()
+    pub(in crate::shell::component) fn current_keyboard_settings(
+        &self,
+    ) -> mesh_core_config::KeyboardSettings {
+        let defaults_path = mesh_core_config::default_settings_defaults_path();
+        let user_path = mesh_core_config::default_settings_path();
+        let defaults_mtime = std::fs::metadata(&defaults_path)
+            .ok()
+            .and_then(|meta| meta.modified().ok());
+        let user_mtime = std::fs::metadata(&user_path)
+            .ok()
+            .and_then(|meta| meta.modified().ok());
+
+        if let Some(cached) = self.keyboard_settings_cache.borrow().as_ref()
+            && cached.defaults_mtime == defaults_mtime
+            && cached.user_mtime == user_mtime
+        {
+            return cached.settings.clone();
+        }
+
+        let settings = mesh_core_config::load_shell_settings()
             .map(|settings| settings.keyboard)
-            .unwrap_or_default()
+            .unwrap_or_default();
+
+        *self.keyboard_settings_cache.borrow_mut() = Some(KeyboardSettingsCache {
+            defaults_mtime,
+            user_mtime,
+            settings: settings.clone(),
+        });
+
+        settings
     }
 
     pub(super) fn key_matches_binding(key: &str, binding: &str) -> bool {

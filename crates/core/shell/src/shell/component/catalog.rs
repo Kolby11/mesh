@@ -5,6 +5,7 @@ use mesh_core_frontend::{CompiledFrontendModule, compile_frontend_module};
 use mesh_core_module::ModuleType;
 use mesh_core_module::lifecycle::ModuleInstance;
 use mesh_core_module::package::InstalledModuleGraph;
+use rayon::prelude::*;
 
 use crate::shell::ShellRunError;
 
@@ -37,36 +38,38 @@ impl FrontendCatalog {
         let mut module_ids: Vec<String> = modules.keys().cloned().collect();
         module_ids.sort();
 
+        let frontend_modules: Vec<_> = module_ids
+            .iter()
+            .filter_map(|module_id| {
+                let module = modules.get(module_id)?;
+                mesh_core_frontend::is_frontend_module(&module.manifest)
+                    .then_some((module_id, module))
+            })
+            .collect();
+        let compiled_entries = frontend_modules
+            .par_iter()
+            .map(|(module_id, module)| {
+                compile_frontend_module(&module.manifest, &module.path)
+                    .map(|compiled| {
+                        (
+                            (*module_id).clone(),
+                            FrontendCatalogEntry {
+                                module_dir: module.path.clone(),
+                                compiled,
+                            },
+                        )
+                    })
+                    .map_err(|source| ShellRunError::FrontendCompile {
+                        module_id: (*module_id).clone(),
+                        source,
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         let mut catalog = Self {
-            modules: HashMap::new(),
+            modules: compiled_entries.into_iter().collect(),
             slot_contributions: HashMap::new(),
         };
-
-        for module_id in module_ids {
-            let Some(module) = modules.get(&module_id) else {
-                continue;
-            };
-
-            if !mesh_core_frontend::is_frontend_module(&module.manifest) {
-                continue;
-            }
-
-            let compiled =
-                compile_frontend_module(&module.manifest, &module.path).map_err(|source| {
-                    ShellRunError::FrontendCompile {
-                        module_id: module_id.clone(),
-                        source,
-                    }
-                })?;
-
-            catalog.modules.insert(
-                module_id.clone(),
-                FrontendCatalogEntry {
-                    module_dir: module.path.clone(),
-                    compiled,
-                },
-            );
-        }
 
         for (module_id, entry) in &catalog.modules {
             for (slot_id, contributions) in &entry.compiled.manifest.slot_contributions {
@@ -239,6 +242,100 @@ impl FrontendCatalog {
         };
         self.validate_component_module_import(host, module_id)?;
         Ok(module_id.clone())
+    }
+}
+
+#[cfg(test)]
+mod performance_tests {
+    use super::*;
+    use mesh_core_module::lifecycle::ModuleInstance;
+
+    fn shipped_frontend_modules() -> HashMap<String, ModuleInstance> {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        std::fs::read_dir(root.join("modules/frontend"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+            .filter_map(|entry| {
+                let module_dir = entry.path();
+                let loaded = mesh_core_module::manifest::load_manifest(&module_dir).ok()?;
+                let module_id = loaded.manifest.package.id.clone();
+                Some((
+                    module_id,
+                    ModuleInstance::new(loaded.manifest, module_dir, loaded.path, loaded.source),
+                ))
+            })
+            .collect()
+    }
+
+    fn compile_sequentially(
+        modules: &HashMap<String, ModuleInstance>,
+    ) -> Result<Vec<(String, FrontendCatalogEntry)>, ShellRunError> {
+        let mut module_ids: Vec<_> = modules.keys().cloned().collect();
+        module_ids.sort();
+        module_ids
+            .into_iter()
+            .filter_map(|module_id| {
+                let module = modules.get(&module_id)?;
+                mesh_core_frontend::is_frontend_module(&module.manifest)
+                    .then_some((module_id, module))
+            })
+            .map(|(module_id, module)| {
+                compile_frontend_module(&module.manifest, &module.path)
+                    .map(|compiled| {
+                        (
+                            module_id.clone(),
+                            FrontendCatalogEntry {
+                                module_dir: module.path.clone(),
+                                compiled,
+                            },
+                        )
+                    })
+                    .map_err(|source| ShellRunError::FrontendCompile { module_id, source })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn parallel_catalog_compilation_matches_sequential_module_set() {
+        let modules = shipped_frontend_modules();
+        let sequential: std::collections::HashSet<_> = compile_sequentially(&modules)
+            .unwrap()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        let parallel: std::collections::HashSet<_> = FrontendCatalog::from_modules(&modules, None)
+            .unwrap()
+            .modules
+            .into_keys()
+            .collect();
+        assert_eq!(parallel, sequential);
+    }
+
+    #[test]
+    #[ignore = "release-only frontend compilation benchmark"]
+    fn parallel_frontend_compilation_beats_sequential_startup() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let modules = shipped_frontend_modules();
+        let iterations = 20;
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(compile_sequentially(&modules).unwrap());
+        }
+        let sequential = started.elapsed();
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(FrontendCatalog::from_modules(&modules, None).unwrap());
+        }
+        let parallel = started.elapsed();
+
+        eprintln!(
+            "frontend compilation over {iterations} shipped-catalog builds: sequential {sequential:?}, parallel {parallel:?}"
+        );
     }
 }
 

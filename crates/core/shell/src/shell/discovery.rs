@@ -363,16 +363,20 @@ impl Shell {
         }
 
         let graph = self.load_installed_module_graph_cached().ok().cloned();
-        let frontend_catalog = FrontendCatalog::from_modules(&self.modules, graph.as_ref())?;
+        let frontend_catalog = std::sync::Arc::new(FrontendCatalog::from_modules(
+            &self.modules,
+            graph.as_ref(),
+        )?);
         let enabled_frontends = self.installed_enabled_frontend_ids();
         let graph_i18n_catalogs = self.graph_i18n_catalog_paths();
+        let interface_catalog = std::sync::Arc::new(self.interfaces.catalog());
         for entry in frontend_catalog.top_level_surfaces_filtered(enabled_frontends.as_ref()) {
             self.register_component(Box::new(
                 FrontendSurfaceComponent::new(
                     entry.compiled,
                     entry.module_dir,
                     frontend_catalog.clone(),
-                    self.interfaces.catalog(),
+                    interface_catalog.clone(),
                 )
                 .with_graph_i18n_catalogs(graph_i18n_catalogs.clone()),
             ));

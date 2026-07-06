@@ -180,7 +180,7 @@ pub struct ScriptContext {
     /// be attached before the script is loaded.
     shared_vm: Option<Lua>,
     env_table: Option<Table>,
-    interface_catalog: InterfaceCatalog,
+    interface_catalog: Arc<InterfaceCatalog>,
     pub(super) interface_bindings: HashMap<String, InterfaceResolution>,
     shared_interface_bindings: Arc<Mutex<SharedInterfaceBindings>>,
     interface_bindings_generation: u64,
@@ -345,7 +345,7 @@ impl ScriptContext {
             vm: None,
             shared_vm: None,
             env_table: None,
-            interface_catalog: InterfaceCatalog::default(),
+            interface_catalog: Arc::new(InterfaceCatalog::default()),
             interface_bindings: HashMap::new(),
             shared_interface_bindings: Arc::new(Mutex::new(SharedInterfaceBindings::default())),
             interface_bindings_generation: 0,
@@ -373,8 +373,8 @@ impl ScriptContext {
         })
     }
 
-    pub fn set_interface_catalog(&mut self, catalog: InterfaceCatalog) {
-        self.interface_catalog = catalog;
+    pub fn set_interface_catalog(&mut self, catalog: impl Into<Arc<InterfaceCatalog>>) {
+        self.interface_catalog = catalog.into();
     }
 
     pub fn set_optional_interfaces(&mut self, interfaces: HashSet<String>) {

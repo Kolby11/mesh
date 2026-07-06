@@ -212,8 +212,8 @@ Items owned by a milestone are listed with their milestone reference.
 - [ ] One `mlua::Lua` VM per ScriptContext (`runtime.rs:92`); move to per-thread VM with `_ENV` isolation → v1.17
 ### P1 — renderer hot paths
 
-- [ ] Interaction frames still re-apply string style declarations per node (`apply_declaration_no_diagnostics` + theme defaults maps dominate the post-2026-06-10 toggle profile); folds into the typed/compiled declaration work → v1.23 and narrower invalidation → v1.18
-- [ ] Avoid flattening retained display-list subtrees into a new flat command buffer on each update; move toward segment/rope-style command storage → v1.21
+- [ ] Interaction frames still re-apply string style declarations per node (`apply_declaration_no_diagnostics` + theme defaults maps dominate the post-2026-06-10 toggle profile); folds into the typed/compiled declaration work → v1.23 and narrower invalidation → v1.18. Progress 2026-07-05: `StyleRuleIndex` now precomputes no-diagnostics declaration metadata for cached restyle paths, so interaction/restyle frames reuse support/profile/deprecated-token classification instead of repeating it per matched declaration. Added parity coverage for cached vs uncached declaration application and a release-only microbenchmark showing indexed declaration application at ~1.4x faster (156.3ms → 109.1ms for 200k iterations on the local profile run).
+- [ ] Avoid flattening retained display-list subtrees into a new flat command buffer on each update; move toward segment/rope-style command storage → v1.21. Progress 2026-07-05: `RetainedDisplayList::update_inner` now detects unchanged display entries for the same root/surface before rebuilding paint subtrees, preserving the existing flat command arrays on no-op updates. Added regression coverage for zero subtree/command rebuilds on unchanged trees and a release-only benchmark showing unchanged update at ~2.6x faster than fresh flat rebuild (349.0ms → 922.3ms for 1k iterations on the local profile run).
 - [ ] Replace per-node string/hash-heavy style matching with interned/typed node keys; remaining after first pass: interned tags, classes, attribute keys → v1.23
 - [ ] Retain Taffy node state across layout passes; `build_taffy_tree` rebuilds a fresh TaffyTree every layout → v1.21
 - [ ] Affected-subtree template re-evaluation: `narrow_script_update` rebuilds the full tree (full template eval) then diffs; use `NodeServiceFieldDependencies` to re-evaluate only nodes whose tracked fields changed → v1.27
@@ -493,7 +493,77 @@ duplicating it.
       typed-declaration item: resolve tokens to typed values
       (`Color`/`f32`/enum) once per theme load and make
       `apply_declaration` consume typed values, keeping strings only for
-      diagnostics.
+      diagnostics. Progress 2026-07-06: numeric style resolution now has a
+      typed fast path for simple `var(...)`/`prop(...)` references and numeric
+      theme tokens, avoiding `TokenValue::Number -> String -> parse_px`
+      round-trips for numeric properties while preserving fallback string
+      semantics for embedded CSS references. A release benchmark over 500k
+      numeric token resolutions measured 83.468ms for the string round trip
+      versus 47.757ms for the typed path (1.7x faster). Progress 2026-07-06:
+      color style resolution now also has a borrowed fast path for simple
+      literals, variables, props, and string theme tokens, avoiding a cloned
+      resolved string before `Color::from_hex` when substitution is not needed.
+      A release benchmark over 500k color token resolutions measured 44.999ms
+      for the string-clone path versus 35.997ms for the borrowed path (1.3x
+      faster). Progress 2026-07-06: keyword-style declarations now use the
+      same borrowed simple-value fast path for direct comparisons across
+      `display`, `position`, visibility, flex/alignment, text, and blend-mode
+      properties. A release benchmark over 500k keyword token resolutions
+      measured 38.788ms for the string-clone path versus 31.852ms for the
+      borrowed path (1.2x faster). Progress 2026-07-06: dimension declarations
+      (`width`, `height`, `flex-basis`) now parse borrowed simple values as
+      well, avoiding allocation before `parse_dimension` for common tokenized
+      sizes. A release benchmark over 500k dimension token resolutions measured
+      48.995ms for the string-clone path versus 41.248ms for the borrowed path
+      (1.2x faster). Progress 2026-07-06: overflow declarations
+      (`overflow`, `overflow-x`, `overflow-y`) now parse borrowed simple
+      values too. A release benchmark over 500k overflow token resolutions
+      measured 57.668ms for the string-clone path versus 47.218ms for the
+      borrowed path (1.2x faster). Progress 2026-07-06: transition/animation
+      duration and delay declarations now parse borrowed simple values before
+      `parse_first_time_ms`. A release benchmark over 500k time token
+      resolutions measured 120.253ms for the string-clone path versus
+      113.080ms for the borrowed path (1.1x faster). Progress 2026-07-06:
+      `transition-property` now parses borrowed simple property lists before
+      `parse_transition_properties`. A release benchmark over 500k transition
+      property token resolutions measured 72.124ms for the string-clone path
+      versus 65.417ms for the borrowed path (1.1x faster). Progress
+      2026-07-06: `filter` and `backdrop-filter` now parse borrowed simple
+      values before `parse_filter`. A release benchmark over 500k filter token
+      resolutions measured 52.210ms for the string-clone path versus 43.185ms
+      for the borrowed path (1.2x faster). Progress 2026-07-06:
+      `background-image` now parses borrowed simple values before
+      `parse_background_image`. A release benchmark over 500k gradient token
+      resolutions measured 71.205ms for the string-clone path versus 62.134ms
+      for the borrowed path (1.1x faster). Progress 2026-07-06: edge
+      shorthands (`padding`, `margin`, `border-width`, `inset`) now parse
+      borrowed simple values before `parse_edges_shorthand`. A release
+      benchmark over 500k edge shorthand token resolutions measured 120.785ms
+      for the string-clone path versus 112.609ms for the borrowed path (1.1x
+      faster). Progress 2026-07-06: `border-radius` shorthand now parses
+      borrowed simple values before `parse_corners_shorthand`. A release
+      benchmark over 500k corner shorthand token resolutions measured 85.640ms
+      for the string-clone path versus 82.162ms for the borrowed path (~4%
+      faster). Progress 2026-07-06: `border` and `border-color` now parse
+      borrowed simple values before `apply_border_shorthand` /
+      `parse_border_color_shorthand`. A release benchmark over 500k border
+      shorthand token resolutions measured 111.028ms for the string-clone path
+      versus 96.613ms for the borrowed path (1.1x faster). Progress
+      2026-07-06: `transform-origin` now parses borrowed simple values before
+      `parse_transform_origin`. A release benchmark over 500k transform-origin
+      token resolutions measured 137.328ms for the string-clone path versus
+      129.423ms for the borrowed path (1.1x faster). Progress 2026-07-06:
+      `transform` now parses borrowed simple values before `parse_transform`.
+      A release benchmark over 500k transform token resolutions measured
+      120.761ms for the string-clone path versus 104.237ms for the borrowed
+      path (1.2x faster). Progress 2026-07-06: `box-shadow` now parses
+      borrowed simple values before `parse_box_shadow`. A release benchmark
+      over 500k box-shadow token resolutions measured 144.953ms for the
+      string-clone path versus 130.210ms for the borrowed path (1.1x faster).
+      Progress 2026-07-06: `flex` now resolves simple values through the
+      borrowed path before applying shorthand semantics. A release benchmark
+      over 500k flex token resolutions measured 80.558ms for the string-clone
+      path versus 73.508ms for the borrowed path (1.1x faster).
 - [ ] **Theme component defaults re-applied per node from string maps.**
       `apply_theme_component_defaults` parses `HashMap<String, String>`
       defaults on every node resolution (already visible in the
@@ -558,6 +628,13 @@ duplicating it.
       (`shell/discovery.rs:126+`). Parse/compile are pure per-module —
       parallelize with rayon/spawn_blocking to cut shell start latency
       (matters for session startup perception vs. quickshell).
+      Progress 2026-07-05: `FrontendCatalog::from_modules` now compiles the
+      sorted frontend module set with an indexed Rayon pipeline, preserving
+      deterministic collection/error order while running independent compile
+      work concurrently. A release benchmark over 20 builds of the nine
+      shipped frontend modules measured 63.48ms sequential versus 32.70ms
+      parallel (~1.9x faster). Directory discovery and manifest parsing remain
+      serial.
 
 ### I. Composition, display list & proxies — third-pass findings
 
@@ -1168,6 +1245,13 @@ Performance:
       same infra module settings reloads already use.
       `resolved_surface_shortcuts` (rebuilt per keypress with locale lookups)
       becomes cacheable the same way.
+      Progress 2026-07-06: `FrontendSurfaceComponent::current_keyboard_settings`
+      now caches the merged `KeyboardSettings` behind an mtime check of both
+      the defaults and user settings paths, so unchanged files skip the
+      `fs::read_to_string` + JSON parse + merge entirely and only pay two
+      `stat()` calls. A release benchmark over 20,000 calls measured 218.6ms
+      reloading every call versus 50.1ms mtime-cached (~4.4x faster).
+      `resolved_surface_shortcuts` caching remains open.
 - [ ] **Click press/release still runs ~5–8 separate full-tree walks.**
       Press: `selectable_text_target_key`, `pointer_event_target_key`,
       `find_node_bounds_by_key`, `find_focusable_at`, then per-kind probes
@@ -1270,7 +1354,7 @@ scan.
 
 Performance:
 
-- [ ] **`InterfaceRegistry::resolve` deep-clones the entire interface catalog
+- [x] **`InterfaceRegistry::resolve` deep-clones the entire interface catalog
       on every call.** `resolve()` goes through `catalog()`, which clones the
       full contracts map **and** providers map (every contract's state fields,
       events, and commands for every interface)
@@ -1284,6 +1368,14 @@ Performance:
       directly under the read lock and return `Arc<InterfaceContract>`;
       keep `catalog()` for the debug/discovery paths that genuinely want a
       snapshot.
+      Completed 2026-07-05: registry contracts are stored behind `Arc`, and
+      `resolve()` now looks up contracts/providers directly under read locks
+      instead of materializing a catalog snapshot. `has()` and
+      `list_interfaces()` likewise query registry maps directly. Explicit
+      `catalog()` calls retain owned snapshot semantics for diagnostics and
+      script setup. A release benchmark with 64 contracts (32 methods each)
+      over 10k resolutions measured 879.6ms for snapshot resolution versus
+      1.20ms for direct registry resolution (~730x faster).
 - [ ] **Contract validation re-derives typed information per event.**
       `json_value_matches_contract_type` allocates a lowercased String per
       field per update (`service_state.rs:401-415`), and named-event payloads
@@ -1293,6 +1385,12 @@ Performance:
       debt). Precompile contract field types and event schemas into typed
       enums at contract-registration time; validation becomes match arms with
       zero allocation.
+      Progress 2026-07-05: primitive type matching no longer allocates a
+      lowercased `String`, and inline event-schema parsing borrows field names
+      and types instead of allocating two strings per field. A release
+      benchmark over 1M type checks measured 12.56ms allocating versus 5.96ms
+      allocation-free (~2.1x faster). Registration-time typed schema
+      precompilation remains open.
 - [ ] Minor: `canonical_interface_name` / `service_name_from_interface`
       allocate fresh Strings 2–3× per event across normalize/record/profiling
       (`service_state.rs:44,92`, `interface.rs:95-118`); thread the canonical
@@ -1374,7 +1472,7 @@ stand; findings below are additional. `file:line` as of this scan.
 
 Performance:
 
-- [ ] **Per-buffer pending damage is a single bounding rect, which forces the
+- [x] **Per-buffer pending damage is a single bounding rect, which forces the
       SHM copy to be a union.** `SurfaceShmBuffer.pending_damage` is
       `Option<DamageRect>` (`presentation/src/wayland_surface/backend.rs:73-76`),
       accumulated via `union_damage` (`backend.rs:270-283`), and
@@ -1388,7 +1486,13 @@ Performance:
       per rect and shrinks steady-state SHM traffic to the actual changed
       pixels. Pairs with the H direct-paint item; whichever lands first should
       carry the rect-list change.
-- [ ] **kde_blur region is re-created and re-committed on every present while
+      Completed 2026-07-05: each SHM buffer now retains an inline bounded list
+      of up to 16 physical damage rects and copies each region independently;
+      overflow collapses safely to one union. Protocol damage includes every
+      region actually refreshed on a reused buffer. A two-edge-rect benchmark
+      over 1,000 1920x100 frames measured 16.25ms for bounding-union copies
+      versus 3.47ms for rect-list copies (~4.7x faster in the debug profile).
+- [x] **kde_blur region is re-created and re-committed on every present while
       blur is active.** `present_with_damage` unconditionally creates a fresh
       `Region`, calls `set_region` + `commit` per frame whenever
       `entry.blur_region` is `Some` (`backend.rs:1192-1215`) — the shell-side
@@ -1400,6 +1504,10 @@ Performance:
       last-committed rect on `SurfaceEntry` and skip when unchanged (the
       `input_region_dirty` pattern two blocks below it is the right shape —
       blur is the one region type that didn't get it).
+      Completed 2026-07-05: `SurfaceEntry` now tracks blur-region dirtiness;
+      unchanged presents skip region creation and KDE blur protocol commits,
+      while region changes and removal still commit exactly once. Regression
+      coverage proves 1,000 unchanged presents require one blur update.
 - [ ] **Input normalization allocates a String per event via a linear surface
       scan.** Every pointer/keyboard event calls `surface_id_for_wl_surface`,
       which iterates all surfaces comparing `wl_surface` handles and clones the
@@ -1439,6 +1547,11 @@ Performance:
       `surface_config_fingerprint` is a fourth hand-rolled byte-at-a-time FNV
       hasher (`backend.rs:142-161`), the presentation face of the §N
       hasher-drift item.
+      Progress 2026-07-05: physical scaling and clipping are fused into one
+      vector build, and the common <=16-rect protocol path borrows the damage
+      slice instead of allocating with `to_vec`. A debug microbenchmark over
+      1M four-rect passthroughs measured 36.09ms cloned versus 8.97ms borrowed
+      (~4.0x faster); the release run was blocked by a full build volume.
 
 Structure:
 
@@ -1468,7 +1581,7 @@ items (parallel paint, pipelining, blocking IO off-thread) and H startup item
 
 Performance:
 
-- [ ] **Every top-level surface gets a deep clone of the entire compiled
+- [x] **Every top-level surface gets a deep clone of the entire compiled
       frontend catalog at startup.** `FrontendCatalog` is a plain `Clone`
       struct holding every `CompiledFrontendModule` (parsed templates, styles,
       scripts for *all* frontend modules; `shell/component/catalog.rs:11-21`),
@@ -1483,7 +1596,15 @@ Performance:
       own deep `interfaces.catalog()` clone (`discovery.rs:375`,
       `extension/service/src/interface.rs:86-91`) — the startup face of the
       §S resolve-clone item; fix both with the same `Arc` treatment.
-- [ ] **`interfaces.resolve()` catalog deep-clones also fire from the command
+      Progress 2026-07-05: the compiled `FrontendCatalog` is now shared by all
+      top-level surfaces through `Arc`; source reload uses copy-on-write via
+      `Arc::make_mut`. This removes the persistent N+1 deep copies of every
+      compiled frontend module. Completed later 2026-07-05: the interface
+      catalog is also constructed once and shared through every surface,
+      embedded `ScriptContext`, and Lua lookup closure. A release benchmark
+      with 64 contracts (32 methods each) over 10k clones measured 799.7ms for
+      deep catalog clones versus 27.3us for `Arc` clones (~29,000x faster).
+- [x] **`interfaces.resolve()` catalog deep-clones also fire from the command
       dispatch path.** `service_command_is_supported` and
       `service_command_is_coalescable` each call `self.interfaces.resolve()`
       (`runtime/request.rs:773-779,813-820`) — two full catalog clones per
@@ -1492,6 +1613,9 @@ Performance:
       again per flushed command. Already covered mechanically by the §S
       "resolve under the read lock" item; listed here so the orchestrator-path
       call sites get retired with it.
+      Completed 2026-07-05 by the direct `InterfaceRegistry::resolve` lookup;
+      command support/coalescing checks now clone only the selected contract
+      `Arc` and provider record.
 - [ ] **Startup is fully serial on the main thread.** Confirmed the H item:
       `discover_modules` scans + parses manifests dir-by-dir
       (`discovery.rs:124-136,209-304`), then `FrontendCatalog::from_modules`
@@ -1501,6 +1625,9 @@ Performance:
       first cut. (Graph load is cached via
       `load_installed_module_graph_cached`; its `clone()` uses at
       `discovery.rs:365` and `backend/spawn.rs:18` are startup-only and fine.)
+      Progress 2026-07-05: frontend compilation now runs concurrently through
+      Rayon and measured ~1.9x faster on the shipped catalog. Discovery and
+      manifest loading remain serial, so the broader startup item stays open.
 - [ ] **Per-event allocations in `dispatch_wayland`.** Each dispatched event
       allocates the physical surface id String (`runtime/wayland.rs:24`),
       clones the routed target id (`wayland.rs:53`), calls

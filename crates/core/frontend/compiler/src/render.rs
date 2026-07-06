@@ -232,6 +232,11 @@ fn evaluate_template_expression(
     instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
 ) -> serde_json::Value {
+    if crate::expr::uses_translation(expression) {
+        return state
+            .map(|store| serde_json::Value::String(eval_expr(expression, store)))
+            .unwrap_or(serde_json::Value::Null);
+    }
     if let (Some(state), Some(composition)) = (state, composition)
         && let Some(result) = composition.evaluate_template_expression(
             instance_key,
@@ -1042,6 +1047,81 @@ fn number_attr(attributes: &BTreeMap<String, String>, name: &str) -> Option<f32>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TemplateExpressionResult;
+
+    struct TranslatingStore;
+
+    impl VariableStore for TranslatingStore {
+        fn get(&self, _name: &str) -> Option<serde_json::Value> {
+            None
+        }
+
+        fn keys(&self) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn translate(&self, key: &str) -> Option<String> {
+            (key == "nav.open_settings").then(|| "Open settings".to_string())
+        }
+    }
+
+    struct IdentityTranslationComposition;
+
+    impl FrontendCompositionResolver for IdentityTranslationComposition {
+        fn evaluate_template_expression(
+            &self,
+            _instance_key: &str,
+            expression: &str,
+            _locals: &serde_json::Map<String, serde_json::Value>,
+        ) -> Option<TemplateExpressionResult> {
+            Some(TemplateExpressionResult {
+                value: serde_json::Value::String(
+                    expression
+                        .strip_prefix("t('")
+                        .and_then(|value| value.strip_suffix("')"))
+                        .unwrap_or(expression)
+                        .to_string(),
+                ),
+                service_reads: Vec::new(),
+            })
+        }
+
+        fn render_import(
+            &self,
+            _host: &Manifest,
+            _host_instance_key: &str,
+            _alias: &str,
+            _props: &BTreeMap<String, String>,
+            _prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
+            _container_width: f32,
+            _container_height: f32,
+        ) -> Option<WidgetNode> {
+            None
+        }
+
+        fn render_slot(
+            &self,
+            _host: &Manifest,
+            _host_instance_key: &str,
+            _slot_name: Option<&str>,
+            _container_width: f32,
+            _container_height: f32,
+        ) -> Vec<WidgetNode> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn translated_expression_uses_locale_store_before_composition_runtime() {
+        let value = evaluate_template_expression(
+            "t('nav.open_settings')",
+            Some(&TranslatingStore),
+            "test",
+            Some(&IdentityTranslationComposition),
+        );
+
+        assert_eq!(value, serde_json::json!("Open settings"));
+    }
 
     fn test_manifest() -> Manifest {
         Manifest {

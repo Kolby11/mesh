@@ -36,6 +36,10 @@ pub(crate) fn eval_expr(expr: &str, store: &dyn mesh_core_elements::VariableStor
     eval_compiled(&compiled, store).into_string()
 }
 
+pub(crate) fn uses_translation(expr: &str) -> bool {
+    compiled_expr(expr).uses_translation()
+}
+
 /// Upper bound on memoized expressions. Template expressions are a fixed set
 /// per loaded module, so this is only reached through repeated hot reloads
 /// with changing sources; clearing then is cheap and self-corrects.
@@ -95,6 +99,29 @@ enum CompiledExpr {
     Literal(String),
     /// Bare variable or dotted path lookup.
     Path(String),
+}
+
+impl CompiledExpr {
+    fn uses_translation(&self) -> bool {
+        match self {
+            Self::TranslateExpr(_) => true,
+            Self::Not(inner) => inner.uses_translation(),
+            Self::Ternary {
+                cond,
+                then_val,
+                else_val,
+            } => {
+                cond.uses_translation()
+                    || then_val.uses_translation()
+                    || else_val.uses_translation()
+            }
+            Self::And(lhs, rhs)
+            | Self::Or(lhs, rhs)
+            | Self::Concat(lhs, rhs)
+            | Self::Compare { lhs, rhs, .. } => lhs.uses_translation() || rhs.uses_translation(),
+            Self::Literal(_) | Self::Path(_) | Self::Length(_) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

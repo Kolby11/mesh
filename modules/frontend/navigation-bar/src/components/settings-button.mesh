@@ -6,8 +6,8 @@
       onpointerenter={onSettingsEnter}
       onpointerleave={onSettingsLeave}
       aria-haspopup="true"
-      title="{t('nav.open_settings')}"
-      aria-label="{t('nav.open_settings')}"
+      title={t('nav.open_settings')}
+      aria-label={t('nav.open_settings')}
     >
       <icon class="nav-button-glyph" name="preferences-system" size="18" />
     </button>

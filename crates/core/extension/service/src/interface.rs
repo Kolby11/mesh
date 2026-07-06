@@ -1,7 +1,7 @@
 use crate::contract::{InterfaceContract, parse_contract_version, parse_version_req};
 use semver::Version;
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, Default)]
 pub struct InterfaceCatalog {
@@ -25,14 +25,14 @@ pub struct InterfaceProvider {
 pub struct InterfaceResolution {
     pub requested: String,
     pub requested_version: Option<String>,
-    pub contract: Option<InterfaceContract>,
+    pub contract: Option<Arc<InterfaceContract>>,
     pub provider: Option<InterfaceProvider>,
 }
 
 /// Dynamic registry of named interfaces, their contract metadata, and providers.
 #[derive(Debug, Default)]
 pub struct InterfaceRegistry {
-    contracts: RwLock<HashMap<String, Vec<InterfaceContract>>>,
+    contracts: RwLock<HashMap<String, Vec<Arc<InterfaceContract>>>>,
     providers: RwLock<HashMap<String, Vec<InterfaceProvider>>>,
 }
 
@@ -43,7 +43,10 @@ impl InterfaceRegistry {
 
     pub fn register_contract(&self, contract: InterfaceContract) {
         let mut contracts = self.contracts.write().unwrap();
-        register_contract_in_map(&mut contracts, contract);
+        let entry = contracts.entry(contract.interface.clone()).or_default();
+        entry.retain(|existing| existing.version != contract.version);
+        entry.push(Arc::new(contract));
+        entry.sort_by(|a, b| b.version.cmp(&a.version));
     }
 
     pub fn register(&self, provider: InterfaceProvider) {
@@ -52,7 +55,42 @@ impl InterfaceRegistry {
     }
 
     pub fn resolve(&self, requested: &str, requested_version: Option<&str>) -> InterfaceResolution {
-        self.catalog().resolve(requested, requested_version)
+        let canonical = canonical_interface_name(requested);
+        let contract = self
+            .contracts
+            .read()
+            .unwrap()
+            .get(&canonical)
+            .and_then(|contracts| {
+                contracts
+                    .iter()
+                    .find(|contract| version_matches_contract(requested_version, &contract.version))
+                    .cloned()
+            });
+        let provider = self
+            .providers
+            .read()
+            .unwrap()
+            .get(&canonical)
+            .and_then(|providers| {
+                providers
+                    .iter()
+                    .find(|provider| {
+                        version_matches_provider(
+                            requested_version,
+                            provider.version.as_deref(),
+                            contract.as_deref(),
+                        )
+                    })
+                    .cloned()
+            });
+
+        InterfaceResolution {
+            requested: canonical,
+            requested_version: requested_version.map(ToOwned::to_owned),
+            contract,
+            provider,
+        }
     }
 
     pub fn providers_for(&self, requested: &str) -> Vec<InterfaceProvider> {
@@ -71,21 +109,49 @@ impl InterfaceRegistry {
             .read()
             .unwrap()
             .get(&canonical)
-            .cloned()
+            .map(|contracts| {
+                contracts
+                    .iter()
+                    .map(|contract| (**contract).clone())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
     pub fn list_interfaces(&self) -> Vec<String> {
-        self.catalog().list_interfaces()
+        let contracts = self.contracts.read().unwrap();
+        let providers = self.providers.read().unwrap();
+        let mut names = Vec::with_capacity(contracts.len() + providers.len());
+        names.extend(contracts.keys().cloned());
+        names.extend(providers.keys().cloned());
+        names.sort();
+        names.dedup();
+        names
     }
 
     pub fn has(&self, requested: &str) -> bool {
-        self.catalog().has(requested)
+        let canonical = canonical_interface_name(requested);
+        self.contracts.read().unwrap().contains_key(&canonical)
+            || self.providers.read().unwrap().contains_key(&canonical)
     }
 
     pub fn catalog(&self) -> InterfaceCatalog {
         InterfaceCatalog {
-            contracts: self.contracts.read().unwrap().clone(),
+            contracts: self
+                .contracts
+                .read()
+                .unwrap()
+                .iter()
+                .map(|(name, contracts)| {
+                    (
+                        name.clone(),
+                        contracts
+                            .iter()
+                            .map(|contract| (**contract).clone())
+                            .collect(),
+                    )
+                })
+                .collect(),
             providers: self.providers.read().unwrap().clone(),
         }
     }
@@ -130,6 +196,7 @@ impl InterfaceCatalog {
                 .iter()
                 .find(|contract| version_matches_contract(requested_version, &contract.version))
                 .cloned()
+                .map(Arc::new)
         });
         let provider = self.providers.get(&canonical).and_then(|providers| {
             providers
@@ -138,7 +205,7 @@ impl InterfaceCatalog {
                     version_matches_provider(
                         requested_version,
                         provider.version.as_deref(),
-                        contract.as_ref(),
+                        contract.as_deref(),
                     )
                 })
                 .cloned()
@@ -232,6 +299,26 @@ mod tests {
     use crate::contract::{ContractCapabilities, InterfaceEvent, InterfaceMethod};
     use std::path::PathBuf;
 
+    fn test_contract(interface: &str, method_count: usize) -> InterfaceContract {
+        InterfaceContract {
+            interface: interface.into(),
+            version: Version::parse("1.0.0").unwrap(),
+            file_path: PathBuf::from("interface.toml"),
+            state_fields: vec![],
+            methods: (0..method_count)
+                .map(|index| InterfaceMethod {
+                    name: format!("method_{index}"),
+                    args: Vec::new(),
+                    returns: None,
+                    coalesce: false,
+                })
+                .collect(),
+            events: vec![],
+            types: HashMap::new(),
+            capabilities: ContractCapabilities::default(),
+        }
+    }
+
     #[test]
     fn canonicalizes_short_names() {
         assert_eq!(canonical_interface_name("audio"), "mesh.audio");
@@ -282,6 +369,94 @@ mod tests {
         assert_eq!(
             resolved.provider.unwrap().provider_module,
             "@mesh/pipewire-audio"
+        );
+    }
+
+    #[test]
+    fn repeated_registry_resolution_shares_contract_storage() {
+        let registry = InterfaceRegistry::new();
+        registry.register_contract(test_contract("mesh.audio", 8));
+
+        let first = registry.resolve("audio", None).contract.unwrap();
+        let second = registry.resolve("audio", None).contract.unwrap();
+
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    #[ignore = "release-only performance benchmark"]
+    fn benchmark_direct_registry_resolution_against_catalog_snapshot() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let registry = InterfaceRegistry::new();
+        for index in 0..64 {
+            let interface = format!("mesh.service_{index}");
+            registry.register_contract(test_contract(&interface, 32));
+            registry.register(InterfaceProvider {
+                interface,
+                version: Some("1.0".into()),
+                base_module: None,
+                provider_module: format!("@mesh/provider_{index}"),
+                backend_name: format!("Provider {index}"),
+                priority: 100,
+            });
+        }
+
+        let iterations = 10_000;
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(registry.catalog().resolve("mesh.service_31", None));
+        }
+        let snapshot_elapsed = started.elapsed();
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(registry.resolve("mesh.service_31", None));
+        }
+        let direct_elapsed = started.elapsed();
+
+        eprintln!(
+            "interface resolution over {iterations} iterations: catalog snapshot {snapshot_elapsed:?}, direct registry {direct_elapsed:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "release-only performance benchmark"]
+    fn benchmark_shared_catalog_clone_against_deep_clone() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let mut catalog = InterfaceCatalog::default();
+        for index in 0..64 {
+            let interface = format!("mesh.service_{index}");
+            catalog.register_contract(test_contract(&interface, 32));
+            catalog.register_provider(InterfaceProvider {
+                interface,
+                version: Some("1.0".into()),
+                base_module: None,
+                provider_module: format!("@mesh/provider_{index}"),
+                backend_name: format!("Provider {index}"),
+                priority: 100,
+            });
+        }
+        let shared = Arc::new(catalog.clone());
+        let iterations = 10_000;
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(catalog.clone());
+        }
+        let deep_clone_elapsed = started.elapsed();
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(Arc::clone(&shared));
+        }
+        let shared_clone_elapsed = started.elapsed();
+
+        eprintln!(
+            "interface catalog clone over {iterations} iterations: deep {deep_clone_elapsed:?}, shared {shared_clone_elapsed:?}"
         );
     }
 

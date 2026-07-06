@@ -271,29 +271,31 @@ surface { width: 200px; height: 80px; }
         .compiled
         .module_component_imports
         .insert("ImportedPopover".into(), imported_id.clone());
-    component.frontend_catalog.modules.insert(
-        imported_id.clone(),
-        FrontendCatalogEntry {
-            module_dir: PathBuf::from("."),
-            compiled: CompiledFrontendModule {
-                manifest: minimal_test_manifest(&imported_id),
-                source_path: PathBuf::from("src/main.mesh"),
-                component: parse_component(
-                    r#"
+    Arc::make_mut(&mut component.frontend_catalog)
+        .modules
+        .insert(
+            imported_id.clone(),
+            FrontendCatalogEntry {
+                module_dir: PathBuf::from("."),
+                compiled: CompiledFrontendModule {
+                    manifest: minimal_test_manifest(&imported_id),
+                    source_path: PathBuf::from("src/main.mesh"),
+                    component: parse_component(
+                        r#"
 <template><button class="opt">Pick</button></template>
 <style>
 .opt { background: #222222; }
 .opt:hover { background: #444444; }
 </style>
 "#,
-                )
-                .unwrap(),
-                local_components: HashMap::new(),
-                module_component_imports: HashMap::new(),
-                watched_paths: Vec::new(),
+                    )
+                    .unwrap(),
+                    local_components: HashMap::new(),
+                    module_component_imports: HashMap::new(),
+                    watched_paths: Vec::new(),
+                },
             },
-        },
-    );
+        );
     // The rule cache may have been built before the import was wired (as it
     // is on hot source reload); reset it the same way reloads do.
     component.cached_restyle_rules = None;
