@@ -84,6 +84,7 @@ struct TestingBackend {
     dismissed_popups: Vec<String>,
     events: Vec<WindowEvent>,
     presented: Vec<String>,
+    presented_damage: Vec<(String, Vec<DamageRect>)>,
 }
 
 impl PresentationEngine {
@@ -145,6 +146,14 @@ impl PresentationEngine {
     pub fn testing_presented_surfaces(&self) -> &[String] {
         match &self.backend {
             Backend::Testing(backend) => &backend.presented,
+            _ => &[],
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_presented_damage(&self) -> &[(String, Vec<DamageRect>)] {
+        match &self.backend {
+            Backend::Testing(backend) => &backend.presented_damage,
             _ => &[],
         }
     }
@@ -278,6 +287,9 @@ impl PresentationEngine {
             Backend::Testing(backend) => {
                 if visible {
                     backend.presented.push(surface_id.to_string());
+                    backend
+                        .presented_damage
+                        .push((surface_id.to_string(), damage.to_vec()));
                 }
                 Ok(())
             }

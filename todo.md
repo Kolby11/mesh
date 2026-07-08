@@ -1577,6 +1577,20 @@ Performance:
       is a pointer clone; `keysym_name`/`normalize_keysym_name` String
       allocation per key event (`handlers.rs:561-585`) and the lowercase alloc
       in `is_non_repeating_key` (`state.rs:336-348`) fold into the same pass.
+      Progress 2026-07-08: Wayland state now maintains a `wl_surface`
+      `ObjectId` → surface id index alongside the owned surface map, so raw
+      pointer, keyboard-focus, layer-close, and popup-dismissal events avoid
+      linearly scanning all surfaces before routing. Public `DevWindowEvent`
+      payloads remain `String`-based, so the remaining clone/API cleanup and
+      key-name allocation pass are still open. A release-only benchmark over
+      500k lookups across 128 surfaces measured 13.141ms for the scan path
+      versus 0.715ms indexed (18.4x faster).
+      Progress 2026-07-08: key-repeat filtering no longer lowercases each
+      key name to detect modifiers/non-repeat keys; it now uses borrowed ASCII
+      case-insensitive equality/window checks. Release benchmark over 1M
+      eight-key batches measured 323.835ms for lowercase allocation versus
+      61.248ms borrowed (5.3x faster). `keysym_name` allocation and public
+      event payload `String` clones remain open.
 - [ ] **Child popup targets force a full-buffer present every frame.**
       `paint_and_present_child_surface` sets `force_full_present = true`
       unconditionally after each child paint (`shell/runtime/render.rs:789-791`),
@@ -1585,6 +1599,15 @@ Performance:
       presentation-side half of the §P "child popups bypass the retained
       pipeline" item — fix them together, otherwise the display-list work
       shows no SHM win.
+      Progress 2026-07-08: child popup targets now force full present only for
+      first/resized buffers or backend scale/full-redraw requests. Steady child
+      frames carry child-local damage translated from the parent component's
+      retained present damage, and the test backend records damage payloads for
+      regression coverage. The focused child-popup test path reduced a steady
+      child present from full `72x32` damage (2,304 logical px) to `12x7`
+      damage (84 logical px), a 27.4x smaller present/upload region. The
+      deeper child-subtree retained-paint path remains open: child buffers are
+      still repainted eagerly before presenting sparse damage.
 - [ ] **`wait_for_surface_configure` runs up to 10 blocking roundtrips on the
       shell thread.** Called from `present_with_damage` (`backend.rs:1130`)
       and `surface_size` (`backend.rs:1324`) whenever the surface is not yet
@@ -1594,6 +1617,13 @@ Performance:
       behind it. Bound it by deadline instead of roundtrip count, or return
       not-ready and let the render loop retry on the next Wayland wake (the
       loop already wakes on the connection fd).
+      Progress 2026-07-08: configure waiting is now deadline-bounded at 2ms.
+      The backend flushes and dispatches pending events, reads Wayland events
+      only while the connection is ready within the remaining budget, and then
+      returns to the render loop if the surface is still unconfigured. This
+      removes the previous worst case of 10 blocking roundtrips on the shell
+      thread; delayed/dead configure now costs at most the 2ms local budget per
+      attempt before other surfaces and IPC work can continue.
 - [ ] Minor per-present allocations: `attach_shm_buffer` builds two
       `Vec<DamageRect>` per present (`backend.rs:334-343`) and
       `protocol_damage_rects` re-allocates via `to_vec` even in the ≤16
@@ -1606,6 +1636,17 @@ Performance:
       slice instead of allocating with `to_vec`. A debug microbenchmark over
       1M four-rect passthroughs measured 36.09ms cloned versus 8.97ms borrowed
       (~4.0x faster); the release run was blocked by a full build volume.
+      Progress 2026-07-08: the fused clipped-damage scratch in
+      `attach_shm_buffer` now uses inline `SmallVec` storage, keeping the
+      common <=16 rect path allocation-free through scaling, clipping, copied
+      damage extension, and protocol-damage borrowing. Release benchmark over
+      1M six-rect clipped scratch builds measured 45.497ms for heap `Vec`
+      versus 16.218ms for `SmallVec` (2.8x faster).
+      Progress 2026-07-08: `surface_config_fingerprint` now overrides
+      primitive `Hasher::write_*` methods instead of falling back to
+      byte-at-a-time hashing for every numeric config field. Release benchmark
+      over 2M config fingerprints measured 27.644ms for byte writes versus
+      5.309ms for primitive writes (5.2x faster).
 
 Structure:
 

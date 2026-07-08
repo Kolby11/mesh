@@ -106,17 +106,13 @@ impl ShmHandler for State {
 
 impl LayerShellHandler for State {
     fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, layer: &LayerSurface) {
-        let id = self
-            .surfaces
-            .iter()
-            .find(|(_, entry)| entry.wl_surface() == layer.wl_surface())
-            .map(|(id, _)| id.clone());
+        let id = self.surface_id_for_wl_surface(layer.wl_surface());
         if let Some(id) = id {
             tracing::debug!(
                 "[focus] layer_shell: layer surface closed, releasing focus grab if active for surface_id={id}"
             );
             self.release_surface_focus_grab(&id);
-            self.surfaces.remove(&id);
+            self.remove_surface(&id);
         }
     }
 
@@ -614,15 +610,10 @@ impl PopupHandler for State {
     }
 
     fn done(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, popup: &Popup) {
-        let target = popup.wl_surface().clone();
-        let dismissed = self
-            .surfaces
-            .iter()
-            .find(|(_, entry)| entry.wl_surface() == &target)
-            .map(|(id, _)| id.clone());
+        let dismissed = self.surface_id_for_wl_surface(popup.wl_surface());
         if let Some(id) = dismissed {
             tracing::debug!("[popover] layer_shell: compositor dismissed popup surface_id={id}");
-            self.surfaces.remove(&id);
+            self.remove_surface(&id);
             self.dismissed_popups.push(id);
         }
     }

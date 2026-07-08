@@ -54,8 +54,8 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::time::{Duration, Instant};
 use wayland_client::{
-    Connection, Dispatch, EventQueue, QueueHandle,
-    backend::WaylandError,
+    Connection, Dispatch, EventQueue, Proxy, QueueHandle,
+    backend::{ObjectId, WaylandError},
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
 };

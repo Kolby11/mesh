@@ -751,7 +751,7 @@ impl Shell {
             });
         }
 
-        {
+        let buffer_resized = {
             let child = &mut self.components[index].children[child_index];
             if child
                 .target
@@ -761,8 +761,11 @@ impl Shell {
                 .unwrap_or(true)
             {
                 child.target.paint_buffer = Some(PixelBuffer::new(physical_w, physical_h));
+                true
+            } else {
+                false
             }
-        }
+        };
 
         let (pad_left, pad_top, pad_right, pad_bottom) =
             self.components[index].children[child_index].content_padding;
@@ -786,9 +789,18 @@ impl Shell {
             self.destroy_child_surface_at(index, child_index);
             return Ok(false);
         }
-        self.components[index].children[child_index]
-            .target
-            .force_full_present = true;
+        if buffer_resized {
+            self.components[index].children[child_index]
+                .target
+                .force_full_present = true;
+        } else {
+            let child_damage = self.components[index]
+                .component
+                .child_surface_present_damage(&node_key, content_offset, (width, height));
+            self.components[index].children[child_index]
+                .target
+                .pending_present_damage = child_damage;
+        }
         // Restrict pointer input to the true (unpadded) content rect, same
         // pattern as the parent tooltip surface: the padding exists so
         // shadow/filter overshoot can paint, not to receive input.
@@ -929,10 +941,13 @@ impl Shell {
             }
         }
 
-        let mut present_damage: Vec<DamageRect> = if is_parent {
-            self.components[index].component.take_present_damage()
-        } else {
-            Vec::new()
+        let mut present_damage: Vec<DamageRect> = match target {
+            TargetRef::Parent => self.components[index].component.take_present_damage(),
+            TargetRef::Child(child_index) => std::mem::take(
+                &mut self.components[index].children[child_index]
+                    .target
+                    .pending_present_damage,
+            ),
         };
         // Scale change or explicit force-full triggers full-buffer present (per HDPI-04)
         let mut force_full = false;

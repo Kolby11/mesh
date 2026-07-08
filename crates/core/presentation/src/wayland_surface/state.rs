@@ -52,6 +52,7 @@ pub(super) struct State {
     pub(super) qh: QueueHandle<State>,
     pub(super) pool: Option<SlotPool>,
     pub(super) surfaces: HashMap<String, SurfaceEntry>,
+    pub(super) surface_ids_by_wl_id: HashMap<ObjectId, String>,
     pub(super) pointer: Option<ThemedPointer>,
     pub(super) pointer_interactive: bool,
     pub(super) keyboard: Option<wl_keyboard::WlKeyboard>,
@@ -311,14 +312,26 @@ impl State {
         self.reapply_surface_config(surface_id);
     }
 
+    pub(super) fn insert_surface(&mut self, surface_id: String, entry: SurfaceEntry) {
+        let wl_id = entry.wl_surface().id();
+        if let Some(previous) = self.surfaces.insert(surface_id.clone(), entry) {
+            self.surface_ids_by_wl_id
+                .remove(&previous.wl_surface().id());
+        }
+        self.surface_ids_by_wl_id.insert(wl_id, surface_id);
+    }
+
+    pub(super) fn remove_surface(&mut self, surface_id: &str) -> Option<SurfaceEntry> {
+        let entry = self.surfaces.remove(surface_id)?;
+        self.surface_ids_by_wl_id.remove(&entry.wl_surface().id());
+        Some(entry)
+    }
+
     pub(super) fn surface_id_for_wl_surface(
         &self,
         surface: &wl_surface::WlSurface,
     ) -> Option<String> {
-        self.surfaces
-            .iter()
-            .find(|(_, entry)| entry.wl_surface() == surface)
-            .map(|(surface_id, _)| surface_id.clone())
+        self.surface_ids_by_wl_id.get(&surface.id()).cloned()
     }
 
     pub(super) fn bind_fractional_scale(
@@ -334,17 +347,135 @@ impl State {
 }
 
 fn is_non_repeating_key(key: &str) -> bool {
-    let key = key.to_ascii_lowercase();
-    key.contains("shift")
-        || key.contains("control")
-        || key == "ctrl"
-        || key.contains("alt")
-        || key.contains("super")
-        || key.contains("meta")
-        || key == "capslock"
-        || key == "numlock"
-        || key == "scrolllock"
-        || key == "escape"
+    contains_ignore_ascii_case(key, "shift")
+        || contains_ignore_ascii_case(key, "control")
+        || key.eq_ignore_ascii_case("ctrl")
+        || contains_ignore_ascii_case(key, "alt")
+        || contains_ignore_ascii_case(key, "super")
+        || contains_ignore_ascii_case(key, "meta")
+        || key.eq_ignore_ascii_case("capslock")
+        || key.eq_ignore_ascii_case("numlock")
+        || key.eq_ignore_ascii_case("scrolllock")
+        || key.eq_ignore_ascii_case("escape")
+}
+
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+#[cfg(test)]
+mod performance_tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    #[ignore = "release-only surface lookup microbenchmark"]
+    fn surface_lookup_index_benchmark() {
+        let ids: Vec<String> = (0..128).map(|index| format!("surface-{index}")).collect();
+        let keys: Vec<u64> = (0..128).collect();
+        let indexed: HashMap<u64, String> = keys.iter().copied().zip(ids.iter().cloned()).collect();
+        let target_key = *keys.last().unwrap();
+        let iterations = 500_000;
+
+        let scan_started = Instant::now();
+        let mut scan_len = 0usize;
+        for _ in 0..iterations {
+            let id = keys
+                .iter()
+                .zip(ids.iter())
+                .find(|(key, _)| **key == target_key)
+                .map(|(_, id)| id.clone())
+                .unwrap();
+            scan_len += id.len();
+        }
+        let scan = scan_started.elapsed();
+
+        let indexed_started = Instant::now();
+        let mut indexed_len = 0usize;
+        for _ in 0..iterations {
+            let id = indexed.get(&target_key).cloned().unwrap();
+            indexed_len += id.len();
+        }
+        let indexed_elapsed = indexed_started.elapsed();
+
+        assert_eq!(scan_len, indexed_len);
+        eprintln!(
+            "500k lookups across 128 surfaces: scan {scan:?}; indexed {indexed_elapsed:?}; ratio {:.1}x",
+            scan.as_secs_f64() / indexed_elapsed.as_secs_f64()
+        );
+        assert!(indexed_elapsed < scan);
+    }
+
+    #[test]
+    fn non_repeating_key_detection_is_case_insensitive() {
+        assert!(is_non_repeating_key("Shift_L"));
+        assert!(is_non_repeating_key("ISO_Level3_Shift"));
+        assert!(is_non_repeating_key("CTRL"));
+        assert!(is_non_repeating_key("CapsLock"));
+        assert!(is_non_repeating_key("Escape"));
+        assert!(!is_non_repeating_key("a"));
+        assert!(!is_non_repeating_key("Enter"));
+    }
+
+    #[test]
+    #[ignore = "release-only non-repeating key detection microbenchmark"]
+    fn borrowed_non_repeating_key_detection_beats_lowercase_allocation() {
+        use std::time::Instant;
+
+        fn old_is_non_repeating_key(key: &str) -> bool {
+            let key = key.to_ascii_lowercase();
+            key.contains("shift")
+                || key.contains("control")
+                || key == "ctrl"
+                || key.contains("alt")
+                || key.contains("super")
+                || key.contains("meta")
+                || key == "capslock"
+                || key == "numlock"
+                || key == "scrolllock"
+                || key == "escape"
+        }
+
+        let keys = [
+            "a",
+            "Enter",
+            "Shift_L",
+            "ISO_Level3_Shift",
+            "Control_R",
+            "Super_L",
+            "CapsLock",
+            "ArrowLeft",
+        ];
+        let iterations = 1_000_000;
+
+        let started = Instant::now();
+        let mut old_count = 0usize;
+        for _ in 0..iterations {
+            for key in keys {
+                old_count += usize::from(old_is_non_repeating_key(std::hint::black_box(key)));
+            }
+        }
+        let old = started.elapsed();
+
+        let started = Instant::now();
+        let mut new_count = 0usize;
+        for _ in 0..iterations {
+            for key in keys {
+                new_count += usize::from(is_non_repeating_key(std::hint::black_box(key)));
+            }
+        }
+        let new = started.elapsed();
+
+        assert_eq!(old_count, new_count);
+        eprintln!(
+            "non-repeating key detection over {iterations} key batches: lowercase {old:?}, borrowed {new:?}, ratio {:.1}x",
+            old.as_secs_f64() / new.as_secs_f64()
+        );
+        assert!(new < old);
+    }
 }
 
 impl ProvidesRegistryState for State {

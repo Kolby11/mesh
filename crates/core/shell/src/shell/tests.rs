@@ -652,6 +652,20 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
         Ok(true)
     }
 
+    fn child_surface_present_damage(
+        &self,
+        _node_key: &str,
+        _content_offset: (u32, u32),
+        _surface_size: (u32, u32),
+    ) -> Vec<mesh_core_render::DamageRect> {
+        vec![mesh_core_render::DamageRect {
+            x: 4,
+            y: 5,
+            width: 12,
+            height: 7,
+        }]
+    }
+
     fn child_hide_transition_ms(&self, _node_key: &str) -> u64 {
         self.state.lock().unwrap().hide_transition_ms
     }
@@ -5296,6 +5310,38 @@ fn child_surface_reconcile_creates_popup_and_paints_subtree() {
     assert_eq!(
         state.lock().unwrap().painted_nodes.as_slice(),
         ["root/popover"]
+    );
+}
+
+#[test]
+fn child_surface_reconcile_uses_child_damage_after_initial_full_present() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state)));
+
+    render_components_until_child_popup(&mut shell);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+
+    shell.render_components().unwrap();
+
+    let child_damage = shell
+        .presentation_engine
+        .testing_presented_damage()
+        .iter()
+        .filter(|(surface, _)| surface == &child_id)
+        .map(|(_, damage)| damage.as_slice())
+        .collect::<Vec<_>>();
+    assert!(
+        child_damage.iter().any(|damage| *damage
+            == [mesh_core_render::DamageRect {
+                x: 4,
+                y: 5,
+                width: 12,
+                height: 7,
+            }]),
+        "steady child popup frames should present the child-local damage instead of forcing full surface damage"
     );
 }
 

@@ -63,6 +63,7 @@ pub struct LayerShellBackend {
 const SHM_BUFFER_POOL_DEPTH: usize = 2;
 const SHM_BUFFER_POOL_MAX: usize = 3;
 const MAX_FRAME_CALLBACK_WAIT: Duration = Duration::from_millis(50);
+const SURFACE_CONFIGURE_WAIT_DEADLINE: Duration = Duration::from_millis(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ShmPoolConfig {
@@ -157,9 +158,22 @@ impl Hasher for SurfaceConfigHasher {
 
     fn write(&mut self, bytes: &[u8]) {
         for byte in bytes {
-            self.0 ^= u64::from(*byte);
-            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+            self.write_u8(*byte);
         }
+    }
+
+    fn write_u8(&mut self, i: u8) {
+        self.0 ^= u64::from(i);
+        self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+
+    fn write_u32(&mut self, i: u32) {
+        self.0 ^= u64::from(i);
+        self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+
+    fn write_i32(&mut self, i: i32) {
+        self.write_u32(i as u32);
     }
 }
 
@@ -330,9 +344,9 @@ impl SurfaceEntry {
         let buffer = &self.shm_buffers[index].buffer;
         let wl_surface = self.role.wl_surface();
 
-        // Scale and clip in one pass so ordinary presents allocate one scratch
-        // vector instead of separate physical and clipped vectors.
-        let mut clipped_damage: Vec<DamageRect> = damage_rects
+        // Scale and clip in one pass. Keep the common <=16 rect path inline so
+        // ordinary presents avoid heap allocation entirely.
+        let mut clipped_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]> = damage_rects
             .iter()
             .map(|r| scale_damage_rect_to_physical(*r, scale))
             .map(|r| clip_damage_rect_to_buffer(r, physical_width, physical_height))
@@ -588,6 +602,14 @@ fn extend_pending_damage(
     }
 }
 
+fn surface_is_configured_or_missing(state: &State, surface_id: &str) -> bool {
+    state
+        .surfaces
+        .get(surface_id)
+        .map(|entry| entry.configured)
+        .unwrap_or(true)
+}
+
 /// Maximum number of `wl_surface::damage_buffer` calls allowed per commit.
 /// When the damage list exceeds this cap the entire surface is marked dirty
 /// with a single bounding-union call to avoid unbounded protocol overhead.
@@ -745,6 +767,7 @@ impl LayerShellBackend {
             qh,
             pool,
             surfaces: HashMap::new(),
+            surface_ids_by_wl_id: HashMap::new(),
             pointer: None,
             pointer_interactive: false,
             keyboard: None,
@@ -810,7 +833,7 @@ impl LayerShellBackend {
                     Some(cfg.namespace.clone()),
                     None,
                 );
-                self.state.surfaces.insert(
+                self.state.insert_surface(
                     surface_id.to_string(),
                     SurfaceEntry::new(
                         SurfaceRole::Layer(layer_surface),
@@ -962,7 +985,7 @@ impl LayerShellBackend {
             KeyboardMode::None,
         );
         let wl_surface = entry.wl_surface().clone();
-        self.state.surfaces.insert(surface_id.to_string(), entry);
+        self.state.insert_surface(surface_id.to_string(), entry);
 
         // Bind HiDPI protocols for the popup surface, mirroring the layer path.
         if let Some(fs) = self
@@ -1017,7 +1040,7 @@ impl LayerShellBackend {
         if !is_popup {
             return;
         }
-        if let Some(entry) = self.state.surfaces.remove(surface_id) {
+        if let Some(entry) = self.state.remove_surface(surface_id) {
             if let Some(viewport) = entry.viewport.as_ref() {
                 viewport.destroy();
             }
@@ -1446,32 +1469,69 @@ impl LayerShellBackend {
     }
 
     fn wait_for_surface_configure(&mut self, surface_id: &str) -> Result<(), PresentationError> {
-        let needs_configure = self
-            .state
-            .surfaces
-            .get(surface_id)
-            .map(|entry| !entry.configured)
-            .unwrap_or(false);
-        if !needs_configure {
+        if surface_is_configured_or_missing(&self.state, surface_id) {
             return Ok(());
         }
 
-        for _ in 0..10 {
+        let deadline = Instant::now() + SURFACE_CONFIGURE_WAIT_DEADLINE;
+        loop {
             self.event_queue
-                .roundtrip(&mut self.state)
-                .map_err(|e| PresentationError::SurfaceCreate(format!("roundtrip: {e}")))?;
-            if self
-                .state
-                .surfaces
-                .get(surface_id)
-                .map(|entry| entry.configured)
-                .unwrap_or(false)
-            {
-                break;
+                .flush()
+                .map_err(|e| PresentationError::SurfaceCreate(format!("flush: {e}")))?;
+            self.event_queue
+                .dispatch_pending(&mut self.state)
+                .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;
+            if surface_is_configured_or_missing(&self.state, surface_id) {
+                return Ok(());
+            }
+
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                return Ok(());
+            };
+            let Some(read_guard) = self.event_queue.prepare_read() else {
+                continue;
+            };
+
+            let fd = read_guard.connection_fd();
+            let timeout_ms = remaining.as_millis().min(i32::MAX as u128) as i32;
+            let mut fds = [PollFd::new(
+                &fd,
+                PollFlags::IN | PollFlags::ERR | PollFlags::HUP,
+            )];
+
+            match poll(&mut fds, timeout_ms) {
+                Ok(0) => {
+                    drop(read_guard);
+                    return Ok(());
+                }
+                Ok(_) => {
+                    if !fds[0]
+                        .revents()
+                        .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP)
+                    {
+                        drop(read_guard);
+                        return Ok(());
+                    }
+                    match read_guard.read() {
+                        Ok(_) => {}
+                        Err(WaylandError::Io(err)) if err.kind() == ErrorKind::WouldBlock => {
+                            return Ok(());
+                        }
+                        Err(err) => {
+                            return Err(PresentationError::SurfaceCreate(format!("read: {err}")));
+                        }
+                    }
+                }
+                Err(rustix::io::Errno::INTR) => {
+                    drop(read_guard);
+                    return Ok(());
+                }
+                Err(err) => {
+                    drop(read_guard);
+                    return Err(PresentationError::SurfaceCreate(format!("poll: {err}")));
+                }
             }
         }
-
-        Ok(())
     }
 
     fn dispatch_available(&mut self) -> Result<(), PresentationError> {
@@ -2345,6 +2405,177 @@ mod tests {
         eprintln!(
             "protocol damage passthrough over {iterations} iterations: cloned {cloned:?}, borrowed {borrowed:?}"
         );
+    }
+
+    #[test]
+    #[ignore = "release-only clipped damage scratch allocation benchmark"]
+    fn smallvec_clipped_damage_beats_heap_vec_scratch() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let rects = [
+            DamageRect {
+                x: 0,
+                y: 0,
+                width: 20,
+                height: 20,
+            },
+            DamageRect {
+                x: 200,
+                y: 0,
+                width: 20,
+                height: 20,
+            },
+            DamageRect {
+                x: 400,
+                y: 0,
+                width: 20,
+                height: 20,
+            },
+            DamageRect {
+                x: 600,
+                y: 0,
+                width: 20,
+                height: 20,
+            },
+        ];
+        let copy_damage = [
+            DamageRect {
+                x: 0,
+                y: 0,
+                width: 20,
+                height: 20,
+            },
+            DamageRect {
+                x: 600,
+                y: 0,
+                width: 20,
+                height: 20,
+            },
+        ];
+        let iterations = 1_000_000;
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            let mut clipped_damage: Vec<DamageRect> = black_box(&rects)
+                .iter()
+                .map(|r| scale_damage_rect_to_physical(*r, 1.0))
+                .map(|r| clip_damage_rect_to_buffer(r, 800, 48))
+                .collect();
+            clipped_damage.extend(
+                black_box(&copy_damage)
+                    .iter()
+                    .map(|rect| clip_damage_rect_to_buffer(*rect, 800, 48)),
+            );
+            black_box(protocol_damage_rects(&clipped_damage, 800, 48));
+        }
+        let heap_vec = started.elapsed();
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            let mut clipped_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]> =
+                black_box(&rects)
+                    .iter()
+                    .map(|r| scale_damage_rect_to_physical(*r, 1.0))
+                    .map(|r| clip_damage_rect_to_buffer(r, 800, 48))
+                    .collect();
+            clipped_damage.extend(
+                black_box(&copy_damage)
+                    .iter()
+                    .map(|rect| clip_damage_rect_to_buffer(*rect, 800, 48)),
+            );
+            black_box(protocol_damage_rects(&clipped_damage, 800, 48));
+        }
+        let inline = started.elapsed();
+
+        eprintln!(
+            "clipped damage scratch over {iterations} iterations: heap Vec {heap_vec:?}, SmallVec {inline:?}, ratio {:.1}x",
+            heap_vec.as_secs_f64() / inline.as_secs_f64()
+        );
+        assert!(inline < heap_vec);
+    }
+
+    #[test]
+    #[ignore = "release-only surface config fingerprint microbenchmark"]
+    fn primitive_surface_config_hashing_beats_byte_writes() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        struct OldHasher(u64);
+        impl Default for OldHasher {
+            fn default() -> Self {
+                Self(0xcbf2_9ce4_8422_2325)
+            }
+        }
+        impl Hasher for OldHasher {
+            fn finish(&self) -> u64 {
+                self.0
+            }
+
+            fn write(&mut self, bytes: &[u8]) {
+                for byte in bytes {
+                    self.0 ^= u64::from(*byte);
+                    self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+                }
+            }
+        }
+
+        fn old_surface_config_fingerprint(
+            cfg: &LayerSurfaceConfig,
+            keyboard_mode: KeyboardMode,
+        ) -> u64 {
+            let mut hasher = OldHasher::default();
+            surface_edge_slot(cfg.edge).hash(&mut hasher);
+            surface_layer_slot(cfg.layer).hash(&mut hasher);
+            cfg.exclusive_zone.hash(&mut hasher);
+            keyboard_mode_slot(keyboard_mode).hash(&mut hasher);
+            cfg.width.hash(&mut hasher);
+            cfg.height.hash(&mut hasher);
+            cfg.margin_top.hash(&mut hasher);
+            cfg.margin_right.hash(&mut hasher);
+            cfg.margin_bottom.hash(&mut hasher);
+            cfg.margin_left.hash(&mut hasher);
+            hasher.finish()
+        }
+
+        let cfg = LayerSurfaceConfig {
+            edge: Some(Edge::Top),
+            layer: MeshLayer::Overlay,
+            size_policy: LayerSurfaceSizePolicy::Fixed,
+            width: 1_920,
+            height: 48,
+            exclusive_zone: 48,
+            keyboard_mode: KeyboardMode::OnDemand,
+            namespace: "benchmark".into(),
+            margin_top: 2,
+            margin_right: 4,
+            margin_bottom: 6,
+            margin_left: 8,
+        };
+        let iterations = 2_000_000;
+
+        let started = Instant::now();
+        let mut old_hash = 0;
+        for _ in 0..iterations {
+            old_hash ^=
+                old_surface_config_fingerprint(black_box(&cfg), black_box(KeyboardMode::OnDemand));
+        }
+        let old = started.elapsed();
+
+        let started = Instant::now();
+        let mut new_hash = 0;
+        for _ in 0..iterations {
+            new_hash ^=
+                surface_config_fingerprint(black_box(&cfg), black_box(KeyboardMode::OnDemand));
+        }
+        let new = started.elapsed();
+
+        black_box((old_hash, new_hash));
+        eprintln!(
+            "surface config fingerprint over {iterations} configs: byte writes {old:?}, primitive writes {new:?}, ratio {:.1}x",
+            old.as_secs_f64() / new.as_secs_f64()
+        );
+        assert!(new < old);
     }
 
     #[test]

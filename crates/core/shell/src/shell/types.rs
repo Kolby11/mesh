@@ -31,6 +31,7 @@ pub(super) struct SurfaceTarget {
     /// compositor roundtrip on every render or input event.
     pub(super) known_surface_size: Option<(u32, u32)>,
     pub(super) force_full_present: bool,
+    pub(super) pending_present_damage: Vec<mesh_core_render::DamageRect>,
     /// When set, this surface is realized as an `xdg_popup` child of the
     /// named parent surface rather than as a layer surface.
     pub(super) popup_parent_surface: Option<String>,
@@ -51,6 +52,7 @@ impl SurfaceTarget {
             surface_size_policy,
             known_surface_size: None,
             force_full_present: false,
+            pending_present_damage: Vec::new(),
             popup_parent_surface: None,
             popup_config: None,
             last_popup_size: None,
