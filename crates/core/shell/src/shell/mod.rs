@@ -14,7 +14,7 @@ use mesh_core_module::package::{InstalledModuleGraph, ModuleKind, load_installed
 use mesh_core_module::{DependencyGraphError, ModuleType, validate_module_dependency_graph};
 use mesh_core_service::{
     InterfaceContract, InterfaceProvider, InterfaceRegistry, ServiceRegistry,
-    canonical_interface_name, load_interface_contract,
+    canonical_interface_name, canonical_interface_name_cow, load_interface_contract,
 };
 use mesh_core_theme::ThemeEngine;
 use mesh_core_wayland::{ClipboardWriter, Layer, StubSurface, WaylandClipboard};

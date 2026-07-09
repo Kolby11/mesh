@@ -61,9 +61,9 @@ The `device_id` attribute becomes a public field on the mounted instance.
 The bound `audio_section` value exposes public fields/functions such as
 `audio_section.label` and `audio_section.focus_audio()`.
 
-Older code and v1.12 notes may mention `module.state`, `module.exports`, and
-`module.events`. Those names describe compatibility/runtime lanes, not the
-preferred v1.14 authoring syntax.
+Older v1.12 notes may mention `module.state` and `module.exports`; those legacy
+mirrors are no longer exposed. `module.events` remains available for named
+module-local event channels.
 
 ## Reading service state
 

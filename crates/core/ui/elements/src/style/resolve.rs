@@ -48,10 +48,14 @@ impl From<&ComputedStyle> for ParentInheritedStyle {
 pub struct StyleResolver<'a> {
     theme: &'a Theme,
     /// Per-instance resolved component-prop values, keyed by `prop_variable_key`
-    /// (`--mesh-prop-<name>`). Seeded into the variable scratch so `prop(name)`
-    /// references resolve. Empty for components without a `<props>` block.
+    /// (`--mesh-prop-<name>`). Consulted as a read-only fallback after the
+    /// per-node custom-variable scratch. Empty without a `<props>` block.
     props: HashMap<String, StyleValue>,
     module_variable_cache: RefCell<HashMap<String, Vec<(String, StyleValue)>>>,
+    theme_default_cache: RefCell<HashMap<String, (ComputedStyle, HashMap<String, StyleValue>)>>,
+    module_theme_default_cache:
+        RefCell<HashMap<String, HashMap<String, (ComputedStyle, HashMap<String, StyleValue>)>>>,
+    theme_reference_cache: RefCell<HashMap<String, Arc<str>>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -429,6 +433,9 @@ impl<'a> StyleResolver<'a> {
             theme,
             props: HashMap::new(),
             module_variable_cache: RefCell::new(HashMap::new()),
+            theme_default_cache: RefCell::new(HashMap::new()),
+            module_theme_default_cache: RefCell::new(HashMap::new()),
+            theme_reference_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -458,10 +465,9 @@ impl<'a> StyleResolver<'a> {
         strict_animation_tokens: bool,
     ) -> String {
         match value {
-            StyleValue::Literal(s) => {
-                resolve_embedded_references(s, self.theme, variables, strict_animation_tokens)
-                    .unwrap_or_default()
-            }
+            StyleValue::Literal(s) => self
+                .resolve_embedded_references_cached(s, variables, strict_animation_tokens)
+                .unwrap_or_default(),
             StyleValue::Var(name) => variables
                 .get(name)
                 .map(|value| {
@@ -475,8 +481,8 @@ impl<'a> StyleResolver<'a> {
                     self.resolve_theme_reference(name, strict_animation_tokens)
                         .unwrap_or_default()
                 }),
-            StyleValue::Prop(name) => variables
-                .get(&prop_variable_key(name))
+            StyleValue::Prop(name) => self
+                .lookup_variable(variables, &prop_variable_key(name))
                 .map(|value| {
                     self.resolve_value_with_variables_mode(
                         value,
@@ -519,22 +525,28 @@ impl<'a> StyleResolver<'a> {
                 }
             }
             StyleValue::Var(name) => {
-                if let Some(value) = variables.get(name) {
+                if let Some(value) = self.lookup_variable(variables, name) {
                     return self.resolve_simple_str_with_variables(
                         value,
                         variables,
                         depth.saturating_add(1),
                     );
                 }
-                let token_name = theme_reference_to_token_name(name);
+                let token_name = self.cached_theme_token_name(name);
                 match self.theme.token(&token_name) {
                     Some(TokenValue::String(value)) => Some(value.as_str()),
                     Some(TokenValue::Number(_)) | Some(TokenValue::Bool(_)) | None => None,
                 }
             }
-            StyleValue::Prop(name) => variables.get(&prop_variable_key(name)).and_then(|value| {
-                self.resolve_simple_str_with_variables(value, variables, depth.saturating_add(1))
-            }),
+            StyleValue::Prop(name) => self
+                .lookup_variable(variables, &prop_variable_key(name))
+                .and_then(|value| {
+                    self.resolve_simple_str_with_variables(
+                        value,
+                        variables,
+                        depth.saturating_add(1),
+                    )
+                }),
         }
     }
 
@@ -543,19 +555,147 @@ impl<'a> StyleResolver<'a> {
         name: &str,
         strict_animation_tokens: bool,
     ) -> Result<String, String> {
-        let token_name = theme_reference_to_token_name(name);
+        let token_name = self.cached_theme_token_name(name);
         match self.theme.token(&token_name) {
             Some(TokenValue::String(s)) => Ok(s.clone()),
             Some(TokenValue::Number(n)) => Ok(format!("{n}")),
             Some(TokenValue::Bool(b)) => Ok(format!("{b}")),
             None => {
                 if strict_animation_tokens && token_name.starts_with("animation.") {
-                    return Err(token_name);
+                    return Err(token_name.to_string());
                 }
                 tracing::warn!("unresolved theme token: {token_name}");
                 Ok(String::new())
             }
         }
+    }
+
+    fn resolve_embedded_references_cached(
+        &self,
+        value: &str,
+        variables: &HashMap<String, StyleValue>,
+        strict_animation_tokens: bool,
+    ) -> Result<String, String> {
+        let mut output = String::with_capacity(value.len());
+        let mut rest = value;
+
+        loop {
+            let var_pos = rest.find("var(");
+            let prop_pos = rest.find("prop(");
+            let Some((start, is_prop)) = (match (var_pos, prop_pos) {
+                (Some(v), Some(p)) if p < v => Some((p, true)),
+                (Some(v), _) => Some((v, false)),
+                (None, Some(p)) => Some((p, true)),
+                (None, None) => None,
+            }) else {
+                break;
+            };
+
+            output.push_str(&rest[..start]);
+            let prefix_len = if is_prop { "prop(".len() } else { "var(".len() };
+            let reference_start = start + prefix_len;
+            let Some(end) = rest[reference_start..].find(')') else {
+                output.push_str(&rest[start..]);
+                return Ok(output);
+            };
+
+            let name = rest[reference_start..reference_start + end].trim();
+            if is_prop {
+                let prop_key = prop_variable_key(name);
+                if let Some(value) = self.lookup_variable(variables, &prop_key) {
+                    let resolved = self.style_value_to_string_cached(
+                        value,
+                        variables,
+                        strict_animation_tokens,
+                    )?;
+                    output.push_str(&self.resolve_embedded_references_cached(
+                        &resolved,
+                        variables,
+                        strict_animation_tokens,
+                    )?);
+                }
+            } else if let Some(value) = self.lookup_variable(variables, name) {
+                let resolved =
+                    self.style_value_to_string_cached(value, variables, strict_animation_tokens)?;
+                output.push_str(&self.resolve_embedded_references_cached(
+                    &resolved,
+                    variables,
+                    strict_animation_tokens,
+                )?);
+            } else {
+                let token_name = self.cached_theme_token_name(name);
+                match self.theme.token(&token_name) {
+                    Some(TokenValue::String(s)) => output.push_str(s),
+                    Some(TokenValue::Number(n)) => output.push_str(&format!("{n}")),
+                    Some(TokenValue::Bool(b)) => output.push_str(&format!("{b}")),
+                    None => {
+                        if strict_animation_tokens && token_name.starts_with("animation.") {
+                            return Err(token_name.to_string());
+                        }
+                        tracing::warn!("unresolved theme token: {token_name}");
+                    }
+                }
+            }
+            rest = &rest[reference_start + end + 1..];
+        }
+
+        output.push_str(rest);
+        Ok(output)
+    }
+
+    fn style_value_to_string_cached(
+        &self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+        strict_animation_tokens: bool,
+    ) -> Result<String, String> {
+        match value {
+            StyleValue::Literal(value) => {
+                self.resolve_embedded_references_cached(value, variables, strict_animation_tokens)
+            }
+            StyleValue::Prop(name) => {
+                if let Some(value) = self.lookup_variable(variables, &prop_variable_key(name)) {
+                    return self.style_value_to_string_cached(
+                        value,
+                        variables,
+                        strict_animation_tokens,
+                    );
+                }
+                Ok(String::new())
+            }
+            StyleValue::Var(name) => {
+                if let Some(value) = self.lookup_variable(variables, name) {
+                    return self.style_value_to_string_cached(
+                        value,
+                        variables,
+                        strict_animation_tokens,
+                    );
+                }
+                self.resolve_theme_reference(name, strict_animation_tokens)
+            }
+        }
+    }
+
+    fn find_unresolved_animation_token_cached(&self, value: &str) -> Option<String> {
+        let mut rest = value;
+
+        loop {
+            let var_start = rest.find("var(");
+            let Some(start) = var_start else {
+                break;
+            };
+
+            let reference_start = start + "var(".len();
+            let end = rest[reference_start..].find(')')?;
+            let token_name =
+                self.cached_theme_token_name(rest[reference_start..reference_start + end].trim());
+            if token_name.starts_with("animation.") && self.theme.token(&token_name).is_none() {
+                return Some(token_name.to_string());
+            }
+            rest = &rest[reference_start + end + 1..];
+        }
+
+        None
     }
 
     fn validate_animation_value_with_variables(
@@ -565,7 +705,7 @@ impl<'a> StyleResolver<'a> {
     ) -> Result<(), String> {
         match value {
             StyleValue::Literal(value) => {
-                if let Some(name) = find_unresolved_animation_token(value, self.theme) {
+                if let Some(name) = self.find_unresolved_animation_token_cached(value) {
                     return Err(name);
                 }
                 Ok(())
@@ -574,17 +714,17 @@ impl<'a> StyleResolver<'a> {
                 .get(name)
                 .map(|value| self.validate_animation_value_with_variables(value, variables))
                 .unwrap_or_else(|| {
-                    let token_name = theme_reference_to_token_name(name);
+                    let token_name = self.cached_theme_token_name(name);
                     if token_name.starts_with("animation.")
                         && self.theme.token(&token_name).is_none()
                     {
-                        Err(token_name)
+                        Err(token_name.to_string())
                     } else {
                         Ok(())
                     }
                 }),
-            StyleValue::Prop(name) => variables
-                .get(&prop_variable_key(name))
+            StyleValue::Prop(name) => self
+                .lookup_variable(variables, &prop_variable_key(name))
                 .map(|value| self.validate_animation_value_with_variables(value, variables))
                 .unwrap_or(Ok(())),
         }
@@ -620,14 +760,14 @@ impl<'a> StyleResolver<'a> {
                 }
             }
             StyleValue::Var(name) => {
-                if let Some(value) = variables.get(name) {
+                if let Some(value) = self.lookup_variable(variables, name) {
                     return self.resolve_color_with_variables_inner(
                         value,
                         variables,
                         depth.saturating_add(1),
                     );
                 }
-                let token_name = theme_reference_to_token_name(name);
+                let token_name = self.cached_theme_token_name(name);
                 match self.theme.token(&token_name) {
                     Some(TokenValue::String(value)) => {
                         Some(Color::from_hex(value).unwrap_or(Color::TRANSPARENT))
@@ -638,9 +778,15 @@ impl<'a> StyleResolver<'a> {
                     None => None,
                 }
             }
-            StyleValue::Prop(name) => variables.get(&prop_variable_key(name)).and_then(|value| {
-                self.resolve_color_with_variables_inner(value, variables, depth.saturating_add(1))
-            }),
+            StyleValue::Prop(name) => self
+                .lookup_variable(variables, &prop_variable_key(name))
+                .and_then(|value| {
+                    self.resolve_color_with_variables_inner(
+                        value,
+                        variables,
+                        depth.saturating_add(1),
+                    )
+                }),
         }
     }
 
@@ -671,14 +817,14 @@ impl<'a> StyleResolver<'a> {
                 }
             }
             StyleValue::Var(name) => {
-                if let Some(value) = variables.get(name) {
+                if let Some(value) = self.lookup_variable(variables, name) {
                     return self.resolve_number_with_variables_inner(
                         value,
                         variables,
                         depth.saturating_add(1),
                     );
                 }
-                let token_name = theme_reference_to_token_name(name);
+                let token_name = self.cached_theme_token_name(name);
                 match self.theme.token(&token_name) {
                     Some(TokenValue::Number(value)) => Some(*value as f32),
                     Some(TokenValue::String(value)) => Some(parse_px(value)),
@@ -686,9 +832,15 @@ impl<'a> StyleResolver<'a> {
                     None => None,
                 }
             }
-            StyleValue::Prop(name) => variables.get(&prop_variable_key(name)).and_then(|value| {
-                self.resolve_number_with_variables_inner(value, variables, depth.saturating_add(1))
-            }),
+            StyleValue::Prop(name) => self
+                .lookup_variable(variables, &prop_variable_key(name))
+                .and_then(|value| {
+                    self.resolve_number_with_variables_inner(
+                        value,
+                        variables,
+                        depth.saturating_add(1),
+                    )
+                }),
         }
     }
 
@@ -814,23 +966,13 @@ impl<'a> StyleResolver<'a> {
         attrs: &StyleNodeAttrs,
         context: StyleContext,
     ) -> ComputedStyle {
-        let mut style = ComputedStyle::default();
-
-        if attrs.tag == "column" {
-            style.direction = FlexDirection::Column;
-        }
+        let (mut style, default_variables) =
+            self.cached_theme_component_defaults_no_diagnostics(attrs.tag, attrs.module_id());
 
         VARIABLE_SCRATCH.with(|scratch| {
             let mut variables = scratch.borrow_mut();
             variables.clear();
-
-            self.apply_theme_component_defaults_no_diagnostics(
-                &mut style,
-                attrs.tag,
-                attrs.module_id(),
-                &mut variables,
-            );
-            self.seed_prop_variables(&mut variables);
+            variables.extend(default_variables);
 
             index.for_each_candidate_rule_index(attrs, |rule_idx| {
                 let Some(rule) = rules.get(rule_idx) else {
@@ -851,12 +993,67 @@ impl<'a> StyleResolver<'a> {
         style
     }
 
-    /// Publish resolved prop values into the variable scratch so `prop(name)`
-    /// references resolve through the same lookup as `var(--…)`.
-    fn seed_prop_variables(&self, variables: &mut HashMap<String, StyleValue>) {
-        for (key, value) in &self.props {
-            variables.insert(key.clone(), value.clone());
+    fn cached_theme_component_defaults_no_diagnostics(
+        &self,
+        tag: &str,
+        module_id: Option<&str>,
+    ) -> (ComputedStyle, HashMap<String, StyleValue>) {
+        let cached = if let Some(module_id) = module_id {
+            self.module_theme_default_cache
+                .borrow()
+                .get(module_id)
+                .and_then(|tags| tags.get(tag))
+                .cloned()
+        } else {
+            self.theme_default_cache.borrow().get(tag).cloned()
+        };
+        if let Some(cached) = cached {
+            return cached;
         }
+
+        let mut style = ComputedStyle::default();
+        if tag == "column" {
+            style.direction = FlexDirection::Column;
+        }
+        let mut variables = HashMap::new();
+        self.apply_theme_component_defaults_no_diagnostics(
+            &mut style,
+            tag,
+            module_id,
+            &mut variables,
+        );
+        let cached = (style, variables);
+        if let Some(module_id) = module_id {
+            self.module_theme_default_cache
+                .borrow_mut()
+                .entry(module_id.to_owned())
+                .or_default()
+                .insert(tag.to_owned(), cached.clone());
+        } else {
+            self.theme_default_cache
+                .borrow_mut()
+                .insert(tag.to_owned(), cached.clone());
+        }
+        cached
+    }
+
+    fn lookup_variable<'b>(
+        &'b self,
+        variables: &'b HashMap<String, StyleValue>,
+        name: &str,
+    ) -> Option<&'b StyleValue> {
+        variables.get(name).or_else(|| self.props.get(name))
+    }
+
+    fn cached_theme_token_name(&self, reference: &str) -> Arc<str> {
+        if let Some(name) = self.theme_reference_cache.borrow().get(reference) {
+            return Arc::clone(name);
+        }
+        let name = Arc::<str>::from(theme_reference_to_token_name(reference));
+        self.theme_reference_cache
+            .borrow_mut()
+            .insert(reference.to_owned(), Arc::clone(&name));
+        name
     }
 
     fn resolve_node_style_with_attrs_indexed(
@@ -881,7 +1078,6 @@ impl<'a> StyleResolver<'a> {
             &mut diagnostics,
             &mut variables,
         );
-        self.seed_prop_variables(&mut variables);
 
         index.for_each_candidate_rule(rules, attrs, |rule| {
             if rule_matches_attrs(rule, attrs, context) {
@@ -1332,7 +1528,7 @@ impl<'a> StyleResolver<'a> {
             && !variables.contains_key(name)
             && self
                 .theme
-                .token(&theme_reference_to_token_name(name))
+                .token(&self.cached_theme_token_name(name))
                 .is_none()
         {
             diagnostics.push(StyleDiagnostic {
@@ -2088,102 +2284,6 @@ fn selector_to_diagnostic_string(selector: &Selector) -> String {
     }
 }
 
-fn resolve_embedded_references(
-    value: &str,
-    theme: &Theme,
-    variables: &HashMap<String, StyleValue>,
-    strict_animation_tokens: bool,
-) -> Result<String, String> {
-    let mut output = String::with_capacity(value.len());
-    let mut rest = value;
-
-    loop {
-        let var_start = rest.find("var(").map(|start| (start, "var("));
-        let prop_start = rest.find("prop(").map(|start| (start, "prop("));
-        let Some((start, marker)) = [var_start, prop_start]
-            .into_iter()
-            .flatten()
-            .min_by_key(|(start, _)| *start)
-        else {
-            break;
-        };
-
-        output.push_str(&rest[..start]);
-        let reference_start = start + marker.len();
-        let Some(end) = rest[reference_start..].find(')') else {
-            output.push_str(&rest[start..]);
-            return Ok(output);
-        };
-
-        let name = rest[reference_start..reference_start + end].trim();
-        if marker == "prop(" {
-            if let Some(value) = variables.get(&prop_variable_key(name)) {
-                output.push_str(&resolve_embedded_references(
-                    &style_value_to_string(value, theme, variables, strict_animation_tokens)?,
-                    theme,
-                    variables,
-                    strict_animation_tokens,
-                )?);
-            }
-        } else if let Some(value) = variables.get(name) {
-            output.push_str(&resolve_embedded_references(
-                &style_value_to_string(value, theme, variables, strict_animation_tokens)?,
-                theme,
-                variables,
-                strict_animation_tokens,
-            )?);
-        } else {
-            let token_name = theme_reference_to_token_name(name);
-            match theme.token(&token_name) {
-                Some(TokenValue::String(s)) => output.push_str(s),
-                Some(TokenValue::Number(n)) => output.push_str(&format!("{n}")),
-                Some(TokenValue::Bool(b)) => output.push_str(&format!("{b}")),
-                None => {
-                    if strict_animation_tokens && token_name.starts_with("animation.") {
-                        return Err(token_name);
-                    }
-                    tracing::warn!("unresolved theme token: {token_name}");
-                }
-            }
-        }
-        rest = &rest[reference_start + end + 1..];
-    }
-
-    output.push_str(rest);
-    Ok(output)
-}
-
-fn style_value_to_string(
-    value: &StyleValue,
-    theme: &Theme,
-    variables: &HashMap<String, StyleValue>,
-    strict_animation_tokens: bool,
-) -> Result<String, String> {
-    match value {
-        StyleValue::Literal(value) => {
-            resolve_embedded_references(value, theme, variables, strict_animation_tokens)
-        }
-        StyleValue::Prop(name) => {
-            if let Some(value) = variables.get(&prop_variable_key(name)) {
-                return style_value_to_string(value, theme, variables, strict_animation_tokens);
-            }
-            Ok(String::new())
-        }
-        StyleValue::Var(name) => {
-            if let Some(value) = variables.get(name) {
-                return style_value_to_string(value, theme, variables, strict_animation_tokens);
-            }
-            let token_name = theme_reference_to_token_name(name);
-            match theme.token(&token_name) {
-                Some(TokenValue::String(s)) => Ok(s.clone()),
-                Some(TokenValue::Number(n)) => Ok(format!("{n}")),
-                Some(TokenValue::Bool(b)) => Ok(format!("{b}")),
-                None => Ok(String::new()),
-            }
-        }
-    }
-}
-
 fn theme_reference_to_token_name(name: &str) -> String {
     let name = name.trim();
     let Some(variable) = name.strip_prefix("--") else {
@@ -2261,28 +2361,6 @@ fn canonicalize_suffixed(value: &str, suffixes: &[&str]) -> String {
         }
     }
     value.to_string()
-}
-
-fn find_unresolved_animation_token(value: &str, theme: &Theme) -> Option<String> {
-    let mut rest = value;
-
-    loop {
-        let var_start = rest.find("var(");
-        let Some(start) = var_start else {
-            break;
-        };
-
-        let reference_start = start + "var(".len();
-        let end = rest[reference_start..].find(')')?;
-        let name =
-            theme_reference_to_token_name(rest[reference_start..reference_start + end].trim());
-        if name.starts_with("animation.") && theme.token(&name).is_none() {
-            return Some(name.to_string());
-        }
-        rest = &rest[reference_start + end + 1..];
-    }
-
-    None
 }
 
 #[cfg(test)]
@@ -3966,6 +4044,240 @@ mod tests {
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- cached_theme_default_prototype_beats_reapplying_string_map --ignored --nocapture
+    #[test]
+    #[ignore = "release-only theme default prototype microbenchmark"]
+    fn cached_theme_default_prototype_beats_reapplying_string_map() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.defaults.components.insert(
+            "benchmark-card".into(),
+            HashMap::from([
+                ("background-color".into(), "#112233".into()),
+                ("color".into(), "#ffffff".into()),
+                ("font-size".into(), "13px".into()),
+                ("padding".into(), "4px 8px".into()),
+                ("border-radius".into(), "6px".into()),
+                ("gap".into(), "5px".into()),
+                ("opacity".into(), "0.875".into()),
+                ("--local-accent".into(), "#445566".into()),
+            ]),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let attrs = StyleNodeAttrs {
+            tag: "benchmark-card",
+            ..StyleNodeAttrs::default()
+        };
+        let rules = Vec::new();
+        let index = StyleRuleIndex::new(&rules);
+        let context = StyleContext::default();
+        let iterations = 200_000;
+
+        let uncached_started = std::time::Instant::now();
+        let mut uncached_accumulator = 0u32;
+        for _ in 0..iterations {
+            let mut style = ComputedStyle::default();
+            let mut variables = HashMap::new();
+            resolver.apply_theme_component_defaults_no_diagnostics(
+                std::hint::black_box(&mut style),
+                "benchmark-card",
+                None,
+                &mut variables,
+            );
+            uncached_accumulator = uncached_accumulator
+                .wrapping_add(std::hint::black_box(style.background_color.r as u32));
+        }
+        let uncached_time = uncached_started.elapsed();
+
+        // Populate the prototype outside the timed cache-hit loop.
+        let _ = resolver
+            .resolve_node_style_with_attrs_indexed_no_diagnostics(&rules, &index, &attrs, context);
+        let cached_started = std::time::Instant::now();
+        let mut cached_accumulator = 0u32;
+        for _ in 0..iterations {
+            let style = resolver.resolve_node_style_with_attrs_indexed_no_diagnostics(
+                std::hint::black_box(&rules),
+                std::hint::black_box(&index),
+                std::hint::black_box(&attrs),
+                context,
+            );
+            cached_accumulator = cached_accumulator
+                .wrapping_add(std::hint::black_box(style.background_color.r as u32));
+        }
+        let cached_time = cached_started.elapsed();
+
+        eprintln!(
+            "theme default prototype: reapply strings {uncached_time:?}; cached {cached_time:?}; ratio {:.1}x; accumulators={uncached_accumulator}/{cached_accumulator}",
+            uncached_time.as_secs_f64() / cached_time.as_secs_f64()
+        );
+        assert_eq!(uncached_accumulator, cached_accumulator);
+        assert!(cached_time < uncached_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- layered_prop_lookup_beats_per_node_prop_cloning --ignored --nocapture
+    #[test]
+    #[ignore = "release-only layered prop lookup microbenchmark"]
+    fn layered_prop_lookup_beats_per_node_prop_cloning() {
+        let theme = mesh_core_theme::default_theme();
+        let props = (0..32)
+            .map(|index| {
+                (
+                    prop_variable_key(&format!("prop_{index}")),
+                    StyleValue::Literal(format!("{index}px")),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let resolver = StyleResolver::new(&theme).with_props(props.clone());
+        let attrs = StyleNodeAttrs {
+            tag: "box",
+            ..StyleNodeAttrs::default()
+        };
+        let rules = Vec::new();
+        let index = StyleRuleIndex::new(&rules);
+        let context = StyleContext::default();
+        let _ = resolver
+            .resolve_node_style_with_attrs_indexed_no_diagnostics(&rules, &index, &attrs, context);
+        let iterations = 200_000usize;
+
+        let cloned_started = std::time::Instant::now();
+        let mut cloned_total = 0usize;
+        for _ in 0..iterations {
+            let mut variables = HashMap::new();
+            for (key, value) in &props {
+                variables.insert(key.clone(), value.clone());
+            }
+            cloned_total = cloned_total.wrapping_add(std::hint::black_box(variables.len()));
+            let style = resolver.resolve_node_style_with_attrs_indexed_no_diagnostics(
+                &rules, &index, &attrs, context,
+            );
+            cloned_total = cloned_total.wrapping_add(std::hint::black_box(style.opacity as usize));
+        }
+        let cloned_time = cloned_started.elapsed();
+
+        let layered_started = std::time::Instant::now();
+        let mut layered_total = 0usize;
+        for _ in 0..iterations {
+            let style = resolver.resolve_node_style_with_attrs_indexed_no_diagnostics(
+                std::hint::black_box(&rules),
+                std::hint::black_box(&index),
+                std::hint::black_box(&attrs),
+                context,
+            );
+            layered_total =
+                layered_total.wrapping_add(std::hint::black_box(style.opacity as usize));
+        }
+        let layered_time = layered_started.elapsed();
+
+        eprintln!(
+            "per-node prop seed: cloned {cloned_time:?}; layered {layered_time:?}; ratio {:.1}x; totals={cloned_total}/{layered_total}",
+            cloned_time.as_secs_f64() / layered_time.as_secs_f64()
+        );
+        assert!(cloned_total > layered_total);
+        assert!(layered_time < cloned_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- cached_theme_reference_beats_recanonicalizing --ignored --nocapture
+    #[test]
+    #[ignore = "release-only theme reference canonicalization microbenchmark"]
+    fn cached_theme_reference_beats_recanonicalizing() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let reference = "--mesh-color-primary";
+        let iterations = 1_000_000usize;
+
+        let canonicalized_started = std::time::Instant::now();
+        let mut canonicalized_total = 0usize;
+        for _ in 0..iterations {
+            let name = theme_reference_to_token_name(std::hint::black_box(reference));
+            canonicalized_total = canonicalized_total.wrapping_add(name.len());
+        }
+        let canonicalized_time = canonicalized_started.elapsed();
+
+        let _ = resolver.cached_theme_token_name(reference);
+        let cached_started = std::time::Instant::now();
+        let mut cached_total = 0usize;
+        for _ in 0..iterations {
+            let name = resolver.cached_theme_token_name(std::hint::black_box(reference));
+            cached_total = cached_total.wrapping_add(name.len());
+        }
+        let cached_time = cached_started.elapsed();
+
+        eprintln!(
+            "theme reference mapping: canonicalized {canonicalized_time:?}; cached {cached_time:?}; ratio {:.1}x; totals={canonicalized_total}/{cached_total}",
+            canonicalized_time.as_secs_f64() / cached_time.as_secs_f64()
+        );
+        assert_eq!(canonicalized_total, cached_total);
+        assert!(cached_time < canonicalized_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- cached_embedded_theme_references_beat_recanonicalizing --ignored --nocapture
+    #[test]
+    #[ignore = "release-only embedded theme reference microbenchmark"]
+    fn cached_embedded_theme_references_beat_recanonicalizing() {
+        fn old_resolve_embedded_references(value: &str, theme: &Theme) -> String {
+            let mut output = String::new();
+            let mut rest = value;
+            loop {
+                let Some(start) = rest.find("var(") else {
+                    break;
+                };
+                output.push_str(&rest[..start]);
+                let reference_start = start + "var(".len();
+                let Some(end) = rest[reference_start..].find(')') else {
+                    output.push_str(&rest[start..]);
+                    return output;
+                };
+                let name = theme_reference_to_token_name(
+                    rest[reference_start..reference_start + end].trim(),
+                );
+                if let Some(TokenValue::String(value)) = theme.token(&name) {
+                    output.push_str(value);
+                }
+                rest = &rest[reference_start + end + 1..];
+            }
+            output.push_str(rest);
+            output
+        }
+
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let value = "linear-gradient(var(--mesh-color-primary), var(--mesh-color-secondary), var(--mesh-color-primary))";
+        let variables = HashMap::new();
+        let iterations = 300_000usize;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let resolved = old_resolve_embedded_references(
+                std::hint::black_box(value),
+                std::hint::black_box(&theme),
+            );
+            old_total = old_total.wrapping_add(std::hint::black_box(resolved.len()));
+        }
+        let old_time = old_started.elapsed();
+
+        let _ = resolver.resolve_embedded_references_cached(value, &variables, false);
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let resolved = resolver
+                .resolve_embedded_references_cached(
+                    std::hint::black_box(value),
+                    std::hint::black_box(&variables),
+                    false,
+                )
+                .expect("embedded references should resolve");
+            new_total = new_total.wrapping_add(std::hint::black_box(resolved.len()));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "embedded theme references: recanonicalized {old_time:?}; cached {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
         assert!(new_time < old_time);
     }
 

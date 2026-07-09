@@ -2,6 +2,7 @@ use super::types::CoreRequest;
 use mesh_core_capability::Capability;
 use mesh_core_scripting::{PublishedEvent, ScriptState};
 pub(super) use mesh_core_service::service_name_from_interface;
+pub(super) use mesh_core_service::service_name_from_interface_cow;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};

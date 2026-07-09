@@ -18,7 +18,10 @@ use std::path::PathBuf;
 
 pub use accessibility::root_accessibility_role;
 pub use compile::{CompileFrontendError, compile_frontend_module, is_frontend_module};
-pub use render::{build_widget_tree_from_component, props_settings_schema, resolve_css_props};
+pub use render::{
+    build_embedded_widget_tree_from_component, build_widget_tree_from_component,
+    props_settings_schema, resolve_css_props,
+};
 pub use style::merge_missing_defaults;
 pub use tags::UiTag;
 
@@ -270,7 +273,8 @@ impl CompiledFrontendModule {
                     container_height: height as f32,
                 },
             );
-            let build_style = render::BuildStyleContext::new(rules, &resolver);
+            let build_style = render::BuildStyleContext::new(rules, &resolver)
+                .with_handler_namespacing(mode == FrontendRenderMode::Embedded);
             root.children = template
                 .root
                 .iter()
@@ -289,7 +293,13 @@ impl CompiledFrontendModule {
                 .collect();
         }
 
-        LayoutEngine::compute_with_measurer(&mut root, width as f32, height as f32, measurer);
+        // Embedded trees are inserted into a surface tree and laid out there after
+        // composition/finalization. Computing their geometry here is both wasted
+        // work and potentially misleading: it uses the host's full bounds rather
+        // than the embedded node's eventual constraints.
+        if mode == FrontendRenderMode::Surface {
+            LayoutEngine::compute_with_measurer(&mut root, width as f32, height as f32, measurer);
+        }
         root
     }
 
@@ -897,6 +907,177 @@ mod tests {
         );
         assert_eq!(owned_count, borrowed_count);
         assert!(borrowed_time < owned_time);
+    }
+
+    #[test]
+    fn embedded_build_defers_layout_until_surface_composition() {
+        let compiled = make_test_module(
+            r#"
+<template>
+  <column>
+    <text onclick="onFirst">first</text>
+    <text>second</text>
+  </column>
+</template>
+"#,
+        );
+        let theme = mesh_core_theme::default_theme();
+
+        let embedded = compiled.build_tree_with_state(
+            &theme,
+            400,
+            300,
+            None,
+            FrontendRenderMode::Embedded,
+            "test/embedded",
+            None,
+            None,
+        );
+        let surface = compiled.build_tree_with_state(
+            &theme,
+            400,
+            300,
+            None,
+            FrontendRenderMode::Surface,
+            "test/surface",
+            None,
+            None,
+        );
+
+        assert_eq!(embedded.layout.width, 0.0);
+        assert_eq!(embedded.layout.height, 0.0);
+        assert_eq!(
+            embedded.children[0].children[0]
+                .event_handlers
+                .get("click")
+                .map(String::as_str),
+            Some("__mesh_embed__::test/embedded::onFirst")
+        );
+        assert!(surface.layout.width > 0.0);
+        assert!(surface.layout.height > 0.0);
+    }
+
+    // Run with:
+    // cargo test -p mesh-core-frontend --release -- embedded_build_layout_deferral_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only embedded layout deferral microbenchmark"]
+    fn embedded_build_layout_deferral_benchmark() {
+        use std::time::Instant;
+
+        let rows = (0..256)
+            .map(|index| format!("<row><text>label {index}</text><text>value {index}</text></row>"))
+            .collect::<String>();
+        let compiled = make_test_module(&format!("<template><column>{rows}</column></template>"));
+        let theme = mesh_core_theme::default_theme();
+        let iterations = 200usize;
+
+        let deferred_started = Instant::now();
+        let mut deferred_width = 0.0f32;
+        for _ in 0..iterations {
+            let tree = compiled.build_tree_with_state(
+                &theme,
+                1200,
+                800,
+                None,
+                FrontendRenderMode::Embedded,
+                "benchmark/embedded",
+                None,
+                None,
+            );
+            deferred_width += tree.layout.width;
+        }
+        let deferred_time = deferred_started.elapsed();
+
+        let eager_started = Instant::now();
+        let mut eager_width = 0.0f32;
+        for _ in 0..iterations {
+            let mut tree = compiled.build_tree_with_state(
+                &theme,
+                1200,
+                800,
+                None,
+                FrontendRenderMode::Embedded,
+                "benchmark/embedded",
+                None,
+                None,
+            );
+            LayoutEngine::compute(&mut tree, 1200.0, 800.0);
+            eager_width += tree.layout.width;
+        }
+        let eager_time = eager_started.elapsed();
+
+        eprintln!(
+            "embedded build: eager layout {eager_time:?}; deferred {deferred_time:?}; ratio {:.1}x; widths={eager_width}/{deferred_width}",
+            eager_time.as_secs_f64() / deferred_time.as_secs_f64()
+        );
+        assert!(eager_width > deferred_width);
+        assert!(deferred_time < eager_time);
+    }
+
+    // Run with:
+    // cargo test -p mesh-core-frontend --release -- inline_handler_namespacing_beats_post_build_walk --ignored --nocapture
+    #[test]
+    #[ignore = "release-only embedded handler namespacing microbenchmark"]
+    fn inline_handler_namespacing_beats_post_build_walk() {
+        use std::time::Instant;
+
+        fn legacy_namespace_walk(node: &mut WidgetNode, instance_key: &str) {
+            for handler in node.event_handlers.values_mut() {
+                if !handler.starts_with("__mesh_embed__::") {
+                    *handler = format!("__mesh_embed__::{instance_key}::{handler}");
+                }
+            }
+            for call in node.event_handler_calls.values_mut() {
+                if !call.handler.starts_with("__mesh_embed__::") {
+                    call.handler = format!("__mesh_embed__::{instance_key}::{}", call.handler);
+                }
+            }
+            for child in &mut node.children {
+                legacy_namespace_walk(child, instance_key);
+            }
+        }
+
+        let buttons = (0..512)
+            .map(|index| format!(r#"<button onclick="onRow{index}">row {index}</button>"#))
+            .collect::<String>();
+        let compiled =
+            make_test_module(&format!("<template><column>{buttons}</column></template>"));
+        let theme = mesh_core_theme::default_theme();
+        let base = compiled.build_tree_with_state(
+            &theme,
+            1200,
+            800,
+            None,
+            FrontendRenderMode::Surface,
+            "benchmark/root",
+            None,
+            None,
+        );
+        let iterations = 2_000usize;
+
+        let inline_started = Instant::now();
+        let mut inline_total = 0usize;
+        for _ in 0..iterations {
+            let tree = std::hint::black_box(base.clone());
+            inline_total = inline_total.wrapping_add(tree.children.len());
+        }
+        let inline_time = inline_started.elapsed();
+
+        let post_walk_started = Instant::now();
+        let mut post_walk_total = 0usize;
+        for _ in 0..iterations {
+            let mut tree = std::hint::black_box(base.clone());
+            legacy_namespace_walk(&mut tree, "benchmark/embedded");
+            post_walk_total = post_walk_total.wrapping_add(tree.children.len());
+        }
+        let post_walk_time = post_walk_started.elapsed();
+
+        eprintln!(
+            "embedded handler namespacing: post-build walk {post_walk_time:?}; inline construction {inline_time:?}; ratio {:.1}x; totals={post_walk_total}/{inline_total}",
+            post_walk_time.as_secs_f64() / inline_time.as_secs_f64()
+        );
+        assert_eq!(post_walk_total, inline_total);
+        assert!(inline_time < post_walk_time);
     }
 
     fn collect_text_content(node: &mesh_core_elements::WidgetNode) -> Vec<String> {

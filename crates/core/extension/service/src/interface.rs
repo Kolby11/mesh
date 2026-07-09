@@ -1,5 +1,6 @@
 use crate::contract::{InterfaceContract, parse_contract_version, parse_version_req};
 use semver::Version;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -159,25 +160,33 @@ impl InterfaceRegistry {
 
 /// Normalize docs-era interface naming.
 pub fn canonical_interface_name(name: &str) -> String {
+    canonical_interface_name_cow(name).into_owned()
+}
+
+/// Borrow an already-canonical interface name and allocate only for short
+/// aliases that need the `mesh.` prefix.
+pub fn canonical_interface_name_cow(name: &str) -> Cow<'_, str> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return String::new();
+        return Cow::Borrowed("");
     }
 
     if trimmed.contains('.') {
-        trimmed.to_string()
+        Cow::Borrowed(trimmed)
     } else {
-        format!("mesh.{trimmed}")
+        Cow::Owned(format!("mesh.{trimmed}"))
     }
 }
 
 /// Convert a canonical interface name such as `mesh.audio` into the short
 /// service state key/capability segment used by runtime APIs.
 pub fn service_name_from_interface(interface: &str) -> String {
-    interface
-        .strip_prefix("mesh.")
-        .unwrap_or(interface)
-        .to_string()
+    service_name_from_interface_cow(interface).into_owned()
+}
+
+/// Borrow the short service segment from an interface name.
+pub fn service_name_from_interface_cow(interface: &str) -> Cow<'_, str> {
+    Cow::Borrowed(interface.strip_prefix("mesh.").unwrap_or(interface))
 }
 
 impl InterfaceCatalog {
@@ -516,5 +525,73 @@ mod tests {
             resolved.provider.unwrap().provider_module,
             "@alice/lmsensors"
         );
+    }
+
+    // cargo test -p mesh-core-service --release -- canonical_interface_borrowing_beats_owned_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only canonical interface name microbenchmark"]
+    fn canonical_interface_borrowing_beats_owned_clone() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let iterations = 2_000_000usize;
+        let canonical = "mesh.audio";
+
+        let owned_started = Instant::now();
+        let mut owned_total = 0usize;
+        for _ in 0..iterations {
+            let name = canonical_interface_name(black_box(canonical));
+            owned_total = owned_total.wrapping_add(name.len());
+        }
+        let owned_time = owned_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_total = 0usize;
+        for _ in 0..iterations {
+            let name = canonical_interface_name_cow(black_box(canonical));
+            borrowed_total = borrowed_total.wrapping_add(name.len());
+        }
+        let borrowed_time = borrowed_started.elapsed();
+
+        eprintln!(
+            "canonical interface: owned {owned_time:?}; borrowed {borrowed_time:?}; ratio {:.1}x; totals={owned_total}/{borrowed_total}",
+            owned_time.as_secs_f64() / borrowed_time.as_secs_f64()
+        );
+        assert_eq!(owned_total, borrowed_total);
+        assert!(borrowed_time < owned_time);
+    }
+
+    // cargo test -p mesh-core-service --release -- service_name_borrowing_beats_owned_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only service name projection microbenchmark"]
+    fn service_name_borrowing_beats_owned_clone() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let iterations = 2_000_000usize;
+        let interface = "mesh.audio";
+
+        let owned_started = Instant::now();
+        let mut owned_total = 0usize;
+        for _ in 0..iterations {
+            let name = service_name_from_interface(black_box(interface));
+            owned_total = owned_total.wrapping_add(name.len());
+        }
+        let owned_time = owned_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_total = 0usize;
+        for _ in 0..iterations {
+            let name = service_name_from_interface_cow(black_box(interface));
+            borrowed_total = borrowed_total.wrapping_add(name.len());
+        }
+        let borrowed_time = borrowed_started.elapsed();
+
+        eprintln!(
+            "service name projection: owned {owned_time:?}; borrowed {borrowed_time:?}; ratio {:.1}x; totals={owned_total}/{borrowed_total}",
+            owned_time.as_secs_f64() / borrowed_time.as_secs_f64()
+        );
+        assert_eq!(owned_total, borrowed_total);
+        assert!(borrowed_time < owned_time);
     }
 }

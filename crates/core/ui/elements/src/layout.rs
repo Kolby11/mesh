@@ -108,7 +108,7 @@ impl IntrinsicLayoutCache {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct TextMeasureKey {
-    content: String,
+    content: Arc<str>,
     font_family: Arc<str>,
     font_size: u32,
     font_weight: u16,
@@ -139,10 +139,12 @@ pub struct LayoutEngine;
 pub struct PerSurfaceLayoutState {
     /// The retained Taffy layout tree, mutated incrementally.
     pub tree: TaffyTree<NodeId>,
-    /// Maps stable `_mesh_key` attribute values (e.g. `"root/0/button"`)
-    /// to their corresponding `TaffyNodeId` in the retained tree.
-    /// Keyed by `String` (NOT ephemeral `NodeId`) per LAYOUT-03.
-    pub node_map: HashMap<String, TaffyNodeId>,
+    /// Maps stable runtime [`NodeId`] values to retained Taffy nodes.
+    ///
+    /// Runtime IDs are hash-chained from the same stable paths formerly kept
+    /// here as `_mesh_key` strings, so retained lookup no longer hashes or
+    /// clones long ancestor paths.
+    pub node_map: HashMap<NodeId, TaffyNodeId>,
     /// `(width, height)` used in the last `compute_layout` call.
     pub last_available: (f32, f32),
     /// `false` after theme/locale/source-reload resets; forces a
@@ -406,7 +408,7 @@ impl LayoutEngine {
 
 #[derive(Clone)]
 struct TextMeasureData {
-    content: String,
+    content: Arc<str>,
     font_family: Arc<str>,
     font_size: f32,
     font_weight: u16,
@@ -584,8 +586,8 @@ fn build_taffy_tree(
                     content: node
                         .attributes
                         .get("content")
-                        .cloned()
-                        .unwrap_or_else(String::new),
+                        .map(|content| Arc::<str>::from(content.as_str()))
+                        .unwrap_or_default(),
                     font_family: node.computed_style.font_family.clone(),
                     font_size: node.computed_style.font_size,
                     font_weight: node.computed_style.font_weight,
@@ -691,8 +693,8 @@ fn compute_structural_retained_layout(
     let mut report = TaffyLayoutReport::default();
     let mut node_id_to_taffy = HashMap::new();
     let mut text_nodes = HashMap::new();
-    let mut present_keys = HashSet::new();
-    collect_mesh_keys(root, &mut present_keys);
+    let mut present_ids = HashSet::new();
+    collect_retained_node_ids(root, &mut present_ids);
 
     match reconcile_retained_taffy_node(
         root,
@@ -702,25 +704,39 @@ fn compute_structural_retained_layout(
         &mut report,
     ) {
         Ok(root_id) => {
-            let mut stale_keys = state
+            let stale_nodes = state
                 .node_map
-                .keys()
-                .filter(|key| !present_keys.contains(*key))
-                .cloned()
+                .iter()
+                .filter(|(node_id, _)| !present_ids.contains(node_id))
+                .map(|(node_id, taffy_id)| (*node_id, *taffy_id))
                 .collect::<Vec<_>>();
-            stale_keys.sort_by_key(|key| std::cmp::Reverse(key.len()));
-            for key in stale_keys {
-                if let Some(taffy_id) = state.node_map.remove(&key) {
-                    if let Err(error) = remove_taffy_subtree(&mut state.tree, taffy_id) {
-                        tracing::warn!(
-                            target: "mesh::layout",
-                            key = %key,
-                            error = %error,
-                            "failed to remove stale retained layout subtree"
-                        );
-                    }
+            let stale_taffy_ids = stale_nodes
+                .iter()
+                .map(|(_, taffy_id)| *taffy_id)
+                .collect::<HashSet<_>>();
+            let stale_roots = stale_nodes
+                .iter()
+                .filter(|(_, taffy_id)| {
+                    !state
+                        .tree
+                        .parent(*taffy_id)
+                        .is_some_and(|parent| stale_taffy_ids.contains(&parent))
+                })
+                .copied()
+                .collect::<Vec<_>>();
+            for (node_id, taffy_id) in stale_roots {
+                if let Err(error) = remove_taffy_subtree(&mut state.tree, taffy_id) {
+                    tracing::warn!(
+                        target: "mesh::layout",
+                        node_id,
+                        error = %error,
+                        "failed to remove stale retained layout subtree"
+                    );
                 }
             }
+            state
+                .node_map
+                .retain(|node_id, _| present_ids.contains(node_id));
 
             let available_space = taffy_available_space(available_width, available_height);
             if let Err(error) = state.tree.compute_layout_with_measure(
@@ -778,14 +794,14 @@ fn reconcile_retained_taffy_node(
     report: &mut TaffyLayoutReport,
 ) -> Result<TaffyNodeId, taffy::TaffyError> {
     let style = taffy_style_for_node(node, report);
-    let key = node.attributes.get("_mesh_key").cloned();
-    let taffy_id = if let Some(key) = key {
-        if let Some(existing) = state.node_map.get(&key).copied() {
+    let retained = node.attributes.contains_key("_mesh_key");
+    let taffy_id = if retained {
+        if let Some(existing) = state.node_map.get(&node.id).copied() {
             state.tree.set_style(existing, style)?;
             existing
         } else {
             let created = state.tree.new_leaf(style)?;
-            state.node_map.insert(key, created);
+            state.node_map.insert(node.id, created);
             created
         }
     } else {
@@ -867,8 +883,8 @@ fn update_text_context(
                 content: node
                     .attributes
                     .get("content")
-                    .cloned()
-                    .unwrap_or_else(String::new),
+                    .map(|content| Arc::<str>::from(content.as_str()))
+                    .unwrap_or_default(),
                 font_family: node.computed_style.font_family.clone(),
                 font_size: node.computed_style.font_size,
                 font_weight: node.computed_style.font_weight,
@@ -886,31 +902,32 @@ fn update_text_context(
 fn collect_stable_taffy_map(
     node: &WidgetNode,
     node_id_to_taffy: &HashMap<NodeId, TaffyNodeId>,
-    stable_map: &mut HashMap<String, TaffyNodeId>,
+    stable_map: &mut HashMap<NodeId, TaffyNodeId>,
 ) {
-    if let Some(key) = node.attributes.get("_mesh_key")
+    if node.attributes.contains_key("_mesh_key")
         && let Some(taffy_id) = node_id_to_taffy.get(&node.id)
     {
-        stable_map.insert(key.clone(), *taffy_id);
+        stable_map.insert(node.id, *taffy_id);
     }
     for child in &node.children {
         collect_stable_taffy_map(child, node_id_to_taffy, stable_map);
     }
 }
 
-fn collect_mesh_keys(node: &WidgetNode, keys: &mut HashSet<String>) {
-    if let Some(key) = node.attributes.get("_mesh_key") {
-        keys.insert(key.clone());
+fn collect_retained_node_ids(node: &WidgetNode, ids: &mut HashSet<NodeId>) {
+    if node.attributes.contains_key("_mesh_key") {
+        ids.insert(node.id);
     }
     for child in &node.children {
-        collect_mesh_keys(child, keys);
+        collect_retained_node_ids(child, ids);
     }
 }
 
 fn retained_taffy_id(node: &WidgetNode, state: &PerSurfaceLayoutState) -> Option<TaffyNodeId> {
     node.attributes
-        .get("_mesh_key")
-        .and_then(|key| state.node_map.get(key))
+        .contains_key("_mesh_key")
+        .then(|| state.node_map.get(&node.id))
+        .flatten()
         .copied()
 }
 
@@ -2183,5 +2200,128 @@ mod tests {
             "expected width=1920, got {}",
             bar_layout.width
         );
+    }
+
+    // cargo test -p mesh-core-elements --release -- shared_text_measure_content_beats_two_string_clones --ignored --nocapture
+    #[test]
+    #[ignore = "release-only text measurement content microbenchmark"]
+    fn shared_text_measure_content_beats_two_string_clones() {
+        use std::time::Instant;
+
+        let content = "performance-sensitive text measurement content ".repeat(8);
+        let iterations = 1_000_000usize;
+
+        let string_started = Instant::now();
+        let mut string_total = 0usize;
+        for _ in 0..iterations {
+            let measure_data = std::hint::black_box(content.clone());
+            let cache_key = std::hint::black_box(measure_data.clone());
+            string_total = string_total.wrapping_add(cache_key.len());
+        }
+        let string_time = string_started.elapsed();
+
+        let shared_started = Instant::now();
+        let mut shared_total = 0usize;
+        for _ in 0..iterations {
+            let measure_data: Arc<str> = std::hint::black_box(Arc::from(content.as_str()));
+            let cache_key = std::hint::black_box(Arc::clone(&measure_data));
+            shared_total = shared_total.wrapping_add(cache_key.len());
+        }
+        let shared_time = shared_started.elapsed();
+
+        eprintln!(
+            "text measurement content: two String clones {string_time:?}; Arc build+clone {shared_time:?}; ratio {:.1}x; totals={string_total}/{shared_total}",
+            string_time.as_secs_f64() / shared_time.as_secs_f64()
+        );
+        assert_eq!(string_total, shared_total);
+        assert!(shared_time < string_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- borrowed_live_layout_keys_beat_cloned_key_set --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained layout key collection microbenchmark"]
+    fn borrowed_live_layout_keys_beat_cloned_key_set() {
+        use std::time::Instant;
+
+        let keys = (0..1_024)
+            .map(|index| format!("root/content/list/row/{index}/label"))
+            .collect::<Vec<_>>();
+        let iterations = 5_000usize;
+
+        let cloned_started = Instant::now();
+        let mut cloned_total = 0usize;
+        for _ in 0..iterations {
+            let set = keys
+                .iter()
+                .map(|key| std::hint::black_box(key.clone()))
+                .collect::<HashSet<String>>();
+            cloned_total = cloned_total.wrapping_add(set.len());
+        }
+        let cloned_time = cloned_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_total = 0usize;
+        for _ in 0..iterations {
+            let set = keys
+                .iter()
+                .map(|key| std::hint::black_box(key.as_str()))
+                .collect::<HashSet<&str>>();
+            borrowed_total = borrowed_total.wrapping_add(set.len());
+        }
+        let borrowed_time = borrowed_started.elapsed();
+
+        eprintln!(
+            "retained layout live keys: cloned {cloned_time:?}; borrowed {borrowed_time:?}; ratio {:.1}x; totals={cloned_total}/{borrowed_total}",
+            cloned_time.as_secs_f64() / borrowed_time.as_secs_f64()
+        );
+        assert_eq!(cloned_total, borrowed_total);
+        assert!(borrowed_time < cloned_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- node_id_layout_lookup_beats_string_key_hashing --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained layout identity microbenchmark"]
+    fn node_id_layout_lookup_beats_string_key_hashing() {
+        use std::time::Instant;
+
+        let keys = (0..1_024)
+            .map(|index| format!("root/content/list/row/{index}/label"))
+            .collect::<Vec<_>>();
+        let string_map = keys
+            .iter()
+            .enumerate()
+            .map(|(index, key)| (key.clone(), index))
+            .collect::<HashMap<_, _>>();
+        let id_map = (0..1_024u64)
+            .enumerate()
+            .map(|(index, id)| (id + 1, index))
+            .collect::<HashMap<_, _>>();
+        let iterations = 5_000_000usize;
+
+        let string_started = Instant::now();
+        let mut string_total = 0usize;
+        for index in 0..iterations {
+            string_total = string_total.wrapping_add(
+                *string_map
+                    .get(std::hint::black_box(&keys[index & 1_023]))
+                    .unwrap(),
+            );
+        }
+        let string_time = string_started.elapsed();
+
+        let id_started = Instant::now();
+        let mut id_total = 0usize;
+        for index in 0..iterations {
+            let id = (index & 1_023) as u64 + 1;
+            id_total = id_total.wrapping_add(*id_map.get(std::hint::black_box(&id)).unwrap());
+        }
+        let id_time = id_started.elapsed();
+
+        eprintln!(
+            "retained layout identity lookup: String {string_time:?}; NodeId {id_time:?}; ratio {:.1}x; totals={string_total}/{id_total}",
+            string_time.as_secs_f64() / id_time.as_secs_f64()
+        );
+        assert_eq!(string_total, id_total);
+        assert!(id_time < string_time);
     }
 }

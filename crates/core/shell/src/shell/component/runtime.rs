@@ -3,9 +3,18 @@ use super::*;
 fn apply_runtime_props(
     runtime: &mut EmbeddedFrontendRuntime,
     props: &HashMap<String, serde_json::Value>,
+    skip_unchanged: bool,
 ) {
     for (key, value) in props {
-        if let Err(err) = runtime.script_ctx.set_member_state(key, value.clone()) {
+        let result = if skip_unchanged {
+            runtime
+                .script_ctx
+                .set_member_state_if_changed(key, value.clone())
+                .map(|_| ())
+        } else {
+            runtime.script_ctx.set_member_state(key, value.clone())
+        };
+        if let Err(err) = result {
             tracing::warn!(
                 module_id = %runtime.module_id,
                 prop = %key,
@@ -369,7 +378,7 @@ impl FrontendSurfaceComponent {
         {
             let mut runtimes = self.runtimes.lock().unwrap();
             if let Some(runtime) = runtimes.get_mut(instance_key) {
-                apply_runtime_props(runtime, props);
+                apply_runtime_props(runtime, props, true);
                 return Ok(());
             }
         }
@@ -382,7 +391,7 @@ impl FrontendSurfaceComponent {
         };
         let mut runtime = self.create_runtime(instance_key, &entry.compiled, props)?;
         Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
-        apply_runtime_props(&mut runtime, props);
+        apply_runtime_props(&mut runtime, props, false);
         self.runtimes
             .lock()
             .unwrap()
@@ -408,7 +417,7 @@ impl FrontendSurfaceComponent {
         {
             let mut runtimes = self.runtimes.lock().unwrap();
             if let Some(runtime) = runtimes.get_mut(instance_key) {
-                apply_runtime_props(runtime, props);
+                apply_runtime_props(runtime, props, true);
                 return Ok(());
             }
         }
@@ -421,7 +430,7 @@ impl FrontendSurfaceComponent {
             props,
         )?;
         Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
-        apply_runtime_props(&mut runtime, props);
+        apply_runtime_props(&mut runtime, props, false);
         self.runtimes
             .lock()
             .unwrap()
@@ -455,7 +464,7 @@ impl FrontendSurfaceComponent {
         let theme = self.active_theme.borrow().clone();
         let state = self.runtime_state(instance_key).unwrap_or_default();
         let bound = LocaleBoundState::new(&state, &self.locale);
-        let mut node = mesh_core_frontend::build_widget_tree_from_component(
+        let node = mesh_core_frontend::build_embedded_widget_tree_from_component(
             component,
             host,
             &theme,
@@ -466,7 +475,6 @@ impl FrontendSurfaceComponent {
             Some(&bound),
             host_rules,
         );
-        namespace_event_handlers(&mut node, instance_key);
         node
     }
 
@@ -502,7 +510,7 @@ impl FrontendSurfaceComponent {
         let active_theme = self.active_theme.borrow().clone();
         self.render_stack.borrow_mut().push(module_id.to_string());
         let measurer = SharedTextMeasurer;
-        let mut tree = entry.compiled.build_tree_with_state(
+        let tree = entry.compiled.build_tree_with_state(
             &active_theme,
             container_width.max(0.0).ceil() as u32,
             container_height.max(0.0).ceil() as u32,
@@ -513,7 +521,6 @@ impl FrontendSurfaceComponent {
             Some(&measurer),
         );
         self.render_stack.borrow_mut().pop();
-        namespace_event_handlers(&mut tree, instance_key);
         tree
     }
 

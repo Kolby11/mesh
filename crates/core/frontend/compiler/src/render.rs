@@ -26,6 +26,7 @@ pub(crate) struct BuildStyleContext<'a, 'theme> {
     rules: &'a [StyleRule],
     index: StyleRuleIndex,
     resolver: &'a StyleResolver<'theme>,
+    namespace_handlers: bool,
 }
 
 impl<'a, 'theme> BuildStyleContext<'a, 'theme> {
@@ -34,7 +35,13 @@ impl<'a, 'theme> BuildStyleContext<'a, 'theme> {
             rules,
             index: StyleRuleIndex::new(rules),
             resolver,
+            namespace_handlers: false,
         }
+    }
+
+    pub(crate) fn with_handler_namespacing(mut self, enabled: bool) -> Self {
+        self.namespace_handlers = enabled;
+        self
     }
 }
 
@@ -55,11 +62,16 @@ pub fn resolve_css_props(
     };
     // The shell publishes one `props` table in script state (the precedence-
     // resolved value per name); script writes round-trip back into it.
-    let props_state = state.and_then(|s| s.get("props"));
+    let props_state_borrowed = state.and_then(|store| store.get_ref("props"));
+    let props_state_owned = if props_state_borrowed.is_none() {
+        state.and_then(|store| store.get("props"))
+    } else {
+        None
+    };
+    let props_state = props_state_borrowed.or(props_state_owned.as_ref());
     for def in &block.props {
         let value =
             props_state
-                .as_ref()
                 .and_then(|obj| obj.get(&def.name))
                 .and_then(|value| {
                     mesh_core_component::json_to_prop_value(value.clone()).and_then(|value| {
@@ -191,25 +203,32 @@ impl<'a> TrackingVariableStore<'a> {
     fn into_reads(self) -> Vec<(String, String)> {
         self.reads.into_inner()
     }
+
+    fn record_read(&self, name: &str) {
+        let Some(dot_pos) = name.find('.') else {
+            return;
+        };
+        let service = &name[..dot_pos];
+        let field = &name[dot_pos + 1..];
+        let mut reads = self.reads.borrow_mut();
+        if reads.last().is_some_and(|(last_service, last_field)| {
+            last_service == service && last_field == field
+        }) {
+            return;
+        }
+        reads.push((service.to_owned(), field.to_owned()));
+    }
 }
 
 impl VariableStore for TrackingVariableStore<'_> {
     fn get(&self, name: &str) -> Option<serde_json::Value> {
         let result = self.inner.get(name);
-        if let Some(dot_pos) = name.find('.') {
-            let service = name[..dot_pos].to_string();
-            let field = name[dot_pos + 1..].to_string();
-            self.reads.borrow_mut().push((service, field));
-        }
+        self.record_read(name);
         result
     }
     fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
         let result = self.inner.get_ref(name);
-        if let Some(dot_pos) = name.find('.') {
-            let service = name[..dot_pos].to_string();
-            let field = name[dot_pos + 1..].to_string();
-            self.reads.borrow_mut().push((service, field));
-        }
+        self.record_read(name);
         result
     }
     fn keys(&self) -> Vec<String> {
@@ -292,6 +311,62 @@ pub fn build_widget_tree_from_component(
     state: Option<&dyn VariableStore>,
     host_rules: &[mesh_core_component::style::StyleRule],
 ) -> WidgetNode {
+    build_widget_tree_from_component_inner(
+        component,
+        host_manifest,
+        theme,
+        container_width,
+        container_height,
+        composition,
+        instance_key,
+        state,
+        host_rules,
+        false,
+    )
+}
+
+/// Build a local component subtree for insertion into a composed surface.
+///
+/// Unlike the generic helper, event handlers are namespaced as they are
+/// created so the shell does not need a second recursive tree pass.
+pub fn build_embedded_widget_tree_from_component(
+    component: &mesh_core_component::ComponentFile,
+    host_manifest: &Manifest,
+    theme: &Theme,
+    container_width: f32,
+    container_height: f32,
+    composition: Option<&dyn FrontendCompositionResolver>,
+    instance_key: &str,
+    state: Option<&dyn VariableStore>,
+    host_rules: &[mesh_core_component::style::StyleRule],
+) -> WidgetNode {
+    build_widget_tree_from_component_inner(
+        component,
+        host_manifest,
+        theme,
+        container_width,
+        container_height,
+        composition,
+        instance_key,
+        state,
+        host_rules,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_widget_tree_from_component_inner(
+    component: &mesh_core_component::ComponentFile,
+    host_manifest: &Manifest,
+    theme: &Theme,
+    container_width: f32,
+    container_height: f32,
+    composition: Option<&dyn FrontendCompositionResolver>,
+    instance_key: &str,
+    state: Option<&dyn VariableStore>,
+    host_rules: &[mesh_core_component::style::StyleRule],
+    namespace_handlers: bool,
+) -> WidgetNode {
     let resolver =
         StyleResolver::new(theme).with_props(resolve_css_props(component.props.as_ref(), state));
     let component_rules: &[mesh_core_component::style::StyleRule] = component
@@ -318,7 +393,8 @@ pub fn build_widget_tree_from_component(
             container_width,
             container_height,
         };
-        let build_style = BuildStyleContext::new(rules, &resolver);
+        let build_style =
+            BuildStyleContext::new(rules, &resolver).with_handler_namespacing(namespace_handlers);
         let children: Vec<WidgetNode> = template
             .root
             .iter()
@@ -654,6 +730,7 @@ fn build_element_node(
             effective_state,
             instance_key,
             composition,
+            build_style.namespace_handlers,
         );
     if let Some(binding) = element.attributes.iter().find_map(|attribute| {
         if let AttributeValue::InstanceBinding(binding) = &attribute.value {
@@ -819,8 +896,13 @@ fn build_component_ref(
     host_instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
 ) -> WidgetNode {
-    let (_, _, mut props, _, prop_handler_calls) =
-        parse_attributes_runtime(&component.props, state, host_instance_key, composition);
+    let (_, _, mut props, _, prop_handler_calls) = parse_attributes_runtime(
+        &component.props,
+        state,
+        host_instance_key,
+        composition,
+        false,
+    );
     for attr in &component.props {
         if let AttributeValue::EventHandler(handler) = &attr.value {
             props.insert(
@@ -891,7 +973,7 @@ pub(crate) fn parse_attributes(
     BTreeMap<String, String>,
     BTreeMap<String, EventHandlerCall>,
 ) {
-    parse_attributes_runtime(attrs, state, "", None)
+    parse_attributes_runtime(attrs, state, "", None, false)
 }
 
 fn parse_attributes_runtime(
@@ -899,6 +981,7 @@ fn parse_attributes_runtime(
     state: Option<&dyn VariableStore>,
     instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
+    namespace_handlers: bool,
 ) -> (
     Vec<String>,
     Option<String>,
@@ -925,9 +1008,10 @@ fn parse_attributes_runtime(
             }
             AttributeValue::Binding(binding) | AttributeValue::TwoWayBinding(binding) => {
                 if is_event_handler_attribute(&attr.name) {
+                    let handler = resolve_event_handler_value(state, binding);
                     event_handlers.insert(
                         normalize_event_handler_name(&attr.name),
-                        resolve_event_handler_value(state, binding),
+                        namespace_handler_if_needed(instance_key, handler, namespace_handlers),
                     );
                     continue;
                 }
@@ -946,10 +1030,17 @@ fn parse_attributes_runtime(
             AttributeValue::InstanceBinding(_) => {}
             AttributeValue::EventHandler(handler) => {
                 let resolved_handler = resolve_event_handler_value(state, handler);
-                event_handlers.insert(normalize_event_handler_name(&attr.name), resolved_handler);
+                event_handlers.insert(
+                    normalize_event_handler_name(&attr.name),
+                    namespace_handler_if_needed(instance_key, resolved_handler, namespace_handlers),
+                );
             }
             AttributeValue::EventHandlerCall { handler, args } => {
-                let resolved_handler = resolve_event_handler_value(state, handler);
+                let resolved_handler = namespace_handler_if_needed(
+                    instance_key,
+                    resolve_event_handler_value(state, handler),
+                    namespace_handlers,
+                );
                 let resolved_args: Vec<serde_json::Value> = args
                     .iter()
                     .map(|arg| {
@@ -980,10 +1071,26 @@ fn parse_attributes_runtime(
     (classes, id, resolved, event_handlers, event_handler_calls)
 }
 
+fn namespace_handler_if_needed(
+    instance_key: &str,
+    handler: String,
+    namespace_handlers: bool,
+) -> String {
+    if namespace_handlers {
+        namespaced_handler(instance_key, &handler)
+    } else {
+        handler
+    }
+}
+
 fn resolve_event_handler_value(state: Option<&dyn VariableStore>, handler: &str) -> String {
     state
-        .and_then(|store| store.get(handler))
-        .and_then(|value| value.as_str().map(str::to_string))
+        .and_then(|store| match store.get_ref(handler) {
+            Some(value) => value.as_str().map(str::to_string),
+            None => store
+                .get(handler)
+                .and_then(|value| value.as_str().map(str::to_string)),
+        })
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| handler.to_string())
 }
@@ -1850,6 +1957,19 @@ mod tests {
     }
 
     #[test]
+    fn tracking_store_coalesces_consecutive_duplicate_reads() {
+        let inner = MapStore(std::collections::HashMap::new());
+        let tracker = TrackingVariableStore::new(&inner);
+        for _ in 0..4 {
+            let _ = mesh_core_elements::VariableStore::get(&tracker, "audio.percent");
+        }
+        assert_eq!(
+            tracker.into_reads(),
+            vec![("audio".to_string(), "percent".to_string())]
+        );
+    }
+
+    #[test]
     fn tracking_store_skips_bare_reads() {
         let inner = MapStore(std::collections::HashMap::new());
         let t = TrackingVariableStore::new(&inner);
@@ -1917,5 +2037,223 @@ mod tests {
             baseline_ns,
             tracking_ns,
         );
+    }
+
+    // cargo test -p mesh-core-frontend --release -- repeated_service_read_coalescing_avoids_string_allocations --ignored --nocapture
+    #[test]
+    #[ignore = "release-only repeated service-read tracking microbenchmark"]
+    fn repeated_service_read_coalescing_avoids_string_allocations() {
+        use std::time::Instant;
+
+        let iterations = 1_000_000usize;
+        let name = "audio.percent";
+
+        let eager_started = Instant::now();
+        let mut eager = Vec::new();
+        for _ in 0..iterations {
+            let dot = std::hint::black_box(name).find('.').unwrap();
+            eager.push((
+                std::hint::black_box(name[..dot].to_owned()),
+                std::hint::black_box(name[dot + 1..].to_owned()),
+            ));
+        }
+        let eager_time = eager_started.elapsed();
+
+        let inner = MapStore(std::collections::HashMap::new());
+        let tracker = TrackingVariableStore::new(&inner);
+        let coalesced_started = Instant::now();
+        for _ in 0..iterations {
+            tracker.record_read(std::hint::black_box(name));
+        }
+        let coalesced_time = coalesced_started.elapsed();
+        let tracked = tracker.into_reads();
+
+        eprintln!(
+            "repeated service reads: eager allocations {eager_time:?}; coalesced {coalesced_time:?}; ratio {:.1}x; entries={}/{}",
+            eager_time.as_secs_f64() / coalesced_time.as_secs_f64(),
+            eager.len(),
+            tracked.len()
+        );
+        assert_eq!(tracked.len(), 1);
+        assert!(coalesced_time < eager_time);
+    }
+
+    #[test]
+    fn event_handler_resolution_prefers_borrowed_store_lookup() {
+        struct BorrowOnlyStore(serde_json::Value);
+
+        impl VariableStore for BorrowOnlyStore {
+            fn get(&self, _name: &str) -> Option<serde_json::Value> {
+                panic!("owned lookup should not run when a borrowed value exists");
+            }
+
+            fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
+                (name == "handler").then_some(&self.0)
+            }
+
+            fn keys(&self) -> Vec<String> {
+                Vec::new()
+            }
+        }
+
+        let store = BorrowOnlyStore(serde_json::json!("onResolved"));
+        assert_eq!(
+            resolve_event_handler_value(Some(&store), "handler"),
+            "onResolved"
+        );
+    }
+
+    // cargo test -p mesh-core-frontend --release -- borrowed_event_handler_lookup_beats_owned_json_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only event-handler lookup microbenchmark"]
+    fn borrowed_event_handler_lookup_beats_owned_json_clone() {
+        use std::time::Instant;
+
+        struct HandlerStore(serde_json::Value);
+
+        impl VariableStore for HandlerStore {
+            fn get(&self, name: &str) -> Option<serde_json::Value> {
+                (name == "handler").then(|| self.0.clone())
+            }
+
+            fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
+                (name == "handler").then_some(&self.0)
+            }
+
+            fn keys(&self) -> Vec<String> {
+                Vec::new()
+            }
+        }
+
+        let store = HandlerStore(serde_json::json!("onPointerMove"));
+        let iterations = 1_000_000usize;
+
+        let owned_started = Instant::now();
+        let mut owned_bytes = 0usize;
+        for _ in 0..iterations {
+            let handler = store
+                .get(std::hint::black_box("handler"))
+                .and_then(|value| value.as_str().map(str::to_string))
+                .unwrap();
+            owned_bytes = owned_bytes.wrapping_add(handler.len());
+        }
+        let owned_time = owned_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_bytes = 0usize;
+        for _ in 0..iterations {
+            let handler =
+                resolve_event_handler_value(Some(&store), std::hint::black_box("handler"));
+            borrowed_bytes = borrowed_bytes.wrapping_add(handler.len());
+        }
+        let borrowed_time = borrowed_started.elapsed();
+
+        eprintln!(
+            "event handler state lookup: owned JSON clone {owned_time:?}; borrowed {borrowed_time:?}; ratio {:.1}x; bytes={owned_bytes}/{borrowed_bytes}",
+            owned_time.as_secs_f64() / borrowed_time.as_secs_f64()
+        );
+        assert_eq!(owned_bytes, borrowed_bytes);
+        assert!(borrowed_time < owned_time);
+    }
+
+    #[test]
+    fn css_prop_resolution_prefers_borrowed_props_table() {
+        struct BorrowOnlyProps(serde_json::Value);
+
+        impl VariableStore for BorrowOnlyProps {
+            fn get(&self, _name: &str) -> Option<serde_json::Value> {
+                panic!("owned props lookup should not run when borrowing is supported");
+            }
+
+            fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
+                (name == "props").then_some(&self.0)
+            }
+
+            fn keys(&self) -> Vec<String> {
+                Vec::new()
+            }
+        }
+
+        let component = mesh_core_component::parse_component(
+            r#"
+<props>
+  width: { type: "size", default: "10px" }
+</props>
+<template><box/></template>
+"#,
+        )
+        .unwrap();
+        let store = BorrowOnlyProps(serde_json::json!({"width": "42px"}));
+        let props = resolve_css_props(component.props.as_ref(), Some(&store));
+        assert!(matches!(
+            props.get(&prop_variable_key("width")),
+            Some(StyleValue::Literal(value)) if value == "42px"
+        ));
+    }
+
+    // cargo test -p mesh-core-frontend --release -- borrowed_css_props_table_beats_deep_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only CSS props table lookup microbenchmark"]
+    fn borrowed_css_props_table_beats_deep_clone() {
+        use std::time::Instant;
+
+        struct OwnedProps(serde_json::Value);
+        impl VariableStore for OwnedProps {
+            fn get(&self, name: &str) -> Option<serde_json::Value> {
+                (name == "props").then(|| self.0.clone())
+            }
+            fn keys(&self) -> Vec<String> {
+                Vec::new()
+            }
+        }
+
+        let component = mesh_core_component::parse_component(
+            r#"
+<props>
+  width: { type: "size", default: "10px" }
+</props>
+<template><box/></template>
+"#,
+        )
+        .unwrap();
+        let mut values = serde_json::Map::new();
+        values.insert("width".into(), serde_json::json!("42px"));
+        for index in 0..128 {
+            values.insert(
+                format!("unused_{index}"),
+                serde_json::json!({"payload": "x".repeat(1_024), "enabled": true}),
+            );
+        }
+        let value = serde_json::Value::Object(values);
+        let owned = OwnedProps(value.clone());
+        let borrowed = MapStore(HashMap::from([("props".into(), value)]));
+        let iterations = 10_000usize;
+
+        let owned_started = Instant::now();
+        let mut owned_total = 0usize;
+        for _ in 0..iterations {
+            owned_total +=
+                resolve_css_props(component.props.as_ref(), Some(std::hint::black_box(&owned)))
+                    .len();
+        }
+        let owned_time = owned_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_total = 0usize;
+        for _ in 0..iterations {
+            borrowed_total += resolve_css_props(
+                component.props.as_ref(),
+                Some(std::hint::black_box(&borrowed)),
+            )
+            .len();
+        }
+        let borrowed_time = borrowed_started.elapsed();
+
+        eprintln!(
+            "CSS props table: owned deep clone {owned_time:?}; borrowed {borrowed_time:?}; ratio {:.1}x; totals={owned_total}/{borrowed_total}",
+            owned_time.as_secs_f64() / borrowed_time.as_secs_f64()
+        );
+        assert_eq!(owned_total, borrowed_total);
+        assert!(borrowed_time < owned_time);
     }
 }

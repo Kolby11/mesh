@@ -370,7 +370,16 @@ fn collect_retained_snapshots(
     node: &WidgetNode,
     snapshots: &mut HashMap<NodeId, RetainedNodeSnapshot>,
 ) {
-    snapshots.insert(node.id, retained_snapshot(node));
+    let previous = snapshots.insert(node.id, retained_snapshot(node));
+    #[cfg(debug_assertions)]
+    {
+        assert!(
+            previous.is_none(),
+            "runtime NodeId collision while collecting retained snapshots: id={} key={:?}",
+            node.id,
+            node.attributes.get("_mesh_key")
+        );
+    }
     for child in &node.children {
         collect_retained_snapshots(child, snapshots);
     }
@@ -1554,6 +1563,24 @@ mod tests {
                 | RetainedNodeDirtyFlags::ATTRIBUTES
                 | RetainedNodeDirtyFlags::STATE
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "runtime NodeId collision")]
+    fn retained_snapshot_collection_panics_on_duplicate_node_ids() {
+        let mut root = WidgetNode::new("row");
+        root.id = 42;
+        root.attributes
+            .insert("_mesh_key".to_string(), "root".to_string());
+        let mut child = WidgetNode::new("button");
+        child.id = 42;
+        child
+            .attributes
+            .insert("_mesh_key".to_string(), "root/0".to_string());
+        root.children.push(child);
+
+        let mut snapshots = HashMap::new();
+        collect_retained_snapshots(&root, &mut snapshots);
     }
 
     #[test]

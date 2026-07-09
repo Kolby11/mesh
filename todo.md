@@ -570,7 +570,7 @@ duplicating it.
       borrowed path before applying shorthand semantics. A release benchmark
       over 500k flex token resolutions measured 80.558ms for the string-clone
       path versus 73.508ms for the borrowed path (1.1x faster).
-- [ ] **Theme component defaults re-applied per node from string maps.**
+- [x] **Theme component defaults re-applied per node from string maps.**
       `apply_theme_component_defaults` parses `HashMap<String, String>`
       defaults on every node resolution (already visible in the
       post-2026-06-10 toggle profile note above). Pre-bake per-tag
@@ -581,8 +581,14 @@ duplicating it.
         borrowed property names directly instead of constructing a temporary
         `Declaration` for every default on every node. A release benchmark over
         200k default applications measured 165.045ms for declaration allocation
-        versus 154.446ms for direct property application (1.1x faster). Full
-        pre-baked `ComputedStyle` prototypes remain open.
+        versus 154.446ms for direct property application (1.1x faster).
+  - [x] 2026-07-09: each `StyleResolver` now pre-bakes and caches the resolved
+        `ComputedStyle` plus custom-variable seed per `(module, tag)`, then
+        clones that prototype before applying matched rules. Resolver-local
+        caches naturally invalidate on theme/prop rebuilds and keep module
+        defaults isolated. A release benchmark over 200k cache-hit resolutions
+        measured 2.931s reapplying an eight-property string map versus 29.740ms
+        from the prototype (~98.5x faster).
 ### F. Animation & layout per-frame overhead
 
 - [ ] **Retained Taffy layout still re-syncs every node's style per pass.**
@@ -838,7 +844,7 @@ passes A–L; `file:line` as of this scan.
 
 Performance:
 
-- [ ] **Full layout per embedded instance per rebuild.** `build_tree_with_state`
+- [x] **Full layout per embedded instance per rebuild.** `build_tree_with_state`
       always ends with `LayoutEngine::compute_with_measurer`
       (`frontend/compiler/src/lib.rs:203`) and `render_embedded_instance` calls
       it per embedded module instance mid-build; `finalize_tree` then re-lays-out
@@ -846,6 +852,11 @@ Performance:
       ≥3 layout passes per rebuild (+1 per nesting level). Verify nothing reads
       `node.layout` between build and finalize, then skip the build-time layout
       for `FrontendRenderMode::Embedded` (and likely the surface build too).
+      Progress 2026-07-09: embedded builds now defer layout until the composed
+      surface finalization pass; standalone surface/preview builds retain their
+      existing eager layout contract. Added regression coverage for both modes
+      and a release-only benchmark: a 513-node embedded tree over 200 builds
+      measured 2.757s with eager layout versus 2.447s deferred (~1.13x faster).
 - [x] **`{#for}` deep-clones the whole items array every rebuild.**
       `store.get(&for_node.iterable)` (`frontend/compiler/src/render.rs:429`)
       uses owned `get` although borrowed `get_ref` exists and is already used by
@@ -859,7 +870,7 @@ Performance:
       (5.12s -> 4.25s for 80 rebuilds); a small-payload full-render benchmark
       was layout/tree-build dominated and did not show a win, so this is
       specifically an allocation/clone-heavy iterable improvement.
-- [ ] **Post-hoc full-subtree walks per embedded instance.**
+- [x] **Post-hoc full-subtree walks per embedded instance.**
       `namespace_event_handlers` re-`format!`s every handler string on every
       rebuild (`ui/interaction/src/hit_test.rs:359`) even though
       `build_widget_node` already receives `instance_key` — namespace during
@@ -867,6 +878,21 @@ Performance:
       `apply_prop_handler_calls` clones each node's whole `event_handlers` map
       and does an O(handlers × props) scan per node
       (`shell/component/composition.rs:213-239`).
+      Progress 2026-07-09: imported and local embedded component handlers are
+      now namespaced during attribute construction, removing both recursive
+      post-build walks while preserving generic preview builds and prop-handler
+      linkage. A 512-handler release benchmark over 2,000 rebuild-shaped tree
+      clones measured 792.876ms with the post-build walk versus 697.654ms with
+      inline namespacing (~1.14x faster). The `apply_prop_handler_calls`
+      matching pass now builds one handler-value index per embedded subtree
+      instead of repeating an O(handlers × props) scan at every node, while
+      preserving first-prop-wins behavior for duplicate bindings. With 16
+      handler props and 64 child nodes, 20k release iterations measured
+      942.132ms repeated scan versus 524.108ms indexed (~1.8x faster). The
+      dominant single-prop case bypasses hash-index construction and compares
+      against one resolved handler directly; 50k release iterations over 64
+      children measured 1.238s repeated map scans versus 1.159s specialized
+      (~1.07x faster).
 - [ ] **Per-rebuild prop churn.** `ensure_runtime`/`ensure_local_component_runtime`
       re-`set` every prop into script state per instance per rebuild with 2–3
       runtimes-mutex acquisitions (`shell/component/runtime.rs:408-415`);
@@ -879,12 +905,32 @@ Performance:
       `render_local_component`/`ensure_local_component_runtime`, removing the
       duplicate host-module and local-component catalog lookups from each local
       component rebuild. Prop map construction, prop state writes, and style-rule
-      merge caching remain open.
+      merge caching remain open. Progress 2026-07-09: embedded and local
+      component prop synchronization now skips unchanged public-member writes,
+      avoiding JSON-to-Lua conversion, `_ENV` mutation, and module-object
+      rebuilding on steady-state parent rebuilds. A release benchmark over
+      100k unchanged structured prop writes measured 119.964ms eager versus
+      12.451ms equality-gated (~9.6x faster). Prop map construction and
+      style-rule merge caching remain open. Progress 2026-07-09: CSS prop
+      projection now borrows the runtime's `props` object and only falls back
+      to an owned lookup for non-lending stores/live proxies, avoiding a deep
+      clone of unrelated instance props per component build. With one declared
+      prop in a 129-entry structured props object, 10k release projections
+      measured 208.842ms owned versus 1.485ms borrowed (~140.6x faster).
 - [ ] **Per-node build allocations.** `attach_module_id` inserts a fresh
       `_mesh_module_id` String on every node; `TrackingVariableStore` pushes two
       fresh Strings per dotted read per node; `resolve_event_handler_value` does
       an owned `store.get` per handler attribute. Folds into v1.23 interning but
       listed because composition keeps adding string attributes.
+      Progress 2026-07-09: event-handler resolution now prefers
+      `VariableStore::get_ref` and falls back to owned `get` only for stores
+      that cannot lend a value (such as live proxies). A release benchmark over
+      1M handler lookups measured 16.593ms with owned JSON cloning versus
+      8.630ms borrowed (~1.9x faster). Consecutive duplicate service-field
+      reads within one node are now coalesced before allocating service/field
+      strings; 1M repeated reads measured 93.496ms eager versus 11.050ms
+      coalesced (~8.5x faster). Module-id and unique tracked-read string
+      allocations remain open.
 
 Structure / correctness:
 
@@ -1067,11 +1113,15 @@ Structure:
       release benchmark over a representative primitive field mix measured
       3.072ms for the byte fallback versus 2.232ms word-at-a-time (1.4x
       faster across 5 million iterations).
-- [ ] **No `NodeId` collision detection.** Runtime ids are FNV/chained hashes
+- [x] **No `NodeId` collision detection.** Runtime ids are FNV/chained hashes
       of key paths (`runtime_tree.rs:346-365`) used as identity keys by all
       three retained systems and the display-list keys; a collision silently
       aliases two nodes (wrong reuse, wrong damage) with no diagnostic. Add a
       debug-build assertion where `node_keys` is populated.
+      Completed 2026-07-09: retained snapshot collection now asserts in debug
+      builds when two nodes produce the same `NodeId`, with regression coverage
+      for duplicate-id detection. Release builds keep the previous zero-cost
+      insert path.
 - [ ] **Identity travels as a string attribute.** `annotate_runtime_tree`
       writes `_mesh_key` into `attributes` (`runtime_tree.rs:711`) purely so
       interaction/refs/metrics can read identity back out of a string map,
@@ -1154,15 +1204,30 @@ Performance:
       first-writer variable precedence. A release benchmark over 3.2 million
       token insertions measured 237.080ms for per-node normalization versus
       132.686ms from cached entries (1.8x faster).
-- [ ] **`seed_prop_variables` clones every prop key+value per node**
+- [x] **`seed_prop_variables` clones every prop key+value per node**
       (`resolve.rs:599-603`) even though props are per-instance constants for
       the whole pass. Seed once per pass or resolve through a layered lookup
       (props map consulted after scratch) instead of copying.
+      Completed 2026-07-09: variable resolution now consults per-node scratch
+      first and the resolver's immutable prop map second, preserving local
+      custom-property override semantics without seeding clones. Embedded
+      `var()`/`prop()` substitution uses the same layered lookup. With 32 props,
+      200k release resolutions measured 582.988ms cloning per-node seeds versus
+      20.304ms layered (~28.7x faster).
 - [ ] **`theme_reference_to_token_name` allocates and canonicalizes per
       `var()` reference per declaration per node** (`resolve.rs:1916-1922` +
       `css_custom_property_to_token_name` prefix tables). Double-key theme
       tokens by their CSS custom-property name at theme load, or intern the
       mapping, so hot lookups are a single hash probe.
+      Progress 2026-07-09: `StyleResolver` now interns canonical token names
+      per reference as `Arc<str>` and the simple string/color/number plus
+      diagnostics paths reuse them. A release benchmark over 1M
+      `--mesh-color-primary` mappings measured 49.820ms recanonicalizing versus
+      15.449ms cached (~3.2x faster). Embedded multi-reference substitution
+      now also routes through the resolver cache and the duplicate standalone
+      helper was removed. A release benchmark over 300k embedded substitutions
+      measured 96.285ms recanonicalizing versus 86.376ms cached (~1.1x faster).
+      A theme-load double-keyed token map may still be a broader follow-up.
 - [ ] Confirmed mechanism for the existing "pre-bake per-tag prototypes" item:
       `apply_theme_defaults_map_no_diagnostics` re-clones each default's
       property String and re-classifies its value per node per pass
@@ -1353,7 +1418,7 @@ proxy seen-cache) are confirmed in place; findings below are what remains.
 
 Performance:
 
-- [ ] **`refresh_module_object` re-serializes the entire component state per
+- [x] **`refresh_module_object` re-serializes the entire component state per
       handler call for every proxy-bearing component.** Any component that
       `require`s a service interface registers state proxies, so
       `has_proxies()` is true and the generation skip never applies
@@ -1367,6 +1432,13 @@ Performance:
       consumer remains, then delete the refresh (and the lane) per the
       no-backward-compat rule — likely the single largest remaining boundary
       cost for service-connected components.
+      Completed 2026-07-09: verified no shipped module consumes
+      `module.state`/`module.exports`, removed both legacy tables and all
+      refresh/export synchronization, and retained `module.events` as the
+      supported named-event API. Host-seeded values remain direct component
+      globals. A proxy-bearing 65-field release benchmark over 20k legacy
+      mirrors measured 1.476s for snapshot + JSON→Lua serialization versus
+      9.497µs of remaining generation bookkeeping (~155k× difference).
 - [ ] **The sync "fast path" still round-trips every known global per
       handler.** For each user global: env read + `from_value` Lua→JSON
       conversion + `state.set` deep-compare, changed or not
@@ -1377,19 +1449,33 @@ Performance:
       keep values in Rust and expose globals through the proxy so there is no
       sync at all. Measure script read-through cost first; pairs with the
       v1.17 per-thread-VM work.
-- [ ] **`ScriptState::snapshot()` with proxies has no caching.** The
+      Progress 2026-07-09: known scalar globals now compare borrowed Lua
+      bool/integer/number/string values directly against current JSON state and
+      skip `from_value` plus `ScriptState::set` when unchanged; tables and
+      changed values retain the conservative conversion path. With 512
+      unchanged numeric globals over 5k handler syncs, release time fell from
+      468.867ms to 410.951ms (~1.14x faster). Avoiding the `_ENV` read itself
+      still requires the forwarding-proxy architecture described above.
+- [x] **`ScriptState::snapshot()` with proxies has no caching.** The
       non-proxy branch caches by generation; the proxy branch rebuilds and
       deep-clones everything on every call (`state.rs:196-231`). Even after
       the `module.state` deletion, remaining `snapshot()` callers pay this —
       cache the variables portion by generation and overlay proxy getters.
-- [ ] Minor: `sync_module_exports_from_lua` runs per sync (module table read
+      Completed 2026-07-09: `snapshot()` now always obtains the local-variable
+      object through the generation cache, then overlays fresh proxy getter
+      values for proxy-bearing states. Added regression coverage proving proxy
+      values remain live while local variables are preserved. A release
+      benchmark over 20k proxy-bearing snapshots with 128 local values measured
+      455.840ms rebuilding locals versus 385.254ms from the cached variable
+      snapshot (~1.2x faster).
+- [x] Minor: `sync_module_exports_from_lua` runs per sync (module table read
       + `from_value` + `set`) even for components that export nothing
       (`runtime.rs:1765-1775`); record "has exports" once at script load and
-      skip.
+      skip. Removed with the legacy `module.exports` lane on 2026-07-09.
 
 Structure:
 
-- [ ] **Legacy `module.state` / `module.exports` lanes.** Documented as
+- [x] **Legacy `module.state` / `module.exports` lanes.** Documented as
       compatibility-only (`docs/modules/frontend/core/README.md`), but they
       still drive per-handler work (items above). Audit consumers and remove
       per the no-backward-compat rule; if `module.exports` is still the
@@ -1449,6 +1535,16 @@ Performance:
       allocate fresh Strings 2–3× per event across normalize/record/profiling
       (`service_state.rs:44,92`, `interface.rs:95-118`); thread the canonical
       name through instead of re-deriving, or intern interface names (v1.23).
+      Progress 2026-07-09: canonical names now use a `Cow<str>` helper that
+      borrows already-qualified interfaces, normalized service events carry
+      the canonical name forward into record/profiling, and allocation occurs
+      only when a short alias needs the `mesh.` prefix or state is inserted.
+      Over 2M canonical-name calls, release time fell from 20.827ms owned to
+      6.446ms borrowed (~3.2x faster). Runtime event observation now also
+      borrows the `mesh.`-stripped service segment rather than allocating once
+      per component/runtime check; 2M projections measured 1.921ms owned versus
+      1.267ms borrowed (~1.5x faster). Callers that retain names still use the
+      owned APIs.
 
 Structure:
 
@@ -1485,7 +1581,7 @@ Performance:
       nodes get converted + `set_style` is the mechanism that makes the
       existing "dirty-node-only sync" item (F) pay off twice: skips the
       conversion walk *and* preserves Taffy's caches for clean subtrees.
-- [ ] **Text measurement clones the content String twice per node per pass.**
+- [x] **Text measurement clones the content String twice per node per pass.**
       `update_text_context`/`build_taffy_tree` clone every text node's
       `content` into `TextMeasureData` per layout-dirty and structural pass
       (`layout.rs:857-884,580-596`), and `TextMeasureKey::new` clones it
@@ -1494,15 +1590,32 @@ Performance:
       content as `Arc<str>` (the §N `Arc<str>` payload item's layout face) and
       probe the intrinsic cache with a borrowed/hashed key instead of an owned
       one.
-- [ ] **Structural reconcile is string-keyed and clone-heavy.**
+      Completed 2026-07-09: `TextMeasureData` and `TextMeasureKey` now share
+      content through `Arc<str>`, leaving one node-attribute-to-measurement
+      allocation per layout sync and making cache-key construction a pointer
+      clone. A 376-byte string benchmark over 1M iterations measured 28.481ms
+      for two `String` clones versus 9.820ms for `Arc` build+clone (~2.9x
+      faster). Text content-change measurement regression coverage passes.
+- [x] **Structural reconcile is string-keyed and clone-heavy.**
       `reconcile_retained_taffy_node` clones each node's `_mesh_key` String
       (`layout.rs:773-810`), `collect_mesh_keys` clones every key into a
       `HashSet<String>` per structural pass (`layout.rs:901-908`), and the
       stale sweep clones + length-sorts keys (`layout.rs:706-722`).
+      Progress 2026-07-09: existing retained nodes now borrow `_mesh_key`
+      during lookup and clone only on insertion; the live-key set borrows from
+      the widget tree, so only genuinely stale keys are cloned for ordered
+      removal. Add/remove/reorder parity tests pass. A 1,024-key release
+      benchmark over 5k collections measured 219.204ms cloned versus 70.786ms
+      borrowed (~3.1x faster). Completed 2026-07-09: retained Taffy identity is
+      now keyed by stable `NodeId`; structural stale removal finds stale roots
+      through Taffy's parent links and removes each subtree once. Five retained
+      add/remove/reorder/style/layout parity cases pass. A 5M-lookup release
+      benchmark measured 86.858ms for long String keys versus 47.315ms for
+      `NodeId` (~1.8x faster).
 
 Structure:
 
-- [ ] **The LAYOUT-03 string-keying rationale is obsolete.**
+- [x] **The LAYOUT-03 string-keying rationale is obsolete.**
       `PerSurfaceLayoutState.node_map` is keyed by `_mesh_key` String with a
       comment "NOT ephemeral NodeId per LAYOUT-03" (`layout.rs:144-146`) — but
       runtime NodeIds are no longer ephemeral: they are stable hash-chained
@@ -1511,6 +1624,8 @@ Structure:
       the per-node hash of long key strings in `retained_taffy_id`
       (`layout.rs:910-915`). Do together with the §Q interaction-map NodeId
       migration so `_mesh_key` strings have no remaining hot consumers.
+      Completed for retained layout on 2026-07-09; interaction/refs maps remain
+      separate follow-up consumers of `_mesh_key`.
 - [ ] Healthy/confirmed: paint-only frames skip all layout sync; fresh
       `node_map`/`text_nodes` maps per pass were measured (scratch reuse
       rejected 2026-07-04); intrinsic text cache is LRU-bounded; Taffy

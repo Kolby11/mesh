@@ -23,7 +23,7 @@ impl Shell {
         ) = (profiling_started, &event)
         {
             self.record_backend_state_publish_delivery(
-                &canonical_interface_name(service),
+                service,
                 source_module,
                 started.elapsed(),
                 Some("broadcast_service_event"),
@@ -58,7 +58,7 @@ impl Shell {
             })
         {
             return ServiceEvent::Updated {
-                service,
+                service: interface,
                 source_module,
                 payload,
             };
@@ -74,7 +74,7 @@ impl Shell {
             }
         }
         ServiceEvent::Updated {
-            service,
+            service: interface,
             source_module,
             payload,
         }
@@ -89,13 +89,13 @@ impl Shell {
         else {
             return true;
         };
-        let interface = canonical_interface_name(service);
+        let interface = canonical_interface_name_cow(service);
         let shell_authoritative_theme_update =
             interface == "mesh.theme" && source_module == "@mesh/shell";
-        if let Some(slot) = self.backend_runtimes.get(&interface) {
+        if let Some(slot) = self.backend_runtimes.get(interface.as_ref()) {
             if slot.provider_id != *source_module && !shell_authoritative_theme_update {
                 tracing::debug!(
-                    interface,
+                    interface = interface.as_ref(),
                     source_module,
                     active_provider = %slot.provider_id,
                     "ignoring stale service update from inactive provider"
@@ -103,7 +103,7 @@ impl Shell {
                 return false;
             }
         } else if self
-            .backend_runtime_status(&interface, source_module)
+            .backend_runtime_status(interface.as_ref(), source_module)
             .is_some_and(|entry| {
                 matches!(
                     entry.status,
@@ -114,19 +114,20 @@ impl Shell {
             })
         {
             tracing::debug!(
-                interface,
+                interface = interface.as_ref(),
                 source_module,
                 "ignoring service update from terminal backend provider"
             );
             return false;
         }
-        if let Some(latest) = self.latest_service_state.get(&interface)
+        if let Some(latest) = self.latest_service_state.get(interface.as_ref())
             && latest.provider_id == *source_module
             && latest.state.eq(payload)
         {
             return false;
         }
         self.validate_service_state_shape(&interface, source_module, &payload);
+        let interface = interface.into_owned();
         self.latest_service_state.insert(
             interface.clone(),
             LatestServiceState::new(interface, source_module.clone(), payload.clone()),

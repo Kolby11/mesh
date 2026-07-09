@@ -1,6 +1,6 @@
 use mesh_core_elements::VariableStore;
 use mesh_core_locale::LocaleEngine;
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
@@ -195,39 +195,41 @@ impl ScriptState {
 
     /// Return a JSON object snapshot of all visible state variables.
     pub fn snapshot(&self) -> Value {
+        let snapshot = self.variable_snapshot();
         if self.proxies.is_empty() {
-            let generation = self.snapshot_generation;
-            if let Some((cached_generation, cached_snapshot)) = self
-                .cached_snapshot
-                .lock()
-                .expect("snapshot cache poisoned")
-                .as_ref()
-                && *cached_generation == generation
-            {
-                return cached_snapshot.clone();
-            }
-
-            let snapshot = Value::Object(
-                self.variables
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.as_ref().clone()))
-                    .collect(),
-            );
-            *self
-                .cached_snapshot
-                .lock()
-                .expect("snapshot cache poisoned") = Some((generation, snapshot.clone()));
             return snapshot;
         }
 
-        let mut object = Map::with_capacity(self.variables.len() + self.proxies.len());
-        for (key, value) in &self.variables {
-            object.insert(key.clone(), value.as_ref().clone());
-        }
+        let mut object = match snapshot {
+            Value::Object(object) => object,
+            other => return other,
+        };
         for (key, proxy) in &self.proxies {
             object.insert(key.clone(), (proxy.getter)());
         }
         Value::Object(object)
+    }
+
+    fn variable_snapshot(&self) -> Value {
+        let generation = self.snapshot_generation;
+        let mut cached = self
+            .cached_snapshot
+            .lock()
+            .expect("snapshot cache poisoned");
+        if let Some((cached_generation, cached_snapshot)) = cached.as_ref()
+            && *cached_generation == generation
+        {
+            return cached_snapshot.clone();
+        }
+
+        let snapshot = Value::Object(
+            self.variables
+                .iter()
+                .map(|(key, value)| (key.clone(), value.as_ref().clone()))
+                .collect(),
+        );
+        *cached = Some((generation, snapshot.clone()));
+        snapshot
     }
 }
 

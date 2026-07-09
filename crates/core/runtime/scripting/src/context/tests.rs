@@ -170,37 +170,24 @@ end
 }
 
 #[test]
-fn module_object_exposes_state_and_exports() {
+fn module_object_keeps_events_without_legacy_state_and_exports() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.load_script(
         r#"
-count = 1
-module.exports.visible = true
-module.exports.label = "Audio"
-
-function render()
-    count = count + 1
-    latest_count = module.state.count
-    exported_label = module.exports.label
-end
+has_state = module.state ~= nil
+has_exports = module.exports ~= nil
+module.events.changed:subscribe(function(value)
+    seen = value
+end)
+module.events.changed:emit("ready")
 "#,
     )
     .unwrap();
 
-    assert_eq!(
-        ctx.state.get("exports"),
-        Some(serde_json::json!({ "visible": true, "label": "Audio" }))
-    );
-
-    ctx.call_handler("render", &[]).unwrap();
-
-    assert_eq!(ctx.state.get("count"), Some(serde_json::json!(2)));
-    assert_eq!(ctx.state.get("latest_count"), Some(serde_json::json!(1)));
-    assert_eq!(
-        ctx.state.get("exported_label"),
-        Some(serde_json::json!("Audio"))
-    );
+    assert_eq!(ctx.state.get("has_state"), Some(serde_json::json!(false)));
+    assert_eq!(ctx.state.get("has_exports"), Some(serde_json::json!(false)));
+    assert_eq!(ctx.state.get("seen"), Some(serde_json::json!("ready")));
 }
 
 #[test]
@@ -515,19 +502,130 @@ end
 }
 
 #[test]
-fn module_state_reflects_host_seeded_values_before_script_runs() {
+fn unchanged_member_state_write_is_skipped() {
+    let mut ctx = ScriptContext::new("@mesh/member-state", CapabilitySet::new()).unwrap();
+    ctx.set_member_state("label", serde_json::json!("stable"))
+        .unwrap();
+    let generation = ctx.state().mutation_generation();
+
+    assert!(
+        !ctx.set_member_state_if_changed("label", serde_json::json!("stable"))
+            .unwrap()
+    );
+    assert_eq!(ctx.state().mutation_generation(), generation);
+    assert!(
+        ctx.set_member_state_if_changed("label", serde_json::json!("changed"))
+            .unwrap()
+    );
+    assert_ne!(ctx.state().mutation_generation(), generation);
+}
+
+// Run with:
+// cargo test -p mesh-core-scripting --release -- unchanged_member_state_write_benchmark --ignored --nocapture
+#[test]
+#[ignore = "release-only unchanged member-state write microbenchmark"]
+fn unchanged_member_state_write_benchmark() {
+    use std::time::Instant;
+
+    let value = serde_json::json!({
+        "title": "stable prop",
+        "items": [1, 2, 3, 4],
+        "enabled": true
+    });
+    let iterations = 100_000usize;
+    let mut eager = ScriptContext::new("@mesh/eager-member", CapabilitySet::new()).unwrap();
+    let mut gated = ScriptContext::new("@mesh/gated-member", CapabilitySet::new()).unwrap();
+    eager.set_member_state("config", value.clone()).unwrap();
+    gated.set_member_state("config", value.clone()).unwrap();
+
+    let eager_started = Instant::now();
+    for _ in 0..iterations {
+        eager
+            .set_member_state("config", std::hint::black_box(value.clone()))
+            .unwrap();
+    }
+    let eager_time = eager_started.elapsed();
+
+    let gated_started = Instant::now();
+    let mut changed = 0usize;
+    for _ in 0..iterations {
+        changed += gated
+            .set_member_state_if_changed("config", std::hint::black_box(value.clone()))
+            .unwrap() as usize;
+    }
+    let gated_time = gated_started.elapsed();
+
+    eprintln!(
+        "unchanged member prop: eager {eager_time:?}; gated {gated_time:?}; ratio {:.1}x; changed={changed}",
+        eager_time.as_secs_f64() / gated_time.as_secs_f64()
+    );
+    assert_eq!(changed, 0);
+    assert!(gated_time < eager_time);
+}
+
+#[test]
+fn host_seeded_global_is_visible_before_script_runs() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_global_state("seeded", serde_json::json!("ready"))
         .unwrap();
     ctx.load_script(
         r#"
-seed_seen = module.state.seeded
+seed_seen = seeded
 "#,
     )
     .unwrap();
 
     assert_eq!(ctx.state.get("seed_seen"), Some(serde_json::json!("ready")));
+}
+
+// cargo test -p mesh-core-scripting --release -- removed_legacy_module_state_mirror_avoids_proxy_snapshot_serialization --ignored --nocapture
+#[test]
+#[ignore = "release-only legacy module-state mirror microbenchmark"]
+fn removed_legacy_module_state_mirror_avoids_proxy_snapshot_serialization() {
+    use std::time::Instant;
+
+    let mut ctx =
+        ScriptContext::new("@mesh/module-mirror-benchmark", CapabilitySet::new()).unwrap();
+    ctx.load_script("").unwrap();
+    for index in 0..64 {
+        ctx.state_mut().set(
+            format!("value_{index}"),
+            serde_json::json!({
+                "label": format!("value {index}"),
+                "samples": [1, 2, 3, 4, 5, 6, 7, 8]
+            }),
+        );
+    }
+    ctx.state_mut().register_proxy(
+        "service",
+        Box::new(|| serde_json::json!({"percent": 72, "muted": false})),
+        None,
+    );
+    let iterations = 20_000usize;
+
+    let mirrored_started = Instant::now();
+    let mut mirrored_total = 0usize;
+    for _ in 0..iterations {
+        mirrored_total =
+            mirrored_total.wrapping_add(ctx.legacy_module_state_mirror_for_benchmark());
+    }
+    let mirrored_time = mirrored_started.elapsed();
+
+    let removed_started = Instant::now();
+    let mut removed_total = 0u64;
+    for _ in 0..iterations {
+        removed_total =
+            removed_total.wrapping_add(std::hint::black_box(ctx.state().mutation_generation()));
+    }
+    let removed_time = removed_started.elapsed();
+
+    eprintln!(
+        "legacy module.state mirror: serialized {mirrored_time:?}; removed-path bookkeeping {removed_time:?}; ratio {:.1}x; totals={mirrored_total}/{removed_total}",
+        mirrored_time.as_secs_f64() / removed_time.as_secs_f64()
+    );
+    assert!(mirrored_total > 0);
+    assert!(removed_time < mirrored_time);
 }
 
 #[test]
@@ -1340,6 +1438,102 @@ fn snapshot_reads_fresh_proxy_values() {
 }
 
 #[test]
+fn proxy_snapshot_reuses_cached_variables_but_keeps_proxy_fresh() {
+    let value = Arc::new(AtomicUsize::new(1));
+    let proxy_value = Arc::clone(&value);
+    let mut state = ScriptState::new();
+    state.set(
+        "local",
+        serde_json::json!({
+            "nested": [1, 2, 3],
+            "label": "cached"
+        }),
+    );
+    state.register_proxy(
+        "live",
+        Box::new(move || serde_json::json!(proxy_value.load(Ordering::SeqCst))),
+        None,
+    );
+
+    assert_eq!(
+        state.snapshot(),
+        serde_json::json!({
+            "local": {
+                "nested": [1, 2, 3],
+                "label": "cached"
+            },
+            "live": 1
+        })
+    );
+    value.store(2, Ordering::SeqCst);
+    assert_eq!(
+        state.snapshot(),
+        serde_json::json!({
+            "local": {
+                "nested": [1, 2, 3],
+                "label": "cached"
+            },
+            "live": 2
+        })
+    );
+}
+
+// cargo test -p mesh-core-scripting --release -- cached_proxy_snapshot_variables_beat_rebuilding_locals --ignored --nocapture
+#[test]
+#[ignore = "release-only proxy snapshot variable-cache microbenchmark"]
+fn cached_proxy_snapshot_variables_beat_rebuilding_locals() {
+    let mut state = ScriptState::new();
+    for index in 0..128 {
+        state.set(
+            format!("value_{index}"),
+            serde_json::json!({
+                "label": format!("value {index}"),
+                "samples": [1, 2, 3, 4, 5, 6, 7, 8]
+            }),
+        );
+    }
+    state.register_proxy(
+        "service",
+        Box::new(|| serde_json::json!({"percent": 72, "muted": false})),
+        None,
+    );
+    let iterations = 20_000usize;
+
+    let old_started = std::time::Instant::now();
+    let mut old_total = 0usize;
+    for _ in 0..iterations {
+        let mut object = serde_json::Map::with_capacity(state.variables.len() + 1);
+        for (key, value) in &state.variables {
+            object.insert(key.clone(), value.as_ref().clone());
+        }
+        object.insert(
+            "service".to_string(),
+            serde_json::json!({"percent": 72, "muted": false}),
+        );
+        old_total = old_total.wrapping_add(std::hint::black_box(object.len()));
+    }
+    let old_time = old_started.elapsed();
+
+    let _ = state.snapshot();
+    let new_started = std::time::Instant::now();
+    let mut new_total = 0usize;
+    for _ in 0..iterations {
+        let snapshot = state.snapshot();
+        new_total = new_total.wrapping_add(std::hint::black_box(
+            snapshot.as_object().map_or(0, serde_json::Map::len),
+        ));
+    }
+    let new_time = new_started.elapsed();
+
+    eprintln!(
+        "proxy snapshot locals: rebuild {old_time:?}; cached {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+        old_time.as_secs_f64() / new_time.as_secs_f64()
+    );
+    assert_eq!(old_total, new_total);
+    assert!(new_time < old_time);
+}
+
+#[test]
 fn script_state_clone_shares_variable_values() {
     let mut state = ScriptState::new();
     state.set(
@@ -1527,6 +1721,45 @@ end
         new_ns < old_ns,
         "write-log sync should beat the old full _ENV scan path"
     );
+}
+
+// cargo test -p mesh-core-scripting --release -- unchanged_scalar_gate_beats_lua_json_roundtrip --ignored --nocapture
+#[test]
+#[ignore = "release-only unchanged scalar sync microbenchmark"]
+fn unchanged_scalar_gate_beats_lua_json_roundtrip() {
+    use std::time::Instant;
+
+    let mut source = String::new();
+    for index in 0..512usize {
+        source.push_str(&format!("value_{index} = {index}\n"));
+    }
+    source.push_str("function noop() end\n");
+    let iterations = 5_000usize;
+
+    let mut roundtrip = ScriptContext::new("@test/scalar-roundtrip", CapabilitySet::new()).unwrap();
+    roundtrip.load_script(&source).unwrap();
+    let roundtrip_started = Instant::now();
+    for _ in 0..iterations {
+        roundtrip
+            .call_lua_function_without_sync_for_test("noop")
+            .unwrap();
+        roundtrip.sync_known_globals_without_scalar_gate_for_benchmark();
+    }
+    let roundtrip_time = roundtrip_started.elapsed();
+
+    let mut gated = ScriptContext::new("@test/scalar-gated", CapabilitySet::new()).unwrap();
+    gated.load_script(&source).unwrap();
+    let gated_started = Instant::now();
+    for _ in 0..iterations {
+        gated.call_handler("noop", &[]).unwrap();
+    }
+    let gated_time = gated_started.elapsed();
+
+    eprintln!(
+        "unchanged scalar sync: Lua→JSON roundtrip {roundtrip_time:?}; borrowed equality gate {gated_time:?}; ratio {:.1}x",
+        roundtrip_time.as_secs_f64() / gated_time.as_secs_f64()
+    );
+    assert!(gated_time < roundtrip_time);
 }
 
 // Run with:

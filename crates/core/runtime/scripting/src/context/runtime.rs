@@ -210,10 +210,6 @@ pub struct ScriptContext {
     /// `bind:this` proxy. The shell consumes this before doing the expensive
     /// cross-instance state resync.
     live_binding_external_accessed: Arc<AtomicBool>,
-    /// `state.snapshot_generation()` at the time of the last `refresh_module_object` call.
-    /// When this matches the current generation (and no proxies exist), the Lua
-    /// `module.state` table is already up to date and the rebuild can be skipped.
-    last_module_refresh_gen: u64,
     /// Fingerprint of the last element metrics snapshot converted into Lua.
     /// Shell paints commonly publish identical geometry across many frames.
     last_element_metrics_fingerprint: Option<u64>,
@@ -367,7 +363,6 @@ impl ScriptContext {
             tracking_storage_reads: Arc::new(Mutex::new(false)),
             pending_side_channels: Arc::new(AtomicBool::new(false)),
             live_binding_external_accessed: Arc::new(AtomicBool::new(false)),
-            last_module_refresh_gen: u64::MAX,
             last_element_metrics_fingerprint: None,
             cached_self_table: None,
         })
@@ -478,7 +473,6 @@ impl ScriptContext {
         // Host API already installed into env_table by ensure_initialized.
         // builtin_globals already populated.
         self.install_interface_imports(imports)?;
-        self.refresh_module_object();
         self.lua()
             .load(source)
             .set_name(&self.module_id)
@@ -601,7 +595,6 @@ impl ScriptContext {
         {
             let _ = self.lua().globals().set("__mesh_locale_current", locale);
         }
-        self.refresh_module_object();
     }
 
     #[cfg(test)]
@@ -678,7 +671,6 @@ impl ScriptContext {
             .set(name, lua_value)
             .map_err(map_lua_error)?;
         self.state.set(name.to_string(), value);
-        self.refresh_module_object();
         Ok(())
     }
 
@@ -695,8 +687,28 @@ impl ScriptContext {
         let lua_value = self.lua().to_value(&value).map_err(lua_err)?;
         self.env().set(name, lua_value).map_err(map_lua_error)?;
         self.state.set(name.to_string(), value);
-        self.refresh_module_object();
         Ok(())
+    }
+
+    /// Set a public member only when its Rust-side value changed.
+    ///
+    /// Host code commonly re-publishes component props during every tree
+    /// rebuild. Avoiding an unchanged write skips JSON-to-Lua conversion, an
+    /// `_ENV` mutation, and rebuilding the component's public-member object.
+    pub fn set_member_state_if_changed(
+        &mut self,
+        name: &str,
+        value: Value,
+    ) -> Result<bool, ScriptError> {
+        if self
+            .state
+            .get_ref(name)
+            .is_some_and(|current| current == &value)
+        {
+            return Ok(false);
+        }
+        self.set_member_state(name, value)?;
+        Ok(true)
     }
 
     pub fn tracked_service_fields(&self) -> HashMap<String, HashSet<String>> {
@@ -790,12 +802,7 @@ impl ScriptContext {
     }
 
     pub fn public_field_names(&self) -> Vec<String> {
-        let mut names = self
-            .state
-            .keys()
-            .into_iter()
-            .filter(|name| name != "exports")
-            .collect::<Vec<_>>();
+        let mut names = self.state.keys();
         names.sort();
         names
     }
@@ -1167,8 +1174,6 @@ impl ScriptContext {
 
     fn install_module_api(&mut self, globals: &mlua::Table) -> Result<(), ScriptError> {
         let module_object = self.lua().create_table().map_err(lua_err)?;
-        let module_state = self.lua().create_table().map_err(lua_err)?;
-        let module_exports = self.lua().create_table().map_err(lua_err)?;
         let module_events = self.lua().create_table().map_err(lua_err)?;
         let module_events_meta = self.lua().create_table().map_err(lua_err)?;
         module_events_meta
@@ -1185,10 +1190,6 @@ impl ScriptContext {
             .map_err(lua_err)?;
         module_events
             .set_metatable(Some(module_events_meta))
-            .map_err(lua_err)?;
-        module_object.set("state", module_state).map_err(lua_err)?;
-        module_object
-            .set("exports", module_exports)
             .map_err(lua_err)?;
         module_object
             .set("events", module_events)
@@ -1760,6 +1761,13 @@ impl ScriptContext {
             for key in &self.user_global_keys {
                 if let Ok(lua_value) = self.env().get::<LuaValue>(key.as_str()) {
                     if !matches!(lua_value, LuaValue::Nil | LuaValue::Function(_)) {
+                        if self
+                            .state
+                            .get_ref(key)
+                            .is_some_and(|current| lua_scalar_matches_json(&lua_value, current))
+                        {
+                            continue;
+                        }
                         if let Ok(value) = self.lua().from_value::<Value>(lua_value) {
                             self.state.set(key.clone(), value);
                         }
@@ -1787,9 +1795,6 @@ impl ScriptContext {
                 }
             }
         }
-
-        self.sync_module_exports_from_lua();
-        self.refresh_module_object();
 
         if self
             .env()
@@ -1843,36 +1848,6 @@ impl ScriptContext {
         }
     }
 
-    fn sync_module_exports_from_lua(&mut self) {
-        let Ok(module_table) = self.env().get::<Table>("module") else {
-            return;
-        };
-        let Ok(exports) = module_table.get::<LuaValue>("exports") else {
-            return;
-        };
-        if let Ok(value) = self.lua().from_value::<Value>(exports) {
-            self.state.set("exports", value);
-        }
-    }
-
-    fn refresh_module_object(&mut self) {
-        // Skip the expensive full-state re-serialization when nothing has changed.
-        // Proxy getters are external and can change without going through set(),
-        // so we must always rebuild when proxies are present.
-        let current_gen = self.state.snapshot_generation();
-        if !self.state.has_proxies() && self.last_module_refresh_gen == current_gen {
-            return;
-        }
-
-        let Ok(module_table) = self.env().get::<Table>("module") else {
-            return;
-        };
-        if let Ok(state_value) = self.lua().to_value(&self.state.snapshot()) {
-            let _ = module_table.set("state", state_value);
-        }
-        self.last_module_refresh_gen = current_gen;
-    }
-
     #[cfg(test)]
     pub(crate) fn has_user_global_key_for_test(&self, key: &str) -> bool {
         self.user_global_key_set.contains(key)
@@ -1881,6 +1856,24 @@ impl ScriptContext {
     #[cfg(test)]
     pub(crate) fn clear_cached_self_table_for_benchmark(&mut self) {
         self.cached_self_table = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn legacy_module_state_mirror_for_benchmark(&self) -> usize {
+        let snapshot = self.state.snapshot();
+        let count = snapshot.as_object().map_or(0, |values| values.len());
+        let module_table = self
+            .env()
+            .get::<Table>("module")
+            .expect("module table installed");
+        let lua_value = self
+            .lua()
+            .to_value(&snapshot)
+            .expect("snapshot converts to Lua");
+        module_table
+            .set("state", lua_value)
+            .expect("legacy state mirror writes");
+        count
     }
 
     #[cfg(test)]
@@ -1979,13 +1972,38 @@ impl ScriptContext {
                 self.user_global_keys.push(name);
             }
         }
-        self.sync_module_exports_from_lua();
-        self.refresh_module_object();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn sync_known_globals_without_scalar_gate_for_benchmark(&mut self) {
+        for key in &self.user_global_keys {
+            if let Ok(lua_value) = self.env().get::<LuaValue>(key.as_str())
+                && !matches!(lua_value, LuaValue::Nil | LuaValue::Function(_))
+                && let Ok(value) = self.lua().from_value::<Value>(lua_value)
+            {
+                self.state.set(key.clone(), value);
+            }
+        }
     }
 }
 
 fn is_lifecycle_handler(name: &str) -> bool {
     matches!(name, "init" | "render" | "mount" | "unmount" | "onRender")
+}
+
+fn lua_scalar_matches_json(lua_value: &LuaValue, json_value: &Value) -> bool {
+    match (lua_value, json_value) {
+        (LuaValue::Boolean(left), Value::Bool(right)) => left == right,
+        (LuaValue::Integer(left), Value::Number(right)) => right.as_i64() == Some(*left),
+        (LuaValue::Number(left), Value::Number(right)) => {
+            right.as_f64().is_some_and(|right| left == &right)
+        }
+        (LuaValue::String(left), Value::String(right)) => left
+            .to_str()
+            .ok()
+            .is_some_and(|left| left.as_ref() == right),
+        _ => false,
+    }
 }
 
 fn is_reserved_runtime_hook(name: &str) -> bool {

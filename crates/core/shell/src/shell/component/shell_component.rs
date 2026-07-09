@@ -25,7 +25,7 @@ impl FrontendSurfaceComponent {
     ) -> bool {
         match event {
             ServiceEvent::Updated { service, .. } => {
-                let service_name = crate::shell::service::service_name_from_interface(service);
+                let service_name = crate::shell::service::service_name_from_interface_cow(service);
                 runtime
                     .script_ctx
                     .has_tracked_fields_for_service(&service_name)
@@ -34,7 +34,7 @@ impl FrontendSurfaceComponent {
                         .has_interface_event_subscription_for_service(&service_name)
             }
             ServiceEvent::InterfaceEvent { service, name, .. } => {
-                let service_name = crate::shell::service::service_name_from_interface(service);
+                let service_name = crate::shell::service::service_name_from_interface_cow(service);
                 runtime
                     .script_ctx
                     .is_subscribed_to_interface_event(&service_name, name)
@@ -1580,7 +1580,7 @@ impl FrontendSurfaceComponent {
         else {
             return Ok(Vec::new());
         };
-        let service_name = crate::shell::service::service_name_from_interface(service);
+        let service_name = crate::shell::service::service_name_from_interface_cow(service);
         let mut needs_rebuild = false;
         let mut runtimes = {
             let mut runtimes = self.runtimes.lock().unwrap();

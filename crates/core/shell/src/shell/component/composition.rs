@@ -252,29 +252,74 @@ fn apply_prop_handler_calls(
     if prop_handler_calls.is_empty() {
         return;
     }
+    if prop_handler_calls.len() == 1 {
+        let (prop_name, call) = prop_handler_calls
+            .first_key_value()
+            .expect("single prop handler exists");
+        if let Some(handler) = props.get(prop_name) {
+            apply_single_prop_handler_call(node, handler, call);
+        }
+        return;
+    }
+    let handlers_by_value = prop_handler_calls
+        .iter()
+        .filter_map(|(prop_name, call)| {
+            props.get(prop_name).map(|handler| (handler.as_str(), call))
+        })
+        // Preserve the old BTreeMap iteration behavior when multiple props
+        // resolve to the same handler: the first prop wins.
+        .fold(HashMap::new(), |mut index, (handler, call)| {
+            index.entry(handler).or_insert(call);
+            index
+        });
+    apply_indexed_prop_handler_calls(node, &handlers_by_value);
+}
+
+fn apply_single_prop_handler_call(
+    node: &mut WidgetNode,
+    target_handler: &str,
+    call: &EventHandlerCall,
+) {
+    for (event_name, handler) in &node.event_handlers {
+        if handler == target_handler {
+            node.event_handler_calls.insert(
+                event_name.clone(),
+                EventHandlerCall {
+                    handler: handler.clone(),
+                    args: call.args.clone(),
+                },
+            );
+        }
+    }
+    for child in &mut node.children {
+        apply_single_prop_handler_call(child, target_handler, call);
+    }
+}
+
+fn apply_indexed_prop_handler_calls(
+    node: &mut WidgetNode,
+    handlers_by_value: &HashMap<&str, &EventHandlerCall>,
+) {
     let handler_calls = node
         .event_handlers
         .iter()
         .filter_map(|(event_name, handler)| {
-            prop_handler_calls
-                .iter()
-                .find(|(prop_name, _)| props.get(*prop_name) == Some(handler))
-                .map(|(_, call)| {
-                    (
-                        event_name.clone(),
-                        EventHandlerCall {
-                            handler: handler.clone(),
-                            args: call.args.clone(),
-                        },
-                    )
-                })
+            handlers_by_value.get(handler.as_str()).map(|call| {
+                (
+                    event_name.clone(),
+                    EventHandlerCall {
+                        handler: handler.clone(),
+                        args: call.args.clone(),
+                    },
+                )
+            })
         })
         .collect::<Vec<_>>();
     for (event_name, call) in handler_calls {
         node.event_handler_calls.insert(event_name, call);
     }
     for child in &mut node.children {
-        apply_prop_handler_calls(child, props, prop_handler_calls);
+        apply_indexed_prop_handler_calls(child, handlers_by_value);
     }
 }
 
@@ -341,6 +386,37 @@ mod tests {
         }
         for child in &mut node.children {
             old_apply_prop_handler_calls(child, props, prop_handler_calls);
+        }
+    }
+
+    fn borrow_scan_prop_handler_calls(
+        node: &mut WidgetNode,
+        props: &BTreeMap<String, String>,
+        prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
+    ) {
+        let handler_calls = node
+            .event_handlers
+            .iter()
+            .filter_map(|(event_name, handler)| {
+                prop_handler_calls
+                    .iter()
+                    .find(|(prop_name, _)| props.get(*prop_name) == Some(handler))
+                    .map(|(_, call)| {
+                        (
+                            event_name.clone(),
+                            EventHandlerCall {
+                                handler: handler.clone(),
+                                args: call.args.clone(),
+                            },
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
+        for (event_name, call) in handler_calls {
+            node.event_handler_calls.insert(event_name, call);
+        }
+        for child in &mut node.children {
+            borrow_scan_prop_handler_calls(child, props, prop_handler_calls);
         }
     }
 
@@ -420,6 +496,125 @@ mod tests {
         );
         assert_eq!(old_total, new_total);
         assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- prop_handler_value_index_beats_repeated_prop_scan --ignored --nocapture
+    #[test]
+    #[ignore = "release-only prop handler value-index microbenchmark"]
+    fn prop_handler_value_index_beats_repeated_prop_scan() {
+        let props = (0..16)
+            .map(|index| {
+                let handler = if index == 15 {
+                    "onMove".to_string()
+                } else {
+                    format!("missingHandler{index}")
+                };
+                (format!("onEvent{index}"), handler)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let calls = (0..16)
+            .map(|index| {
+                (
+                    format!("onEvent{index}"),
+                    EventHandlerCall {
+                        handler: format!("event{index}"),
+                        args: vec![serde_json::json!(index)],
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let template = handler_tree(64);
+        let iterations = 20_000;
+
+        let scan_started = Instant::now();
+        let mut scan_total = 0usize;
+        for _ in 0..iterations {
+            let mut node = template.clone();
+            borrow_scan_prop_handler_calls(
+                std::hint::black_box(&mut node),
+                std::hint::black_box(&props),
+                std::hint::black_box(&calls),
+            );
+            scan_total += node
+                .children
+                .iter()
+                .map(|child| child.event_handler_calls.len())
+                .sum::<usize>();
+        }
+        let scan_time = scan_started.elapsed();
+
+        let indexed_started = Instant::now();
+        let mut indexed_total = 0usize;
+        for _ in 0..iterations {
+            let mut node = template.clone();
+            apply_prop_handler_calls(
+                std::hint::black_box(&mut node),
+                std::hint::black_box(&props),
+                std::hint::black_box(&calls),
+            );
+            indexed_total += node
+                .children
+                .iter()
+                .map(|child| child.event_handler_calls.len())
+                .sum::<usize>();
+        }
+        let indexed_time = indexed_started.elapsed();
+
+        eprintln!(
+            "prop handler value lookup: repeated scan {scan_time:?}; indexed {indexed_time:?}; ratio {:.1}x; totals={scan_total}/{indexed_total}",
+            scan_time.as_secs_f64() / indexed_time.as_secs_f64()
+        );
+        assert_eq!(scan_total, indexed_total);
+        assert!(indexed_time < scan_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- single_prop_handler_fast_path_beats_repeated_map_scan --ignored --nocapture
+    #[test]
+    #[ignore = "release-only single prop-handler microbenchmark"]
+    fn single_prop_handler_fast_path_beats_repeated_map_scan() {
+        let props = BTreeMap::from([("onMoveProp".into(), "onMove".into())]);
+        let calls = BTreeMap::from([(
+            "onMoveProp".into(),
+            EventHandlerCall {
+                handler: "handleMove".into(),
+                args: vec![serde_json::json!("bound")],
+            },
+        )]);
+        let template = handler_tree(64);
+        let iterations = 50_000;
+
+        let scan_started = Instant::now();
+        let mut scan_total = 0usize;
+        for _ in 0..iterations {
+            let mut node = template.clone();
+            borrow_scan_prop_handler_calls(&mut node, &props, &calls);
+            scan_total += node
+                .children
+                .iter()
+                .map(|child| child.event_handler_calls.len())
+                .sum::<usize>();
+        }
+        let scan_time = scan_started.elapsed();
+
+        let fast_started = Instant::now();
+        let mut fast_total = 0usize;
+        for _ in 0..iterations {
+            let mut node = template.clone();
+            apply_prop_handler_calls(&mut node, &props, &calls);
+            fast_total += node
+                .children
+                .iter()
+                .map(|child| child.event_handler_calls.len())
+                .sum::<usize>();
+        }
+        let fast_time = fast_started.elapsed();
+
+        eprintln!(
+            "single prop handler: repeated map scan {scan_time:?}; specialized {fast_time:?}; ratio {:.1}x; totals={scan_total}/{fast_total}",
+            scan_time.as_secs_f64() / fast_time.as_secs_f64()
+        );
+        assert_eq!(scan_total, fast_total);
+        assert!(fast_time < scan_time);
     }
 }
 
