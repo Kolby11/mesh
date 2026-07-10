@@ -181,9 +181,11 @@ impl Shell {
             );
             let emitted = {
                 let runtime = &mut self.components[index];
-                runtime
-                    .component
-                    .surface_size_changed(component_surface_size.0, component_surface_size.1);
+                if runtime.component.content_input_size() != Some(component_surface_size) {
+                    runtime
+                        .component
+                        .surface_size_changed(component_surface_size.0, component_surface_size.1);
+                }
                 let emitted = match target {
                     TargetRef::Parent => runtime.component.handle_input(
                         self.theme.active(),

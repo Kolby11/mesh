@@ -1886,7 +1886,11 @@ Performance:
       size-change calls remain open. Progress 2026-07-10: added a
       single-request drain helper and used it for Wayland global shortcuts and
       popup pointer-leave hides, removing the remaining single-element
-      `VecDeque::from([request])` allocations in `dispatch_wayland`.
+      `VecDeque::from([request])` allocations in `dispatch_wayland`. Progress
+      2026-07-10: stable-size input events now compare against the component's
+      current content input size before calling `surface_size_changed`, so the
+      redundant per-event size-change call is skipped unless the routed content
+      size actually changed.
 - [ ] Minor idle-loop hygiene in `render_components`: the surface id String
       is cloned for every component before the `wants_render` gate
       (`runtime/render.rs:23`), and `component.id().to_string()` runs per
