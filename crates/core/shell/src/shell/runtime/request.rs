@@ -180,6 +180,14 @@ impl Shell {
         Ok(())
     }
 
+    pub(in crate::shell) fn drain_request(
+        &mut self,
+        request: CoreRequest,
+    ) -> Result<(), ShellRunError> {
+        let mut emitted = self.apply_request(request)?;
+        self.drain_requests(&mut emitted)
+    }
+
     pub(in crate::shell) fn apply_request(
         &mut self,
         request: CoreRequest,

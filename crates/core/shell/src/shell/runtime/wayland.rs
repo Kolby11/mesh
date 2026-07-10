@@ -72,8 +72,10 @@ impl Shell {
                     .popup_parent_surface
                     .is_some()
             {
-                let mut pending = self.hide_popover(target_surface_id.clone(), true)?;
-                self.drain_requests(&mut pending)?;
+                self.drain_request(CoreRequest::HidePopover {
+                    surface_id: target_surface_id.clone(),
+                    defer_for_hover_bridge: true,
+                })?;
             } else if matches!(event, WindowEvent::PointerLeave { .. })
                 && matches!(target, TargetRef::Parent)
             {
@@ -128,8 +130,7 @@ impl Shell {
                 if let Some(request) =
                     shell_global_shortcut_request(key, mods.ctrl, mods.shift, self.debug.enabled)
                 {
-                    let mut pending = VecDeque::from([request]);
-                    self.drain_requests(&mut pending)?;
+                    self.drain_request(request)?;
                     continue;
                 }
             }

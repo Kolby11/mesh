@@ -992,9 +992,12 @@ Structure / correctness:
       `resolve_node_style_for_module_indexed`, so dynamic class styles are correct
       in the initial tree instead of depending on a corrective finalize restyle.
       Added `dynamic_class_participates_in_initial_style_resolution`.
-- [ ] Minor: `render_import`'s local-component branch does its catalog lookups
+- [x] Minor: `render_import`'s local-component branch does its catalog lookups
       twice (gate in `composition.rs:22-23`, again inside
-      `render_local_component`, `runtime.rs:435-440`).
+      `render_local_component`, `runtime.rs:435-440`). Completed 2026-07-10:
+      the local branch now threads the already-resolved `ComponentFile`,
+      host manifest, and host style-rule slice into `render_local_component`,
+      so the duplicate catalog lookup path is gone.
 
 ### N. Retained tree, render objects & display list — 2026-07-04 deep dive
 
@@ -1768,7 +1771,7 @@ Performance:
       removes the previous worst case of 10 blocking roundtrips on the shell
       thread; delayed/dead configure now costs at most the 2ms local budget per
       attempt before other surfaces and IPC work can continue.
-- [ ] Minor per-present allocations: `attach_shm_buffer` builds two
+- [x] Minor per-present allocations: `attach_shm_buffer` builds two
       `Vec<DamageRect>` per present (`backend.rs:334-343`) and
       `protocol_damage_rects` re-allocates via `to_vec` even in the ≤16
       passthrough case (`backend.rs:569-582`) — smallvec/iterate-in-place;
@@ -1880,7 +1883,10 @@ Performance:
       instead of allocating it per event, clones keyboard focus only for
       keyboard routing, and drains emitted requests as one `VecDeque` instead
       of wrapping each request separately. Target-surface clone and redundant
-      size-change calls remain open.
+      size-change calls remain open. Progress 2026-07-10: added a
+      single-request drain helper and used it for Wayland global shortcuts and
+      popup pointer-leave hides, removing the remaining single-element
+      `VecDeque::from([request])` allocations in `dispatch_wayland`.
 - [ ] Minor idle-loop hygiene in `render_components`: the surface id String
       is cloned for every component before the `wants_render` gate
       (`runtime/render.rs:23`), and `component.id().to_string()` runs per
