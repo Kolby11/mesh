@@ -316,6 +316,12 @@ impl Shell {
                     .unwrap_or(true)
                 {
                     runtime.parent.paint_buffer = Some(PixelBuffer::new(physical_w, physical_h));
+                    // A resized buffer starts fully transparent; `paint()` only
+                    // repaints dirty regions against the retained tree, so
+                    // without forcing a full present the untouched pixels of a
+                    // freshly-allocated buffer never get drawn until something
+                    // else marks the whole surface dirty.
+                    runtime.parent.force_full_present = true;
                 }
                 runtime
                     .component
@@ -751,7 +757,7 @@ impl Shell {
             });
         }
 
-        let buffer_resized = {
+        {
             let child = &mut self.components[index].children[child_index];
             if child
                 .target
@@ -761,11 +767,8 @@ impl Shell {
                 .unwrap_or(true)
             {
                 child.target.paint_buffer = Some(PixelBuffer::new(physical_w, physical_h));
-                true
-            } else {
-                false
             }
-        };
+        }
 
         let (pad_left, pad_top, pad_right, pad_bottom) =
             self.components[index].children[child_index].content_padding;
@@ -789,18 +792,15 @@ impl Shell {
             self.destroy_child_surface_at(index, child_index);
             return Ok(false);
         }
-        if buffer_resized {
-            self.components[index].children[child_index]
-                .target
-                .force_full_present = true;
-        } else {
-            let child_damage = self.components[index]
-                .component
-                .child_surface_present_damage(&node_key, content_offset, (width, height));
-            self.components[index].children[child_index]
-                .target
-                .pending_present_damage = child_damage;
-        }
+        // `paint_child_surface` clears and fully repaints the child buffer
+        // every frame, so any pixel may have changed since the last present.
+        // The child has no incremental damage tracking of its own; presenting
+        // anything narrower than the full surface leaves the compositor (and
+        // the SHM copy path, which only refreshes reported rects) showing
+        // stale pixels — popover enter/exit transitions freeze on frame one.
+        self.components[index].children[child_index]
+            .target
+            .force_full_present = true;
         // Restrict pointer input to the true (unpadded) content rect, same
         // pattern as the parent tooltip surface: the padding exists so
         // shadow/filter overshoot can paint, not to receive input.
@@ -943,11 +943,9 @@ impl Shell {
 
         let mut present_damage: Vec<DamageRect> = match target {
             TargetRef::Parent => self.components[index].component.take_present_damage(),
-            TargetRef::Child(child_index) => std::mem::take(
-                &mut self.components[index].children[child_index]
-                    .target
-                    .pending_present_damage,
-            ),
+            // Child surfaces always present with `force_full_present` set by
+            // `paint_and_present_child_surface`; full damage is filled in below.
+            TargetRef::Child(_) => Vec::new(),
         };
         // Scale change or explicit force-full triggers full-buffer present (per HDPI-04)
         let mut force_full = false;

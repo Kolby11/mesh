@@ -186,7 +186,9 @@
       "Bash(awk *)",
       "Bash(sed -i 's|docs/component-configuration\\\\.md §10|docs/spec/03-components.md §7|; s|docs/component-configuration\\\\.md|docs/spec/03-components.md|g' project_component_config_model.md)",
       "Bash(sed -i 's|\\(`docs/component-configuration\\\\.md` §5\\)|\\(`docs/spec/03-components.md` §2\\)|' project_css_surface_sizing.md)",
-      "Bash(sed -i 's|spec in docs/component-configuration\\\\.md|spec in docs/spec/03-components.md|' MEMORY.md)"
+      "Bash(sed -i 's|spec in docs/component-configuration\\\\.md|spec in docs/spec/03-components.md|' MEMORY.md)",
+      "Bash(find / -maxdepth 4 -iname \"*mesh*.log\")",
+      "Read(//home/kolby/.local/share/mesh/**)"
     ]
   }
 }

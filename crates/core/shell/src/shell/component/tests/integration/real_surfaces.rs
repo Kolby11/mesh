@@ -526,7 +526,9 @@ fn set_entering_child_keys_scopes_entrance_to_popover_subtree_only() {
     );
     let motion = first_node_with_class_token(popover, "bubble-options-motion").unwrap();
     assert_eq!(motion.computed_style.transform.translate_x, 46.0);
-    assert_eq!(motion.computed_style.opacity, 0.0);
+    assert_eq!(motion.computed_style.transform.scale_x, 0.12);
+    // The entering pose keeps full opacity — only the exiting rule fades out.
+    assert_eq!(motion.computed_style.opacity, 1.0);
 }
 
 #[test]

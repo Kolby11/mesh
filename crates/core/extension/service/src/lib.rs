@@ -32,7 +32,7 @@ pub use contract::{
 };
 pub use interface::{
     InterfaceCatalog, InterfaceProvider, InterfaceRegistry, InterfaceResolution,
-    canonical_interface_name, canonical_interface_name_cow, service_name_from_interface,
-    service_name_from_interface_cow,
+    canonical_interface_name, canonical_interface_name_cow, canonical_interface_name_owned,
+    service_name_from_interface, service_name_from_interface_cow,
 };
 pub use registry::{ServiceEntry, ServiceError, ServiceRegistry};

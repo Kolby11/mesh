@@ -957,6 +957,50 @@ mod tests {
         assert!(surface.layout.height > 0.0);
     }
 
+    #[test]
+    fn shipped_navigation_surface_root_spans_available_width() {
+        fn first_node_with_class<'a>(
+            node: &'a WidgetNode,
+            class_name: &str,
+        ) -> Option<&'a WidgetNode> {
+            if node
+                .attributes
+                .get("class")
+                .is_some_and(|classes| classes.split_whitespace().any(|class| class == class_name))
+            {
+                return Some(node);
+            }
+            node.children
+                .iter()
+                .find_map(|child| first_node_with_class(child, class_name))
+        }
+
+        let module_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../modules/frontend/navigation-bar");
+        let loaded = mesh_core_module::manifest::load_manifest(&module_dir)
+            .expect("navigation manifest should load");
+        let compiled = compile_frontend_module(&loaded.manifest, &module_dir)
+            .expect("navigation module should compile");
+        let theme = mesh_core_theme::default_theme();
+        let tree = compiled.build_preview_tree(&theme, 960, 56);
+        let nav_shell = first_node_with_class(&tree, "nav-shell").expect("nav-shell node");
+
+        assert_eq!(tree.layout.width.round() as u32, 960);
+        assert_eq!(tree.layout.height.round() as u32, 56);
+        assert_eq!(
+            nav_shell.layout.width.round() as u32,
+            960,
+            "nav-shell should span the surface width, got {:?}",
+            nav_shell.layout
+        );
+        assert_eq!(
+            nav_shell.layout.height.round() as u32,
+            56,
+            "nav-shell should span the bar height, got {:?}",
+            nav_shell.layout
+        );
+    }
+
     // Run with:
     // cargo test -p mesh-core-frontend --release -- embedded_build_layout_deferral_benchmark --ignored --nocapture
     #[test]

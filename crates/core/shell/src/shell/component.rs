@@ -1,4 +1,6 @@
-use super::service::{apply_service_update, script_events_to_requests, seed_service_state};
+use super::service::{
+    apply_service_update_with_name, script_events_to_requests, seed_service_state,
+};
 use super::surface_layout::{SurfaceLayoutSettings, load_frontend_module_settings};
 use super::types::{
     ChildSurfaceKind, ChildSurfaceRequest, ComponentContext, ComponentError, ComponentInput,
@@ -447,6 +449,7 @@ pub(super) struct FrontendSurfaceComponent {
     active_theme_stale: Cell<bool>,
     measured_size: Option<(u32, u32)>,
     last_surface_size: Option<(u32, u32)>,
+    last_painted_buffer_size: Option<(u32, u32)>,
     surface_pixels_invalid: bool,
     locale: LocaleEngine,
     interface_catalog: Arc<mesh_core_service::InterfaceCatalog>,
@@ -496,7 +499,6 @@ pub(super) struct FrontendSurfaceComponent {
     invalidation_snapshot: Option<mesh_core_debug::ProfilingInvalidationSnapshot>,
     focused_proof_snapshot: Option<mesh_core_render::FocusedProofSnapshot>,
     last_present_damage_rects: Vec<DamageRect>,
-    child_present_damage_rects: Vec<DamageRect>,
     last_visual_damage: HashMap<NodeId, DamageRect>,
     tooltip_damage_scratch: Vec<DamageRect>,
     dirty_node_visual_damage_scratch: Vec<DamageRect>,
@@ -646,6 +648,7 @@ impl FrontendSurfaceComponent {
             active_theme_stale: Cell::new(true),
             measured_size: None,
             last_surface_size: None,
+            last_painted_buffer_size: None,
             surface_pixels_invalid: true,
             locale: LocaleEngine::new("en"),
             interface_catalog: interface_catalog.into(),
@@ -676,7 +679,6 @@ impl FrontendSurfaceComponent {
             invalidation_snapshot: None,
             focused_proof_snapshot: None,
             last_present_damage_rects: Vec::new(),
-            child_present_damage_rects: Vec::new(),
             last_visual_damage: HashMap::new(),
             tooltip_damage_scratch: Vec::new(),
             dirty_node_visual_damage_scratch: Vec::new(),

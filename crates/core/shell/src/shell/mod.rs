@@ -14,7 +14,8 @@ use mesh_core_module::package::{InstalledModuleGraph, ModuleKind, load_installed
 use mesh_core_module::{DependencyGraphError, ModuleType, validate_module_dependency_graph};
 use mesh_core_service::{
     InterfaceContract, InterfaceProvider, InterfaceRegistry, ServiceRegistry,
-    canonical_interface_name, canonical_interface_name_cow, load_interface_contract,
+    canonical_interface_name, canonical_interface_name_cow, canonical_interface_name_owned,
+    load_interface_contract,
 };
 use mesh_core_theme::ThemeEngine;
 use mesh_core_wayland::{ClipboardWriter, Layer, StubSurface, WaylandClipboard};
@@ -60,7 +61,7 @@ pub use types::{
     ServiceEvent, ShellComponent, SurfaceId, TabFocusTarget,
 };
 
-use service::{service_command_control_capability, service_name_from_interface};
+use service::{service_capabilities, service_name_from_interface};
 
 /// If `assets.icons` is declared in a module manifest, register an icon pack
 /// at `<module_id>` rooted at `<module_dir>/<assets.icons.path>`. The pack

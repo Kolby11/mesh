@@ -652,20 +652,6 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
         Ok(true)
     }
 
-    fn child_surface_present_damage(
-        &self,
-        _node_key: &str,
-        _content_offset: (u32, u32),
-        _surface_size: (u32, u32),
-    ) -> Vec<mesh_core_render::DamageRect> {
-        vec![mesh_core_render::DamageRect {
-            x: 4,
-            y: 5,
-            width: 12,
-            height: 7,
-        }]
-    }
-
     fn child_hide_transition_ms(&self, _node_key: &str) -> u64 {
         self.state.lock().unwrap().hide_transition_ms
     }
@@ -5314,7 +5300,11 @@ fn child_surface_reconcile_creates_popup_and_paints_subtree() {
 }
 
 #[test]
-fn child_surface_reconcile_uses_child_damage_after_initial_full_present() {
+fn child_surface_presents_full_damage_every_frame() {
+    // `paint_child_surface` clears and fully repaints the child buffer each
+    // frame, so every child present must report full-surface damage —
+    // anything narrower leaves stale pixels in the compositor and freezes
+    // popover enter/exit transitions.
     let mut shell = Shell::new();
     shell.presentation_engine =
         mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
@@ -5333,15 +5323,12 @@ fn child_surface_reconcile_uses_child_damage_after_initial_full_present() {
         .filter(|(surface, _)| surface == &child_id)
         .map(|(_, damage)| damage.as_slice())
         .collect::<Vec<_>>();
+    assert!(!child_damage.is_empty(), "child popup should be presented");
     assert!(
-        child_damage.iter().any(|damage| *damage
-            == [mesh_core_render::DamageRect {
-                x: 4,
-                y: 5,
-                width: 12,
-                height: 7,
-            }]),
-        "steady child popup frames should present the child-local damage instead of forcing full surface damage"
+        child_damage
+            .iter()
+            .all(|damage| damage.len() == 1 && damage[0].x == 0 && damage[0].y == 0),
+        "every child popup present should carry full-surface damage, got {child_damage:?}"
     );
 }
 

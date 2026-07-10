@@ -17,6 +17,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 pub(super) struct ServiceCapabilities {
     pub service_name: String,
     pub read: Capability,
+    pub control: Capability,
     pub theme: Option<Capability>,
     pub locale: Option<Capability>,
 }
@@ -39,6 +40,7 @@ pub(super) fn service_capabilities(interface: &str) -> Arc<ServiceCapabilities> 
     let service_name = service_name_from_interface(interface);
     let entry = Arc::new(ServiceCapabilities {
         read: Capability::new(format!("service.{service_name}.read")),
+        control: Capability::new(format!("service.{service_name}.control")),
         theme: (interface == "mesh.theme").then(|| Capability::new("theme.read")),
         locale: (interface == "mesh.locale").then(|| Capability::new("locale.read")),
         service_name,
@@ -75,6 +77,16 @@ pub(super) fn apply_service_update(
     payload: impl Borrow<serde_json::Value>,
 ) {
     let service_name = service_name_from_interface(service);
+    apply_service_update_with_name(state, has_read, &service_name, source_module, payload);
+}
+
+pub(super) fn apply_service_update_with_name(
+    state: &mut ScriptState,
+    has_read: bool,
+    service_name: &str,
+    source_module: &str,
+    payload: impl Borrow<serde_json::Value>,
+) {
     if has_read {
         state.set(
             "last_service_update",
@@ -85,10 +97,7 @@ pub(super) fn apply_service_update(
 }
 
 pub(super) fn service_command_control_capability(interface: &str) -> Capability {
-    Capability::new(format!(
-        "service.{}.control",
-        service_name_from_interface(interface)
-    ))
+    service_capabilities(interface).control.clone()
 }
 
 pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<CoreRequest> {
@@ -470,5 +479,113 @@ mod tests {
             }
             other => panic!("expected PositionSurface, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn service_capabilities_include_control_capability() {
+        let caps = service_capabilities("mesh.audio");
+
+        assert_eq!(caps.service_name, "audio");
+        assert_eq!(caps.read.id(), "service.audio.read");
+        assert_eq!(caps.control.id(), "service.audio.control");
+    }
+
+    // cargo test -p mesh-core-shell --release -- cached_service_control_capability_avoids_formatting --ignored --nocapture
+    #[test]
+    #[ignore = "release-only service command capability microbenchmark"]
+    fn cached_service_control_capability_avoids_formatting() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        fn old_control_capability(interface: &str) -> mesh_core_capability::Capability {
+            mesh_core_capability::Capability::new(format!(
+                "service.{}.control",
+                service_name_from_interface(interface)
+            ))
+        }
+
+        let iterations = 1_000_000usize;
+        let interface = "mesh.audio";
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let cap = old_control_capability(black_box(interface));
+            old_total = old_total.wrapping_add(cap.id().len());
+        }
+        let old_time = old_started.elapsed();
+
+        let cached_started = Instant::now();
+        let mut cached_total = 0usize;
+        for _ in 0..iterations {
+            let cap = service_command_control_capability(black_box(interface));
+            cached_total = cached_total.wrapping_add(cap.id().len());
+        }
+        let cached_time = cached_started.elapsed();
+
+        eprintln!(
+            "service control capability over {iterations} iterations: format {old_time:?}; cached clone {cached_time:?}; ratio {:.1}x; totals={old_total}/{cached_total}",
+            old_time.as_secs_f64() / cached_time.as_secs_f64()
+        );
+        assert_eq!(old_total, cached_total);
+        assert!(cached_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- borrowed_service_update_name_avoids_projection --ignored --nocapture
+    #[test]
+    #[ignore = "release-only service update name microbenchmark"]
+    fn borrowed_service_update_name_avoids_projection() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let iterations = 200_000usize;
+        let payload = serde_json::json!({ "available": true, "percent": 42, "muted": false });
+
+        let projected_started = Instant::now();
+        let mut projected_total = 0usize;
+        for _ in 0..iterations {
+            let mut state = ScriptState::new();
+            apply_service_update(
+                &mut state,
+                true,
+                black_box("mesh.audio"),
+                "@mesh/pipewire-audio",
+                black_box(&payload),
+            );
+            projected_total = projected_total.wrapping_add(
+                state
+                    .get("audio")
+                    .and_then(|value| value.as_object().map(serde_json::Map::len))
+                    .unwrap_or_default(),
+            );
+        }
+        let projected_time = projected_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_total = 0usize;
+        for _ in 0..iterations {
+            let mut state = ScriptState::new();
+            apply_service_update_with_name(
+                &mut state,
+                true,
+                black_box("audio"),
+                "@mesh/pipewire-audio",
+                black_box(&payload),
+            );
+            borrowed_total = borrowed_total.wrapping_add(
+                state
+                    .get("audio")
+                    .and_then(|value| value.as_object().map(serde_json::Map::len))
+                    .unwrap_or_default(),
+            );
+        }
+        let borrowed_time = borrowed_started.elapsed();
+
+        eprintln!(
+            "service update state write over {iterations} iterations: project-name {projected_time:?}; borrowed-name {borrowed_time:?}; ratio {:.1}x; totals={projected_total}/{borrowed_total}",
+            projected_time.as_secs_f64() / borrowed_time.as_secs_f64()
+        );
+        assert_eq!(projected_total, borrowed_total);
+        assert!(borrowed_time < projected_time);
     }
 }

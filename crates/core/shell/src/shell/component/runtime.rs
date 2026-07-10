@@ -261,10 +261,10 @@ impl FrontendSurfaceComponent {
                 "locale": self.locale.current(),
                 "current": self.locale.current()
             });
-            apply_service_update(
+            apply_service_update_with_name(
                 script_ctx.state_mut(),
                 true,
-                "mesh.locale",
+                "locale",
                 "@mesh/shell",
                 &payload,
             );
@@ -286,10 +286,10 @@ impl FrontendSurfaceComponent {
             // can read state fields regardless of read capability.
             script_ctx.apply_service_payload(service_name, payload);
             if script_has_service_read(&script_ctx, &interface, service_name) {
-                apply_service_update(
+                apply_service_update_with_name(
                     script_ctx.state_mut(),
                     true,
-                    &interface,
+                    service_name,
                     "<cached>",
                     payload.clone(),
                 );

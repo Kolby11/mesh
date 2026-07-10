@@ -1782,8 +1782,59 @@ fn map_anchor(cfg: &LayerSurfaceConfig) -> Anchor {
     }
 }
 
+/// Map a MESH surface config onto the wire `zwlr_layer_surface_v1::set_size`.
+///
+/// CRITICAL layer-shell semantics: a dimension of `0` does NOT mean "empty" —
+/// it means "stretch to the output edges on that axis" (and is only protocol-
+/// valid when the surface is anchored to both opposing edges of that axis).
+/// Passing measured-content sizes of `0` straight through has repeatedly
+/// produced invisible output-spanning surfaces that swallow all pointer and
+/// keyboard input shell-wide. Every zero that reaches this function is
+/// therefore resolved here:
+/// - `0` on a both-edges-anchored axis is an intentional span (bars) — kept.
+/// - `0` on any other axis is protocol-invalid "not measured yet" — replaced
+///   with the exclusive-zone fallback so the surface maps small, not spanned.
+/// - `0` on BOTH axes is never intentional for a shell surface — both sides
+///   get the fallback and an error is logged so the bug is visible in logs
+///   instead of as a screen-wide input blackout.
+/// Map a MESH surface config onto the wire `zwlr_layer_surface_v1::set_size`.
+///
+/// CRITICAL layer-shell semantics: a dimension of `0` does NOT mean "empty" —
+/// it means "stretch to the output edges on that axis" (and is only protocol-
+/// valid when the surface is anchored to both opposing edges of that axis).
+/// Passing measured-content sizes of `0` straight through has repeatedly
+/// produced invisible output-spanning surfaces that swallow pointer and
+/// keyboard input shell-wide.
+///
+/// Zeros are resolved here as follows:
+/// - Top/bottom surfaces: width `0` is the intended output-wide bar span
+///   (their horizontal both-edge anchor is unconditional); height `0` falls
+///   back to the exclusive zone.
+/// - Left/right surfaces with a positive exclusive zone are docked rails:
+///   width falls back to the exclusive zone and height `0` spans — intended.
+/// - Left/right (and unanchored) surfaces WITHOUT an exclusive zone are
+///   floating popover-style surfaces. `map_anchor` derives the vertical
+///   both-edge anchor FROM `height == 0`, so an unmeasured `0x0` popover
+///   would silently become a full-output-height input sink (this shipped
+///   twice: an invisible surface swallowing all pointer/keyboard input).
+///   That case is clamped to 1x1 and logged as an error — a broken 1px
+///   surface plus a log line beats a screen-wide input blackout.
 fn layer_protocol_size(cfg: &LayerSurfaceConfig) -> (u32, u32) {
     let anchor = map_anchor(cfg);
+    if cfg.width == 0
+        && cfg.height == 0
+        && cfg.exclusive_zone <= 0
+        && !matches!(cfg.edge, Some(Edge::Top | Edge::Bottom))
+    {
+        tracing::error!(
+            namespace = %cfg.namespace,
+            edge = ?cfg.edge,
+            "non-docked layer surface configured 0x0: zero means \"span the \
+             output\" in layer-shell, which would map an invisible \
+             output-spanning surface that blocks input; clamping to 1x1"
+        );
+        return (1, 1);
+    }
     let width = if cfg.width == 0 && !anchor.contains(Anchor::LEFT | Anchor::RIGHT) {
         layer_protocol_fallback_size(cfg)
     } else {
@@ -2137,6 +2188,25 @@ mod tests {
             layer_protocol_size(&cfg),
             (48, 0),
             "left surfaces with dynamic height are top+bottom anchored, so only height may be sent as zero; width falls back to the exclusive zone"
+        );
+    }
+
+    #[test]
+    fn undocked_side_surface_never_spans_the_output() {
+        // Regression guard: a floating (exclusive_zone == 0) left/right
+        // surface whose content is not measured yet must NOT map as an
+        // output-height-spanning surface — that shipped twice as an invisible
+        // full-height overlay swallowing all pointer/keyboard input.
+        let mut cfg = base_cfg();
+        cfg.edge = Some(Edge::Left);
+        cfg.width = 0;
+        cfg.height = 0;
+        cfg.exclusive_zone = 0;
+
+        assert_eq!(
+            layer_protocol_size(&cfg),
+            (1, 1),
+            "an unmeasured popover-style side surface must map tiny, never output-spanning"
         );
     }
 

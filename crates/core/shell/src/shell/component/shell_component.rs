@@ -218,10 +218,10 @@ impl ShellComponent for FrontendSurfaceComponent {
                 continue;
             }
             let previous = runtime.script_ctx.state().get(service_name);
-            apply_service_update(
+            apply_service_update_with_name(
                 runtime.script_ctx.state_mut(),
                 true,
-                service,
+                service_name,
                 source_module,
                 payload,
             );
@@ -455,6 +455,19 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.observe_surface_size(content_width, content_height);
         let paint_width = width.max(content_width).max(1);
         let paint_height = height.max(content_height).max(1);
+        // The paint buffer's physical size tracks `paint_width`/`paint_height`
+        // (content plus the tooltip overlay reserve, times scale), not the
+        // content-only dimensions `observe_surface_size` watches above. A
+        // tooltip appearing/disappearing changes the buffer size without
+        // changing content size, so the caller (`Shell::render_components`)
+        // reallocates a fresh, zeroed `PixelBuffer` that `observe_surface_size`
+        // never notices. Without forcing a full repaint here, only the dirty
+        // diff gets drawn into the new buffer and everything else stays
+        // transparent.
+        if self.last_painted_buffer_size != Some((buffer.width, buffer.height)) {
+            self.surface_pixels_invalid = true;
+        }
+        self.last_painted_buffer_size = Some((buffer.width, buffer.height));
         // Partial-damage clip rects are computed in logical coordinates, but the
         // painter applies the damage clip in physical buffer space (and scales the
         // display list by `scale`). At a fractional scale logical != physical, so a
@@ -725,7 +738,6 @@ impl ShellComponent for FrontendSurfaceComponent {
                 push_damage_rect(&mut self.last_present_damage_rects, rect, surface_damage);
             }
         }
-        self.child_present_damage_rects = self.last_present_damage_rects.clone();
         // When effective_damage.rects is empty, leave last_present_damage_rects unchanged
         // (accumulates across immediate-rerender passes, matching old merge_optional_damage behaviour)
         self.last_visual_damage = collect_visual_damage_rects(&tree, content_damage);
@@ -1166,49 +1178,6 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn take_present_damage(&mut self) -> Vec<DamageRect> {
         std::mem::take(&mut self.last_present_damage_rects)
-    }
-
-    fn child_surface_present_damage(
-        &self,
-        node_key: &str,
-        content_offset: (u32, u32),
-        surface_size: (u32, u32),
-    ) -> Vec<DamageRect> {
-        let Some(tree) = self.last_tree.as_ref() else {
-            return Vec::new();
-        };
-        let Some(node) = find_node_by_key(tree, node_key) else {
-            return Vec::new();
-        };
-        let child_visual = damage_rect_for_subtree_visual_bounds(node);
-        let node_left = node.layout.x.floor() as i32;
-        let node_top = node.layout.y.floor() as i32;
-        let surface = DamageRect {
-            x: 0,
-            y: 0,
-            width: surface_size.0.max(1),
-            height: surface_size.1.max(1),
-        };
-        let mut local_damage = Vec::new();
-        for &damage in &self.child_present_damage_rects {
-            let Some(intersection) = intersect_damage_rect(damage, child_visual) else {
-                continue;
-            };
-            let translated = DamageRect {
-                x: (intersection.x as i32)
-                    .saturating_sub(node_left)
-                    .saturating_add(content_offset.0 as i32)
-                    .max(0) as u32,
-                y: (intersection.y as i32)
-                    .saturating_sub(node_top)
-                    .saturating_add(content_offset.1 as i32)
-                    .max(0) as u32,
-                width: intersection.width,
-                height: intersection.height,
-            };
-            push_damage_rect(&mut local_damage, translated, surface);
-        }
-        local_damage
     }
 
     fn wants_immediate_rerender(&self) -> bool {
@@ -1940,20 +1909,6 @@ fn visual_damage_rect_for_widget_node(
     )
 }
 
-fn damage_rect_for_subtree_visual_bounds(node: &WidgetNode) -> DamageRect {
-    let (left, top, right, bottom) = subtree_visual_bounds(node);
-    let left = left.floor().max(0.0) as u32;
-    let top = top.floor().max(0.0) as u32;
-    let right = right.ceil().max(0.0) as u32;
-    let bottom = bottom.ceil().max(0.0) as u32;
-    DamageRect {
-        x: left,
-        y: top,
-        width: right.saturating_sub(left).max(1),
-        height: bottom.saturating_sub(top).max(1),
-    }
-}
-
 /// Union of `node_visual_bounds` over `node` and its full subtree, in
 /// absolute layout space. Used to size a popover's popup buffer so
 /// descendant `box-shadow`/`filter` overshoot (e.g. a floating bubble
@@ -2255,24 +2210,6 @@ fn bounding_damage_rect(rects: &[DamageRect], surface: DamageRect) -> Option<Dam
     let first = iter.next()?;
     let bounds = iter.fold(first, union_damage);
     clip_damage(bounds, surface)
-}
-
-fn intersect_damage_rect(a: DamageRect, b: DamageRect) -> Option<DamageRect> {
-    let left = a.x.max(b.x);
-    let top = a.y.max(b.y);
-    let right = a.x.saturating_add(a.width).min(b.x.saturating_add(b.width));
-    let bottom =
-        a.y.saturating_add(a.height)
-            .min(b.y.saturating_add(b.height));
-    if right <= left || bottom <= top {
-        return None;
-    }
-    Some(DamageRect {
-        x: left,
-        y: top,
-        width: right - left,
-        height: bottom - top,
-    })
 }
 
 fn damage_rects_area(rects: &[DamageRect]) -> u64 {

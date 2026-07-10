@@ -337,18 +337,6 @@ pub trait ShellComponent: Send {
     fn take_present_damage(&mut self) -> Vec<DamageRect> {
         Vec::new()
     }
-    /// Return the most recent parent-paint damage translated into a promoted
-    /// child surface's local coordinates. The shell calls this after presenting
-    /// the parent surface, so implementations that derive child surfaces from
-    /// the same retained tree should keep a non-draining copy of frame damage.
-    fn child_surface_present_damage(
-        &self,
-        _node_key: &str,
-        _content_offset: (u32, u32),
-        _surface_size: (u32, u32),
-    ) -> Vec<DamageRect> {
-        Vec::new()
-    }
     /// Whether pending dirtiness should be resolved in the same render pass.
     fn wants_immediate_rerender(&self) -> bool {
         self.wants_render()

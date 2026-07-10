@@ -929,8 +929,14 @@ Performance:
       8.630ms borrowed (~1.9x faster). Consecutive duplicate service-field
       reads within one node are now coalesced before allocating service/field
       strings; 1M repeated reads measured 93.496ms eager versus 11.050ms
-      coalesced (~8.5x faster). Module-id and unique tracked-read string
-      allocations remain open.
+      coalesced (~8.5x faster). Progress 2026-07-09: non-consecutive duplicate
+      service-field reads within one node are also coalesced before allocation,
+      so interleaved expressions like `audio.percent`, `network.ssid`,
+      `audio.percent` publish two dependencies instead of three. A release
+      benchmark over 250k node-shaped read batches measured 22.424ms
+      consecutive-only versus 21.995ms duplicate-scan (~1.0x faster) while
+      reducing dependency entries from 1,000,000 to 750,000. Module-id and
+      unique tracked-read string allocations remain open.
 
 Structure / correctness:
 
@@ -980,12 +986,12 @@ Structure / correctness:
       `_mesh_module_id`, the promoted-popover marker — stringly-typed channels
       between compiler and shell causing prefix parsing and false attribute
       dirtiness. The composition-boundary instance of v1.23 typed fields.
-- [ ] **Verify dynamic `class={expr}` bindings participate in build-time style
-      resolution.** `parse_attributes` only feeds `classes` from Static values
-      (`render.rs:760-767`); a fully-dynamic class lands in `resolved` and is
-      skipped by the build-path `resolve_node_style_for_module_indexed` call,
-      relying on the finalize restyle to correct it. Confirm and either resolve
-      dynamic classes at build or document the two-pass behavior.
+- [x] **Verify dynamic `class="{expr}"` bindings participate in build-time style
+      resolution.** Completed 2026-07-09: build-time style matching now derives
+      selector class/id identity from resolved dynamic attributes before calling
+      `resolve_node_style_for_module_indexed`, so dynamic class styles are correct
+      in the initial tree instead of depending on a corrective finalize restyle.
+      Added `dynamic_class_participates_in_initial_style_resolution`.
 - [ ] Minor: `render_import`'s local-component branch does its catalog lookups
       twice (gate in `composition.rs:22-23`, again inside
       `render_local_component`, `runtime.rs:435-440`).
@@ -1530,7 +1536,13 @@ Performance:
       and types instead of allocating two strings per field. A release
       benchmark over 1M type checks measured 12.56ms allocating versus 5.96ms
       allocation-free (~2.1x faster). Registration-time typed schema
-      precompilation remains open.
+      precompilation remains open. Progress 2026-07-10: shell-side contract
+      validation now caches compiled inline event schemas and contract type
+      classifications, so steady-state named interface events reuse typed
+      field descriptors instead of reparsing the schema string. A release
+      benchmark over 300k four-field event validations measured 45.182ms
+      parse-per-event versus 15.958ms cached (~2.8x faster). Moving the
+      compiled descriptors onto the registered contract remains open.
 - [ ] Minor: `canonical_interface_name` / `service_name_from_interface`
       allocate fresh Strings 2–3× per event across normalize/record/profiling
       (`service_state.rs:44,92`, `interface.rs:95-118`); thread the canonical
@@ -1543,8 +1555,25 @@ Performance:
       6.446ms borrowed (~3.2x faster). Runtime event observation now also
       borrows the `mesh.`-stripped service segment rather than allocating once
       per component/runtime check; 2M projections measured 1.921ms owned versus
-      1.267ms borrowed (~1.5x faster). Callers that retain names still use the
-      owned APIs.
+      1.267ms borrowed (~1.5x faster). Progress 2026-07-10: service-event
+      normalization now reuses the owned incoming name when it is already
+      canonical, avoiding one extra allocation before provider/status checks.
+      A release benchmark over 2M canonical runtime names measured 32.137ms
+      borrowed-to-owned versus 25.147ms owned-reuse (~1.3x faster). Some
+      callers that retain names still use the generic owned API. Progress
+      2026-07-10: per-interface service capability caches now include the
+      control capability, and service-command dispatch borrows the cached
+      capability while reusing one canonical interface name through support,
+      optimistic-state, provider, and debug-call bookkeeping. A release
+      benchmark over 1M control-capability lookups measured 27.754ms formatting
+      versus 23.994ms cached clone (~1.2x faster). Remaining work is broader
+      API cleanup for retained interface names outside the command path.
+      Progress 2026-07-10: service update delivery now threads the cached short
+      service name into state writes for live delivery, locale seeding, and
+      cached replay into new runtimes, avoiding another canonical-interface to
+      service-name projection per receiving runtime. A release benchmark over
+      200k state writes measured 66.567ms projected-name versus 61.055ms
+      borrowed-name (~1.1x faster).
 
 Structure:
 

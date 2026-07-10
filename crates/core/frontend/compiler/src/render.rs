@@ -216,6 +216,11 @@ impl<'a> TrackingVariableStore<'a> {
         }) {
             return;
         }
+        if reads.iter().any(|(existing_service, existing_field)| {
+            existing_service == service && existing_field == field
+        }) {
+            return;
+        }
         reads.push((service.to_owned(), field.to_owned()));
     }
 }
@@ -750,11 +755,20 @@ fn build_element_node(
         }
     }
     apply_source_tag_defaults(&element.tag_kind, &mut attributes);
+    let resolved_classes = attributes.get("class").map(|value| {
+        value
+            .split_whitespace()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    });
+    let style_classes = resolved_classes.as_deref().unwrap_or(&classes);
+    let resolved_id = id.clone().or_else(|| attributes.get("id").cloned());
+    let style_id = resolved_id.as_deref();
     let inherited_mask = inherited_style_mask(
         build_style.rules,
         &tag,
-        &classes,
-        id.as_deref(),
+        style_classes,
+        style_id,
         container_context,
     );
 
@@ -767,8 +781,8 @@ fn build_element_node(
         build_style.rules,
         &build_style.index,
         &tag,
-        &classes,
-        id.as_deref(),
+        style_classes,
+        style_id,
         container_context,
         Default::default(),
         Some(&manifest.package.id),
@@ -782,7 +796,7 @@ fn build_element_node(
     if let Some(id) = id {
         node.attributes.insert("id".into(), id);
     }
-    if !classes.is_empty() {
+    if !classes.is_empty() && !node.attributes.contains_key("class") {
         node.attributes.insert("class".into(), classes.join(" "));
     }
 
@@ -1455,6 +1469,49 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_class_participates_in_initial_style_resolution() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<template>
+  <box class="{active_class}"/>
+</template>
+<style>
+.active { width: 42px; }
+</style>
+"#,
+        )
+        .unwrap();
+        let manifest = test_manifest();
+        let theme = mesh_core_theme::default_theme();
+        let state = MapStore(std::collections::HashMap::from([(
+            "active_class".to_string(),
+            serde_json::json!("active"),
+        )]));
+
+        let tree = build_widget_tree_from_component(
+            &component,
+            &manifest,
+            &theme,
+            200.0,
+            80.0,
+            None,
+            "root",
+            Some(&state),
+            &[],
+        );
+
+        let active_box = tree.children.first().expect("template root");
+        assert_eq!(
+            active_box.attributes.get("class"),
+            Some(&"active".to_string())
+        );
+        assert_eq!(
+            active_box.computed_style.width,
+            mesh_core_elements::Dimension::Px(42.0)
+        );
+    }
+
+    #[test]
     fn props_settings_schema_projects_typed_fields() {
         let component = mesh_core_component::parse_component(
             r#"
@@ -1970,6 +2027,23 @@ mod tests {
     }
 
     #[test]
+    fn tracking_store_coalesces_nonconsecutive_duplicate_reads() {
+        let inner = MapStore(std::collections::HashMap::new());
+        let tracker = TrackingVariableStore::new(&inner);
+        let _ = mesh_core_elements::VariableStore::get(&tracker, "audio.percent");
+        let _ = mesh_core_elements::VariableStore::get(&tracker, "network.ssid");
+        let _ = mesh_core_elements::VariableStore::get(&tracker, "audio.percent");
+
+        assert_eq!(
+            tracker.into_reads(),
+            vec![
+                ("audio".to_string(), "percent".to_string()),
+                ("network".to_string(), "ssid".to_string())
+            ]
+        );
+    }
+
+    #[test]
     fn tracking_store_skips_bare_reads() {
         let inner = MapStore(std::collections::HashMap::new());
         let t = TrackingVariableStore::new(&inner);
@@ -2076,6 +2150,65 @@ mod tests {
         );
         assert_eq!(tracked.len(), 1);
         assert!(coalesced_time < eager_time);
+    }
+
+    // cargo test -p mesh-core-frontend --release -- nonconsecutive_service_read_coalescing_avoids_duplicate_allocations --ignored --nocapture
+    #[test]
+    #[ignore = "release-only nonconsecutive service-read tracking microbenchmark"]
+    fn nonconsecutive_service_read_coalescing_avoids_duplicate_allocations() {
+        use std::time::Instant;
+
+        fn old_record_read(reads: &mut Vec<(String, String)>, name: &str) {
+            let Some(dot_pos) = name.find('.') else {
+                return;
+            };
+            let service = &name[..dot_pos];
+            let field = &name[dot_pos + 1..];
+            if reads.last().is_some_and(|(last_service, last_field)| {
+                last_service == service && last_field == field
+            }) {
+                return;
+            }
+            reads.push((service.to_owned(), field.to_owned()));
+        }
+
+        let iterations = 250_000usize;
+        let names = [
+            "audio.percent",
+            "network.ssid",
+            "audio.percent",
+            "power.percent",
+        ];
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let mut reads = Vec::new();
+            for name in names {
+                old_record_read(&mut reads, std::hint::black_box(name));
+            }
+            old_total = old_total.wrapping_add(std::hint::black_box(reads.len()));
+        }
+        let old_time = old_started.elapsed();
+
+        let inner = MapStore(std::collections::HashMap::new());
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let tracker = TrackingVariableStore::new(&inner);
+            for name in names {
+                tracker.record_read(std::hint::black_box(name));
+            }
+            new_total = new_total.wrapping_add(std::hint::black_box(tracker.into_reads().len()));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "nonconsecutive service reads: consecutive-only {old_time:?}; duplicate scan {new_time:?}; ratio {:.1}x; entries={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_total < old_total);
+        assert!(new_time < old_time);
     }
 
     #[test]

@@ -595,4 +595,24 @@ LSP completions for `audio.` derive state fields and commands by analyzing the b
 - **Public/private script members.** Any non-local assigned in `<script>` is a public reactive member. Templates bind to `{variable_name}`. `local` variables/functions are private. Runtime hooks receive `self`; current-instance metadata and persistent storage live at `self.meta` and `self.storage`.
 - **Surface layout is user-configurable.** Any surface can have its anchor, layer, size, keyboard mode overridden via `config/settings.json` inside the module directory.
 - **Surface sizing is CSS content measurement.** Every surface's size is the laid-out box of its component root — `width: 100%` spans the anchored edge, a fixed length pins it, `fit-content` shrinks to content, with `min-*`/`max-*` clamps applied by the layout engine (`measure_content_size()` in `mesh-core-interaction`). There is no `size_policy` manifest field.
+- **CRITICAL — layer-shell size `0` means "span the output", not "empty".**
+  In `zwlr_layer_surface_v1::set_size`, a `0` dimension stretches the surface
+  to the output edges on that axis (valid only when anchored to both opposing
+  edges). Content-measured sizing produces `0` for "not measured yet", so any
+  code that forwards measured sizes toward layer-shell must never let a `0`
+  through as an implicit span. This has shipped twice as an invisible
+  output-spanning surface that swallowed all pointer/keyboard input
+  shell-wide (unstoppable shell, no window focus). Rules:
+  - Never "fix" bar spanning by forcing a dimension to `0` in
+    `render_layout`/shell code for a whole edge class — popovers and settings
+    surfaces share those edges and will span too. Spanning intent belongs to
+    the surface's own CSS (`width: 100%`) via content measurement.
+  - `layer_protocol_size()` in
+    `crates/core/presentation/src/wayland_surface/backend.rs` is the single
+    choke point that resolves zeros (bar span kept, docked-rail fallback,
+    floating `0x0` clamped to 1x1 with an error log). Do not add other
+    `set_size` call sites; route every layer-surface size through it.
+  - Symptom signature for diagnosis: "shell overlays the whole screen /
+    can't focus or click anything" ⇒ grep logs for
+    `non-docked layer surface configured 0x0`.
 - **Test location:** unit tests live in `#[cfg(test)]` modules at the bottom of each source file.

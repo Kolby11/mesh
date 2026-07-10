@@ -447,8 +447,10 @@ impl Shell {
         source_module_id: &str,
         source_capabilities: &mesh_core_capability::CapabilitySet,
     ) -> serde_json::Value {
-        let required = service_command_control_capability(interface);
-        if !source_capabilities.is_granted(&required) {
+        let interface_canonical = canonical_interface_name_cow(interface);
+        let service_caps = service_capabilities(interface_canonical.as_ref());
+        let required = &service_caps.control;
+        if !source_capabilities.is_granted(required) {
             tracing::warn!(
                 source_module_id,
                 interface,
@@ -457,7 +459,7 @@ impl Shell {
                 "denied unauthorized service command dispatch"
             );
             self.record_method_call(mesh_core_debug::MethodCallEntry {
-                interface: canonical_interface_name(interface),
+                interface: interface_canonical.to_string(),
                 provider_id: None,
                 source_module_id: source_module_id.to_string(),
                 command: command.to_string(),
@@ -477,7 +479,7 @@ impl Shell {
             });
         }
 
-        if !self.service_command_is_supported(interface, command) {
+        if !self.service_command_is_supported(interface_canonical.as_ref(), command) {
             let message = format!("unsupported_service_command: {interface}.{command}");
             tracing::warn!(
                 source_module_id,
@@ -491,7 +493,7 @@ impl Shell {
                 message.clone(),
             );
             self.record_method_call(mesh_core_debug::MethodCallEntry {
-                interface: canonical_interface_name(interface),
+                interface: interface_canonical.to_string(),
                 provider_id: None,
                 source_module_id: source_module_id.to_string(),
                 command: command.to_string(),
@@ -511,6 +513,7 @@ impl Shell {
             });
         }
 
+        let interface = interface_canonical.as_ref();
         let mut dispatch_result = if self.service_handlers.contains_key(interface) {
             let coalesce = self.service_command_is_coalescable(interface, command);
             if coalesce {
@@ -558,7 +561,7 @@ impl Shell {
             .get("ok")
             .and_then(|value| value.as_bool())
             .unwrap_or(false)
-            && canonical_interface_name(interface) == "mesh.audio"
+            && interface == "mesh.audio"
             && command == "set_muted"
             && let Some(muted) = payload.get("muted").and_then(|value| value.as_bool())
         {
@@ -568,7 +571,7 @@ impl Shell {
 
         let provider_id = self
             .backend_runtimes
-            .get(&canonical_interface_name(interface))
+            .get(interface)
             .map(|slot| slot.provider_id.clone());
         let queued = dispatch_result
             .get("queued")
@@ -590,7 +593,7 @@ impl Shell {
             .and_then(|value| value.as_str())
             .map(ToOwned::to_owned);
         self.record_method_call(mesh_core_debug::MethodCallEntry {
-            interface: canonical_interface_name(interface),
+            interface: interface.to_string(),
             provider_id,
             source_module_id: source_module_id.to_string(),
             command: command.to_string(),
