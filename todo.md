@@ -727,7 +727,15 @@ duplicating it.
       the existing lock/clone/convert path (0.8x); the extra Lua lookup cost
       outweighed the saved Rust work, so the prototype was reverted. A future
       attempt should target shared immutable JSON values or lock avoidance
-      without adding another Lua table lookup.
+      without adding another Lua table lookup. Progress 2026-07-12:
+      `self.storage.snapshot` is now installed as a table-owned Lua function
+      once instead of being allocated from `__index` on every method lookup.
+      This does not change scalar storage read cloning, but removes repeated
+      function allocation for render hooks that call `self.storage:snapshot()`.
+      Added coverage that snapshot lookup does not track a storage-key read
+      plus a release-only benchmark; the local dev-shell run measured
+      602.437ms for per-lookup function creation versus 548.181ms for the
+      table-owned method over 100k snapshot calls (1.1x faster).
 ### J. Algorithmic complexity — quadratic hot-path patterns (fourth pass)
 
 Targeted scan for accidentally-super-linear loops. These compound with each
@@ -979,8 +987,16 @@ Performance:
       `audio.percent` publish two dependencies instead of three. A release
       benchmark over 250k node-shaped read batches measured 22.424ms
       consecutive-only versus 21.995ms duplicate-scan (~1.0x faster) while
-      reducing dependency entries from 1,000,000 to 750,000. Module-id and
-      unique tracked-read string allocations remain open.
+      reducing dependency entries from 1,000,000 to 750,000. Progress
+      2026-07-12: `WidgetNode` now carries a typed `module_id` field with
+      legacy `_mesh_module_id` attribute fallback, and frontend build/style
+      resolution paths use the typed field for normal trees. This removes the
+      fresh `_mesh_module_id` attribute insertion per built node while
+      preserving hand-built test/tooling compatibility. A release benchmark
+      over 500k build-shaped node clones with existing attributes measured
+      152.730ms for attribute-map insertion versus 141.105ms for typed-field
+      assignment (1.1x faster), before downstream savings from the smaller
+      attribute map. Unique tracked-read string allocations remain open.
 
 Structure / correctness:
 
@@ -1494,7 +1510,7 @@ Performance:
       reuse declaration/override/localized-trigger resolution. Release
       benchmark over 50,000 calls with 24 actions measured 693.588ms rebuilding
       each call versus 128.437ms cached (5.4x faster).
-- [ ] **Click press/release still runs ~5–8 separate full-tree walks.**
+- [x] **Click press/release still runs ~5–8 separate full-tree walks.**
       Press: `selectable_text_target_key`, `pointer_event_target_key`,
       `find_node_bounds_by_key`, `find_focusable_at`, then per-kind probes
       (`is_slider_key`/`is_option_key`/`is_radio_key`/
@@ -1530,7 +1546,64 @@ Performance:
       chain) and a release-only benchmark; the local dev-shell run measured
       169.032ms for the per-key walk versus 28.557ms fused over 2k lookups on
       a 40-deep chain with 200 padding siblings (5.9x faster).
-- [ ] **Scroll events do two extra walks** — `find_scrollable_at` then
+      Progress 2026-07-12: pointer press targeting now uses a fused
+      `pointer_press_hit` traversal that returns the press target, focusable
+      target, target node, and bounds together. The press handler consumes the
+      resolved target for pointer-down bounds, slider detection/change-handler
+      checks, option/radio/checkable classification, and initial slider value
+      calculation instead of immediately re-walking the tree for each. Added
+      parity coverage for focusable targets and non-focusable clickable
+      ancestors plus a release-only benchmark; the local dev-shell run measured
+      3.844s for the old multi-walk press lookup versus 3.170ms fused over 20k
+      clickable-grid presses (1212.6x faster). Remaining release-path
+      `pointer_event_target_key`/`find_click_handler`, click-event node
+      resolution, and some activation helpers still do separate walks.
+      Follow-up 2026-07-12: pointer release capture now short-circuits when the
+      pointer is still inside the stored press bounds, avoiding an unnecessary
+      release hit-test on ordinary clicks. The click dispatch path also reuses
+      stored press bounds and an already-resolved target node for menu/item
+      classification, click-event construction, and click/activate handler
+      checks. Added release-capture parity tests plus a release-only benchmark;
+      the local dev-shell run measured 1.529ms for unconditional release
+      hit-testing versus 168.599us with the bounds short-circuit over 20k
+      releases (9.1x faster). Remaining: release outside press bounds still
+      falls back to `pointer_event_target_key`, and some activation helpers
+      still do their own ancestry/descendant walks.
+      Follow-up 2026-07-12: release fallback outside the stored press bounds
+      now uses the fused `pointer_press_hit` path instead of the legacy
+      `pointer_event_target_with_focus` multi-walk. Added a release-only
+      non-focusable clickable-grid benchmark; the local dev-shell run measured
+      2.238s for the legacy multi-walk fallback versus 2.884ms with the fused
+      press hit over 20k releases (775.9x faster). Remaining activation helper
+      ancestry/descendant walks are still separate.
+      Follow-up 2026-07-12: press targets now snapshot their release-dispatch
+      metadata (bounds, tag/current-target payload, activation classification,
+      click/activate handlers and pre-bound args) so ordinary same-bounds
+      release dispatch avoids re-walking the tree for node lookup, bounds
+      lookup, classification, and handler resolution. Added a release-only
+      metadata benchmark; the local dev-shell run measured 2.503s for the old
+      tree lookup/reconstruction path versus 18.997us from the press snapshot
+      over 20k worst-case releases (131766.2x faster for that isolated
+      metadata path). Remaining activation helper ancestry/descendant walks
+      are still separate.
+      Follow-up 2026-07-12: checkable switch/checkbox press activation now
+      reads `checked` state from the already-resolved press target node instead
+      of re-walking the tree by key inside `toggle_checked_value`. Added a
+      release-only benchmark; the local dev-shell run measured 4.989s for the
+      key lookup path versus 1.076ms with the resolved node over 200k
+      worst-case toggles (4637.5x faster for that isolated state lookup).
+      Remaining option/radio activation ancestry/descendant walks are still
+      separate.
+      Follow-up 2026-07-12: option/radio pointer activation now also consumes
+      the already-resolved press target for the initial disabled/value read,
+      while preserving the existing ancestor/descendant group behavior. Added
+      a release-only benchmark; the local dev-shell run measured 5.068s for
+      the key lookup path versus 3.942ms with the resolved node over 200k
+      worst-case activations (1285.6x faster for that isolated target-state
+      lookup). Broader option/radio group indexing remains a future structural
+      optimization rather than part of the original press/release multi-walk
+      hot path.
+- [x] **Scroll events do two extra walks** — `find_scrollable_at` then
       `find_node_by_key` for limits (`input/mod.rs:307-309`); fold the
       scrollable ancestor + limits into the fused hit-test result.
       Progress 2026-07-10: added `find_scrollable_at_with_limits`, preserving
@@ -1539,6 +1612,14 @@ Performance:
       release-only benchmark; the local dev-shell run measured 1.578s for
       key-then-lookup versus 311.309ms fused over 200k scroll hits (5.1x
       faster).
+      Follow-up 2026-07-12: scroll-handler dispatch now uses a fused
+      `pointer_event_handler_hit(..., "scroll")` traversal that returns the
+      nearest handler node and bounds directly. This removes the path
+      allocation, per-key `find_event_handler` tree walks, duplicate handler
+      probe, node lookup, and bounds lookup before calling `onscroll`. Added
+      parity coverage and a release-only benchmark; the local dev-shell run
+      measured 2.610s for the old path/key-walk dispatch lookup versus 1.600ms
+      fused over 20k scroll-handler hits (1630.5x faster).
 - [x] Minor: `apply_element_actions` cloned the whole `ref_node_keys`
       HashMap per action batch (`interaction_state.rs:91`). Progress
       2026-07-10: action application now temporarily moves the ref lookup map
@@ -1551,17 +1632,29 @@ Performance:
       (`input/mod.rs:214-240`). Progress 2026-07-10: pointer move now takes
       ownership of the path produced by `pointer_hit_test`, swaps it into
       component hover state, and pointer-leave takes the stored path instead
-      of clone-then-clear. One dispatch snapshot remains until hover dispatch
-      no longer needs to call a `&mut self` method while borrowing path state.
+      of clone-then-clear.
       Added a release-only benchmark; the local dev-shell run measured 1.600s
       for the old clone shuffle versus 1.042s for move/replace over 500k path
       updates (1.5x faster).
-- [ ] Confirmation for the tracked slider-drag item (J): the unconditional
+      Follow-up 2026-07-12: hover transition dispatch now borrows the incoming
+      `new_path` before moving it into component state, removing the remaining
+      `current_path = self.hovered_path.clone()` snapshot while preserving
+      state restoration before handler errors propagate. Updated the
+      release-only benchmark; the local dev-shell run measured 1.574s for the
+      old clone-shuffle path versus 495.624ms for move/replace without the
+      dispatch snapshot over 500k path updates (3.2x faster).
+- [x] Confirmation for the tracked slider-drag item (J): the unconditional
       `invalidate_script_state()` per coalesced drag motion is at
       `input/mod.rs:193-200` with a comment explaining why state-dirty
       detection was insufficient — the fix needs slider knob position painted
       from shell-owned `slider_values` via the STATE path plus a paint-only
       text update, exactly as the J item describes.
+      Confirmed complete 2026-07-12: handlerless slider press/move paths now
+      use interaction restyle, while sliders with change/release handlers keep
+      script invalidation for reactive labels. Existing policy coverage asserts
+      both paths, and the release-only benchmark reports 790.919ms forced
+      script rebuild versus 213.822ms retained interaction repaint over 200
+      handlerless drag frames (3.7x faster).
 
 Structure:
 
@@ -1735,7 +1828,13 @@ Performance:
       cached replay into new runtimes, avoiding another canonical-interface to
       service-name projection per receiving runtime. A release benchmark over
       200k state writes measured 66.567ms projected-name versus 61.055ms
-      borrowed-name (~1.1x faster).
+      borrowed-name (~1.1x faster). Progress 2026-07-12:
+      `apply_service_update` now also uses the borrowed `Cow` projection for
+      generic callers instead of allocating an owned projected name before
+      immediately passing it by reference. A release benchmark over 200k state
+      writes measured 64.151ms owned projection versus 61.845ms borrowed
+      projection (~1.04x faster); explicit pre-borrowed-name state writes
+      remain slightly faster at 61.472ms.
 
 Structure:
 
@@ -1772,6 +1871,11 @@ Performance:
       nodes get converted + `set_style` is the mechanism that makes the
       existing "dirty-node-only sync" item (F) pay off twice: skips the
       conversion walk *and* preserves Taffy's caches for clean subtrees.
+      Rejected experiment 2026-07-12: checking `tree.style(id) == new_style`
+      before `set_style` without per-node dirty bits measured slower in an
+      optimized direct Taffy microbenchmark (46.115ms unconditional
+      `set_style` versus 51.642ms skip-equal over 2k×512 equal-style updates),
+      so this needs the retained dirty-bit feed rather than an equality guard.
 - [x] **Text measurement clones the content String twice per node per pass.**
       `update_text_context`/`build_taffy_tree` clone every text node's
       `content` into `TextMeasureData` per layout-dirty and structural pass
@@ -1896,7 +2000,17 @@ Performance:
       case-insensitive equality/window checks. Release benchmark over 1M
       eight-key batches measured 323.835ms for lowercase allocation versus
       61.248ms borrowed (5.3x faster). `keysym_name` allocation and public
-      event payload `String` clones remain open.
+      event payload `String` clones remain open. Progress 2026-07-12:
+      key press repeat setup now builds repeat state from borrowed
+      `surface_id`/key-name inputs and clones only when a repeat state is
+      actually retained; non-repeating key events move the owned event
+      surface/key strings directly into `DevWindowEvent` instead of cloning
+      them and dropping the originals. Added repeat-state coverage and a
+      release-only benchmark; the local dev-shell run measured 16.578ms for
+      the old clone-before-schedule shape versus 7.198ms borrowed over 500k
+      non-repeating key presses (2.3x faster for that isolated repeat setup
+      path). `keysym_name` allocation and public event payload `String` clones
+      remain open.
 - [ ] **Child popup targets force a full-buffer present every frame.**
       `paint_and_present_child_surface` sets `force_full_present = true`
       unconditionally after each child paint (`shell/runtime/render.rs:789-791`),
@@ -2029,7 +2143,7 @@ Performance:
       Progress 2026-07-05: frontend compilation now runs concurrently through
       Rayon and measured ~1.9x faster on the shipped catalog. Discovery and
       manifest loading remain serial, so the broader startup item stays open.
-- [ ] **Per-event allocations in `dispatch_wayland`.** Each dispatched event
+- [x] **Per-event allocations in `dispatch_wayland`.** Each dispatched event
       allocates the physical surface id String (`runtime/wayland.rs:24`),
       clones the routed target id (`wayland.rs:53`), calls
       `surface_size_changed` per event even when the size cannot have changed
@@ -2053,8 +2167,19 @@ Performance:
       emitted-request `VecDeque::from(Vec<CoreRequest>)` adapter with direct
       `Vec::drain` looked plausible but measured slower: 74.102ms for the
       `VecDeque` adapter versus 82.505ms for direct vector drain over 1M
-      four-request batches (0.9x), so the prototype was reverted.
-- [ ] Minor idle-loop hygiene in `render_components`: the surface id String
+      four-request batches (0.9x), so the prototype was reverted. Follow-up
+      2026-07-12: `dispatch_wayland` now splits incoming `WindowEvent`s by
+      value into `(surface_id, payload)` and routes by borrowed `&str`, so
+      the event-owned surface id is reused instead of cloning the routed
+      target id for every event. Pointer-leave hide requests still allocate
+      only when they need an owned `CoreRequest` surface id. Added payload
+      preservation coverage and a release-only benchmark; the local dev-shell
+      run measured 12.274ms for the old target-id clone path versus 7.151ms
+      for split-by-value over 500k events (1.7x faster for the isolated
+      dispatch id step). The listed `dispatch_wayland` allocation sources are
+      now addressed; broader public `WindowEvent` surface-id API cleanup
+      remains tracked under input normalization.
+- [x] Minor idle-loop hygiene in `render_components`: the surface id String
       is cloned for every component before the `wants_render` gate
       (`runtime/render.rs:23`), and `component.id().to_string()` runs per
       rendering component per frame (`render.rs:66`); `reconcile_child_surface
@@ -2076,7 +2201,14 @@ Performance:
       A release-only benchmark over 500k three-popover reconciliation
       membership checks measured 39.237ms for the `HashSet` path versus
       372.816us for `SmallVec` (105.2x faster). Closing-key owned set
-      construction remains open.
+      construction remains open. Follow-up 2026-07-12: `ShellComponent` now
+      exposes a borrowed `set_closing_child_keys_from_slice` path, and child
+      reconciliation compares stack-backed closing-key slices against the
+      component's existing set before allocating owned strings. The local
+      release benchmark measured 81.703ms for owned `HashSet<String>`
+      construction versus 23.756ms for borrowed `SmallVec` comparison over
+      500k steady-state checks (3.4x faster). The listed idle-loop allocation
+      sources are now addressed.
 
 Structure:
 

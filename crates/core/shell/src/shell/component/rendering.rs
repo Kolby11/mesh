@@ -609,7 +609,7 @@ impl FrontendSurfaceComponent {
             .map(|value| value.split_whitespace().map(str::to_owned).collect())
             .unwrap_or_default();
         let id = node.attributes.get("id").map(|value| value.as_str());
-        let module_id = node.attributes.get("_mesh_module_id").map(String::as_str);
+        let module_id = node.module_id();
         let (_style, diagnostics) = resolver
             .resolve_node_style_with_diagnostics_for_module_indexed(
                 rules, index, &node.tag, &classes, id, context, node.state, module_id,

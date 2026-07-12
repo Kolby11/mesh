@@ -474,7 +474,7 @@ impl KeyboardHandler for State {
         _serial: u32,
         event: KeyEvent,
     ) {
-        let Some(surface_id) = self.keyboard_focus.clone() else {
+        let Some(mut surface_id) = self.keyboard_focus.clone() else {
             return;
         };
         let name = keysym_name(event.keysym);
@@ -483,22 +483,25 @@ impl KeyboardHandler for State {
             shift: self.keyboard_mods.shift,
             alt: self.keyboard_mods.alt,
         };
-        self.events.push(DevWindowEvent::Key {
-            surface_id: surface_id.clone(),
-            event: DevWindowKeyEvent::Pressed(name.clone(), mods.clone()),
-        });
         let ch = event
             .utf8
             .as_deref()
             .and_then(|s| s.chars().next())
             .filter(|ch| !ch.is_control());
+        self.keyboard_repeat =
+            self.keyboard_repeat_state(&surface_id, &name, mods.clone(), ch, Instant::now());
+        let key_surface_id = if ch.is_some() || self.keyboard_repeat.is_some() {
+            surface_id.clone()
+        } else {
+            std::mem::take(&mut surface_id)
+        };
+        self.events.push(DevWindowEvent::Key {
+            surface_id: key_surface_id,
+            event: DevWindowKeyEvent::Pressed(name, mods),
+        });
         if let Some(ch) = ch {
-            self.events.push(DevWindowEvent::Char {
-                surface_id: surface_id.clone(),
-                ch,
-            });
+            self.events.push(DevWindowEvent::Char { surface_id, ch });
         }
-        self.schedule_keyboard_repeat(surface_id, name, mods, ch);
     }
 
     fn release_key(

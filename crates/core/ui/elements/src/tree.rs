@@ -86,6 +86,8 @@ pub struct WidgetNode {
     pub scroll_metrics: Option<WidgetScrollMetrics>,
     /// Stable runtime identity for this node, kept out of the string attribute map.
     mesh_key: Option<String>,
+    /// Source module identity used for module-scoped theme defaults.
+    module_id: Option<String>,
     /// Service field reads captured during template evaluation.
     /// Each entry is a (service_name, field_name) pair read by this node's expressions.
     pub service_field_reads: Vec<(String, String)>,
@@ -110,6 +112,7 @@ impl WidgetNode {
             state: ElementState::default(),
             scroll_metrics: None,
             mesh_key: None,
+            module_id: None,
             service_field_reads: Vec::new(),
             cached_class_attr: None,
             cached_classes: Vec::new(),
@@ -132,6 +135,20 @@ impl WidgetNode {
 
     pub fn has_mesh_key(&self) -> bool {
         self.mesh_key().is_some()
+    }
+
+    pub fn set_module_id(&mut self, module_id: impl Into<String>) {
+        self.module_id = Some(module_id.into());
+    }
+
+    pub fn clear_module_id(&mut self) {
+        self.module_id = None;
+    }
+
+    pub fn module_id(&self) -> Option<&str> {
+        self.module_id
+            .as_deref()
+            .or_else(|| self.attributes.get("_mesh_module_id").map(String::as_str))
     }
 
     pub fn resolved_scroll_metrics(&self) -> WidgetScrollMetrics {
@@ -249,6 +266,22 @@ mod tests {
         assert_eq!(node.mesh_key(), Some("legacy/path"));
     }
 
+    #[test]
+    fn module_id_uses_typed_field_before_legacy_attribute() {
+        let mut node = WidgetNode::new("button");
+        assert_eq!(node.module_id(), None);
+
+        node.attributes
+            .insert("_mesh_module_id".into(), "@legacy/module".into());
+        assert_eq!(node.module_id(), Some("@legacy/module"));
+
+        node.set_module_id("@typed/module");
+        assert_eq!(node.module_id(), Some("@typed/module"));
+
+        node.clear_module_id();
+        assert_eq!(node.module_id(), Some("@legacy/module"));
+    }
+
     // cargo test -p mesh-core-elements --release -- typed_mesh_key_assignment_beats_attribute_map_insert --ignored --nocapture
     #[test]
     #[ignore = "release-only mesh key assignment microbenchmark"]
@@ -278,6 +311,48 @@ mod tests {
 
         eprintln!(
             "mesh key assignment: attribute map {attribute_time:?}; typed field {typed_time:?}; ratio {:.1}x; totals={attribute_total}/{typed_total}",
+            attribute_time.as_secs_f64() / typed_time.as_secs_f64()
+        );
+        assert_eq!(attribute_total, typed_total);
+        assert!(typed_time < attribute_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- typed_module_id_assignment_beats_attribute_map_insert --ignored --nocapture
+    #[test]
+    #[ignore = "release-only module id assignment microbenchmark"]
+    fn typed_module_id_assignment_beats_attribute_map_insert() {
+        let iterations = 500_000usize;
+        let module_id = "@mesh/navigation-bar";
+        let mut template = WidgetNode::new("row");
+        for index in 0..8 {
+            template
+                .attributes
+                .insert(format!("attr{index}"), format!("value{index}"));
+        }
+
+        let attribute_started = std::time::Instant::now();
+        let mut attribute_total = 0usize;
+        for _ in 0..iterations {
+            let mut node = template.clone();
+            node.attributes
+                .insert("_mesh_module_id".into(), module_id.to_string());
+            attribute_total =
+                attribute_total.wrapping_add(std::hint::black_box(node.module_id().unwrap().len()));
+        }
+        let attribute_time = attribute_started.elapsed();
+
+        let typed_started = std::time::Instant::now();
+        let mut typed_total = 0usize;
+        for _ in 0..iterations {
+            let mut node = template.clone();
+            node.set_module_id(module_id);
+            typed_total =
+                typed_total.wrapping_add(std::hint::black_box(node.module_id().unwrap().len()));
+        }
+        let typed_time = typed_started.elapsed();
+
+        eprintln!(
+            "module id assignment: attribute map {attribute_time:?}; typed field {typed_time:?}; ratio {:.1}x; totals={attribute_total}/{typed_total}",
             attribute_time.as_secs_f64() / typed_time.as_secs_f64()
         );
         assert_eq!(attribute_total, typed_total);

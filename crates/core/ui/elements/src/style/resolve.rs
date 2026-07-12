@@ -190,10 +190,7 @@ impl<'a> StyleNodeAttrs<'a> {
             classes,
             id: node.attributes.get("id").map(|value| value.as_str()),
             key: node.mesh_key(),
-            module_id: node
-                .attributes
-                .get("_mesh_module_id")
-                .map(|value| value.as_str()),
+            module_id: node.module_id(),
             state: node.state,
             state_mask: active_state_mask(node.state),
         }

@@ -47,7 +47,6 @@ use ipc::spawn_ipc_server;
 use mesh_core_backend::{BackendServiceEvent, spawn_backend_service};
 use mesh_core_presentation::{
     LayerSurfaceConfig, PresentationEngine, WindowEvent, WindowKeyEvent, coalesce_input_events,
-    event_surface_id,
 };
 use mesh_core_render::{DebugOverlay, PixelBuffer};
 use sounds::{SoundKind, play_shell_sound};

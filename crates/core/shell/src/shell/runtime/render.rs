@@ -495,7 +495,7 @@ impl Shell {
             self.components[index].entering_child_node_keys.clear();
             self.components[index]
                 .component
-                .set_closing_child_keys(HashSet::new());
+                .set_closing_child_keys_from_slice(&[]);
             self.components[index]
                 .component
                 .set_entering_child_keys(HashSet::new());
@@ -539,15 +539,18 @@ impl Shell {
             }
         }
 
-        let closing_keys: HashSet<String> = self.components[index]
-            .children
-            .iter()
-            .filter(|child| child.closing_until.is_some())
-            .map(|child| child.node_key.clone())
-            .collect();
-        self.components[index]
-            .component
-            .set_closing_child_keys(closing_keys);
+        {
+            let runtime = &mut self.components[index];
+            let closing_keys: SmallVec<[&str; 4]> = runtime
+                .children
+                .iter()
+                .filter(|child| child.closing_until.is_some())
+                .map(|child| child.node_key.as_str())
+                .collect();
+            runtime
+                .component
+                .set_closing_child_keys_from_slice(&closing_keys);
+        }
 
         let mut any_presented = false;
         for request in &requests {
@@ -1338,6 +1341,50 @@ mod performance_tests {
         );
         assert_eq!(hash_count, small_count);
         assert!(small_time < hash_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- closing_child_keys_borrowed_compare_beats_owned_hashset --ignored --nocapture
+    #[test]
+    #[ignore = "release-only child closing-key allocation microbenchmark"]
+    fn closing_child_keys_borrowed_compare_beats_owned_hashset() {
+        let closing = [
+            "root/0/language-popover".to_string(),
+            "root/1/theme-popover".to_string(),
+            "root/2/audio-popover".to_string(),
+        ];
+        let existing: HashSet<String> = closing.iter().cloned().collect();
+        let iterations = 500_000;
+
+        let hash_started = Instant::now();
+        let mut hash_count = 0usize;
+        for _ in 0..iterations {
+            let candidate: HashSet<String> =
+                closing.iter().map(|key| black_box(key).clone()).collect();
+            if candidate == existing {
+                hash_count = hash_count.wrapping_add(candidate.len());
+            }
+        }
+        let hash_time = hash_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_count = 0usize;
+        for _ in 0..iterations {
+            let candidate: SmallVec<[&str; 4]> =
+                closing.iter().map(|key| black_box(key.as_str())).collect();
+            if existing.len() == candidate.len()
+                && candidate.iter().all(|key| existing.contains(*key))
+            {
+                borrowed_count = borrowed_count.wrapping_add(candidate.len());
+            }
+        }
+        let borrowed_time = borrowed_started.elapsed();
+
+        eprintln!(
+            "closing child keys: owned HashSet {hash_time:?}; borrowed SmallVec compare {borrowed_time:?}; ratio {:.1}x; counts={hash_count}/{borrowed_count}",
+            hash_time.as_secs_f64() / borrowed_time.as_secs_f64()
+        );
+        assert_eq!(hash_count, borrowed_count);
+        assert!(borrowed_time < hash_time);
     }
 }
 

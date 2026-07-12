@@ -381,6 +381,7 @@ impl FrontendSurfaceComponent {
             if find_node_by_key(tree, key).is_none() {
                 self.pointer_down_key = None;
                 self.pointer_down_bounds = None;
+                self.pointer_down_target = None;
             }
         }
 

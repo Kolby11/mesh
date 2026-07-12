@@ -178,7 +178,7 @@ fn parse_tabindex(node: &WidgetNode) -> Option<i32> {
         .and_then(|value| value.parse::<i32>().ok())
 }
 
-fn node_is_pointer_focusable(node: &WidgetNode) -> bool {
+pub(crate) fn node_is_pointer_focusable(node: &WidgetNode) -> bool {
     !node_is_hidden(node)
         && !node_is_disabled(node)
         && (node_is_native_focusable(node) || parse_tabindex(node).is_some())

@@ -972,8 +972,7 @@ fn build_component_ref(
 }
 
 fn attach_module_id(node: &mut WidgetNode, module_id: &str) {
-    node.attributes
-        .insert("_mesh_module_id".into(), module_id.to_string());
+    node.set_module_id(module_id);
 }
 
 #[cfg(test)]

@@ -21,9 +21,8 @@ impl Shell {
                 "[hover] dispatch_wayland: got event {:?}",
                 std::mem::discriminant(&event)
             );
-            let physical_surface_id = event_surface_id(&event);
-            let is_keyboard_event =
-                matches!(&event, WindowEvent::Key { .. } | WindowEvent::Char { .. });
+            let (physical_surface_id, event) = split_window_event(event);
+            let is_keyboard_event = event.is_keyboard();
             let keyboard_focus_surface = if is_keyboard_event {
                 self.keyboard_focus_surface.clone()
             } else {
@@ -42,46 +41,46 @@ impl Shell {
                     {
                         surface_id
                     } else {
-                        physical_surface_id
+                        &physical_surface_id
                     }
                 } else {
-                    physical_surface_id
+                    &physical_surface_id
                 }
             } else {
-                physical_surface_id
+                &physical_surface_id
             };
 
             let Some((index, target)) = self.component_target_for_surface(route_surface_id) else {
                 continue;
             };
 
-            let target_surface_id = self.components[index].target(target).surface_id.clone();
+            let target_surface_id = route_surface_id;
             if matches!(
                 event,
-                WindowEvent::PointerMove { .. }
-                    | WindowEvent::PointerButton { .. }
-                    | WindowEvent::Scroll { .. }
+                RoutedWindowEvent::PointerMove { .. }
+                    | RoutedWindowEvent::PointerButton { .. }
+                    | RoutedWindowEvent::Scroll { .. }
             ) {
-                self.cancel_pending_popover_hide(&target_surface_id);
-                if let WindowEvent::PointerMove { x, y, .. } = &event {
-                    self.cancel_pending_child_popover_hides_at(&target_surface_id, *x, *y);
+                self.cancel_pending_popover_hide(target_surface_id);
+                if let RoutedWindowEvent::PointerMove { x, y } = &event {
+                    self.cancel_pending_child_popover_hides_at(target_surface_id, *x, *y);
                 }
-            } else if matches!(event, WindowEvent::PointerLeave { .. })
+            } else if matches!(event, RoutedWindowEvent::PointerLeave)
                 && self.components[index]
                     .target(target)
                     .popup_parent_surface
                     .is_some()
             {
                 self.drain_request(CoreRequest::HidePopover {
-                    surface_id: target_surface_id.clone(),
+                    surface_id: target_surface_id.to_string(),
                     defer_for_hover_bridge: true,
                 })?;
-            } else if matches!(event, WindowEvent::PointerLeave { .. })
+            } else if matches!(event, RoutedWindowEvent::PointerLeave)
                 && matches!(target, TargetRef::Parent)
             {
-                self.defer_child_popover_hides_for_parent(&target_surface_id);
+                self.defer_child_popover_hides_for_parent(target_surface_id);
             }
-            let Some(surface) = self.surfaces.get(&target_surface_id) else {
+            let Some(surface) = self.surfaces.get(target_surface_id) else {
                 continue;
             };
             let fixed_surface_size = if surface.width == 0 || surface.height == 0 {
@@ -101,7 +100,7 @@ impl Shell {
                 })
                 .or_else(|| {
                     self.presentation_engine
-                        .surface_size_if_known(&target_surface_id)
+                        .surface_size_if_known(target_surface_id)
                 })
                 .unwrap_or((1, 1));
             self.components[index].target_mut(target).known_surface_size =
@@ -122,11 +121,7 @@ impl Shell {
                     .unwrap_or(target_surface_size),
             };
 
-            if let WindowEvent::Key {
-                event: WindowKeyEvent::Pressed(key, mods),
-                ..
-            } = &event
-            {
+            if let RoutedWindowEvent::KeyPressed { key, mods } = &event {
                 if let Some(request) =
                     shell_global_shortcut_request(key, mods.ctrl, mods.shift, self.debug.enabled)
                 {
@@ -136,29 +131,27 @@ impl Shell {
             }
 
             let input = match event {
-                WindowEvent::PointerButton {
+                RoutedWindowEvent::PointerButton {
                     x,
                     y,
                     pressed: true,
-                    ..
                 } => {
-                    self.claim_keyboard_focus_for_surface(&target_surface_id);
+                    self.claim_keyboard_focus_for_surface(target_surface_id);
                     ComponentInput::PointerButton {
                         x,
                         y,
                         pressed: true,
                     }
                 }
-                WindowEvent::PointerMove { x, y, .. } => ComponentInput::PointerMove { x, y },
-                WindowEvent::PointerLeave { .. } => ComponentInput::PointerLeave,
-                WindowEvent::PointerButton { x, y, pressed, .. } => {
+                RoutedWindowEvent::PointerMove { x, y } => ComponentInput::PointerMove { x, y },
+                RoutedWindowEvent::PointerLeave => ComponentInput::PointerLeave,
+                RoutedWindowEvent::PointerButton { x, y, pressed } => {
                     ComponentInput::PointerButton { x, y, pressed }
                 }
-                WindowEvent::Scroll { x, y, dx, dy, .. } => ComponentInput::Scroll { x, y, dx, dy },
-                WindowEvent::Key {
-                    event: WindowKeyEvent::Pressed(key, mods),
-                    ..
-                } => {
+                RoutedWindowEvent::Scroll { x, y, dx, dy } => {
+                    ComponentInput::Scroll { x, y, dx, dy }
+                }
+                RoutedWindowEvent::KeyPressed { key, mods } => {
                     self.active_key_modifiers = KeyModifiers {
                         ctrl: mods.ctrl,
                         shift: mods.shift,
@@ -166,14 +159,11 @@ impl Shell {
                     };
                     component_key_pressed_input(key, mods.ctrl, mods.shift, mods.alt)
                 }
-                WindowEvent::Key {
-                    event: WindowKeyEvent::Released(key),
-                    ..
-                } => {
+                RoutedWindowEvent::KeyReleased { key } => {
                     update_modifiers_for_key_release(&mut self.active_key_modifiers, &key);
                     component_key_released_input(key, self.active_key_modifiers)
                 }
-                WindowEvent::Char { ch, .. } => ComponentInput::Char { ch },
+                RoutedWindowEvent::Char { ch } => ComponentInput::Char { ch },
             };
             tracing::trace!(
                 "[hover] dispatch_wayland: routing event to surface_id={}",
@@ -214,7 +204,7 @@ impl Shell {
             if let Some(started) = input_started {
                 let component_id = self.components[index].component.id().to_string();
                 self.record_surface_profiling_stage(
-                    &target_surface_id,
+                    target_surface_id,
                     Some(component_id.as_str()),
                     mesh_core_debug::ProfilingStage::InputHandling,
                     started.elapsed(),
@@ -252,6 +242,77 @@ impl Shell {
     }
 }
 
+#[derive(Debug)]
+enum RoutedWindowEvent {
+    PointerMove {
+        x: f32,
+        y: f32,
+    },
+    PointerLeave,
+    PointerButton {
+        x: f32,
+        y: f32,
+        pressed: bool,
+    },
+    Scroll {
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    },
+    KeyPressed {
+        key: String,
+        mods: mesh_core_presentation::KeyMods,
+    },
+    KeyReleased {
+        key: String,
+    },
+    Char {
+        ch: char,
+    },
+}
+
+impl RoutedWindowEvent {
+    fn is_keyboard(&self) -> bool {
+        matches!(
+            self,
+            Self::KeyPressed { .. } | Self::KeyReleased { .. } | Self::Char { .. }
+        )
+    }
+}
+
+fn split_window_event(event: WindowEvent) -> (String, RoutedWindowEvent) {
+    match event {
+        WindowEvent::PointerMove { surface_id, x, y } => {
+            (surface_id, RoutedWindowEvent::PointerMove { x, y })
+        }
+        WindowEvent::PointerLeave { surface_id } => (surface_id, RoutedWindowEvent::PointerLeave),
+        WindowEvent::PointerButton {
+            surface_id,
+            x,
+            y,
+            pressed,
+        } => (
+            surface_id,
+            RoutedWindowEvent::PointerButton { x, y, pressed },
+        ),
+        WindowEvent::Scroll {
+            surface_id,
+            x,
+            y,
+            dx,
+            dy,
+        } => (surface_id, RoutedWindowEvent::Scroll { x, y, dx, dy }),
+        WindowEvent::Key { surface_id, event } => match event {
+            WindowKeyEvent::Pressed(key, mods) => {
+                (surface_id, RoutedWindowEvent::KeyPressed { key, mods })
+            }
+            WindowKeyEvent::Released(key) => (surface_id, RoutedWindowEvent::KeyReleased { key }),
+        },
+        WindowEvent::Char { surface_id, ch } => (surface_id, RoutedWindowEvent::Char { ch }),
+    }
+}
+
 fn profiling_trigger_for_event(event: &WindowEvent) -> &'static str {
     match event {
         WindowEvent::PointerMove { .. } => "pointer_move",
@@ -260,5 +321,89 @@ fn profiling_trigger_for_event(event: &WindowEvent) -> &'static str {
         WindowEvent::Scroll { .. } => "scroll",
         WindowEvent::Key { .. } => "key",
         WindowEvent::Char { .. } => "char",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    #[test]
+    fn split_window_event_preserves_surface_and_payload() {
+        let (surface_id, event) = split_window_event(WindowEvent::PointerButton {
+            surface_id: "panel".to_string(),
+            x: 12.0,
+            y: 24.0,
+            pressed: true,
+        });
+        assert_eq!(surface_id, "panel");
+        assert!(matches!(
+            event,
+            RoutedWindowEvent::PointerButton {
+                x: 12.0,
+                y: 24.0,
+                pressed: true
+            }
+        ));
+
+        let (surface_id, event) = split_window_event(WindowEvent::Key {
+            surface_id: "launcher".to_string(),
+            event: WindowKeyEvent::Pressed(
+                "Enter".to_string(),
+                mesh_core_presentation::KeyMods {
+                    ctrl: true,
+                    shift: false,
+                    alt: true,
+                },
+            ),
+        });
+        assert_eq!(surface_id, "launcher");
+        assert!(event.is_keyboard());
+        assert!(matches!(
+            event,
+            RoutedWindowEvent::KeyPressed {
+                ref key,
+                ref mods
+            } if key == "Enter" && mods.ctrl && !mods.shift && mods.alt
+        ));
+    }
+
+    #[test]
+    #[ignore = "release-only dispatch surface-id split microbenchmark"]
+    fn dispatch_surface_id_split_benchmark() {
+        const ITERATIONS: usize = 500_000;
+        let surface_id = "@mesh/benchmark-panel/with/a/long/child-surface-id".to_string();
+        let old_events: Vec<_> = (0..ITERATIONS)
+            .map(|index| WindowEvent::PointerMove {
+                surface_id: surface_id.clone(),
+                x: (index % 256) as f32,
+                y: (index % 128) as f32,
+            })
+            .collect();
+        let new_events = old_events.clone();
+
+        let started = Instant::now();
+        for event in old_events {
+            let target_surface_id = mesh_core_presentation::event_surface_id(&event).to_string();
+            black_box(target_surface_id);
+            black_box(event);
+        }
+        let old_elapsed = started.elapsed();
+
+        let started = Instant::now();
+        for event in new_events {
+            let (target_surface_id, routed) = split_window_event(event);
+            black_box(target_surface_id);
+            black_box(routed);
+        }
+        let new_elapsed = started.elapsed();
+
+        eprintln!("dispatch surface-id target clone: old={old_elapsed:?} split={new_elapsed:?}");
+        assert!(
+            new_elapsed < old_elapsed,
+            "split path should avoid the old per-event target surface id clone"
+        );
     }
 }

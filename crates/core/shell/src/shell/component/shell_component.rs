@@ -1189,6 +1189,22 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
     }
 
+    fn set_closing_child_keys_from_slice(&mut self, keys: &[&str]) {
+        if self.closing_child_keys.len() == keys.len()
+            && keys
+                .iter()
+                .all(|key| self.closing_child_keys.contains(*key))
+        {
+            return;
+        }
+        self.closing_child_keys = keys.iter().map(|key| (*key).to_owned()).collect();
+        // A full rebuild (not just a style-only restyle) so the affected
+        // popover subtree's `class` attribute is re-derived fresh from the
+        // template rather than carrying forward a stale appended class from
+        // a previous closing/reopening cycle.
+        self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
+    }
+
     fn set_entering_child_keys(&mut self, keys: std::collections::HashSet<String>) {
         if self.entering_child_keys == keys {
             return;

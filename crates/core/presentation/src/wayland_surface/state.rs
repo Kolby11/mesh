@@ -73,31 +73,15 @@ pub(super) struct State {
 }
 
 impl State {
-    pub(super) fn schedule_keyboard_repeat(
-        &mut self,
-        surface_id: String,
-        key: String,
+    pub(super) fn keyboard_repeat_state(
+        &self,
+        surface_id: &str,
+        key: &str,
         mods: KeyMods,
         ch: Option<char>,
-    ) {
-        if is_non_repeating_key(&key) {
-            self.keyboard_repeat = None;
-            return;
-        }
-
-        let RepeatInfo::Repeat { rate, delay } = self.keyboard_repeat_info else {
-            self.keyboard_repeat = None;
-            return;
-        };
-        let interval = Duration::from_micros((1_000_000 / rate.get() as u64).max(1));
-        self.keyboard_repeat = Some(KeyboardRepeatState {
-            surface_id,
-            key,
-            mods,
-            ch,
-            next_at: Instant::now() + Duration::from_millis(delay as u64),
-            interval,
-        });
+        now: Instant,
+    ) -> Option<KeyboardRepeatState> {
+        keyboard_repeat_state_for(self.keyboard_repeat_info, surface_id, key, mods, ch, now)
     }
 
     pub(super) fn clear_keyboard_repeat_for_key(&mut self, key: &str) {
@@ -346,6 +330,32 @@ impl State {
     }
 }
 
+fn keyboard_repeat_state_for(
+    repeat_info: RepeatInfo,
+    surface_id: &str,
+    key: &str,
+    mods: KeyMods,
+    ch: Option<char>,
+    now: Instant,
+) -> Option<KeyboardRepeatState> {
+    if is_non_repeating_key(key) {
+        return None;
+    }
+
+    let RepeatInfo::Repeat { rate, delay } = repeat_info else {
+        return None;
+    };
+    let interval = Duration::from_micros((1_000_000 / rate.get() as u64).max(1));
+    Some(KeyboardRepeatState {
+        surface_id: surface_id.to_string(),
+        key: key.to_string(),
+        mods,
+        ch,
+        next_at: now + Duration::from_millis(delay as u64),
+        interval,
+    })
+}
+
 fn is_non_repeating_key(key: &str) -> bool {
     contains_ignore_ascii_case(key, "shift")
         || contains_ignore_ascii_case(key, "control")
@@ -369,6 +379,7 @@ fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
 #[cfg(test)]
 mod performance_tests {
     use super::*;
+    use std::num::NonZeroU32;
     use std::time::Instant;
 
     #[test]
@@ -418,6 +429,28 @@ mod performance_tests {
         assert!(is_non_repeating_key("Escape"));
         assert!(!is_non_repeating_key("a"));
         assert!(!is_non_repeating_key("Enter"));
+    }
+
+    #[test]
+    fn keyboard_repeat_state_skips_non_repeating_keys() {
+        let repeat_info = RepeatInfo::Repeat {
+            rate: NonZeroU32::new(30).unwrap(),
+            delay: 250,
+        };
+        let mods = KeyMods::default();
+        let now = Instant::now();
+
+        assert!(
+            keyboard_repeat_state_for(repeat_info, "panel", "Shift_L", mods.clone(), None, now)
+                .is_none()
+        );
+
+        let repeat =
+            keyboard_repeat_state_for(repeat_info, "panel", "a", mods, Some('a'), now).unwrap();
+        assert_eq!(repeat.surface_id, "panel");
+        assert_eq!(repeat.key, "a");
+        assert_eq!(repeat.ch, Some('a'));
+        assert_eq!(repeat.next_at, now + Duration::from_millis(250));
     }
 
     #[test]
@@ -472,6 +505,78 @@ mod performance_tests {
         assert_eq!(old_count, new_count);
         eprintln!(
             "non-repeating key detection over {iterations} key batches: lowercase {old:?}, borrowed {new:?}, ratio {:.1}x",
+            old.as_secs_f64() / new.as_secs_f64()
+        );
+        assert!(new < old);
+    }
+
+    #[test]
+    #[ignore = "release-only key press repeat setup microbenchmark"]
+    fn borrowed_repeat_setup_avoids_non_repeating_event_clones() {
+        let repeat_info = RepeatInfo::Repeat {
+            rate: NonZeroU32::new(30).unwrap(),
+            delay: 250,
+        };
+        let mods = KeyMods {
+            ctrl: false,
+            shift: true,
+            alt: false,
+        };
+        let iterations = 500_000;
+        let now = Instant::now();
+
+        fn old_schedule_keyboard_repeat(
+            repeat_info: RepeatInfo,
+            surface_id: String,
+            key: String,
+            mods: KeyMods,
+            ch: Option<char>,
+            now: Instant,
+        ) -> Option<KeyboardRepeatState> {
+            keyboard_repeat_state_for(repeat_info, &surface_id, &key, mods, ch, now)
+        }
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            let surface_id = String::from("@mesh/keyboard/benchmark/surface");
+            let name = String::from("Shift_L");
+            let key_event = DevWindowEvent::Key {
+                surface_id: surface_id.clone(),
+                event: DevWindowKeyEvent::Pressed(name.clone(), mods.clone()),
+            };
+            let repeat = old_schedule_keyboard_repeat(
+                repeat_info,
+                surface_id,
+                name,
+                mods.clone(),
+                None,
+                now,
+            );
+            std::hint::black_box((key_event, repeat));
+        }
+        let old = started.elapsed();
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            let mut surface_id = String::from("@mesh/keyboard/benchmark/surface");
+            let name = String::from("Shift_L");
+            let repeat =
+                keyboard_repeat_state_for(repeat_info, &surface_id, &name, mods.clone(), None, now);
+            let key_surface_id = if repeat.is_some() {
+                surface_id.clone()
+            } else {
+                std::mem::take(&mut surface_id)
+            };
+            let key_event = DevWindowEvent::Key {
+                surface_id: key_surface_id,
+                event: DevWindowKeyEvent::Pressed(name, mods.clone()),
+            };
+            std::hint::black_box((key_event, repeat, surface_id));
+        }
+        let new = started.elapsed();
+
+        eprintln!(
+            "non-repeating key press repeat setup over {iterations} events: old {old:?}, borrowed {new:?}, ratio {:.1}x",
             old.as_secs_f64() / new.as_secs_f64()
         );
         assert!(new < old);

@@ -428,6 +428,11 @@ pub trait ShellComponent: Send {
     /// so the popover's own CSS transition resolves and advances through the
     /// normal per-node transition engine instead of a one-shot style snap.
     fn set_closing_child_keys(&mut self, _keys: std::collections::HashSet<String>) {}
+    /// Borrowed variant for hot reconciliation paths. Implementations can
+    /// compare against their existing state before allocating an owned set.
+    fn set_closing_child_keys_from_slice(&mut self, keys: &[&str]) {
+        self.set_closing_child_keys(keys.iter().map(|key| (*key).to_owned()).collect());
+    }
     /// Tell the component which newly opened child popovers should be painted
     /// in their authored entrance state. The shell maps the child from this
     /// paint, then clears the keys so normal CSS transitions animate it to its

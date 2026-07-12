@@ -1,5 +1,85 @@
 use super::super::*;
 
+#[derive(Debug, Clone, PartialEq)]
+pub(in crate::shell::component) struct PressedTargetSnapshot {
+    pub(super) key: String,
+    pub(super) bounds: (f32, f32, f32, f32),
+    pub(super) tag: String,
+    pub(super) current_target: serde_json::Value,
+    pub(super) activation_item: bool,
+    pub(super) click_handler: Option<PressedHandlerSnapshot>,
+    activate_handler: Option<PressedHandlerSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct PressedHandlerSnapshot {
+    handler: String,
+    args: Vec<serde_json::Value>,
+}
+
+impl PressedHandlerSnapshot {
+    fn from_node(node: &WidgetNode, event_name: &str) -> Option<Self> {
+        if let Some(call) = node.event_handler_calls.get(event_name) {
+            return Some(Self {
+                handler: call.handler.clone(),
+                args: call.args.clone(),
+            });
+        }
+        node.event_handlers.get(event_name).map(|handler| Self {
+            handler: handler.clone(),
+            args: Vec::new(),
+        })
+    }
+}
+
+impl PressedTargetSnapshot {
+    pub(super) fn from_node(key: &str, node: &WidgetNode, bounds: (f32, f32, f32, f32)) -> Self {
+        let (left, top, right, bottom) = bounds;
+        let width = (right - left).max(0.0);
+        let height = (bottom - top).max(0.0);
+        let bounds_json = serde_json::json!({
+            "left": left,
+            "top": top,
+            "right": right,
+            "bottom": bottom,
+            "width": width,
+            "height": height,
+        });
+        let position = serde_json::json!({
+            "margin_left": left.round() as i32,
+            "margin_bottom": bottom.round() as i32,
+            "width": width.round() as i32,
+            "height": height.round() as i32,
+        });
+        let mut current_target =
+            element_snapshot_json(node, left - node.layout.x, top - node.layout.y);
+        if let Some(object) = current_target.as_object_mut() {
+            object.insert("key".into(), serde_json::Value::String(key.to_string()));
+            object.insert("tag".into(), serde_json::Value::String(node.tag.clone()));
+            object.insert("bounds".into(), bounds_json);
+            object.insert("position".into(), position);
+        }
+        Self {
+            key: key.to_string(),
+            bounds,
+            tag: node.tag.clone(),
+            current_target,
+            activation_item: node_is_source(
+                node,
+                &[
+                    "menu-item",
+                    "command-item",
+                    "preference-row",
+                    "tab",
+                    "list-item",
+                ],
+            ),
+            click_handler: PressedHandlerSnapshot::from_node(node, "click"),
+            activate_handler: PressedHandlerSnapshot::from_node(node, "activate"),
+        }
+    }
+}
+
 impl FrontendSurfaceComponent {
     pub(super) fn dispatch_text_input_value_handlers(
         &mut self,
@@ -79,6 +159,57 @@ impl FrontendSurfaceComponent {
         self.preserve_slider_value(tree, slider_key, value);
     }
 
+    pub(super) fn update_slider_from_resolved_press(
+        &mut self,
+        slider_key: &str,
+        node: &WidgetNode,
+        bounds: (f32, f32, f32, f32),
+        x: f32,
+        y: f32,
+    ) {
+        let is_vertical = node
+            .attributes
+            .get("orient")
+            .map(|v| v == "vertical")
+            .unwrap_or(false);
+        let (left, top, right, bottom) = bounds;
+
+        let min = node
+            .attributes
+            .get("min")
+            .and_then(|value: &String| value.parse::<f32>().ok())
+            .unwrap_or(0.0);
+        let max = node
+            .attributes
+            .get("max")
+            .and_then(|value: &String| value.parse::<f32>().ok())
+            .unwrap_or(100.0);
+
+        if max <= min {
+            return;
+        }
+
+        let pct = if is_vertical {
+            let height = (bottom - top).max(1.0);
+            let local_y = (y - top).clamp(0.0, height);
+            1.0 - (local_y / height).clamp(0.0, 1.0)
+        } else {
+            let width = (right - left).max(1.0);
+            let local_x = (x - left).clamp(0.0, width);
+            (local_x / width).clamp(0.0, 1.0)
+        };
+        let value = min + (max - min) * pct;
+        if let Some(script_value) = node
+            .attributes
+            .get("value")
+            .and_then(|value| value.parse::<f32>().ok())
+        {
+            self.slider_script_values
+                .insert(slider_key.to_string(), script_value);
+        }
+        self.slider_values.insert(slider_key.to_string(), value);
+    }
+
     pub(super) fn slider_value(&self, tree: &WidgetNode, slider_key: &str) -> Option<f32> {
         self.slider_values.get(slider_key).copied().or_else(|| {
             find_node_by_key(tree, slider_key).and_then(|node| {
@@ -99,6 +230,17 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn toggle_checked_value(&mut self, tree: &WidgetNode, key: &str) -> bool {
         let next = !self.current_checked_value(tree, key);
+        self.checked_values.insert(key.to_string(), next);
+        next
+    }
+
+    pub(super) fn toggle_checked_value_for_node(&mut self, key: &str, node: &WidgetNode) -> bool {
+        let current = self.checked_values.get(key).copied().unwrap_or_else(|| {
+            node.attributes
+                .get("checked")
+                .is_some_and(|value| matches!(value.as_str(), "true" | "1" | "checked"))
+        });
+        let next = !current;
         self.checked_values.insert(key.to_string(), next);
         next
     }
@@ -158,6 +300,60 @@ impl FrontendSurfaceComponent {
         Ok(requests)
     }
 
+    pub(in crate::shell::component) fn dispatch_resolved_activation_handlers(
+        &mut self,
+        node: &WidgetNode,
+        click_event: serde_json::Value,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let mut requests = Vec::new();
+        if node.event_handlers.contains_key("click") {
+            requests.extend(self.call_resolved_node_handler(
+                node,
+                "click",
+                &[click_event.clone()],
+            )?);
+        }
+        requests.extend(self.call_resolved_node_handler(node, "activate", &[click_event])?);
+        Ok(requests)
+    }
+
+    pub(in crate::shell::component) fn dispatch_pressed_activation_handlers(
+        &mut self,
+        target: &PressedTargetSnapshot,
+        click_event: serde_json::Value,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let mut requests = Vec::new();
+        if let Some(handler) = &target.click_handler {
+            requests.extend(self.call_pressed_handler(handler, click_event.clone())?);
+        }
+        if let Some(handler) = &target.activate_handler {
+            requests.extend(self.call_pressed_handler(handler, click_event)?);
+        }
+        Ok(requests)
+    }
+
+    pub(in crate::shell::component) fn call_pressed_click_handler(
+        &mut self,
+        target: &PressedTargetSnapshot,
+        click_event: serde_json::Value,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        target
+            .click_handler
+            .as_ref()
+            .map(|handler| self.call_pressed_handler(handler, click_event))
+            .unwrap_or_else(|| Ok(Vec::new()))
+    }
+
+    fn call_pressed_handler(
+        &mut self,
+        handler: &PressedHandlerSnapshot,
+        event_arg: serde_json::Value,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let mut args = handler.args.clone();
+        args.push(event_arg);
+        self.call_namespaced_handler(&handler.handler, &args)
+    }
+
     pub(super) fn activate_option_choice(
         &mut self,
         tree: &WidgetNode,
@@ -166,6 +362,15 @@ impl FrontendSurfaceComponent {
         let Some(option) = find_node_by_key(tree, option_key) else {
             return Ok(Vec::new());
         };
+        self.activate_option_choice_for_node(tree, option_key, option)
+    }
+
+    pub(super) fn activate_option_choice_for_node(
+        &mut self,
+        tree: &WidgetNode,
+        option_key: &str,
+        option: &WidgetNode,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
         if node_disabled(option) {
             return Ok(Vec::new());
         }
@@ -205,6 +410,15 @@ impl FrontendSurfaceComponent {
         let Some(radio) = find_node_by_key(tree, radio_key) else {
             return Ok(Vec::new());
         };
+        self.activate_radio_choice_for_node(tree, radio_key, radio)
+    }
+
+    pub(super) fn activate_radio_choice_for_node(
+        &mut self,
+        tree: &WidgetNode,
+        radio_key: &str,
+        radio: &WidgetNode,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
         if node_disabled(radio) {
             return Ok(Vec::new());
         }
@@ -259,7 +473,24 @@ impl FrontendSurfaceComponent {
         x: f32,
         y: f32,
     ) -> Option<String> {
-        pointer_event_target_with_focus(tree, x, y).0
+        pointer_press_hit(tree, x, y)
+            .target
+            .map(|target| target.key.to_owned())
+    }
+
+    pub(in crate::shell::component) fn captured_release_key(
+        &self,
+        tree: &WidgetNode,
+        x: f32,
+        y: f32,
+    ) -> Option<String> {
+        captured_release_key(
+            tree,
+            self.pointer_down_key.as_deref(),
+            self.pointer_down_bounds,
+            x,
+            y,
+        )
     }
 
     pub(in crate::shell::component) fn build_click_event(
@@ -339,6 +570,61 @@ impl FrontendSurfaceComponent {
         })
     }
 
+    pub(in crate::shell::component) fn pressed_target_snapshot(
+        &self,
+        key: &str,
+        node: &WidgetNode,
+        bounds: (f32, f32, f32, f32),
+    ) -> PressedTargetSnapshot {
+        PressedTargetSnapshot::from_node(key, node, bounds)
+    }
+
+    pub(in crate::shell::component) fn build_click_event_for_pressed_target(
+        &self,
+        tree: &WidgetNode,
+        target: &PressedTargetSnapshot,
+        x: f32,
+        y: f32,
+    ) -> serde_json::Value {
+        let (left, top, right, bottom) = target.bounds;
+        let width = (right - left).max(0.0);
+        let height = (bottom - top).max(0.0);
+        let bounds = serde_json::json!({
+            "left": left,
+            "top": top,
+            "right": right,
+            "bottom": bottom,
+            "width": width,
+            "height": height,
+        });
+        let position = serde_json::json!({
+            "margin_left": left.round() as i32,
+            "margin_bottom": bottom.round() as i32,
+            "width": width.round() as i32,
+            "height": height.round() as i32,
+        });
+
+        serde_json::json!({
+            "type": "click",
+            "pointer": {
+                "x": x,
+                "y": y,
+            },
+            "surface": {
+                "id": self.surface_id(),
+                "width": tree.layout.width,
+                "height": tree.layout.height,
+            },
+            "current": {
+                "key": target.key,
+                "tag": target.tag,
+                "bounds": bounds,
+                "position": position,
+            },
+            "current_target": target.current_target
+        })
+    }
+
     pub(super) fn build_focus_event(
         &self,
         tree: &WidgetNode,
@@ -403,22 +689,10 @@ impl FrontendSurfaceComponent {
         dx: f32,
         dy: f32,
     ) -> Result<Option<Vec<CoreRequest>>, ComponentError> {
-        let Some(path) = find_node_path_at(tree, x, y) else {
+        let Some(hit) = pointer_event_handler_hit(tree, x, y, "scroll") else {
             return Ok(None);
         };
-        let Some(node_key) = path
-            .into_iter()
-            .rev()
-            .find(|key| find_event_handler(tree, key, "scroll").is_some())
-        else {
-            return Ok(None);
-        };
-        if find_event_handler(tree, &node_key, "scroll").is_none() {
-            return Ok(None);
-        }
-        let target = find_node_by_key(tree, &node_key);
-        let (left, top, right, bottom) =
-            find_node_bounds_by_key(tree, &node_key, 0.0, 0.0).unwrap_or((0.0, 0.0, 0.0, 0.0));
+        let (left, top, right, bottom) = hit.bounds;
         let width = (right - left).max(0.0);
         let height = (bottom - top).max(0.0);
         let bounds = serde_json::json!({
@@ -429,7 +703,6 @@ impl FrontendSurfaceComponent {
             "width": width,
             "height": height,
         });
-        let tag = target.map(|node| node.tag.clone()).unwrap_or_default();
         let event = serde_json::json!({
             "type": "scroll",
             "pointer": {
@@ -446,12 +719,12 @@ impl FrontendSurfaceComponent {
                 "height": tree.layout.height,
             },
             "current": {
-                "key": node_key,
-                "tag": tag,
+                "key": hit.key,
+                "tag": hit.node.tag,
                 "bounds": bounds,
             }
         });
-        self.call_node_handler(tree, &node_key, "scroll", &[event])
+        self.call_resolved_node_handler(hit.node, "scroll", &[event])
             .map(Some)
     }
 
@@ -592,12 +865,13 @@ fn collect_key_path(node: &WidgetNode, key: &str, path: &mut Vec<String>) -> boo
 /// `pointer_event_target_key` (once inside it, once explicitly) to decide the
 /// focus target on every press — this returns both from one `find_focusable_at`
 /// walk instead of two.
+#[cfg(test)]
 pub(in crate::shell::component) fn pointer_event_target_with_focus(
     tree: &WidgetNode,
     x: f32,
     y: f32,
 ) -> (Option<String>, Option<String>) {
-    let focusable = find_focusable_at(tree, x, y);
+    let focusable = mesh_core_interaction::find_focusable_at(tree, x, y);
     let target = focusable.clone().or_else(|| {
         find_node_path_at(tree, x, y).and_then(|path| {
             path.into_iter()
@@ -606,4 +880,21 @@ pub(in crate::shell::component) fn pointer_event_target_with_focus(
         })
     });
     (target, focusable)
+}
+
+pub(in crate::shell::component) fn captured_release_key(
+    tree: &WidgetNode,
+    pointer_down_key: Option<&str>,
+    pointer_down_bounds: Option<(f32, f32, f32, f32)>,
+    x: f32,
+    y: f32,
+) -> Option<String> {
+    let down_key = pointer_down_key?;
+    if pointer_down_bounds.is_some_and(|bounds| super::point_in_bounds(x, y, bounds)) {
+        return Some(down_key.to_owned());
+    }
+    let release_key = pointer_press_hit(tree, x, y)
+        .target
+        .map(|target| target.key.to_owned());
+    (release_key.as_deref() == Some(down_key)).then(|| down_key.to_owned())
 }

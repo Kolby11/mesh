@@ -5,6 +5,8 @@ mod keyboard;
 mod widgets;
 
 use focus::selectable_text_target_key;
+pub(in crate::shell::component) use widgets::PressedTargetSnapshot;
+#[cfg(test)]
 use widgets::pointer_event_target_with_focus;
 
 #[cfg(test)]
@@ -59,6 +61,7 @@ impl FrontendSurfaceComponent {
                         let requests = self.set_focus_target(tree, None, false)?;
                         self.pointer_down_key = None;
                         self.pointer_down_bounds = None;
+                        self.pointer_down_target = None;
                         self.active_slider_key = None;
                         self.begin_text_selection(selection_key, x, y);
                         self.invalidate_paint();
@@ -66,11 +69,17 @@ impl FrontendSurfaceComponent {
                     }
 
                     self.clear_selection();
-                    let (target_key, focusable_key) = pointer_event_target_with_focus(tree, x, y);
-                    if let Some(node_key) = target_key {
+                    let press_hit = pointer_press_hit(tree, x, y);
+                    if let Some(target) = press_hit.target {
+                        let node_key = target.key.to_owned();
+                        let focusable_key = press_hit.focusable.map(|hit| hit.key.to_owned());
                         self.pointer_down_key = Some(node_key.clone());
-                        self.pointer_down_bounds =
-                            find_node_bounds_by_key(tree, &node_key, 0.0, 0.0);
+                        self.pointer_down_bounds = Some(target.bounds);
+                        self.pointer_down_target = Some(self.pressed_target_snapshot(
+                            &node_key,
+                            target.node,
+                            target.bounds,
+                        ));
                         let mut requests = if let Some(focused_key) = focusable_key {
                             let focus_visible =
                                 self.pointer_focus_visible_for_key(tree, &focused_key);
@@ -79,10 +88,16 @@ impl FrontendSurfaceComponent {
                             self.set_focus_target(tree, None, false)?
                         };
 
-                        if is_slider_key(tree, &node_key) {
+                        if target.node.tag == "slider" {
                             self.active_slider_key = Some(node_key.clone());
-                            self.update_slider_from_position(tree, &node_key, x, y);
-                            if find_event_handler(tree, &node_key, "change").is_some()
+                            self.update_slider_from_resolved_press(
+                                &node_key,
+                                target.node,
+                                target.bounds,
+                                x,
+                                y,
+                            );
+                            if target.node.event_handlers.contains_key("change")
                                 && let Some(value) = self.slider_value(tree, &node_key)
                             {
                                 requests.extend(self.call_node_handler(
@@ -97,12 +112,23 @@ impl FrontendSurfaceComponent {
                             }
                         } else {
                             self.active_slider_key = None;
-                            if self.is_option_key(tree, &node_key) {
-                                requests.extend(self.activate_option_choice(tree, &node_key)?);
-                            } else if self.is_radio_key(tree, &node_key) {
-                                requests.extend(self.activate_radio_choice(tree, &node_key)?);
-                            } else if self.is_checkable_choice_key(tree, &node_key) {
-                                let value = self.toggle_checked_value(tree, &node_key);
+                            if node_is_source(target.node, &["option"]) {
+                                requests.extend(self.activate_option_choice_for_node(
+                                    tree,
+                                    &node_key,
+                                    target.node,
+                                )?);
+                            } else if node_is_source(target.node, &["radio"]) {
+                                requests.extend(self.activate_radio_choice_for_node(
+                                    tree,
+                                    &node_key,
+                                    target.node,
+                                )?);
+                            } else if node_is_source(target.node, &["switch", "checkbox"])
+                                || matches!(target.node.tag.as_str(), "switch" | "checkbox")
+                            {
+                                let value =
+                                    self.toggle_checked_value_for_node(&node_key, target.node);
                                 requests.extend(self.call_node_handler(
                                     tree,
                                     &node_key,
@@ -120,6 +146,7 @@ impl FrontendSurfaceComponent {
                         let requests = self.set_focus_target(tree, None, false)?;
                         self.pointer_down_key = None;
                         self.pointer_down_bounds = None;
+                        self.pointer_down_target = None;
                         self.active_slider_key = None;
                         self.invalidate_interaction_restyle();
                         if !requests.is_empty() {
@@ -148,38 +175,65 @@ impl FrontendSurfaceComponent {
                         return Ok(requests);
                     }
 
-                    let release_key = self.pointer_event_target_key(tree, x, y);
-                    let captured_click_key = self.pointer_down_key.as_ref().and_then(|down_key| {
-                        let released_on_same_key =
-                            release_key.as_deref() == Some(down_key.as_str());
-                        let released_inside_press_bounds = self
-                            .pointer_down_bounds
-                            .is_some_and(|bounds| point_in_bounds(x, y, bounds));
-                        (released_on_same_key || released_inside_press_bounds)
-                            .then_some(down_key.clone())
-                    });
+                    let captured_click_key = self.captured_release_key(tree, x, y);
                     if let Some(node_key) = captured_click_key {
-                        if self.is_menu_item_key(tree, &node_key)
-                            || self.is_container_collection_item_key(tree, &node_key)
+                        if let Some(pressed_target) = self
+                            .pointer_down_target
+                            .clone()
+                            .filter(|target| target.key == node_key)
                         {
-                            let click_event = self.build_click_event(tree, &node_key, x, y);
-                            requests.extend(self.dispatch_activation_handlers(
+                            let click_event = self.build_click_event_for_pressed_target(
+                                tree,
+                                &pressed_target,
+                                x,
+                                y,
+                            );
+                            if pressed_target.activation_item {
+                                requests.extend(self.dispatch_pressed_activation_handlers(
+                                    &pressed_target,
+                                    click_event,
+                                )?);
+                            } else if pressed_target.click_handler.is_some() {
+                                requests.extend(
+                                    self.call_pressed_click_handler(&pressed_target, click_event)?,
+                                );
+                            }
+                        } else if let Some(target) = find_node_by_key(tree, &node_key) {
+                            let bounds = self
+                                .pointer_down_bounds
+                                .or_else(|| find_node_bounds_by_key(tree, &node_key, 0.0, 0.0))
+                                .unwrap_or((0.0, 0.0, 0.0, 0.0));
+                            let click_event = self.build_click_event_for(
                                 tree,
                                 &node_key,
-                                click_event,
-                            )?);
-                        } else if find_click_handler(tree, &node_key).is_some() {
-                            let click_event = self.build_click_event(tree, &node_key, x, y);
-                            requests.extend(self.call_node_handler(
-                                tree,
-                                &node_key,
-                                "click",
-                                &[click_event],
-                            )?);
+                                Some(target),
+                                bounds,
+                                x,
+                                y,
+                            );
+                            if node_is_source(
+                                target,
+                                &["menu-item", "command-item", "preference-row"],
+                            ) || node_is_source(target, &["tab", "list-item"])
+                            {
+                                requests.extend(
+                                    self.dispatch_resolved_activation_handlers(
+                                        target,
+                                        click_event,
+                                    )?,
+                                );
+                            } else if target.event_handlers.contains_key("click") {
+                                requests.extend(self.call_resolved_node_handler(
+                                    target,
+                                    "click",
+                                    &[click_event],
+                                )?);
+                            }
                         }
                     }
                     self.pointer_down_key = None;
                     self.pointer_down_bounds = None;
+                    self.pointer_down_target = None;
                     self.active_slider_key = None;
                     self.invalidate_interaction_restyle();
                     if !requests.is_empty() {
@@ -244,8 +298,7 @@ impl FrontendSurfaceComponent {
                             previous_owner == next_owner
                         });
                     self.hovered_key = new_key.clone();
-                    let previous_path = std::mem::replace(&mut self.hovered_path, new_path);
-                    let current_path = self.hovered_path.clone();
+                    let previous_path = std::mem::take(&mut self.hovered_path);
                     self.hovered_tooltip = next_tooltip.clone();
                     // Store the hovered element's bounds for tooltip positioning.
                     // Use the tooltip owner's bounds when available; fall back to
@@ -269,13 +322,15 @@ impl FrontendSurfaceComponent {
                     self.invalidate_hover_change(tooltip_may_change);
                     // Dispatch pointerenter/pointerleave to any script handlers on
                     // the entered/left nodes (e.g. hover-to-open popovers).
-                    let hover_requests = self.dispatch_hover_transition_handlers(
+                    let hover_result = self.dispatch_hover_transition_handlers(
                         tree,
                         &previous_path,
-                        &current_path,
+                        &new_path,
                         x,
                         y,
-                    )?;
+                    );
+                    self.hovered_path = new_path;
+                    let hover_requests = hover_result?;
                     if !hover_requests.is_empty() {
                         return Ok(hover_requests);
                     }
@@ -459,6 +514,7 @@ pub(super) fn is_bare_printable_key(key: &str, modifiers: KeyModifiers) -> bool 
 #[cfg(test)]
 mod press_target_tests {
     use super::pointer_event_target_with_focus;
+    use super::widgets::captured_release_key;
     use mesh_core_elements::WidgetNode;
     use mesh_core_interaction::find_focusable_at;
 
@@ -514,6 +570,69 @@ mod press_target_tests {
         let (target, focusable) = pointer_event_target_with_focus(&root, 500.0, 500.0);
         assert_eq!(target, None);
         assert_eq!(focusable, None);
+    }
+
+    #[test]
+    fn captured_release_key_skips_hit_test_when_release_stays_inside_press_bounds() {
+        let mut root = positioned_node("root", "row", 0.0, 0.0, 40.0, 20.0);
+        let mut button = positioned_node("root/0", "button", 0.0, 0.0, 40.0, 20.0);
+        button
+            .event_handlers
+            .insert("click".into(), "onClick".into());
+        root.children.push(button);
+
+        let captured = captured_release_key(
+            &root,
+            Some("root/0"),
+            Some((0.0, 0.0, 40.0, 20.0)),
+            39.0,
+            19.0,
+        );
+
+        assert_eq!(captured.as_deref(), Some("root/0"));
+    }
+
+    #[test]
+    fn captured_release_key_falls_back_to_hit_test_outside_press_bounds() {
+        let mut root = positioned_node("root", "row", 0.0, 0.0, 80.0, 20.0);
+        let mut button = positioned_node("root/0", "button", 0.0, 0.0, 40.0, 20.0);
+        button
+            .event_handlers
+            .insert("click".into(), "onClick".into());
+        root.children.push(button);
+
+        let captured = captured_release_key(
+            &root,
+            Some("root/0"),
+            Some((0.0, 0.0, 10.0, 10.0)),
+            20.0,
+            10.0,
+        );
+
+        assert_eq!(captured.as_deref(), Some("root/0"));
+    }
+
+    #[test]
+    fn captured_release_key_rejects_different_release_target() {
+        let mut root = positioned_node("root", "row", 0.0, 0.0, 80.0, 20.0);
+        let mut left = positioned_node("root/0", "button", 0.0, 0.0, 40.0, 20.0);
+        left.event_handlers.insert("click".into(), "onLeft".into());
+        let mut right = positioned_node("root/1", "button", 40.0, 0.0, 40.0, 20.0);
+        right
+            .event_handlers
+            .insert("click".into(), "onRight".into());
+        root.children.push(left);
+        root.children.push(right);
+
+        let captured = captured_release_key(
+            &root,
+            Some("root/0"),
+            Some((0.0, 0.0, 10.0, 10.0)),
+            60.0,
+            10.0,
+        );
+
+        assert_eq!(captured, None);
     }
 }
 
@@ -607,9 +726,8 @@ mod performance_tests {
             let mut pointer_path = black_box(&path).clone();
             let previous_path =
                 std::mem::replace(&mut new_hovered_path, std::mem::take(&mut pointer_path));
-            let current_path = new_hovered_path.clone();
             new_total = new_total.wrapping_add(black_box(
-                previous_path.len() + new_hovered_path.len() + current_path.len(),
+                previous_path.len() + new_hovered_path.len() + new_hovered_path.len(),
             ));
         }
         let new_time = new_start.elapsed();
@@ -703,6 +821,264 @@ mod performance_tests {
 
         eprintln!(
             "press target lookup: duplicate walk {old_time:?}; fused {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // Run with:
+    // cargo test -p mesh-core-shell --release -- captured_release_key_beats_unneeded_release_hit_test --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn captured_release_key_beats_unneeded_release_hit_test() {
+        use super::widgets::{captured_release_key, pointer_event_target_with_focus};
+
+        let tree = large_positioned_tree(200, 12);
+        let down_key = "root/199/11";
+        let bounds = Some((440.0, 3980.0, 480.0, 4000.0));
+        let (x, y) = (tree.layout.width - 5.0, tree.layout.height - 5.0);
+        let iterations = 20_000usize;
+
+        let old_start = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let release_key = pointer_event_target_with_focus(black_box(&tree), x, y).0;
+            let released_on_same_key = release_key.as_deref() == Some(down_key);
+            let released_inside_press_bounds =
+                bounds.is_some_and(|bounds| super::point_in_bounds(x, y, bounds));
+            let captured = (released_on_same_key || released_inside_press_bounds)
+                .then_some(down_key.to_owned());
+            old_total = old_total.wrapping_add(captured.map_or(0, |key| key.len()));
+        }
+        let old_time = old_start.elapsed();
+
+        let new_start = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let captured = captured_release_key(black_box(&tree), Some(down_key), bounds, x, y);
+            new_total = new_total.wrapping_add(captured.map_or(0, |key| key.len()));
+        }
+        let new_time = new_start.elapsed();
+
+        eprintln!(
+            "release capture: unconditional hit-test {old_time:?}; bounds short-circuit {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // Run with:
+    // cargo test -p mesh-core-shell --release -- captured_release_fallback_uses_fused_press_hit --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn captured_release_fallback_uses_fused_press_hit() {
+        use super::widgets::{captured_release_key, pointer_event_target_with_focus};
+
+        let mut tree = large_positioned_tree(200, 12);
+        for row in &mut tree.children {
+            row.tag = "box".into();
+            for cell in &mut row.children {
+                cell.tag = "box".into();
+            }
+        }
+        let down_key = "root/199/11";
+        let stale_bounds = Some((0.0, 0.0, 1.0, 1.0));
+        let (x, y) = (tree.layout.width - 5.0, tree.layout.height - 5.0);
+        let iterations = 20_000usize;
+
+        let old_start = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let release_key = pointer_event_target_with_focus(black_box(&tree), x, y).0;
+            let captured =
+                (release_key.as_deref() == Some(down_key)).then_some(down_key.to_owned());
+            old_total = old_total.wrapping_add(captured.map_or(0, |key| key.len()));
+        }
+        let old_time = old_start.elapsed();
+
+        let new_start = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let captured =
+                captured_release_key(black_box(&tree), Some(down_key), stale_bounds, x, y);
+            new_total = new_total.wrapping_add(captured.map_or(0, |key| key.len()));
+        }
+        let new_time = new_start.elapsed();
+
+        eprintln!(
+            "release fallback: legacy multi-walk {old_time:?}; fused press hit {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // Run with:
+    // cargo test -p mesh-core-shell --release -- pressed_target_snapshot_skips_release_dispatch_lookups --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn pressed_target_snapshot_skips_release_dispatch_lookups() {
+        use mesh_core_interaction::{find_node_bounds_by_key, find_node_by_key, node_is_source};
+
+        let tree = large_positioned_tree(200, 12);
+        let down_key = "root/199/11";
+        let bounds = (440.0, 3980.0, 480.0, 4000.0);
+        let target = find_node_by_key(&tree, down_key).expect("target node");
+        let snapshot = super::widgets::PressedTargetSnapshot::from_node(down_key, target, bounds);
+        let iterations = 20_000usize;
+
+        let old_start = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let node = find_node_by_key(black_box(&tree), down_key).expect("target node");
+            let bounds = find_node_bounds_by_key(&tree, down_key, 0.0, 0.0).expect("target bounds");
+            let activation = node_is_source(
+                node,
+                &[
+                    "menu-item",
+                    "command-item",
+                    "preference-row",
+                    "tab",
+                    "list-item",
+                ],
+            );
+            let has_click = node.event_handlers.contains_key("click")
+                || node.event_handler_calls.contains_key("click");
+            old_total = old_total.wrapping_add(node.tag.len());
+            old_total = old_total.wrapping_add(usize::from(bounds.2 > bounds.0));
+            old_total = old_total.wrapping_add(usize::from(activation));
+            old_total = old_total.wrapping_add(usize::from(has_click));
+        }
+        let old_time = old_start.elapsed();
+
+        let new_start = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let target = black_box(&snapshot);
+            new_total = new_total.wrapping_add(target.tag.len());
+            new_total = new_total.wrapping_add(usize::from(target.bounds.2 > target.bounds.0));
+            new_total = new_total.wrapping_add(usize::from(target.activation_item));
+            new_total = new_total.wrapping_add(usize::from(target.click_handler.is_some()));
+        }
+        let new_time = new_start.elapsed();
+
+        eprintln!(
+            "release dispatch metadata: tree lookups {old_time:?}; press snapshot {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // Run with:
+    // cargo test -p mesh-core-shell --release -- resolved_checkable_toggle_skips_key_lookup --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn resolved_checkable_toggle_skips_key_lookup() {
+        use mesh_core_interaction::find_node_by_key;
+
+        let mut tree = large_positioned_tree(200, 12);
+        for row in &mut tree.children {
+            for cell in &mut row.children {
+                cell.tag = "checkbox".into();
+                cell.attributes.insert("checked".into(), "true".into());
+            }
+        }
+        let key = "root/199/11";
+        let node = find_node_by_key(&tree, key).expect("checkbox node");
+        let iterations = 200_000usize;
+
+        let old_start = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let checked = find_node_by_key(black_box(&tree), key)
+                .and_then(|node| node.attributes.get("checked"))
+                .is_some_and(|value| matches!(value.as_str(), "true" | "1" | "checked"));
+            old_total = old_total.wrapping_add(usize::from(!checked));
+        }
+        let old_time = old_start.elapsed();
+
+        let new_start = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let checked = black_box(node)
+                .attributes
+                .get("checked")
+                .is_some_and(|value| matches!(value.as_str(), "true" | "1" | "checked"));
+            new_total = new_total.wrapping_add(usize::from(!checked));
+        }
+        let new_time = new_start.elapsed();
+
+        eprintln!(
+            "checkable toggle state: key lookup {old_time:?}; resolved node {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // Run with:
+    // cargo test -p mesh-core-shell --release -- resolved_option_radio_activation_skips_initial_key_lookup --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn resolved_option_radio_activation_skips_initial_key_lookup() {
+        use mesh_core_interaction::{find_node_by_key, node_is_source};
+
+        let mut tree = large_positioned_tree(200, 12);
+        for row in &mut tree.children {
+            for cell in &mut row.children {
+                cell.tag = "option".into();
+                cell.attributes
+                    .insert("data-mesh-element".into(), "option".into());
+                cell.attributes.insert("value".into(), "choice".into());
+            }
+        }
+        let key = "root/199/11";
+        let node = find_node_by_key(&tree, key).expect("option node");
+        let iterations = 200_000usize;
+
+        let old_start = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let option = find_node_by_key(black_box(&tree), key).expect("option node");
+            let disabled = option
+                .attributes
+                .get("disabled")
+                .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1" | "disabled"));
+            let value_len = option
+                .attributes
+                .get("value")
+                .or_else(|| option.attributes.get("label"))
+                .map_or(0, String::len);
+            old_total = old_total.wrapping_add(usize::from(node_is_source(option, &["option"])));
+            old_total = old_total.wrapping_add(usize::from(disabled));
+            old_total = old_total.wrapping_add(value_len);
+        }
+        let old_time = old_start.elapsed();
+
+        let new_start = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let option = black_box(node);
+            let disabled = option
+                .attributes
+                .get("disabled")
+                .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1" | "disabled"));
+            let value_len = option
+                .attributes
+                .get("value")
+                .or_else(|| option.attributes.get("label"))
+                .map_or(0, String::len);
+            new_total = new_total.wrapping_add(usize::from(node_is_source(option, &["option"])));
+            new_total = new_total.wrapping_add(usize::from(disabled));
+            new_total = new_total.wrapping_add(value_len);
+        }
+        let new_time = new_start.elapsed();
+
+        eprintln!(
+            "option/radio activation target state: key lookup {old_time:?}; resolved node {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_total, new_total);

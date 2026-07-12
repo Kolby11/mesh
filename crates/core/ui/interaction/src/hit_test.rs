@@ -6,6 +6,26 @@ pub struct PointerHit {
     pub bounds: ContentBounds,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct PointerPressNode<'a> {
+    pub key: &'a str,
+    pub node: &'a WidgetNode,
+    pub bounds: ContentBounds,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PointerPressHit<'a> {
+    pub target: Option<PointerPressNode<'a>>,
+    pub focusable: Option<PointerPressNode<'a>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PointerEventHandlerHit<'a> {
+    pub key: &'a str,
+    pub node: &'a WidgetNode,
+    pub bounds: ContentBounds,
+}
+
 type TooltipHit = (String, String, ContentBounds);
 
 /// Resolve all pointer-motion metadata in the same tree traversal.
@@ -13,6 +33,117 @@ pub fn pointer_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<PointerHit>
     let mut hit = pointer_hit_test_reversed(node, x, y, 0.0, 0.0, None)?;
     hit.path.reverse();
     Some(hit)
+}
+
+/// Resolve pointer-press targeting in one traversal.
+///
+/// The shell press path needs the deepest pointer-focusable node, and if none
+/// exists, the deepest ancestor under the point with a click handler. The older
+/// path computed these with separate full-tree walks (`find_focusable_at`,
+/// `find_node_path_at`, and per-key handler lookups), then walked again for
+/// target bounds. This returns the same target decision plus bounds directly
+/// from the hit traversal.
+pub fn pointer_press_hit(node: &WidgetNode, x: f32, y: f32) -> PointerPressHit<'_> {
+    let mut hit = pointer_press_hit_inner(node, x, y, 0.0, 0.0).unwrap_or_default();
+    hit.target = hit.focusable.or(hit.target);
+    hit
+}
+
+/// Resolve the deepest node under the pointer that owns a plain event handler.
+///
+/// This preserves the legacy `find_node_path_at(...).rev().find(find_event_handler)`
+/// behavior while avoiding the path allocation plus per-key tree walks.
+pub fn pointer_event_handler_hit<'a>(
+    node: &'a WidgetNode,
+    x: f32,
+    y: f32,
+    event_name: &str,
+) -> Option<PointerEventHandlerHit<'a>> {
+    pointer_event_handler_hit_inner(node, x, y, event_name, 0.0, 0.0)
+}
+
+fn pointer_event_handler_hit_inner<'a>(
+    node: &'a WidgetNode,
+    x: f32,
+    y: f32,
+    event_name: &str,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<PointerEventHandlerHit<'a>> {
+    if node_is_hidden(node) {
+        return None;
+    }
+
+    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
+    let inside = layout_contains_with_offset(node, x, y, offset_x, offset_y);
+    if !inside && node_clips_children(node) {
+        return None;
+    }
+
+    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
+    for child in node.children.iter().rev() {
+        if let Some(hit) =
+            pointer_event_handler_hit_inner(child, x, y, event_name, child_offset_x, child_offset_y)
+        {
+            return Some(hit);
+        }
+    }
+
+    if inside && node.event_handlers.contains_key(event_name) {
+        return node.mesh_key().map(|key| PointerEventHandlerHit {
+            key,
+            node,
+            bounds: node_rect_with_offset(node, offset_x, offset_y),
+        });
+    }
+
+    None
+}
+
+fn pointer_press_hit_inner<'a>(
+    node: &'a WidgetNode,
+    x: f32,
+    y: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<PointerPressHit<'a>> {
+    if node_is_hidden(node) {
+        return None;
+    }
+
+    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
+    let inside = layout_contains_with_offset(node, x, y, offset_x, offset_y);
+    if !inside && node_clips_children(node) {
+        return None;
+    }
+
+    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
+    let mut hit = PointerPressHit::default();
+    for child in node.children.iter().rev() {
+        if let Some(child_hit) =
+            pointer_press_hit_inner(child, x, y, child_offset_x, child_offset_y)
+        {
+            hit.focusable = child_hit.focusable;
+            hit.target = child_hit.target;
+            break;
+        }
+    }
+
+    if inside && let Some(key) = node.mesh_key() {
+        let node_hit = PointerPressNode {
+            key,
+            node,
+            bounds: node_rect_with_offset(node, offset_x, offset_y),
+        };
+        if hit.focusable.is_none() && crate::focus::node_is_pointer_focusable(node) {
+            hit.focusable = Some(node_hit);
+        }
+        if hit.target.is_none() && node.event_handlers.contains_key("click") {
+            hit.target = Some(node_hit);
+        }
+    }
+
+    (hit.focusable.is_some() || hit.target.is_some()).then_some(hit)
 }
 
 fn pointer_hit_test_reversed(
@@ -441,6 +572,140 @@ mod tests {
     }
 
     #[test]
+    fn pointer_press_hit_matches_focusable_target_and_bounds() {
+        let mut root = WidgetNode::new("surface");
+        root.attributes.insert("_mesh_key".into(), "root".into());
+        root.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 120.0,
+            height: 80.0,
+        };
+        let mut button = WidgetNode::new("button");
+        button
+            .attributes
+            .insert("_mesh_key".into(), "button".into());
+        button.layout = LayoutRect {
+            x: 24.0,
+            y: 20.0,
+            width: 40.0,
+            height: 20.0,
+        };
+        root.children.push(button);
+
+        let hit = pointer_press_hit(&root, 48.0, 30.0);
+
+        let target = hit.target.expect("focusable cell target");
+        let focusable = hit.focusable.expect("focusable cell");
+        assert_eq!(target.key, "button");
+        assert_eq!(focusable.key, "button");
+        assert_eq!(
+            Some(target.key.to_owned()),
+            crate::focus::find_focusable_at(&root, 48.0, 30.0)
+        );
+        assert_eq!(
+            target.bounds,
+            find_node_bounds_by_key(&root, "button", 0.0, 0.0).unwrap()
+        );
+    }
+
+    #[test]
+    fn pointer_press_hit_uses_clickable_ancestor_when_no_focusable_node_matches() {
+        let mut root = WidgetNode::new("surface");
+        root.attributes.insert("_mesh_key".into(), "root".into());
+        root.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 40.0,
+        };
+        let mut clickable = WidgetNode::new("box");
+        clickable
+            .attributes
+            .insert("_mesh_key".into(), "clickable".into());
+        clickable
+            .event_handlers
+            .insert("click".into(), "onClick".into());
+        clickable.layout = LayoutRect {
+            x: 10.0,
+            y: 5.0,
+            width: 60.0,
+            height: 25.0,
+        };
+        let mut label = WidgetNode::new("label");
+        label.attributes.insert("_mesh_key".into(), "label".into());
+        label.layout = LayoutRect {
+            x: 12.0,
+            y: 7.0,
+            width: 20.0,
+            height: 10.0,
+        };
+        clickable.children.push(label);
+        root.children.push(clickable);
+
+        let hit = pointer_press_hit(&root, 15.0, 10.0);
+
+        assert!(hit.focusable.is_none());
+        let target = hit.target.expect("clickable ancestor target");
+        assert_eq!(target.key, "clickable");
+        assert_eq!(
+            target.bounds,
+            find_node_bounds_by_key(&root, "clickable", 0.0, 0.0).unwrap()
+        );
+    }
+
+    #[test]
+    fn pointer_event_handler_hit_matches_nearest_handler_ancestor() {
+        let mut root = WidgetNode::new("surface");
+        root.attributes.insert("_mesh_key".into(), "root".into());
+        root.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 120.0,
+            height: 80.0,
+        };
+        let mut scroll_owner = WidgetNode::new("box");
+        scroll_owner
+            .attributes
+            .insert("_mesh_key".into(), "scroll-owner".into());
+        scroll_owner
+            .event_handlers
+            .insert("scroll".into(), "onScroll".into());
+        scroll_owner.layout = LayoutRect {
+            x: 10.0,
+            y: 10.0,
+            width: 80.0,
+            height: 40.0,
+        };
+        let mut label = WidgetNode::new("label");
+        label.attributes.insert("_mesh_key".into(), "label".into());
+        label.layout = LayoutRect {
+            x: 20.0,
+            y: 20.0,
+            width: 20.0,
+            height: 10.0,
+        };
+        scroll_owner.children.push(label);
+        root.children.push(scroll_owner);
+
+        let hit = pointer_event_handler_hit(&root, 24.0, 24.0, "scroll").expect("scroll hit");
+        let old = find_node_path_at(&root, 24.0, 24.0)
+            .and_then(|path| {
+                path.into_iter()
+                    .rev()
+                    .find(|key| find_event_handler(&root, key, "scroll").is_some())
+            })
+            .expect("old scroll target");
+
+        assert_eq!(hit.key, old);
+        assert_eq!(hit.node.tag, "box");
+        assert_eq!(
+            hit.bounds,
+            find_node_bounds_by_key(&root, "scroll-owner", 0.0, 0.0).unwrap()
+        );
+    }
+
+    #[test]
     fn tooltip_container_bounds_finds_innermost_clipping_ancestor() {
         use mesh_core_elements::style::Overflow;
 
@@ -574,6 +839,122 @@ mod tests {
 
         eprintln!("tree_walk={tree_walk:?} fused={fused:?}");
         assert!(fused < tree_walk, "fused lookup must improve pointer time");
+    }
+
+    // cargo test -p mesh-core-interaction --release -- pointer_press_hit_beats_press_path_tree_walks --ignored --nocapture
+    #[test]
+    #[ignore = "release-only press-hit microbenchmark"]
+    fn pointer_press_hit_beats_press_path_tree_walks() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let mut tree = indexed_tree(200, 12);
+        for row in &mut tree.children {
+            row.tag = "box".into();
+            for cell in &mut row.children {
+                cell.tag = "box".into();
+                cell.layout.y = row.layout.y;
+                cell.event_handlers
+                    .insert("click".into(), "handleClick".into());
+            }
+        }
+        let x = tree.layout.width - 5.0;
+        let y = tree.layout.height - 5.0;
+        let iterations = 20_000usize;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let focusable = crate::focus::find_focusable_at(black_box(&tree), x, y);
+            let target = focusable.clone().or_else(|| {
+                find_node_path_at(&tree, x, y).and_then(|path| {
+                    path.into_iter()
+                        .rev()
+                        .find(|key| find_event_handler(&tree, key, "click").is_some())
+                })
+            });
+            if let Some(key) = target.as_deref() {
+                black_box(find_node_bounds_by_key(&tree, key, 0.0, 0.0));
+            }
+            old_total = old_total.wrapping_add(target.map_or(0, |key| key.len()));
+            old_total = old_total.wrapping_add(focusable.map_or(0, |key| key.len()));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let hit = pointer_press_hit(black_box(&tree), x, y);
+            new_total = new_total.wrapping_add(hit.target.map_or(0, |node| node.key.len()));
+            new_total = new_total.wrapping_add(hit.focusable.map_or(0, |node| node.key.len()));
+            black_box(hit.target.map(|node| node.bounds));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "press hit lookup: multi-walk {old_time:?}; fused {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-interaction --release -- pointer_event_handler_hit_beats_path_handler_walks --ignored --nocapture
+    #[test]
+    #[ignore = "release-only event-handler-hit microbenchmark"]
+    fn pointer_event_handler_hit_beats_path_handler_walks() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let mut tree = indexed_tree(200, 12);
+        for row in &mut tree.children {
+            for cell in &mut row.children {
+                cell.layout.y = row.layout.y;
+                cell.event_handlers
+                    .insert("scroll".into(), "handleScroll".into());
+            }
+        }
+        let x = tree.layout.width - 5.0;
+        let y = tree.layout.height - 5.0;
+        let iterations = 20_000usize;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let target = find_node_path_at(black_box(&tree), x, y).and_then(|path| {
+                path.into_iter()
+                    .rev()
+                    .find(|key| find_event_handler(&tree, key, "scroll").is_some())
+            });
+            if let Some(key) = target.as_deref() {
+                old_total = old_total.wrapping_add(key.len());
+                old_total = old_total
+                    .wrapping_add(find_node_by_key(&tree, key).map_or(0, |node| node.tag.len()));
+                old_total = old_total.wrapping_add(
+                    find_node_bounds_by_key(&tree, key, 0.0, 0.0)
+                        .map_or(0, |bounds| usize::from(bounds.2 > bounds.0)),
+                );
+            }
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            if let Some(hit) = pointer_event_handler_hit(black_box(&tree), x, y, "scroll") {
+                new_total = new_total.wrapping_add(hit.key.len());
+                new_total = new_total.wrapping_add(hit.node.tag.len());
+                new_total = new_total.wrapping_add(usize::from(hit.bounds.2 > hit.bounds.0));
+            }
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "event-handler hit lookup: path/key walks {old_time:?}; fused {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 
     #[test]

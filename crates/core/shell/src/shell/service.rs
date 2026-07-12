@@ -76,8 +76,14 @@ pub(super) fn apply_service_update(
     source_module: &str,
     payload: impl Borrow<serde_json::Value>,
 ) {
-    let service_name = service_name_from_interface(service);
-    apply_service_update_with_name(state, has_read, &service_name, source_module, payload);
+    let service_name = service_name_from_interface_cow(service);
+    apply_service_update_with_name(
+        state,
+        has_read,
+        service_name.as_ref(),
+        source_module,
+        payload,
+    );
 }
 
 pub(super) fn apply_service_update_with_name(
@@ -538,6 +544,17 @@ mod tests {
         use std::hint::black_box;
         use std::time::Instant;
 
+        fn old_apply_service_update(
+            state: &mut ScriptState,
+            has_read: bool,
+            service: &str,
+            source_module: &str,
+            payload: impl Borrow<serde_json::Value>,
+        ) {
+            let service_name = service_name_from_interface(service);
+            apply_service_update_with_name(state, has_read, &service_name, source_module, payload);
+        }
+
         let iterations = 200_000usize;
         let payload = serde_json::json!({ "available": true, "percent": 42, "muted": false });
 
@@ -545,7 +562,7 @@ mod tests {
         let mut projected_total = 0usize;
         for _ in 0..iterations {
             let mut state = ScriptState::new();
-            apply_service_update(
+            old_apply_service_update(
                 &mut state,
                 true,
                 black_box("mesh.audio"),
@@ -560,6 +577,26 @@ mod tests {
             );
         }
         let projected_time = projected_started.elapsed();
+
+        let cow_started = Instant::now();
+        let mut cow_total = 0usize;
+        for _ in 0..iterations {
+            let mut state = ScriptState::new();
+            apply_service_update(
+                &mut state,
+                true,
+                black_box("mesh.audio"),
+                "@mesh/pipewire-audio",
+                black_box(&payload),
+            );
+            cow_total = cow_total.wrapping_add(
+                state
+                    .get("audio")
+                    .and_then(|value| value.as_object().map(serde_json::Map::len))
+                    .unwrap_or_default(),
+            );
+        }
+        let cow_time = cow_started.elapsed();
 
         let borrowed_started = Instant::now();
         let mut borrowed_total = 0usize;
@@ -582,10 +619,13 @@ mod tests {
         let borrowed_time = borrowed_started.elapsed();
 
         eprintln!(
-            "service update state write over {iterations} iterations: project-name {projected_time:?}; borrowed-name {borrowed_time:?}; ratio {:.1}x; totals={projected_total}/{borrowed_total}",
+            "service update state write over {iterations} iterations: owned-project {projected_time:?}; cow-project {cow_time:?}; borrowed-name {borrowed_time:?}; owned/cow {:.1}x; owned/borrowed {:.1}x; totals={projected_total}/{cow_total}/{borrowed_total}",
+            projected_time.as_secs_f64() / cow_time.as_secs_f64(),
             projected_time.as_secs_f64() / borrowed_time.as_secs_f64()
         );
+        assert_eq!(projected_total, cow_total);
         assert_eq!(projected_total, borrowed_total);
+        assert!(cow_time < projected_time);
         assert!(borrowed_time < projected_time);
     }
 }

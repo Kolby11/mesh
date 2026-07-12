@@ -260,6 +260,15 @@ pub fn create_lua_storage_table(
     let table = lua.create_table()?;
     let metatable = lua.create_table()?;
 
+    let snapshot_storage = Arc::clone(&storage);
+    table.set(
+        "snapshot",
+        lua.create_function(move |lua, _args: Variadic<LuaValue>| {
+            let snapshot = snapshot_storage.lock().unwrap().snapshot();
+            lua.to_value(&snapshot)
+        })?,
+    )?;
+
     let index_storage = Arc::clone(&storage);
     let index_diagnostics = Arc::clone(&diagnostic_sink);
     metatable.set(
@@ -268,15 +277,6 @@ pub fn create_lua_storage_table(
             let Some(key) = storage_key_from_lua(&key, &index_diagnostics)? else {
                 return Ok(LuaValue::Nil);
             };
-
-            if key == "snapshot" {
-                let snapshot_storage = Arc::clone(&index_storage);
-                let snapshot = lua.create_function(move |lua, _args: Variadic<LuaValue>| {
-                    let snapshot = snapshot_storage.lock().unwrap().snapshot();
-                    lua.to_value(&snapshot)
-                })?;
-                return Ok(LuaValue::Function(snapshot));
-            }
 
             read_sink(key.clone());
             let value = index_storage.lock().unwrap().get(&key).cloned();
@@ -500,5 +500,126 @@ mod tests {
             manager.open(second_scope).get("value"),
             Some(&json!("second"))
         );
+    }
+
+    #[test]
+    fn lua_snapshot_method_does_not_track_storage_key_read() {
+        let lua = Lua::new();
+        let root = temp_root("lua-snapshot-method");
+        let manager = StorageManager::new(root);
+        let mut scoped = manager.open(StorageScope::frontend("module", "component", "one"));
+        scoped.set("theme", json!("dark"));
+        let reads = Arc::new(Mutex::new(Vec::new()));
+        let read_sink = {
+            let reads = Arc::clone(&reads);
+            Arc::new(move |key: String| reads.lock().unwrap().push(key))
+        };
+        let storage = create_lua_storage_table(
+            &lua,
+            Arc::new(Mutex::new(scoped)),
+            Arc::new(|_| {}),
+            read_sink,
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+        lua.globals().set("storage", storage).unwrap();
+
+        let theme: String = lua.load("return storage:snapshot().theme").eval().unwrap();
+
+        assert_eq!(theme, "dark");
+        assert!(
+            reads.lock().unwrap().is_empty(),
+            "looking up the table-owned snapshot method should not be tracked as a storage key read"
+        );
+    }
+
+    #[test]
+    #[ignore = "release-only storage snapshot lookup microbenchmark"]
+    fn table_owned_snapshot_method_beats_index_allocated_function() {
+        use std::time::Instant;
+
+        fn old_lua_storage_table(lua: &Lua, storage: Arc<Mutex<ScopedStorage>>) -> Table {
+            let table = lua.create_table().unwrap();
+            let metatable = lua.create_table().unwrap();
+            let index_storage = Arc::clone(&storage);
+            metatable
+                .set(
+                    "__index",
+                    lua.create_function(move |lua, (_table, key): (Table, LuaValue)| {
+                        let key = match key {
+                            LuaValue::String(value) => value.to_str()?.to_string(),
+                            _ => return Ok(LuaValue::Nil),
+                        };
+                        if key == "snapshot" {
+                            let snapshot_storage = Arc::clone(&index_storage);
+                            let snapshot =
+                                lua.create_function(move |lua, _args: Variadic<LuaValue>| {
+                                    let snapshot = snapshot_storage.lock().unwrap().snapshot();
+                                    lua.to_value(&snapshot)
+                                })?;
+                            return Ok(LuaValue::Function(snapshot));
+                        }
+                        Ok(LuaValue::Nil)
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+            table.set_metatable(Some(metatable)).unwrap();
+            table
+        }
+
+        fn benchmark_storage(root_name: &str) -> Arc<Mutex<ScopedStorage>> {
+            let root = temp_root(root_name);
+            let manager = StorageManager::new(root);
+            let mut scoped = manager.open(StorageScope::frontend("module", "component", "one"));
+            scoped.set("theme", json!("dark"));
+            scoped.set("locale", json!("sk"));
+            Arc::new(Mutex::new(scoped))
+        }
+
+        let iterations = 100_000;
+        let old_lua = Lua::new();
+        old_lua
+            .globals()
+            .set(
+                "storage",
+                old_lua_storage_table(&old_lua, benchmark_storage("snapshot-old")),
+            )
+            .unwrap();
+        let old_started = Instant::now();
+        for _ in 0..iterations {
+            let theme: String = old_lua
+                .load("return storage:snapshot().theme")
+                .eval()
+                .unwrap();
+            std::hint::black_box(theme);
+        }
+        let old = old_started.elapsed();
+
+        let new_lua = Lua::new();
+        let new_table = create_lua_storage_table(
+            &new_lua,
+            benchmark_storage("snapshot-new"),
+            Arc::new(|_| {}),
+            Arc::new(|_| {}),
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+        new_lua.globals().set("storage", new_table).unwrap();
+        let new_started = Instant::now();
+        for _ in 0..iterations {
+            let theme: String = new_lua
+                .load("return storage:snapshot().theme")
+                .eval()
+                .unwrap();
+            std::hint::black_box(theme);
+        }
+        let new = new_started.elapsed();
+
+        eprintln!(
+            "storage snapshot lookup over {iterations} calls: index-created fn {old:?}, table-owned fn {new:?}, ratio {:.1}x",
+            old.as_secs_f64() / new.as_secs_f64()
+        );
+        assert!(new < old);
     }
 }
