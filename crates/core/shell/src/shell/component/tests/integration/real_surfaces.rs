@@ -73,12 +73,11 @@ fn collect_class_attributes(node: &WidgetNode, classes: &mut Vec<String>) {
 }
 
 fn parent_of_node_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a WidgetNode> {
-    if node.children.iter().any(|child| {
-        child
-            .attributes
-            .get("_mesh_key")
-            .is_some_and(|candidate| candidate == key)
-    }) {
+    if node
+        .children
+        .iter()
+        .any(|child| child.mesh_key().is_some_and(|candidate| candidate == key))
+    {
         return Some(node);
     }
     node.children
@@ -1089,11 +1088,7 @@ fn shipped_navigation_audio_popover_transition_does_not_consume_first_input() {
     )
     .expect("volume button");
     let click_handler = button.event_handlers.get("click").unwrap().clone();
-    let button_key = button
-        .attributes
-        .get("_mesh_key")
-        .expect("button mesh key")
-        .clone();
+    let button_key = button.mesh_key().expect("button mesh key").to_owned();
     let open_requests = navigation
         .call_namespaced_handler(
             &click_handler,
@@ -1137,11 +1132,7 @@ fn shipped_navigation_audio_popover_transition_does_not_consume_first_input() {
         .unwrap();
     let audio_tree = audio.last_tree.as_ref().expect("rendered audio popover");
     let slider = first_node_by_tag(audio_tree, "slider").expect("slider node");
-    let slider_key = slider
-        .attributes
-        .get("_mesh_key")
-        .expect("slider key")
-        .clone();
+    let slider_key = slider.mesh_key().expect("slider key").to_owned();
     audio.focused_key = Some(slider_key);
 
     let requests = audio
@@ -1198,17 +1189,9 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
         "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
     )
     .expect("volume button");
-    let button_key = button
-        .attributes
-        .get("_mesh_key")
-        .expect("button mesh key")
-        .clone();
+    let button_key = button.mesh_key().expect("button mesh key").to_owned();
     let icon = first_node_by_tag(button, "icon").expect("volume icon");
-    let icon_key = icon
-        .attributes
-        .get("_mesh_key")
-        .expect("icon mesh key")
-        .clone();
+    let icon_key = icon.mesh_key().expect("icon mesh key").to_owned();
     assert_eq!(
         find_tooltip_text_by_key(tree, &icon_key).as_deref(),
         Some("Volume 50%"),
@@ -1381,11 +1364,7 @@ fn shipped_navigation_icon_rasterizes_pixels_on_real_surface() {
         icon.attributes.get("name").is_some() || icon.attributes.get("src").is_some(),
         "volume icon should declare a name or src to resolve"
     );
-    let icon_key = icon
-        .attributes
-        .get("_mesh_key")
-        .expect("icon mesh key")
-        .clone();
+    let icon_key = icon.mesh_key().expect("icon mesh key").to_owned();
     let (left, top, right, bottom) =
         find_node_bounds_by_key(tree, &icon_key, 0.0, 0.0).expect("icon bounds");
     assert!(
@@ -1428,10 +1407,9 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
     let theme_button =
         first_node_with_attr(tree, "aria-label", "Select theme").expect("theme button");
     let theme_button_key = theme_button
-        .attributes
-        .get("_mesh_key")
+        .mesh_key()
         .expect("theme button key")
-        .clone();
+        .to_owned();
     let (theme_left, theme_top, theme_right, theme_bottom) =
         find_node_bounds_by_key(tree, &theme_button_key, 0.0, 0.0).expect("theme button bounds");
     let theme_center_x = (theme_left + theme_right) / 2.0;
@@ -1501,6 +1479,13 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
         Some("true"),
         "embedded wrapper should be hidden so promoted content is not painted inline"
     );
+    assert_ne!(
+        embedded_wrapper.computed_style.display,
+        mesh_core_elements::style::Display::None,
+        "promoted hidden wrapper must stay in layout so popup coordinates remain available"
+    );
+    assert_eq!(embedded_wrapper.layout.width, 0.0);
+    assert_eq!(embedded_wrapper.layout.height, 0.0);
     let cluster_after = first_node_by_class(tree, "right-cluster").expect("control cluster after");
     assert!(
         (cluster_after.layout.width - cluster_width_before).abs() <= 1.0,
@@ -1555,11 +1540,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             .as_ref()
             .expect("rendered navigation bar");
         let button = first_node_with_click_handler(tree, handler).expect("hover trigger button");
-        let button_key = button
-            .attributes
-            .get("_mesh_key")
-            .expect("button mesh key")
-            .clone();
+        let button_key = button.mesh_key().expect("button mesh key").to_owned();
         let (left, top, right, bottom) =
             find_node_bounds_by_key(tree, &button_key, 0.0, 0.0).expect("button bounds");
 
@@ -1600,7 +1581,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             "{handler} child popup should paint successfully"
         );
         let child_tree = component
-            .child_surface_debug_tree(&requests[0].node_key)
+            .child_surface_debug_tree(&requests[0].node_key, (0.0, 0.0))
             .expect("debug child tree");
         let mut classes = Vec::new();
         collect_class_attributes(&child_tree, &mut classes);
@@ -1927,6 +1908,48 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
 }
 
 #[test]
+fn debug_inspector_hidden_views_do_not_participate_in_layout() {
+    let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.debug".into(),
+            source_module: "@mesh/core-debug".into(),
+            payload: serde_json::json!({
+                "overlay_enabled": true,
+                "profiling_enabled": false,
+                "profiling_session_id": 11,
+                "active_view": "overview",
+                "modules": [{ "id": "@mesh/debug-inspector" }],
+                "interfaces": [],
+                "backend_runtimes": [],
+                "active_surfaces": ["@mesh/debug-inspector"],
+                "profiling": serde_json::Value::Null
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(480, 640);
+    component.paint(&theme, 480, 640, &mut buffer, 1.0).unwrap();
+
+    let tree = component.last_tree.as_ref().expect("rendered inspector");
+    let overview = first_node_with_class_token(tree, "overview-view").expect("overview view");
+    let modules = first_node_with_class_token(tree, "modules-view").expect("modules view");
+    let surfaces = first_node_with_class_token(tree, "surfaces-view").expect("surfaces view");
+    let backend = first_node_with_class_token(tree, "backend-view").expect("backend view");
+    let benchmark = first_node_with_class_token(tree, "benchmark-view").expect("benchmark view");
+
+    assert!(overview.layout.height > 0.0);
+    for hidden_view in [modules, surfaces, backend, benchmark] {
+        assert_eq!(
+            hidden_view.computed_style.display,
+            mesh_core_elements::style::Display::None
+        );
+        assert_eq!(hidden_view.layout.height, 0.0);
+    }
+}
+
+#[test]
 fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
     let theme = default_theme();
@@ -2030,4 +2053,46 @@ fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
             .iter()
             .any(|line| line.contains("Total render 128us"))
     );
+}
+
+#[test]
+fn debug_dump_language_popover_fit_sizes() {
+    let theme = default_theme();
+    let mut language =
+        real_frontend_module_component("@mesh/language-popover", audio_network_catalog());
+    language.visible = true;
+    language.set_surface_exiting(false);
+    language
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.locale".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({ "locale": "en", "current": "en" }),
+        })
+        .unwrap();
+
+    let mut buffer = PixelBuffer::new(112, 92);
+    language.paint(&theme, 112, 92, &mut buffer, 1.0).unwrap();
+    let tree = language.last_tree.as_ref().unwrap();
+
+    fn dump(node: &WidgetNode, depth: usize) {
+        eprintln!(
+            "{}<{}> class={:?} pos={:?} layout=({:.1},{:.1},{:.1},{:.1}) padding={:?} w/h={:?}/{:?}",
+            "  ".repeat(depth),
+            node.tag,
+            node.attributes.get("class"),
+            node.computed_style.position,
+            node.layout.x,
+            node.layout.y,
+            node.layout.width,
+            node.layout.height,
+            node.computed_style.padding,
+            node.computed_style.width,
+            node.computed_style.height,
+        );
+        for child in &node.children {
+            dump(child, depth + 1);
+        }
+    }
+    dump(tree, 0);
+    panic!("dump above");
 }

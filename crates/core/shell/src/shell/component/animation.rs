@@ -370,8 +370,7 @@ impl FrontendSurfaceComponent {
         resolver: &StyleResolver,
     ) -> RenderKeyframeRule {
         let selector = node
-            .attributes
-            .get("_mesh_key")
+            .mesh_key()
             .map(|key| format!("#{key}"))
             .unwrap_or_else(|| node.tag.clone());
         let mut stops = Vec::new();

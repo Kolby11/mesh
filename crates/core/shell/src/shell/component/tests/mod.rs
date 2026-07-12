@@ -284,13 +284,13 @@ fn sparse_ref_metrics_skip_unpublished_snapshots() {
         if let Some(reference) = node.attributes.get("ref") {
             refs.insert(reference.clone(), metrics.clone());
             if let Some(key) = node_key {
-                ref_keys.insert(reference.clone(), key.clone());
+                ref_keys.insert(reference.clone(), key.to_owned());
             }
         }
         if let Some(binding) = node.attributes.get("_mesh_bind_this") {
             refs.insert(binding.clone(), metrics);
             if let Some(key) = node_key {
-                ref_keys.insert(binding.clone(), key.clone());
+                ref_keys.insert(binding.clone(), key.to_owned());
             }
         }
 

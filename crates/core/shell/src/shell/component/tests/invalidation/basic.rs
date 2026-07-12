@@ -516,6 +516,75 @@ fn phase18_script_and_text_invalidations_take_full_rebuild_paint_path() {
 }
 
 #[test]
+fn source_reload_drops_stale_retained_tree_before_next_paint() {
+    use crate::shell::component::catalog::FrontendCatalog;
+    use mesh_core_frontend::compile_frontend_module;
+
+    fn write_source(module_dir: &std::path::Path, body: &str) {
+        std::fs::create_dir_all(module_dir.join("src")).unwrap();
+        std::fs::write(
+            module_dir.join("src/main.mesh"),
+            format!("<template><text>{body}</text></template>"),
+        )
+        .unwrap();
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let module_dir = temp.path();
+    let manifest = minimal_test_manifest("@test/hot-reload");
+    write_source(module_dir, "before");
+
+    let compiled = compile_frontend_module(&manifest, module_dir).unwrap();
+    let catalog = FrontendCatalog {
+        modules: Default::default(),
+        slot_contributions: Default::default(),
+    };
+    let mut component = FrontendSurfaceComponent::new(
+        compiled,
+        module_dir.to_path_buf(),
+        catalog,
+        mesh_core_service::InterfaceCatalog::default(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: "@test/hot-reload".into(),
+            surface_id: "@test/hot-reload".into(),
+            diagnostics: Diagnostics::new("@test/hot-reload"),
+        })
+        .unwrap();
+    component.visible = true;
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 80);
+    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    assert_eq!(
+        first_node_by_tag(component.last_tree.as_ref().unwrap(), "text")
+            .unwrap()
+            .attributes
+            .get("content")
+            .map(String::as_str),
+        Some("before")
+    );
+
+    write_source(module_dir, "after");
+    assert!(component.reload_source().unwrap());
+    assert!(
+        component.last_tree.is_none(),
+        "source reload must drop the stale retained widget tree"
+    );
+
+    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    assert_eq!(
+        first_node_by_tag(component.last_tree.as_ref().unwrap(), "text")
+            .unwrap()
+            .attributes
+            .get("content")
+            .map(String::as_str),
+        Some("after")
+    );
+}
+
+#[test]
 fn retained_paint_path_records_phase26_cpu_attribution_stages() {
     let mut component = test_frontend_component(
         "<template><row><text>Proof</text><icon name=\"phase26-missing-icon\" /></row></template>",

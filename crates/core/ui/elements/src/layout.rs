@@ -422,6 +422,7 @@ fn taffy_dimension(dimension: Dimension) -> taffy_style::Dimension {
         Dimension::Px(value) => taffy_style::Dimension::length(value),
         Dimension::Percent(value) => taffy_style::Dimension::percent(value / 100.0),
         Dimension::Content => taffy_style::Dimension::auto(),
+        Dimension::Fit => taffy_style::Dimension::auto(),
     }
 }
 
@@ -924,8 +925,7 @@ fn collect_retained_node_ids(node: &WidgetNode, ids: &mut HashSet<NodeId>) {
 }
 
 fn retained_taffy_id(node: &WidgetNode, state: &PerSurfaceLayoutState) -> Option<TaffyNodeId> {
-    node.attributes
-        .contains_key("_mesh_key")
+    node.has_mesh_key()
         .then(|| state.node_map.get(&node.id))
         .flatten()
         .copied()
@@ -1026,6 +1026,59 @@ fn write_taffy_layout(
     viewport_h: f32,
 ) {
     write_taffy_layout_with_parent(node, tree, node_map, None, 0.0, 0.0, viewport_w, viewport_h);
+    resolve_fit_sizing(node);
+}
+
+/// Grow every `width/height: fit` node to cover the union bounding box of
+/// *all* its descendants — including absolutely/fixed-positioned ones, which
+/// Taffy's own flex sizing (and standard `fit-content`) never counts, since
+/// out-of-flow elements don't contribute to intrinsic sizing per spec. Runs
+/// bottom-up after `write_taffy_layout_with_parent` has already resolved
+/// every node's absolute on-screen box, so a `fit` node whose own child is
+/// also `fit` picks up that child's corrected size.
+///
+/// This only *extends* the box Taffy already computed (`.max(...)`) — normal
+/// in-flow content is already covered by Taffy's own auto-sizing and this is
+/// a no-op for it. It does not re-run flex layout, so a `fit` node's own
+/// position and its flex siblings' positions are unaffected: this corrects
+/// the node's own box in place, it does not reflow its container.
+fn resolve_fit_sizing(node: &mut WidgetNode) {
+    for child in &mut node.children {
+        resolve_fit_sizing(child);
+    }
+
+    let fit_width = matches!(node.computed_style.width, Dimension::Fit);
+    let fit_height = matches!(node.computed_style.height, Dimension::Fit);
+    if !fit_width && !fit_height {
+        return;
+    }
+
+    let mut max_right = node.layout.x + node.layout.width;
+    let mut max_bottom = node.layout.y + node.layout.height;
+    accumulate_descendant_extents(node, &mut max_right, &mut max_bottom);
+
+    if fit_width {
+        node.layout.width = (max_right - node.layout.x).max(0.0);
+    }
+    if fit_height {
+        node.layout.height = (max_bottom - node.layout.y).max(0.0);
+    }
+}
+
+/// Accumulate the furthest right/bottom screen-space edge across all
+/// descendants of `node` (any depth). `position: fixed` subtrees are
+/// skipped: `write_taffy_layout_with_parent` positions those relative to the
+/// viewport origin, not to `node`, so their coordinates aren't comparable to
+/// `node`'s own box and would otherwise blow the bounding box out arbitrarily.
+fn accumulate_descendant_extents(node: &WidgetNode, max_right: &mut f32, max_bottom: &mut f32) {
+    for child in &node.children {
+        if child.computed_style.position == Position::Fixed {
+            continue;
+        }
+        *max_right = max_right.max(child.layout.x + child.layout.width);
+        *max_bottom = max_bottom.max(child.layout.y + child.layout.height);
+        accumulate_descendant_extents(child, max_right, max_bottom);
+    }
 }
 
 fn write_taffy_layout_with_parent(
@@ -1151,7 +1204,7 @@ pub fn remove_taffy_subtree(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::style::{Color, Display, Edges, FlexDirection, Position};
+    use crate::style::{AlignSelf, Color, Display, Edges, FlexDirection, Position};
     use std::cell::Cell;
 
     fn make_node(tag: &str, width: Dimension, height: Dimension) -> WidgetNode {
@@ -1338,6 +1391,27 @@ mod tests {
 
         assert_eq!(root.children[0].layout.x, 10.0);
         assert_eq!(root.children[0].layout.y, 10.0);
+    }
+
+    #[test]
+    fn fit_sizing_does_not_double_count_trailing_padding() {
+        let mut root = make_node("column", Dimension::Px(200.0), Dimension::Px(100.0));
+        root.computed_style.direction = FlexDirection::Column;
+
+        let mut panel = make_node("column", Dimension::Fit, Dimension::Fit);
+        panel.computed_style.direction = FlexDirection::Column;
+        panel.computed_style.align_self = AlignSelf::Start;
+        panel.computed_style.padding = Edges::all(12.0);
+        panel.children = vec![make_node("text", Dimension::Px(80.0), Dimension::Px(20.0))];
+        root.children = vec![panel];
+
+        LayoutEngine::compute(&mut root, 200.0, 100.0);
+
+        let panel = &root.children[0];
+        assert_eq!(panel.layout.width, 104.0);
+        assert_eq!(panel.layout.height, 44.0);
+        assert_eq!(panel.children[0].layout.x, 12.0);
+        assert_eq!(panel.children[0].layout.y, 12.0);
     }
 
     #[test]

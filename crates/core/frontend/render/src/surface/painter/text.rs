@@ -1,4 +1,5 @@
 use crate::display_list::{DisplayPaintNode, DisplayTextPaint};
+use mesh_core_elements::Edges;
 use mesh_core_elements::lru::LruCache;
 use skia_safe::Canvas;
 use std::hash::{Hash, Hasher};
@@ -467,7 +468,6 @@ impl FrontendRenderEngine {
         }
 
         let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
-        let ty = (y + (style.padding.top * scale) as i32).max(0) as u32;
         let inner_width = ((node.layout.width - style.padding.horizontal()) * scale).max(0.0);
 
         let display_text: std::borrow::Cow<'_, str> =
@@ -503,6 +503,24 @@ impl FrontendRenderEngine {
             } else {
                 style.text_align
             };
+        let render_max_width = if style.white_space == mesh_core_elements::WhiteSpace::Nowrap {
+            None
+        } else {
+            Some(inner_width)
+        };
+        let ty = centered_text_origin_y(
+            &self.text_renderer,
+            &display_text,
+            &style.font_family,
+            style.font_size * scale,
+            style.font_weight,
+            style.line_height,
+            render_max_width,
+            node.layout.height,
+            style.padding,
+            scale,
+            y,
+        );
 
         if let Some(selection) = selection_geometry(
             &self.text_renderer,
@@ -530,11 +548,6 @@ impl FrontendRenderEngine {
             return;
         }
 
-        let render_max_width = if style.white_space == mesh_core_elements::WhiteSpace::Nowrap {
-            None
-        } else {
-            Some(inner_width)
-        };
         self.text_renderer.render_clipped(
             &display_text,
             &style.font_family,
@@ -567,7 +580,6 @@ impl FrontendRenderEngine {
         }
 
         let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
-        let ty = (y + (style.padding.top * scale) as i32).max(0) as u32;
         let inner_width = ((node.layout.width - style.padding.horizontal()) * scale).max(0.0);
 
         let display_text: std::borrow::Cow<'_, str> =
@@ -603,6 +615,20 @@ impl FrontendRenderEngine {
             } else {
                 style.text_align
             };
+        let render_max_width = Some(inner_width);
+        let ty = centered_text_origin_y(
+            &self.text_renderer,
+            &display_text,
+            &style.font_family,
+            style.font_size * scale,
+            style.font_weight,
+            style.line_height,
+            render_max_width,
+            node.layout.height,
+            style.padding,
+            scale,
+            y,
+        );
 
         if let Some(selection) = selection_geometry_for_display(
             &self.text_renderer,
@@ -644,7 +670,7 @@ impl FrontendRenderEngine {
                 tx,
                 ty,
                 clip_to_tuple(clip),
-                Some(inner_width),
+                render_max_width,
             );
         });
     }
@@ -820,6 +846,33 @@ impl FrontendRenderEngine {
             Some(max_text_w),
         );
     }
+}
+
+fn centered_text_origin_y(
+    renderer: &impl TextRenderCache,
+    text: &str,
+    font_family: &str,
+    font_size: f32,
+    font_weight: u16,
+    line_height: f32,
+    max_width: Option<f32>,
+    layout_height: f32,
+    padding: Edges,
+    scale: f32,
+    y: i32,
+) -> u32 {
+    let inner_height = ((layout_height - padding.vertical()) * scale).max(0.0);
+    let (_, measured_height) = renderer.measure_styled(
+        text,
+        font_family,
+        font_size,
+        font_weight,
+        line_height,
+        max_width,
+    );
+    let text_height = measured_height.max((font_size).max(8.0));
+    let centered_offset = ((inner_height - text_height) / 2.0).max(0.0);
+    (y + (padding.top * scale + centered_offset).round() as i32).max(0) as u32
 }
 
 pub(super) fn truncate_with_ellipsis(
@@ -1110,6 +1163,30 @@ pub(super) fn render_selection_highlights(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn centered_text_origin_offsets_short_text_inside_tall_box() {
+        let renderer = TextRenderer::new();
+        let top = centered_text_origin_y(
+            &renderer,
+            "Label",
+            "Inter",
+            14.0,
+            400,
+            1.4,
+            None,
+            60.0,
+            Edges::zero(),
+            1.0,
+            10,
+        );
+
+        assert!(top > 10, "text should be vertically centered, got y={top}");
+        assert!(
+            top < 35,
+            "text should remain inside the upper half of the box, got y={top}"
+        );
+    }
 
     #[test]
     fn truncate_with_ellipsis_appends_ellipsis_for_short_space() {

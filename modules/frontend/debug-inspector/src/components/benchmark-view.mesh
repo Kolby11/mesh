@@ -6,152 +6,93 @@
     </text>
 
     <column class="benchmark-list">
-      <box class="benchmark-row">
-        <column class="benchmark-copy">
-          <row class="benchmark-head">
-            <text class="benchmark-title">{row1_title}</text>
-            <text class="benchmark-status">{row1_status}</text>
-          </row>
-          <text class="benchmark-meta">{row1_scenario_id} / {row1_target}</text>
-          <button class="benchmark-action" onclick={row1_onRun} aria-label="{row1_action_aria_label}">
-            <text class="benchmark-action-text">{row1_action_label}</text>
-          </button>
-          <text class="benchmark-primary-metric">{row1_primary_metric}</text>
-          <text class="benchmark-secondary-metric">{row1_secondary_metric}</text>
-          <text class="benchmark-hint">{row1_hint}</text>
-        </column>
-      </box>
-
-      <box class="benchmark-row">
-        <column class="benchmark-copy">
-          <row class="benchmark-head">
-            <text class="benchmark-title">{row2_title}</text>
-            <text class="benchmark-status">{row2_status}</text>
-          </row>
-          <text class="benchmark-meta">{row2_scenario_id} / {row2_target}</text>
-          <button class="benchmark-action" onclick={row2_onRun} aria-label="{row2_action_aria_label}">
-            <text class="benchmark-action-text">{row2_action_label}</text>
-          </button>
-          <text class="benchmark-primary-metric">{row2_primary_metric}</text>
-          <text class="benchmark-secondary-metric">{row2_secondary_metric}</text>
-          <text class="benchmark-hint">{row2_hint}</text>
-        </column>
-      </box>
-
-      <box class="benchmark-row">
-        <column class="benchmark-copy">
-          <row class="benchmark-head">
-            <text class="benchmark-title">{row3_title}</text>
-            <text class="benchmark-status">{row3_status}</text>
-          </row>
-          <text class="benchmark-meta">{row3_scenario_id} / {row3_target}</text>
-          <button class="benchmark-action" onclick={row3_onRun} aria-label="{row3_action_aria_label}">
-            <text class="benchmark-action-text">{row3_action_label}</text>
-          </button>
-          <text class="benchmark-primary-metric">{row3_primary_metric}</text>
-          <text class="benchmark-secondary-metric">{row3_secondary_metric}</text>
-          <text class="benchmark-hint">{row3_hint}</text>
-        </column>
-      </box>
-
-      <box class="benchmark-row">
-        <column class="benchmark-copy">
-          <row class="benchmark-head">
-            <text class="benchmark-title">{row4_title}</text>
-            <text class="benchmark-status">{row4_status}</text>
-          </row>
-          <text class="benchmark-meta">{row4_scenario_id} / {row4_target}</text>
-          <button class="benchmark-action" onclick={row4_onRun} aria-label="{row4_action_aria_label}">
-            <text class="benchmark-action-text">{row4_action_label}</text>
-          </button>
-          <text class="benchmark-primary-metric">{row4_primary_metric}</text>
-          <text class="benchmark-secondary-metric">{row4_secondary_metric}</text>
-          <text class="benchmark-hint">{row4_hint}</text>
-        </column>
-      </box>
-
-      <box class="benchmark-row">
-        <column class="benchmark-copy">
-          <row class="benchmark-head">
-            <text class="benchmark-title">{row5_title}</text>
-            <text class="benchmark-status">{row5_status}</text>
-          </row>
-          <text class="benchmark-meta">{row5_scenario_id} / {row5_target}</text>
-          <button class="benchmark-action" onclick={row5_onRun} aria-label="{row5_action_aria_label}">
-            <text class="benchmark-action-text">{row5_action_label}</text>
-          </button>
-          <text class="benchmark-primary-metric">{row5_primary_metric}</text>
-          <text class="benchmark-secondary-metric">{row5_secondary_metric}</text>
-          <text class="benchmark-hint">{row5_hint}</text>
-        </column>
-      </box>
+      {#for row in rows}
+        <box class="benchmark-row">
+          <column class="benchmark-copy">
+            <row class="benchmark-head">
+              <text class="benchmark-title">{row.title}</text>
+              <text class="benchmark-status">{row.status}</text>
+            </row>
+            <text class="benchmark-meta">{row.scenario_id} / {row.target}</text>
+            <button class="benchmark-action" onclick={onRunScenario(row.scenario_id)} aria-label={row.action_aria_label}>
+              <text class="benchmark-action-text">{row.action_label}</text>
+            </button>
+            <text class="benchmark-primary-metric">{row.primary_metric}</text>
+            <text class="benchmark-secondary-metric">{row.secondary_metric}</text>
+            <text class="benchmark-hint">{row.hint}</text>
+          </column>
+        </box>
+      {/for}
     </column>
   </column>
 </template>
 
 <script lang="luau">
+hidden = false
+rows = {}
+onRunScenario = nil
 </script>
 
 <style>
-.benchmark-view,
-.benchmark-list {
+  .benchmark-view,
+  .benchmark-list {
     gap: var(--spacing-md);
-}
+  }
 
-.benchmark-copy {
+  .benchmark-copy {
     gap: var(--spacing-xs);
-}
+  }
 
-.benchmark-head {
+  .benchmark-head {
     width: 100%;
     align-items: center;
     justify-content: space-between;
     gap: var(--spacing-sm);
-}
+  }
 
-.section-title,
-.benchmark-title {
+  .section-title,
+  .benchmark-title {
     font-size: var(--typography-size-sm);
     font-weight: 700;
     color: var(--color-on-surface);
-}
+  }
 
-.section-copy,
-.benchmark-meta,
-.benchmark-secondary-metric,
-.benchmark-hint {
+  .section-copy,
+  .benchmark-meta,
+  .benchmark-secondary-metric,
+  .benchmark-hint {
     font-size: var(--typography-size-xs);
     color: var(--color-on-surface-variant);
-}
+  }
 
-.benchmark-status,
-.benchmark-primary-metric {
+  .benchmark-status,
+  .benchmark-primary-metric {
     font-size: var(--typography-size-xs);
     font-weight: 700;
     color: var(--color-on-surface);
-}
+  }
 
-.benchmark-row {
+  .benchmark-row {
     width: 100%;
     padding: var(--spacing-md);
     background: var(--color-surface-container);
     border-width: 1px;
     border-style: solid;
     border-color: var(--color-outline-variant);
-}
+  }
 
-.benchmark-action {
+  .benchmark-action {
     min-height: 32px;
     padding-inline: var(--spacing-sm);
     padding-block: var(--spacing-xs);
     justify-content: center;
     align-items: center;
     background: var(--color-primary);
-}
+  }
 
-.benchmark-action-text {
+  .benchmark-action-text {
     font-size: var(--typography-size-xs);
     font-weight: 700;
     color: var(--color-on-primary);
-}
+  }
 </style>

@@ -9,36 +9,12 @@
         onpointerenter={onPopoverEnter}
         onpointerleave={onPopoverLeave}
     >
-        <box class="bubble-popover-panel">
-            <BubbleOptions
-                label="Select theme"
-                item1_button_class="{dark_class}"
-                item1_core_class="{dark_core_class}"
-                item1_icon_class="bubble-option-icon"
-                item1_icon="weather-clear-night"
-                item1_text_class="bubble-option-text bubble-option-hidden"
-                item1_text=""
-                item1_title="Default Dark"
-                onfirst={onDark}
-                item2_button_class="{light_class}"
-                item2_core_class="{light_core_class}"
-                item2_icon_class="bubble-option-icon"
-                item2_icon="weather-clear"
-                item2_text_class="bubble-option-text bubble-option-hidden"
-                item2_text=""
-                item2_title="Default Light"
-                onsecond={onLight}
-                item3_button_class="{gruvbox_class}"
-                item3_core_class="{gruvbox_core_class}"
-                item3_icon_class="bubble-option-icon"
-                item3_icon="palette"
-                item3_text_class="bubble-option-text bubble-option-hidden"
-                item3_text=""
-                item3_title="Gruvbox"
-                onthird={onGruvbox}
-                onscroll={onThemeScroll}
-            />
-        </box>
+        <BubbleOptions
+            label="Select theme"
+            items={items}
+            onselect={onSelectTheme}
+            onscroll={onThemeScroll}
+        />
     </popover>
 </template>
 
@@ -47,61 +23,68 @@ local theme = require("mesh.theme")
 local BubbleOptions = require("../../shared/components/bubble-options.mesh")
 
 open = false
-dark_class = "bubble-option bubble-option-left"
-light_class = "bubble-option bubble-option-center"
-gruvbox_class = "bubble-option bubble-option-right"
-dark_core_class = "bubble-option-core bubble-option-core-dark"
-light_core_class = "bubble-option-core bubble-option-core-light"
-gruvbox_core_class = "bubble-option-core bubble-option-core-gruvbox"
+
+-- One struct per visible slot (left/center/right); BubbleOptions only
+-- iterates this array, so position and active-state classes are baked in here.
+items = {}
 
 local THEME_DARK = "mesh-default-dark"
 local THEME_LIGHT = "mesh-default-light"
 local THEME_GRUVBOX = "gruvbox-dark"
 
-local function sync_classes(current)
-    dark_class = "bubble-option bubble-option-left"
-    light_class = "bubble-option bubble-option-center"
-    gruvbox_class = "bubble-option bubble-option-right"
-    dark_core_class = "bubble-option-core bubble-option-core-dark"
-    light_core_class = "bubble-option-core bubble-option-core-light"
-    gruvbox_core_class = "bubble-option-core bubble-option-core-gruvbox"
+local THEME_OPTIONS = {
+    { id = THEME_DARK, position = "left", core = "bubble-option-core-dark", icon = "weather-clear-night" },
+    { id = THEME_LIGHT, position = "center", core = "bubble-option-core-light", icon = "weather-clear" },
+    { id = THEME_GRUVBOX, position = "right", core = "bubble-option-core-gruvbox", icon = "palette" },
+}
 
-    if current == THEME_DARK then
-        dark_class = dark_class .. " bubble-option-active"
-        dark_core_class = dark_core_class .. " bubble-option-core-active"
-    elseif current == THEME_LIGHT then
-        light_class = light_class .. " bubble-option-active"
-        light_core_class = light_core_class .. " bubble-option-core-active"
-    elseif current == THEME_GRUVBOX then
-        gruvbox_class = gruvbox_class .. " bubble-option-active"
-        gruvbox_core_class = gruvbox_core_class .. " bubble-option-core-active"
+local THEME_LABELS = {
+    [THEME_DARK] = "Default Dark",
+    [THEME_LIGHT] = "Default Light",
+    [THEME_GRUVBOX] = "Gruvbox",
+}
+
+local function build_option(option, current)
+    local button_class = "bubble-option bubble-option-" .. option.position
+    local core_class = "bubble-option-core " .. option.core
+    if option.id == current then
+        button_class = button_class .. " bubble-option-active"
+        core_class = core_class .. " bubble-option-core-active"
     end
+
+    return {
+        id = option.id,
+        button_class = button_class,
+        core_class = core_class,
+        motion_class = "bubble-options-motion bubble-options-motion-" .. option.position,
+        icon_class = "bubble-option-icon",
+        icon = option.icon,
+        text_class = "bubble-option-text bubble-option-hidden",
+        text = "",
+        title = THEME_LABELS[option.id],
+    }
+end
+
+local function sync_options(current)
+    local next_items = {}
+    for index, option in THEME_OPTIONS do
+        next_items[index] = build_option(option, current)
+    end
+    items = next_items
 end
 
 function render(self)
     if theme then
         local current = theme.current or theme.theme_id or THEME_DARK
-        sync_classes(current)
+        sync_options(current)
     end
 end
 
 -- Selecting a theme does not close the popover: it stays open so the user can
 -- keep choosing. It closes on pointer leave (onPopoverLeave) or, for keyboard
 -- activation, on focus leave.
-local function apply_theme(id)
-    mesh.events.publish("shell.set-theme", { theme_id = id })
-end
-
-function onDark()
-    apply_theme(THEME_DARK)
-end
-
-function onLight()
-    apply_theme(THEME_LIGHT)
-end
-
-function onGruvbox()
-    apply_theme(THEME_GRUVBOX)
+function onSelectTheme(theme_id)
+    mesh.events.publish("shell.set-theme", { theme_id = theme_id })
 end
 
 function onThemeScroll(_event)
@@ -117,26 +100,21 @@ function onPopoverLeave()
     open = false
     self.PopoverLeave:fire()
 end
-
 </script>
 
 <style>
     .theme-float-shell {
-        width: 112px;
-        height: 74px;
+        /* Sized to the bounding box of the BubbleOptions content instead of a
+        hardcoded size — <popover> isn't a container tag, so it needs the
+        fit value explicitly (box/row/column default to it). */
+        width: fit;
+        height: fit;
         padding: 0;
         background: transparent;
         opacity: 1;
         transform: translateY(0px) scale(1);
         transition: transform 220ms var(--animation-curves-bezier-emphasized-decelerate),
         opacity 180ms var(--animation-curves-bezier-standard);
-    }
-
-    .bubble-popover-panel {
-        width: 112px;
-        height: 74px;
-        padding: 0;
-        background: transparent;
     }
 
     .theme-float-shell.mesh-surface-entering {

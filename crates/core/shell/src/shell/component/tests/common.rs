@@ -1085,11 +1085,7 @@ pub(super) fn node_by_mesh_key<'a>(node: &'a WidgetNode, key: &str) -> &'a Widge
 }
 
 pub(super) fn find_node_by_mesh_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a WidgetNode> {
-    if node
-        .attributes
-        .get("_mesh_key")
-        .is_some_and(|value| value == key)
-    {
+    if node.mesh_key().is_some_and(|value| value == key) {
         return Some(node);
     }
     node.children

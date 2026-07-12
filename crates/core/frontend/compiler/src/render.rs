@@ -1,7 +1,7 @@
 use crate::expr::eval_expr;
 use crate::style::{
-    InheritedStyleMask, child_style_context, container_style, inherit_text_style,
-    inherited_style_mask, merge_missing_defaults, slot_style, text_style,
+    InheritedStyleMask, child_style_context, inherit_text_style, inherited_style_mask,
+    merge_missing_defaults, slot_style, synthetic_wrapper_style, text_style,
 };
 use crate::tags::lower_source_tag;
 use crate::{FrontendCompositionResolver, LayeredStore};
@@ -522,7 +522,7 @@ pub(crate) fn build_widget_node(
             };
             let mut node = WidgetNode::new("column");
             attach_module_id(&mut node, &manifest.package.id);
-            node.computed_style = container_style("column");
+            node.computed_style = synthetic_wrapper_style();
             let child_context = child_style_context(&node.computed_style, container_context);
             node.children = active_children
                 .iter()
@@ -551,7 +551,7 @@ pub(crate) fn build_widget_node(
         TemplateNode::For(for_node) => {
             let mut node = WidgetNode::new("column");
             attach_module_id(&mut node, &manifest.package.id);
-            node.computed_style = container_style("column");
+            node.computed_style = synthetic_wrapper_style();
             let child_context = child_style_context(&node.computed_style, container_context);
 
             if let Some(store) = state {

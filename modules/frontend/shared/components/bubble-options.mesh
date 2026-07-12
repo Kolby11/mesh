@@ -1,71 +1,37 @@
 <template>
-    <box class="bubble-options-stage" onscroll={onscroll} aria-label="{label}">
-        <button class="{item1_button_class}" onclick={onfirst} data-tooltip-disabled="true" title="{item1_title}" aria-label="{item1_title}">
-            <box class="bubble-options-motion bubble-options-motion-left">
-                <box class="{item1_core_class}">
-                    <icon class="{item1_icon_class}" name="{item1_icon}" size="14" />
-                    <text class="{item1_text_class}">{item1_text}</text>
+    <box class="bubble-options-stage" onscroll={onscroll} aria-label={label}>
+        {#for item in items}
+            <button class={item.button_class} onclick={onselect(item.id)} data-tooltip-disabled="true" title={item.title} aria-label={item.title}>
+                <box class={item.motion_class}>
+                    <box class={item.core_class}>
+                        <icon class={item.icon_class} name={item.icon} size="14" />
+                        <text class={item.text_class}>{item.text}</text>
+                    </box>
                 </box>
-            </box>
-        </button>
-        <button class="{item2_button_class}" onclick={onsecond} data-tooltip-disabled="true" title="{item2_title}" aria-label="{item2_title}">
-            <box class="bubble-options-motion bubble-options-motion-center">
-                <box class="{item2_core_class}">
-                    <icon class="{item2_icon_class}" name="{item2_icon}" size="14" />
-                    <text class="{item2_text_class}">{item2_text}</text>
-                </box>
-            </box>
-        </button>
-        <button class="{item3_button_class}" onclick={onthird} data-tooltip-disabled="true" title="{item3_title}" aria-label="{item3_title}">
-            <box class="bubble-options-motion bubble-options-motion-right">
-                <box class="{item3_core_class}">
-                    <icon class="{item3_icon_class}" name="{item3_icon}" size="14" />
-                    <text class="{item3_text_class}">{item3_text}</text>
-                </box>
-            </box>
-        </button>
+            </button>
+        {/for}
     </box>
 </template>
 
 <script lang="luau">
 label = "Options"
 
-item1_button_class = "bubble-option bubble-option-left"
-item2_button_class = "bubble-option bubble-option-center"
-item3_button_class = "bubble-option bubble-option-right"
+-- Each entry: { id, button_class, core_class, motion_class, icon_class, icon,
+-- text_class, text, title }. Position (left/center/right) and active/hover
+-- state are baked into button_class/core_class/motion_class by the caller,
+-- since this component only iterates — it has no notion of slot position.
+items = {}
 
-item1_core_class = "bubble-option-core"
-item2_core_class = "bubble-option-core"
-item3_core_class = "bubble-option-core"
-
-item1_icon_class = "bubble-option-icon bubble-option-hidden"
-item2_icon_class = "bubble-option-icon bubble-option-hidden"
-item3_icon_class = "bubble-option-icon bubble-option-hidden"
-
-item1_text_class = "bubble-option-text"
-item2_text_class = "bubble-option-text"
-item3_text_class = "bubble-option-text"
-
-item1_icon = "palette"
-item2_icon = "palette"
-item3_icon = "palette"
-item1_text = ""
-item2_text = ""
-item3_text = ""
-item1_title = ""
-item2_title = ""
-item3_title = ""
-
-onfirst = nil
-onsecond = nil
-onthird = nil
+-- Called with the selected item's `id` (onselect(item.id)).
+onselect = nil
 onscroll = nil
 </script>
 
 <style>
     .bubble-options-stage {
-        width: 112px;
-        height: 74px;
+        /* box defaults to width/height: fit — sized to the bounding box of
+        its absolutely-positioned option buttons, so it never needs a
+        hardcoded size here. */
         position: relative;
         overflow: visible;
     }

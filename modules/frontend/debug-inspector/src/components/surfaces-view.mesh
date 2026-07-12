@@ -1,5 +1,5 @@
 <template>
-  <column class="surfaces-view">
+  <column class="surfaces-view" hidden={hidden}>
     <text class="section-title">Surfaces</text>
     <text class="section-copy">{state_copy}</text>
 
@@ -11,70 +11,50 @@
     </empty-state>
 
     <list class="surface-list" label="Recent surfaces">
-      <list-item class="surface-card" hidden={row1_hidden}>
-        <column class="surface-copy">
-          <text class="surface-title">{row1_surface_id}</text>
-          <text class="surface-meta">{row1_module_id}</text>
-          <text class="surface-metric">{row1_stage_label}</text>
-          <text class="surface-metric">{row1_render_label}</text>
-          <text class="surface-metric">{row1_redraw_label}</text>
-          <text class="surface-metric">{row1_paint_policy_label}</text>
-          <text class="surface-metric">{row1_paint_filter_label}</text>
-        </column>
-      </list-item>
-
-      <list-item class="surface-card" hidden={row2_hidden}>
-        <column class="surface-copy">
-          <text class="surface-title">{row2_surface_id}</text>
-          <text class="surface-meta">{row2_module_id}</text>
-          <text class="surface-metric">{row2_stage_label}</text>
-          <text class="surface-metric">{row2_render_label}</text>
-          <text class="surface-metric">{row2_redraw_label}</text>
-          <text class="surface-metric">{row2_paint_policy_label}</text>
-          <text class="surface-metric">{row2_paint_filter_label}</text>
-        </column>
-      </list-item>
-
-      <list-item class="surface-card" hidden={row3_hidden}>
-        <column class="surface-copy">
-          <text class="surface-title">{row3_surface_id}</text>
-          <text class="surface-meta">{row3_module_id}</text>
-          <text class="surface-metric">{row3_stage_label}</text>
-          <text class="surface-metric">{row3_render_label}</text>
-          <text class="surface-metric">{row3_redraw_label}</text>
-          <text class="surface-metric">{row3_paint_policy_label}</text>
-          <text class="surface-metric">{row3_paint_filter_label}</text>
-        </column>
-      </list-item>
+      {#for row in rows}
+        <list-item class="surface-card">
+          <column class="surface-copy">
+            <text class="surface-title">{row.surface_id}</text>
+            <text class="surface-meta">{row.module_id}</text>
+            <text class="surface-metric">{row.stage_label}</text>
+            <text class="surface-metric">{row.render_label}</text>
+            <text class="surface-metric">{row.redraw_label}</text>
+            <text class="surface-metric">{row.paint_policy_label}</text>
+            <text class="surface-metric">{row.paint_filter_label}</text>
+          </column>
+        </list-item>
+      {/for}
     </list>
   </column>
 </template>
 
 <script lang="luau">
+hidden = false
+rows = {}
 </script>
 
 <style>
-.surfaces-view,
-.surface-list {
+  .surfaces-view,
+  .surface-list {
     gap: var(--spacing-md);
-}
+  }
 
-.section-title {
+  .section-title {
     font-size: var(--typography-size-sm);
     font-weight: 700;
     color: var(--color-on-surface);
-}
+  }
 
-.section-copy,
-.empty-text,
-.surface-meta,
-.surface-metric {
+  .section-copy,
+  .empty-text,
+  .surface-meta,
+  .surface-metric {
     font-size: var(--typography-size-xs);
     color: var(--color-on-surface-variant);
-}
+  }
 
-.empty-card,
-.surface-card {
+  .empty-card,
+  .surface-card {
     width: 100%;
     padding: var(--spacing-md);
     border-radius: var(--radius-md);
@@ -82,17 +62,17 @@
     border-width: 1px;
     border-style: solid;
     border-color: var(--color-outline-variant);
-}
+  }
 
-.empty-copy,
-.surface-copy {
+  .empty-copy,
+  .surface-copy {
     gap: var(--spacing-xs);
-}
+  }
 
-.empty-title,
-.surface-title {
+  .empty-title,
+  .surface-title {
     font-size: var(--typography-size-sm);
     font-weight: 700;
     color: var(--color-on-surface);
-}
+  }
 </style>

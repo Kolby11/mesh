@@ -1,5 +1,5 @@
 <template>
-  <column class="modules-view">
+  <column class="modules-view" hidden={hidden}>
     <text class="section-title">Modules</text>
     <text class="section-copy">{state_copy}</text>
     <input
@@ -18,113 +18,63 @@
     </empty-state>
 
     <list class="module-list" label="Installed module graph">
-      <list-item class="module-card" hidden={row1_hidden}>
-        <column class="module-copy">
-          <row class="module-head">
-            <text class="module-title">{row1_module_id}</text>
-            <text class="module-kind">{row1_kind_label}</text>
-          </row>
-          <text class="module-meta">{row1_status_label}</text>
-          <text class="section-subtitle">Uses</text>
-          <text class="module-metric">{row1_uses_interfaces}</text>
-          <text class="module-metric">{row1_uses_resources}</text>
-          <text class="section-subtitle">Provides</text>
-          <text class="module-metric">{row1_provides_interfaces}</text>
-          <text class="module-metric">{row1_provides_resources}</text>
-          <text class="section-subtitle">Health</text>
-          <text class="module-metric">{row1_health_label}</text>
-        </column>
-      </list-item>
-
-      <list-item class="module-card" hidden={row2_hidden}>
-        <column class="module-copy">
-          <row class="module-head">
-            <text class="module-title">{row2_module_id}</text>
-            <text class="module-kind">{row2_kind_label}</text>
-          </row>
-          <text class="module-meta">{row2_status_label}</text>
-          <text class="section-subtitle">Uses</text>
-          <text class="module-metric">{row2_uses_interfaces}</text>
-          <text class="module-metric">{row2_uses_resources}</text>
-          <text class="section-subtitle">Provides</text>
-          <text class="module-metric">{row2_provides_interfaces}</text>
-          <text class="module-metric">{row2_provides_resources}</text>
-          <text class="section-subtitle">Health</text>
-          <text class="module-metric">{row2_health_label}</text>
-        </column>
-      </list-item>
-
-      <list-item class="module-card" hidden={row3_hidden}>
-        <column class="module-copy">
-          <row class="module-head">
-            <text class="module-title">{row3_module_id}</text>
-            <text class="module-kind">{row3_kind_label}</text>
-          </row>
-          <text class="module-meta">{row3_status_label}</text>
-          <text class="section-subtitle">Uses</text>
-          <text class="module-metric">{row3_uses_interfaces}</text>
-          <text class="module-metric">{row3_uses_resources}</text>
-          <text class="section-subtitle">Provides</text>
-          <text class="module-metric">{row3_provides_interfaces}</text>
-          <text class="module-metric">{row3_provides_resources}</text>
-          <text class="section-subtitle">Health</text>
-          <text class="module-metric">{row3_health_label}</text>
-        </column>
-      </list-item>
-
-      <list-item class="module-card" hidden={row4_hidden}>
-        <column class="module-copy">
-          <row class="module-head">
-            <text class="module-title">{row4_module_id}</text>
-            <text class="module-kind">{row4_kind_label}</text>
-          </row>
-          <text class="module-meta">{row4_status_label}</text>
-          <text class="section-subtitle">Uses</text>
-          <text class="module-metric">{row4_uses_interfaces}</text>
-          <text class="module-metric">{row4_uses_resources}</text>
-          <text class="section-subtitle">Provides</text>
-          <text class="module-metric">{row4_provides_interfaces}</text>
-          <text class="module-metric">{row4_provides_resources}</text>
-          <text class="section-subtitle">Health</text>
-          <text class="module-metric">{row4_health_label}</text>
-        </column>
-      </list-item>
+      {#for row in rows}
+        <list-item class="module-card">
+          <column class="module-copy">
+            <row class="module-head">
+              <text class="module-title">{row.module_id}</text>
+              <text class="module-kind">{row.kind_label}</text>
+            </row>
+            <text class="module-meta">{row.status_label}</text>
+            <text class="section-subtitle">Uses</text>
+            <text class="module-metric">{row.uses_interfaces}</text>
+            <text class="module-metric">{row.uses_resources}</text>
+            <text class="section-subtitle">Provides</text>
+            <text class="module-metric">{row.provides_interfaces}</text>
+            <text class="module-metric">{row.provides_resources}</text>
+            <text class="section-subtitle">Health</text>
+            <text class="module-metric">{row.health_label}</text>
+          </column>
+        </list-item>
+      {/for}
     </list>
   </column>
 </template>
 
 <script lang="luau">
+hidden = false
+rows = {}
 </script>
 
 <style>
-.modules-view,
-.module-list {
+  .modules-view,
+  .module-list {
     gap: var(--spacing-md);
-}
+  }
 
-.module-filter {
+  .module-filter {
     width: 100%;
-}
+  }
 
-.section-title,
-.section-subtitle,
-.empty-title,
-.module-title {
+  .section-title,
+  .section-subtitle,
+  .empty-title,
+  .module-title {
     font-size: var(--typography-size-sm);
     font-weight: 700;
     color: var(--color-on-surface);
-}
+  }
 
-.section-copy,
-.empty-text,
-.module-meta,
-.module-metric {
+  .section-copy,
+  .empty-text,
+  .module-meta,
+  .module-metric {
     font-size: var(--typography-size-xs);
     color: var(--color-on-surface-variant);
-}
+  }
 
-.empty-card,
-.module-card {
+  .empty-card,
+  .module-card {
     width: 100%;
     padding: var(--spacing-md);
     border-radius: var(--radius-md);
@@ -132,21 +82,21 @@
     border-width: 1px;
     border-style: solid;
     border-color: var(--color-outline-variant);
-}
+  }
 
-.empty-copy,
-.module-copy {
+  .empty-copy,
+  .module-copy {
     gap: var(--spacing-xs);
-}
+  }
 
-.module-head {
+  .module-head {
     width: 100%;
     align-items: center;
     justify-content: space-between;
     gap: var(--spacing-sm);
-}
+  }
 
-.module-kind {
+  .module-kind {
     padding-inline: var(--spacing-sm);
     padding-block: var(--spacing-xs);
     border-radius: var(--radius-full);
@@ -154,5 +104,5 @@
     color: var(--color-on-secondary-container);
     font-size: var(--typography-size-xs);
     font-weight: 700;
-}
+  }
 </style>

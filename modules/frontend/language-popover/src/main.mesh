@@ -1,45 +1,21 @@
 <template>
-  <popover
-    open={open}
-    class="language-popover-shell"
-    aria-label="{t('language.choose')}"
-    anchor-ref="language-button"
-    anchor="bottom"
-    gravity="bottom"
-    onpointerenter={onPopoverEnter}
-    onpointerleave={onPopoverLeave}
-  >
-    <box class="bubble-popover-panel">
-      <BubbleOptions
-        label="{t('language.choose')}"
-        item1_button_class="{item1_button_class}"
-        item1_core_class="{item1_core_class}"
-        item1_icon_class="bubble-option-icon bubble-option-hidden"
-        item1_icon="palette"
-        item1_text_class="bubble-option-text"
-        item1_text="{item1_text}"
-        item1_title="{item1_title}"
-        onfirst={onSelectFirst}
-        item2_button_class="{item2_button_class}"
-        item2_core_class="{item2_core_class}"
-        item2_icon_class="bubble-option-icon bubble-option-hidden"
-        item2_icon="palette"
-        item2_text_class="bubble-option-text"
-        item2_text="{item2_text}"
-        item2_title="{item2_title}"
-        onsecond={onSelectSecond}
-        item3_button_class="{item3_button_class}"
-        item3_core_class="{item3_core_class}"
-        item3_icon_class="bubble-option-icon bubble-option-hidden"
-        item3_icon="palette"
-        item3_text_class="bubble-option-text"
-        item3_text="{item3_text}"
-        item3_title="{item3_title}"
-        onthird={onSelectThird}
-        onscroll={onOptionScroll}
-      />
-    </box>
-  </popover>
+    <popover
+        open={open}
+        class="language-popover-shell"
+        aria-label={t('language.choose')}
+        anchor-ref="language-button"
+        anchor="bottom"
+        gravity="bottom"
+        onpointerenter={onPopoverEnter}
+        onpointerleave={onPopoverLeave}
+    >
+        <BubbleOptions
+            label={t('language.choose')}
+            items={items}
+            onselect={onSelectOption}
+            onscroll={onOptionScroll}
+        />
+    </popover>
 </template>
 
 <script lang="luau">
@@ -52,18 +28,9 @@ open = false
 selected_locale = "en"
 window_start = 1
 
-item1_button_class = "bubble-option bubble-option-left"
-item2_button_class = "bubble-option bubble-option-center"
-item3_button_class = "bubble-option bubble-option-right"
-item1_core_class = "bubble-option-core bubble-option-core-language bubble-option-core-language-left"
-item2_core_class = "bubble-option-core bubble-option-core-language bubble-option-core-language-center"
-item3_core_class = "bubble-option-core bubble-option-core-language bubble-option-core-language-right"
-item1_text = "EN"
-item2_text = "SK"
-item3_text = "DE"
-item1_title = "English"
-item2_title = "Slovak"
-item3_title = "German"
+-- One struct per visible slot (left/center/right); BubbleOptions only
+-- iterates this array, so position and active-state classes are baked in here.
+items = {}
 
 local function normalize_index(index)
     local count = #locales
@@ -112,47 +79,39 @@ local function sync_window_to_locale(locale)
     end
 end
 
-local function set_option(slot, locale)
-    local button_class = "bubble-option"
-    local slot_anim_class
-    if slot == 1 then
-        button_class = button_class .. " bubble-option-left"
-        slot_anim_class = "bubble-option-core-language-left"
-    elseif slot == 2 then
-        button_class = button_class .. " bubble-option-center"
-        slot_anim_class = "bubble-option-core-language-center"
-    else
-        button_class = button_class .. " bubble-option-right"
-        slot_anim_class = "bubble-option-core-language-right"
-    end
-    local core_class = "bubble-option-core bubble-option-core-language " .. slot_anim_class
+local SLOTS = {
+    { position = "left", anim = "bubble-option-core-language-left" },
+    { position = "center", anim = "bubble-option-core-language-center" },
+    { position = "right", anim = "bubble-option-core-language-right" },
+}
+
+local function build_option(slot, locale)
+    local button_class = "bubble-option bubble-option-" .. slot.position
+    local core_class = "bubble-option-core bubble-option-core-language " .. slot.anim
     if locale == selected_locale then
         button_class = button_class .. " bubble-option-active"
         core_class = core_class .. " bubble-option-core-active"
     end
 
-    if slot == 1 then
-        item1_button_class = button_class
-        item1_core_class = core_class
-        item1_text = locale_label(locale)
-        item1_title = t("language." .. locale)
-    elseif slot == 2 then
-        item2_button_class = button_class
-        item2_core_class = core_class
-        item2_text = locale_label(locale)
-        item2_title = t("language." .. locale)
-    else
-        item3_button_class = button_class
-        item3_core_class = core_class
-        item3_text = locale_label(locale)
-        item3_title = t("language." .. locale)
-    end
+    return {
+        id = locale,
+        button_class = button_class,
+        core_class = core_class,
+        motion_class = "bubble-options-motion bubble-options-motion-" .. slot.position,
+        icon_class = "bubble-option-icon bubble-option-hidden",
+        icon = "palette",
+        text_class = "bubble-option-text",
+        text = locale_label(locale),
+        title = t("language." .. locale),
+    }
 end
 
 local function sync_options()
-    set_option(1, locale_at(0))
-    set_option(2, locale_at(1))
-    set_option(3, locale_at(2))
+    items = {
+        build_option(SLOTS[1], locale_at(0)),
+        build_option(SLOTS[2], locale_at(1)),
+        build_option(SLOTS[3], locale_at(2)),
+    }
 end
 
 -- Selecting a locale does not close the popover: it stays open so the user can
@@ -178,16 +137,8 @@ function render(self)
     sync_options()
 end
 
-function onSelectFirst()
-    select_locale(locale_at(0))
-end
-
-function onSelectSecond()
-    select_locale(locale_at(1))
-end
-
-function onSelectThird()
-    select_locale(locale_at(2))
+function onSelectOption(locale)
+    select_locale(locale)
 end
 
 function onOptionScroll(event)
@@ -209,37 +160,32 @@ function onPopoverLeave()
     open = false
     self.PopoverLeave:fire()
 end
-
 </script>
 
 <style>
-.language-popover-shell {
-    width: 112px;
-    height: 74px;
-    padding: 0;
-    background: transparent;
-    opacity: 1;
-    transform: translateY(0px) scale(1);
-    transition: transform 220ms var(--animation-curves-bezier-emphasized-decelerate),
-                opacity 180ms var(--animation-curves-bezier-standard);
-}
+    .language-popover-shell {
+        /* Sized to the bounding box of the BubbleOptions content instead of a
+        hardcoded size — <popover> isn't a container tag, so it needs the
+        fit value explicitly (box/row/column default to it). */
+        width: fit;
+        height: fit;
+        padding: 0;
+        background: transparent;
+        opacity: 1;
+        transform: translateY(0px) scale(1);
+        transition: transform 220ms var(--animation-curves-bezier-emphasized-decelerate),
+        opacity 180ms var(--animation-curves-bezier-standard);
+    }
 
-.bubble-popover-panel {
-    width: 112px;
-    height: 74px;
-    padding: 0;
-    background: transparent;
-}
+    .language-popover-shell.mesh-surface-entering {
+        opacity: 1;
+        transform: translateY(-8px) scale(0.92);
+    }
 
-.language-popover-shell.mesh-surface-entering {
-    opacity: 1;
-    transform: translateY(-8px) scale(0.92);
-}
-
-.language-popover-shell.mesh-surface-exiting {
-    opacity: 0;
-    transform: translateY(-6px) scale(0.94);
-    transition: transform 140ms var(--animation-curves-bezier-standard),
-                opacity 180ms var(--animation-curves-bezier-standard);
-}
+    .language-popover-shell.mesh-surface-exiting {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.94);
+        transition: transform 140ms var(--animation-curves-bezier-standard),
+        opacity 180ms var(--animation-curves-bezier-standard);
+    }
 </style>

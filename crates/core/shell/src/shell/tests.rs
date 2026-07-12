@@ -964,6 +964,93 @@ impl super::types::ShellComponent for PopupGeometryRecordingComponent {
     }
 }
 
+struct MeasuredLayerGeometryComponent {
+    surface_id: String,
+    declared_size: (u32, u32),
+    current_size: (u32, u32),
+}
+
+impl MeasuredLayerGeometryComponent {
+    fn new(surface_id: &str, declared_size: (u32, u32), initial_size: (u32, u32)) -> Self {
+        Self {
+            surface_id: surface_id.to_string(),
+            declared_size,
+            current_size: initial_size,
+        }
+    }
+}
+
+impl super::types::ShellComponent for MeasuredLayerGeometryComponent {
+    fn id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn surface_id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn initial_visibility(&self) -> Option<bool> {
+        Some(false)
+    }
+
+    fn mount(
+        &mut self,
+        _ctx: super::types::ComponentContext,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_core_event(
+        &mut self,
+        _event: &super::types::CoreEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_service_event(
+        &mut self,
+        _event: &ServiceEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn tick(&mut self) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn wants_render(&self) -> bool {
+        true
+    }
+
+    fn render(
+        &mut self,
+        surface: &mut dyn mesh_core_wayland::ShellSurface,
+    ) -> Result<(), super::types::ComponentError> {
+        surface.set_size(self.current_size.0, self.current_size.1);
+        Ok(())
+    }
+
+    fn paint(
+        &mut self,
+        _theme: &mesh_core_theme::Theme,
+        _width: u32,
+        _height: u32,
+        _buffer: &mut mesh_core_render::PixelBuffer,
+        _scale: f32,
+    ) -> Result<(), super::types::ComponentError> {
+        self.current_size = self.declared_size;
+        Ok(())
+    }
+
+    fn theme_changed(&mut self) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn declared_or_measured_size(&self) -> (u32, u32) {
+        self.current_size
+    }
+}
+
 impl ClipboardWriter for RecordingClipboard {
     fn write_text(&mut self, text: &str) -> Result<(), ClipboardError> {
         self.writes.lock().unwrap().push(text.to_string());
@@ -4134,6 +4221,49 @@ fn promoted_popover_config_uses_content_size_not_stale_surface_size() {
         config.placement.size,
         (112, 74),
         "popup positioner geometry must use content size, not tooltip-padded surface size"
+    );
+}
+
+#[test]
+fn layer_surface_config_uses_content_size_not_stale_surface_size_on_first_show() {
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
+        "@mesh/debug-inspector",
+        (480, 640),
+        (0, 0),
+    )));
+
+    shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@mesh/debug-inspector".into(),
+        })
+        .unwrap();
+    shell.render_components().unwrap();
+
+    let runtime = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.surface_id == "@mesh/debug-inspector")
+        .expect("devtools runtime should be registered");
+    let config = runtime
+        .parent
+        .last_surface_config
+        .as_ref()
+        .expect("layer surface should be configured on first show");
+    assert_eq!(
+        (config.width, config.height),
+        (480, 640),
+        "layer surface configure must use measured content size instead of the stale pre-measure size"
+    );
+    let buffer = runtime
+        .parent
+        .paint_buffer
+        .as_ref()
+        .expect("layer surface should allocate a paint buffer on first show");
+    assert_eq!(
+        (buffer.width, buffer.height),
+        (480, 640),
+        "first visible frame must allocate a paint buffer at the measured content size"
     );
 }
 

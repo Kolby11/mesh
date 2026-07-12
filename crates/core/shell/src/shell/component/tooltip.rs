@@ -624,12 +624,12 @@ mod tests {
         let mut theme = theme_with_tooltip_animation("does-not-exist 100ms");
         assert!(tooltip_animation_from_theme(&theme).is_none());
 
-        theme
-            .defaults
-            .components
-            .get_mut("tooltip")
-            .unwrap()
-            .remove("animation");
+        let tooltip_defaults = theme.defaults.components.get_mut("tooltip").unwrap();
+        *tooltip_defaults = tooltip_defaults
+            .iter()
+            .filter(|(property, _)| property.as_str() != "animation")
+            .map(|(property, value)| (property.clone(), value.clone()))
+            .collect();
         assert!(tooltip_animation_from_theme(&theme).is_none());
     }
 

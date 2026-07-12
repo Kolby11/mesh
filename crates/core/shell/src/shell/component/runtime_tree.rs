@@ -480,6 +480,9 @@ fn attributes_fingerprint(node: &WidgetNode) -> u64 {
     let mut hasher = RuntimeTreeHasher::default();
     node.tag.hash(&mut hasher);
     for (key, value) in &node.attributes {
+        if key == "_mesh_key" {
+            continue;
+        }
         if key == "_mesh_focused" {
             continue;
         }
@@ -607,6 +610,7 @@ fn hash_dimension(value: Dimension, hasher: &mut impl Hasher) {
             percent.to_bits().hash(hasher);
         }
         Dimension::Content => 3u8.hash(hasher),
+        Dimension::Fit => 4u8.hash(hasher),
     }
 }
 

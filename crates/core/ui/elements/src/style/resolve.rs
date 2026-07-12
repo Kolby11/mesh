@@ -4185,7 +4185,7 @@ mod tests {
         let basis = match style.flex_basis {
             Dimension::Px(value) | Dimension::Percent(value) => value,
             Dimension::Auto => 1.0,
-            Dimension::Content => 2.0,
+            Dimension::Content | Dimension::Fit => 2.0,
         };
         style.flex_grow + style.flex_shrink + basis
     }

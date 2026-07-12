@@ -1897,10 +1897,9 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     )
     .expect("rendered theme button");
     let theme_key = theme_button
-        .attributes
-        .get("_mesh_key")
+        .mesh_key()
         .expect("theme button mesh key")
-        .clone();
+        .to_owned();
     let theme_bounds =
         find_node_bounds_by_key(tree, &theme_key, 0.0, 0.0).expect("theme button bounds");
     component.focused_key = Some(theme_key.clone());
@@ -2009,10 +2008,9 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
     )
     .expect("language menu button");
     let language_key = language_button
-        .attributes
-        .get("_mesh_key")
+        .mesh_key()
         .expect("language menu button mesh key")
-        .clone();
+        .to_owned();
     let language_bounds =
         find_node_bounds_by_key(tree, &language_key, 0.0, 0.0).expect("language button bounds");
     component.focused_key = Some(language_key.clone());
@@ -2169,10 +2167,9 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
     )
     .expect("language menu button");
     let language_key = language_button
-        .attributes
-        .get("_mesh_key")
+        .mesh_key()
         .expect("language menu button mesh key")
-        .clone();
+        .to_owned();
     component.focused_key = Some(language_key.clone());
     component.focus_visible_key = Some(language_key);
 
@@ -2374,10 +2371,9 @@ fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
     )
     .expect("rendered settings button");
     let settings_key = settings_button
-        .attributes
-        .get("_mesh_key")
+        .mesh_key()
         .expect("settings button mesh key")
-        .clone();
+        .to_owned();
     let (left, top, right, bottom) =
         find_node_bounds_by_key(tree, &settings_key, 0.0, 0.0).expect("settings bounds");
     let x = (left + right) * 0.5;
@@ -2454,10 +2450,9 @@ fn navigation_bar_keyboard_activation_opens_volume_surface_on_real_surface() {
     )
     .expect("rendered volume button");
     let volume_key = volume_button
-        .attributes
-        .get("_mesh_key")
+        .mesh_key()
         .expect("volume button mesh key")
-        .clone();
+        .to_owned();
 
     component.focused_key = Some(volume_key.clone());
     component.focus_visible_key = Some(volume_key);
@@ -2506,10 +2501,9 @@ fn navigation_bar_pointer_activation_opens_volume_surface_without_stealing_focus
     )
     .expect("rendered volume button");
     let volume_key = volume_button
-        .attributes
-        .get("_mesh_key")
+        .mesh_key()
         .expect("volume button mesh key")
-        .clone();
+        .to_owned();
     let (left, top, right, bottom) =
         find_node_bounds_by_key(tree, &volume_key, 0.0, 0.0).expect("volume bounds");
     let x = (left + right) * 0.5;
@@ -2572,10 +2566,9 @@ fn navigation_bar_same_hover_volume_trigger_closes_popover_immediately() {
     )
     .expect("rendered volume button");
     let volume_key = volume_button
-        .attributes
-        .get("_mesh_key")
+        .mesh_key()
         .expect("volume button mesh key")
-        .clone();
+        .to_owned();
     let (left, top, right, bottom) =
         find_node_bounds_by_key(tree, &volume_key, 0.0, 0.0).expect("volume bounds");
     let x = (left + right) * 0.5;
@@ -2672,10 +2665,9 @@ fn navigation_bar_volume_trigger_reopens_after_rapid_toggle_cycle() {
     )
     .expect("rendered volume button");
     let volume_key = volume_button
-        .attributes
-        .get("_mesh_key")
+        .mesh_key()
         .expect("volume button mesh key")
-        .clone();
+        .to_owned();
     let (left, top, right, bottom) =
         find_node_bounds_by_key(tree, &volume_key, 0.0, 0.0).expect("volume bounds");
     let x = (left + right) * 0.5;
@@ -2777,10 +2769,9 @@ fn navigation_bar_volume_trigger_reopens_after_external_close() {
     )
     .expect("rendered volume button");
     let volume_key = volume_button
-        .attributes
-        .get("_mesh_key")
+        .mesh_key()
         .expect("volume button mesh key")
-        .clone();
+        .to_owned();
     let (left, top, right, bottom) =
         find_node_bounds_by_key(tree, &volume_key, 0.0, 0.0).expect("volume bounds");
     let x = (left + right) * 0.5;
@@ -2879,10 +2870,9 @@ fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
     )
     .expect("rendered volume button");
     let volume_key = volume_button
-        .attributes
-        .get("_mesh_key")
+        .mesh_key()
         .expect("volume button mesh key")
-        .clone();
+        .to_owned();
     let (_left, top, right, bottom) =
         find_node_bounds_by_key(tree, &volume_key, 0.0, 0.0).expect("volume bounds");
     let x = right - 0.5;
@@ -2950,11 +2940,7 @@ fn navigation_bar_keyboard_audio_popover_slider_responds_to_arrow_keys() {
         .as_ref()
         .expect("rendered audio popover");
     let slider = first_node_by_tag(tree, "slider").expect("slider node");
-    let slider_key = slider
-        .attributes
-        .get("_mesh_key")
-        .expect("slider key")
-        .clone();
+    let slider_key = slider.mesh_key().expect("slider key").to_owned();
     component.focused_key = Some(slider_key);
 
     let requests = component

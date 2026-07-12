@@ -28,6 +28,16 @@ fn service_unavailable_response() -> serde_json::Value {
 }
 
 impl Shell {
+    fn invalidate_debug_layout_bounds_targets(&mut self) {
+        for runtime in &mut self.components {
+            runtime.component.request_paint();
+            runtime.parent.force_full_present = true;
+            for child in &mut runtime.children {
+                child.target.force_full_present = true;
+            }
+        }
+    }
+
     fn clear_transfer_owned_keyboard_mode(
         &mut self,
         surface_id: &str,
@@ -412,6 +422,7 @@ impl Shell {
                         "off"
                     }
                 );
+                self.invalidate_debug_layout_bounds_targets();
                 Ok(VecDeque::new())
             }
             CoreRequest::ToggleDebugProfiling => {

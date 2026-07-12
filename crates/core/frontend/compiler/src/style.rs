@@ -174,7 +174,7 @@ fn resolve_dimension_for_context(dimension: Dimension, available: f32) -> f32 {
     match dimension {
         Dimension::Px(px) => px,
         Dimension::Percent(percent) => available * percent / 100.0,
-        Dimension::Auto | Dimension::Content => available.max(0.0),
+        Dimension::Auto | Dimension::Content | Dimension::Fit => available.max(0.0),
     }
 }
 
@@ -207,6 +207,18 @@ pub fn merge_missing_defaults(tag: &str, style: &mut ComputedStyle) {
         && style.padding.left == 0.0
     {
         style.padding = defaults.padding;
+    }
+    // `Auto` here means no CSS rule ever assigned a width/height (there is no
+    // meaningful distinct intent behind an author writing `width: auto;`
+    // versus writing nothing at all — both mean "let the layout decide").
+    // Containers (box/column/row) default to `Fit` — sized to the bounding
+    // box of their own content, including absolutely-positioned children —
+    // rather than the bare stretch/hug behavior plain `Auto` gives them.
+    if style.width == Dimension::Auto {
+        style.width = defaults.width;
+    }
+    if style.height == Dimension::Auto {
+        style.height = defaults.height;
     }
     if style.gap == 0.0 {
         style.gap = defaults.gap;
@@ -254,6 +266,22 @@ pub(crate) fn container_style(tag: &str) -> ComputedStyle {
     style
 }
 
+/// Style for the synthetic `<column>` wrapper `{#for}`/`{#if}` blocks are
+/// compiled into. This wrapper is invisible authoring structure, not a real
+/// layout container an author styled — it must not carry `container_style`'s
+/// 12px padding / 8px gap defaults, or every control-flow block silently
+/// shifts its children by that padding (bit absolutely-positioned children
+/// hardest, since the padding offsets their containing block).
+pub(crate) fn synthetic_wrapper_style() -> ComputedStyle {
+    let mut style = container_style("column");
+    style.padding = mesh_core_elements::Edges::all(0.0);
+    style.gap = 0.0;
+    style.background_color = mesh_core_elements::Color::TRANSPARENT;
+    style.width = mesh_core_elements::Dimension::Auto;
+    style.height = mesh_core_elements::Dimension::Auto;
+    style
+}
+
 pub(crate) fn embedded_root_style() -> ComputedStyle {
     let mut style = container_style("column");
     style.padding = mesh_core_elements::Edges::all(0.0);
@@ -285,7 +313,12 @@ pub(crate) fn text_style() -> ComputedStyle {
 
 fn default_leaf_style(tag: &str) -> ComputedStyle {
     let mut style = match tag {
-        "column" | "row" => container_style(tag),
+        "column" | "row" => {
+            let mut style = container_style(tag);
+            style.width = mesh_core_elements::Dimension::Fit;
+            style.height = mesh_core_elements::Dimension::Fit;
+            style
+        }
         "button" => {
             let mut style = container_style("row");
             style.background_color = mesh_core_elements::Color::from_hex("#2b2633")
@@ -331,6 +364,17 @@ fn default_leaf_style(tag: &str) -> ComputedStyle {
         "box" => {
             let mut style = ComputedStyle::default();
             style.background_color = mesh_core_elements::Color::TRANSPARENT;
+            style.width = mesh_core_elements::Dimension::Fit;
+            style.height = mesh_core_elements::Dimension::Fit;
+            style
+        }
+        "popover" => {
+            // A `<popover>` is a placement wrapper promoted to its own xdg_popup
+            // surface, not a generic container — it must not inherit
+            // `container_style`'s 12px padding/8px gap defaults meant for
+            // column/row layout boxes.
+            let mut style = ComputedStyle::default();
+            style.background_color = mesh_core_elements::Color::TRANSPARENT;
             style
         }
         "text" => text_style(),
@@ -351,4 +395,29 @@ fn default_leaf_style(tag: &str) -> ComputedStyle {
     }
 
     style
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn popover_default_style_has_no_padding_or_gap() {
+        // `<popover>` is a placement wrapper (promoted to its own xdg_popup
+        // surface), not a generic layout container — it must not inherit
+        // `container_style`'s 12px padding / 8px gap defaults, or an author's
+        // explicit `padding: 0;` gets silently backfilled by
+        // `merge_missing_defaults` right back to a visible ring of space.
+        let defaults = default_leaf_style("popover");
+        assert_eq!(defaults.padding, mesh_core_elements::Edges::zero());
+        assert_eq!(defaults.gap, 0.0);
+    }
+
+    #[test]
+    fn popover_explicit_zero_padding_survives_default_merge() {
+        let mut style = ComputedStyle::default();
+        style.padding = mesh_core_elements::Edges::zero();
+        merge_missing_defaults("popover", &mut style);
+        assert_eq!(style.padding, mesh_core_elements::Edges::zero());
+    }
 }

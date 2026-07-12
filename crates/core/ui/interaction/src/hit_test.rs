@@ -54,11 +54,7 @@ fn pointer_hit_test_reversed(
 }
 
 pub fn find_node_by_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a WidgetNode> {
-    if node
-        .attributes
-        .get("_mesh_key")
-        .is_some_and(|value| value == key)
-    {
+    if node.mesh_key().is_some_and(|value| value == key) {
         return Some(node);
     }
 
@@ -131,11 +127,7 @@ pub fn find_node_bounds_by_key(
     offset_y: f32,
 ) -> Option<ContentBounds> {
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    if node
-        .attributes
-        .get("_mesh_key")
-        .is_some_and(|value| value == key)
-    {
+    if node.mesh_key().is_some_and(|value| value == key) {
         return Some(node_rect_with_offset(node, offset_x, offset_y));
     }
 
@@ -196,10 +188,7 @@ fn find_node_path_reversed(
     }
 
     if inside {
-        return node
-            .attributes
-            .get("_mesh_key")
-            .map(|key| vec![key.clone()]);
+        return node.mesh_key().map(|key| vec![key.to_owned()]);
     }
 
     None
@@ -312,9 +301,8 @@ fn find_tooltip_by_key_with_inherited(
 fn node_tooltip_owner_text(node: &WidgetNode) -> Option<(String, String)> {
     node_tooltip_text(node).map(|text| {
         let owner = node
-            .attributes
-            .get("_mesh_key")
-            .cloned()
+            .mesh_key()
+            .map(str::to_owned)
             .unwrap_or_else(|| format!("anonymous-tooltip-owner:{:p}", node));
         (owner, text)
     })

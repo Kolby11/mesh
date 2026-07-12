@@ -531,7 +531,12 @@ impl FrontendSurfaceComponent {
             return false;
         }
         self.last_surface_size = Some(size);
-        self.last_tree = None;
+        // The retained tree is deliberately kept: the STYLE|LAYOUT flags below
+        // already force a full rebuild at the new size, and the stale tree is
+        // the diff source for `previous_visual_styles` — dropping it here
+        // would cancel in-flight/starting transitions on every resize
+        // (including the self-inflicted one-frame settle when a
+        // content-measured surface adopts its measured size).
         // A new available size means the CSS content measurement must be redone:
         // clear the cached measurement so the next paint re-measures the root
         // against the new available space (e.g. a `width: 100%` root re-spans, a
@@ -628,8 +633,21 @@ fn merge_runtime_primitive_defaults(node: &mut WidgetNode) {
     if node.tag != "surface" {
         mesh_core_frontend::merge_missing_defaults(&node.tag, &mut node.computed_style);
     }
+    apply_hidden_attribute_layout(node);
     for child in &mut node.children {
         merge_runtime_primitive_defaults(child);
+    }
+}
+
+fn apply_hidden_attribute_layout(node: &mut WidgetNode) {
+    let hidden = node.attributes.get("hidden").is_some_and(|value| {
+        matches!(
+            value.as_str(),
+            "" | "true" | "1" | "hidden" | "disabled" | "checked"
+        )
+    });
+    if hidden && !node.attributes.contains_key(PROMOTED_POPOVER_MARKER) {
+        node.computed_style.display = mesh_core_elements::style::Display::None;
     }
 }
 
@@ -782,9 +800,8 @@ mod interaction_changed_key_tests {
         selection_foreground: &str,
     ) -> bool {
         let matches_selection = node
-            .attributes
-            .get("_mesh_key")
-            .is_some_and(|key| key == &selection.anchor.node_key);
+            .mesh_key()
+            .is_some_and(|key| key == selection.anchor.node_key);
         if matches_selection
             && annotate_selected_text_node(
                 node,
@@ -1163,11 +1180,7 @@ pub(super) fn append_class_recursive(node: &mut WidgetNode, class_name: &str) {
 }
 
 fn find_node_by_key_mut<'a>(node: &'a mut WidgetNode, key: &str) -> Option<&'a mut WidgetNode> {
-    if node
-        .attributes
-        .get("_mesh_key")
-        .is_some_and(|value| value == key)
-    {
+    if node.mesh_key().is_some_and(|value| value == key) {
         return Some(node);
     }
     for child in &mut node.children {

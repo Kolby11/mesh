@@ -1,34 +1,19 @@
 <template>
   <tabs class="view-tabs" label="Debug inspector views">
-    <tab class="view-tab" onactivate={onOverview} onclick={onOverview}>
-      <column class="view-tab-copy">
-        <text class="view-tab-label">Overview</text>
-        <box class="view-tab-indicator" hidden={overview_indicator_hidden} />
-      </column>
+    <tab class={overview_tab_class} onactivate={onOverview} onclick={onOverview}>
+      <text class="view-tab-label">Overview</text>
     </tab>
-    <tab class="view-tab" onactivate={onModules} onclick={onModules}>
-      <column class="view-tab-copy">
-        <text class="view-tab-label">Modules</text>
-        <box class="view-tab-indicator" hidden={modules_indicator_hidden} />
-      </column>
+    <tab class={modules_tab_class} onactivate={onModules} onclick={onModules}>
+      <text class="view-tab-label">Modules</text>
     </tab>
-    <tab class="view-tab" onactivate={onSurfaces} onclick={onSurfaces}>
-      <column class="view-tab-copy">
-        <text class="view-tab-label">Surfaces</text>
-        <box class="view-tab-indicator" hidden={surfaces_indicator_hidden} />
-      </column>
+    <tab class={surfaces_tab_class} onactivate={onSurfaces} onclick={onSurfaces}>
+      <text class="view-tab-label">Surfaces</text>
     </tab>
-    <tab class="view-tab" onactivate={onBackendServices} onclick={onBackendServices}>
-      <column class="view-tab-copy">
-        <text class="view-tab-label">Backends</text>
-        <box class="view-tab-indicator" hidden={backend_services_indicator_hidden} />
-      </column>
+    <tab class={backend_tab_class} onactivate={onBackendServices} onclick={onBackendServices}>
+      <text class="view-tab-label">Backends</text>
     </tab>
-    <tab class="view-tab" onactivate={onBenchmark} onclick={onBenchmark}>
-      <column class="view-tab-copy">
-        <text class="view-tab-label">Bench</text>
-        <box class="view-tab-indicator" hidden={benchmark_indicator_hidden} />
-      </column>
+    <tab class={benchmark_tab_class} onactivate={onBenchmark} onclick={onBenchmark}>
+      <text class="view-tab-label">Bench</text>
     </tab>
   </tabs>
 </template>
@@ -37,40 +22,41 @@
 </script>
 
 <style>
-.view-tabs {
+  .view-tabs {
     width: 100%;
-    gap: 2px;
+    gap: var(--spacing-md);
     flex-wrap: nowrap;
-}
+    border-bottom-width: 1px;
+    border-bottom-style: solid;
+    border-bottom-color: var(--color-outline-variant);
+  }
 
-.view-tab {
-    min-width: 0;
-    flex-grow: 1;
+  .view-tab {
+    flex-shrink: 0;
     padding-inline: var(--spacing-xs);
-    padding-block: var(--spacing-xs);
-    border-radius: var(--radius-md);
-    background: var(--color-surface-container);
-    border-width: 1px;
-    border-style: solid;
-    border-color: var(--color-outline-variant);
-}
+    padding-block: var(--spacing-sm);
+    background: transparent;
+    border-width: 0;
+    border-bottom-width: 2px;
+    border-bottom-style: solid;
+    border-bottom-color: transparent;
+  }
 
-.view-tab-copy {
-    align-items: center;
-    gap: var(--spacing-xs);
-}
+  .view-tab-active {
+    border-bottom-color: var(--color-primary);
+  }
 
-.view-tab-label {
+  .view-tab-label {
+    font-size: var(--typography-size-xs);
+    font-weight: 600;
+    color: var(--color-on-surface-variant);
+    text-align: center;
+  }
+
+  .view-tab-active .view-tab-label {
     font-size: var(--typography-size-xs);
     font-weight: 700;
-    color: var(--color-on-surface);
+    color: var(--color-primary);
     text-align: center;
-}
-
-.view-tab-indicator {
-    width: 100%;
-    height: 3px;
-    border-radius: var(--radius-full);
-    background: var(--color-primary);
-}
+  }
 </style>

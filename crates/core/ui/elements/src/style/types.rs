@@ -779,6 +779,7 @@ pub enum Dimension {
     Px(f32),
     Percent(f32),
     Content,
+    Fit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -1487,11 +1487,7 @@ pub fn element_snapshot(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Elem
     };
 
     ElementSnapshot {
-        key: node
-            .attributes
-            .get("_mesh_key")
-            .cloned()
-            .unwrap_or_default(),
+        key: node.mesh_key().unwrap_or_default().to_owned(),
         id: node.attributes.get("id").cloned(),
         reference: node.attributes.get("ref").cloned(),
         tag: node.tag.clone(),

@@ -240,10 +240,26 @@ fn runtime_props_json(props: &BTreeMap<String, String>) -> HashMap<String, serde
     let mut props_json = HashMap::with_capacity(public_count);
     for (key, value) in props {
         if runtime_prop_is_public(key) {
-            props_json.insert(key.clone(), serde_json::Value::String(value.clone()));
+            props_json.insert(key.clone(), decode_prop_value(value));
         }
     }
     props_json
+}
+
+/// A bound table/array prop (e.g. `items="{items}"`) reaches this boundary
+/// already JSON-stringified — the attribute resolver in `mesh-core-frontend`
+/// stringifies every resolved value on the way here (`json_value_to_string`),
+/// so the type information is otherwise lost. Recover it: a value that looks
+/// like a JSON array/object is parsed back into structured JSON so it lands
+/// in the child's Luau `_ENV` as a real table, not a stringified blob.
+/// Anything else (the overwhelming majority of props: plain text, numbers,
+/// booleans) is passed through unchanged.
+fn decode_prop_value(value: &str) -> serde_json::Value {
+    match value.trim_start().as_bytes().first() {
+        Some(b'[') | Some(b'{') => serde_json::from_str(value)
+            .unwrap_or_else(|_| serde_json::Value::String(value.to_string())),
+        _ => serde_json::Value::String(value.to_string()),
+    }
 }
 
 fn runtime_prop_is_public(key: &str) -> bool {
@@ -471,6 +487,47 @@ mod tests {
         );
         assert!(!props_json.contains_key("__mesh_binding_hidden"));
         assert!(!props_json.contains_key("__mesh_bind_this"));
+    }
+
+    #[test]
+    fn runtime_props_json_recovers_array_and_object_props_as_structured_json() {
+        // A bound table prop (e.g. `items="{items}"`) arrives here already
+        // JSON-stringified by the attribute resolver upstream. It must come
+        // back out as a real array/object, not a string blob the child's
+        // `{#for item in items}` can't iterate.
+        let props = BTreeMap::from([
+            (
+                "items".into(),
+                r#"[{"id":"en","text":"EN"},{"id":"sk","text":"SK"}]"#.into(),
+            ),
+            ("config".into(), r#"{"enabled":true}"#.into()),
+            ("label".into(), "Volume".into()),
+            // Looks table-ish at a glance but isn't valid JSON: must fall
+            // back to a plain string rather than being dropped or panicking.
+            ("weird".into(), "[not json".into()),
+        ]);
+
+        let props_json = runtime_props_json(&props);
+
+        assert_eq!(
+            props_json.get("items"),
+            Some(&serde_json::json!([
+                {"id": "en", "text": "EN"},
+                {"id": "sk", "text": "SK"},
+            ]))
+        );
+        assert_eq!(
+            props_json.get("config"),
+            Some(&serde_json::json!({"enabled": true}))
+        );
+        assert_eq!(
+            props_json.get("label"),
+            Some(&serde_json::Value::String("Volume".into()))
+        );
+        assert_eq!(
+            props_json.get("weird"),
+            Some(&serde_json::Value::String("[not json".into()))
+        );
     }
 
     // cargo test -p mesh-core-shell --release -- presized_runtime_props_json_beats_filtered_collect --ignored --nocapture

@@ -453,6 +453,71 @@ audio.$0
         assert_eq!(bind_this.insert_text.as_deref(), Some("bind:this={$1}"));
     }
 
+    #[test]
+    fn template_attr_completion_offers_custom_component_public_members() {
+        // Attribute-name completion on a custom PascalCase component tag
+        // should offer the imported component's own public script members
+        // (its props), the same members `bind:this` exposes at runtime —
+        // not just the generic universal/event attrs.
+        let dir =
+            std::env::temp_dir().join(format!("mesh-lsp-component-attrs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("item-row.mesh"),
+            r#"<template>
+  <row />
+</template>
+
+<script lang="luau">
+label_text = ""
+
+local private_state = 1
+
+onselect = nil
+
+function render(self)
+end
+</script>
+"#,
+        )
+        .unwrap();
+
+        let (source, position) = fixture_with_cursor(
+            r#"<template>
+  <ItemRow $0 />
+</template>
+
+<script lang="luau">
+local ItemRow = require("./item-row.mesh")
+</script>
+"#,
+        );
+        let uri = Url::from_file_path(dir.join("main.mesh")).unwrap();
+        let doc = Document::new(uri, source);
+        let labels = completion_labels(&doc, position);
+
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert!(labels.contains(&"label_text".to_string()));
+        assert!(labels.contains(&"onselect".to_string()));
+        assert!(!labels.contains(&"private_state".to_string()));
+    }
+
+    #[test]
+    fn template_attr_value_completion_offers_popover_anchor_enum() {
+        let (source, position) = fixture_with_cursor(
+            r#"<template>
+  <popover anchor="$0" />
+</template>
+"#,
+        );
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+        let labels = completion_labels(&doc, position);
+
+        assert!(labels.contains(&"bottom".to_string()));
+        assert!(labels.contains(&"top-left".to_string()));
+    }
+
     fn completion_labels(doc: &Document, position: Position) -> Vec<String> {
         complete(doc, position, &ModuleRegistry::empty())
             .into_iter()

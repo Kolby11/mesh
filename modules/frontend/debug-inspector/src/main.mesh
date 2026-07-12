@@ -1,227 +1,101 @@
 <template>
-  <dialog class="inspector-shell" aria-label="Debug Inspector">
-    <column class="inspector-root">
-      <row class="inspector-header">
-        <column class="header-copy">
-          <text class="inspector-title">Debug Inspector</text>
-          <text class="inspector-status">{session_status}</text>
+    <dialog class="inspector-shell" aria-label="Debug Inspector">
+        <column class="inspector-root">
+            <row class="inspector-header">
+                <column class="header-copy">
+                    <text class="inspector-title">Debug Inspector</text>
+                    <text class="inspector-status">{session_status}</text>
+                </column>
+                <button class="icon-button" onclick={onCloseInspector} aria-label="Close debug inspector">
+                    <icon name="window-close" size="16" />
+                </button>
+            </row>
+
+            <column class="profiling-zone">
+                <row class="profiling-head">
+                    <text class="profiling-title">Profiling</text>
+                    <text class="profiling-badge">{profiling_badge}</text>
+                </row>
+                <text class="profiling-copy">{profiling_copy}</text>
+            </column>
+
+            <ViewTabs
+                onOverview={showOverview}
+                onModules={showModules}
+                onSurfaces={showSurfaces}
+                onBackendServices={showBackendServices}
+                onBenchmark={showBenchmark}
+                overview_tab_class={overview_tab_class}
+                modules_tab_class={modules_tab_class}
+                surfaces_tab_class={surfaces_tab_class}
+                backend_tab_class={backend_tab_class}
+                benchmark_tab_class={benchmark_tab_class}
+            />
+
+            <column class="inspector-body">
+                <OverviewView
+                    hidden={overview_hidden}
+                    state_title={overview_state_title}
+                    state_copy={overview_state_copy}
+                    off_hidden={overview_off_hidden}
+                    warming_hidden={overview_warming_hidden}
+                    idle_hidden={overview_idle_hidden}
+                    session_value={session_value}
+                    overlay_value={overlay_value}
+                    module_count={module_count}
+                    active_surface_count={active_surface_count}
+                    backend_count={backend_count}
+                    shell_stage_label={shell_stage_label}
+                    shell_render_label={shell_render_label}
+                    onToggleProfiling={onToggleProfiling}
+                    profiling_button_label={profiling_button_label}
+                    profiling_button_text={profiling_button_text}
+                    onToggleLayoutBounds={onToggleLayoutBounds}
+                    layout_bounds_button_label={layout_bounds_button_label}
+                    layout_bounds_button_text={layout_bounds_button_text}
+                    layout_bounds_value={layout_bounds_value}
+                />
+
+                <ModulesView
+                    hidden={modules_hidden}
+                    state_copy={modules_state_copy}
+                    filter_value={module_filter_value}
+                    onFilterChange={onModuleFilterChange}
+                    empty_hidden={modules_empty_hidden}
+                    rows={module_rows}
+                />
+
+                <SurfacesView
+                    hidden={surfaces_hidden}
+                    state_copy={surfaces_state_copy}
+                    empty_hidden={surfaces_empty_hidden}
+                    rows={surface_rows}
+                />
+
+                <BackendServicesView
+                    hidden={backend_hidden}
+                    state_copy={backend_state_copy}
+                    empty_hidden={backend_empty_hidden}
+                    rows={backend_rows}
+                />
+
+                <BenchmarkView
+                    hidden={benchmark_hidden}
+                    rows={benchmark_rows}
+                    onRunScenario={runBenchmarkScenarioById}
+                />
+            </column>
         </column>
-        <button class="header-close" onclick={onCloseInspector} aria-label="Close debug inspector">
-          <text class="header-close-text">Close</text>
-        </button>
-      </row>
-
-      <column class="profiling-zone">
-        <row class="profiling-head">
-          <text class="profiling-title">Profiling</text>
-          <text class="profiling-badge">{profiling_badge}</text>
-        </row>
-        <text class="profiling-copy">{profiling_copy}</text>
-      </column>
-
-      <ViewTabs
-        onOverview={showOverview}
-        onModules={showModules}
-        onSurfaces={showSurfaces}
-        onBackendServices={showBackendServices}
-        onBenchmark={showBenchmark}
-        overview_indicator_hidden={overview_indicator_hidden}
-        modules_indicator_hidden={modules_indicator_hidden}
-        surfaces_indicator_hidden={surfaces_indicator_hidden}
-        backend_services_indicator_hidden={backend_services_indicator_hidden}
-        benchmark_indicator_hidden={benchmark_indicator_hidden}
-      />
-
-      <column class="inspector-body">
-        <OverviewView
-          hidden={overview_hidden}
-          state_title={overview_state_title}
-          state_copy={overview_state_copy}
-          off_hidden={overview_off_hidden}
-          warming_hidden={overview_warming_hidden}
-          idle_hidden={overview_idle_hidden}
-          session_value={session_value}
-          overlay_value={overlay_value}
-          module_count={module_count}
-          active_surface_count={active_surface_count}
-          backend_count={backend_count}
-          shell_stage_label={shell_stage_label}
-          shell_render_label={shell_render_label}
-          onToggleProfiling={onToggleProfiling}
-          profiling_button_label={profiling_button_label}
-          profiling_button_text={profiling_button_text}
-          onToggleLayoutBounds={onToggleLayoutBounds}
-          layout_bounds_button_label={layout_bounds_button_label}
-          layout_bounds_button_text={layout_bounds_button_text}
-          layout_bounds_value={layout_bounds_value}
-        />
-
-        <ModulesView
-          hidden={modules_hidden}
-          state_copy={modules_state_copy}
-          filter_value={module_filter_value}
-          onFilterChange={onModuleFilterChange}
-          empty_hidden={modules_empty_hidden}
-          row1_hidden={module_row_1_hidden}
-          row1_module_id={module_row_1_module_id}
-          row1_kind_label={module_row_1_kind_label}
-          row1_status_label={module_row_1_status_label}
-          row1_uses_interfaces={module_row_1_uses_interfaces}
-          row1_uses_resources={module_row_1_uses_resources}
-          row1_provides_interfaces={module_row_1_provides_interfaces}
-          row1_provides_resources={module_row_1_provides_resources}
-          row1_health_label={module_row_1_health_label}
-          row2_hidden={module_row_2_hidden}
-          row2_module_id={module_row_2_module_id}
-          row2_kind_label={module_row_2_kind_label}
-          row2_status_label={module_row_2_status_label}
-          row2_uses_interfaces={module_row_2_uses_interfaces}
-          row2_uses_resources={module_row_2_uses_resources}
-          row2_provides_interfaces={module_row_2_provides_interfaces}
-          row2_provides_resources={module_row_2_provides_resources}
-          row2_health_label={module_row_2_health_label}
-          row3_hidden={module_row_3_hidden}
-          row3_module_id={module_row_3_module_id}
-          row3_kind_label={module_row_3_kind_label}
-          row3_status_label={module_row_3_status_label}
-          row3_uses_interfaces={module_row_3_uses_interfaces}
-          row3_uses_resources={module_row_3_uses_resources}
-          row3_provides_interfaces={module_row_3_provides_interfaces}
-          row3_provides_resources={module_row_3_provides_resources}
-          row3_health_label={module_row_3_health_label}
-          row4_hidden={module_row_4_hidden}
-          row4_module_id={module_row_4_module_id}
-          row4_kind_label={module_row_4_kind_label}
-          row4_status_label={module_row_4_status_label}
-          row4_uses_interfaces={module_row_4_uses_interfaces}
-          row4_uses_resources={module_row_4_uses_resources}
-          row4_provides_interfaces={module_row_4_provides_interfaces}
-          row4_provides_resources={module_row_4_provides_resources}
-          row4_health_label={module_row_4_health_label}
-        />
-
-        <SurfacesView
-          hidden={surfaces_hidden}
-          state_copy={surfaces_state_copy}
-          empty_hidden={surfaces_empty_hidden}
-          row1_hidden={surface_row_1_hidden}
-          row1_surface_id={surface_row_1_surface_id}
-          row1_module_id={surface_row_1_module_id}
-          row1_stage_label={surface_row_1_stage_label}
-          row1_render_label={surface_row_1_render_label}
-          row1_redraw_label={surface_row_1_redraw_label}
-          row1_paint_policy_label={surface_row_1_paint_policy_label}
-          row1_paint_filter_label={surface_row_1_paint_filter_label}
-          row2_hidden={surface_row_2_hidden}
-          row2_surface_id={surface_row_2_surface_id}
-          row2_module_id={surface_row_2_module_id}
-          row2_stage_label={surface_row_2_stage_label}
-          row2_render_label={surface_row_2_render_label}
-          row2_redraw_label={surface_row_2_redraw_label}
-          row2_paint_policy_label={surface_row_2_paint_policy_label}
-          row2_paint_filter_label={surface_row_2_paint_filter_label}
-          row3_hidden={surface_row_3_hidden}
-          row3_surface_id={surface_row_3_surface_id}
-          row3_module_id={surface_row_3_module_id}
-          row3_stage_label={surface_row_3_stage_label}
-          row3_render_label={surface_row_3_render_label}
-          row3_redraw_label={surface_row_3_redraw_label}
-          row3_paint_policy_label={surface_row_3_paint_policy_label}
-          row3_paint_filter_label={surface_row_3_paint_filter_label}
-        />
-
-        <BackendServicesView
-          hidden={backend_hidden}
-          state_copy={backend_state_copy}
-          empty_hidden={backend_empty_hidden}
-          row1_hidden={backend_row_1_hidden}
-          row1_interface={backend_row_1_interface}
-          row1_provider_id={backend_row_1_provider_id}
-          row1_runtime_label={backend_row_1_runtime_label}
-          row1_poll_update={backend_row_1_poll_update}
-          row1_command_handling={backend_row_1_command_handling}
-          row1_state_publish_delivery={backend_row_1_state_publish_delivery}
-          row2_hidden={backend_row_2_hidden}
-          row2_interface={backend_row_2_interface}
-          row2_provider_id={backend_row_2_provider_id}
-          row2_runtime_label={backend_row_2_runtime_label}
-          row2_poll_update={backend_row_2_poll_update}
-          row2_command_handling={backend_row_2_command_handling}
-          row2_state_publish_delivery={backend_row_2_state_publish_delivery}
-          row3_hidden={backend_row_3_hidden}
-          row3_interface={backend_row_3_interface}
-          row3_provider_id={backend_row_3_provider_id}
-          row3_runtime_label={backend_row_3_runtime_label}
-          row3_poll_update={backend_row_3_poll_update}
-          row3_command_handling={backend_row_3_command_handling}
-          row3_state_publish_delivery={backend_row_3_state_publish_delivery}
-        />
-
-        <BenchmarkView
-          hidden={benchmark_hidden}
-          row1_title={benchmark_row_1_title}
-          row1_scenario_id={benchmark_row_1_scenario_id}
-          row1_target={benchmark_row_1_target}
-          row1_status={benchmark_row_1_status}
-          row1_action_label={benchmark_row_1_action_label}
-          row1_action_aria_label={benchmark_row_1_action_aria_label}
-          row1_primary_metric={benchmark_row_1_primary_metric}
-          row1_secondary_metric={benchmark_row_1_secondary_metric}
-          row1_hint={benchmark_row_1_hint}
-          row1_onRun={runHoverBenchmark}
-          row2_title={benchmark_row_2_title}
-          row2_scenario_id={benchmark_row_2_scenario_id}
-          row2_target={benchmark_row_2_target}
-          row2_status={benchmark_row_2_status}
-          row2_action_label={benchmark_row_2_action_label}
-          row2_action_aria_label={benchmark_row_2_action_aria_label}
-          row2_primary_metric={benchmark_row_2_primary_metric}
-          row2_secondary_metric={benchmark_row_2_secondary_metric}
-          row2_hint={benchmark_row_2_hint}
-          row2_onRun={runSurfaceOpenCloseBenchmark}
-          row3_title={benchmark_row_3_title}
-          row3_scenario_id={benchmark_row_3_scenario_id}
-          row3_target={benchmark_row_3_target}
-          row3_status={benchmark_row_3_status}
-          row3_action_label={benchmark_row_3_action_label}
-          row3_action_aria_label={benchmark_row_3_action_aria_label}
-          row3_primary_metric={benchmark_row_3_primary_metric}
-          row3_secondary_metric={benchmark_row_3_secondary_metric}
-          row3_hint={benchmark_row_3_hint}
-          row3_onRun={runPointerUpdateBenchmark}
-          row4_title={benchmark_row_4_title}
-          row4_scenario_id={benchmark_row_4_scenario_id}
-          row4_target={benchmark_row_4_target}
-          row4_status={benchmark_row_4_status}
-          row4_action_label={benchmark_row_4_action_label}
-          row4_action_aria_label={benchmark_row_4_action_aria_label}
-          row4_primary_metric={benchmark_row_4_primary_metric}
-          row4_secondary_metric={benchmark_row_4_secondary_metric}
-          row4_hint={benchmark_row_4_hint}
-          row4_onRun={runKeyboardTraversalBenchmark}
-          row5_title={benchmark_row_5_title}
-          row5_scenario_id={benchmark_row_5_scenario_id}
-          row5_target={benchmark_row_5_target}
-          row5_status={benchmark_row_5_status}
-          row5_action_label={benchmark_row_5_action_label}
-          row5_action_aria_label={benchmark_row_5_action_aria_label}
-          row5_primary_metric={benchmark_row_5_primary_metric}
-          row5_secondary_metric={benchmark_row_5_secondary_metric}
-          row5_hint={benchmark_row_5_hint}
-          row5_onRun={runBackendUpdateBenchmark}
-        />
-      </column>
-    </column>
-  </dialog>
+    </dialog>
 </template>
 
 <script lang="luau">
 local BackendServicesView = require("./components/backend-services-view.mesh")
-local BenchmarkView       = require("./components/benchmark-view.mesh")
-local ModulesView         = require("./components/modules-view.mesh")
-local OverviewView        = require("./components/overview-view.mesh")
-local SurfacesView        = require("./components/surfaces-view.mesh")
-local ViewTabs            = require("./components/view-tabs.mesh")
+local BenchmarkView = require("./components/benchmark-view.mesh")
+local ModulesView = require("./components/modules-view.mesh")
+local OverviewView = require("./components/overview-view.mesh")
+local SurfacesView = require("./components/surfaces-view.mesh")
+local ViewTabs = require("./components/view-tabs.mesh")
 
 local debug_service = require("mesh.debug")
 
@@ -232,11 +106,11 @@ modules_hidden = true
 surfaces_hidden = true
 backend_hidden = true
 benchmark_hidden = true
-overview_indicator_hidden = false
-modules_indicator_hidden = true
-surfaces_indicator_hidden = true
-backend_services_indicator_hidden = true
-benchmark_indicator_hidden = true
+overview_tab_class = "view-tab view-tab-active"
+modules_tab_class = "view-tab"
+surfaces_tab_class = "view-tab"
+backend_tab_class = "view-tab"
+benchmark_tab_class = "view-tab"
 session_status = "Debug overlay connected"
 profiling_badge = "Idle"
 profiling_copy = "Profiling stays off until you explicitly start it."
@@ -260,145 +134,23 @@ backend_count = "0"
 shell_stage_label = "No recent samples yet"
 shell_render_label = "Total surface render: --"
 
-modules_state_copy = "Installed module contracts show declared dependencies, contributions, resources, and graph diagnostics."
+modules_state_copy =
+    "Installed module contracts show declared dependencies, contributions, resources, and graph diagnostics."
 module_filter_value = ""
 modules_empty = true
 modules_empty_hidden = false
-module_row_1_hidden = true
-module_row_1_module_id = ""
-module_row_1_kind_label = ""
-module_row_1_status_label = ""
-module_row_1_uses_interfaces = ""
-module_row_1_uses_resources = ""
-module_row_1_provides_interfaces = ""
-module_row_1_provides_resources = ""
-module_row_1_health_label = ""
-module_row_2_hidden = true
-module_row_2_module_id = ""
-module_row_2_kind_label = ""
-module_row_2_status_label = ""
-module_row_2_uses_interfaces = ""
-module_row_2_uses_resources = ""
-module_row_2_provides_interfaces = ""
-module_row_2_provides_resources = ""
-module_row_2_health_label = ""
-module_row_3_hidden = true
-module_row_3_module_id = ""
-module_row_3_kind_label = ""
-module_row_3_status_label = ""
-module_row_3_uses_interfaces = ""
-module_row_3_uses_resources = ""
-module_row_3_provides_interfaces = ""
-module_row_3_provides_resources = ""
-module_row_3_health_label = ""
-module_row_4_hidden = true
-module_row_4_module_id = ""
-module_row_4_kind_label = ""
-module_row_4_status_label = ""
-module_row_4_uses_interfaces = ""
-module_row_4_uses_resources = ""
-module_row_4_provides_interfaces = ""
-module_row_4_provides_resources = ""
-module_row_4_health_label = ""
+module_rows = {}
 
 surfaces_state_copy = "Surface timing rows stay visible even when no recent work has been recorded."
 surfaces_empty = true
 surfaces_empty_hidden = false
-surface_row_1_hidden = true
-surface_row_1_surface_id = ""
-surface_row_1_module_id = ""
-surface_row_1_stage_label = ""
-surface_row_1_render_label = ""
-surface_row_1_redraw_label = ""
-surface_row_1_paint_policy_label = ""
-surface_row_1_paint_filter_label = ""
-surface_row_2_hidden = true
-surface_row_2_surface_id = ""
-surface_row_2_module_id = ""
-surface_row_2_stage_label = ""
-surface_row_2_render_label = ""
-surface_row_2_redraw_label = ""
-surface_row_2_paint_policy_label = ""
-surface_row_2_paint_filter_label = ""
-surface_row_3_hidden = true
-surface_row_3_surface_id = ""
-surface_row_3_module_id = ""
-surface_row_3_stage_label = ""
-surface_row_3_render_label = ""
-surface_row_3_redraw_label = ""
-surface_row_3_paint_policy_label = ""
-surface_row_3_paint_filter_label = ""
+surface_rows = {}
 
 backend_state_copy = "Runtime health and stage timing stay separated even when providers are idle."
 backend_empty = true
 backend_empty_hidden = false
-backend_row_1_hidden = true
-backend_row_1_interface = ""
-backend_row_1_provider_id = ""
-backend_row_1_runtime_label = ""
-backend_row_1_poll_update = ""
-backend_row_1_command_handling = ""
-backend_row_1_state_publish_delivery = ""
-backend_row_2_hidden = true
-backend_row_2_interface = ""
-backend_row_2_provider_id = ""
-backend_row_2_runtime_label = ""
-backend_row_2_poll_update = ""
-backend_row_2_command_handling = ""
-backend_row_2_state_publish_delivery = ""
-backend_row_3_hidden = true
-backend_row_3_interface = ""
-backend_row_3_provider_id = ""
-backend_row_3_runtime_label = ""
-backend_row_3_poll_update = ""
-backend_row_3_command_handling = ""
-backend_row_3_state_publish_delivery = ""
-
-benchmark_row_1_title = "Hover"
-benchmark_row_1_scenario_id = "hover"
-benchmark_row_1_target = "@mesh/navigation-bar"
-benchmark_row_1_status = "Profiling off"
-benchmark_row_1_action_label = "Start profiling first"
-benchmark_row_1_action_aria_label = "Start profiling first for Hover"
-benchmark_row_1_primary_metric = "No benchmark results yet"
-benchmark_row_1_secondary_metric = "No benchmark results yet"
-benchmark_row_1_hint = "Run a scenario while profiling is live to populate latest-session metrics."
-benchmark_row_2_title = "Surface open/close"
-benchmark_row_2_scenario_id = "surface_open_close"
-benchmark_row_2_target = "@mesh/audio-popover"
-benchmark_row_2_status = "Profiling off"
-benchmark_row_2_action_label = "Start profiling first"
-benchmark_row_2_action_aria_label = "Start profiling first for Surface open/close"
-benchmark_row_2_primary_metric = "No benchmark results yet"
-benchmark_row_2_secondary_metric = "No benchmark results yet"
-benchmark_row_2_hint = "Run a scenario while profiling is live to populate latest-session metrics."
-benchmark_row_3_title = "Pointer-driven update"
-benchmark_row_3_scenario_id = "pointer_update"
-benchmark_row_3_target = "@mesh/navigation-bar audio controls"
-benchmark_row_3_status = "Profiling off"
-benchmark_row_3_action_label = "Start profiling first"
-benchmark_row_3_action_aria_label = "Start profiling first for Pointer-driven update"
-benchmark_row_3_primary_metric = "No benchmark results yet"
-benchmark_row_3_secondary_metric = "No benchmark results yet"
-benchmark_row_3_hint = "Run a scenario while profiling is live to populate latest-session metrics."
-benchmark_row_4_title = "Keyboard traversal"
-benchmark_row_4_scenario_id = "keyboard_traversal"
-benchmark_row_4_target = "@mesh/navigation-bar focus chain"
-benchmark_row_4_status = "Profiling off"
-benchmark_row_4_action_label = "Start profiling first"
-benchmark_row_4_action_aria_label = "Start profiling first for Keyboard traversal"
-benchmark_row_4_primary_metric = "No benchmark results yet"
-benchmark_row_4_secondary_metric = "No benchmark results yet"
-benchmark_row_4_hint = "Run a scenario while profiling is live to populate latest-session metrics."
-benchmark_row_5_title = "Backend-driven update"
-benchmark_row_5_scenario_id = "backend_update"
-benchmark_row_5_target = "mesh.audio -> @mesh/pipewire-audio"
-benchmark_row_5_status = "Profiling off"
-benchmark_row_5_action_label = "Start profiling first"
-benchmark_row_5_action_aria_label = "Start profiling first for Backend-driven update"
-benchmark_row_5_primary_metric = "No benchmark results yet"
-benchmark_row_5_secondary_metric = "No benchmark results yet"
-benchmark_row_5_hint = "Run a scenario while profiling is live to populate latest-session metrics."
+backend_rows = {}
+benchmark_rows = {}
 
 local function count_list(value)
     if type(value) == "table" then
@@ -413,16 +165,22 @@ local function sync_view_state()
     surfaces_hidden = active_view ~= "surfaces"
     backend_hidden = active_view ~= "backend_services"
     benchmark_hidden = active_view ~= "benchmark"
-    overview_indicator_hidden = active_view ~= "overview"
-    modules_indicator_hidden = active_view ~= "modules"
-    surfaces_indicator_hidden = active_view ~= "surfaces"
-    backend_services_indicator_hidden = active_view ~= "backend_services"
-    benchmark_indicator_hidden = active_view ~= "benchmark"
+    overview_tab_class = active_view == "overview" and "view-tab view-tab-active" or "view-tab"
+    modules_tab_class = active_view == "modules" and "view-tab view-tab-active" or "view-tab"
+    surfaces_tab_class = active_view == "surfaces" and "view-tab view-tab-active" or "view-tab"
+    backend_tab_class = active_view == "backend_services" and "view-tab view-tab-active" or "view-tab"
+    benchmark_tab_class = active_view == "benchmark" and "view-tab view-tab-active" or "view-tab"
 end
 
 local function service_view_id(value)
     local view = tostring(value or "")
-    if view == "overview" or view == "modules" or view == "surfaces" or view == "backend_services" or view == "benchmark" then
+    if
+        view == "overview"
+        or view == "modules"
+        or view == "surfaces"
+        or view == "backend_services"
+        or view == "benchmark"
+    then
         return view
     end
     return nil
@@ -724,58 +482,9 @@ local function module_interface_uses_label(entry)
     )
 end
 
-local function set_module_slot(slot, hidden, module_id, kind_label, status_label, uses_interfaces, uses_resources, provides_interfaces, provides_resources, health_label)
-    if slot == 1 then
-        module_row_1_hidden = hidden
-        module_row_1_module_id = module_id
-        module_row_1_kind_label = kind_label
-        module_row_1_status_label = status_label
-        module_row_1_uses_interfaces = uses_interfaces
-        module_row_1_uses_resources = uses_resources
-        module_row_1_provides_interfaces = provides_interfaces
-        module_row_1_provides_resources = provides_resources
-        module_row_1_health_label = health_label
-        return
-    end
-    if slot == 2 then
-        module_row_2_hidden = hidden
-        module_row_2_module_id = module_id
-        module_row_2_kind_label = kind_label
-        module_row_2_status_label = status_label
-        module_row_2_uses_interfaces = uses_interfaces
-        module_row_2_uses_resources = uses_resources
-        module_row_2_provides_interfaces = provides_interfaces
-        module_row_2_provides_resources = provides_resources
-        module_row_2_health_label = health_label
-        return
-    end
-    if slot == 3 then
-        module_row_3_hidden = hidden
-        module_row_3_module_id = module_id
-        module_row_3_kind_label = kind_label
-        module_row_3_status_label = status_label
-        module_row_3_uses_interfaces = uses_interfaces
-        module_row_3_uses_resources = uses_resources
-        module_row_3_provides_interfaces = provides_interfaces
-        module_row_3_provides_resources = provides_resources
-        module_row_3_health_label = health_label
-        return
-    end
-    module_row_4_hidden = hidden
-    module_row_4_module_id = module_id
-    module_row_4_kind_label = kind_label
-    module_row_4_status_label = status_label
-    module_row_4_uses_interfaces = uses_interfaces
-    module_row_4_uses_resources = uses_resources
-    module_row_4_provides_interfaces = provides_interfaces
-    module_row_4_provides_resources = provides_resources
-    module_row_4_health_label = health_label
-end
-
-local function module_slot(slot, entry)
+local function module_row(entry)
     if entry == nil then
-        set_module_slot(slot, true, "", "", "", "", "", "", "", "")
-        return
+        return nil
     end
     local module_id = tostring(entry.module_id or "unknown-module")
     local kind_label = tostring(entry.kind or "module")
@@ -783,18 +492,16 @@ local function module_slot(slot, entry)
     if not entry.enabled then
         status_label = "Disabled"
     end
-    set_module_slot(
-        slot,
-        false,
-        module_id,
-        kind_label,
-        status_label,
-        module_interface_uses_label(entry),
-        combined_resources(entry),
-        provided_interfaces_label(entry),
-        provided_resources_label(entry),
-        module_health_label(entry)
-    )
+    return {
+        module_id = module_id,
+        kind_label = kind_label,
+        status_label = status_label,
+        uses_interfaces = module_interface_uses_label(entry),
+        uses_resources = combined_resources(entry),
+        provides_interfaces = provided_interfaces_label(entry),
+        provides_resources = provided_resources_label(entry),
+        health_label = module_health_label(entry),
+    }
 end
 
 local function graph_value_matches(value, query)
@@ -829,15 +536,12 @@ local function sync_module_rows()
     end
     modules_empty = #filtered == 0
     modules_empty_hidden = not modules_empty
-    modules_state_copy = string.format(
-        "%s of %s installed graph entries match.",
-        tostring(#filtered),
-        tostring(list_size(graph))
-    )
-    module_slot(1, filtered[1])
-    module_slot(2, filtered[2])
-    module_slot(3, filtered[3])
-    module_slot(4, filtered[4])
+    modules_state_copy =
+        string.format("%s of %s installed graph entries match.", tostring(#filtered), tostring(list_size(graph)))
+    module_rows = {}
+    for index = 1, math.min(#filtered, 4) do
+        module_rows[#module_rows + 1] = module_row(filtered[index])
+    end
 end
 
 function onModuleFilterChange(event)
@@ -871,7 +575,7 @@ local function find_benchmark_scenario(scenarios, scenario_id)
     return nil
 end
 
-local function apply_benchmark_slot(slot, definition, scenario)
+local function benchmark_row(definition, scenario)
     local title = definition.title
     local scenario_id = definition.id
     local target = definition.target
@@ -897,64 +601,17 @@ local function apply_benchmark_slot(slot, definition, scenario)
     end
 
     local action_aria_label = string.format("%s for %s", action_label, title)
-
-    if slot == 1 then
-        benchmark_row_1_title = title
-        benchmark_row_1_scenario_id = scenario_id
-        benchmark_row_1_target = target
-        benchmark_row_1_status = status
-        benchmark_row_1_action_label = action_label
-        benchmark_row_1_action_aria_label = action_aria_label
-        benchmark_row_1_primary_metric = primary_metric
-        benchmark_row_1_secondary_metric = secondary_metric
-        benchmark_row_1_hint = hint
-        return
-    end
-    if slot == 2 then
-        benchmark_row_2_title = title
-        benchmark_row_2_scenario_id = scenario_id
-        benchmark_row_2_target = target
-        benchmark_row_2_status = status
-        benchmark_row_2_action_label = action_label
-        benchmark_row_2_action_aria_label = action_aria_label
-        benchmark_row_2_primary_metric = primary_metric
-        benchmark_row_2_secondary_metric = secondary_metric
-        benchmark_row_2_hint = hint
-        return
-    end
-    if slot == 3 then
-        benchmark_row_3_title = title
-        benchmark_row_3_scenario_id = scenario_id
-        benchmark_row_3_target = target
-        benchmark_row_3_status = status
-        benchmark_row_3_action_label = action_label
-        benchmark_row_3_action_aria_label = action_aria_label
-        benchmark_row_3_primary_metric = primary_metric
-        benchmark_row_3_secondary_metric = secondary_metric
-        benchmark_row_3_hint = hint
-        return
-    end
-    if slot == 4 then
-        benchmark_row_4_title = title
-        benchmark_row_4_scenario_id = scenario_id
-        benchmark_row_4_target = target
-        benchmark_row_4_status = status
-        benchmark_row_4_action_label = action_label
-        benchmark_row_4_action_aria_label = action_aria_label
-        benchmark_row_4_primary_metric = primary_metric
-        benchmark_row_4_secondary_metric = secondary_metric
-        benchmark_row_4_hint = hint
-        return
-    end
-    benchmark_row_5_title = title
-    benchmark_row_5_scenario_id = scenario_id
-    benchmark_row_5_target = target
-    benchmark_row_5_status = status
-    benchmark_row_5_action_label = action_label
-    benchmark_row_5_action_aria_label = action_aria_label
-    benchmark_row_5_primary_metric = primary_metric
-    benchmark_row_5_secondary_metric = secondary_metric
-    benchmark_row_5_hint = hint
+    return {
+        title = title,
+        scenario_id = scenario_id,
+        target = target,
+        status = status,
+        action_label = action_label,
+        action_aria_label = action_aria_label,
+        primary_metric = primary_metric,
+        secondary_metric = secondary_metric,
+        hint = hint,
+    }
 end
 
 local function sync_benchmark_rows()
@@ -963,54 +620,25 @@ local function sync_benchmark_rows()
         scenarios = debug_service.benchmarks.scenarios
     end
 
+    benchmark_rows = {}
     for index, definition in ipairs(benchmark_definitions) do
-        apply_benchmark_slot(index, definition, find_benchmark_scenario(scenarios, definition.id))
+        benchmark_rows[index] = benchmark_row(definition, find_benchmark_scenario(scenarios, definition.id))
     end
 end
 
-local function surface_slot(slot, snapshot)
-    if slot == 1 then
-        surface_row_1_hidden = snapshot == nil
-        if snapshot == nil then return end
-        surface_row_1_surface_id = tostring(snapshot.surface_id or "unknown-surface")
-        surface_row_1_module_id = string.format("Module %s", tostring(snapshot.module_id or "unknown"))
-        surface_row_1_stage_label = first_stage_label(snapshot.stages)
-        surface_row_1_render_label = string.format(
-            "Total render %s",
-            micros_label(snapshot.total_surface_render_time_micros)
-        )
-        surface_row_1_redraw_label = string.format("Redraws %s", tostring(snapshot.redraw_count or 0))
-        surface_row_1_paint_policy_label = paint_policy_label(snapshot)
-        surface_row_1_paint_filter_label = paint_filter_label(snapshot)
-        return
+local function surface_row(snapshot)
+    if snapshot == nil then
+        return nil
     end
-    if slot == 2 then
-        surface_row_2_hidden = snapshot == nil
-        if snapshot == nil then return end
-        surface_row_2_surface_id = tostring(snapshot.surface_id or "unknown-surface")
-        surface_row_2_module_id = string.format("Module %s", tostring(snapshot.module_id or "unknown"))
-        surface_row_2_stage_label = first_stage_label(snapshot.stages)
-        surface_row_2_render_label = string.format(
-            "Total render %s",
-            micros_label(snapshot.total_surface_render_time_micros)
-        )
-        surface_row_2_redraw_label = string.format("Redraws %s", tostring(snapshot.redraw_count or 0))
-        surface_row_2_paint_policy_label = paint_policy_label(snapshot)
-        surface_row_2_paint_filter_label = paint_filter_label(snapshot)
-        return
-    end
-    surface_row_3_hidden = snapshot == nil
-    if snapshot == nil then return end
-    surface_row_3_surface_id = tostring(snapshot.surface_id or "unknown-surface")
-    surface_row_3_module_id = string.format("Module %s", tostring(snapshot.module_id or "unknown"))
-    surface_row_3_stage_label = first_stage_label(snapshot.stages)
-    surface_row_3_render_label = string.format(
-        "Total render %s",
-        micros_label(snapshot.total_surface_render_time_micros)
-    )
-    surface_row_3_redraw_label = string.format("Redraws %s", tostring(snapshot.redraw_count or 0))
-    surface_row_3_paint_policy_label = paint_policy_label(snapshot)
-    surface_row_3_paint_filter_label = paint_filter_label(snapshot)
+    return {
+        surface_id = tostring(snapshot.surface_id or "unknown-surface"),
+        module_id = string.format("Module %s", tostring(snapshot.module_id or "unknown")),
+        stage_label = first_stage_label(snapshot.stages),
+        render_label = string.format("Total render %s", micros_label(snapshot.total_surface_render_time_micros)),
+        redraw_label = string.format("Redraws %s", tostring(snapshot.redraw_count or 0)),
+        paint_policy_label = paint_policy_label(snapshot),
+        paint_filter_label = paint_filter_label(snapshot),
+    }
 end
 
 local function runtime_label(interface_name, provider_id, runtimes)
@@ -1018,7 +646,10 @@ local function runtime_label(interface_name, provider_id, runtimes)
         return "No runtime health entry"
     end
     for _, runtime in ipairs(runtimes) do
-        if tostring(runtime.interface or "") == interface_name and tostring(runtime.provider_id or "") == provider_id then
+        if
+            tostring(runtime.interface or "") == interface_name
+            and tostring(runtime.provider_id or "") == provider_id
+        then
             local status = tostring(runtime.status or "unknown")
             local message = tostring(runtime.message or "No runtime detail")
             return string.format("%s: %s", status, message)
@@ -1027,50 +658,20 @@ local function runtime_label(interface_name, provider_id, runtimes)
     return "No runtime health entry"
 end
 
-local function backend_slot(slot, snapshot, runtimes)
-    local target_interface = ""
-    local target_provider = ""
-    local target_runtime = ""
-    local target_poll = ""
-    local target_command = ""
-    local target_publish = ""
-
-    if snapshot ~= nil then
-        target_interface = tostring(snapshot.interface or "unknown")
-        target_provider = tostring(snapshot.provider_id or "unknown")
-        target_runtime = runtime_label(target_interface, target_provider, runtimes)
-        target_poll = stage_total_label(find_stage(snapshot.stages, "poll_update"))
-        target_command = stage_total_label(find_stage(snapshot.stages, "command_handling"))
-        target_publish = stage_total_label(find_stage(snapshot.stages, "state_publish_delivery"))
+local function backend_row(snapshot, runtimes)
+    if snapshot == nil then
+        return nil
     end
-
-    if slot == 1 then
-        backend_row_1_hidden = snapshot == nil
-        backend_row_1_interface = target_interface
-        backend_row_1_provider_id = target_provider
-        backend_row_1_runtime_label = target_runtime
-        backend_row_1_poll_update = target_poll
-        backend_row_1_command_handling = target_command
-        backend_row_1_state_publish_delivery = target_publish
-        return
-    end
-    if slot == 2 then
-        backend_row_2_hidden = snapshot == nil
-        backend_row_2_interface = target_interface
-        backend_row_2_provider_id = target_provider
-        backend_row_2_runtime_label = target_runtime
-        backend_row_2_poll_update = target_poll
-        backend_row_2_command_handling = target_command
-        backend_row_2_state_publish_delivery = target_publish
-        return
-    end
-    backend_row_3_hidden = snapshot == nil
-    backend_row_3_interface = target_interface
-    backend_row_3_provider_id = target_provider
-    backend_row_3_runtime_label = target_runtime
-    backend_row_3_poll_update = target_poll
-    backend_row_3_command_handling = target_command
-    backend_row_3_state_publish_delivery = target_publish
+    local interface_name = tostring(snapshot.interface or "unknown")
+    local provider_id = tostring(snapshot.provider_id or "unknown")
+    return {
+        interface = interface_name,
+        provider_id = provider_id,
+        runtime_label = runtime_label(interface_name, provider_id, runtimes),
+        poll_update = stage_total_label(find_stage(snapshot.stages, "poll_update")),
+        command_handling = stage_total_label(find_stage(snapshot.stages, "command_handling")),
+        state_publish_delivery = stage_total_label(find_stage(snapshot.stages, "state_publish_delivery")),
+    }
 end
 
 function showOverview()
@@ -1110,32 +711,12 @@ function onToggleLayoutBounds()
     mesh.events.publish("shell.toggle-debug-layout-bounds", {})
 end
 
-local function runBenchmarkScenario(scenario_id)
+function runBenchmarkScenarioById(scenario_id)
     if not (debug_service and debug_service.profiling_enabled) then
         mesh.events.publish("shell.toggle-debug-profiling", {})
         return
     end
     mesh.events.publish("shell.run-debug-benchmark", { scenario_id = scenario_id })
-end
-
-function runHoverBenchmark()
-    runBenchmarkScenario("hover")
-end
-
-function runSurfaceOpenCloseBenchmark()
-    runBenchmarkScenario("surface_open_close")
-end
-
-function runPointerUpdateBenchmark()
-    runBenchmarkScenario("pointer_update")
-end
-
-function runKeyboardTraversalBenchmark()
-    runBenchmarkScenario("keyboard_traversal")
-end
-
-function runBackendUpdateBenchmark()
-    runBenchmarkScenario("backend_update")
 end
 
 function render()
@@ -1158,14 +739,10 @@ function render()
         shell_render_label = "Total surface render: --"
         surfaces_empty = true
         surfaces_empty_hidden = false
+        surface_rows = {}
         backend_empty = true
         backend_empty_hidden = false
-        surface_slot(1, nil)
-        surface_slot(2, nil)
-        surface_slot(3, nil)
-        backend_slot(1, nil, nil)
-        backend_slot(2, nil, nil)
-        backend_slot(3, nil, nil)
+        backend_rows = {}
         sync_module_rows()
         sync_benchmark_rows()
         return
@@ -1246,167 +823,182 @@ function render()
     surfaces_empty_hidden = not surfaces_empty
     backend_empty = list_size(backend_samples) == 0
     backend_empty_hidden = not backend_empty
-    surfaces_state_copy = "Compare per-surface timing, redraw activity, and retained paint filtering without leaving the right-side panel."
-    backend_state_copy = "Runtime health and stage timing stay separated so lifecycle issues do not read like performance cost."
+    surfaces_state_copy =
+        "Compare per-surface timing, redraw activity, and retained paint filtering without leaving the right-side panel."
+    backend_state_copy =
+        "Runtime health and stage timing stay separated so lifecycle issues do not read like performance cost."
     sync_view_state()
     sync_overview_state_flags()
     sync_module_rows()
 
-    surface_slot(1, surface_samples and surface_samples[1] or nil)
-    surface_slot(2, surface_samples and surface_samples[2] or nil)
-    surface_slot(3, surface_samples and surface_samples[3] or nil)
+    surface_rows = {}
+    if type(surface_samples) == "table" then
+        for index = 1, math.min(#surface_samples, 3) do
+            surface_rows[#surface_rows + 1] = surface_row(surface_samples[index])
+        end
+    end
 
-    backend_slot(1, backend_samples and backend_samples[1] or nil, debug_service.backend_runtimes)
-    backend_slot(2, backend_samples and backend_samples[2] or nil, debug_service.backend_runtimes)
-    backend_slot(3, backend_samples and backend_samples[3] or nil, debug_service.backend_runtimes)
+    backend_rows = {}
+    if type(backend_samples) == "table" then
+        for index = 1, math.min(#backend_samples, 3) do
+            backend_rows[#backend_rows + 1] = backend_row(backend_samples[index], debug_service.backend_runtimes)
+        end
+    end
     sync_benchmark_rows()
 end
 </script>
 
 <style>
-.inspector-shell {
-    width: 320px;
-    height: 100%;
-    padding: var(--spacing-sm);
-    background: transparent;
-}
+    .inspector-root,
+    .inspector-root row,
+    .inspector-root column,
+    .inspector-root text,
+    .inspector-root button,
+    .inspector-root input,
+    .inspector-root box,
+    .inspector-root list,
+    .inspector-root list-item,
+    .inspector-root empty-state,
+    .inspector-root tabs,
+    .inspector-root tab {
+        transition: none;
+    }
 
-.inspector-root {
-    width: 100%;
-    height: 100%;
-    gap: var(--spacing-md);
-    padding: var(--spacing-md);
-    border-radius: var(--radius-lg);
-    background: var(--color-surface);
-    color: var(--color-on-surface);
-    border-width: 1px;
-    border-style: solid;
-    border-color: var(--color-outline-variant);
-}
+    .inspector-shell {
+        width: 480px;
+        max-width: 480px;
+        min-height: 640px;
+        background: var(--color-surface);
+        color: var(--color-on-surface);
+        border-left-width: 1px;
+        border-left-style: solid;
+        border-left-color: var(--color-outline-variant);
+    }
 
-.inspector-header {
-    width: 100%;
-    align-items: start;
-    gap: var(--spacing-sm);
-}
+    .inspector-root {
+        width: 100%;
+        gap: var(--spacing-md);
+        padding: var(--spacing-lg);
+    }
 
-.header-copy {
-    flex-grow: 1;
-    gap: 2px;
-}
+    .inspector-header {
+        width: 100%;
+        align-items: start;
+        gap: var(--spacing-sm);
+    }
 
-.inspector-title {
-    font-size: var(--typography-size-md);
-    font-weight: 700;
-    color: var(--color-on-surface);
-}
+    .header-copy {
+        flex-grow: 1;
+        gap: 2px;
+    }
 
-.inspector-status {
-    font-size: var(--typography-size-xs);
-    color: var(--color-on-surface-variant);
-}
+    .inspector-title {
+        font-size: var(--typography-size-md);
+        font-weight: 700;
+        color: var(--color-on-surface);
+    }
 
-.header-close {
-    min-width: 64px;
-    height: 32px;
-    padding-inline: var(--spacing-sm);
-    justify-content: center;
-    align-items: center;
-    border-radius: var(--radius-md);
-    background: var(--color-surface-container);
-}
+    .inspector-status {
+        font-size: var(--typography-size-xs);
+        color: var(--color-on-surface-variant);
+    }
 
-.header-close-text {
-    font-size: var(--typography-size-sm);
-    font-weight: 600;
-    color: var(--color-on-surface);
-}
+    .icon-button {
+        width: 32px;
+        height: 32px;
+        justify-content: center;
+        align-items: center;
+        border-radius: var(--radius-full);
+        background: var(--color-surface-container);
+        color: var(--color-on-surface);
+        border-width: 0;
+    }
 
-.profiling-zone {
-    gap: var(--spacing-xs);
-    padding: var(--spacing-md);
-    border-radius: var(--radius-md);
-    background: var(--color-surface-container-low);
-    border-width: 1px;
-    border-style: solid;
-    border-color: var(--color-outline-variant);
-}
+    .profiling-zone {
+        gap: var(--spacing-xs);
+        padding: var(--spacing-md);
+        border-radius: var(--radius-md);
+        background: var(--color-surface-container-low);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--color-outline-variant);
+    }
 
-.profiling-head {
-    width: 100%;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--spacing-sm);
-}
+    .profiling-head {
+        width: 100%;
+        justify-content: space-between;
+        align-items: center;
+        gap: var(--spacing-sm);
+    }
 
-.profiling-title {
-    font-size: var(--typography-size-sm);
-    font-weight: 700;
-    color: var(--color-on-surface);
-}
+    .profiling-title {
+        font-size: var(--typography-size-sm);
+        font-weight: 700;
+        color: var(--color-on-surface);
+    }
 
-.profiling-badge {
-    padding-inline: var(--spacing-sm);
-    padding-block: var(--spacing-xs);
-    border-radius: var(--radius-full);
-    background: var(--color-secondary-container);
-    color: var(--color-on-secondary-container);
-    font-size: var(--typography-size-xs);
-    font-weight: 700;
-}
+    .profiling-badge {
+        padding-inline: var(--spacing-sm);
+        padding-block: var(--spacing-xs);
+        border-radius: var(--radius-full);
+        background: var(--color-secondary-container);
+        color: var(--color-on-secondary-container);
+        font-size: var(--typography-size-xs);
+        font-weight: 700;
+    }
 
-.profiling-copy {
-    font-size: var(--typography-size-xs);
-    color: var(--color-on-surface-variant);
-}
+    .profiling-copy {
+        font-size: var(--typography-size-xs);
+        color: var(--color-on-surface-variant);
+    }
 
-.inspector-body {
-    width: 100%;
-    flex-grow: 1;
-    gap: var(--spacing-md);
-}
+    .inspector-body {
+        width: 100%;
+        flex-grow: 1;
+        gap: var(--spacing-md);
+    }
 
-.benchmark-view {
-    gap: var(--spacing-md);
-}
+    .benchmark-view {
+        gap: var(--spacing-md);
+    }
 
-.section-title {
-    font-size: var(--typography-size-sm);
-    font-weight: 700;
-    color: var(--color-on-surface);
-}
+    .section-title {
+        font-size: var(--typography-size-sm);
+        font-weight: 700;
+        color: var(--color-on-surface);
+    }
 
-.section-copy {
-    font-size: var(--typography-size-xs);
-    color: var(--color-on-surface-variant);
-}
+    .section-copy {
+        font-size: var(--typography-size-xs);
+        color: var(--color-on-surface-variant);
+    }
 
-.benchmark-stack {
-    gap: var(--spacing-sm);
-}
+    .benchmark-stack {
+        gap: var(--spacing-sm);
+    }
 
-.benchmark-card {
-    width: 100%;
-    padding: var(--spacing-md);
-    border-radius: var(--radius-md);
-    background: var(--color-surface-container);
-    border-width: 1px;
-    border-style: solid;
-    border-color: var(--color-outline-variant);
-}
+    .benchmark-card {
+        width: 100%;
+        padding: var(--spacing-md);
+        border-radius: var(--radius-md);
+        background: var(--color-surface-container);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--color-outline-variant);
+    }
 
-.benchmark-card-copy {
-    gap: var(--spacing-xs);
-}
+    .benchmark-card-copy {
+        gap: var(--spacing-xs);
+    }
 
-.benchmark-card-title {
-    font-size: var(--typography-size-sm);
-    font-weight: 700;
-    color: var(--color-on-surface);
-}
+    .benchmark-card-title {
+        font-size: var(--typography-size-sm);
+        font-weight: 700;
+        color: var(--color-on-surface);
+    }
 
-.benchmark-card-text {
-    font-size: var(--typography-size-xs);
-    color: var(--color-on-surface-variant);
-}
+    .benchmark-card-text {
+        font-size: var(--typography-size-xs);
+        color: var(--color-on-surface-variant);
+    }
 </style>

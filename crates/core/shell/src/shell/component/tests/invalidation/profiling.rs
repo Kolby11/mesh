@@ -117,10 +117,9 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
     )
     .expect("rendered theme button");
     let hover_key = hover_target
-        .attributes
-        .get("_mesh_key")
+        .mesh_key()
         .expect("theme button mesh key")
-        .clone();
+        .to_owned();
     let (hover_left, hover_top, hover_right, hover_bottom) =
         find_node_bounds_by_key(hover_tree, &hover_key, 0.0, 0.0).expect("theme button bounds");
     hover_component

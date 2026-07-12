@@ -7,6 +7,30 @@ use super::painter::{ClipRect, FrontendRenderEngine};
 use mesh_core_elements::style::Color;
 use mesh_core_elements::tree::WidgetNode;
 
+/// Mirrors `node_is_explicitly_hidden` in `painter/tree.rs` — the real
+/// painter's definition of "not part of this surface's visible output".
+/// Promoted `<popover>` wrappers are tagged `hidden="true"` and collapsed to
+/// 0x0-with-overflow-visible so their (still full-size) subtree stays intact
+/// for the dedicated child `xdg_popup` surface's own paint/bounds pass, while
+/// the parent surface skips painting them. The bounds overlay must apply the
+/// same skip, or it walks into that leftover full-size subtree and draws a
+/// second, stale set of boxes at the collapsed in-flow position in the parent
+/// surface — on top of the correct boxes the child surface already drew.
+fn node_is_hidden_from_bounds(node: &WidgetNode) -> bool {
+    use mesh_core_elements::style::{Display, Visibility};
+    node.computed_style.display == Display::None
+        || matches!(
+            node.computed_style.visibility,
+            Visibility::Hidden | Visibility::Collapse
+        )
+        || node.attributes.get("hidden").is_some_and(|value| {
+            matches!(
+                value.as_str(),
+                "" | "true" | "1" | "hidden" | "disabled" | "checked"
+            )
+        })
+}
+
 // Layout bounds palette — depth 0..7
 const BOUNDS_COLORS: [Color; 8] = [
     Color {
@@ -87,7 +111,7 @@ impl DebugOverlay {
             width: bw,
             height: bh,
         };
-        paint_bounds_recursive(engine, root, buffer, scale, full, 0);
+        paint_bounds_recursive(engine, root, buffer, scale, full, 0, 0.0, 0.0);
     }
 }
 
@@ -104,15 +128,26 @@ fn paint_bounds_recursive(
     scale: f32,
     _clip: ClipRect,
     depth: usize,
+    offset_x: f32,
+    offset_y: f32,
 ) {
-    use mesh_core_elements::style::Display;
-    if node.computed_style.display == Display::None {
+    if node_is_hidden_from_bounds(node) {
         return;
     }
 
+    // Mirror the real painter's offset accumulation (`render_node_with_filter`
+    // in painter/tree.rs): a node's own CSS `transform.translate_*` shifts
+    // where it (and its subtree) actually paints, so the debug box must
+    // apply the same shift — otherwise it's drawn at the pre-transform layout
+    // position, which reads as offset up-left of the visibly transformed
+    // element (e.g. bubble/popover entrance-transform elements).
+    let transform = node.computed_style.transform;
+    let offset_x = offset_x + transform.translate_x;
+    let offset_y = offset_y + transform.translate_y;
+
     let color = BOUNDS_COLORS[depth % BOUNDS_COLORS.len()];
-    let x = (node.layout.x * scale) as i32;
-    let y = (node.layout.y * scale) as i32;
+    let x = ((node.layout.x + offset_x) * scale) as i32;
+    let y = ((node.layout.y + offset_y) * scale) as i32;
     let w = (node.layout.width * scale) as i32;
     let h = (node.layout.height * scale) as i32;
 
@@ -175,8 +210,20 @@ fn paint_bounds_recursive(
         );
     }
 
+    let scroll = node.resolved_scroll_metrics();
+    let child_offset_x = offset_x - scroll.x;
+    let child_offset_y = offset_y - scroll.y;
     for child in &node.children {
-        paint_bounds_recursive(engine, child, buffer, scale, _clip, depth + 1);
+        paint_bounds_recursive(
+            engine,
+            child,
+            buffer,
+            scale,
+            _clip,
+            depth + 1,
+            child_offset_x,
+            child_offset_y,
+        );
     }
 }
 

@@ -387,6 +387,10 @@ impl ShellComponent for FrontendSurfaceComponent {
             || !self.entering_child_keys.is_empty()
     }
 
+    fn request_paint(&mut self) {
+        self.invalidate_paint();
+    }
+
     fn surface_size_changed(&mut self, width: u32, height: u32) -> bool {
         self.observe_surface_size(width, height)
     }
@@ -439,8 +443,6 @@ impl ShellComponent for FrontendSurfaceComponent {
         // Capture and clear dirty flags up front. paint is the work-doer; if
         // anything during paint (measured_size change, active animation) needs
         // another frame, it sets a flag again and wants_render picks it up.
-        let (requires_tree_rebuild, can_use_retained_path, dirty_types, _) =
-            self.take_dirty_for_paint();
         let (requested_width, requested_height) = self.requested_layout_size();
         let content_width = if requested_width == 0 {
             width.max(1)
@@ -452,7 +454,13 @@ impl ShellComponent for FrontendSurfaceComponent {
         } else {
             requested_height.max(1)
         };
+        // Observe the content size BEFORE snapshotting dirty flags: a size
+        // change raises STYLE|LAYOUT|PAINT|METRICS, and this very paint is the
+        // one that rebuilds at the new size — snapshotting first would leave
+        // those flags pending and burn one extra full frame per resize.
         self.observe_surface_size(content_width, content_height);
+        let (requires_tree_rebuild, can_use_retained_path, dirty_types, _) =
+            self.take_dirty_for_paint();
         let paint_width = width.max(content_width).max(1);
         let paint_height = height.max(content_height).max(1);
         // The paint buffer's physical size tracks `paint_width`/`paint_height`
@@ -647,7 +655,17 @@ impl ShellComponent for FrontendSurfaceComponent {
             let measured_size = measure_content_size(&tree, content_width, content_height);
             if self.measured_size != Some(measured_size) {
                 self.measured_size = Some(measured_size);
-                self.invalidate_surface_config();
+                // Only schedule a surface reconfigure when the measurement
+                // actually disagrees with the size this paint laid out
+                // against. `observe_surface_size` clears `measured_size`
+                // whenever the available size changes, so without this guard
+                // the None → Some re-measure after a self-inflicted resize
+                // (content measured smaller, surface reconfigured to match)
+                // would invalidate one extra frame per settle and oscillating
+                // tests/surfaces would never converge.
+                if measured_size != (content_width, content_height) {
+                    self.invalidate_surface_config();
+                }
             }
         }
         // Element metrics depend on geometry plus ref/id/scroll attributes,
@@ -787,6 +805,19 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.clear_runtime_dirty_states();
         if self.surface_entering {
             self.surface_entering = false;
+            // A top-level layer surface reopens with one controlled entering
+            // frame, then immediately repaints without the marker. Reusing
+            // that transient tree as the "previous visual style" bootstrap
+            // source lets global width/height transitions animate from the
+            // entering frame's temporary geometry, which visibly squashes the
+            // first settled frame of drawers like the debug inspector. Drop
+            // the snapshot for the follow-up repaint so it snaps straight to
+            // the resting layout. Promoted popups keep the snapshot because
+            // their second frame intentionally transitions from the entering
+            // pose into place.
+            if !self.popup_promoted {
+                self.last_tree = None;
+            }
             self.invalidate_script_state();
         }
 
@@ -921,12 +952,11 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.init_root_runtime()?;
         self.render_hooks_pending = true;
         self.invalidate_script_state();
-        // Style rules may have changed in the recompiled module.
-        self.cached_restyle_rules = None;
-        self.cached_style_rule_index = None;
-        self.layout_state = PerSurfaceLayoutState::default();
-        self.focused_proof_snapshot = None;
-        self.last_visual_damage.clear();
+        // Source reload may change structure, styles, scripts, local imports,
+        // or render-object identities. Drop every retained render/layout cache
+        // so the next paint starts from the newly compiled module rather than
+        // diffing against the stale tree from the previous source version.
+        self.reset_render_caches();
         Ok(true)
     }
 
@@ -986,12 +1016,25 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.last_tree.as_ref()
     }
 
-    fn child_surface_debug_tree(&self, node_key: &str) -> Option<WidgetNode> {
+    fn child_surface_debug_tree(
+        &self,
+        node_key: &str,
+        content_offset: (f32, f32),
+    ) -> Option<WidgetNode> {
         let tree = self.last_tree.as_ref()?;
         let node = find_node_by_key(tree, node_key)?;
         let bounds = find_node_bounds_by_key(tree, node_key, 0.0, 0.0)?;
         let mut child_tree = node.clone();
-        offset_widget_tree_layout(&mut child_tree, -bounds.0, -bounds.1);
+        // Must match `paint_child_surface`'s offset exactly: that call bakes
+        // `-bounds + content_offset` in as the painter's starting offset
+        // rather than into `.layout`, but for a pure translation the two are
+        // equivalent, so baking it into `.layout` here keeps this a plain
+        // `WidgetNode` the debug overlay can walk with no special-casing.
+        offset_widget_tree_layout(
+            &mut child_tree,
+            -bounds.0 + content_offset.0,
+            -bounds.1 + content_offset.1,
+        );
         Some(child_tree)
     }
 
@@ -1989,7 +2032,7 @@ fn collect_child_surface_requests(
         );
         let content_padding = popover_content_padding(node);
         requests.push(ChildSurfaceRequest {
-            node_key: node_key.clone(),
+            node_key: node_key.to_string(),
             kind: ChildSurfaceKind::Popover,
             anchor_rect: bounds_to_i32_rect(anchor),
             content_size: content,
@@ -2064,10 +2107,7 @@ fn find_node_bounds_by_reference(
     // far off-screen. Transient CSS transforms (a trigger's hover/focus translate
     // bounce) are intentionally ignored so a promoted popup anchors to the trigger's
     // stable layout box and does not jitter with the 1px decorative offset.
-    if node
-        .attributes
-        .get("_mesh_key")
-        .is_some_and(|key| key == reference)
+    if node.mesh_key().is_some_and(|key| key == reference)
         || node
             .attributes
             .get("ref")

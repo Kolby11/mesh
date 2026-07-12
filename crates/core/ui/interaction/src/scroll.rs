@@ -26,11 +26,7 @@ pub fn scroll_limits(node: &WidgetNode) -> (f32, f32) {
 /// the key is absent. The first element is always the root and the last is the
 /// target, so `[..len-1]` are the target's ancestors in outer-to-inner order.
 fn node_path_by_key<'a>(node: &'a WidgetNode, target_key: &str) -> Option<Vec<&'a WidgetNode>> {
-    if node
-        .attributes
-        .get("_mesh_key")
-        .is_some_and(|value| value == target_key)
-    {
+    if node.mesh_key().is_some_and(|value| value == target_key) {
         return Some(vec![node]);
     }
     for child in &node.children {
@@ -58,8 +54,7 @@ fn path_screen_offsets(
         let screen = (incoming.0 + t.translate_x, incoming.1 + t.translate_y);
         result.push(screen);
         let scroll = node
-            .attributes
-            .get("_mesh_key")
+            .mesh_key()
             .and_then(|key| offsets.get(key))
             .copied()
             .unwrap_or_default();
@@ -216,18 +211,39 @@ fn find_scrollable_at_with_offset(
 ///
 /// `fallback_*` is used only when the root has no positive laid-out extent yet
 /// (e.g. a degenerate first frame).
+///
+/// The compiled surface tree's root is a synthetic `surface` wrapper whose
+/// style is pinned to the paint-input size (`surface_style()` in the frontend
+/// compiler), so its own laid-out box can only ever echo the input back —
+/// circular for content-sized surfaces, which then stay stuck at whatever
+/// size the first paint assumed (the shipped symptom: a right-anchored panel
+/// permanently mapped at the 1x1 protocol clamp). The box whose CSS
+/// `width`/`height` the layout engine actually resolved is the wrapper's
+/// child (the component root), so for a `surface` wrapper measure the union
+/// extent of its children instead.
 pub fn measure_content_size(
     tree: &WidgetNode,
     fallback_width: u32,
     fallback_height: u32,
 ) -> (u32, u32) {
-    let width = if tree.layout.width >= 1.0 {
-        tree.layout.width.ceil() as u32
+    let (content_width, content_height) = if tree.tag == "surface" && !tree.children.is_empty() {
+        let mut max_x = 0f32;
+        let mut max_y = 0f32;
+        for child in &tree.children {
+            max_x = max_x.max(child.layout.x + child.layout.width);
+            max_y = max_y.max(child.layout.y + child.layout.height);
+        }
+        (max_x, max_y)
+    } else {
+        (tree.layout.width, tree.layout.height)
+    };
+    let width = if content_width >= 1.0 {
+        content_width.ceil() as u32
     } else {
         fallback_width
     };
-    let height = if tree.layout.height >= 1.0 {
-        tree.layout.height.ceil() as u32
+    let height = if content_height >= 1.0 {
+        content_height.ceil() as u32
     } else {
         fallback_height
     };

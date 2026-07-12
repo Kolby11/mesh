@@ -302,7 +302,7 @@ fn complete_component_instance_members(
 
 /// Resolve a mounted component tag to the public members exported by its source
 /// file. Returns `(variables, functions)`.
-fn resolve_component_public_members(
+pub(crate) fn resolve_component_public_members(
     doc: &Document,
     component_tag: &str,
     registry: &ModuleRegistry,

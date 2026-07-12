@@ -1,5 +1,5 @@
 <template>
-  <column class="overview-view">
+  <column class="overview-view" hidden={hidden}>
     <text class="section-title">Overview</text>
 
     <box class="state-card" hidden={off_hidden}>
@@ -30,11 +30,11 @@
       </column>
     </box>
 
-    <button class="profiling-toggle" onclick={onToggleProfiling} aria-label="{profiling_button_label}">
+    <button class="profiling-toggle" onclick={onToggleProfiling} aria-label={profiling_button_label}>
       <text class="profiling-toggle-text">{profiling_button_text}</text>
     </button>
 
-    <button class="layout-bounds-toggle" onclick={onToggleLayoutBounds} aria-label="{layout_bounds_button_label}">
+    <button class="layout-bounds-toggle" onclick={onToggleLayoutBounds} aria-label={layout_bounds_button_label}>
       <text class="layout-bounds-toggle-text">{layout_bounds_button_text}</text>
     </button>
 
@@ -74,22 +74,23 @@
 </template>
 
 <script lang="luau">
+hidden = false
 </script>
 
 <style>
-.overview-view {
+  .overview-view {
     gap: var(--spacing-md);
-}
+  }
 
-.section-title {
+  .section-title {
     font-size: var(--typography-size-sm);
     font-weight: 700;
     color: var(--color-on-surface);
-}
+  }
 
-.state-card,
-.summary-card,
-.metric-group {
+  .state-card,
+  .summary-card,
+  .metric-group {
     width: 100%;
     padding: var(--spacing-md);
     border-radius: var(--radius-md);
@@ -97,77 +98,77 @@
     border-width: 1px;
     border-style: solid;
     border-color: var(--color-outline-variant);
-}
+  }
 
-.state-copy,
-.summary-copy {
+  .state-copy,
+  .summary-copy {
     gap: var(--spacing-xs);
-}
+  }
 
-.state-title,
-.summary-title,
-.metric-group-title {
+  .state-title,
+  .summary-title,
+  .metric-group-title {
     font-size: var(--typography-size-sm);
     font-weight: 700;
     color: var(--color-on-surface);
-}
+  }
 
-.state-text,
-.summary-text,
-.metric-summary {
+  .state-text,
+  .summary-text,
+  .metric-summary {
     font-size: var(--typography-size-xs);
     color: var(--color-on-surface-variant);
-}
+  }
 
-.profiling-toggle {
+  .profiling-toggle {
     width: 100%;
     min-height: 36px;
     justify-content: center;
     align-items: center;
     border-radius: var(--radius-md);
     background: var(--color-primary);
-}
+  }
 
-.profiling-toggle-text {
+  .profiling-toggle-text {
     font-size: var(--typography-size-sm);
     font-weight: 700;
     color: var(--color-on-primary);
-}
+  }
 
-.layout-bounds-toggle {
+  .layout-bounds-toggle {
     width: 100%;
     min-height: 36px;
     justify-content: center;
     align-items: center;
     border-radius: var(--radius-md);
     background: var(--color-secondary-container);
-}
+  }
 
-.layout-bounds-toggle-text {
+  .layout-bounds-toggle-text {
     font-size: var(--typography-size-sm);
     font-weight: 700;
     color: var(--color-on-secondary-container);
-}
+  }
 
-.metric-group {
+  .metric-group {
     gap: var(--spacing-sm);
-}
+  }
 
-.metric-row {
+  .metric-row {
     width: 100%;
     justify-content: space-between;
     align-items: center;
     gap: var(--spacing-sm);
-}
+  }
 
-.metric-label {
+  .metric-label {
     font-size: var(--typography-size-xs);
     color: var(--color-on-surface-variant);
-}
+  }
 
-.metric-value {
+  .metric-value {
     font-size: var(--typography-size-xs);
     font-weight: 700;
     color: var(--color-on-surface);
-}
+  }
 </style>

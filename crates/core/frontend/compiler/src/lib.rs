@@ -735,6 +735,87 @@ mod tests {
     }
 
     #[test]
+    fn for_node_wrapper_carries_no_padding_or_gap() {
+        // The synthetic <column> wrapper a {#for} block compiles into is
+        // invisible authoring structure, not an author-styled container.
+        // Regression test for a bug where it silently inherited
+        // container_style's 12px padding / 8px gap, shifting every child
+        // (worst for absolutely-positioned ones, since the padding offsets
+        // their containing block).
+        let source = r#"
+<template>
+  <box>
+    {#for item in items}
+      <text>{item.name}</text>
+    {/for}
+  </box>
+</template>
+"#;
+        let module = mesh_core_component::parse_component(source).unwrap();
+        let manifest = mesh_core_module::Manifest {
+            package: mesh_core_module::ModuleSection {
+                id: "test".into(),
+                version: "0.1.0".into(),
+                module_type: mesh_core_module::ModuleType::Widget,
+                api_version: "0.1.0".into(),
+                name: None,
+                license: None,
+                description: None,
+                authors: vec![],
+                repository: None,
+            },
+            compatibility: Default::default(),
+            dependencies: Default::default(),
+            capabilities: Default::default(),
+            entrypoints: Default::default(),
+            accessibility: None,
+            keybinds: Default::default(),
+            i18n: None,
+            theme: None,
+            service: None,
+            provides: vec![],
+            interface: None,
+            extensions: vec![],
+            exports: Default::default(),
+            provides_slots: Default::default(),
+            slot_contributions: Default::default(),
+            surface_layout: None,
+            assets: None,
+            icons: None,
+            icon_pack: None,
+            icon_requirements: Default::default(),
+            translations: Default::default(),
+        };
+        let theme = mesh_core_theme::default_theme();
+        let store = MapStore(
+            [("items".to_string(), serde_json::json!([{"name": "Alice"}]))]
+                .into_iter()
+                .collect(),
+        );
+        let compiled = CompiledFrontendModule {
+            manifest,
+            source_path: std::path::PathBuf::from("test.mesh"),
+            component: module,
+            local_components: Default::default(),
+            module_component_imports: Default::default(),
+            watched_paths: Vec::new(),
+        };
+        let tree = compiled.build_preview_tree_with_state(&theme, 400, 300, Some(&store));
+        fn find_column(node: &WidgetNode) -> Option<&WidgetNode> {
+            if node.tag == "column" {
+                return Some(node);
+            }
+            node.children.iter().find_map(find_column)
+        }
+        let wrapper = find_column(&tree).expect("for-loop wrapper node");
+        assert_eq!(
+            wrapper.computed_style.padding,
+            mesh_core_elements::Edges::zero()
+        );
+        assert_eq!(wrapper.computed_style.gap, 0.0);
+    }
+
+    #[test]
     fn for_node_borrows_iterable_without_owned_root_clone() {
         use std::cell::Cell;
 

@@ -23,6 +23,9 @@ impl std::fmt::Display for TagCategory {
 pub struct AttrDef {
     pub name: &'static str,
     pub description: &'static str,
+    /// Known value set for enum-like attributes, used to drive attribute-value
+    /// completion. Empty means the value is free-form (no completion offered).
+    pub values: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -69,38 +72,49 @@ fn push_attr(attrs: &mut Vec<&'static AttrDef>, attr: &'static AttrDef) {
     attrs.push(attr);
 }
 
+/// Shared value set for boolean attributes (`disabled`, `checked`, ...).
+const BOOL_VALUES: &[&str] = &["true", "false"];
+
 const MESH_ELEMENT_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "class",
         description: "CSS class name(s)",
+        values: &[],
     },
     AttrDef {
         name: "id",
         description: "Element identifier for CSS targeting",
+        values: &[],
     },
     AttrDef {
         name: "ref",
         description: "Stable element reference name for runtime metrics under refs.<name>",
+        values: &[],
     },
     AttrDef {
         name: "style",
         description: "Inline CSS styles",
+        values: &[],
     },
     AttrDef {
         name: "aria-label",
         description: "Accessible label",
+        values: &[],
     },
     AttrDef {
         name: "aria-role",
         description: "WAI-ARIA role override",
+        values: &[],
     },
     AttrDef {
         name: "title",
         description: "Tooltip / accessible title",
+        values: &[],
     },
     AttrDef {
         name: "aria-hidden",
         description: "Hide from accessibility tree",
+        values: BOOL_VALUES,
     },
 ];
 
@@ -108,30 +122,37 @@ const INTERACTIVE_ELEMENT_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "onclick",
         description: "Click / tap handler function",
+        values: &[],
     },
     AttrDef {
         name: "onactivate",
         description: "Keyboard or command activation handler function",
+        values: &[],
     },
     AttrDef {
         name: "onchange",
         description: "Value change handler function",
+        values: &[],
     },
     AttrDef {
         name: "oninput",
         description: "User input handler function",
+        values: &[],
     },
     AttrDef {
         name: "onfocus",
         description: "Focus received handler function",
+        values: &[],
     },
     AttrDef {
         name: "onblur",
         description: "Focus lost handler function",
+        values: &[],
     },
     AttrDef {
         name: "onkeydown",
         description: "Key press handler function",
+        values: &[],
     },
 ];
 
@@ -139,10 +160,12 @@ const VALUE_ELEMENT_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "value",
         description: "Current control value",
+        values: &[],
     },
     AttrDef {
         name: "disabled",
         description: "Disables user interaction",
+        values: BOOL_VALUES,
     },
 ];
 
@@ -150,14 +173,17 @@ const TEXT_INPUT_ELEMENT_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "placeholder",
         description: "Placeholder text shown while empty",
+        values: &[],
     },
     AttrDef {
         name: "readonly",
         description: "Makes the input read-only",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "type",
         description: "Input type: text | password | number | email | url | search",
+        values: &["text", "password", "number", "email", "url", "search"],
     },
 ];
 
@@ -165,14 +191,17 @@ const RANGE_ELEMENT_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "min",
         description: "Minimum value",
+        values: &[],
     },
     AttrDef {
         name: "max",
         description: "Maximum value",
+        values: &[],
     },
     AttrDef {
         name: "step",
         description: "Step size",
+        values: &[],
     },
 ];
 
@@ -214,29 +243,35 @@ static NO_ATTRS: &[AttrDef] = &[];
 static TEXT_ATTRS: &[AttrDef] = &[AttrDef {
     name: "selectable",
     description: "Whether text can be selected by the user",
+    values: &[],
 }];
 
 static LABEL_ATTRS: &[AttrDef] = &[AttrDef {
     name: "for",
     description: "ID of the associated input element",
+    values: &[],
 }];
 
 static ICON_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "name",
         description: "XDG icon name (e.g. audio-volume-high)",
+        values: &[],
     },
     AttrDef {
         name: "src",
         description: "Absolute or module-relative path to an icon file",
+        values: &[],
     },
     AttrDef {
         name: "size",
         description: "Icon size hint in pixels for XDG resolution",
+        values: &[],
     },
     AttrDef {
         name: "alt",
         description: "Accessible alternative text",
+        values: &[],
     },
 ];
 
@@ -244,10 +279,12 @@ static IMAGE_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "src",
         description: "Image source path",
+        values: &[],
     },
     AttrDef {
         name: "alt",
         description: "Accessible alternative text",
+        values: &[],
     },
 ];
 
@@ -255,30 +292,37 @@ static LAYOUT_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "align",
         description: "Cross-axis alignment",
+        values: &["start", "end", "center", "stretch"],
     },
     AttrDef {
         name: "justify",
         description: "Main-axis justification",
+        values: &["start", "end", "center", "space-between", "space-around"],
     },
     AttrDef {
         name: "spacing",
         description: "Spacing between children",
+        values: &[],
     },
     AttrDef {
         name: "gap",
         description: "Gap between children",
+        values: &[],
     },
     AttrDef {
         name: "overflow",
         description: "Overflow behavior",
+        values: &["visible", "hidden", "auto", "scroll"],
     },
     AttrDef {
         name: "overflow-x",
         description: "Horizontal overflow behavior",
+        values: &["visible", "hidden", "auto", "scroll"],
     },
     AttrDef {
         name: "overflow-y",
         description: "Vertical overflow behavior",
+        values: &["visible", "hidden", "auto", "scroll"],
     },
 ];
 
@@ -286,71 +330,86 @@ static GRID_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "columns",
         description: "Grid columns as fixed px or auto tracks",
+        values: &[],
     },
     AttrDef {
         name: "rows",
         description: "Grid rows as fixed px or auto tracks",
+        values: &[],
     },
     AttrDef {
         name: "column",
         description: "Grid column placement",
+        values: &[],
     },
     AttrDef {
         name: "row",
         description: "Grid row placement",
+        values: &[],
     },
     AttrDef {
         name: "column-span",
         description: "Grid column span",
+        values: &[],
     },
     AttrDef {
         name: "row-span",
         description: "Grid row span",
+        values: &[],
     },
 ];
 
 static STACK_ATTRS: &[AttrDef] = &[AttrDef {
     name: "layer",
     description: "Layer order for overlapping children",
+    values: &[],
 }];
 
 static DISPLAY_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "label",
         description: "Accessible label",
+        values: &[],
     },
     AttrDef {
         name: "tooltip",
         description: "Accessible tooltip text",
+        values: &[],
     },
 ];
 
 static SHORTCUT_ATTRS: &[AttrDef] = &[AttrDef {
     name: "key",
     description: "Shortcut key label",
+    values: &[],
 }];
 
 static TOOLTIP_ATTRS: &[AttrDef] = &[AttrDef {
     name: "tooltip-for",
     description: "ID of the element that owns this tooltip",
+    values: &[],
 }];
 
 static PROGRESS_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "value",
         description: "Current progress value",
+        values: &[],
     },
     AttrDef {
         name: "min",
         description: "Minimum progress value",
+        values: &[],
     },
     AttrDef {
         name: "max",
         description: "Maximum progress value",
+        values: &[],
     },
     AttrDef {
         name: "indeterminate",
         description: "Progress has no determinate value",
+        values: BOOL_VALUES,
     },
 ];
 
@@ -358,75 +417,91 @@ static BUTTON_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "variant",
         description: "Visual variant: filled | outlined | text | tonal",
+        values: &["filled", "outlined", "text", "tonal"],
     },
     AttrDef {
         name: "pressed",
         description: "Whether the button is in a pressed/toggled state",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "busy",
         description: "Whether the action is currently busy",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "default",
         description: "Marks the default action in a group",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "destructive",
         description: "Marks a destructive action",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "keybind",
         description: "Associated keybind id or display shortcut",
+        values: &[],
     },
     AttrDef {
         name: "command",
         description: "Command intent metadata",
+        values: &[],
     },
     AttrDef {
         name: "href",
         description: "Link intent metadata; navigation is handled by Luau",
+        values: &[],
     },
 ];
 
 static TEXTAREA_ATTRS: &[AttrDef] = &[AttrDef {
     name: "multiline",
     description: "Whether this configured input accepts multiple lines",
+    values: BOOL_VALUES,
 }];
 
 static PASSWORD_ATTRS: &[AttrDef] = &[AttrDef {
     name: "masked",
     description: "Whether this configured input masks displayed text",
+    values: BOOL_VALUES,
 }];
 
 static NUMERIC_INPUT_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "min",
         description: "Minimum numeric value",
+        values: &[],
     },
     AttrDef {
         name: "max",
         description: "Maximum numeric value",
+        values: &[],
     },
     AttrDef {
         name: "step",
         description: "Positive numeric step size",
+        values: &[],
     },
 ];
 
 static SWITCH_ATTRS: &[AttrDef] = &[AttrDef {
     name: "checked",
     description: "Whether the switch is on",
+    values: BOOL_VALUES,
 }];
 
 static CHECKBOX_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "checked",
         description: "Whether the checkbox is checked",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "label",
         description: "Associated label text",
+        values: &[],
     },
 ];
 
@@ -434,14 +509,17 @@ static SELECT_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "value",
         description: "Selected option value",
+        values: &[],
     },
     AttrDef {
         name: "disabled",
         description: "Disables selection changes",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "required",
         description: "Requires a selected value",
+        values: BOOL_VALUES,
     },
 ];
 
@@ -449,14 +527,17 @@ static OPTION_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "value",
         description: "Value sent to the parent select onchange handler",
+        values: &[],
     },
     AttrDef {
         name: "selected",
         description: "Marks this option as selected",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "disabled",
         description: "Disables this option",
+        values: BOOL_VALUES,
     },
 ];
 
@@ -464,18 +545,22 @@ static RADIO_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "value",
         description: "Value sent to the parent radio-group onchange handler",
+        values: &[],
     },
     AttrDef {
         name: "name",
         description: "Radio group name when not nested in a radio-group",
+        values: &[],
     },
     AttrDef {
         name: "checked",
         description: "Whether this radio choice is checked",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "disabled",
         description: "Disables this radio choice",
+        values: BOOL_VALUES,
     },
 ];
 
@@ -483,10 +568,12 @@ static MENU_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "expanded",
         description: "Whether the menu is expanded",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "disabled",
         description: "Disables the menu",
+        values: BOOL_VALUES,
     },
 ];
 
@@ -494,18 +581,22 @@ static MENU_ITEM_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "disabled",
         description: "Disables item activation",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "selected",
         description: "Whether this item is selected",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "keybind",
         description: "Associated keybind id or display shortcut",
+        values: &[],
     },
     AttrDef {
         name: "command",
         description: "Command intent metadata",
+        values: &[],
     },
 ];
 
@@ -513,14 +604,17 @@ static CONTAINER_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "open",
         description: "Whether the container is open",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "expanded",
         description: "Whether the container is expanded",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "label",
         description: "Accessible label",
+        values: &[],
     },
 ];
 
@@ -528,10 +622,12 @@ static TAB_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "selected",
         description: "Whether this tab is selected",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "disabled",
         description: "Disables tab activation",
+        values: BOOL_VALUES,
     },
 ];
 
@@ -539,21 +635,85 @@ static COLLECTION_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "selected",
         description: "Whether this item is selected",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "disabled",
         description: "Disables item activation",
+        values: BOOL_VALUES,
     },
     AttrDef {
         name: "active",
         description: "Marks the active row or item",
+        values: BOOL_VALUES,
     },
 ];
 
 static SLOT_ATTRS: &[AttrDef] = &[AttrDef {
     name: "name",
     description: "Slot name (matches the parent component's slot)",
+    values: &[],
 }];
+
+/// Shared value set for `<popover>` anchor/gravity edge attributes, mirroring
+/// `PopoverAnchor`/`PopoverGravity` in `mesh-core-elements/src/popover.rs`.
+const POPOVER_EDGE_VALUES: &[&str] = &[
+    "center",
+    "top",
+    "bottom",
+    "left",
+    "right",
+    "top-left",
+    "top-right",
+    "bottom-left",
+    "bottom-right",
+];
+
+static POPOVER_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "open",
+        description: "Whether the popover is promoted/visible",
+        values: BOOL_VALUES,
+    },
+    AttrDef {
+        name: "anchor-ref",
+        description: "Element `ref` name of the trigger the popover is positioned against",
+        values: &[],
+    },
+    AttrDef {
+        name: "anchor",
+        description: "Edge/corner of the anchor rectangle the popup is positioned against",
+        values: POPOVER_EDGE_VALUES,
+    },
+    AttrDef {
+        name: "gravity",
+        description: "Direction the popup grows away from the anchor point; defaults to match anchor",
+        values: POPOVER_EDGE_VALUES,
+    },
+    AttrDef {
+        name: "offset-x",
+        description: "Extra horizontal offset applied to the computed position, in pixels",
+        values: &[],
+    },
+    AttrDef {
+        name: "offset-y",
+        description: "Extra vertical offset applied to the computed position, in pixels",
+        values: &[],
+    },
+    AttrDef {
+        name: "grab",
+        description: "Input-grab policy: hover (no compositor grab) or click (takes the click-serial grab)",
+        values: &["hover", "click"],
+    },
+    AttrDef {
+        name: "constrain",
+        description: "Space/comma separated constraint-adjustment tokens: flip | flip-x | flip-y | slide | slide-x | slide-y | resize | resize-x | resize-y | none",
+        values: &[
+            "flip", "flip-x", "flip-y", "slide", "slide-x", "slide-y", "resize", "resize-x",
+            "resize-y", "none",
+        ],
+    },
+];
 
 const BASE_MESH: &[&ElementBase] = &[&MESH_ELEMENT_BASE];
 const BASE_MESH_INTERACTIVE: &[&ElementBase] = &[&MESH_ELEMENT_BASE, &INTERACTIVE_ELEMENT_BASE];
@@ -1072,9 +1232,9 @@ pub static TAG_DEFS: &[TagDef] = &[
         name: "popover",
         category: TagCategory::Composition,
         self_closing: false,
-        description: "Popover container using shell popover focus behavior when surfaced separately.",
+        description: "Popover container promoted to its own xdg_popup child surface, positioned via anchor/gravity against an anchor-ref trigger.",
         bases: BASE_MESH_INTERACTIVE,
-        attributes: CONTAINER_ATTRS,
+        attributes: POPOVER_ATTRS,
     },
     TagDef {
         name: "dialog",

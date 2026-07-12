@@ -254,6 +254,9 @@ pub trait ShellComponent: Send {
     }
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError>;
     fn wants_render(&self) -> bool;
+    /// Request a paint-only frame without implying script, layout, or style changes.
+    /// Shell-owned overlays use this when presentation-only debug state changes.
+    fn request_paint(&mut self) {}
     fn surface_size_changed(&mut self, _width: u32, _height: u32) -> bool {
         false
     }
@@ -377,8 +380,15 @@ pub trait ShellComponent: Send {
         None
     }
     /// Return a child-surface subtree normalized to child-local coordinates,
-    /// for debug layout overlays on promoted popups.
-    fn child_surface_debug_tree(&self, _node_key: &str) -> Option<WidgetNode> {
+    /// for debug layout overlays on promoted popups. `content_offset` must be
+    /// the same `(pad_left, pad_top)` passed to `paint_child_surface` for
+    /// this child, or the debug boxes land at a constant offset from the
+    /// real (padding-shifted) rendered content.
+    fn child_surface_debug_tree(
+        &self,
+        _node_key: &str,
+        _content_offset: (f32, f32),
+    ) -> Option<WidgetNode> {
         None
     }
     /// Return child surfaces that should be auto-derived from the last painted

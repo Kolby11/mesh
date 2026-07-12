@@ -4,6 +4,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::{
+    analyzer::script::resolve_component_public_members,
     document::Document,
     knowledge::tags::{EVENT_ATTRS, TAG_DEFS, TagDef, UNIVERSAL_ATTRS},
     module_registry::ModuleRegistry,
@@ -13,12 +14,12 @@ use crate::{
 pub fn complete(
     ctx: TemplateContext,
     doc: &Document,
-    _registry: &ModuleRegistry,
+    registry: &ModuleRegistry,
 ) -> Vec<CompletionItem> {
     match ctx {
         TemplateContext::TagName { .. } => complete_tags(doc),
-        TemplateContext::AttrName { tag } => complete_attrs(&tag, doc),
-        TemplateContext::AttrValue { tag, attr } => complete_attr_value(&tag, &attr, doc),
+        TemplateContext::AttrName { tag } => complete_attrs(&tag, doc, registry),
+        TemplateContext::AttrValue { tag, attr } => complete_attr_value(&tag, &attr, doc, registry),
         TemplateContext::Expr => complete_expr(doc),
         TemplateContext::Content => vec![],
     }
@@ -68,13 +69,27 @@ fn tag_completion_item(tag: &TagDef) -> CompletionItem {
     }
 }
 
-fn complete_attrs(tag: &str, _doc: &Document) -> Vec<CompletionItem> {
+fn complete_attrs(tag: &str, doc: &Document, registry: &ModuleRegistry) -> Vec<CompletionItem> {
     let mut items = Vec::new();
 
     // Tag-specific attributes
     if let Some(tag_def) = TAG_DEFS.iter().find(|t| t.name == tag) {
         for attr in tag_def.all_attributes() {
             items.push(attr_completion_item(attr.name, attr.description, false));
+        }
+    } else if let Some((variables, _functions)) =
+        resolve_component_public_members(doc, tag, registry)
+    {
+        // Custom PascalCase component tag: offer the imported component's own
+        // public script members as its props, mirroring what `bind:this`
+        // exposes at runtime.
+        for variable in variables {
+            let is_handler = variable.starts_with("on");
+            items.push(attr_completion_item(
+                &variable,
+                &format!("public member of <{tag}>"),
+                is_handler,
+            ));
         }
     } else {
         for attr in UNIVERSAL_ATTRS {
@@ -146,10 +161,17 @@ fn attr_completion_item(name: &str, description: &str, is_handler: bool) -> Comp
     }
 }
 
-fn complete_attr_value(tag: &str, attr: &str, doc: &Document) -> Vec<CompletionItem> {
-    // Event handler attrs: complete with function names
+fn complete_attr_value(
+    tag: &str,
+    attr: &str,
+    doc: &Document,
+    registry: &ModuleRegistry,
+) -> Vec<CompletionItem> {
+    // Event handler attrs: complete with function names. Applies both to core
+    // element handlers (onclick, ...) and to a mounted component's own
+    // handler-shaped public members (onfirst, onselect, ...).
     if attr.starts_with("on") {
-        return doc
+        let mut items: Vec<CompletionItem> = doc
             .script_functions
             .iter()
             .map(|name| CompletionItem {
@@ -159,6 +181,20 @@ fn complete_attr_value(tag: &str, attr: &str, doc: &Document) -> Vec<CompletionI
                 ..Default::default()
             })
             .collect();
+        if let Some((_variables, functions)) = resolve_component_public_members(doc, tag, registry)
+        {
+            for name in functions {
+                if !items.iter().any(|item| item.label == name) {
+                    items.push(CompletionItem {
+                        label: name,
+                        kind: Some(CompletionItemKind::FUNCTION),
+                        detail: Some("script function".to_string()),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+        return items;
     }
 
     // class attr: complete with class names from the style block
@@ -169,6 +205,29 @@ fn complete_attr_value(tag: &str, attr: &str, doc: &Document) -> Vec<CompletionI
     // icon name attr: common XDG icon names
     if attr == "name" && matches!(tag, "icon" | "icon-button") {
         return icon_name_completions();
+    }
+
+    // Known enum-like attribute: complete with its declared value set, e.g.
+    // <popover anchor="..."> or <row overflow="...">.
+    if let Some(tag_def) = TAG_DEFS.iter().find(|t| t.name == tag) {
+        if let Some(attr_def) = tag_def
+            .all_attributes()
+            .into_iter()
+            .find(|a| a.name == attr)
+        {
+            if !attr_def.values.is_empty() {
+                return attr_def
+                    .values
+                    .iter()
+                    .map(|value| CompletionItem {
+                        label: value.to_string(),
+                        kind: Some(CompletionItemKind::ENUM_MEMBER),
+                        detail: Some(format!("{attr} value")),
+                        ..Default::default()
+                    })
+                    .collect();
+            }
+        }
     }
 
     vec![]

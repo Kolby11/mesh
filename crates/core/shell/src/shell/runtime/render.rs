@@ -9,6 +9,8 @@ use mesh_core_render::{DamageRect, DisplayPaintCommand};
 use smallvec::SmallVec;
 use std::collections::HashSet;
 
+const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
+
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
         self.drain_dismissed_popups()?;
@@ -146,6 +148,19 @@ impl Shell {
                 // configure_popup() after the content size is resolved below.
                 let is_popup = self.components[index].parent.popup_config.is_some();
 
+                // A never-before-configured layer surface has no retained
+                // widget tree yet, so `render()` (which measures content from
+                // the *existing* tree) reports a stale/zero size on this very
+                // first pass — the real tree is only built moments later by
+                // `paint()` below. Popups already dodge this with
+                // `defer_popup_create` + an immediate-rerender pass; mirror
+                // that here so the first-ever configure for a layer surface
+                // isn't sent with an unmeasured size (which the layer-shell
+                // backend then has to clamp to a broken 1x1, see
+                // `layer_protocol_size`).
+                let first_layer_configure =
+                    !is_popup && self.components[index].parent.last_surface_config.is_none();
+
                 // Compare all copy fields before cloning namespace (the only heap field).
                 let size_policy = self.components[index].parent.surface_size_policy;
                 let layer = surface.layer.unwrap_or(Layer::Top);
@@ -155,7 +170,7 @@ impl Shell {
                 // component sees) stay content-sized; pointer input is
                 // confined back to content in `present_surface_target`.
                 let (tooltip_extra_w, tooltip_extra_h) =
-                    component::tooltip_overlay_extra_for_content(surface.width, surface.height);
+                    tooltip_overlay_extra_for_surface(&surface_id, surface.width, surface.height);
                 let configured_width = surface.width.saturating_add(tooltip_extra_w);
                 let configured_height = surface.height.saturating_add(tooltip_extra_h);
                 let config_changed = self.components[index]
@@ -190,8 +205,27 @@ impl Shell {
                         margin_bottom: surface.margin_bottom,
                         margin_left: surface.margin_left,
                     };
+                    tracing::debug!(
+                        surface_id = %surface_id,
+                        width = configured_width,
+                        height = configured_height,
+                        first_layer_configure,
+                        rerender_attempts,
+                        "sending layer-surface configure"
+                    );
                     self.presentation_engine.configure(&surface_id, cfg.clone());
                     self.components[index].parent.last_surface_config = Some(cfg);
+                    // A geometry-changing configure invalidates the
+                    // compositor's previously-acked size: `apply_config`
+                    // flips the backend's `entry.configured` to false until a
+                    // fresh configure event arrives, but `known_surface_size`
+                    // here is a separate shell-side cache that isn't tied to
+                    // that flag. Left stale, `resolve_dynamic_surface_size`
+                    // short-circuits on the old (possibly clamped-to-1x1)
+                    // size below instead of waiting for the new ack, which
+                    // pins the surface at its first-ever (often wrong) size
+                    // forever.
+                    self.components[index].parent.known_surface_size = None;
                 }
 
                 let inner_requested_width = surface.width;
@@ -228,13 +262,21 @@ impl Shell {
                     } else {
                         None
                     };
+                    let (fallback_width, fallback_height) =
+                        self.components[index].component.declared_or_measured_size();
                     width = if inner_requested_width == 0 {
-                        dynamic_size.map(|(w, _)| w).unwrap_or(1)
+                        dynamic_size
+                            .map(|(w, _)| w)
+                            .or((fallback_width > 0).then_some(fallback_width))
+                            .unwrap_or(1)
                     } else {
                         inner_requested_width.max(1)
                     };
                     height = if inner_requested_height == 0 {
-                        dynamic_size.map(|(_, h)| h).unwrap_or(1)
+                        dynamic_size
+                            .map(|(_, h)| h)
+                            .or((fallback_height > 0).then_some(fallback_height))
+                            .unwrap_or(1)
                     } else {
                         inner_requested_height.max(1)
                     };
@@ -283,7 +325,7 @@ impl Shell {
                     (width, height)
                 } else {
                     let (extra_w, extra_h) =
-                        component::tooltip_overlay_extra_for_content(width, height);
+                        tooltip_overlay_extra_for_surface(&surface_id, width, height);
                     (
                         width.saturating_add(extra_w),
                         height.saturating_add(extra_h),
@@ -344,9 +386,15 @@ impl Shell {
                 // paint above has now populated `measured_size`; force one more
                 // iteration so the `xdg_popup` is created at the measured size
                 // (the immediate-rerender gate alone returns false for a
-                // surface-config-only change).
+                // surface-config-only change). Layer surfaces get the same
+                // treatment on their first-ever configure: the paint above
+                // just built the retained tree for the first time, so
+                // re-running render() now lets it re-measure and send a
+                // corrected `configure()` instead of leaving the surface
+                // stuck at the unmeasured first-pass size.
                 if (!self.components[index].component.wants_immediate_rerender()
-                    && !defer_popup_create)
+                    && !defer_popup_create
+                    && !first_layer_configure)
                     || rerender_attempts >= 1
                 {
                     break;
@@ -979,9 +1027,11 @@ impl Shell {
                     let node_key = self.components[index].children[child_index]
                         .node_key
                         .clone();
+                    let (pad_left, pad_top, _, _) =
+                        self.components[index].children[child_index].content_padding;
                     self.components[index]
                         .component
-                        .child_surface_debug_tree(&node_key)
+                        .child_surface_debug_tree(&node_key, (pad_left as f32, pad_top as f32))
                 }
             };
             if let Some(tree) = debug_tree {
@@ -1068,6 +1118,13 @@ impl Shell {
         }
         Ok(size)
     }
+}
+
+fn tooltip_overlay_extra_for_surface(surface_id: &str, width: u32, height: u32) -> (u32, u32) {
+    if surface_id == DEBUG_INSPECTOR_SURFACE_ID {
+        return (0, 0);
+    }
+    component::tooltip_overlay_extra_for_content(width, height)
 }
 
 fn child_surface_id(parent_surface_id: &str, node_key: &str) -> String {
