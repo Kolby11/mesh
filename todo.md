@@ -432,7 +432,12 @@ duplicating it.
       structure directly instead of allocating a serialized string for every
       arg. A release benchmark over 500k nested JSON arg fingerprints measured
       433.760ms for `to_string` hashing versus 92.355ms for direct typed
-      hashing (4.7x faster).
+      hashing (4.7x faster). Progress 2026-07-10: `_mesh_focused` is no
+      longer included in retained attribute fingerprints because the same
+      state change is already tracked by the typed `ElementState` fingerprint.
+      Added regression coverage and a release-only benchmark; the local
+      dev-shell run measured 82.703ms with redundant hashing versus 58.788ms
+      with the skip over 2M fingerprints (1.4x faster).
 - [ ] **`WidgetNode` allocation profile.** Every node carries `tag: String`,
       `attributes: BTreeMap<String,String>`, `event_handlers:
     BTreeMap<String,String>` (`ui/elements/src/tree.rs:44-68`), rebuilt
@@ -471,6 +476,13 @@ duplicating it.
       existing keyed node lookup and annotates only that node instead of running
       a selection-specific recursive tree walk. Release benchmark on a broad
       tree: recursive 4.072s vs keyed 3.857s over 10k iterations (1.1x faster).
+      Progress 2026-07-10: targeted interaction restyle now carries both the
+      full affected-descendant set for CSS matching and a root-only set for
+      runtime primitive default merging, so hover/focus frames stop applying
+      default fills across unrelated subtrees. Added regression coverage and a
+      release-only benchmark; the local dev-shell run measured 2.593s for
+      full-tree default merge versus 1.923s targeted over 5k synthetic
+      interaction updates (1.3x faster).
 - [ ] **Layout + display list**: Taffy tree rebuilt per layout pass and
       display-list subtree flattening per update are already tracked
       (v1.21). Reaffirmed as the dominant structural-frame costs behind
@@ -481,6 +493,18 @@ duplicating it.
       epoch marks 89.300ms over 20k synthetic updates (1.8x faster). Rejected
       experiment: changing render-object child IDs from `Vec` to `SmallVec`
       measured slower (11.285ms `Vec` vs 21.992ms `SmallVec`) and was reverted.
+      Progress 2026-07-10: dirty-ancestor collection for retained display-list
+      subtree reuse now stops once all dirty nodes have been found instead of
+      always walking the full tree. Added regression coverage for sparse dirty
+      ancestor correctness and a release-only benchmark; the local dev-shell
+      in-crate run measured 2.334s full-walk versus 5.292ms early-exit over
+      the sparse-dirty workload (441.1x faster). Progress 2026-07-10:
+      retained display-list
+      damage diff now skips the previous-entry removal scan when the new entry
+      set has no insertions and the map sizes match, because removals are then
+      impossible. Added a release-only benchmark; the local dev-shell in-crate
+      run measured 1.905s for the full previous-entry scan versus 185.220us
+      for the guarded skip over 200k stable-key updates (10283.4x faster).
 - [ ] **CPU Skia raster + SHM is the ceiling.** Painting is skia-safe CPU
       raster into `PixelBuffer` + SHM upload (`render/src/surface/painter/backend.rs`);
       blur/shadows/gradients are CPU per damaged pixel. GPU rendering is
@@ -724,6 +748,12 @@ multiplied by O(n) tree clones is where interaction latency actually goes.
       path hashing versus 5.755ms for parent chaining (6.3x faster). String
       paths are still built because interaction state and refs currently use
       them as public runtime keys; removing those allocations remains open.
+      Progress 2026-07-10: runtime annotation now builds those public key
+      paths with one mutable string buffer instead of allocating a formatted
+      child key at every edge. Added key-string regression coverage and a
+      release-only benchmark; the local dev-shell run measured 1.091s for
+      `format!("{key}/{index}")` versus 421.848ms for append/truncate over
+      20k broad-tree iterations (2.6x faster).
 - [ ] **`finalize_tree` closing-popover pass: O(closing-keys × tree)**
       `find_node_by_key_mut` per closing key (`rendering.rs:273-279`).
       Trivial count in practice; fold into the fused annotation walk (D)
@@ -740,6 +770,13 @@ multiplied by O(n) tree clones is where interaction latency actually goes.
       instead of SCRIPT invalidation (the knob position is
       shell-owned state — `slider_values` — not script state), a drag frame
       should cost a targeted restyle, not a rebuild.
+      Progress 2026-07-10: handlerless slider press/move frames now invalidate
+      through interaction restyle instead of unconditional script rebuild,
+      while sliders with `change`/`release` handlers preserve the script
+      invalidation path so reactive labels still update. Added policy tests for
+      both paths and a release-only repaint benchmark; the local dev-shell run
+      measured 790.919ms for forced script rebuild versus 213.822ms retained
+      interaction repaint over 200 handlerless drag frames (3.7x faster).
 
 ### K. Threading & repaint suppression (fifth pass)
 
@@ -917,6 +954,13 @@ Performance:
       clone of unrelated instance props per component build. With one declared
       prop in a 129-entry structured props object, 10k release projections
       measured 208.842ms owned versus 1.485ms borrowed (~140.6x faster).
+      Progress 2026-07-10: imported/local component prop-map construction now
+      uses a shared helper that pre-counts public props and allocates the
+      runtime `HashMap` at the right capacity while consistently filtering
+      internal binding channels. A release benchmark over 100k rebuild-shaped
+      64-prop maps measured 591.288ms for filtered `collect` versus 429.191ms
+      for the pre-sized helper (1.4x faster). Prop state writes and style-rule
+      merge caching remain open.
 - [ ] **Per-node build allocations.** `attach_module_id` inserts a fresh
       `_mesh_module_id` String on every node; `TrackingVariableStore` pushes two
       fresh Strings per dotted read per node; `resolve_event_handler_value` does
@@ -1158,12 +1202,27 @@ Structure:
       (hover background) rebuilds every descendant's commands even though
       their geometry and content are unchanged. Only the dirty node's own
       commands need rebuilding when its layout/scroll/clip didn't change;
-      children could be re-appended from the previous subtree.
+      children could be re-appended from the previous subtree. Progress
+      2026-07-10: paint-only dirty parents now allow clean descendants to
+      reuse retained subtrees, while layout/clip/transform/reorder dirty
+      parents still force descendant rebuilds. Added regression coverage for
+      both paths and a release-only benchmark; the local dev-shell run measured
+      564.325ms for forced descendant rebuilds versus 226.123ms with clean
+      descendant reuse over 1k paint-only dirty-parent rebuilds (2.5x faster),
+      with rebuilt commands dropping from 514k to 2k.
 - [ ] **`DisplayPaintCommand` embeds a full cloned `DisplayPaintNode` per
       command.** `paint_node.clone()` per Node command
       (`display_list.rs:1524`), with the same node reused for the Scrollbars
       command — each clone copies text/placeholder Strings and the style
       block. Share via `Arc<DisplayPaintNode>` per node with per-command kind.
+      Progress 2026-07-12: `DisplayPaintCommand` now shares
+      `Arc<DisplayPaintNode>` handles, so node and scrollbar commands for the
+      same widget reuse one paint-node payload and retained command-buffer
+      clones copy an Arc handle instead of text/style payloads. The in-crate
+      release benchmark is present, but this environment cannot link Skia test
+      binaries because `freetype`/`fontconfig` are missing; a standalone
+      release benchmark over 4M two-command clones measured 548.859ms for
+      owned node clones versus 83.270ms for Arc-backed commands (6.6x faster).
 
 ### O. Style system & theming — 2026-07-04 deep dive
 
@@ -1203,7 +1262,19 @@ Performance:
       (`resolve.rs:916-950`). All are pure functions of the declaration;
       precompute them once per rule into a validated/compiled declaration at
       rule-build time. Cheap first step toward the v1.23 typed-declarations
-      item.
+      item. Progress 2026-07-12: diagnostics resolution now consumes the same
+      indexed declaration metadata as the no-diagnostics restyle path,
+      preserving diagnostic messages while avoiding static property
+      reclassification and per-declaration selector-string allocation on each
+      matched node. Added parity coverage for unsupported properties and
+      missing variables. Release benchmark over 200k diagnostic declaration
+      applications measured 138.902ms for reclassification versus 76.267ms
+      with indexed metadata (1.8x faster). Follow-up 2026-07-12:
+      `StyleRuleIndex` now also precomputes selector diagnostic strings, so
+      the diagnostics walk no longer formats compound selectors for every
+      matched node. Release benchmark over 500k compound-selector lookups
+      measured 45.176ms per-node formatting versus 214.902us from indexed
+      strings (210.2x faster).
 - [x] **`seed_module_theme_variables` allocates two Strings per module token
       per node per pass** — `format!("--{}", name.replace('.', "-"))`
       (`resolve.rs:857-876`). Precompute the CSS-variable-keyed token map once
@@ -1329,7 +1400,12 @@ Performance:
       preserving sampled top/bottom colors. Release-only benchmark over 5k
       moving-gradient draws measured 13.653ms with position-churned shader
       creation versus 12.524ms with size-key reuse (1.1x faster, one shader
-      creation). Clip/layer stack allocation remains open.
+      creation). Rejected experiment 2026-07-12: replacing the per-batch
+      `Vec::with_capacity` clip/layer stacks with a hand-rolled inline stack
+      regressed isolated stack bookkeeping badly: 31.812ms for the existing
+      Vec path versus 350.183ms inline over 8M four-clip/four-layer batches.
+      Clip/layer stack allocation remains open; a future attempt should use a
+      proven small-vector implementation or reuse scratch storage.
 
 Structure:
 
@@ -1390,13 +1466,58 @@ Performance:
       it's the same pattern the motion path already fixed — extend
       `pointer_hit_test` to also return focusable/selectable/kind/handler info
       in its single traversal.
+      Progress 2026-07-11: `pointer_event_target_key` already ran
+      `find_focusable_at` once internally, and the press handler immediately
+      called `find_focusable_at` a second time on the same point to pick the
+      focus target — a duplicate full-tree walk every press. Replaced both
+      call sites with a fused `pointer_event_target_with_focus` free function
+      that returns the click-target key and the focusable key from one walk.
+      Added parity tests (focusable-with-handler, click-only fallback,
+      no-target) and a release-only benchmark; the local dev-shell run
+      measured 3.156ms for the duplicate-walk path versus 1.438ms fused over
+      20k presses on a 200x12 grid (2.2x faster). The remaining walks
+      (`selectable_text_target_key`, `find_node_bounds_by_key`, per-kind
+      probes, release-path `pointer_event_target_key`/`find_click_handler`)
+      are still separate; full fusion into `pointer_hit_test` remains open.
+      Progress 2026-07-11: `selectable_text_target_key` ran `find_node_path_at`
+      once to get the depth-many key path, then called `find_node_by_key`
+      separately for *each* key in that path — twice over (once for the
+      interactive-ancestor check, once for the selectable-text search) —
+      turning every press into an O(depth × tree) walk instead of O(depth).
+      Rewrote it to resolve the whole path in one `find_nodes_by_keys` call
+      (already used by hover-transition dispatch for the same reason) and
+      converted it to a free function alongside the fused press-target lookup.
+      Added correctness tests (plain selectable text, interactive-ancestor
+      short-circuit, non-selectable text, and old-vs-new parity on a deep
+      chain) and a release-only benchmark; the local dev-shell run measured
+      169.032ms for the per-key walk versus 28.557ms fused over 2k lookups on
+      a 40-deep chain with 200 padding siblings (5.9x faster).
 - [ ] **Scroll events do two extra walks** — `find_scrollable_at` then
       `find_node_by_key` for limits (`input/mod.rs:307-309`); fold the
       scrollable ancestor + limits into the fused hit-test result.
-- [ ] Minor: `apply_element_actions` clones the whole `ref_node_keys`
-      HashMap per action batch (`interaction_state.rs:91`); hover-change path
-      clones `Vec<String>` paths (`input/mod.rs:214-240`) — both retire with
-      the string-key → `NodeId` migration (§N / J open item).
+      Progress 2026-07-10: added `find_scrollable_at_with_limits`, preserving
+      the legacy key-only API while letting wheel input consume the scrollable
+      key and max offsets from the same traversal. Added parity coverage and a
+      release-only benchmark; the local dev-shell run measured 1.578s for
+      key-then-lookup versus 311.309ms fused over 200k scroll hits (5.1x
+      faster).
+- [x] Minor: `apply_element_actions` cloned the whole `ref_node_keys`
+      HashMap per action batch (`interaction_state.rs:91`). Progress
+      2026-07-10: action application now temporarily moves the ref lookup map
+      out of the `RefCell` and restores it after resolving the drained batch,
+      avoiding clone-per-batch while preserving the same resolver semantics.
+      Added ref-table preservation coverage and a release-only benchmark; the
+      local dev-shell run measured 1.837s for cloning a 512-entry map versus
+      1.494ms for move/restore over 100k batches (~1230x faster).
+- [x] Minor: hover-change path cloned `Vec<String>` paths
+      (`input/mod.rs:214-240`). Progress 2026-07-10: pointer move now takes
+      ownership of the path produced by `pointer_hit_test`, swaps it into
+      component hover state, and pointer-leave takes the stored path instead
+      of clone-then-clear. One dispatch snapshot remains until hover dispatch
+      no longer needs to call a `&mut self` method while borrowing path state.
+      Added a release-only benchmark; the local dev-shell run measured 1.600s
+      for the old clone shuffle versus 1.042s for move/replace over 500k path
+      updates (1.5x faster).
 - [ ] Confirmation for the tracked slider-drag item (J): the unconditional
       `invalidate_script_state()` per coalesced drag motion is at
       `input/mod.rs:193-200` with a comment explaining why state-dirty
@@ -1890,7 +2011,11 @@ Performance:
       2026-07-10: stable-size input events now compare against the component's
       current content input size before calling `surface_size_changed`, so the
       redundant per-event size-change call is skipped unless the routed content
-      size actually changed.
+      size actually changed. Rejected experiment 2026-07-10: replacing the
+      emitted-request `VecDeque::from(Vec<CoreRequest>)` adapter with direct
+      `Vec::drain` looked plausible but measured slower: 74.102ms for the
+      `VecDeque` adapter versus 82.505ms for direct vector drain over 1M
+      four-request batches (0.9x), so the prototype was reverted.
 - [ ] Minor idle-loop hygiene in `render_components`: the surface id String
       is cloned for every component before the `wants_render` gate
       (`runtime/render.rs:23`), and `component.id().to_string()` runs per
@@ -1902,7 +2027,18 @@ Performance:
       `wants_render()` before cloning the parent surface id, so idle components
       do not allocate a surface-id `String` on each render pass. The remaining
       per-rendering-component id clone and popover reconciliation sets remain
-      open.
+      open. Progress 2026-07-10: rendering components now reuse the already
+      cloned parent `surface_id` as the component/profiling id instead of
+      calling `component.id().to_string()` again. A release-only benchmark over
+      2M id reads measured 15.359ms for the extra clone versus 1.368ms for the
+      borrowed surface id path (11.2x faster). Popover reconciliation set
+      churn remains open. Progress 2026-07-10: child-surface reconciliation now
+      stores requested child keys in a stack-backed `SmallVec` for the usual
+      small-popover case instead of allocating a `HashSet<&str>` each frame.
+      A release-only benchmark over 500k three-popover reconciliation
+      membership checks measured 39.237ms for the `HashSet` path versus
+      372.816us for `SmallVec` (105.2x faster). Closing-key owned set
+      construction remains open.
 
 Structure:
 

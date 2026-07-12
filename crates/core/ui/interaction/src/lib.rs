@@ -13,8 +13,8 @@ pub use hit_test::{
     node_is_source, parse_namespaced_handler, pointer_hit_test, source_element_tag,
 };
 pub use scroll::{
-    annotate_overflow_tree, find_scrollable_at, measure_content_size, scroll_into_view_offsets,
-    scroll_limits,
+    ScrollableHit, annotate_overflow_tree, find_scrollable_at, find_scrollable_at_with_limits,
+    measure_content_size, scroll_into_view_offsets, scroll_limits,
 };
 
 pub(crate) type ContentBounds = (f32, f32, f32, f32);

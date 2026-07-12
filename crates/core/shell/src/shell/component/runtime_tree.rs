@@ -370,7 +370,12 @@ fn collect_retained_snapshots(
     node: &WidgetNode,
     snapshots: &mut HashMap<NodeId, RetainedNodeSnapshot>,
 ) {
+    #[cfg(not(debug_assertions))]
+    snapshots.insert(node.id, retained_snapshot(node));
+
+    #[cfg(debug_assertions)]
     let previous = snapshots.insert(node.id, retained_snapshot(node));
+
     #[cfg(debug_assertions)]
     {
         assert!(
@@ -478,7 +483,7 @@ fn attributes_fingerprint(node: &WidgetNode) -> u64 {
         // Runtime identity is already represented by `node.id`. Rehashing the
         // full slash-joined path here makes deep trees pay for the same
         // identity twice on every retained snapshot.
-        if key == "_mesh_key" {
+        if matches!(key.as_str(), "_mesh_key" | "_mesh_focused") {
             continue;
         }
         if key == "content" && !node.children.is_empty() {
@@ -770,12 +775,13 @@ pub(super) fn annotate_runtime_tree(
     context: &mut RuntimeAnnotationContext<'_>,
 ) {
     let node_id = stable_runtime_node_id(&key);
-    annotate_runtime_tree_inner(node, key, node_id, context);
+    let mut key = key;
+    annotate_runtime_tree_inner(node, &mut key, node_id, context);
 }
 
 fn annotate_runtime_tree_inner(
     node: &mut WidgetNode,
-    key: String,
+    key: &mut String,
     node_id: NodeId,
     context: &mut RuntimeAnnotationContext<'_>,
 ) {
@@ -793,7 +799,7 @@ fn annotate_runtime_tree_inner(
             .is_some_and(|value| truthy_attribute(value));
     let checked = context
         .checked_values
-        .get(&key)
+        .get(key_str)
         .copied()
         .or_else(|| {
             node.attributes
@@ -835,14 +841,14 @@ fn annotate_runtime_tree_inner(
         "input" => {
             let value = context
                 .input_values
-                .get(&key)
+                .get(key_str)
                 .cloned()
                 .or_else(|| node.attributes.get("value").cloned())
                 .unwrap_or_default();
             node.attributes.insert("value".into(), value);
         }
         "slider" => {
-            annotate_slider_node(node, &key, key_str, context);
+            annotate_slider_node(node, key_str, key_str, context);
         }
         "switch" | "checkbox" => {
             node.attributes.insert(
@@ -873,7 +879,7 @@ fn annotate_runtime_tree_inner(
     if node_is_source(node, &["select", "radio-group"])
         && let Some(value) = context
             .input_values
-            .get(&key)
+            .get(key_str)
             .cloned()
             .or_else(|| node.attributes.get("value").cloned())
     {
@@ -884,7 +890,7 @@ fn annotate_runtime_tree_inner(
 
     let offset = context
         .scroll_offsets
-        .get(&key)
+        .get(key_str)
         .copied()
         .unwrap_or_default();
     let scroll = node.scroll_metrics.get_or_insert_default();
@@ -892,12 +898,13 @@ fn annotate_runtime_tree_inner(
     scroll.y = offset.y;
 
     for (index, child) in node.children.iter_mut().enumerate() {
-        annotate_runtime_tree_inner(
-            child,
-            format!("{key}/{index}"),
-            child_runtime_node_id(node_id, index),
-            context,
-        );
+        let previous_len = key.len();
+        {
+            use std::fmt::Write as _;
+            let _ = write!(key, "/{index}");
+        }
+        annotate_runtime_tree_inner(child, key, child_runtime_node_id(node_id, index), context);
+        key.truncate(previous_len);
     }
 }
 
@@ -1226,6 +1233,21 @@ mod tests {
     }
 
     #[test]
+    fn attribute_fingerprint_ignores_redundant_focused_annotation() {
+        let mut node = WidgetNode::new("input");
+        node.attributes.insert("_mesh_key".into(), "root/0".into());
+        node.attributes.insert("value".into(), "hello".into());
+        let original = attributes_fingerprint(&node);
+
+        node.attributes
+            .insert("_mesh_focused".into(), "true".into());
+        assert_eq!(attributes_fingerprint(&node), original);
+
+        node.attributes.insert("value".into(), "world".into());
+        assert_ne!(attributes_fingerprint(&node), original);
+    }
+
+    #[test]
     fn attribute_fingerprint_tracks_typed_handler_arg_changes() {
         let mut node = WidgetNode::new("button");
         node.event_handler_calls.insert(
@@ -1290,6 +1312,57 @@ mod tests {
 
         eprintln!(
             "typed JSON arg fingerprint: to_string {old_time:?}; direct hash {new_time:?}; ratio {:.1}x; accumulators={old_accumulator:x}/{new_accumulator:x}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_ne!(old_accumulator, 0);
+        assert_ne!(new_accumulator, 0);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- focused_annotation_skip_beats_redundant_attribute_hash --ignored --nocapture
+    #[test]
+    #[ignore = "release-only focused annotation fingerprint microbenchmark"]
+    fn focused_annotation_skip_beats_redundant_attribute_hash() {
+        fn old_attributes_fingerprint(node: &WidgetNode) -> u64 {
+            let mut hasher = RuntimeTreeHasher::default();
+            node.tag.hash(&mut hasher);
+            for (key, value) in &node.attributes {
+                if key == "_mesh_key" {
+                    continue;
+                }
+                key.hash(&mut hasher);
+                value.hash(&mut hasher);
+            }
+            hasher.finish()
+        }
+
+        let mut node = WidgetNode::new("input");
+        node.attributes.insert("_mesh_key".into(), "root/0".into());
+        node.attributes
+            .insert("_mesh_focused".into(), "true".into());
+        node.attributes
+            .insert("value".into(), "active field".into());
+        node.attributes.insert("placeholder".into(), "Name".into());
+        let iterations = 2_000_000;
+
+        let old_started = Instant::now();
+        let mut old_accumulator = 0u64;
+        for _ in 0..iterations {
+            old_accumulator = old_accumulator
+                .wrapping_add(old_attributes_fingerprint(std::hint::black_box(&node)));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_accumulator = 0u64;
+        for _ in 0..iterations {
+            new_accumulator =
+                new_accumulator.wrapping_add(attributes_fingerprint(std::hint::black_box(&node)));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "focused annotation fingerprint: redundant attribute hash {old_time:?}; skipped {new_time:?}; ratio {:.1}x; accumulators={old_accumulator:x}/{new_accumulator:x}",
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_ne!(old_accumulator, 0);
@@ -1512,6 +1585,71 @@ mod tests {
         assert_eq!(first.id, second.id);
         assert_eq!(first.children[0].id, second.children[0].id);
         assert_ne!(first.id, first.children[0].id);
+        assert_eq!(
+            first.attributes.get("_mesh_key").map(String::as_str),
+            Some("root")
+        );
+        assert_eq!(
+            first.children[0]
+                .attributes
+                .get("_mesh_key")
+                .map(String::as_str),
+            Some("root/0")
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- mutable_runtime_key_paths_beat_format_per_child --ignored --nocapture
+    #[test]
+    #[ignore = "release-only runtime key path construction microbenchmark"]
+    fn mutable_runtime_key_paths_beat_format_per_child() {
+        fn old_sum_paths(key: String, width: usize, depth: usize) -> usize {
+            let mut total = key.len();
+            if depth > 0 {
+                for index in 0..width {
+                    total += old_sum_paths(format!("{key}/{index}"), width, depth - 1);
+                }
+            }
+            total
+        }
+
+        fn new_sum_paths(key: &mut String, width: usize, depth: usize) -> usize {
+            let mut total = key.len();
+            if depth > 0 {
+                for index in 0..width {
+                    let previous_len = key.len();
+                    {
+                        use std::fmt::Write as _;
+                        let _ = write!(key, "/{index}");
+                    }
+                    total += new_sum_paths(key, width, depth - 1);
+                    key.truncate(previous_len);
+                }
+            }
+            total
+        }
+
+        let iterations = 20_000;
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total += old_sum_paths("root".to_string(), 4, 5);
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let mut key = "root".to_string();
+            new_total += new_sum_paths(&mut key, 4, 5);
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "runtime key paths: format-per-child {old_time:?}; mutable path {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 
     #[test]

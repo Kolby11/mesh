@@ -214,7 +214,7 @@ impl Default for RetainedDisplayList {
 
 #[derive(Debug, Clone)]
 pub struct DisplayPaintCommand {
-    pub node: DisplayPaintNode,
+    pub node: Arc<DisplayPaintNode>,
     pub clip: DisplayListClip,
     pub kind: DisplayPaintCommandKind,
 }
@@ -892,6 +892,7 @@ impl RetainedDisplayList {
                 next_subtrees.clear();
                 let mut local_metrics = LocalReuseMetrics::default();
                 let vclip = surface_clip(surface);
+                let allow_clean_descendant_reuse = changed_layout_count(dirty_summary) == 0;
                 let subtree = build_paint_subtree(
                     root,
                     0.0,
@@ -899,6 +900,7 @@ impl RetainedDisplayList {
                     vclip,
                     vclip,
                     false,
+                    allow_clean_descendant_reuse,
                     dirty_node_ids,
                     &rebuild_ancestors,
                     &self.subtrees,
@@ -927,6 +929,7 @@ impl RetainedDisplayList {
                     vclip,
                     vclip,
                     true,
+                    false,
                     dirty_node_ids,
                     &HashSet::new(),
                     &HashMap::new(),
@@ -950,6 +953,7 @@ impl RetainedDisplayList {
         damage_rects.clear();
         let mut reused = 0u64;
         let mut rebuilt = 0u64;
+        let mut inserted = 0u64;
         for (key, next_entry) in &next {
             match self.entries.get(key) {
                 Some(previous) if previous == next_entry => reused = reused.saturating_add(1),
@@ -961,6 +965,7 @@ impl RetainedDisplayList {
                     push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
                 }
                 None => {
+                    inserted = inserted.saturating_add(1);
                     rebuilt = rebuilt.saturating_add(1);
                     damage = union_damage(damage, next_entry.bounds);
                     push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
@@ -969,11 +974,13 @@ impl RetainedDisplayList {
         }
 
         let mut removed = 0u64;
-        for (key, previous) in &self.entries {
-            if !next.contains_key(key) {
-                removed = removed.saturating_add(1);
-                damage = union_damage(damage, previous.bounds);
-                push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
+        if inserted > 0 || next.len() != self.entries.len() {
+            for (key, previous) in &self.entries {
+                if !next.contains_key(key) {
+                    removed = removed.saturating_add(1);
+                    damage = union_damage(damage, previous.bounds);
+                    push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
+                }
             }
         }
 
@@ -1598,27 +1605,52 @@ fn collect_dirty_ancestor_ids(
     }
     let mut ancestors = HashSet::new();
     let mut path = Vec::new();
-    collect_dirty_ancestor_ids_inner(root, dirty_node_ids, &mut path, &mut ancestors);
+    collect_dirty_ancestor_ids_inner(
+        root,
+        dirty_node_ids,
+        dirty_node_ids.len(),
+        &mut path,
+        &mut ancestors,
+    );
     ancestors
 }
 
 fn collect_dirty_ancestor_ids_inner(
     node: &WidgetNode,
     dirty_node_ids: &HashSet<NodeId>,
+    remaining_dirty: usize,
     path: &mut Vec<NodeId>,
     ancestors: &mut HashSet<NodeId>,
-) {
+) -> usize {
+    if remaining_dirty == 0 {
+        return 0;
+    }
+    let mut remaining_dirty = remaining_dirty;
     let is_dirty = dirty_node_ids.contains(&node.id);
     if is_dirty {
         for ancestor in path.iter().copied() {
             ancestors.insert(ancestor);
         }
+        remaining_dirty -= 1;
+        if remaining_dirty == 0 {
+            return 0;
+        }
     }
     path.push(node.id);
     for child in &node.children {
-        collect_dirty_ancestor_ids_inner(child, dirty_node_ids, path, ancestors);
+        remaining_dirty = collect_dirty_ancestor_ids_inner(
+            child,
+            dirty_node_ids,
+            remaining_dirty,
+            path,
+            ancestors,
+        );
+        if remaining_dirty == 0 {
+            break;
+        }
     }
     path.pop();
+    remaining_dirty
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1629,6 +1661,7 @@ fn build_paint_subtree(
     clip: DisplayListClip,
     viewport_clip: DisplayListClip,
     force_rebuild: bool,
+    allow_clean_descendant_reuse: bool,
     dirty_node_ids: &HashSet<NodeId>,
     dirty_ancestors: &HashSet<NodeId>,
     previous_subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
@@ -1664,7 +1697,7 @@ fn build_paint_subtree(
     let transform = style.transform;
     let offset_x = offset_x + transform.translate_x;
     let offset_y = offset_y + transform.translate_y;
-    let paint_node = build_paint_node(node, offset_x, offset_y);
+    let paint_node = Arc::new(build_paint_node(node, offset_x, offset_y));
     let bounds = node_clip_for(&paint_node);
     let visual_bounds = visual_clip_for(&paint_node);
     let node_clip = intersect_display_clip(clip, visual_bounds);
@@ -1680,7 +1713,7 @@ fn build_paint_subtree(
 
     let mut subtree = PaintSubtreeBuilder::default();
     subtree.push_command(DisplayPaintCommand {
-        node: paint_node.clone(),
+        node: Arc::clone(&paint_node),
         clip: node_clip,
         kind: DisplayPaintCommandKind::Node,
     });
@@ -1712,7 +1745,8 @@ fn build_paint_subtree(
             coy,
             cc,
             viewport_clip,
-            force_rebuild || node_is_dirty,
+            force_rebuild || (node_is_dirty && !allow_clean_descendant_reuse),
+            allow_clean_descendant_reuse,
             dirty_node_ids,
             dirty_ancestors,
             previous_subtrees,
@@ -1806,6 +1840,7 @@ fn append_child_paint_subtree(
     child_clip: DisplayListClip,
     viewport_clip: DisplayListClip,
     force_rebuild: bool,
+    allow_clean_descendant_reuse: bool,
     dirty_node_ids: &HashSet<NodeId>,
     dirty_ancestors: &HashSet<NodeId>,
     previous_subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
@@ -1826,6 +1861,7 @@ fn append_child_paint_subtree(
         child_clip,
         viewport_clip,
         force_rebuild,
+        allow_clean_descendant_reuse,
         dirty_node_ids,
         dirty_ancestors,
         previous_subtrees,
@@ -3099,7 +3135,11 @@ mod tests {
     fn retained_subtree_handle_beats_fieldwise_clone() {
         let subtree = RetainedPaintSubtree {
             commands: vec![DisplayPaintCommand {
-                node: build_paint_node(&node(1, "box", 0.0, 0.0, 20.0, 20.0), 0.0, 0.0),
+                node: Arc::new(build_paint_node(
+                    &node(1, "box", 0.0, 0.0, 20.0, 20.0),
+                    0.0,
+                    0.0,
+                )),
                 clip: DisplayListClip {
                     x: 0,
                     y: 0,
@@ -3151,6 +3191,100 @@ mod tests {
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert!(new_time * 5 < old_time * 4);
+    }
+
+    // cargo test -p mesh-core-render --release -- arc_paint_command_node_beats_owned_command_clones --ignored --nocapture
+    #[test]
+    #[ignore = "release-only display paint command node clone microbenchmark"]
+    fn arc_paint_command_node_beats_owned_command_clones() {
+        #[derive(Clone)]
+        struct OldDisplayPaintCommand {
+            node: DisplayPaintNode,
+            clip: DisplayListClip,
+            kind: DisplayPaintCommandKind,
+        }
+
+        let mut widget = node(1, "text", 0.0, 0.0, 180.0, 24.0);
+        widget.attributes.insert(
+            "content".into(),
+            "The same paint node is copied through retained command buffers".into(),
+        );
+        let paint_node = build_paint_node(&widget, 0.0, 0.0);
+        let clip = DisplayListClip {
+            x: 0,
+            y: 0,
+            width: 180,
+            height: 24,
+        };
+        let old_commands = vec![
+            OldDisplayPaintCommand {
+                node: paint_node.clone(),
+                clip,
+                kind: DisplayPaintCommandKind::Node,
+            },
+            OldDisplayPaintCommand {
+                node: paint_node.clone(),
+                clip,
+                kind: DisplayPaintCommandKind::Scrollbars,
+            },
+        ];
+        let shared_node = Arc::new(paint_node);
+        let new_commands = vec![
+            DisplayPaintCommand {
+                node: Arc::clone(&shared_node),
+                clip,
+                kind: DisplayPaintCommandKind::Node,
+            },
+            DisplayPaintCommand {
+                node: shared_node,
+                clip,
+                kind: DisplayPaintCommandKind::Scrollbars,
+            },
+        ];
+        let iterations = 2_000_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let cloned = old_commands.clone();
+            old_total = old_total.wrapping_add(
+                cloned
+                    .iter()
+                    .map(|command| {
+                        command.node.id as usize
+                            + command.clip.width as usize
+                            + usize::from(command.kind == DisplayPaintCommandKind::Scrollbars)
+                    })
+                    .sum::<usize>(),
+            );
+            std::hint::black_box(cloned);
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let cloned = new_commands.clone();
+            new_total = new_total.wrapping_add(
+                cloned
+                    .iter()
+                    .map(|command| {
+                        command.node.id as usize
+                            + command.clip.width as usize
+                            + usize::from(command.kind == DisplayPaintCommandKind::Scrollbars)
+                    })
+                    .sum::<usize>(),
+            );
+            std::hint::black_box(cloned);
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "display paint command node clone: owned node {old_time:?}; arc node {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 
     // cargo test -p mesh-core-render --release -- unchanged_display_list_update_beats_flat_rebuild --ignored --nocapture
@@ -3658,6 +3792,66 @@ mod tests {
         assert_eq!(metrics.damage_area, 200);
     }
 
+    // cargo test -p mesh-core-render --release -- removal_scan_guard_skips_equal_key_sets --ignored --nocapture
+    #[test]
+    #[ignore = "release-only display-list removal scan microbenchmark"]
+    fn removal_scan_guard_skips_equal_key_sets() {
+        fn old_removed_count(previous: &HashMap<u64, u64>, next: &HashMap<u64, u64>) -> usize {
+            let mut removed = 0usize;
+            for key in previous.keys() {
+                if !next.contains_key(key) {
+                    removed += 1;
+                }
+            }
+            removed
+        }
+
+        fn guarded_removed_count(
+            previous: &HashMap<u64, u64>,
+            next: &HashMap<u64, u64>,
+            inserted: usize,
+        ) -> usize {
+            if inserted == 0 && previous.len() == next.len() {
+                return 0;
+            }
+            old_removed_count(previous, next)
+        }
+
+        let previous = (0..1024_u64)
+            .map(|index| (index, index.wrapping_mul(3)))
+            .collect::<HashMap<_, _>>();
+        let next = (0..1024_u64)
+            .map(|index| (index, index.wrapping_mul(5)))
+            .collect::<HashMap<_, _>>();
+        let iterations = 200_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total +=
+                old_removed_count(std::hint::black_box(&previous), std::hint::black_box(&next));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            new_total += guarded_removed_count(
+                std::hint::black_box(&previous),
+                std::hint::black_box(&next),
+                std::hint::black_box(0),
+            );
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "display-list removal scan: full previous-entry scan {old_time:?}; guarded skip {new_time:?}; ratio {:.1}x; counts={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time * 10 < old_time);
+    }
+
     #[test]
     fn display_list_clips_damage_to_surface() {
         let mut root = node(1, "box", 80.0, 80.0, 40.0, 40.0);
@@ -3783,6 +3977,100 @@ mod tests {
     }
 
     #[test]
+    fn dirty_ancestor_collection_preserves_ancestors_for_sparse_dirty_nodes() {
+        let mut root = node(1, "row", 0.0, 0.0, 120.0, 40.0);
+        let mut left = node(2, "box", 0.0, 0.0, 40.0, 40.0);
+        left.children.push(node(3, "text", 4.0, 4.0, 20.0, 12.0));
+        let mut right = node(4, "box", 60.0, 0.0, 40.0, 40.0);
+        right.children.push(node(5, "text", 4.0, 4.0, 20.0, 12.0));
+        root.children.push(left);
+        root.children.push(right);
+
+        let ancestors = collect_dirty_ancestor_ids(&root, &HashSet::from([3]));
+
+        assert_eq!(ancestors, HashSet::from([1, 2]));
+    }
+
+    // cargo test -p mesh-core-render --release -- dirty_ancestor_collection_stops_after_sparse_dirty_nodes --ignored --nocapture
+    #[test]
+    #[ignore = "release-only dirty ancestor microbenchmark"]
+    fn dirty_ancestor_collection_stops_after_sparse_dirty_nodes() {
+        fn build_subtree(next_id: &mut NodeId, width: usize, depth: usize) -> WidgetNode {
+            let id = *next_id;
+            *next_id += 1;
+            let mut root = node(id, "box", 0.0, 0.0, 20.0, 20.0);
+            if depth > 0 {
+                root.children = (0..width)
+                    .map(|_| build_subtree(next_id, width, depth - 1))
+                    .collect();
+            }
+            root
+        }
+
+        fn old_collect_dirty_ancestor_ids(
+            root: &WidgetNode,
+            dirty_node_ids: &HashSet<NodeId>,
+        ) -> HashSet<NodeId> {
+            fn walk(
+                node: &WidgetNode,
+                dirty_node_ids: &HashSet<NodeId>,
+                path: &mut Vec<NodeId>,
+                ancestors: &mut HashSet<NodeId>,
+            ) {
+                if dirty_node_ids.contains(&node.id) {
+                    for ancestor in path.iter().copied() {
+                        ancestors.insert(ancestor);
+                    }
+                }
+                path.push(node.id);
+                for child in &node.children {
+                    walk(child, dirty_node_ids, path, ancestors);
+                }
+                path.pop();
+            }
+
+            let mut ancestors = HashSet::new();
+            let mut path = Vec::new();
+            walk(root, dirty_node_ids, &mut path, &mut ancestors);
+            ancestors
+        }
+
+        let mut next_id = 1;
+        let root = build_subtree(&mut next_id, 5, 5);
+        let dirty = HashSet::from([root.children[0].children[0].children[0].id]);
+        let iterations = 50_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total += old_collect_dirty_ancestor_ids(
+                std::hint::black_box(&root),
+                std::hint::black_box(&dirty),
+            )
+            .len();
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            new_total += collect_dirty_ancestor_ids(
+                std::hint::black_box(&root),
+                std::hint::black_box(&dirty),
+            )
+            .len();
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "dirty ancestor collection: full walk {old_time:?}; early exit {new_time:?}; ratio {:.1}x; counts={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time * 2 < old_time);
+    }
+
+    #[test]
     fn display_list_unchanged_tree_skips_flat_command_rebuild() {
         let root = display_entry_benchmark_tree(8, 8);
         let mut list = RetainedDisplayList::default();
@@ -3838,6 +4126,169 @@ mod tests {
         assert_eq!(right_before, right_after);
         assert!(metrics.subtree_segments_reused > 0);
         assert!(metrics.subtree_commands_rebuilt > 0);
+    }
+
+    #[test]
+    fn display_list_reuses_clean_descendants_for_paint_only_dirty_parent() {
+        let mut root = node(1, "row", 0.0, 0.0, 160.0, 40.0);
+        let mut panel = node(2, "box", 0.0, 0.0, 120.0, 40.0);
+        panel.children.push(node(3, "text", 4.0, 4.0, 20.0, 12.0));
+        panel.children.push(node(4, "text", 30.0, 4.0, 20.0, 12.0));
+        root.children.push(panel);
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 160, 40, false, true);
+        let before = list.paint_commands().to_vec();
+
+        root.children[0].computed_style.background_color = Color::from_hex("#336699").unwrap();
+        let metrics = list.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                material: 1,
+                ..Default::default()
+            },
+            &HashSet::from([2]),
+            160,
+            40,
+            false,
+            true,
+        );
+        let after = list.paint_commands().to_vec();
+
+        assert_eq!(
+            command_debugs(&before, &[3, 4]),
+            command_debugs(&after, &[3, 4])
+        );
+        assert!(
+            metrics.subtree_segments_reused >= 2,
+            "paint-only dirty parent should reuse clean child subtrees: {metrics:?}"
+        );
+        assert_eq!(
+            metrics.subtree_commands_rebuilt, 2,
+            "only root and the dirty parent should rebuild their local commands"
+        );
+    }
+
+    #[test]
+    fn display_list_rebuilds_descendants_for_layout_dirty_parent() {
+        let mut root = node(1, "row", 0.0, 0.0, 160.0, 40.0);
+        let mut panel = node(2, "box", 0.0, 0.0, 120.0, 40.0);
+        panel.children.push(node(3, "text", 4.0, 4.0, 20.0, 12.0));
+        panel.children.push(node(4, "text", 30.0, 4.0, 20.0, 12.0));
+        root.children.push(panel);
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 160, 40, false, true);
+
+        root.children[0].layout.x = 8.0;
+        let metrics = list.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                geometry: 1,
+                ..Default::default()
+            },
+            &HashSet::from([2]),
+            160,
+            40,
+            false,
+            true,
+        );
+
+        assert_eq!(
+            metrics.subtree_segments_reused, 0,
+            "layout dirty parent must rebuild descendants because offsets changed"
+        );
+        assert_eq!(metrics.subtree_commands_rebuilt, 4);
+    }
+
+    // cargo test -p mesh-core-render --release -- paint_only_dirty_parent_reuses_clean_descendants --ignored --nocapture
+    #[test]
+    #[ignore = "release-only display-list paint-only subtree reuse microbenchmark"]
+    fn paint_only_dirty_parent_reuses_clean_descendants() {
+        fn make_tree(children: usize) -> WidgetNode {
+            let mut root = node(1, "row", 0.0, 0.0, children as f32 * 12.0, 24.0);
+            let mut panel = node(2, "box", 0.0, 0.0, children as f32 * 12.0, 24.0);
+            for index in 0..children {
+                let id = 3 + index as NodeId;
+                let mut child = node(id, "text", index as f32 * 12.0, 0.0, 10.0, 12.0);
+                child
+                    .attributes
+                    .insert("content".into(), format!("Item {index}"));
+                panel.children.push(child);
+            }
+            root.children.push(panel);
+            root
+        }
+
+        let mut root = make_tree(512);
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 6200, 40, false, true);
+        root.children[0].computed_style.background_color = Color::from_hex("#335577").unwrap();
+
+        let dirty_node_ids = HashSet::from([2]);
+        let dirty_ancestors = collect_dirty_ancestor_ids(&root, &dirty_node_ids);
+        let vclip = surface_clip(DamageRect {
+            x: 0,
+            y: 0,
+            width: 6200,
+            height: 40,
+        });
+        let iterations = 1_000usize;
+
+        let old_started = std::time::Instant::now();
+        let mut old_rebuilt_commands = 0u64;
+        for _ in 0..iterations {
+            let mut next_subtrees = HashMap::new();
+            let mut metrics = LocalReuseMetrics::default();
+            build_paint_subtree(
+                std::hint::black_box(&root),
+                0.0,
+                0.0,
+                vclip,
+                vclip,
+                false,
+                false,
+                &dirty_node_ids,
+                &dirty_ancestors,
+                &list.subtrees,
+                &mut next_subtrees,
+                &mut metrics,
+            );
+            old_rebuilt_commands =
+                old_rebuilt_commands.saturating_add(std::hint::black_box(metrics.rebuilt_commands));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_rebuilt_commands = 0u64;
+        for _ in 0..iterations {
+            let mut next_subtrees = HashMap::new();
+            let mut metrics = LocalReuseMetrics::default();
+            build_paint_subtree(
+                std::hint::black_box(&root),
+                0.0,
+                0.0,
+                vclip,
+                vclip,
+                false,
+                true,
+                &dirty_node_ids,
+                &dirty_ancestors,
+                &list.subtrees,
+                &mut next_subtrees,
+                &mut metrics,
+            );
+            new_rebuilt_commands =
+                new_rebuilt_commands.saturating_add(std::hint::black_box(metrics.rebuilt_commands));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "paint-only dirty parent subtree reuse: forced {old_time:?}; descendant-reuse {new_time:?}; ratio {:.1}x; rebuilt_commands={old_rebuilt_commands}/{new_rebuilt_commands}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
+        assert!(new_rebuilt_commands < old_rebuilt_commands);
     }
 
     #[test]

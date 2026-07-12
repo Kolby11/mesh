@@ -48,13 +48,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         if let Some(entry) = self.frontend_catalog.modules.get(&host.package.id) {
             if let Some(component) = entry.compiled.local_components.get(alias) {
                 let bind_this = props.get("__mesh_bind_this").cloned();
-                let props_json: HashMap<String, serde_json::Value> = props
-                    .iter()
-                    .filter(|(key, _)| {
-                        !key.starts_with("__mesh_binding_") && key.as_str() != "__mesh_bind_this"
-                    })
-                    .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
-                    .collect();
+                let props_json = runtime_props_json(props);
                 let instance_key = format!("{host_instance_key}/local:{alias}");
                 let mut node = self.render_local_component(
                     &entry.compiled.manifest,
@@ -121,13 +115,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             return Some(placeholder);
         }
 
-        let props_json: HashMap<String, serde_json::Value> = props
-            .iter()
-            .filter(|(key, _)| {
-                !key.starts_with("__mesh_binding_") && key.as_str() != "__mesh_bind_this"
-            })
-            .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
-            .collect();
+        let props_json = runtime_props_json(props);
         let bind_this = props.get("__mesh_bind_this").cloned();
         let instance_key = format!("{host_instance_key}/import:{alias}");
         let mut node = self.render_embedded_instance(
@@ -242,6 +230,24 @@ fn embedded_root_is_popover(node: &WidgetNode) -> bool {
     node.children
         .first()
         .is_some_and(|child| source_element_tag(child) == "popover")
+}
+
+fn runtime_props_json(props: &BTreeMap<String, String>) -> HashMap<String, serde_json::Value> {
+    let public_count = props
+        .keys()
+        .filter(|key| runtime_prop_is_public(key.as_str()))
+        .count();
+    let mut props_json = HashMap::with_capacity(public_count);
+    for (key, value) in props {
+        if runtime_prop_is_public(key) {
+            props_json.insert(key.clone(), serde_json::Value::String(value.clone()));
+        }
+    }
+    props_json
+}
+
+fn runtime_prop_is_public(key: &str) -> bool {
+    !key.starts_with("__mesh_binding_") && key != "__mesh_bind_this"
 }
 
 fn apply_prop_handler_calls(
@@ -447,6 +453,73 @@ mod tests {
                 .map(|call| call.handler.as_str()),
             Some("onMove")
         );
+    }
+
+    #[test]
+    fn runtime_props_json_filters_internal_binding_props() {
+        let props = BTreeMap::from([
+            ("label".into(), "Volume".into()),
+            ("__mesh_binding_hidden".into(), "isHidden".into()),
+            ("__mesh_bind_this".into(), "child".into()),
+        ]);
+
+        let props_json = runtime_props_json(&props);
+
+        assert_eq!(
+            props_json.get("label"),
+            Some(&serde_json::Value::String("Volume".into()))
+        );
+        assert!(!props_json.contains_key("__mesh_binding_hidden"));
+        assert!(!props_json.contains_key("__mesh_bind_this"));
+    }
+
+    // cargo test -p mesh-core-shell --release -- presized_runtime_props_json_beats_filtered_collect --ignored --nocapture
+    #[test]
+    #[ignore = "release-only runtime prop map construction microbenchmark"]
+    fn presized_runtime_props_json_beats_filtered_collect() {
+        fn old_runtime_props_json(
+            props: &BTreeMap<String, String>,
+        ) -> HashMap<String, serde_json::Value> {
+            props
+                .iter()
+                .filter(|(key, _)| {
+                    !key.starts_with("__mesh_binding_") && key.as_str() != "__mesh_bind_this"
+                })
+                .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
+                .collect()
+        }
+
+        let mut props = BTreeMap::new();
+        for index in 0..64 {
+            props.insert(format!("prop{index}"), format!("value{index}"));
+            props.insert(
+                format!("__mesh_binding_prop{index}"),
+                format!("state{index}"),
+            );
+        }
+        props.insert("__mesh_bind_this".into(), "child".into());
+        let iterations = 100_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total += old_runtime_props_json(std::hint::black_box(&props)).len();
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            new_total += runtime_props_json(std::hint::black_box(&props)).len();
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "runtime props map: filtered collect {old_time:?}; presized helper {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 
     // cargo test -p mesh-core-shell --release -- prop_handler_matching_skips_event_handler_map_clone --ignored --nocapture

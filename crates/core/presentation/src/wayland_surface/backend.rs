@@ -63,7 +63,14 @@ pub struct LayerShellBackend {
 const SHM_BUFFER_POOL_DEPTH: usize = 2;
 const SHM_BUFFER_POOL_MAX: usize = 3;
 const MAX_FRAME_CALLBACK_WAIT: Duration = Duration::from_millis(50);
-const SURFACE_CONFIGURE_WAIT_DEADLINE: Duration = Duration::from_millis(2);
+// This wait only runs between a surface's creation and its first configure
+// event, so a generous deadline costs nothing in steady state. It must be long
+// enough for the compositor to actually answer: `surface_size()` callers size
+// spanning bars from the first configure, and if the deadline expires before
+// it arrives the shell falls back to a 1px available width, measures the root
+// at fit-content, and pins the surface to that small fixed size permanently
+// (a 2ms deadline shipped exactly that bug — a bar shrunk to a centered box).
+const SURFACE_CONFIGURE_WAIT_DEADLINE: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ShmPoolConfig {
@@ -1486,6 +1493,10 @@ impl LayerShellBackend {
             }
 
             let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                tracing::warn!(
+                    surface_id,
+                    "surface configure wait deadline expired; proceeding with unconfigured size"
+                );
                 return Ok(());
             };
             let Some(read_guard) = self.event_queue.prepare_read() else {
@@ -1502,6 +1513,10 @@ impl LayerShellBackend {
             match poll(&mut fds, timeout_ms) {
                 Ok(0) => {
                     drop(read_guard);
+                    tracing::warn!(
+                        surface_id,
+                        "surface configure wait deadline expired; proceeding with unconfigured size"
+                    );
                     return Ok(());
                 }
                 Ok(_) => {
@@ -1510,12 +1525,12 @@ impl LayerShellBackend {
                         .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP)
                     {
                         drop(read_guard);
-                        return Ok(());
+                        continue;
                     }
                     match read_guard.read() {
                         Ok(_) => {}
                         Err(WaylandError::Io(err)) if err.kind() == ErrorKind::WouldBlock => {
-                            return Ok(());
+                            continue;
                         }
                         Err(err) => {
                             return Err(PresentationError::SurfaceCreate(format!("read: {err}")));
@@ -1524,7 +1539,7 @@ impl LayerShellBackend {
                 }
                 Err(rustix::io::Errno::INTR) => {
                     drop(read_guard);
-                    return Ok(());
+                    continue;
                 }
                 Err(err) => {
                     drop(read_guard);

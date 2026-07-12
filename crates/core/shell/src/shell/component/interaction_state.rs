@@ -101,13 +101,17 @@ impl FrontendSurfaceComponent {
         let Some(tree) = self.last_tree.take() else {
             return Ok(Vec::new());
         };
-        let ref_keys = self.ref_node_keys.borrow().clone();
+        let ref_keys = {
+            let mut ref_node_keys = self.ref_node_keys.borrow_mut();
+            std::mem::take(&mut *ref_node_keys)
+        };
 
         let result = self.apply_element_actions_with_tree(&tree, &ref_keys, actions);
         debug_assert!(
             self.last_tree.is_none(),
             "element actions must not replace the retained tree"
         );
+        *self.ref_node_keys.borrow_mut() = ref_keys;
         self.last_tree = Some(tree);
         result
     }

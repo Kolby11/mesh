@@ -199,6 +199,7 @@ pub struct StyleRuleIndex {
     state_to_rules: HashMap<u32, Vec<usize>>,
     fallback: Vec<usize>,
     no_diagnostics_declarations: Vec<Vec<IndexedDeclaration>>,
+    selector_diagnostics: Vec<String>,
 }
 
 impl StyleRuleIndex {
@@ -220,6 +221,10 @@ impl StyleRuleIndex {
                         .map(IndexedDeclaration::from_declaration)
                         .collect()
                 })
+                .collect(),
+            selector_diagnostics: rules
+                .iter()
+                .map(|rule| selector_to_diagnostic_string(&rule.selector))
                 .collect(),
         };
         for (idx, rule) in rules.iter().enumerate() {
@@ -310,6 +315,13 @@ impl StyleRuleIndex {
             .unwrap_or(&[])
     }
 
+    fn selector_diagnostic(&self, rule_idx: usize) -> &str {
+        self.selector_diagnostics
+            .get(rule_idx)
+            .map(String::as_str)
+            .unwrap_or("")
+    }
+
     fn index_selector(&mut self, idx: usize, selector: &Selector) {
         // Index state bits from compound selector parts so that
         // compound rules like `button:hover` also populate state_to_rules.
@@ -376,7 +388,11 @@ enum IndexedProperty {
         strict_animation: bool,
         background_image: bool,
     },
-    Ignored,
+    DiagnosticOnly(String),
+    Deferred(String),
+    OutOfScope(String),
+    Unsupported(String),
+    DeprecatedToken(String),
 }
 
 impl IndexedDeclaration {
@@ -393,13 +409,25 @@ impl IndexedProperty {
         if property.starts_with("--") {
             return Self::Custom(property.to_owned());
         }
-        if let Some(status) = style_profile_status(property)
-            && !matches!(status, StyleProfileStatus::Implemented)
-        {
-            return Self::Ignored;
+        if let Some(status) = style_profile_status(property) {
+            match status {
+                StyleProfileStatus::Implemented => {}
+                StyleProfileStatus::DiagnosticOnly => {
+                    return Self::DiagnosticOnly(property.to_owned());
+                }
+                StyleProfileStatus::Deferred => {
+                    return Self::Deferred(property.to_owned());
+                }
+                StyleProfileStatus::OutOfScope => {
+                    return Self::OutOfScope(property.to_owned());
+                }
+            }
         }
-        if !is_supported_css_property(property) || contains_deprecated_token_reference(value) {
-            return Self::Ignored;
+        if !is_supported_css_property(property) {
+            return Self::Unsupported(property.to_owned());
+        }
+        if contains_deprecated_token_reference(value) {
+            return Self::DeprecatedToken(property.to_owned());
         }
         Self::Lowered {
             name: property.to_owned(),
@@ -1079,13 +1107,17 @@ impl<'a> StyleResolver<'a> {
             &mut variables,
         );
 
-        index.for_each_candidate_rule(rules, attrs, |rule| {
+        index.for_each_candidate_rule_index(attrs, |rule_idx| {
+            let Some(rule) = rules.get(rule_idx) else {
+                return;
+            };
             if rule_matches_attrs(rule, attrs, context) {
-                for decl in &rule.declarations {
-                    self.apply_declaration_with_diagnostics(
+                let selector = index.selector_diagnostic(rule_idx);
+                for decl in index.no_diagnostics_declarations(rule_idx) {
+                    self.apply_indexed_declaration_with_diagnostics(
                         &mut style,
                         decl,
-                        Some(selector_to_diagnostic_string(&rule.selector)),
+                        selector,
                         &mut diagnostics,
                         &mut variables,
                     );
@@ -1394,7 +1426,6 @@ impl<'a> StyleResolver<'a> {
             IndexedProperty::Custom(property) => {
                 variables.insert(property.clone(), decl.value.clone());
             }
-            IndexedProperty::Ignored => {}
             IndexedProperty::Lowered {
                 name,
                 strict_animation,
@@ -1410,6 +1441,113 @@ impl<'a> StyleResolver<'a> {
                 if *background_image {
                     let resolved = self.resolve_value_with_variables(&decl.value, variables);
                     if !is_supported_background_image(&resolved) {
+                        return;
+                    }
+                }
+                apply_declaration(style, name, &decl.value, self, variables);
+            }
+            IndexedProperty::DiagnosticOnly(_)
+            | IndexedProperty::Deferred(_)
+            | IndexedProperty::OutOfScope(_)
+            | IndexedProperty::Unsupported(_)
+            | IndexedProperty::DeprecatedToken(_) => {}
+        }
+    }
+
+    fn apply_indexed_declaration_with_diagnostics(
+        &self,
+        style: &mut ComputedStyle,
+        decl: &IndexedDeclaration,
+        selector: &str,
+        diagnostics: &mut Vec<StyleDiagnostic>,
+        variables: &mut HashMap<String, StyleValue>,
+    ) {
+        match &decl.property {
+            IndexedProperty::Custom(property) => {
+                variables.insert(property.clone(), decl.value.clone());
+            }
+            IndexedProperty::DiagnosticOnly(property) => {
+                diagnostics.push(StyleDiagnostic {
+                    property: property.clone(),
+                    selector: Some(selector.to_owned()),
+                    message: format!(
+                        "diagnostic-only CSS property '{property}' is accepted by the parser but not lowered into ComputedStyle"
+                    ),
+                });
+            }
+            IndexedProperty::Deferred(property) => {
+                diagnostics.push(StyleDiagnostic {
+                    property: property.clone(),
+                    selector: Some(selector.to_owned()),
+                    message: format!(
+                        "deferred CSS property '{property}' is accepted by the parser but not lowered in the current painter profile"
+                    ),
+                });
+            }
+            IndexedProperty::OutOfScope(property) => {
+                diagnostics.push(StyleDiagnostic {
+                    property: property.clone(),
+                    selector: Some(selector.to_owned()),
+                    message: format!(
+                        "unsupported CSS property '{property}' is out-of-scope for the MESH shell CSS profile"
+                    ),
+                });
+            }
+            IndexedProperty::Unsupported(property) => {
+                diagnostics.push(StyleDiagnostic {
+                    property: property.clone(),
+                    selector: Some(selector.to_owned()),
+                    message: format!("unsupported CSS property '{property}'"),
+                });
+            }
+            IndexedProperty::DeprecatedToken(property) => {
+                diagnostics.push(StyleDiagnostic {
+                    property: property.clone(),
+                    selector: Some(selector.to_owned()),
+                    message: "deprecated token() references are not supported; use var(--...)"
+                        .to_string(),
+                });
+            }
+            IndexedProperty::Lowered {
+                name,
+                strict_animation,
+                background_image,
+            } => {
+                if let StyleValue::Var(variable_name) = &decl.value
+                    && !*strict_animation
+                    && !variables.contains_key(variable_name)
+                    && self
+                        .theme
+                        .token(&self.cached_theme_token_name(variable_name))
+                        .is_none()
+                {
+                    diagnostics.push(StyleDiagnostic {
+                        property: name.clone(),
+                        selector: Some(selector.to_owned()),
+                        message: format!(
+                            "unsupported CSS variable reference '{variable_name}' for property '{name}'"
+                        ),
+                    });
+                }
+                if *strict_animation
+                    && let Err(token_name) =
+                        self.validate_animation_value_with_variables(&decl.value, variables)
+                {
+                    diagnostics.push(StyleDiagnostic {
+                        property: name.clone(),
+                        selector: Some(selector.to_owned()),
+                        message: format!("unresolved animation token reference '{token_name}'"),
+                    });
+                    return;
+                }
+                if *background_image {
+                    let resolved = self.resolve_value_with_variables(&decl.value, variables);
+                    if !is_supported_background_image(&resolved) {
+                        diagnostics.push(StyleDiagnostic {
+                            property: name.clone(),
+                            selector: Some(selector.to_owned()),
+                            message: format!("unsupported background-image '{resolved}'"),
+                        });
                         return;
                     }
                 }
@@ -2509,10 +2647,20 @@ mod tests {
             },
             StyleRule {
                 selector: Selector::Tag("box".to_string()),
-                declarations: vec![Declaration {
-                    property: "color".to_string(),
-                    value: StyleValue::Literal("#112233".to_string()),
-                }],
+                declarations: vec![
+                    Declaration {
+                        property: "color".to_string(),
+                        value: StyleValue::Literal("#112233".to_string()),
+                    },
+                    Declaration {
+                        property: "unknown-property".to_string(),
+                        value: StyleValue::Literal("ignored".to_string()),
+                    },
+                    Declaration {
+                        property: "background-color".to_string(),
+                        value: StyleValue::Var("--missing-color".to_string()),
+                    },
+                ],
                 container_query: None,
             },
         ];
@@ -2541,6 +2689,145 @@ mod tests {
             );
 
         assert_eq!(indexed, uncached);
+    }
+
+    // cargo test -p mesh-core-elements --release -- indexed_diagnostic_declarations_skip_static_reclassification --ignored --nocapture
+    #[test]
+    #[ignore = "release-only indexed diagnostic declaration microbenchmark"]
+    fn indexed_diagnostic_declarations_skip_static_reclassification() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let declarations = vec![
+            Declaration {
+                property: "--accent".to_string(),
+                value: StyleValue::Literal("#112233".to_string()),
+            },
+            Declaration {
+                property: "background-color".to_string(),
+                value: StyleValue::Var("--accent".to_string()),
+            },
+            Declaration {
+                property: "grid-template-columns".to_string(),
+                value: StyleValue::Literal("1fr 1fr".to_string()),
+            },
+            Declaration {
+                property: "unknown-property".to_string(),
+                value: StyleValue::Literal("ignored".to_string()),
+            },
+            Declaration {
+                property: "transition-duration".to_string(),
+                value: StyleValue::Var("--animation-missing-duration".to_string()),
+            },
+        ];
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations,
+            container_query: None,
+        }];
+        let index = StyleRuleIndex::new(&rules);
+        let classes = vec!["panel".to_string()];
+        let attrs = StyleNodeAttrs::new("box", &classes, None, ElementState::default());
+        let iterations = 200_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_count = 0usize;
+        for _ in 0..iterations {
+            let mut style = ComputedStyle::default();
+            let mut diagnostics = Vec::new();
+            let mut variables = HashMap::new();
+            index.for_each_candidate_rule(&rules, &attrs, |rule| {
+                if rule_matches_attrs(rule, &attrs, StyleContext::default()) {
+                    for decl in &rule.declarations {
+                        resolver.apply_declaration_with_diagnostics(
+                            std::hint::black_box(&mut style),
+                            decl,
+                            Some(selector_to_diagnostic_string(&rule.selector)),
+                            &mut diagnostics,
+                            &mut variables,
+                        );
+                    }
+                }
+            });
+            old_count = old_count.wrapping_add(std::hint::black_box(diagnostics.len()));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_count = 0usize;
+        for _ in 0..iterations {
+            let mut style = ComputedStyle::default();
+            let mut diagnostics = Vec::new();
+            let mut variables = HashMap::new();
+            index.for_each_candidate_rule_index(&attrs, |rule_idx| {
+                let rule = &rules[rule_idx];
+                if rule_matches_attrs(rule, &attrs, StyleContext::default()) {
+                    let selector = selector_to_diagnostic_string(&rule.selector);
+                    for decl in index.no_diagnostics_declarations(rule_idx) {
+                        resolver.apply_indexed_declaration_with_diagnostics(
+                            std::hint::black_box(&mut style),
+                            decl,
+                            &selector,
+                            &mut diagnostics,
+                            &mut variables,
+                        );
+                    }
+                }
+            });
+            new_count = new_count.wrapping_add(std::hint::black_box(diagnostics.len()));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "diagnostic declaration apply: static reclassification {old_time:?}; indexed metadata {new_time:?}; ratio {:.1}x; counts={old_count}/{new_count}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_count, new_count);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- indexed_selector_diagnostics_skip_per_node_formatting --ignored --nocapture
+    #[test]
+    #[ignore = "release-only indexed selector diagnostic string microbenchmark"]
+    fn indexed_selector_diagnostics_skip_per_node_formatting() {
+        let selector = Selector::Compound(vec![
+            Selector::Tag("button".to_string()),
+            Selector::Class("primary".to_string()),
+            Selector::State("button".to_string(), "hover".to_string()),
+        ]);
+        let rules = vec![StyleRule {
+            selector,
+            declarations: vec![Declaration {
+                property: "grid-template-columns".to_string(),
+                value: StyleValue::Literal("1fr 1fr".to_string()),
+            }],
+            container_query: None,
+        }];
+        let index = StyleRuleIndex::new(&rules);
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total = old_total.wrapping_add(
+                selector_to_diagnostic_string(std::hint::black_box(&rules[0].selector)).len(),
+            );
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            new_total =
+                new_total.wrapping_add(index.selector_diagnostic(std::hint::black_box(0)).len());
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "selector diagnostics: per-node formatting {old_time:?}; indexed string {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 
     // cargo test -p mesh-core-elements --release -- indexed_diagnostics_beat_per_node_index_rebuild --ignored --nocapture

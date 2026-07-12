@@ -2,6 +2,17 @@ use super::*;
 use std::collections::HashMap;
 
 pub fn find_scrollable_at(node: &WidgetNode, x: f32, y: f32) -> Option<String> {
+    find_scrollable_at_with_limits(node, x, y).map(|hit| hit.key)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScrollableHit {
+    pub key: String,
+    pub max_x: f32,
+    pub max_y: f32,
+}
+
+pub fn find_scrollable_at_with_limits(node: &WidgetNode, x: f32, y: f32) -> Option<ScrollableHit> {
     find_scrollable_at_with_offset(node, x, y, 0.0, 0.0)
 }
 
@@ -161,7 +172,7 @@ fn find_scrollable_at_with_offset(
     y: f32,
     offset_x: f32,
     offset_y: f32,
-) -> Option<String> {
+) -> Option<ScrollableHit> {
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
     let inside_self = layout_contains_with_offset(node, x, y, offset_x, offset_y);
     if !inside_self && node_clips_children(node) {
@@ -179,7 +190,14 @@ fn find_scrollable_at_with_offset(
     }
 
     if inside_self && node_is_scrollable(node) {
-        return node.attributes.get("_mesh_key").cloned();
+        return node.attributes.get("_mesh_key").map(|key| {
+            let (max_x, max_y) = scroll_limits(node);
+            ScrollableHit {
+                key: key.clone(),
+                max_x,
+                max_y,
+            }
+        });
     }
 
     None
@@ -410,5 +428,88 @@ mod scroll_into_view_tests {
         );
         let outer = by_key.get("root/0").expect("outer should scroll");
         assert!((outer.y - 200.0).abs() < 0.01, "got {}", outer.y);
+    }
+
+    #[test]
+    fn scrollable_hit_with_limits_matches_legacy_key_lookup() {
+        let tree = list_tree();
+
+        let legacy = find_scrollable_at(&tree, 10.0, 10.0);
+        let fused = find_scrollable_at_with_limits(&tree, 10.0, 10.0).expect("scrollable hit");
+
+        assert_eq!(legacy.as_deref(), Some(fused.key.as_str()));
+        assert_eq!(fused.key, "root/0");
+        assert_eq!(fused.max_x, 0.0);
+        assert_eq!(fused.max_y, 400.0);
+    }
+
+    // cargo test -p mesh-core-interaction --release -- scrollable_hit_with_limits_beats_key_then_lookup --ignored --nocapture
+    #[test]
+    #[ignore = "release-only scroll hit fusion microbenchmark"]
+    fn scrollable_hit_with_limits_beats_key_then_lookup() {
+        fn build_tree(
+            width: usize,
+            depth: usize,
+            key: String,
+            next_leaf_y: &mut f32,
+        ) -> WidgetNode {
+            let mut node = node(&key, "box", 0.0, 0.0, 120.0, 120.0);
+            if depth == 0 {
+                node.layout.y = *next_leaf_y;
+                *next_leaf_y += 2.0;
+                return node;
+            }
+            node.children = (0..width)
+                .map(|index| build_tree(width, depth - 1, format!("{key}/{index}"), next_leaf_y))
+                .collect();
+            node
+        }
+
+        let mut y = 0.0;
+        let mut root = build_tree(4, 5, "root".into(), &mut y);
+        root.children[3] = scrollable(node("root/3", "column", 0.0, 0.0, 120.0, 120.0), 0.0, 512.0);
+        root.children[3].children = (0..64)
+            .map(|index| {
+                node(
+                    &format!("root/3/{index}"),
+                    "box",
+                    0.0,
+                    index as f32 * 12.0,
+                    100.0,
+                    10.0,
+                )
+            })
+            .collect();
+        let iterations = 200_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0.0f32;
+        for _ in 0..iterations {
+            if let Some(key) = find_scrollable_at(std::hint::black_box(&root), 10.0, 10.0)
+                && let Some(node) = crate::find_node_by_key(std::hint::black_box(&root), &key)
+            {
+                let (_, max_y) = scroll_limits(node);
+                old_total += std::hint::black_box(max_y);
+            }
+        }
+        let old_time = old_started.elapsed();
+
+        let fused_started = std::time::Instant::now();
+        let mut fused_total = 0.0f32;
+        for _ in 0..iterations {
+            if let Some(hit) =
+                find_scrollable_at_with_limits(std::hint::black_box(&root), 10.0, 10.0)
+            {
+                fused_total += std::hint::black_box(hit.max_y);
+            }
+        }
+        let fused_time = fused_started.elapsed();
+
+        eprintln!(
+            "scrollable hit limits: key+lookup {old_time:?}; fused {fused_time:?}; ratio {:.1}x; totals={old_total}/{fused_total}",
+            old_time.as_secs_f64() / fused_time.as_secs_f64()
+        );
+        assert_eq!(old_total, fused_total);
+        assert!(fused_time < old_time);
     }
 }

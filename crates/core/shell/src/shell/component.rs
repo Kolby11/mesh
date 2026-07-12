@@ -10,9 +10,10 @@ use super::types::{
 use mesh_core_interaction::{
     annotate_overflow_tree, collect_focus_traversal, find_click_handler, find_event_handler,
     find_focusable_at, find_node_bounds_by_key, find_node_by_key, find_node_path_at,
-    find_scrollable_at, find_tooltip_by_key, find_tooltip_container_bounds, is_input_key,
-    is_slider_key, measure_content_size, next_focus_target, node_is_source,
-    parse_namespaced_handler, scroll_into_view_offsets, scroll_limits, source_element_tag,
+    find_nodes_by_keys, find_scrollable_at_with_limits, find_tooltip_by_key,
+    find_tooltip_container_bounds, is_input_key, is_slider_key, measure_content_size,
+    next_focus_target, node_is_source, parse_namespaced_handler, scroll_into_view_offsets,
+    scroll_limits, source_element_tag,
 };
 mod animation;
 mod catalog;

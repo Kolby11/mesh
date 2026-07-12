@@ -4,6 +4,9 @@ mod focus;
 mod keyboard;
 mod widgets;
 
+use focus::selectable_text_target_key;
+use widgets::pointer_event_target_with_focus;
+
 #[cfg(test)]
 pub(crate) use keyboard::KeybindResolutionSource;
 pub(in crate::shell::component) use keyboard::ResolvedSurfaceShortcut;
@@ -52,7 +55,7 @@ impl FrontendSurfaceComponent {
         match input {
             ComponentInput::PointerButton { x, y, pressed } => {
                 if pressed {
-                    if let Some(selection_key) = self.selectable_text_target_key(tree, x, y) {
+                    if let Some(selection_key) = selectable_text_target_key(tree, x, y) {
                         let requests = self.set_focus_target(tree, None, false)?;
                         self.pointer_down_key = None;
                         self.pointer_down_bounds = None;
@@ -63,12 +66,12 @@ impl FrontendSurfaceComponent {
                     }
 
                     self.clear_selection();
-                    if let Some(node_key) = self.pointer_event_target_key(tree, x, y) {
+                    let (target_key, focusable_key) = pointer_event_target_with_focus(tree, x, y);
+                    if let Some(node_key) = target_key {
                         self.pointer_down_key = Some(node_key.clone());
                         self.pointer_down_bounds =
                             find_node_bounds_by_key(tree, &node_key, 0.0, 0.0);
-                        let mut requests = if let Some(focused_key) = find_focusable_at(tree, x, y)
-                        {
+                        let mut requests = if let Some(focused_key) = focusable_key {
                             let focus_visible =
                                 self.pointer_focus_visible_for_key(tree, &focused_key);
                             self.set_focus_target(tree, Some(focused_key), focus_visible)?
@@ -79,15 +82,19 @@ impl FrontendSurfaceComponent {
                         if is_slider_key(tree, &node_key) {
                             self.active_slider_key = Some(node_key.clone());
                             self.update_slider_from_position(tree, &node_key, x, y);
-                            if let Some(value) = self.slider_value(tree, &node_key) {
+                            if find_event_handler(tree, &node_key, "change").is_some()
+                                && let Some(value) = self.slider_value(tree, &node_key)
+                            {
                                 requests.extend(self.call_node_handler(
                                     tree,
                                     &node_key,
                                     "change",
                                     &[serde_json::json!(value)],
                                 )?);
+                                self.invalidate_script_state();
+                            } else {
+                                self.invalidate_interaction_restyle();
                             }
-                            self.invalidate_script_state();
                         } else {
                             self.active_slider_key = None;
                             if self.is_option_key(tree, &node_key) {
@@ -123,6 +130,7 @@ impl FrontendSurfaceComponent {
                     let mut requests = Vec::new();
                     if let Some(slider_key) = self.active_slider_key.clone()
                         && let Some(value) = self.slider_value(tree, &slider_key)
+                        && find_event_handler(tree, &slider_key, "release").is_some()
                     {
                         requests.extend(self.call_node_handler(
                             tree,
@@ -184,21 +192,20 @@ impl FrontendSurfaceComponent {
                     self.update_slider_from_position(tree, &slider_key, x, y);
                     let mut requests = Vec::new();
                     if let Some(value) = self.slider_value(tree, &slider_key) {
-                        requests.extend(self.call_node_handler(
-                            tree,
-                            &slider_key,
-                            "change",
-                            &[serde_json::json!(value)],
-                        )?);
+                        if find_event_handler(tree, &slider_key, "change").is_some() {
+                            requests.extend(self.call_node_handler(
+                                tree,
+                                &slider_key,
+                                "change",
+                                &[serde_json::json!(value)],
+                            )?);
+                            // Slider drag with script handlers can mutate reactive globals
+                            // such as labels bound to the value, so preserve the rebuild path.
+                            self.invalidate_script_state();
+                        } else {
+                            self.invalidate_interaction_restyle();
+                        }
                     }
-                    // Slider drag must always trigger a full repaint: the knob
-                    // moved (slider_values mutated above) and the change handler
-                    // typically writes reactive globals (e.g. percent label).
-                    // Force a script-state rebuild + full surface repaint
-                    // unconditionally; relying on state_dirty detection misses
-                    // intermediate frames and the selective-damage path can
-                    // skip presents when only text content differs.
-                    self.invalidate_script_state();
                     if !requests.is_empty() {
                         return Ok(requests);
                     }
@@ -211,10 +218,10 @@ impl FrontendSurfaceComponent {
 
                 // Update hover state for CSS :hover and the tooltip system.
                 self.hovered_pos = (x, y);
-                let pointer_hit = mesh_core_interaction::pointer_hit_test(tree, x, y);
+                let mut pointer_hit = mesh_core_interaction::pointer_hit_test(tree, x, y);
                 let new_path = pointer_hit
-                    .as_ref()
-                    .map(|hit| hit.path.clone())
+                    .as_mut()
+                    .map(|hit| std::mem::take(&mut hit.path))
                     .unwrap_or_default();
                 let new_key = new_path.last().cloned();
                 tracing::trace!(
@@ -224,7 +231,6 @@ impl FrontendSurfaceComponent {
                     self.hovered_key
                 );
                 if new_key != self.hovered_key || new_path != self.hovered_path {
-                    let previous_path = self.hovered_path.clone();
                     let previous_tooltip = self.hovered_tooltip.clone();
                     let next_tooltip = pointer_hit.as_ref().and_then(|hit| hit.tooltip.clone());
                     let tooltip_may_change = previous_tooltip.is_some()
@@ -238,7 +244,8 @@ impl FrontendSurfaceComponent {
                             previous_owner == next_owner
                         });
                     self.hovered_key = new_key.clone();
-                    self.hovered_path = new_path.clone();
+                    let previous_path = std::mem::replace(&mut self.hovered_path, new_path);
+                    let current_path = self.hovered_path.clone();
                     self.hovered_tooltip = next_tooltip.clone();
                     // Store the hovered element's bounds for tooltip positioning.
                     // Use the tooltip owner's bounds when available; fall back to
@@ -265,7 +272,7 @@ impl FrontendSurfaceComponent {
                     let hover_requests = self.dispatch_hover_transition_handlers(
                         tree,
                         &previous_path,
-                        &new_path,
+                        &current_path,
                         x,
                         y,
                     )?;
@@ -275,16 +282,15 @@ impl FrontendSurfaceComponent {
                 }
             }
             ComponentInput::PointerLeave => {
-                let previous_path = self.hovered_path.clone();
-                if self.hovered_key.is_some()
+                let had_hover_state = self.hovered_key.is_some()
                     || !self.hovered_path.is_empty()
-                    || self.hover_start.is_some()
-                {
+                    || self.hover_start.is_some();
+                let previous_path = std::mem::take(&mut self.hovered_path);
+                if had_hover_state {
                     let tooltip_may_change = self.hovered_tooltip.is_some()
                         || self.tooltip_visible
                         || self.last_tooltip_damage.is_some();
                     self.hovered_key = None;
-                    self.hovered_path.clear();
                     self.hovered_tooltip = None;
                     self.hover_start = None;
                     self.tooltip_visible = false;
@@ -305,21 +311,16 @@ impl FrontendSurfaceComponent {
                     return Ok(requests);
                 }
 
-                if let Some(scroll_key) = find_scrollable_at(tree, x, y) {
-                    if let Some(node) = find_node_by_key(tree, &scroll_key) {
-                        let (max_x, max_y) = scroll_limits(node);
-                        let current = self.scroll_offsets.entry(scroll_key).or_default();
-                        let next_x = (current.x - dx * 28.0).clamp(0.0, max_x);
-                        let next_y = (current.y - dy * 28.0).clamp(0.0, max_y);
-                        if (next_x - current.x).abs() > f32::EPSILON
-                            || (next_y - current.y).abs() > f32::EPSILON
-                        {
-                            current.x = next_x;
-                            current.y = next_y;
-                            self.invalidate(
-                                ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS,
-                            );
-                        }
+                if let Some(scroll_hit) = find_scrollable_at_with_limits(tree, x, y) {
+                    let current = self.scroll_offsets.entry(scroll_hit.key).or_default();
+                    let next_x = (current.x - dx * 28.0).clamp(0.0, scroll_hit.max_x);
+                    let next_y = (current.y - dy * 28.0).clamp(0.0, scroll_hit.max_y);
+                    if (next_x - current.x).abs() > f32::EPSILON
+                        || (next_y - current.y).abs() > f32::EPSILON
+                    {
+                        current.x = next_x;
+                        current.y = next_y;
+                        self.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
                     }
                 }
             }
@@ -456,6 +457,67 @@ pub(super) fn is_bare_printable_key(key: &str, modifiers: KeyModifiers) -> bool 
 }
 
 #[cfg(test)]
+mod press_target_tests {
+    use super::pointer_event_target_with_focus;
+    use mesh_core_elements::WidgetNode;
+    use mesh_core_interaction::find_focusable_at;
+
+    fn positioned_node(key: &str, tag: &str, x: f32, y: f32, w: f32, h: f32) -> WidgetNode {
+        let mut node = WidgetNode::new(tag);
+        node.attributes.insert("_mesh_key".into(), key.into());
+        node.layout.x = x;
+        node.layout.y = y;
+        node.layout.width = w;
+        node.layout.height = h;
+        node
+    }
+
+    #[test]
+    fn fused_lookup_matches_focusable_target_with_click_handler() {
+        let mut button = positioned_node("root/0", "button", 0.0, 0.0, 40.0, 20.0);
+        button
+            .event_handlers
+            .insert("click".into(), "onClick".into());
+        let mut root = positioned_node("root", "row", 0.0, 0.0, 40.0, 20.0);
+        root.children.push(button);
+
+        let (target, focusable) = pointer_event_target_with_focus(&root, 10.0, 10.0);
+        assert_eq!(target.as_deref(), Some("root/0"));
+        assert_eq!(focusable.as_deref(), Some("root/0"));
+        assert_eq!(focusable, find_focusable_at(&root, 10.0, 10.0));
+    }
+
+    #[test]
+    fn fused_lookup_falls_back_to_click_handler_when_not_focusable() {
+        let mut clickable = positioned_node("root/0", "box", 0.0, 0.0, 40.0, 20.0);
+        clickable
+            .event_handlers
+            .insert("click".into(), "onClick".into());
+        let mut root = positioned_node("root", "row", 0.0, 0.0, 40.0, 20.0);
+        root.children.push(clickable);
+
+        let (target, focusable) = pointer_event_target_with_focus(&root, 10.0, 10.0);
+        assert_eq!(target.as_deref(), Some("root/0"));
+        assert_eq!(focusable, None);
+        assert_eq!(find_focusable_at(&root, 10.0, 10.0), None);
+    }
+
+    #[test]
+    fn fused_lookup_returns_none_outside_any_target() {
+        let mut clickable = positioned_node("root/0", "box", 0.0, 0.0, 40.0, 20.0);
+        clickable
+            .event_handlers
+            .insert("click".into(), "onClick".into());
+        let mut root = positioned_node("root", "row", 0.0, 0.0, 40.0, 20.0);
+        root.children.push(clickable);
+
+        let (target, focusable) = pointer_event_target_with_focus(&root, 500.0, 500.0);
+        assert_eq!(target, None);
+        assert_eq!(focusable, None);
+    }
+}
+
+#[cfg(test)]
 mod performance_tests {
     use mesh_core_elements::WidgetNode;
     use std::hint::black_box;
@@ -514,5 +576,136 @@ mod performance_tests {
             take_ns.saturating_mul(10) <= clone_ns,
             "moving the retained tree should be at least 10x faster than recursively cloning it"
         );
+    }
+
+    // Run with:
+    // cargo test -p mesh-core-shell --release -- hover_path_move_replace_beats_clone_shuffle --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn hover_path_move_replace_beats_clone_shuffle() {
+        let path: Vec<String> = (0..48).map(|index| format!("root/{index}")).collect();
+        let previous: Vec<String> = (0..48).map(|index| format!("prev/{index}")).collect();
+        let iterations = 500_000usize;
+
+        let old_start = Instant::now();
+        let mut old_hovered_path = previous.clone();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let pointer_path = black_box(&path).clone();
+            let previous_path = old_hovered_path.clone();
+            old_hovered_path = pointer_path.clone();
+            old_total = old_total.wrapping_add(black_box(
+                previous_path.len() + old_hovered_path.len() + pointer_path.len(),
+            ));
+        }
+        let old_time = old_start.elapsed();
+
+        let new_start = Instant::now();
+        let mut new_hovered_path = previous;
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let mut pointer_path = black_box(&path).clone();
+            let previous_path =
+                std::mem::replace(&mut new_hovered_path, std::mem::take(&mut pointer_path));
+            let current_path = new_hovered_path.clone();
+            new_total = new_total.wrapping_add(black_box(
+                previous_path.len() + new_hovered_path.len() + current_path.len(),
+            ));
+        }
+        let new_time = new_start.elapsed();
+
+        eprintln!(
+            "hover path update: clone-shuffle {old_time:?}; move/replace {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    fn large_positioned_tree(rows: usize, columns: usize) -> WidgetNode {
+        let row_height = 20.0;
+        let column_width = 40.0;
+        let mut root = WidgetNode::new("column");
+        root.layout.width = column_width * columns as f32;
+        root.layout.height = row_height * rows as f32;
+        for row_index in 0..rows {
+            let mut row = WidgetNode::new("row");
+            row.attributes
+                .insert("_mesh_key".into(), format!("root/{row_index}"));
+            row.layout.x = 0.0;
+            row.layout.y = row_index as f32 * row_height;
+            row.layout.width = column_width * columns as f32;
+            row.layout.height = row_height;
+            for column_index in 0..columns {
+                let mut node = WidgetNode::new("button");
+                node.attributes.insert(
+                    "_mesh_key".into(),
+                    format!("root/{row_index}/{column_index}"),
+                );
+                node.event_handlers
+                    .insert("click".into(), "handleItemClick".into());
+                // `WidgetNode::layout` is absolute (root-relative), not
+                // parent-relative — hit-testing accumulates transform/scroll
+                // offset only, so children must carry their own absolute y.
+                node.layout.x = column_index as f32 * column_width;
+                node.layout.y = row_index as f32 * row_height;
+                node.layout.width = column_width;
+                node.layout.height = row_height;
+                row.children.push(node);
+            }
+            root.children.push(row);
+        }
+        root
+    }
+
+    // Run with:
+    // cargo test -p mesh-core-shell --release -- fused_press_target_beats_duplicate_focusable_walk --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn fused_press_target_beats_duplicate_focusable_walk() {
+        use super::pointer_event_target_with_focus;
+        use mesh_core_interaction::{find_event_handler, find_focusable_at, find_node_path_at};
+
+        let tree = large_positioned_tree(200, 12);
+        // Last row, last column: worst-case walk depth for both the
+        // focusable search and the click-handler path fallback.
+        let (x, y) = (tree.layout.width - 5.0, tree.layout.height - 5.0);
+        let iterations = 20_000usize;
+
+        let old_start = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            // Old behaviour: `pointer_event_target_key` walks once internally
+            // to find the focusable target, then `handle_component_input`
+            // walked again with a second `find_focusable_at` call to decide
+            // the focus target.
+            let first = find_focusable_at(black_box(&tree), x, y).or_else(|| {
+                find_node_path_at(&tree, x, y).and_then(|path| {
+                    path.into_iter()
+                        .rev()
+                        .find(|key| find_event_handler(&tree, key, "click").is_some())
+                })
+            });
+            let second = find_focusable_at(black_box(&tree), x, y);
+            old_total = old_total.wrapping_add(first.map_or(0, |k| k.len()));
+            old_total = old_total.wrapping_add(second.map_or(0, |k| k.len()));
+        }
+        let old_time = old_start.elapsed();
+
+        let new_start = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let (target, focusable) = pointer_event_target_with_focus(black_box(&tree), x, y);
+            new_total = new_total.wrapping_add(target.map_or(0, |k| k.len()));
+            new_total = new_total.wrapping_add(focusable.map_or(0, |k| k.len()));
+        }
+        let new_time = new_start.elapsed();
+
+        eprintln!(
+            "press target lookup: duplicate walk {old_time:?}; fused {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 }

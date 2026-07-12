@@ -348,14 +348,14 @@ impl FrontendSurfaceComponent {
         let affected_keys = if targeted_interaction_restyle {
             self.collect_interaction_changed_node_ids(tree)
         } else {
-            HashSet::new()
+            InteractionChangedNodeIds::default()
         };
         let interaction_snapshot_valid = self.interaction_snapshot_valid;
         let index_cache = &mut self.cached_style_rule_index;
         let mut reused_retained_layout = false;
         let preserve_surface_root = tree.tag == "surface";
         if targeted_interaction_restyle {
-            if affected_keys.is_empty() {
+            if affected_keys.affected.is_empty() {
                 if !interaction_snapshot_valid {
                     // First frame or no previous interaction state — fall back
                     // to full-tree restyle.
@@ -384,7 +384,7 @@ impl FrontendSurfaceComponent {
                             restyle_rules,
                             context,
                             index_cache,
-                            &affected_keys,
+                            &affected_keys.affected,
                         );
                     }
                 } else {
@@ -395,10 +395,10 @@ impl FrontendSurfaceComponent {
                         restyle_rules,
                         context,
                         index_cache,
-                        &affected_keys,
+                        &affected_keys.affected,
                     );
                 }
-                merge_runtime_primitive_defaults(tree);
+                merge_runtime_primitive_defaults_for_ids(tree, &affected_keys.roots);
             }
             reused_retained_layout = !dirty_types.contains(ComponentDirtyFlags::LAYOUT);
         } else {
@@ -497,7 +497,7 @@ impl FrontendSurfaceComponent {
     ///
     /// Compares current hover/focus state against previous frame's state to
     /// identify which nodes changed.
-    fn collect_interaction_changed_node_ids(&self, tree: &WidgetNode) -> HashSet<NodeId> {
+    fn collect_interaction_changed_node_ids(&self, tree: &WidgetNode) -> InteractionChangedNodeIds {
         let mut changed_keys: HashSet<&str> = HashSet::new();
 
         // Collect keys that had hover change: union of old and new hovered paths.
@@ -517,12 +517,12 @@ impl FrontendSurfaceComponent {
         }
 
         if changed_keys.is_empty() {
-            return HashSet::new(); // first frame: no previous state
+            return InteractionChangedNodeIds::default(); // first frame: no previous state
         }
 
-        let mut all_affected: HashSet<NodeId> = HashSet::new();
-        collect_changed_subtree_node_ids(tree, &changed_keys, false, &mut all_affected);
-        all_affected
+        let mut ids = InteractionChangedNodeIds::default();
+        collect_changed_subtree_node_ids(tree, &changed_keys, false, &mut ids);
+        ids
     }
 
     pub(super) fn observe_surface_size(&mut self, width: u32, height: u32) -> bool {
@@ -633,6 +633,22 @@ fn merge_runtime_primitive_defaults(node: &mut WidgetNode) {
     }
 }
 
+fn merge_runtime_primitive_defaults_for_ids(
+    node: &mut WidgetNode,
+    affected_ids: &HashSet<NodeId>,
+) -> bool {
+    let node_affected = affected_ids.contains(&node.id);
+    if node_affected {
+        merge_runtime_primitive_defaults(node);
+        return true;
+    }
+    let mut descendant_affected = false;
+    for child in &mut node.children {
+        descendant_affected |= merge_runtime_primitive_defaults_for_ids(child, affected_ids);
+    }
+    descendant_affected
+}
+
 /// Collapses promoted `<popover>` wrappers to a zero-size, overflow-visible box so
 /// their (still full-size) popover subtree does not push trigger-row siblings around.
 /// A zero flex-basis contributes nothing to the parent's layout, while the overflowing
@@ -673,17 +689,26 @@ pub(super) fn constrain_error_placeholders(node: &mut WidgetNode) {
     }
 }
 
+#[derive(Default)]
+struct InteractionChangedNodeIds {
+    affected: HashSet<NodeId>,
+    roots: HashSet<NodeId>,
+}
+
 fn collect_changed_subtree_node_ids(
     node: &WidgetNode,
     changed_keys: &HashSet<&str>,
     parent_affected: bool,
-    out: &mut HashSet<NodeId>,
+    out: &mut InteractionChangedNodeIds,
 ) {
     let node_key = node.attributes.get("_mesh_key");
-    let node_affected =
-        parent_affected || node_key.is_some_and(|key| changed_keys.contains(key.as_str()));
+    let directly_affected = node_key.is_some_and(|key| changed_keys.contains(key.as_str()));
+    let node_affected = parent_affected || directly_affected;
     if node_affected {
-        out.insert(node.id);
+        out.affected.insert(node.id);
+    }
+    if directly_affected && !parent_affected {
+        out.roots.insert(node.id);
     }
 
     for child in &node.children {
@@ -817,18 +842,58 @@ mod interaction_changed_key_tests {
             ],
         );
         let changed = HashSet::from(["root/0"]);
-        let mut affected = HashSet::new();
+        let mut affected = InteractionChangedNodeIds::default();
 
         collect_changed_subtree_node_ids(&tree, &changed, false, &mut affected);
 
         assert_eq!(
-            affected,
+            affected.affected,
             HashSet::from([
                 crate::shell::component::runtime_tree::stable_runtime_node_id("root/0"),
                 crate::shell::component::runtime_tree::stable_runtime_node_id("root/0/0"),
                 crate::shell::component::runtime_tree::stable_runtime_node_id("root/0/1"),
             ])
         );
+        assert_eq!(
+            affected.roots,
+            HashSet::from([
+                crate::shell::component::runtime_tree::stable_runtime_node_id("root/0")
+            ])
+        );
+    }
+
+    #[test]
+    fn targeted_default_merge_only_updates_affected_subtrees() {
+        let mut tree = keyed_node(
+            "root",
+            vec![
+                keyed_node("root/0", vec![keyed_node("root/0/0", vec![])]),
+                keyed_node("root/1", vec![keyed_node("root/1/0", vec![])]),
+            ],
+        );
+        tree.children[0].tag = "column".into();
+        tree.children[0].children[0].tag = "text".into();
+        tree.children[0].children[0].computed_style.color = mesh_core_elements::Color::TRANSPARENT;
+        tree.children[1].tag = "column".into();
+        tree.children[1].children[0].tag = "text".into();
+        tree.children[1].children[0].computed_style.color = mesh_core_elements::Color::TRANSPARENT;
+
+        let affected = HashSet::from([
+            crate::shell::component::runtime_tree::stable_runtime_node_id("root/0"),
+        ]);
+
+        merge_runtime_primitive_defaults_for_ids(&mut tree, &affected);
+
+        assert_eq!(
+            tree.children[0].computed_style.direction,
+            mesh_core_elements::style::FlexDirection::Column
+        );
+        assert_eq!(tree.children[0].children[0].computed_style.color.a, 255);
+        assert_eq!(
+            tree.children[1].computed_style.direction,
+            mesh_core_elements::style::FlexDirection::Row
+        );
+        assert_eq!(tree.children[1].children[0].computed_style.color.a, 0);
     }
 
     // cargo test -p mesh-core-shell --release -- interaction_changed_node_ids_beat_runtime_key_clones --ignored --nocapture
@@ -882,7 +947,9 @@ mod interaction_changed_key_tests {
         let mut new_count = 0;
         for _ in 0..iterations {
             let mut affected = HashSet::new();
-            collect_changed_subtree_node_ids(&tree, &new_changed, false, &mut affected);
+            let mut ids = InteractionChangedNodeIds::default();
+            collect_changed_subtree_node_ids(&tree, &new_changed, false, &mut ids);
+            affected.extend(ids.affected);
             new_count += std::hint::black_box(affected.len());
         }
         let new_time = new_started.elapsed();
@@ -892,6 +959,58 @@ mod interaction_changed_key_tests {
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_count, new_count);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- targeted_default_merge_skips_unaffected_subtrees --ignored --nocapture
+    #[test]
+    #[ignore = "release-only targeted default merge microbenchmark"]
+    fn targeted_default_merge_skips_unaffected_subtrees() {
+        fn build(key: String, width: usize, depth: usize, next_id: &mut NodeId) -> WidgetNode {
+            let id = *next_id;
+            *next_id += 1;
+            let mut node = WidgetNode::new(if depth % 2 == 0 { "column" } else { "text" });
+            node.id = id;
+            node.attributes.insert("_mesh_key".into(), key.clone());
+            if depth > 0 {
+                node.children = (0..width)
+                    .map(|index| build(format!("{key}/{index}"), width, depth - 1, next_id))
+                    .collect();
+            }
+            node
+        }
+
+        let mut next_id = 1;
+        let tree = build("root".into(), 4, 5, &mut next_id);
+        let mut affected = InteractionChangedNodeIds::default();
+        collect_changed_subtree_node_ids(&tree, &HashSet::from(["root/0/0"]), false, &mut affected);
+        let iterations = 5_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0.0f32;
+        for _ in 0..iterations {
+            let mut tree = tree.clone();
+            merge_runtime_primitive_defaults(std::hint::black_box(&mut tree));
+            old_total += std::hint::black_box(tree.children[0].computed_style.gap);
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0.0f32;
+        for _ in 0..iterations {
+            let mut tree = tree.clone();
+            merge_runtime_primitive_defaults_for_ids(
+                std::hint::black_box(&mut tree),
+                std::hint::black_box(&affected.roots),
+            );
+            new_total += std::hint::black_box(tree.children[0].computed_style.gap);
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "runtime primitive defaults: full tree {old_time:?}; targeted {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
         assert!(new_time < old_time);
     }
 

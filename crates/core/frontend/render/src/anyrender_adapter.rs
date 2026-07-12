@@ -17,8 +17,6 @@
 
 #![cfg(feature = "renderer-anyrender")]
 
-use std::sync::Arc;
-
 use anyrender::PaintScene;
 use anyrender::recording::Scene;
 use peniko::Fill;
@@ -130,7 +128,9 @@ pub fn encode_command_to_scene(
             #[cfg(feature = "renderer-parley")]
             let _ = diagnostics;
         }
-        DisplayPaintContent::Slider(_) | DisplayPaintContent::Input(_) => {
+        DisplayPaintContent::Slider(_)
+        | DisplayPaintContent::Input(_)
+        | DisplayPaintContent::Checkmark(_) => {
             // DEFERRED per Phase 49 D-10: controls stay on the software painter
             // until their full lossless command subset is specified.
         }
@@ -150,13 +150,15 @@ mod tests {
         DisplayScrollbars, DisplaySliderPaint,
     };
     use mesh_core_elements::style::{
-        Color, Edges, Overflow, TextAlign, TextDirection, TextOverflow,
+        BackgroundPaint, BlendMode, Color, Edges, Overflow, TextAlign, TextDirection, TextOverflow,
     };
     use mesh_core_elements::{BoxShadow, LayoutRect, VisualFilter};
+    use std::sync::Arc;
 
     fn base_style() -> DisplayPaintStyle {
         DisplayPaintStyle {
             background_color: Color::TRANSPARENT,
+            background_paint: BackgroundPaint::None,
             border_color: Color::TRANSPARENT,
             border_width: Edges::zero(),
             border_radius: 0.0,
@@ -175,6 +177,7 @@ mod tests {
             box_shadow: BoxShadow::NONE,
             filter: VisualFilter::NONE,
             backdrop_filter: VisualFilter::NONE,
+            mix_blend_mode: BlendMode::Normal,
             icon_fill: None,
             icon_weight: None,
             icon_grade: None,
@@ -184,7 +187,7 @@ mod tests {
 
     fn cmd(content: DisplayPaintContent, kind: DisplayPaintCommandKind) -> DisplayPaintCommand {
         DisplayPaintCommand {
-            node: DisplayPaintNode {
+            node: Arc::new(DisplayPaintNode {
                 id: 1,
                 layout: LayoutRect {
                     x: 0.0,
@@ -195,7 +198,7 @@ mod tests {
                 style: base_style(),
                 content,
                 scrollbars: DisplayScrollbars::default(),
-            },
+            }),
             clip: DisplayListClip {
                 x: 0,
                 y: 0,
@@ -209,7 +212,7 @@ mod tests {
     #[test]
     fn anyrender_encodes_background_command() {
         let mut c = cmd(DisplayPaintContent::None, DisplayPaintCommandKind::Node);
-        c.node.style.background_color = Color::WHITE;
+        Arc::make_mut(&mut c.node).style.background_color = Color::WHITE;
         let mut diagnostics = Vec::new();
         assert_eq!(encode_command_to_scene(&c, &mut diagnostics), 1);
         assert!(diagnostics.is_empty());
@@ -218,8 +221,9 @@ mod tests {
     #[test]
     fn anyrender_encodes_border_command() {
         let mut c = cmd(DisplayPaintContent::None, DisplayPaintCommandKind::Node);
-        c.node.style.border_color = Color::BLACK;
-        c.node.style.border_width = Edges {
+        let node = Arc::make_mut(&mut c.node);
+        node.style.border_color = Color::BLACK;
+        node.style.border_width = Edges {
             top: 2.0,
             right: 2.0,
             bottom: 2.0,

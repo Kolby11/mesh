@@ -349,6 +349,55 @@ fn sparse_ref_metrics_skip_unpublished_snapshots() {
     assert!(new_time < old_time);
 }
 
+// cargo test -p mesh-core-shell --release -- element_action_ref_keys_move_restore_beats_full_clone --ignored --nocapture
+#[test]
+#[ignore = "release-only element-action ref lookup microbenchmark"]
+fn element_action_ref_keys_move_restore_beats_full_clone() {
+    let entries = 512usize;
+    let iterations = 100_000usize;
+    let ref_keys: HashMap<String, String> = (0..entries)
+        .map(|index| (format!("ref_{index}"), format!("root/{index}")))
+        .collect();
+    let lookup = "ref_511".to_string();
+
+    let old_refs = std::cell::RefCell::new(ref_keys.clone());
+    let old_started = std::time::Instant::now();
+    let mut old_total = 0usize;
+    for _ in 0..iterations {
+        let batch_ref_keys = old_refs.borrow().clone();
+        old_total = old_total.wrapping_add(
+            std::hint::black_box(batch_ref_keys.get(&lookup))
+                .map(String::len)
+                .unwrap_or_default(),
+        );
+    }
+    let old_time = old_started.elapsed();
+
+    let new_refs = std::cell::RefCell::new(ref_keys);
+    let new_started = std::time::Instant::now();
+    let mut new_total = 0usize;
+    for _ in 0..iterations {
+        let batch_ref_keys = {
+            let mut borrowed = new_refs.borrow_mut();
+            std::mem::take(&mut *borrowed)
+        };
+        new_total = new_total.wrapping_add(
+            std::hint::black_box(batch_ref_keys.get(&lookup))
+                .map(String::len)
+                .unwrap_or_default(),
+        );
+        *new_refs.borrow_mut() = batch_ref_keys;
+    }
+    let new_time = new_started.elapsed();
+
+    eprintln!(
+        "element action ref keys: clone {old_time:?}; move/restore {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+        old_time.as_secs_f64() / new_time.as_secs_f64()
+    );
+    assert_eq!(old_total, new_total);
+    assert!(new_time < old_time);
+}
+
 // cargo test -p mesh-core-shell --release -- runtime_prop_sync_single_lock_beats_contains_then_get_mut --ignored --nocapture
 #[test]
 #[ignore = "release-only runtime prop sync lock microbenchmark"]

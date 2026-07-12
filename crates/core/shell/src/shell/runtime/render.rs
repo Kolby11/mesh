@@ -6,6 +6,7 @@ use mesh_core_presentation::{
     LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement,
 };
 use mesh_core_render::{DamageRect, DisplayPaintCommand};
+use smallvec::SmallVec;
 use std::collections::HashSet;
 
 impl Shell {
@@ -63,7 +64,7 @@ impl Shell {
             let profiling_enabled = self.profiling_enabled();
             let mut rerender_attempts = 0;
             let mut component_stage_records = Vec::new();
-            let component_id = self.components[index].component.id().to_string();
+            let component_id = surface_id.as_str();
             // Hoist logical dimensions and scale before the loop so that
             // the post-loop force-full-redraw and debug-overlay paths can
             // reference them without depending on loop-scoped mutable borrows.
@@ -361,7 +362,7 @@ impl Shell {
                     .module_id
                     .as_deref()
                     .filter(|id| !id.is_empty())
-                    .or(Some(component_id.as_str()));
+                    .or(Some(component_id));
                 self.record_surface_profiling_stage(
                     &surface_id,
                     module_id,
@@ -374,11 +375,7 @@ impl Shell {
                 .component
                 .take_invalidation_snapshot()
             {
-                self.record_surface_invalidation(
-                    &surface_id,
-                    Some(component_id.as_str()),
-                    invalidation,
-                );
+                self.record_surface_invalidation(&surface_id, Some(component_id), invalidation);
             }
 
             // Present the component's parent surface. Child popup targets paint
@@ -386,7 +383,7 @@ impl Shell {
             let presented = self.present_surface_target(
                 index,
                 TargetRef::Parent,
-                &component_id,
+                component_id,
                 paint_width,
                 paint_height,
                 scale,
@@ -400,7 +397,7 @@ impl Shell {
 
             let child_presented = self.reconcile_child_surface_requests(
                 index,
-                &component_id,
+                component_id,
                 &surface_id,
                 scale,
                 total_render_started,
@@ -435,16 +432,16 @@ impl Shell {
                 .set_entering_child_keys(HashSet::new());
             return Ok(false);
         }
-        let requested_keys: HashSet<&str> = requests
+        let requested_keys: SmallVec<[&str; 4]> = requests
             .iter()
             .map(|request| request.node_key.as_str())
             .collect();
         self.components[index]
             .entering_child_node_keys
-            .retain(|node_key| requested_keys.contains(node_key.as_str()));
+            .retain(|node_key| requested_keys.contains(&node_key.as_str()));
         self.components[index]
             .dismissed_child_node_keys
-            .retain(|node_key| requested_keys.contains(node_key.as_str()));
+            .retain(|node_key| requested_keys.contains(&node_key.as_str()));
         if !self.presentation_engine.popup_supported() {
             self.destroy_all_child_surfaces(index);
             self.components[index].entering_child_node_keys.clear();
@@ -463,7 +460,7 @@ impl Shell {
             let node_key = self.components[index].children[child_index]
                 .node_key
                 .clone();
-            if requested_keys.contains(node_key.as_str()) {
+            if requested_keys.contains(&node_key.as_str()) {
                 self.components[index].children[child_index].closing_until = None;
                 child_index += 1;
                 continue;
@@ -688,7 +685,7 @@ impl Shell {
             .iter()
             .enumerate()
             .filter(|(_, child)| {
-                child.closing_until.is_some() && !requested_keys.contains(child.node_key.as_str())
+                child.closing_until.is_some() && !requested_keys.contains(&child.node_key.as_str())
             })
             .map(|(child_index, _)| child_index)
             .collect();
@@ -1176,6 +1173,8 @@ fn map_popover_gravity(gravity: PopoverGravity) -> PopupGravity {
 #[cfg(test)]
 mod performance_tests {
     use super::child_surface_id;
+    use smallvec::SmallVec;
+    use std::collections::HashSet;
     use std::hint::black_box;
     use std::time::Instant;
 
@@ -1205,6 +1204,83 @@ mod performance_tests {
             encode.as_secs_f64() / clone.as_secs_f64()
         );
         assert!(clone < encode);
+    }
+
+    // cargo test -p mesh-core-shell --release -- render_component_id_borrow_beats_extra_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only render component id allocation microbenchmark"]
+    fn render_component_id_borrow_beats_extra_clone() {
+        let surface_id = "@mesh/navigation-bar".to_string();
+        let iterations = 2_000_000;
+
+        let clone_started = Instant::now();
+        let mut clone_len = 0usize;
+        for _ in 0..iterations {
+            let component_id = black_box(&surface_id).clone();
+            clone_len += black_box(component_id.len());
+        }
+        let clone_time = clone_started.elapsed();
+
+        let borrow_started = Instant::now();
+        let mut borrow_len = 0usize;
+        for _ in 0..iterations {
+            let component_id = black_box(&surface_id).as_str();
+            borrow_len += black_box(component_id.len());
+        }
+        let borrow_time = borrow_started.elapsed();
+
+        eprintln!(
+            "render component id: extra clone {clone_time:?}; borrow existing surface id {borrow_time:?}; ratio {:.1}x; lens={clone_len}/{borrow_len}",
+            clone_time.as_secs_f64() / borrow_time.as_secs_f64()
+        );
+        assert_eq!(clone_len, borrow_len);
+        assert!(borrow_time < clone_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- requested_child_keys_smallvec_beats_hashset_for_popovers --ignored --nocapture
+    #[test]
+    #[ignore = "release-only child requested-key membership microbenchmark"]
+    fn requested_child_keys_smallvec_beats_hashset_for_popovers() {
+        let requested = [
+            "root/0/language-popover",
+            "root/1/theme-popover",
+            "root/2/audio-popover",
+        ];
+        let retained = [
+            "root/0/language-popover".to_string(),
+            "root/1/theme-popover".to_string(),
+            "root/4/stale-popover".to_string(),
+        ];
+        let iterations = 500_000;
+
+        let hash_started = Instant::now();
+        let mut hash_count = 0usize;
+        for _ in 0..iterations {
+            let requested_keys: HashSet<&str> = requested.iter().copied().collect();
+            hash_count += retained
+                .iter()
+                .filter(|key| requested_keys.contains(key.as_str()))
+                .count();
+        }
+        let hash_time = hash_started.elapsed();
+
+        let small_started = Instant::now();
+        let mut small_count = 0usize;
+        for _ in 0..iterations {
+            let requested_keys: SmallVec<[&str; 4]> = requested.iter().copied().collect();
+            small_count += retained
+                .iter()
+                .filter(|key| requested_keys.contains(&key.as_str()))
+                .count();
+        }
+        let small_time = small_started.elapsed();
+
+        eprintln!(
+            "requested child keys: HashSet {hash_time:?}; SmallVec {small_time:?}; ratio {:.1}x; counts={hash_count}/{small_count}",
+            hash_time.as_secs_f64() / small_time.as_secs_f64()
+        );
+        assert_eq!(hash_count, small_count);
+        assert!(small_time < hash_time);
     }
 }
 
@@ -1287,7 +1363,7 @@ mod tests {
             DisplayPaintContent, DisplayPaintStyle, DisplayScrollbars,
         };
         DisplayPaintCommand {
-            node: DisplayPaintNode {
+            node: Arc::new(DisplayPaintNode {
                 id: 1,
                 layout: LayoutRect {
                     x,
@@ -1339,7 +1415,7 @@ mod tests {
                 },
                 content: DisplayPaintContent::None,
                 scrollbars: DisplayScrollbars::default(),
-            },
+            }),
             clip: DisplayListClip {
                 x: 0,
                 y: 0,

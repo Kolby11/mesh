@@ -263,49 +263,6 @@ impl FrontendSurfaceComponent {
         }
     }
 
-    pub(super) fn selectable_text_target_key(
-        &self,
-        tree: &WidgetNode,
-        x: f32,
-        y: f32,
-    ) -> Option<String> {
-        let path = find_node_path_at(tree, x, y)?;
-        if path.iter().any(|key| {
-            find_node_by_key(tree, key).is_some_and(|node| {
-                matches!(node.tag.as_str(), "button" | "slider" | "input")
-                    || node_is_source(
-                        node,
-                        &[
-                            "select",
-                            "option",
-                            "switch",
-                            "checkbox",
-                            "radio",
-                            "menu",
-                            "menu-item",
-                            "command-item",
-                            "preference-row",
-                            "tab",
-                            "list-item",
-                        ],
-                    )
-                    || node.event_handlers.contains_key("click")
-            })
-        }) {
-            return None;
-        }
-
-        path.into_iter().rev().find(|key| {
-            find_node_by_key(tree, key).is_some_and(|node| {
-                node.tag == "text"
-                    && node
-                        .attributes
-                        .get("selectable")
-                        .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1"))
-            })
-        })
-    }
-
     pub(super) fn selection_copy_payload(&self, tree: &WidgetNode) -> Option<String> {
         let selection = self.selection.as_ref()?;
         let node = find_node_by_key(tree, &selection.anchor.node_key)?;
@@ -361,5 +318,221 @@ impl FrontendSurfaceComponent {
         }
 
         Some(geometry.selected_text)
+    }
+}
+
+/// Selectable-text press target at a point, or `None` if the point is over
+/// an interactive element (buttons, inputs, menu items, anything with a
+/// click handler, ...) or not over selectable text at all.
+///
+/// `find_node_path_at` returns a depth-many key path; resolving each key with
+/// a separate `find_node_by_key` call re-walks the whole tree per key
+/// (O(depth × tree)). `find_nodes_by_keys` resolves the whole path in one
+/// traversal instead.
+pub(super) fn selectable_text_target_key(tree: &WidgetNode, x: f32, y: f32) -> Option<String> {
+    let path = find_node_path_at(tree, x, y)?;
+    let keys: std::collections::HashSet<&str> = path.iter().map(String::as_str).collect();
+    let nodes = find_nodes_by_keys(tree, &keys);
+
+    let is_interactive = path.iter().any(|key| {
+        nodes.get(key).is_some_and(|(node, _)| {
+            matches!(node.tag.as_str(), "button" | "slider" | "input")
+                || node_is_source(
+                    node,
+                    &[
+                        "select",
+                        "option",
+                        "switch",
+                        "checkbox",
+                        "radio",
+                        "menu",
+                        "menu-item",
+                        "command-item",
+                        "preference-row",
+                        "tab",
+                        "list-item",
+                    ],
+                )
+                || node.event_handlers.contains_key("click")
+        })
+    });
+    if is_interactive {
+        return None;
+    }
+
+    path.into_iter().rev().find(|key| {
+        nodes.get(key.as_str()).is_some_and(|(node, _)| {
+            node.tag == "text"
+                && node
+                    .attributes
+                    .get("selectable")
+                    .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1"))
+        })
+    })
+}
+
+#[cfg(test)]
+mod selectable_text_target_key_tests {
+    use super::*;
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    fn positioned_node(key: &str, tag: &str, x: f32, y: f32, w: f32, h: f32) -> WidgetNode {
+        let mut node = WidgetNode::new(tag);
+        node.attributes.insert("_mesh_key".into(), key.into());
+        node.layout.x = x;
+        node.layout.y = y;
+        node.layout.width = w;
+        node.layout.height = h;
+        node
+    }
+
+    #[test]
+    fn finds_selectable_text_with_no_interactive_ancestors() {
+        let mut text = positioned_node("root/0", "text", 0.0, 0.0, 40.0, 20.0);
+        text.attributes.insert("selectable".into(), "true".into());
+        let mut root = positioned_node("root", "row", 0.0, 0.0, 40.0, 20.0);
+        root.children.push(text);
+
+        assert_eq!(
+            selectable_text_target_key(&root, 10.0, 10.0).as_deref(),
+            Some("root/0")
+        );
+    }
+
+    #[test]
+    fn returns_none_when_an_ancestor_is_interactive() {
+        let mut text = positioned_node("root/0/0", "text", 0.0, 0.0, 40.0, 20.0);
+        text.attributes.insert("selectable".into(), "true".into());
+        let mut button = positioned_node("root/0", "button", 0.0, 0.0, 40.0, 20.0);
+        button.children.push(text);
+        let mut root = positioned_node("root", "row", 0.0, 0.0, 40.0, 20.0);
+        root.children.push(button);
+
+        assert_eq!(selectable_text_target_key(&root, 10.0, 10.0), None);
+    }
+
+    #[test]
+    fn returns_none_for_non_selectable_text() {
+        let text = positioned_node("root/0", "text", 0.0, 0.0, 40.0, 20.0);
+        let mut root = positioned_node("root", "row", 0.0, 0.0, 40.0, 20.0);
+        root.children.push(text);
+
+        assert_eq!(selectable_text_target_key(&root, 10.0, 10.0), None);
+    }
+
+    fn chain_leaf(depth: usize) -> WidgetNode {
+        if depth == 0 {
+            let mut text = positioned_node("chain/leaf", "text", 0.0, 0.0, 40.0, 20.0);
+            text.attributes.insert("selectable".into(), "true".into());
+            text
+        } else {
+            let mut node = positioned_node(&format!("chain/{depth}"), "box", 0.0, 0.0, 40.0, 20.0);
+            node.children.push(chain_leaf(depth - 1));
+            node
+        }
+    }
+
+    // A deep single-child chain (models path length) plus wide unrelated
+    // padding subtrees off the root (models total tree size), so a
+    // per-path-key `find_node_by_key` walk pays for the whole tree on every
+    // one of the `depth` keys.
+    fn chain_tree_with_padding(depth: usize, padding: usize) -> WidgetNode {
+        let mut root = positioned_node("root", "column", 0.0, 0.0, 40.0, 20.0);
+        for index in 0..padding {
+            root.children.push(positioned_node(
+                &format!("pad/{index}"),
+                "box",
+                1000.0,
+                1000.0,
+                10.0,
+                10.0,
+            ));
+        }
+        root.children.push(chain_leaf(depth));
+        root
+    }
+
+    fn old_selectable_text_target_key(tree: &WidgetNode, x: f32, y: f32) -> Option<String> {
+        let path = find_node_path_at(tree, x, y)?;
+        if path.iter().any(|key| {
+            find_node_by_key(tree, key).is_some_and(|node| {
+                matches!(node.tag.as_str(), "button" | "slider" | "input")
+                    || node_is_source(
+                        node,
+                        &[
+                            "select",
+                            "option",
+                            "switch",
+                            "checkbox",
+                            "radio",
+                            "menu",
+                            "menu-item",
+                            "command-item",
+                            "preference-row",
+                            "tab",
+                            "list-item",
+                        ],
+                    )
+                    || node.event_handlers.contains_key("click")
+            })
+        }) {
+            return None;
+        }
+
+        path.into_iter().rev().find(|key| {
+            find_node_by_key(tree, key).is_some_and(|node| {
+                node.tag == "text"
+                    && node
+                        .attributes
+                        .get("selectable")
+                        .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1"))
+            })
+        })
+    }
+
+    #[test]
+    fn fused_lookup_matches_old_per_key_walk_on_deep_chain() {
+        let tree = chain_tree_with_padding(40, 200);
+        assert_eq!(
+            selectable_text_target_key(&tree, 10.0, 10.0),
+            old_selectable_text_target_key(&tree, 10.0, 10.0)
+        );
+        assert_eq!(
+            selectable_text_target_key(&tree, 10.0, 10.0).as_deref(),
+            Some("chain/leaf")
+        );
+    }
+
+    // Run with:
+    // cargo test -p mesh-core-shell --release -- fused_selectable_text_lookup_beats_per_key_tree_walk --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn fused_selectable_text_lookup_beats_per_key_tree_walk() {
+        let tree = chain_tree_with_padding(40, 200);
+        let iterations = 2_000usize;
+
+        let old_start = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let key = old_selectable_text_target_key(black_box(&tree), 10.0, 10.0);
+            old_total = old_total.wrapping_add(key.map_or(0, |k| k.len()));
+        }
+        let old_time = old_start.elapsed();
+
+        let new_start = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let key = selectable_text_target_key(black_box(&tree), 10.0, 10.0);
+            new_total = new_total.wrapping_add(key.map_or(0, |k| k.len()));
+        }
+        let new_time = new_start.elapsed();
+
+        eprintln!(
+            "selectable text target: per-key walk {old_time:?}; fused {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 }

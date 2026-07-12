@@ -35,6 +35,15 @@ end
         .call_namespaced_handler("focus_field", &[])
         .unwrap();
     assert_eq!(
+        component
+            .ref_node_keys
+            .borrow()
+            .get("field")
+            .map(String::as_str),
+        Some("root/0"),
+        "element action application should keep the ref lookup table populated"
+    );
+    assert_eq!(
         component.focused_key.as_deref(),
         Some("root/0"),
         "refs.field:focus() should focus the input's live node"

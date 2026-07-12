@@ -553,7 +553,12 @@ impl SkiaPaintBackend {
                 PainterCommand::DrawPath { path, paint, clip } => {
                     let paint = *paint;
                     self.diagnose_unsupported_paint(paint, diagnostics);
-                    self.draw_path_command(canvas, path, paint, effective_clip(*clip, &clip_stack));
+                    self.draw_path_command(
+                        canvas,
+                        path,
+                        paint,
+                        effective_clip(*clip, &clip_stack),
+                    );
                 }
                 PainterCommand::DrawImage {
                     image,

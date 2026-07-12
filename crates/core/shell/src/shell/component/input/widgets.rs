@@ -259,13 +259,7 @@ impl FrontendSurfaceComponent {
         x: f32,
         y: f32,
     ) -> Option<String> {
-        find_focusable_at(tree, x, y).or_else(|| {
-            find_node_path_at(tree, x, y).and_then(|path| {
-                path.into_iter()
-                    .rev()
-                    .find(|key| find_event_handler(tree, key, "click").is_some())
-            })
-        })
+        pointer_event_target_with_focus(tree, x, y).0
     }
 
     pub(in crate::shell::component) fn build_click_event(
@@ -590,4 +584,26 @@ fn collect_key_path(node: &WidgetNode, key: &str, path: &mut Vec<String>) -> boo
         path.pop();
     }
     false
+}
+
+/// Fused press-path lookup: returns the click-target key alongside the
+/// focusable-at-point key computed in the same pass. `handle_component_input`
+/// used to call `find_focusable_at` a second time immediately after
+/// `pointer_event_target_key` (once inside it, once explicitly) to decide the
+/// focus target on every press — this returns both from one `find_focusable_at`
+/// walk instead of two.
+pub(in crate::shell::component) fn pointer_event_target_with_focus(
+    tree: &WidgetNode,
+    x: f32,
+    y: f32,
+) -> (Option<String>, Option<String>) {
+    let focusable = find_focusable_at(tree, x, y);
+    let target = focusable.clone().or_else(|| {
+        find_node_path_at(tree, x, y).and_then(|path| {
+            path.into_iter()
+                .rev()
+                .find(|key| find_event_handler(tree, key, "click").is_some())
+        })
+    });
+    (target, focusable)
 }
