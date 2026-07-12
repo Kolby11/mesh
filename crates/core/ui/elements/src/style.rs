@@ -168,7 +168,7 @@ box.card { padding: 3px; }
         let resolver = StyleResolver::new(&theme);
         let value = StyleValue::Var("--color-primary".to_string());
         let resolved = resolver.resolve_value(&value);
-        assert_eq!(resolved, "#6750A4");
+        assert_eq!(Color::from_hex(&resolved), Color::from_hex("#6750A4"));
     }
 
     #[test]
@@ -177,7 +177,7 @@ box.card { padding: 3px; }
         let resolver = StyleResolver::new(&theme);
         let value = StyleValue::Var("--color-primary".to_string());
         let resolved = resolver.resolve_value(&value);
-        assert_eq!(resolved, "#6750A4");
+        assert_eq!(Color::from_hex(&resolved), Color::from_hex("#6750A4"));
     }
 
     #[test]
@@ -769,10 +769,9 @@ box.card { padding: 3px; }
             defaults: mesh_core_theme::ThemeDefaults {
                 components: std::collections::HashMap::from([(
                     "base".into(),
-                    std::collections::HashMap::from([(
-                        "color".into(),
-                        "var(--color-on-background)".into(),
-                    )]),
+                    [("color".into(), "var(--color-on-background)".into())]
+                        .into_iter()
+                        .collect(),
                 )]),
             },
             keyframes: std::collections::HashMap::new(),
@@ -789,18 +788,22 @@ box.card { padding: 3px; }
                     components: std::collections::HashMap::from([
                         (
                             "base".into(),
-                            std::collections::HashMap::from([(
+                            [(
                                 "transition".into(),
                                 "background-color var(--animation-duration-short) var(--animation-curves-bezier-standard)"
                                     .into(),
-                            )]),
+                            )]
+                            .into_iter()
+                            .collect(),
                         ),
                         (
                             "button".into(),
-                            std::collections::HashMap::from([(
+                            [(
                                 "background".into(),
                                 "var(--weather-color-sunny)".into(),
-                            )]),
+                            )]
+                            .into_iter()
+                            .collect(),
                         ),
                     ]),
                 },
@@ -1658,7 +1661,7 @@ box.card { padding: 3px; }
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(style.background_color, Color::from_hex("#211F26").unwrap());
         assert_eq!(style.color, Color::from_hex("#E6E1E5").unwrap());
-        assert_eq!(style.padding, Edges::all(4.0));
+        assert_eq!(style.padding, Edges::all(8.0));
         assert_eq!(style.border_radius, Corners::all(16.0));
         assert_eq!(style.gap, 4.0);
     }

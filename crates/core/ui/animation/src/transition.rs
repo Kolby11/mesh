@@ -495,7 +495,7 @@ impl TransitionAnimator {
         live: &mut HashSet<String>,
     ) -> bool {
         let mut active = false;
-        if let Some(key) = node.attributes.get("_mesh_key").cloned() {
+        if let Some(key) = node.mesh_key().map(str::to_owned) {
             live.insert(key.clone());
             let previous = self
                 .displayed_style(&key, now)

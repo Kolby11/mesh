@@ -440,9 +440,9 @@ fn set_closing_child_keys_scopes_exit_transition_to_popover_subtree_only() {
         .last_tree
         .as_ref()
         .and_then(|tree| first_node_with_class_token(tree, "theme-float-shell"))
-        .and_then(|node| node.attributes.get("_mesh_key"))
+        .and_then(|node| node.mesh_key())
         .expect("theme selector root should be a keyed popover node")
-        .clone();
+        .to_owned();
 
     // This is the same shell -> component channel `reconcile_child_surface_requests`
     // uses once a promoted popover's node drops out of the open requests while
@@ -507,9 +507,9 @@ fn set_entering_child_keys_scopes_entrance_to_popover_subtree_only() {
         .last_tree
         .as_ref()
         .and_then(|tree| first_node_with_class_token(tree, "theme-float-shell"))
-        .and_then(|node| node.attributes.get("_mesh_key"))
+        .and_then(|node| node.mesh_key())
         .expect("theme selector root should be a keyed popover node")
-        .clone();
+        .to_owned();
 
     theme_selector.set_entering_child_keys([popover_key].into_iter().collect());
     theme_selector
@@ -1003,10 +1003,10 @@ fn shipped_navigation_volume_button_publishes_immediate_audio_popover_show() {
                     "id": "@mesh/navigation-bar"
                 },
                 "current": {
-                    "key": button.attributes.get("_mesh_key").cloned().unwrap_or_default()
+                    "key": button.mesh_key().unwrap_or_default()
                 },
                 "current_target": {
-                    "key": button.attributes.get("_mesh_key").cloned().unwrap_or_default(),
+                    "key": button.mesh_key().unwrap_or_default(),
                     "position": {
                         "margin_left": 32,
                         "margin_bottom": 40

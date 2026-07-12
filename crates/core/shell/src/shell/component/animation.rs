@@ -176,7 +176,7 @@ impl FrontendSurfaceComponent {
                 .attributes
                 .get("_mesh_surface_entering")
                 .is_some_and(|value| value == "true");
-        if let Some(key) = node.attributes.get("_mesh_key").cloned() {
+        if let Some(key) = node.mesh_key().map(str::to_owned) {
             live_keys.insert(key.clone());
             if entering {
                 // A promoted child is mapped from this exact paint. Snap its
@@ -415,8 +415,8 @@ pub(super) fn collect_visual_styles(root: &WidgetNode) -> HashMap<String, Animat
 }
 
 fn collect_visual_styles_into(node: &WidgetNode, styles: &mut HashMap<String, AnimatableStyle>) {
-    if let Some(key) = node.attributes.get("_mesh_key") {
-        styles.insert(key.clone(), AnimatableStyle::from_node(node));
+    if let Some(key) = node.mesh_key() {
+        styles.insert(key.to_owned(), AnimatableStyle::from_node(node));
     }
 
     for child in &node.children {

@@ -909,12 +909,12 @@ fn normalize_key_name(value: &str) -> String {
 fn collect_keybind_subscribers(node: &WidgetNode, subscribers: &mut Vec<KeybindSubscriber>) {
     if let (Some(keybind_id), Some(node_key), Some(handler)) = (
         node.attributes.get("keybind"),
-        node.attributes.get("_mesh_key"),
+        node.mesh_key(),
         node.event_handlers.get("keybind"),
     ) {
         subscribers.push(KeybindSubscriber {
             keybind_id: keybind_id.clone(),
-            node_key: node_key.clone(),
+            node_key: node_key.to_owned(),
             handler: handler.clone(),
         });
     }

@@ -274,11 +274,11 @@ fn sparse_ref_metrics_skip_unpublished_snapshots() {
             .get("scroll_y")
             .and_then(serde_json::Value::as_f64)
             .unwrap_or(0.0) as f32;
-        let node_key = node.attributes.get("_mesh_key");
+        let node_key = node.mesh_key();
         if let Some(id) = node.attributes.get("id") {
             refs.insert(id.clone(), metrics.clone());
             if let Some(key) = node_key {
-                ref_keys.insert(id.clone(), key.clone());
+                ref_keys.insert(id.clone(), key.to_owned());
             }
         }
         if let Some(reference) = node.attributes.get("ref") {

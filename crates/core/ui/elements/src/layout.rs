@@ -794,7 +794,7 @@ fn reconcile_retained_taffy_node(
     report: &mut TaffyLayoutReport,
 ) -> Result<TaffyNodeId, taffy::TaffyError> {
     let style = taffy_style_for_node(node, report);
-    let retained = node.attributes.contains_key("_mesh_key");
+    let retained = node.has_mesh_key();
     let taffy_id = if retained {
         if let Some(existing) = state.node_map.get(&node.id).copied() {
             state.tree.set_style(existing, style)?;
@@ -904,7 +904,7 @@ fn collect_stable_taffy_map(
     node_id_to_taffy: &HashMap<NodeId, TaffyNodeId>,
     stable_map: &mut HashMap<NodeId, TaffyNodeId>,
 ) {
-    if node.attributes.contains_key("_mesh_key")
+    if node.has_mesh_key()
         && let Some(taffy_id) = node_id_to_taffy.get(&node.id)
     {
         stable_map.insert(node.id, *taffy_id);
@@ -915,7 +915,7 @@ fn collect_stable_taffy_map(
 }
 
 fn collect_retained_node_ids(node: &WidgetNode, ids: &mut HashSet<NodeId>) {
-    if node.attributes.contains_key("_mesh_key") {
+    if node.has_mesh_key() {
         ids.insert(node.id);
     }
     for child in &node.children {
@@ -1191,8 +1191,8 @@ mod tests {
     }
 
     fn collect_keyed_layouts(node: &WidgetNode, layouts: &mut HashMap<String, LayoutRect>) {
-        if let Some(key) = node.attributes.get("_mesh_key") {
-            layouts.insert(key.clone(), node.layout);
+        if let Some(key) = node.mesh_key() {
+            layouts.insert(key.to_owned(), node.layout);
         }
         for child in &node.children {
             collect_keyed_layouts(child, layouts);

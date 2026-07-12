@@ -522,7 +522,7 @@ fn sibling_source_key(
         .children
         .iter()
         .filter(|child| node_is_source(child, source_tags) && !node_disabled(child))
-        .filter_map(|child| child.attributes.get("_mesh_key").cloned())
+        .filter_map(|child| child.mesh_key().map(str::to_owned))
         .collect();
     if candidates.is_empty() {
         return None;
@@ -550,9 +550,9 @@ fn descendant_source_keys(tree: &WidgetNode, root_key: &str, source_tags: &[&str
 
 fn collect_descendant_source_keys(node: &WidgetNode, source_tags: &[&str], keys: &mut Vec<String>) {
     if node_is_source(node, source_tags)
-        && let Some(key) = node.attributes.get("_mesh_key")
+        && let Some(key) = node.mesh_key()
     {
-        keys.push(key.clone());
+        keys.push(key.to_owned());
     }
     for child in &node.children {
         collect_descendant_source_keys(child, source_tags, keys);
@@ -569,8 +569,8 @@ fn key_path(tree: &WidgetNode, key: &str) -> Option<Vec<String>> {
 }
 
 fn collect_key_path(node: &WidgetNode, key: &str, path: &mut Vec<String>) -> bool {
-    if let Some(node_key) = node.attributes.get("_mesh_key") {
-        path.push(node_key.clone());
+    if let Some(node_key) = node.mesh_key() {
+        path.push(node_key.to_owned());
         if node_key == key {
             return true;
         }
@@ -580,7 +580,7 @@ fn collect_key_path(node: &WidgetNode, key: &str, path: &mut Vec<String>) -> boo
             return true;
         }
     }
-    if node.attributes.contains_key("_mesh_key") {
+    if node.has_mesh_key() {
         path.pop();
     }
     false

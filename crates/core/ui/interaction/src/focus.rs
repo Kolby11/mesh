@@ -74,7 +74,7 @@ fn find_focusable_at_with_offset(
     }
 
     if inside_self && node_is_pointer_focusable(node) {
-        return node.attributes.get("_mesh_key").cloned();
+        return node.mesh_key().map(str::to_owned);
     }
 
     None
@@ -102,11 +102,11 @@ fn collect_focus_traversal_with_offset(
     }
 
     if node_is_tabbable(node)
-        && let Some(key) = node.attributes.get("_mesh_key")
+        && let Some(key) = node.mesh_key()
     {
         let (left, top, _right, bottom) = visible_rect.unwrap_or(rect);
         targets.push(FocusTraversalTarget {
-            key: key.clone(),
+            key: key.to_owned(),
             tabindex: parse_tabindex(node),
             left,
             top,

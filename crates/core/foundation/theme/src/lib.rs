@@ -3,13 +3,150 @@
 /// Themes define design tokens across standard groups: colors, typography,
 /// spacing, radius, elevation, borders, motion, and shadows. Components
 /// inherit tokens from the active theme.
-use serde::{Deserialize, Serialize};
+use serde::de::{MapAccess, Visitor};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 const LEGACY_DEFAULT_SHELL_ANIMATION_PREFIX: &str = "animation.default.";
 
-pub type ComponentDefaults = HashMap<String, String>;
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ComponentDefaults {
+    declarations: Vec<(String, String)>,
+}
+
+impl ComponentDefaults {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, property: String, value: String) -> Option<String> {
+        let previous = self.remove(&property);
+        self.declarations.push((property, value));
+        previous
+    }
+
+    pub fn get(&self, property: &str) -> Option<&String> {
+        self.declarations
+            .iter()
+            .find_map(|(name, value)| (name == property).then_some(value))
+    }
+
+    pub fn contains_key(&self, property: &str) -> bool {
+        self.get(property).is_some()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.declarations.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.declarations
+            .iter()
+            .map(|(property, value)| (property, value))
+    }
+
+    fn remove(&mut self, property: &str) -> Option<String> {
+        let index = self
+            .declarations
+            .iter()
+            .position(|(name, _)| name == property)?;
+        Some(self.declarations.remove(index).1)
+    }
+}
+
+impl Extend<(String, String)> for ComponentDefaults {
+    fn extend<T: IntoIterator<Item = (String, String)>>(&mut self, iter: T) {
+        for (property, value) in iter {
+            self.insert(property, value);
+        }
+    }
+}
+
+impl FromIterator<(String, String)> for ComponentDefaults {
+    fn from_iter<T: IntoIterator<Item = (String, String)>>(iter: T) -> Self {
+        let mut defaults = Self::new();
+        defaults.extend(iter);
+        defaults
+    }
+}
+
+impl IntoIterator for ComponentDefaults {
+    type Item = (String, String);
+    type IntoIter = std::vec::IntoIter<(String, String)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.declarations.into_iter()
+    }
+}
+
+pub struct ComponentDefaultsIter<'a> {
+    iter: std::slice::Iter<'a, (String, String)>,
+}
+
+impl<'a> Iterator for ComponentDefaultsIter<'a> {
+    type Item = (&'a String, &'a String);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(property, value)| (property, value))
+    }
+}
+
+impl<'a> IntoIterator for &'a ComponentDefaults {
+    type Item = (&'a String, &'a String);
+    type IntoIter = ComponentDefaultsIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ComponentDefaultsIter {
+            iter: self.declarations.iter(),
+        }
+    }
+}
+
+impl Serialize for ComponentDefaults {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.declarations.len()))?;
+        for (property, value) in &self.declarations {
+            map.serialize_entry(property, value)?;
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for ComponentDefaults {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ComponentDefaultsVisitor;
+
+        impl<'de> Visitor<'de> for ComponentDefaultsVisitor {
+            type Value = ComponentDefaults;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a map of CSS properties to values")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut defaults = ComponentDefaults::new();
+                while let Some((property, value)) = map.next_entry::<String, String>()? {
+                    defaults.insert(property, value);
+                }
+                Ok(defaults)
+            }
+        }
+
+        deserializer.deserialize_map(ComponentDefaultsVisitor)
+    }
+}
 
 /// A resolved theme token value.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -926,6 +1063,59 @@ mod tests {
     }
 
     #[test]
+    fn css_theme_preserves_component_default_declaration_order() {
+        let theme = parse_theme_css(
+            "css-theme",
+            "CSS Theme",
+            r#"
+            button {
+              background: #000000;
+              background-color: #112233;
+              color: #ffffff;
+            }
+            "#,
+        )
+        .expect("css theme parses");
+
+        let defaults = theme
+            .component_defaults("button")
+            .expect("button defaults parsed");
+        let properties = defaults
+            .iter()
+            .map(|(property, _)| property.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(properties, vec!["background", "background-color", "color"]);
+    }
+
+    #[test]
+    fn css_theme_moves_duplicate_component_default_to_latest_position() {
+        let theme = parse_theme_css(
+            "css-theme",
+            "CSS Theme",
+            r#"
+            button {
+              background-color: #000000;
+              background: #112233;
+              background-color: #445566;
+            }
+            "#,
+        )
+        .expect("css theme parses");
+
+        let defaults = theme
+            .component_defaults("button")
+            .expect("button defaults parsed");
+        let declarations = defaults
+            .iter()
+            .map(|(property, value)| (property.as_str(), value.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            declarations,
+            vec![("background", "#112233"), ("background-color", "#445566")]
+        );
+    }
+
+    #[test]
     fn css_theme_does_not_interpret_double_dash_as_token_separator() {
         let theme = parse_theme_css(
             "css-theme",
@@ -1003,19 +1193,24 @@ mod tests {
             theme
                 .token("color.surface-container")
                 .map(ToString::to_string),
-            Some("#211F26".into())
+            Some("#211f26".into())
         );
         assert_eq!(
             theme.token("color.on-surface").map(ToString::to_string),
-            Some("#E6E1E5".into())
+            Some("#e6e1e5".into())
         );
-        assert_eq!(
-            theme
-                .component_defaults("base")
-                .and_then(|defaults| defaults.get("transition"))
-                .map(String::as_str),
-            Some(
-                "background-color var(--animation-duration-short) var(--animation-curves-bezier-standard), color var(--animation-duration-short) var(--animation-curves-bezier-standard), border-color var(--animation-duration-short) var(--animation-curves-bezier-standard), opacity var(--animation-duration-medium) var(--animation-curves-bezier-standard), border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate), border-width var(--animation-duration-medium) var(--animation-curves-bezier-standard), width var(--animation-duration-medium) var(--animation-curves-bezier-standard), height var(--animation-duration-medium) var(--animation-curves-bezier-standard), padding var(--animation-duration-medium) var(--animation-curves-bezier-standard), margin var(--animation-duration-medium) var(--animation-curves-bezier-standard), transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate)"
+        let transition = theme
+            .component_defaults("base")
+            .and_then(|defaults| defaults.get("transition"))
+            .expect("base transition default");
+        assert!(
+            transition.contains(
+                "background-color var(--animation-duration-short) var(--animation-curves-bezier-standard)"
+            )
+        );
+        assert!(
+            transition.contains(
+                "transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate)"
             )
         );
     }

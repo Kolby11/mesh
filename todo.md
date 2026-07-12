@@ -1175,12 +1175,22 @@ Structure:
       builds when two nodes produce the same `NodeId`, with regression coverage
       for duplicate-id detection. Release builds keep the previous zero-cost
       insert path.
-- [ ] **Identity travels as a string attribute.** `annotate_runtime_tree`
+- [x] **Identity travels as a string attribute.** `annotate_runtime_tree`
       writes `_mesh_key` into `attributes` (`runtime_tree.rs:711`) purely so
       interaction/refs/metrics can read identity back out of a string map,
       which in turn forced the `_mesh_key` hash-exclusion special case in
       `attributes_fingerprint`. Typed field on `WidgetNode` (v1.23) retires
       both.
+      Completed 2026-07-12: `WidgetNode` now carries a typed `mesh_key`
+      field with legacy `_mesh_key` attribute fallback for hand-built tests and
+      tooling. Runtime annotation writes only the typed field, retained-tree
+      fingerprints no longer special-case `_mesh_key`, and interaction,
+      layout, style, animation, metrics/ref publication, keybind, widget
+      navigation, and child-surface request paths read identity through
+      `WidgetNode::mesh_key()`. A release microbenchmark over 500k assignments
+      measured 48.154ms for `_mesh_key` BTreeMap insertion versus 37.245ms for
+      typed field assignment (1.3x faster), before counting the downstream
+      fingerprint/map-scan savings from the smaller attribute map.
 - [ ] Minor: display-list `update_inner` is ~220 lines mixing diff, damage,
       and a ~30-field metrics struct assembly (`display_list.rs:742-961`);
       split when next touched.
@@ -1210,7 +1220,7 @@ Structure:
       564.325ms for forced descendant rebuilds versus 226.123ms with clean
       descendant reuse over 1k paint-only dirty-parent rebuilds (2.5x faster),
       with rebuilt commands dropping from 514k to 2k.
-- [ ] **`DisplayPaintCommand` embeds a full cloned `DisplayPaintNode` per
+- [x] **`DisplayPaintCommand` embeds a full cloned `DisplayPaintNode` per
       command.** `paint_node.clone()` per Node command
       (`display_list.rs:1524`), with the same node reused for the Scrollbars
       command — each clone copies text/placeholder Strings and the style
@@ -1294,7 +1304,7 @@ Performance:
       `var()`/`prop()` substitution uses the same layered lookup. With 32 props,
       200k release resolutions measured 582.988ms cloning per-node seeds versus
       20.304ms layered (~28.7x faster).
-- [ ] **`theme_reference_to_token_name` allocates and canonicalizes per
+- [x] **`theme_reference_to_token_name` allocates and canonicalizes per
       `var()` reference per declaration per node** (`resolve.rs:1916-1922` +
       `css_custom_property_to_token_name` prefix tables). Double-key theme
       tokens by their CSS custom-property name at theme load, or intern the
@@ -1307,15 +1317,30 @@ Performance:
       now also routes through the resolver cache and the duplicate standalone
       helper was removed. A release benchmark over 300k embedded substitutions
       measured 96.285ms recanonicalizing versus 86.376ms cached (~1.1x faster).
-      A theme-load double-keyed token map may still be a broader follow-up.
-- [ ] Confirmed mechanism for the existing "pre-bake per-tag prototypes" item:
+      Follow-up 2026-07-12: `StyleResolver` now also caches resolved theme token
+      values, so repeated global-token `var(--...)` paths skip both canonical
+      name lookup and `Theme::token` lookup after the first hit. A release
+      benchmark over 1M `--color-primary` lookups measured 33.179ms for
+      cached-name + theme lookup versus 18.984ms from cached token values
+      (1.7x faster). The corrected embedded-reference benchmark using real
+      `--color-*` variables measured 202.594ms recanonicalizing versus
+      158.496ms cached (1.3x faster). A theme-load double-keyed token map is no
+      longer needed for the resolver hot path, but may still be useful if other
+      call sites begin resolving CSS-variable token names directly.
+- [x] Confirmed mechanism for the existing "pre-bake per-tag prototypes" item:
       `apply_theme_defaults_map_no_diagnostics` re-clones each default's
       property String and re-classifies its value per node per pass
       (`resolve.rs:901-914`), for "base" + tag + module-base + module-tag maps.
+      Completed 2026-07-12: diagnostics style resolution now has the same
+      per-tag/module theme-default prototype cache as the no-diagnostics path,
+      including cached default diagnostics and seeded custom variables. A
+      release benchmark over 200k diagnostic default resolutions measured
+      1.304s replaying theme string maps versus 29.778ms from cached prototypes
+      (43.8x faster).
 
 Structure / correctness:
 
-- [ ] **Theme component defaults apply in nondeterministic order.**
+- [x] **Theme component defaults apply in nondeterministic order.**
       `ComponentDefaults = HashMap<String, String>`
       (`foundation/theme/src/lib.rs:12`) and `apply_theme_component_defaults`
       iterates it per node. A theme declaring an overlapping shorthand +
@@ -1323,6 +1348,11 @@ Structure / correctness:
       component resolves in random order per process run, and theme-CSS source
       declaration order is lost entirely at parse. Store defaults as an
       ordered `Vec<(String, String)>` preserving source order (CSS last-wins).
+      Completed 2026-07-12: `ComponentDefaults` is now an ordered declaration
+      collection with serde support for the existing map-shaped JSON/CSS theme
+      format. CSS parsing preserves declaration order, duplicate properties
+      move to their latest declaration position, and component-default
+      iteration now applies authored CSS order deterministically.
 - [ ] **The diagnostics/no-diagnostics path duplication caused the drift.**
       Four near-identical function pairs (`resolve_node_style_with_attrs*`,
       `apply_theme_defaults_map*`, `apply_declaration_*`) exist so the
@@ -1387,7 +1417,15 @@ Performance:
       blit (`render/src/surface/painter/tree.rs:380-410`). Any animated
       rotation pays an allocation + full subtree repaint per frame; reuse a
       cached temp buffer keyed by size class. Low priority until rotation is
-      used in shipped surfaces.
+      used in shipped surfaces. Rejected experiment 2026-07-12: adding a
+      reusable scratch `PixelBuffer` slot to `FrontendRenderEngine` preserved
+      ownership/recursion safety, but an optimized standalone benchmark that
+      mirrored `PixelBuffer` allocation/clear measured 2.586ms for fresh
+      allocate+clear versus 341.011ms for scratch reuse over 2M 96x64 buffers.
+      The retained buffer must be explicitly cleared every frame, while fresh
+      zeroed allocation can be much cheaper in this workload. Do not retry this
+      shape without measuring against real rotated subtree painting and memory
+      bandwidth, or without a way to track dirty coverage inside the temp.
 - [ ] **Minor inner-loop allocations in the Skia backend.**
       `execute_commands_on_canvas` allocates clip/layer stacks per batch
       (`painter/backend.rs:479-480`); the gradient shader cache key includes

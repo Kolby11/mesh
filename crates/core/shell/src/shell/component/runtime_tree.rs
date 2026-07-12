@@ -382,7 +382,7 @@ fn collect_retained_snapshots(
             previous.is_none(),
             "runtime NodeId collision while collecting retained snapshots: id={} key={:?}",
             node.id,
-            node.attributes.get("_mesh_key")
+            node.mesh_key()
         );
     }
     for child in &node.children {
@@ -480,10 +480,7 @@ fn attributes_fingerprint(node: &WidgetNode) -> u64 {
     let mut hasher = RuntimeTreeHasher::default();
     node.tag.hash(&mut hasher);
     for (key, value) in &node.attributes {
-        // Runtime identity is already represented by `node.id`. Rehashing the
-        // full slash-joined path here makes deep trees pay for the same
-        // identity twice on every retained snapshot.
-        if matches!(key.as_str(), "_mesh_key" | "_mesh_focused") {
+        if key == "_mesh_focused" {
             continue;
         }
         if key == "content" && !node.children.is_empty() {
@@ -673,7 +670,7 @@ pub(super) fn collect_element_metrics(
     refs: &mut serde_json::Map<String, serde_json::Value>,
     ref_keys: &mut HashMap<String, String>,
 ) {
-    let node_key = node.attributes.get("_mesh_key");
+    let node_key = node.mesh_key();
     let publishes_element = collect_elements && node_key.is_some();
     let publishes_ref = collect_refs
         && (node.attributes.contains_key("id")
@@ -684,7 +681,7 @@ pub(super) fn collect_element_metrics(
         .then(|| element_snapshot_json(node, offset_x, offset_y));
 
     if collect_elements && let (Some(key), Some(metrics)) = (node_key, metrics.as_ref()) {
-        elements.insert(key.clone(), metrics.clone());
+        elements.insert(key.to_owned(), metrics.clone());
     }
     // Map each `refs.<name>` to the node's runtime key so imperative element
     // actions (focus/blur/…) can resolve a name back to the live widget node.
@@ -692,19 +689,19 @@ pub(super) fn collect_element_metrics(
         if let Some(id) = node.attributes.get("id") {
             refs.insert(id.clone(), metrics.clone());
             if let Some(key) = node_key {
-                ref_keys.insert(id.clone(), key.clone());
+                ref_keys.insert(id.clone(), key.to_owned());
             }
         }
         if let Some(reference) = node.attributes.get("ref") {
             refs.insert(reference.clone(), metrics.clone());
             if let Some(key) = node_key {
-                ref_keys.insert(reference.clone(), key.clone());
+                ref_keys.insert(reference.clone(), key.to_owned());
             }
         }
         if let Some(binding) = node.attributes.get("_mesh_bind_this") {
             refs.insert(binding.clone(), metrics.clone());
             if let Some(key) = node_key {
-                ref_keys.insert(binding.clone(), key.clone());
+                ref_keys.insert(binding.clone(), key.to_owned());
             }
         }
     }
@@ -786,7 +783,7 @@ fn annotate_runtime_tree_inner(
     context: &mut RuntimeAnnotationContext<'_>,
 ) {
     node.id = node_id;
-    node.attributes.insert("_mesh_key".into(), key.clone());
+    node.set_mesh_key(key.clone());
 
     let key_str = key.as_str();
     let disabled = node
@@ -1585,17 +1582,10 @@ mod tests {
         assert_eq!(first.id, second.id);
         assert_eq!(first.children[0].id, second.children[0].id);
         assert_ne!(first.id, first.children[0].id);
-        assert_eq!(
-            first.attributes.get("_mesh_key").map(String::as_str),
-            Some("root")
-        );
-        assert_eq!(
-            first.children[0]
-                .attributes
-                .get("_mesh_key")
-                .map(String::as_str),
-            Some("root/0")
-        );
+        assert_eq!(first.mesh_key(), Some("root"));
+        assert_eq!(first.children[0].mesh_key(), Some("root/0"));
+        assert!(!first.attributes.contains_key("_mesh_key"));
+        assert!(!first.children[0].attributes.contains_key("_mesh_key"));
     }
 
     // cargo test -p mesh-core-shell --release -- mutable_runtime_key_paths_beat_format_per_child --ignored --nocapture

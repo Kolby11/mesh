@@ -1980,7 +1980,7 @@ fn collect_child_surface_requests(
 ) {
     if source_element_tag(node) == "popover"
         && popover_is_open(node)
-        && let Some(node_key) = node.attributes.get("_mesh_key")
+        && let Some(node_key) = node.mesh_key()
         && let Some(anchor) = popover_anchor_bounds(root, node, node_key)
     {
         let content = (

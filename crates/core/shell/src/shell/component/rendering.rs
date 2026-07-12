@@ -701,8 +701,8 @@ fn collect_changed_subtree_node_ids(
     parent_affected: bool,
     out: &mut InteractionChangedNodeIds,
 ) {
-    let node_key = node.attributes.get("_mesh_key");
-    let directly_affected = node_key.is_some_and(|key| changed_keys.contains(key.as_str()));
+    let node_key = node.mesh_key();
+    let directly_affected = node_key.is_some_and(|key| changed_keys.contains(key));
     let node_affected = parent_affected || directly_affected;
     if node_affected {
         out.affected.insert(node.id);
@@ -918,10 +918,10 @@ mod interaction_changed_key_tests {
             parent_affected: bool,
             out: &mut HashSet<String>,
         ) {
-            let key = node.attributes.get("_mesh_key");
+            let key = node.mesh_key();
             let affected = parent_affected || key.is_some_and(|key| changed.contains(key));
             if affected && let Some(key) = key {
-                out.insert(key.clone());
+                out.insert(key.to_owned());
             }
             for child in &node.children {
                 old_collect(child, changed, affected, out);

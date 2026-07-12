@@ -84,6 +84,8 @@ pub struct WidgetNode {
     pub state: ElementState,
     /// Typed runtime scroll state, kept out of the string attribute map.
     pub scroll_metrics: Option<WidgetScrollMetrics>,
+    /// Stable runtime identity for this node, kept out of the string attribute map.
+    mesh_key: Option<String>,
     /// Service field reads captured during template evaluation.
     /// Each entry is a (service_name, field_name) pair read by this node's expressions.
     pub service_field_reads: Vec<(String, String)>,
@@ -107,10 +109,29 @@ impl WidgetNode {
             event_handler_calls: BTreeMap::new(),
             state: ElementState::default(),
             scroll_metrics: None,
+            mesh_key: None,
             service_field_reads: Vec::new(),
             cached_class_attr: None,
             cached_classes: Vec::new(),
         }
+    }
+
+    pub fn set_mesh_key(&mut self, key: impl Into<String>) {
+        self.mesh_key = Some(key.into());
+    }
+
+    pub fn clear_mesh_key(&mut self) {
+        self.mesh_key = None;
+    }
+
+    pub fn mesh_key(&self) -> Option<&str> {
+        self.mesh_key
+            .as_deref()
+            .or_else(|| self.attributes.get("_mesh_key").map(String::as_str))
+    }
+
+    pub fn has_mesh_key(&self) -> bool {
+        self.mesh_key().is_some()
     }
 
     pub fn resolved_scroll_metrics(&self) -> WidgetScrollMetrics {
@@ -210,5 +231,56 @@ mod tests {
         node.attributes.remove("class");
         node.refresh_class_tokens_cache();
         assert!(node.class_tokens().is_empty());
+    }
+
+    #[test]
+    fn mesh_key_uses_typed_field_before_legacy_attribute() {
+        let mut node = WidgetNode::new("button");
+        assert_eq!(node.mesh_key(), None);
+
+        node.attributes
+            .insert("_mesh_key".into(), "legacy/path".into());
+        assert_eq!(node.mesh_key(), Some("legacy/path"));
+
+        node.set_mesh_key("typed/path");
+        assert_eq!(node.mesh_key(), Some("typed/path"));
+
+        node.clear_mesh_key();
+        assert_eq!(node.mesh_key(), Some("legacy/path"));
+    }
+
+    // cargo test -p mesh-core-elements --release -- typed_mesh_key_assignment_beats_attribute_map_insert --ignored --nocapture
+    #[test]
+    #[ignore = "release-only mesh key assignment microbenchmark"]
+    fn typed_mesh_key_assignment_beats_attribute_map_insert() {
+        let iterations = 500_000usize;
+
+        let attribute_started = std::time::Instant::now();
+        let mut attribute_total = 0usize;
+        for index in 0..iterations {
+            let mut node = WidgetNode::new("row");
+            let key = format!("root/{index}");
+            node.attributes.insert("_mesh_key".into(), key);
+            attribute_total =
+                attribute_total.wrapping_add(std::hint::black_box(node.mesh_key().unwrap().len()));
+        }
+        let attribute_time = attribute_started.elapsed();
+
+        let typed_started = std::time::Instant::now();
+        let mut typed_total = 0usize;
+        for index in 0..iterations {
+            let mut node = WidgetNode::new("row");
+            node.set_mesh_key(format!("root/{index}"));
+            typed_total =
+                typed_total.wrapping_add(std::hint::black_box(node.mesh_key().unwrap().len()));
+        }
+        let typed_time = typed_started.elapsed();
+
+        eprintln!(
+            "mesh key assignment: attribute map {attribute_time:?}; typed field {typed_time:?}; ratio {:.1}x; totals={attribute_total}/{typed_total}",
+            attribute_time.as_secs_f64() / typed_time.as_secs_f64()
+        );
+        assert_eq!(attribute_total, typed_total);
+        assert!(typed_time < attribute_time);
     }
 }

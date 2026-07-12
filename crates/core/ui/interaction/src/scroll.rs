@@ -107,7 +107,7 @@ pub fn scroll_into_view_offsets(
 
     for i in scrollable {
         let container = path[i];
-        let Some(key) = container.attributes.get("_mesh_key").cloned() else {
+        let Some(key) = container.mesh_key().map(str::to_owned) else {
             continue;
         };
 
@@ -190,10 +190,10 @@ fn find_scrollable_at_with_offset(
     }
 
     if inside_self && node_is_scrollable(node) {
-        return node.attributes.get("_mesh_key").map(|key| {
+        return node.mesh_key().map(|key| {
             let (max_x, max_y) = scroll_limits(node);
             ScrollableHit {
-                key: key.clone(),
+                key: key.to_owned(),
                 max_x,
                 max_y,
             }

@@ -37,15 +37,15 @@ fn pointer_hit_test_reversed(
     let (child_ox, child_oy) = child_offsets_with_scroll(node, offset_x, offset_y);
     for child in node.children.iter().rev() {
         if let Some(mut hit) = pointer_hit_test_reversed(child, x, y, child_ox, child_oy, tooltip) {
-            if let Some(key) = node.attributes.get("_mesh_key") {
-                hit.path.push(key.clone());
+            if let Some(key) = node.mesh_key() {
+                hit.path.push(key.to_owned());
             }
             return Some(hit);
         }
     }
-    let key = node.attributes.get("_mesh_key")?;
+    let key = node.mesh_key()?;
     inside.then(|| PointerHit {
-        path: vec![key.clone()],
+        path: vec![key.to_owned()],
         tooltip: tooltip.map(|(owner, text, _)| (owner.clone(), text.clone())),
         bounds: tooltip
             .map(|(_, _, bounds)| *bounds)
@@ -107,11 +107,11 @@ fn collect_nodes_by_keys<'a>(
         return;
     }
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    if let Some(key) = node.attributes.get("_mesh_key")
-        && keys.contains(key.as_str())
+    if let Some(key) = node.mesh_key()
+        && keys.contains(key)
     {
         found.insert(
-            key.clone(),
+            key.to_owned(),
             (node, node_rect_with_offset(node, offset_x, offset_y)),
         );
     }
@@ -188,8 +188,8 @@ fn find_node_path_reversed(
     let (child_ox, child_oy) = child_offsets_with_scroll(node, offset_x, offset_y);
     for child in node.children.iter().rev() {
         if let Some(mut path) = find_node_path_reversed(child, x, y, child_ox, child_oy) {
-            if let Some(key) = node.attributes.get("_mesh_key") {
-                path.push(key.clone());
+            if let Some(key) = node.mesh_key() {
+                path.push(key.to_owned());
             }
             return Some(path);
         }
@@ -260,7 +260,7 @@ fn find_container_bounds_inner(
     nearest_clip: Option<ContentBounds>,
 ) -> Option<Option<ContentBounds>> {
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    if node.attributes.get("_mesh_key").is_some_and(|k| k == key) {
+    if node.mesh_key().is_some_and(|k| k == key) {
         return Some(nearest_clip);
     }
     let clips = node.computed_style.overflow_x.clips_contents()
@@ -298,7 +298,7 @@ fn find_tooltip_by_key_with_inherited(
 ) -> Option<Option<(String, String)>> {
     let owner_text = node_tooltip_owner_text(node);
     let inherited = owner_text.as_ref().or(inherited);
-    if node.attributes.get("_mesh_key").is_some_and(|k| k == key) {
+    if node.mesh_key().is_some_and(|k| k == key) {
         return Some(inherited.cloned());
     }
     for child in &node.children {
@@ -493,14 +493,14 @@ mod tests {
 
         assert_eq!(found.len(), 2, "the missing key must not appear");
         let (row_node, row_bounds) = found.get("row-2").expect("row-2 found");
-        assert_eq!(row_node.attributes.get("_mesh_key").unwrap(), "row-2");
+        assert_eq!(row_node.mesh_key().unwrap(), "row-2");
         assert_eq!(
             row_bounds,
             &find_node_bounds_by_key(&root, "row-2", 0.0, 0.0).unwrap()
         );
 
         let (cell_node, cell_bounds) = found.get("cell-4-3").expect("cell-4-3 found");
-        assert_eq!(cell_node.attributes.get("_mesh_key").unwrap(), "cell-4-3");
+        assert_eq!(cell_node.mesh_key().unwrap(), "cell-4-3");
         assert_eq!(
             cell_bounds,
             &find_node_bounds_by_key(&root, "cell-4-3", 0.0, 0.0).unwrap()

@@ -55,7 +55,40 @@ pub struct StyleResolver<'a> {
     theme_default_cache: RefCell<HashMap<String, (ComputedStyle, HashMap<String, StyleValue>)>>,
     module_theme_default_cache:
         RefCell<HashMap<String, HashMap<String, (ComputedStyle, HashMap<String, StyleValue>)>>>,
+    theme_default_diagnostic_cache: RefCell<HashMap<String, ThemeDefaultDiagnosticPrototype>>,
+    module_theme_default_diagnostic_cache:
+        RefCell<HashMap<String, HashMap<String, ThemeDefaultDiagnosticPrototype>>>,
     theme_reference_cache: RefCell<HashMap<String, Arc<str>>>,
+    theme_value_cache: RefCell<HashMap<String, CachedThemeTokenValue>>,
+}
+
+type ThemeDefaultDiagnosticPrototype = (
+    ComputedStyle,
+    HashMap<String, StyleValue>,
+    Vec<StyleDiagnostic>,
+);
+
+#[derive(Debug, Clone)]
+enum CachedThemeTokenValue {
+    Missing,
+    String(Arc<str>),
+    Number(f64),
+    Bool(bool),
+}
+
+impl CachedThemeTokenValue {
+    fn from_token(value: Option<&TokenValue>) -> Self {
+        match value {
+            Some(TokenValue::String(value)) => Self::String(Arc::from(value.as_str())),
+            Some(TokenValue::Number(value)) => Self::Number(*value),
+            Some(TokenValue::Bool(value)) => Self::Bool(*value),
+            None => Self::Missing,
+        }
+    }
+
+    fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -156,7 +189,7 @@ impl<'a> StyleNodeAttrs<'a> {
             tag: node.tag.as_str(),
             classes,
             id: node.attributes.get("id").map(|value| value.as_str()),
-            key: node.attributes.get("_mesh_key").map(|value| value.as_str()),
+            key: node.mesh_key(),
             module_id: node
                 .attributes
                 .get("_mesh_module_id")
@@ -274,7 +307,7 @@ impl StyleRuleIndex {
                     visit(rule);
                 }
             }
-        });
+        })
     }
 
     fn for_each_candidate_rule_index(&self, attrs: &StyleNodeAttrs, mut visit: impl FnMut(usize)) {
@@ -305,7 +338,7 @@ impl StyleRuleIndex {
             for &idx in ids.iter() {
                 visit(idx);
             }
-        });
+        })
     }
 
     fn no_diagnostics_declarations(&self, rule_idx: usize) -> &[IndexedDeclaration] {
@@ -463,7 +496,10 @@ impl<'a> StyleResolver<'a> {
             module_variable_cache: RefCell::new(HashMap::new()),
             theme_default_cache: RefCell::new(HashMap::new()),
             module_theme_default_cache: RefCell::new(HashMap::new()),
+            theme_default_diagnostic_cache: RefCell::new(HashMap::new()),
+            module_theme_default_diagnostic_cache: RefCell::new(HashMap::new()),
             theme_reference_cache: RefCell::new(HashMap::new()),
+            theme_value_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -583,12 +619,12 @@ impl<'a> StyleResolver<'a> {
         name: &str,
         strict_animation_tokens: bool,
     ) -> Result<String, String> {
-        let token_name = self.cached_theme_token_name(name);
-        match self.theme.token(&token_name) {
-            Some(TokenValue::String(s)) => Ok(s.clone()),
-            Some(TokenValue::Number(n)) => Ok(format!("{n}")),
-            Some(TokenValue::Bool(b)) => Ok(format!("{b}")),
-            None => {
+        match self.cached_theme_token_value(name) {
+            CachedThemeTokenValue::String(s) => Ok(s.to_string()),
+            CachedThemeTokenValue::Number(n) => Ok(format!("{n}")),
+            CachedThemeTokenValue::Bool(b) => Ok(format!("{b}")),
+            CachedThemeTokenValue::Missing => {
+                let token_name = self.cached_theme_token_name(name);
                 if strict_animation_tokens && token_name.starts_with("animation.") {
                     return Err(token_name.to_string());
                 }
@@ -651,12 +687,12 @@ impl<'a> StyleResolver<'a> {
                     strict_animation_tokens,
                 )?);
             } else {
-                let token_name = self.cached_theme_token_name(name);
-                match self.theme.token(&token_name) {
-                    Some(TokenValue::String(s)) => output.push_str(s),
-                    Some(TokenValue::Number(n)) => output.push_str(&format!("{n}")),
-                    Some(TokenValue::Bool(b)) => output.push_str(&format!("{b}")),
-                    None => {
+                match self.cached_theme_token_value(name) {
+                    CachedThemeTokenValue::String(s) => output.push_str(&s),
+                    CachedThemeTokenValue::Number(n) => output.push_str(&format!("{n}")),
+                    CachedThemeTokenValue::Bool(b) => output.push_str(&format!("{b}")),
+                    CachedThemeTokenValue::Missing => {
+                        let token_name = self.cached_theme_token_name(name);
                         if strict_animation_tokens && token_name.starts_with("animation.") {
                             return Err(token_name.to_string());
                         }
@@ -715,9 +751,10 @@ impl<'a> StyleResolver<'a> {
 
             let reference_start = start + "var(".len();
             let end = rest[reference_start..].find(')')?;
-            let token_name =
-                self.cached_theme_token_name(rest[reference_start..reference_start + end].trim());
-            if token_name.starts_with("animation.") && self.theme.token(&token_name).is_none() {
+            let reference = rest[reference_start..reference_start + end].trim();
+            let token_name = self.cached_theme_token_name(reference);
+            let token_value = self.cached_theme_token_value(reference);
+            if token_name.starts_with("animation.") && token_value.is_missing() {
                 return Some(token_name.to_string());
             }
             rest = &rest[reference_start + end + 1..];
@@ -744,7 +781,7 @@ impl<'a> StyleResolver<'a> {
                 .unwrap_or_else(|| {
                     let token_name = self.cached_theme_token_name(name);
                     if token_name.starts_with("animation.")
-                        && self.theme.token(&token_name).is_none()
+                        && self.cached_theme_token_value(name).is_missing()
                     {
                         Err(token_name.to_string())
                     } else {
@@ -795,15 +832,14 @@ impl<'a> StyleResolver<'a> {
                         depth.saturating_add(1),
                     );
                 }
-                let token_name = self.cached_theme_token_name(name);
-                match self.theme.token(&token_name) {
-                    Some(TokenValue::String(value)) => {
-                        Some(Color::from_hex(value).unwrap_or(Color::TRANSPARENT))
+                match self.cached_theme_token_value(name) {
+                    CachedThemeTokenValue::String(value) => {
+                        Some(Color::from_hex(&value).unwrap_or(Color::TRANSPARENT))
                     }
-                    Some(TokenValue::Number(_)) | Some(TokenValue::Bool(_)) => {
+                    CachedThemeTokenValue::Number(_) | CachedThemeTokenValue::Bool(_) => {
                         Some(Color::TRANSPARENT)
                     }
-                    None => None,
+                    CachedThemeTokenValue::Missing => None,
                 }
             }
             StyleValue::Prop(name) => self
@@ -852,12 +888,11 @@ impl<'a> StyleResolver<'a> {
                         depth.saturating_add(1),
                     );
                 }
-                let token_name = self.cached_theme_token_name(name);
-                match self.theme.token(&token_name) {
-                    Some(TokenValue::Number(value)) => Some(*value as f32),
-                    Some(TokenValue::String(value)) => Some(parse_px(value)),
-                    Some(TokenValue::Bool(_)) => Some(0.0),
-                    None => None,
+                match self.cached_theme_token_value(name) {
+                    CachedThemeTokenValue::Number(value) => Some(value as f32),
+                    CachedThemeTokenValue::String(value) => Some(parse_px(&value)),
+                    CachedThemeTokenValue::Bool(_) => Some(0.0),
+                    CachedThemeTokenValue::Missing => None,
                 }
             }
             StyleValue::Prop(name) => self
@@ -1043,14 +1078,14 @@ impl<'a> StyleResolver<'a> {
         if tag == "column" {
             style.direction = FlexDirection::Column;
         }
-        let mut variables = HashMap::new();
+        let mut default_variables = HashMap::new();
         self.apply_theme_component_defaults_no_diagnostics(
             &mut style,
             tag,
             module_id,
-            &mut variables,
+            &mut default_variables,
         );
-        let cached = (style, variables);
+        let cached = (style, default_variables);
         if let Some(module_id) = module_id {
             self.module_theme_default_cache
                 .borrow_mut()
@@ -1084,6 +1119,19 @@ impl<'a> StyleResolver<'a> {
         name
     }
 
+    fn cached_theme_token_value(&self, reference: &str) -> CachedThemeTokenValue {
+        let reference = reference.trim();
+        if let Some(value) = self.theme_value_cache.borrow().get(reference) {
+            return value.clone();
+        }
+        let token_name = self.cached_theme_token_name(reference);
+        let value = CachedThemeTokenValue::from_token(self.theme.token(&token_name));
+        self.theme_value_cache
+            .borrow_mut()
+            .insert(reference.to_owned(), value.clone());
+        value
+    }
+
     fn resolve_node_style_with_attrs_indexed(
         &self,
         rules: &[StyleRule],
@@ -1091,21 +1139,8 @@ impl<'a> StyleResolver<'a> {
         attrs: &StyleNodeAttrs,
         context: StyleContext,
     ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
-        let mut style = ComputedStyle::default();
-        let mut diagnostics = Vec::new();
-        let mut variables = HashMap::new();
-
-        if attrs.tag == "column" {
-            style.direction = FlexDirection::Column;
-        }
-
-        self.apply_theme_component_defaults(
-            &mut style,
-            attrs.tag,
-            attrs.module_id(),
-            &mut diagnostics,
-            &mut variables,
-        );
+        let (mut style, mut variables, mut diagnostics) =
+            self.cached_theme_component_defaults_with_diagnostics(attrs.tag, attrs.module_id());
 
         index.for_each_candidate_rule_index(attrs, |rule_idx| {
             let Some(rule) = rules.get(rule_idx) else {
@@ -1126,6 +1161,55 @@ impl<'a> StyleResolver<'a> {
         });
 
         (style, diagnostics)
+    }
+
+    fn cached_theme_component_defaults_with_diagnostics(
+        &self,
+        tag: &str,
+        module_id: Option<&str>,
+    ) -> ThemeDefaultDiagnosticPrototype {
+        let cached = if let Some(module_id) = module_id {
+            self.module_theme_default_diagnostic_cache
+                .borrow()
+                .get(module_id)
+                .and_then(|tags| tags.get(tag))
+                .cloned()
+        } else {
+            self.theme_default_diagnostic_cache
+                .borrow()
+                .get(tag)
+                .cloned()
+        };
+        if let Some(cached) = cached {
+            return cached;
+        }
+
+        let mut style = ComputedStyle::default();
+        if tag == "column" {
+            style.direction = FlexDirection::Column;
+        }
+        let mut diagnostics = Vec::new();
+        let mut default_variables = HashMap::new();
+        self.apply_theme_component_defaults(
+            &mut style,
+            tag,
+            module_id,
+            &mut diagnostics,
+            &mut default_variables,
+        );
+        let cached = (style, default_variables, diagnostics);
+        if let Some(module_id) = module_id {
+            self.module_theme_default_diagnostic_cache
+                .borrow_mut()
+                .entry(module_id.to_owned())
+                .or_default()
+                .insert(tag.to_owned(), cached.clone());
+        } else {
+            self.theme_default_diagnostic_cache
+                .borrow_mut()
+                .insert(tag.to_owned(), cached.clone());
+        }
+        cached
     }
 
     pub fn apply_declarations_with_diagnostics(
@@ -1516,10 +1600,7 @@ impl<'a> StyleResolver<'a> {
                 if let StyleValue::Var(variable_name) = &decl.value
                     && !*strict_animation
                     && !variables.contains_key(variable_name)
-                    && self
-                        .theme
-                        .token(&self.cached_theme_token_name(variable_name))
-                        .is_none()
+                    && self.cached_theme_token_value(variable_name).is_missing()
                 {
                     diagnostics.push(StyleDiagnostic {
                         property: name.clone(),
@@ -1664,10 +1745,7 @@ impl<'a> StyleResolver<'a> {
         if let StyleValue::Var(name) = &decl.value
             && !is_strict_animation_property(&decl.property)
             && !variables.contains_key(name)
-            && self
-                .theme
-                .token(&self.cached_theme_token_name(name))
-                .is_none()
+            && self.cached_theme_token_value(name).is_missing()
         {
             diagnostics.push(StyleDiagnostic {
                 property: decl.property.clone(),
@@ -2689,6 +2767,51 @@ mod tests {
             );
 
         assert_eq!(indexed, uncached);
+    }
+
+    #[test]
+    fn cached_diagnostic_theme_defaults_match_replayed_defaults() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.defaults.components.insert(
+            "benchmark-card".into(),
+            [
+                ("background-color".into(), "#112233".into()),
+                ("color".into(), "#ffffff".into()),
+                ("font-size".into(), "13px".into()),
+                ("grid-template-columns".into(), "1fr 1fr".into()),
+                ("--local-accent".into(), "#445566".into()),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let resolver = StyleResolver::new(&theme);
+
+        let mut replayed_style = ComputedStyle::default();
+        let mut replayed_diagnostics = Vec::new();
+        let mut replayed_variables = HashMap::new();
+        resolver.apply_theme_component_defaults(
+            &mut replayed_style,
+            "benchmark-card",
+            None,
+            &mut replayed_diagnostics,
+            &mut replayed_variables,
+        );
+
+        let (cached_style, cached_variables, cached_diagnostics) =
+            resolver.cached_theme_component_defaults_with_diagnostics("benchmark-card", None);
+
+        assert_eq!(
+            cached_style.background_color,
+            replayed_style.background_color
+        );
+        assert_eq!(cached_style.color, replayed_style.color);
+        assert!((cached_style.font_size - replayed_style.font_size).abs() < f32::EPSILON);
+        assert_eq!(cached_variables.len(), replayed_variables.len());
+        assert!(matches!(
+            cached_variables.get("--local-accent"),
+            Some(StyleValue::Literal(value)) if value == "#445566"
+        ));
+        assert_eq!(cached_diagnostics, replayed_diagnostics);
     }
 
     // cargo test -p mesh-core-elements --release -- indexed_diagnostic_declarations_skip_static_reclassification --ignored --nocapture
@@ -4341,7 +4464,7 @@ mod tests {
         let mut theme = mesh_core_theme::default_theme();
         theme.defaults.components.insert(
             "benchmark-card".into(),
-            HashMap::from([
+            [
                 ("background-color".into(), "#112233".into()),
                 ("color".into(), "#ffffff".into()),
                 ("font-size".into(), "13px".into()),
@@ -4350,7 +4473,9 @@ mod tests {
                 ("gap".into(), "5px".into()),
                 ("opacity".into(), "0.875".into()),
                 ("--local-accent".into(), "#445566".into()),
-            ]),
+            ]
+            .into_iter()
+            .collect(),
         );
         let resolver = StyleResolver::new(&theme);
         let attrs = StyleNodeAttrs {
@@ -4397,6 +4522,89 @@ mod tests {
 
         eprintln!(
             "theme default prototype: reapply strings {uncached_time:?}; cached {cached_time:?}; ratio {:.1}x; accumulators={uncached_accumulator}/{cached_accumulator}",
+            uncached_time.as_secs_f64() / cached_time.as_secs_f64()
+        );
+        assert_eq!(uncached_accumulator, cached_accumulator);
+        assert!(cached_time < uncached_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- cached_diagnostic_theme_default_prototype_beats_reapplying_string_map --ignored --nocapture
+    #[test]
+    #[ignore = "release-only diagnostic theme default prototype microbenchmark"]
+    fn cached_diagnostic_theme_default_prototype_beats_reapplying_string_map() {
+        fn old_resolve_diagnostic_theme_defaults(
+            resolver: &StyleResolver<'_>,
+            tag: &str,
+        ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
+            let mut style = ComputedStyle::default();
+            let mut diagnostics = Vec::new();
+            let mut variables = HashMap::new();
+            resolver.apply_theme_component_defaults(
+                &mut style,
+                tag,
+                None,
+                &mut diagnostics,
+                &mut variables,
+            );
+            (style, diagnostics)
+        }
+
+        let mut theme = mesh_core_theme::default_theme();
+        theme.defaults.components.insert(
+            "benchmark-card".into(),
+            [
+                ("background-color".into(), "#112233".into()),
+                ("color".into(), "#ffffff".into()),
+                ("font-size".into(), "13px".into()),
+                ("padding".into(), "4px 8px".into()),
+                ("border-radius".into(), "6px".into()),
+                ("gap".into(), "5px".into()),
+                ("opacity".into(), "0.875".into()),
+                ("grid-template-columns".into(), "1fr 1fr".into()),
+                ("--local-accent".into(), "#445566".into()),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let attrs = StyleNodeAttrs {
+            tag: "benchmark-card",
+            ..StyleNodeAttrs::default()
+        };
+        let rules = Vec::new();
+        let index = StyleRuleIndex::new(&rules);
+        let context = StyleContext::default();
+        let iterations = 200_000;
+
+        let uncached_started = std::time::Instant::now();
+        let mut uncached_accumulator = 0u32;
+        for _ in 0..iterations {
+            let (style, diagnostics) =
+                old_resolve_diagnostic_theme_defaults(&resolver, "benchmark-card");
+            uncached_accumulator = uncached_accumulator.wrapping_add(std::hint::black_box(
+                style.background_color.r as u32 + diagnostics.len() as u32,
+            ));
+        }
+        let uncached_time = uncached_started.elapsed();
+
+        let _ = resolver.resolve_node_style_with_attrs_indexed(&rules, &index, &attrs, context);
+        let cached_started = std::time::Instant::now();
+        let mut cached_accumulator = 0u32;
+        for _ in 0..iterations {
+            let (style, diagnostics) = resolver.resolve_node_style_with_attrs_indexed(
+                std::hint::black_box(&rules),
+                std::hint::black_box(&index),
+                std::hint::black_box(&attrs),
+                context,
+            );
+            cached_accumulator = cached_accumulator.wrapping_add(std::hint::black_box(
+                style.background_color.r as u32 + diagnostics.len() as u32,
+            ));
+        }
+        let cached_time = cached_started.elapsed();
+
+        eprintln!(
+            "diagnostic theme default prototype: reapply strings {uncached_time:?}; cached {cached_time:?}; ratio {:.1}x; accumulators={uncached_accumulator}/{cached_accumulator}",
             uncached_time.as_secs_f64() / cached_time.as_secs_f64()
         );
         assert_eq!(uncached_accumulator, cached_accumulator);
@@ -4471,7 +4679,7 @@ mod tests {
     fn cached_theme_reference_beats_recanonicalizing() {
         let theme = mesh_core_theme::default_theme();
         let resolver = StyleResolver::new(&theme);
-        let reference = "--mesh-color-primary";
+        let reference = "--color-primary";
         let iterations = 1_000_000usize;
 
         let canonicalized_started = std::time::Instant::now();
@@ -4497,6 +4705,70 @@ mod tests {
         );
         assert_eq!(canonicalized_total, cached_total);
         assert!(cached_time < canonicalized_time);
+    }
+
+    #[test]
+    fn cached_theme_token_value_matches_theme_lookup() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+
+        match resolver.cached_theme_token_value("--color-primary") {
+            CachedThemeTokenValue::String(value) => assert_eq!(
+                Some(value.as_ref()),
+                theme.token("color.primary").and_then(|value| match value {
+                    TokenValue::String(value) => Some(value.as_str()),
+                    TokenValue::Number(_) | TokenValue::Bool(_) => None,
+                })
+            ),
+            CachedThemeTokenValue::Number(_)
+            | CachedThemeTokenValue::Bool(_)
+            | CachedThemeTokenValue::Missing => panic!("expected string color token"),
+        }
+        assert!(
+            resolver
+                .cached_theme_token_value("--definitely-missing")
+                .is_missing()
+        );
+    }
+
+    // cargo test -p mesh-core-elements --release -- cached_theme_token_value_beats_cached_name_theme_lookup --ignored --nocapture
+    #[test]
+    #[ignore = "release-only theme token value lookup microbenchmark"]
+    fn cached_theme_token_value_beats_cached_name_theme_lookup() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let reference = "--color-primary";
+        let iterations = 1_000_000usize;
+
+        let _ = resolver.cached_theme_token_name(reference);
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let name = resolver.cached_theme_token_name(std::hint::black_box(reference));
+            if let Some(TokenValue::String(value)) = theme.token(&name) {
+                old_total = old_total.wrapping_add(std::hint::black_box(value.len()));
+            }
+        }
+        let old_time = old_started.elapsed();
+
+        let _ = resolver.cached_theme_token_value(reference);
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            if let CachedThemeTokenValue::String(value) =
+                resolver.cached_theme_token_value(std::hint::black_box(reference))
+            {
+                new_total = new_total.wrapping_add(std::hint::black_box(value.len()));
+            }
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "theme token value lookup: cached-name+theme {old_time:?}; cached-value {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 
     // cargo test -p mesh-core-elements --release -- cached_embedded_theme_references_beat_recanonicalizing --ignored --nocapture
@@ -4530,7 +4802,8 @@ mod tests {
 
         let theme = mesh_core_theme::default_theme();
         let resolver = StyleResolver::new(&theme);
-        let value = "linear-gradient(var(--mesh-color-primary), var(--mesh-color-secondary), var(--mesh-color-primary))";
+        let value =
+            "linear-gradient(var(--color-primary), var(--color-secondary), var(--color-primary))";
         let variables = HashMap::new();
         let iterations = 300_000usize;
 
