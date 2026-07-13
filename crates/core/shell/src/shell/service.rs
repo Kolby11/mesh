@@ -102,6 +102,7 @@ pub(super) fn apply_service_update_with_name(
     }
 }
 
+#[cfg(test)]
 pub(super) fn service_command_control_capability(interface: &str) -> Capability {
     service_capabilities(interface).control.clone()
 }
@@ -109,146 +110,144 @@ pub(super) fn service_command_control_capability(interface: &str) -> Capability 
 pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<CoreRequest> {
     events
         .into_iter()
-        .filter_map(|event| match event.channel.as_str() {
-            "shell.show-surface" => event
+        .filter_map(script_event_to_request)
+        .collect()
+}
+
+fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
+    match event.channel.as_str() {
+        "shell.show-surface" => event
+            .payload
+            .get("surface_id")
+            .and_then(|v| v.as_str())
+            .map(|id| CoreRequest::ShowSurface {
+                surface_id: id.to_string(),
+            }),
+        "shell.hide-surface" => event
+            .payload
+            .get("surface_id")
+            .and_then(|v| v.as_str())
+            .map(|id| CoreRequest::HideSurface {
+                surface_id: id.to_string(),
+            }),
+        "shell.hide-popover" => {
+            let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
+            let defer_for_hover_bridge = event
                 .payload
-                .get("surface_id")
-                .and_then(|v| v.as_str())
-                .map(|id| CoreRequest::ShowSurface {
-                    surface_id: id.to_string(),
-                }),
-            "shell.hide-surface" => event
+                .get("defer_for_hover_bridge")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            Some(CoreRequest::HidePopover {
+                surface_id: surface_id.to_string(),
+                defer_for_hover_bridge,
+            })
+        }
+        "shell.toggle-surface" => event
+            .payload
+            .get("surface_id")
+            .and_then(|v| v.as_str())
+            .map(|id| CoreRequest::ToggleSurface {
+                surface_id: id.to_string(),
+            }),
+        "shell.position-surface" => {
+            let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
+            let margin_top = payload_i32(&event.payload, "margin_top").unwrap_or(0);
+            let margin_left = payload_i32(&event.payload, "margin_left").unwrap_or(0);
+            Some(CoreRequest::PositionSurface {
+                surface_id: surface_id.to_string(),
+                margin_top,
+                margin_left,
+            })
+        }
+        "shell.activate-popover" => {
+            let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
+            let trigger_surface = event
                 .payload
-                .get("surface_id")
-                .and_then(|v| v.as_str())
-                .map(|id| CoreRequest::HideSurface {
-                    surface_id: id.to_string(),
-                }),
-            "shell.hide-popover" => {
-                let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
-                let defer_for_hover_bridge = event
-                    .payload
-                    .get("defer_for_hover_bridge")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                Some(CoreRequest::HidePopover {
-                    surface_id: surface_id.to_string(),
-                    defer_for_hover_bridge,
-                })
-            }
-            "shell.toggle-surface" => event
+                .get("trigger_surface")
+                .and_then(|v| v.as_str())?;
+            let trigger_key = event.payload.get("trigger_key").and_then(|v| v.as_str())?;
+            let focus = event
                 .payload
-                .get("surface_id")
-                .and_then(|v| v.as_str())
-                .map(|id| CoreRequest::ToggleSurface {
-                    surface_id: id.to_string(),
-                }),
-            "shell.position-surface" => {
-                let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
-                let margin_top = payload_i32(&event.payload, "margin_top").unwrap_or(0);
-                let margin_left = payload_i32(&event.payload, "margin_left").unwrap_or(0);
-                Some(CoreRequest::PositionSurface {
-                    surface_id: surface_id.to_string(),
-                    margin_top,
-                    margin_left,
-                })
-            }
-            "shell.activate-popover" => {
-                let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
-                let trigger_surface = event
-                    .payload
-                    .get("trigger_surface")
-                    .and_then(|v| v.as_str())?;
-                let trigger_key = event.payload.get("trigger_key").and_then(|v| v.as_str())?;
-                let focus = event
-                    .payload
-                    .get("focus")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
-                Some(CoreRequest::ActivatePopover {
-                    surface_id: surface_id.to_string(),
-                    trigger_surface: trigger_surface.to_string(),
-                    trigger_key: trigger_key.to_string(),
-                    focus,
-                })
-            }
-            "shell.set-theme" => event
-                .payload
-                .get("theme_id")
-                .and_then(|v| v.as_str())
-                .map(|id| CoreRequest::SetTheme {
-                    theme_id: id.to_string(),
-                }),
-            "shell.set-locale" => {
-                event
-                    .payload
-                    .get("locale")
-                    .and_then(|v| v.as_str())
-                    .map(|locale| CoreRequest::SetLocale {
-                        locale: locale.to_string(),
+                .get("focus")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            Some(CoreRequest::ActivatePopover {
+                surface_id: surface_id.to_string(),
+                trigger_surface: trigger_surface.to_string(),
+                trigger_key: trigger_key.to_string(),
+                focus,
+            })
+        }
+        "shell.set-theme" => event
+            .payload
+            .get("theme_id")
+            .and_then(|v| v.as_str())
+            .map(|id| CoreRequest::SetTheme {
+                theme_id: id.to_string(),
+            }),
+        "shell.set-locale" => event
+            .payload
+            .get("locale")
+            .and_then(|v| v.as_str())
+            .map(|locale| CoreRequest::SetLocale {
+                locale: locale.to_string(),
+            }),
+        "shell.toggle-debug-overlay" => Some(CoreRequest::ToggleDebugOverlay),
+        "shell.toggle-debug-layout-bounds" => Some(CoreRequest::ToggleDebugLayoutBounds),
+        "shell.toggle-debug-profiling" => Some(CoreRequest::ToggleDebugProfiling),
+        "shell.run-debug-benchmark" => {
+            match event.payload.get("scenario_id").and_then(|v| v.as_str()) {
+                Some(scenario_id) if !scenario_id.is_empty() => {
+                    Some(CoreRequest::RunDebugBenchmark {
+                        scenario_id: scenario_id.to_string(),
                     })
-            }
-            "shell.toggle-debug-overlay" => Some(CoreRequest::ToggleDebugOverlay),
-            "shell.toggle-debug-layout-bounds" => Some(CoreRequest::ToggleDebugLayoutBounds),
-            "shell.toggle-debug-profiling" => Some(CoreRequest::ToggleDebugProfiling),
-            "shell.run-debug-benchmark" => {
-                match event.payload.get("scenario_id").and_then(|v| v.as_str()) {
-                    Some(scenario_id) if !scenario_id.is_empty() => {
-                        Some(CoreRequest::RunDebugBenchmark {
-                            scenario_id: scenario_id.to_string(),
-                        })
-                    }
-                    _ => Some(CoreRequest::PublishDiagnostics {
-                        message: "debug benchmark request missing scenario_id".to_string(),
-                    }),
                 }
+                _ => Some(CoreRequest::PublishDiagnostics {
+                    message: "debug benchmark request missing scenario_id".to_string(),
+                }),
             }
-            // `shell.` is a reserved channel namespace handled by the arms
-            // above. An unknown shell.* channel must never fall through to the
-            // service-command path (it would demand a capability for a phantom
-            // `shell` interface); surface a targeted diagnostic instead.
-            other if other.starts_with("shell.") => {
+        }
+        other if other.starts_with("shell.") => {
+            tracing::warn!(
+                source_module_id = %event.source_module_id,
+                channel = %event.channel,
+                "unknown shell channel published by frontend module"
+            );
+            Some(CoreRequest::PublishDiagnostics {
+                message: format!(
+                    "Unknown shell channel '{}' published by '{}'; shell.* is reserved for core requests and service commands use mesh.<interface>.<command> channels",
+                    event.channel, event.source_module_id
+                ),
+            })
+        }
+        other => other.rfind('.').map(|pos| {
+            let interface_name = &other[..pos];
+            let capabilities = service_capabilities(interface_name);
+            let required = &capabilities.control;
+            if event.source_capabilities.is_granted(required) {
+                CoreRequest::ServiceCommand {
+                    interface: interface_name.to_string(),
+                    command: other[pos + 1..].to_string(),
+                    payload: event.payload,
+                    source_module_id: event.source_module_id,
+                    source_capabilities: event.source_capabilities,
+                }
+            } else {
                 tracing::warn!(
                     source_module_id = %event.source_module_id,
+                    required_capability = %required,
                     channel = %event.channel,
-                    "unknown shell channel published by frontend module"
+                    "denied frontend service command publication"
                 );
-                Some(CoreRequest::PublishDiagnostics {
+                CoreRequest::PublishDiagnostics {
                     message: format!(
-                        "Unknown shell channel '{}' published by '{}'; shell.* is reserved for core requests and service commands use mesh.<interface>.<command> channels",
-                        event.channel, event.source_module_id
+                        "Denied service command '{}' from '{}' without {}",
+                        event.channel, event.source_module_id, required
                     ),
-                })
-            }
-            other => other.rfind('.').map(|pos| {
-                let interface = other[..pos].to_string();
-                let command = other[pos + 1..].to_string();
-                let required = service_command_control_capability(&interface);
-                if event.source_capabilities.is_granted(&required) {
-                    CoreRequest::ServiceCommand {
-                        interface,
-                        command,
-                        payload: event.payload,
-                        source_module_id: event.source_module_id,
-                        source_capabilities: event.source_capabilities,
-                    }
-                } else {
-                    tracing::warn!(
-                        source_module_id = %event.source_module_id,
-                        required_capability = %required,
-                        channel = %event.channel,
-                        "denied frontend service command publication"
-                    );
-                    CoreRequest::PublishDiagnostics {
-                        message: format!(
-                            "Denied service command '{}' from '{}' without {}",
-                            event.channel, event.source_module_id, required
-                        ),
-                    }
                 }
-            }),
-        })
-        .collect()
+            }
+        }),
+    }
 }
 
 fn payload_i32(payload: &serde_json::Value, key: &str) -> Option<i32> {
@@ -415,9 +414,9 @@ mod tests {
                 assert!(message.contains("Unknown shell channel"));
                 assert!(message.contains("shell.brightness-down"));
             }
-            other => panic!(
-                "unknown shell.* channels must never become service commands, got {other:?}"
-            ),
+            other => {
+                panic!("unknown shell.* channels must never become service commands, got {other:?}")
+            }
         }
     }
 
@@ -576,6 +575,40 @@ mod tests {
         assert!(cached_time < old_time);
     }
 
+    // cargo test -p mesh-core-shell --release -- borrowed_service_control_capability_beats_cached_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only service command capability borrow microbenchmark"]
+    fn borrowed_service_control_capability_beats_cached_clone() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let iterations = 1_000_000usize;
+        let interface = "mesh.audio";
+
+        let clone_started = Instant::now();
+        let mut clone_total = 0usize;
+        for _ in 0..iterations {
+            let cap = service_command_control_capability(black_box(interface));
+            clone_total = clone_total.wrapping_add(cap.id().len());
+        }
+        let clone_time = clone_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_total = 0usize;
+        for _ in 0..iterations {
+            let caps = service_capabilities(black_box(interface));
+            borrowed_total = borrowed_total.wrapping_add(caps.control.id().len());
+        }
+        let borrowed_time = borrowed_started.elapsed();
+
+        eprintln!(
+            "service control capability over {iterations} iterations: cached clone {clone_time:?}; borrowed cached Arc {borrowed_time:?}; ratio {:.1}x; totals={clone_total}/{borrowed_total}",
+            clone_time.as_secs_f64() / borrowed_time.as_secs_f64()
+        );
+        assert_eq!(clone_total, borrowed_total);
+        assert!(borrowed_time < clone_time);
+    }
+
     // cargo test -p mesh-core-shell --release -- borrowed_service_update_name_avoids_projection --ignored --nocapture
     #[test]
     #[ignore = "release-only service update name microbenchmark"]
@@ -666,5 +699,76 @@ mod tests {
         assert_eq!(projected_total, borrowed_total);
         assert!(cow_time < projected_time);
         assert!(borrowed_time < projected_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- denied_service_command_defers_command_allocation --ignored --nocapture
+    #[test]
+    #[ignore = "release-only denied service command allocation microbenchmark"]
+    fn denied_service_command_defers_command_allocation() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        fn old_denied_command_request(event: PublishedEvent) -> Option<CoreRequest> {
+            let other = event.channel.as_str();
+            other.rfind('.').map(|pos| {
+                let interface = other[..pos].to_string();
+                let command = other[pos + 1..].to_string();
+                black_box(&command);
+                let required = service_command_control_capability(&interface);
+                if event.source_capabilities.is_granted(&required) {
+                    CoreRequest::ServiceCommand {
+                        interface,
+                        command,
+                        payload: event.payload,
+                        source_module_id: event.source_module_id,
+                        source_capabilities: event.source_capabilities,
+                    }
+                } else {
+                    CoreRequest::PublishDiagnostics {
+                        message: format!(
+                            "Denied service command '{}' from '{}' without {}",
+                            event.channel, event.source_module_id, required
+                        ),
+                    }
+                }
+            })
+        }
+
+        let event = PublishedEvent {
+            channel: "mesh.audio.set_volume".into(),
+            payload: serde_json::json!({ "percent": 55 }),
+            source_module_id: "@mesh/benchmark".into(),
+            source_capabilities: mesh_core_capability::CapabilitySet::new(),
+        };
+        let iterations = 200_000usize;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            if let Some(CoreRequest::PublishDiagnostics { message }) =
+                old_denied_command_request(black_box(event.clone()))
+            {
+                old_total += message.len();
+            }
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            if let Some(CoreRequest::PublishDiagnostics { message }) =
+                script_event_to_request(black_box(event.clone()))
+            {
+                new_total += message.len();
+            }
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "denied service command over {iterations} events: eager command allocation {old_time:?}; deferred {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 }

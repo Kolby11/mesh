@@ -338,13 +338,12 @@ fn keyboard_repeat_state_for(
     ch: Option<char>,
     now: Instant,
 ) -> Option<KeyboardRepeatState> {
-    if is_non_repeating_key(key) {
-        return None;
-    }
-
     let RepeatInfo::Repeat { rate, delay } = repeat_info else {
         return None;
     };
+    if is_non_repeating_key(key) {
+        return None;
+    }
     let interval = Duration::from_micros((1_000_000 / rate.get() as u64).max(1));
     Some(KeyboardRepeatState {
         surface_id: surface_id.to_string(),
@@ -357,6 +356,9 @@ fn keyboard_repeat_state_for(
 }
 
 fn is_non_repeating_key(key: &str) -> bool {
+    if key.len() == 1 {
+        return false;
+    }
     contains_ignore_ascii_case(key, "shift")
         || contains_ignore_ascii_case(key, "control")
         || key.eq_ignore_ascii_case("ctrl")
@@ -370,10 +372,11 @@ fn is_non_repeating_key(key: &str) -> bool {
 }
 
 fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    let needle = needle.as_bytes();
     haystack
         .as_bytes()
         .windows(needle.len())
-        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+        .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 #[cfg(test)]
@@ -580,6 +583,199 @@ mod performance_tests {
             old.as_secs_f64() / new.as_secs_f64()
         );
         assert!(new < old);
+    }
+
+    // cargo test -p mesh-core-presentation --release -- repeat_disabled_gate_beats_key_classification --ignored --nocapture
+    #[test]
+    #[ignore = "release-only disabled repeat setup microbenchmark"]
+    fn repeat_disabled_gate_beats_key_classification() {
+        fn old_keyboard_repeat_state_for(
+            repeat_info: RepeatInfo,
+            surface_id: &str,
+            key: &str,
+            mods: KeyMods,
+            ch: Option<char>,
+            now: Instant,
+        ) -> Option<KeyboardRepeatState> {
+            if is_non_repeating_key(key) {
+                return None;
+            }
+            let RepeatInfo::Repeat { rate, delay } = repeat_info else {
+                return None;
+            };
+            let interval = Duration::from_micros((1_000_000 / rate.get() as u64).max(1));
+            Some(KeyboardRepeatState {
+                surface_id: surface_id.to_string(),
+                key: key.to_string(),
+                mods,
+                ch,
+                next_at: now + Duration::from_millis(delay as u64),
+                interval,
+            })
+        }
+
+        let keys = [
+            "Shift_L",
+            "ISO_Level3_Shift",
+            "Control_R",
+            "Super_L",
+            "CapsLock",
+            "a",
+            "Enter",
+            "ArrowLeft",
+        ];
+        let iterations = 500_000usize;
+        let now = Instant::now();
+        let repeat_info = RepeatInfo::Disable;
+        let mods = KeyMods::default();
+
+        let old_started = Instant::now();
+        let mut old_count = 0usize;
+        for _ in 0..iterations {
+            for key in keys {
+                old_count += usize::from(
+                    old_keyboard_repeat_state_for(
+                        repeat_info,
+                        "panel",
+                        std::hint::black_box(key),
+                        mods.clone(),
+                        None,
+                        now,
+                    )
+                    .is_some(),
+                );
+            }
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_count = 0usize;
+        for _ in 0..iterations {
+            for key in keys {
+                new_count += usize::from(
+                    keyboard_repeat_state_for(
+                        repeat_info,
+                        "panel",
+                        std::hint::black_box(key),
+                        mods.clone(),
+                        None,
+                        now,
+                    )
+                    .is_some(),
+                );
+            }
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_count, new_count);
+        eprintln!(
+            "disabled repeat setup over {iterations} key batches: classify-first {old_time:?}, repeat-gate-first {new_time:?}, ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-presentation --release -- single_character_repeat_key_skips_modifier_scan --ignored --nocapture
+    #[test]
+    #[ignore = "release-only single-character repeat-key microbenchmark"]
+    fn single_character_repeat_key_skips_modifier_scan() {
+        fn old_is_non_repeating_key(key: &str) -> bool {
+            contains_ignore_ascii_case(key, "shift")
+                || contains_ignore_ascii_case(key, "control")
+                || key.eq_ignore_ascii_case("ctrl")
+                || contains_ignore_ascii_case(key, "alt")
+                || contains_ignore_ascii_case(key, "super")
+                || contains_ignore_ascii_case(key, "meta")
+                || key.eq_ignore_ascii_case("capslock")
+                || key.eq_ignore_ascii_case("numlock")
+                || key.eq_ignore_ascii_case("scrolllock")
+                || key.eq_ignore_ascii_case("escape")
+        }
+
+        let keys = ["a", "b", "1", "=", "Z", ";"];
+        let iterations = 1_000_000usize;
+
+        let old_started = Instant::now();
+        let mut old_count = 0usize;
+        for _ in 0..iterations {
+            for key in keys {
+                old_count += usize::from(old_is_non_repeating_key(std::hint::black_box(key)));
+            }
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_count = 0usize;
+        for _ in 0..iterations {
+            for key in keys {
+                new_count += usize::from(is_non_repeating_key(std::hint::black_box(key)));
+            }
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_count, new_count);
+        eprintln!(
+            "single-character key classification over {iterations} key batches: full scan {old_time:?}, len gate {new_time:?}, ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-presentation --release -- cached_needle_bytes_beats_per_window_as_bytes --ignored --nocapture
+    #[test]
+    #[ignore = "release-only case-insensitive contains microbenchmark"]
+    fn cached_needle_bytes_beats_per_window_as_bytes() {
+        fn old_contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+            haystack
+                .as_bytes()
+                .windows(needle.len())
+                .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+        }
+
+        let keys = [
+            "ISO_Level3_Shift",
+            "Control_R",
+            "Super_L",
+            "Pointer_Button_Primary",
+            "XF86AudioRaiseVolume",
+        ];
+        let needles = ["shift", "control", "super", "audio"];
+        let iterations = 300_000usize;
+
+        let old_started = Instant::now();
+        let mut old_count = 0usize;
+        for _ in 0..iterations {
+            for key in keys {
+                for needle in needles {
+                    old_count += usize::from(old_contains_ignore_ascii_case(
+                        std::hint::black_box(key),
+                        std::hint::black_box(needle),
+                    ));
+                }
+            }
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_count = 0usize;
+        for _ in 0..iterations {
+            for key in keys {
+                for needle in needles {
+                    new_count += usize::from(contains_ignore_ascii_case(
+                        std::hint::black_box(key),
+                        std::hint::black_box(needle),
+                    ));
+                }
+            }
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_count, new_count);
+        eprintln!(
+            "contains_ignore_ascii_case over {iterations} key batches: per-window needle bytes {old_time:?}, cached needle bytes {new_time:?}, ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
     }
 }
 

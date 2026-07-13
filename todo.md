@@ -303,6 +303,17 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       handler string instead of cloning instance+handler and formatting every
       time. Release benchmark over 5.12M due-handler prep entries measured
       351.4ms format-on-tick versus 207.8ms cached-name (~1.7x faster).
+      Follow-up same day: denied service-command routing now checks the
+      borrowed cached control capability before command/interface string
+      allocation; release benchmark over 200,000 denied events measured 36.3ms
+      eager allocation versus 29.1ms deferred allocation (~1.2x faster).
+      Service-command capability checks now borrow the cached control
+      capability instead of cloning it on the production path; release
+      benchmark over 1M checks measured 27.6ms cached clone versus 19.2ms
+      borrowed cached `Arc` (~1.4x faster). Rejected: preallocating the script
+      request vector was not stable in a fresh release run (363.0ms
+      filter-collect versus 365.5ms preallocated loop), so that change was
+      dropped.
       Remaining: full graph-wide instance-key interning for ordinary handler
       dispatch.
 - [x] Shell-side subscription index (service → component indices) so event
@@ -412,7 +423,17 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       content-measured resizes stop reallocating the whole buffer set (H).
 - [ ] Input normalization: public `WindowEvent`/`DevWindowEvent` surface-id
       payloads are still owned `String`s; move to `Arc<str>`/numeric ids
-      (U; lookup index and key-name borrowing landed).
+      (U; lookup index and key-name borrowing landed). Progress 2026-07-13:
+      disabled keyboard-repeat setup now returns before classifying
+      non-repeating key names; release benchmark over 500,000 key batches
+      measured 31.6ms classify-first versus 0.88ms repeat-gate-first (~36x
+      faster for disabled-repeat setup). Single-character repeatable keys now
+      bypass the modifier-name scan entirely; release benchmark over 1M key
+      batches measured 11.1ms full scan versus 6.3ms length gate (~1.8x
+      faster for that classification path). Case-insensitive key classification
+      now caches the needle byte slice outside the haystack window loop; release
+      benchmark over 300,000 key batches measured 60.40ms per-window
+      `as_bytes()` versus 59.93ms cached needle bytes (small ~0.8% win).
 - [ ] Startup: parallelize module discovery + manifest parsing (frontend
       compilation already runs through Rayon) (H/V). Progress 2026-07-13:
       installed-graph auto-discovery now loads sorted module manifests through
