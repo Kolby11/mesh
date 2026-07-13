@@ -1,12 +1,10 @@
 use super::super::*;
+use mesh_core_service::{InterfaceArgument, TypeExpr};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 thread_local! {
-    static INLINE_EVENT_SCHEMA_CACHE: RefCell<HashMap<String, Arc<[CompiledPayloadField]>>> =
-        RefCell::new(HashMap::new());
-    static CONTRACT_TYPE_CACHE: RefCell<HashMap<String, ContractValueType>> =
+    static CONTRACT_TYPE_CACHE: RefCell<HashMap<String, TypeExpr>> =
         RefCell::new(HashMap::new());
 }
 
@@ -73,14 +71,23 @@ impl Shell {
                 payload,
             };
         }
-        if interface == "mesh.audio"
-            && let Some(requested_muted) = self.pending_audio_muted
-        {
-            let backend_muted = payload.get("muted").and_then(|value| value.as_bool());
-            if backend_muted == Some(requested_muted) {
-                self.pending_audio_muted = None;
+        // Re-apply pending optimistic patches until the provider confirms the
+        // expected value; a confirming update clears the pending entry.
+        let pending_fields: Vec<String> = self
+            .pending_optimistic_state
+            .keys()
+            .filter(|(pending_interface, _)| pending_interface == &interface)
+            .map(|(_, field)| field.clone())
+            .collect();
+        for field in pending_fields {
+            let key = (interface.clone(), field);
+            let Some(expected) = self.pending_optimistic_state.get(&key) else {
+                continue;
+            };
+            if payload.get(&key.1) == Some(expected) {
+                self.pending_optimistic_state.remove(&key);
             } else {
-                payload["muted"] = serde_json::json!(requested_muted);
+                payload[key.1.as_str()] = expected.clone();
             }
         }
         ServiceEvent::Updated {
@@ -145,9 +152,19 @@ impl Shell {
         true
     }
 
-    pub(in crate::shell) fn apply_optimistic_audio_muted_state(&mut self, muted: bool) {
-        self.pending_audio_muted = Some(muted);
-        let interface = "mesh.audio".to_string();
+    /// Apply a contract-declared optimistic state patch: set the public state
+    /// field to the expected value immediately so UI reacts before the
+    /// provider confirms. `normalize_service_event` keeps re-applying the
+    /// patch until a provider update carries the expected value.
+    pub(in crate::shell) fn apply_optimistic_service_state(
+        &mut self,
+        interface: &str,
+        field: &str,
+        value: serde_json::Value,
+    ) {
+        self.pending_optimistic_state
+            .insert((interface.to_string(), field.to_string()), value.clone());
+        let interface = interface.to_string();
         let provider_id = self
             .backend_runtimes
             .get(&interface)
@@ -157,13 +174,13 @@ impl Shell {
                     .get(&interface)
                     .map(|latest| latest.provider_id.clone())
             })
-            .unwrap_or_else(|| "@mesh/optimistic-audio".to_string());
+            .unwrap_or_else(|| "@mesh/optimistic".to_string());
         let mut payload = self
             .latest_service_state
             .get(&interface)
             .map(|latest| latest.state.clone())
             .unwrap_or_else(|| serde_json::json!({ "available": true }));
-        payload["muted"] = serde_json::json!(muted);
+        payload[field] = value;
         self.latest_service_state.insert(
             interface.clone(),
             LatestServiceState::new(interface.clone(), provider_id.clone(), payload.clone()),
@@ -173,6 +190,29 @@ impl Shell {
             source_module: provider_id,
             payload,
         });
+    }
+
+    /// Compute the optimistic value for a dispatched command from its
+    /// contract annotation: either the named argument's payload value, or the
+    /// negation of the current boolean state field for toggles.
+    pub(in crate::shell) fn optimistic_value_for_command(
+        &self,
+        interface: &str,
+        optimistic: &mesh_core_service::OptimisticUpdate,
+        payload: &serde_json::Value,
+    ) -> Option<serde_json::Value> {
+        match &optimistic.from_arg {
+            Some(arg) => payload.get(arg).cloned(),
+            None => {
+                let current = self
+                    .latest_service_state
+                    .get(interface)
+                    .and_then(|latest| latest.state.get(&optimistic.field))
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                Some(serde_json::json!(!current))
+            }
+        }
     }
 
     pub(in crate::shell) fn deliver_service_event(
@@ -267,10 +307,10 @@ impl Shell {
                 contract.interface
             )];
         };
-        let Some(schema) = event.payload.as_deref() else {
+        if event.payload.is_empty() {
             return Vec::new();
-        };
-        event_payload_contract_warnings(&contract.interface, event_name, schema, payload)
+        }
+        event_payload_contract_warnings(&contract.interface, event_name, &event.payload, payload)
     }
 
     fn record_service_contract_warning(
@@ -351,13 +391,9 @@ fn service_state_contract_warnings(
 fn event_payload_contract_warnings(
     interface: &str,
     event_name: &str,
-    schema: &str,
+    fields: &[InterfaceArgument],
     payload: &serde_json::Value,
 ) -> Vec<String> {
-    let fields = compiled_inline_object_schema(schema);
-    if fields.is_empty() {
-        return Vec::new();
-    }
     let Some(object) = payload.as_object() else {
         return vec![format!(
             "event '{event_name}' for {interface} must be a JSON object, got {}",
@@ -366,7 +402,7 @@ fn event_payload_contract_warnings(
     };
 
     let mut warnings = Vec::new();
-    for field in fields.iter() {
+    for field in fields {
         let Some(value) = object.get(field.name.as_str()) else {
             warnings.push(format!(
                 "event '{event_name}' for {interface} missing required payload field '{}'",
@@ -374,11 +410,11 @@ fn event_payload_contract_warnings(
             ));
             continue;
         };
-        if !field.value_type.matches(value) {
+        if !cached_contract_value_type(&field.arg_type).matches(value) {
             let field_name = field.name.as_str();
             warnings.push(format!(
                 "event '{event_name}' for {interface} payload field '{field_name}' expected {}, got {}",
-                field.type_label,
+                field.arg_type,
                 json_type_name(value)
             ));
         }
@@ -386,154 +422,28 @@ fn event_payload_contract_warnings(
     warnings
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CompiledPayloadField {
-    name: String,
-    type_label: String,
-    value_type: ContractValueType,
-}
-
-fn compiled_inline_object_schema(schema: &str) -> Arc<[CompiledPayloadField]> {
-    INLINE_EVENT_SCHEMA_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if let Some(fields) = cache.get(schema) {
-            return Arc::clone(fields);
-        }
-        let fields: Arc<[CompiledPayloadField]> = parse_inline_object_schema(schema)
-            .into_iter()
-            .map(|(name, field_type)| CompiledPayloadField {
-                name: name.to_owned(),
-                type_label: field_type.to_owned(),
-                value_type: cached_contract_value_type(field_type),
-            })
-            .collect();
-        cache.insert(schema.to_owned(), Arc::clone(&fields));
-        fields
-    })
-}
-
-fn parse_inline_object_schema(schema: &str) -> Vec<(&str, &str)> {
-    let trimmed = schema.trim();
-    let Some(inner) = trimmed
-        .strip_prefix('{')
-        .and_then(|value| value.strip_suffix('}'))
-    else {
-        return Vec::new();
-    };
-    inner
-        .split(',')
-        .filter_map(|part| {
-            let (name, field_type) = part.split_once(':')?;
-            let name = name.trim();
-            let field_type = field_type.trim();
-            if name.is_empty() || field_type.is_empty() {
-                return None;
-            }
-            Some((name, field_type))
-        })
-        .collect()
-}
-
 fn is_runtime_metadata_state_field(name: &str) -> bool {
     name == "source_module"
 }
 
-fn cached_contract_value_type(field_type: &str) -> ContractValueType {
+/// Parse a contract type expression through the shared grammar, cached per
+/// expression string. Unparseable expressions never reach here for graph-built
+/// contracts (they are rejected at graph build), but fall back to a permissive
+/// `any?` so runtime validation degrades gracefully.
+fn cached_contract_value_type(field_type: &str) -> TypeExpr {
     CONTRACT_TYPE_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(value_type) = cache.get(field_type) {
-            return *value_type;
+            return value_type.clone();
         }
-        let value_type = ContractValueType::from_contract_type(field_type);
-        cache.insert(field_type.to_owned(), value_type);
+        let value_type = TypeExpr::parse(field_type).unwrap_or(TypeExpr {
+            base: mesh_core_service::BaseType::Any,
+            array: false,
+            optional: true,
+        });
+        cache.insert(field_type.to_owned(), value_type.clone());
         value_type
     })
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum ContractValueType {
-    Bool,
-    Number,
-    Integer,
-    String,
-    Object,
-    Array,
-    Any,
-}
-
-impl ContractValueType {
-    fn from_contract_type(field_type: &str) -> Self {
-        let normalized = field_type.trim();
-        if normalized.starts_with('[') && normalized.ends_with(']') {
-            return Self::Array;
-        }
-
-        if normalized.eq_ignore_ascii_case("bool") || normalized.eq_ignore_ascii_case("boolean") {
-            Self::Bool
-        } else if normalized.eq_ignore_ascii_case("float")
-            || normalized.eq_ignore_ascii_case("double")
-            || normalized.eq_ignore_ascii_case("number")
-        {
-            Self::Number
-        } else if normalized.eq_ignore_ascii_case("int")
-            || normalized.eq_ignore_ascii_case("integer")
-        {
-            Self::Integer
-        } else if normalized.eq_ignore_ascii_case("string") {
-            Self::String
-        } else if normalized.eq_ignore_ascii_case("object")
-            || normalized.eq_ignore_ascii_case("table")
-            || normalized.eq_ignore_ascii_case("map")
-        {
-            Self::Object
-        } else {
-            Self::Any
-        }
-    }
-
-    fn matches(self, value: &serde_json::Value) -> bool {
-        match self {
-            Self::Bool => value.is_boolean(),
-            Self::Number => value.is_number(),
-            Self::Integer => value.as_i64().is_some() || value.as_u64().is_some(),
-            Self::String => value.is_string(),
-            Self::Object => value.is_object(),
-            Self::Array => value.is_array(),
-            Self::Any => true,
-        }
-    }
-}
-
-fn json_value_matches_contract_type(value: &serde_json::Value, field_type: &str) -> bool {
-    cached_contract_value_type(field_type).matches(value)
-}
-
-#[cfg(test)]
-fn json_value_matches_contract_type_old(value: &serde_json::Value, field_type: &str) -> bool {
-    let normalized = field_type.trim();
-    if normalized.starts_with('[') && normalized.ends_with(']') {
-        return value.is_array();
-    }
-
-    if normalized.eq_ignore_ascii_case("bool") || normalized.eq_ignore_ascii_case("boolean") {
-        value.is_boolean()
-    } else if normalized.eq_ignore_ascii_case("float")
-        || normalized.eq_ignore_ascii_case("double")
-        || normalized.eq_ignore_ascii_case("number")
-    {
-        value.is_number()
-    } else if normalized.eq_ignore_ascii_case("int") || normalized.eq_ignore_ascii_case("integer") {
-        value.as_i64().is_some() || value.as_u64().is_some()
-    } else if normalized.eq_ignore_ascii_case("string") {
-        value.is_string()
-    } else if normalized.eq_ignore_ascii_case("object")
-        || normalized.eq_ignore_ascii_case("table")
-        || normalized.eq_ignore_ascii_case("map")
-    {
-        value.is_object()
-    } else {
-        true
-    }
 }
 
 fn json_type_name(value: &serde_json::Value) -> &'static str {
@@ -548,36 +458,22 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
 }
 
 #[cfg(test)]
-mod contract_validation_performance_tests {
+mod contract_validation_tests {
     use super::*;
 
-    #[test]
-    fn borrowed_inline_schema_parser_preserves_trimmed_fields() {
-        assert_eq!(
-            parse_inline_object_schema("{ device_id: string, level: FLOAT }").as_slice(),
-            &[("device_id", "string"), ("level", "FLOAT")]
-        );
-        assert!(parse_inline_object_schema("string").is_empty());
+    fn field(name: &str, arg_type: &str) -> InterfaceArgument {
+        InterfaceArgument {
+            name: name.to_string(),
+            arg_type: arg_type.to_string(),
+        }
     }
 
     #[test]
-    fn compiled_inline_schema_cache_reuses_schema_fields() {
-        let first = compiled_inline_object_schema("{ device_id: string, level: FLOAT }");
-        let second = compiled_inline_object_schema("{ device_id: string, level: FLOAT }");
-
-        assert!(Arc::ptr_eq(&first, &second));
-        assert_eq!(first.len(), 2);
-        assert_eq!(first[0].name, "device_id");
-        assert_eq!(first[0].value_type, ContractValueType::String);
-        assert_eq!(first[1].value_type, ContractValueType::Number);
-    }
-
-    #[test]
-    fn compiled_event_validation_preserves_warnings() {
+    fn structured_event_validation_preserves_warnings() {
         let warnings = event_payload_contract_warnings(
             "mesh.audio",
             "VolumeChanged",
-            "{ device_id: string, level: float }",
+            &[field("device_id", "string"), field("level", "float")],
             &serde_json::json!({ "device_id": 7, "other": true }),
         );
 
@@ -587,20 +483,33 @@ mod contract_validation_performance_tests {
     }
 
     #[test]
-    fn allocation_free_type_matching_preserves_supported_aliases() {
+    fn event_validation_rejects_non_object_payload() {
+        let warnings = event_payload_contract_warnings(
+            "mesh.audio",
+            "VolumeChanged",
+            &[field("level", "float")],
+            &serde_json::json!(42),
+        );
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("must be a JSON object"));
+    }
+
+    #[test]
+    fn cached_type_matching_follows_shared_grammar() {
         let cases = [
-            (serde_json::json!(true), " BOOLEAN ", true),
-            (serde_json::json!(1.5), "FLOAT", true),
-            (serde_json::json!(1.5), "integer", false),
-            (serde_json::json!(1), "INT", true),
-            (serde_json::json!("value"), "String", true),
-            (serde_json::json!({}), "MAP", true),
-            (serde_json::json!([]), "[string]", true),
-            (serde_json::json!(null), "custom_type", true),
+            (serde_json::json!(true), "boolean", true),
+            (serde_json::json!(1.5), "float", true),
+            (serde_json::json!(1.5), "int", false),
+            (serde_json::json!(1), "int", true),
+            (serde_json::json!("value"), "string", true),
+            (serde_json::json!({}), "object", true),
+            (serde_json::json!([]), "Device[]", true),
+            (serde_json::json!(null), "string?", true),
+            (serde_json::json!(null), "string", false),
         ];
         for (value, field_type, expected) in cases {
             assert_eq!(
-                json_value_matches_contract_type(&value, field_type),
+                cached_contract_value_type(field_type).matches(&value),
                 expected,
                 "type {field_type}"
             );
@@ -608,100 +517,7 @@ mod contract_validation_performance_tests {
     }
 
     #[test]
-    #[ignore = "release-only contract validation microbenchmark"]
-    fn allocation_free_contract_type_matching_beats_lowercase_allocation() {
-        use std::hint::black_box;
-        use std::time::Instant;
-
-        fn old_matches(value: &serde_json::Value, field_type: &str) -> bool {
-            let normalized = field_type.trim().to_ascii_lowercase();
-            match normalized.as_str() {
-                "float" | "double" | "number" => value.is_number(),
-                _ => true,
-            }
-        }
-
-        let value = serde_json::json!(42.5);
-        let iterations = 1_000_000;
-        let started = Instant::now();
-        for _ in 0..iterations {
-            black_box(old_matches(&value, black_box(" NUMBER ")));
-        }
-        let allocating = started.elapsed();
-
-        let started = Instant::now();
-        for _ in 0..iterations {
-            black_box(json_value_matches_contract_type(
-                &value,
-                black_box(" NUMBER "),
-            ));
-        }
-        let allocation_free = started.elapsed();
-
-        eprintln!(
-            "contract type checks over {iterations} iterations: lowercase allocation {allocating:?}, allocation-free {allocation_free:?}"
-        );
-    }
-
-    // cargo test -p mesh-core-shell --release -- cached_event_schema_validation_beats_parse_per_event --ignored --nocapture
-    #[test]
-    #[ignore = "release-only event schema validation microbenchmark"]
-    fn cached_event_schema_validation_beats_parse_per_event() {
-        use std::hint::black_box;
-        use std::time::Instant;
-
-        fn old_event_warnings(schema: &str, payload: &serde_json::Value) -> usize {
-            let fields = parse_inline_object_schema(schema);
-            let Some(object) = payload.as_object() else {
-                return 1;
-            };
-            let mut warnings = 0usize;
-            for (field_name, field_type) in fields {
-                let Some(value) = object.get(field_name) else {
-                    warnings += 1;
-                    continue;
-                };
-                if !json_value_matches_contract_type_old(value, field_type) {
-                    warnings += 1;
-                }
-            }
-            warnings
-        }
-
-        let schema = "{ device_id: string, level: float, muted: bool, channels: [string] }";
-        let payload = serde_json::json!({
-            "device_id": "default",
-            "level": 42.0,
-            "muted": false,
-            "channels": ["front-left", "front-right"]
-        });
-        let iterations = 300_000usize;
-
-        let started = Instant::now();
-        let mut old_total = 0usize;
-        for _ in 0..iterations {
-            old_total += old_event_warnings(black_box(schema), black_box(&payload));
-        }
-        let parse_each_time = started.elapsed();
-
-        let started = Instant::now();
-        let mut cached_total = 0usize;
-        for _ in 0..iterations {
-            cached_total += event_payload_contract_warnings(
-                "mesh.audio",
-                "VolumeChanged",
-                black_box(schema),
-                black_box(&payload),
-            )
-            .len();
-        }
-        let cached = started.elapsed();
-
-        eprintln!(
-            "event schema validation over {iterations} iterations: parse-per-event {parse_each_time:?}, cached {cached:?}, ratio {:.1}x",
-            parse_each_time.as_secs_f64() / cached.as_secs_f64()
-        );
-        assert_eq!(old_total, cached_total);
-        assert!(cached < parse_each_time);
+    fn invalid_type_expressions_degrade_to_permissive_matching() {
+        assert!(cached_contract_value_type("[string]").matches(&serde_json::json!(1)));
     }
 }

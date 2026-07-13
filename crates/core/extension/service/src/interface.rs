@@ -325,14 +325,12 @@ fn version_matches_provider(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contract::{ContractCapabilities, InterfaceEvent, InterfaceMethod};
-    use std::path::PathBuf;
+    use crate::contract::{ContractCapabilities, InterfaceArgument, InterfaceEvent, InterfaceMethod};
 
     fn test_contract(interface: &str, method_count: usize) -> InterfaceContract {
         InterfaceContract {
             interface: interface.into(),
             version: Version::parse("1.0.0").unwrap(),
-            file_path: PathBuf::from("interface.toml"),
             state_fields: vec![],
             methods: (0..method_count)
                 .map(|index| InterfaceMethod {
@@ -340,6 +338,7 @@ mod tests {
                     args: Vec::new(),
                     returns: None,
                     coalesce: false,
+                    optimistic: None,
                 })
                 .collect(),
             events: vec![],
@@ -378,17 +377,26 @@ mod tests {
         registry.register_contract(InterfaceContract {
             interface: "mesh.audio".into(),
             version: Version::parse("1.0.0").unwrap(),
-            file_path: PathBuf::from("interface.toml"),
             state_fields: vec![],
             methods: vec![InterfaceMethod {
                 name: "volume_up".into(),
                 args: Vec::new(),
                 returns: None,
                 coalesce: false,
+                optimistic: None,
             }],
             events: vec![InterfaceEvent {
                 name: "VolumeChanged".into(),
-                payload: Some("{ device_id: string, level: float }".into()),
+                payload: vec![
+                    InterfaceArgument {
+                        name: "device_id".into(),
+                        arg_type: "string".into(),
+                    },
+                    InterfaceArgument {
+                        name: "level".into(),
+                        arg_type: "float".into(),
+                    },
+                ],
             }],
             types: HashMap::new(),
             capabilities: ContractCapabilities::default(),
@@ -541,7 +549,6 @@ mod tests {
         registry.register_contract(InterfaceContract {
             interface: "alice.thermal".into(),
             version: Version::parse("1.0.0").unwrap(),
-            file_path: PathBuf::from("interface.toml"),
             state_fields: Vec::new(),
             methods: Vec::new(),
             events: Vec::new(),

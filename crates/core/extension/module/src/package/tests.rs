@@ -230,7 +230,7 @@ fn interface_module_without_contract_file_is_valid() {
     let manifest = ModuleManifest::from_json_str(content).unwrap();
     let interface = manifest.mesh.interface.unwrap();
     assert_eq!(interface.name, "me.cputemp");
-    assert!(interface.file.is_none());
+    assert!(interface.contract.is_none());
 }
 
 #[test]
@@ -1175,6 +1175,7 @@ fn loaded_module(
                 provides: MeshProvides::default(),
                 implements: provides,
                 interface: None,
+                interfaces: Vec::new(),
                 contributes,
                 icons: None,
                 icon_pack: None,
@@ -1384,7 +1385,7 @@ fn interface_module(
     module.manifest.mesh.interface = Some(MeshInterfaceDeclaration {
         name: name.into(),
         version: Some("1.0".into()),
-        file: Some("interface.toml".into()),
+        contract: Some(serde_json::json!({})),
         domain: Some(domain.into()),
         extends: extends.map(str::to_string),
         relationship: Some(relationship),
@@ -1781,7 +1782,7 @@ fn installed_module_graph_supports_backend_without_interface_module() {
         "@me/cputemp-backend"
     );
     assert!(graph.diagnostics().iter().all(|diagnostic| {
-        diagnostic.status != "missing_interface_contract_file"
+        diagnostic.status != "missing_interface_contract"
             && diagnostic.status != "missing_provider_interface_module_dependency"
     }));
 }
@@ -3186,10 +3187,138 @@ fn library_module_with_no_capabilities_is_accepted() {
 }
 
 #[test]
-fn graph_diagnostics_report_missing_interface_contract_file() {
-    // Use a real temp dir so the module directory exists; the contract file is deliberately absent.
-    let dir = temp_dir("interface-contract-test");
-    let manifest_path = dir.join("module.json");
+fn inline_backend_interface_declaration_registers_contract() {
+    let root = root_with_modules(
+        &[("@mesh/hyprland-wm", ModuleKind::Backend)],
+        &[("mesh.wm", "@mesh/hyprland-wm")],
+        None,
+    );
+    let mut backend = loaded_module(
+        "@mesh/hyprland-wm",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.wm".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider: Some("hyprland".into()),
+            label: None,
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+    backend.manifest.mesh.interfaces =
+        vec![crate::package::module_manifest::MeshInterfaceDeclaration {
+            name: "mesh.wm".into(),
+            version: Some("1.0".into()),
+            contract: Some(serde_json::json!({
+                "state": [{ "name": "available", "type": "boolean" }],
+                "methods": [{
+                    "name": "focus_workspace",
+                    "args": [{ "name": "id", "type": "int" }],
+                    "returns": "Result"
+                }],
+                "capabilities": { "required": ["service.wm.read"] }
+            })),
+            domain: Some("wm".into()),
+            extends: None,
+            relationship: Some(crate::package::module_manifest::InterfaceRelationship::Base),
+            reason: None,
+        }];
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![backend]).unwrap();
+
+    let contract = graph
+        .interface_contract("mesh.wm")
+        .expect("inline backend declaration should register a typed contract");
+    assert_eq!(contract.methods[0].name, "focus_workspace");
+    assert_eq!(
+        contract.capabilities.required,
+        vec!["service.wm.read".to_string()]
+    );
+    assert!(
+        graph
+            .declared_interface("mesh.wm")
+            .is_some_and(|declaration| declaration.module_id == "@mesh/hyprland-wm")
+    );
+}
+
+#[test]
+fn duplicate_interface_declaration_prefers_interface_module() {
+    let root = root_with_modules(
+        &[
+            ("@mesh/example-interface", ModuleKind::Interface),
+            ("@mesh/example-backend", ModuleKind::Backend),
+        ],
+        &[("mesh.example", "@mesh/example-backend")],
+        None,
+    );
+    let mut interface = loaded_module(
+        "@mesh/example-interface",
+        ModuleKind::Interface,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    interface.manifest.mesh.interface =
+        Some(crate::package::module_manifest::MeshInterfaceDeclaration {
+            name: "mesh.example".into(),
+            version: Some("1.0".into()),
+            contract: Some(serde_json::json!({
+                "methods": [{ "name": "from_interface_module" }]
+            })),
+            domain: Some("example".into()),
+            extends: None,
+            relationship: Some(crate::package::module_manifest::InterfaceRelationship::Base),
+            reason: None,
+        });
+    let mut backend = loaded_module(
+        "@mesh/example-backend",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider: Some("example".into()),
+            label: None,
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+    backend.manifest.mesh.interfaces =
+        vec![crate::package::module_manifest::MeshInterfaceDeclaration {
+            name: "mesh.example".into(),
+            version: Some("1.0".into()),
+            contract: Some(serde_json::json!({
+                "methods": [{ "name": "from_inline_backend" }]
+            })),
+            domain: Some("example".into()),
+            extends: None,
+            relationship: Some(crate::package::module_manifest::InterfaceRelationship::Base),
+            reason: None,
+        }];
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![interface, backend]).unwrap();
+
+    let contract = graph.interface_contract("mesh.example").unwrap();
+    assert_eq!(
+        contract.methods[0].name, "from_interface_module",
+        "standalone interface module contract must win over inline duplicates"
+    );
+    assert!(
+        graph
+            .diagnostics()
+            .iter()
+            .any(|d| d.status == "duplicate_interface_declaration"
+                && d.module_id == "@mesh/example-backend"),
+        "losing inline declaration should be a diagnostic; got: {:?}",
+        graph.diagnostics()
+    );
+}
+
+#[test]
+fn invalid_interface_contract_becomes_graph_diagnostic() {
     let root = root_with_modules(
         &[("@mesh/test-interface", ModuleKind::Interface)],
         &[],
@@ -3206,20 +3335,60 @@ fn graph_diagnostics_report_missing_interface_contract_file() {
         Some(crate::package::module_manifest::MeshInterfaceDeclaration {
             name: "mesh.test".into(),
             version: Some("1.0".into()),
-            file: Some("contract.toml".into()),
+            // References a named type that is never declared.
+            contract: Some(serde_json::json!({
+                "methods": [{ "name": "sensors", "returns": "Sensor[]" }]
+            })),
             domain: Some("test".into()),
             extends: None,
             relationship: Some(crate::package::module_manifest::InterfaceRelationship::Base),
             reason: None,
         });
-    iface.path = manifest_path;
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![iface]).unwrap();
+
+    assert!(graph.interface_contract("mesh.test").is_none());
+    assert!(
+        graph
+            .diagnostics()
+            .iter()
+            .any(|d| d.status == "invalid_interface_contract" && d.message.contains("Sensor")),
+        "invalid contract should surface as a diagnostic; got: {:?}",
+        graph.diagnostics()
+    );
+}
+
+#[test]
+fn graph_diagnostics_report_missing_interface_contract() {
+    let root = root_with_modules(
+        &[("@mesh/test-interface", ModuleKind::Interface)],
+        &[],
+        None,
+    );
+    let mut iface = loaded_module(
+        "@mesh/test-interface",
+        ModuleKind::Interface,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    iface.manifest.mesh.interface =
+        Some(crate::package::module_manifest::MeshInterfaceDeclaration {
+            name: "mesh.test".into(),
+            version: Some("1.0".into()),
+            contract: None,
+            domain: Some("test".into()),
+            extends: None,
+            relationship: Some(crate::package::module_manifest::InterfaceRelationship::Base),
+            reason: None,
+        });
     let graph = InstalledModuleGraph::from_parts(root, vec![iface]).unwrap();
     assert!(
         graph
             .diagnostics()
             .iter()
-            .any(|d| d.status == "missing_interface_contract_file"),
-        "expected missing_interface_contract_file diagnostic; got: {:?}",
+            .any(|d| d.status == "missing_interface_contract"),
+        "expected missing_interface_contract diagnostic; got: {:?}",
         graph.diagnostics()
     );
 }
@@ -3605,14 +3774,6 @@ fn graph_diagnostics_report_keybind_subscription_contract_gaps() {
 #[test]
 fn graph_diagnostics_report_backend_undeclared_interface_event_emit() {
     let interface_dir = temp_dir("interface-event-contract-test");
-    fs::write(
-        interface_dir.join("interface.toml"),
-        r#"
-[[events]]
-name = "DeclaredChanged"
-"#,
-    )
-    .unwrap();
     let backend_dir = temp_dir("backend-event-emit-test");
     let backend_src = backend_dir.join("src");
     fs::create_dir_all(&backend_src).unwrap();
@@ -3645,7 +3806,9 @@ end
     interface.manifest.mesh.interface = Some(MeshInterfaceDeclaration {
         name: "mesh.example".into(),
         version: Some("1.0".into()),
-        file: Some("interface.toml".into()),
+        contract: Some(serde_json::json!({
+            "events": [{ "name": "DeclaredChanged" }]
+        })),
         domain: Some("example".into()),
         extends: None,
         relationship: Some(InterfaceRelationship::Base),
@@ -3685,14 +3848,6 @@ end
 #[test]
 fn graph_diagnostics_report_frontend_undeclared_interface_event_subscription() {
     let interface_dir = temp_dir("frontend-interface-event-contract-test");
-    fs::write(
-        interface_dir.join("interface.toml"),
-        r#"
-[[events]]
-name = "DeclaredChanged"
-"#,
-    )
-    .unwrap();
     let frontend_dir = temp_dir("frontend-event-subscription-test");
     let frontend_src = frontend_dir.join("src");
     fs::create_dir_all(&frontend_src).unwrap();
@@ -3726,7 +3881,9 @@ example.MissingChanged:on(function(_event) end)
     interface.manifest.mesh.interface = Some(MeshInterfaceDeclaration {
         name: "mesh.example".into(),
         version: Some("1.0".into()),
-        file: Some("interface.toml".into()),
+        contract: Some(serde_json::json!({
+            "events": [{ "name": "DeclaredChanged" }]
+        })),
         domain: Some("example".into()),
         extends: None,
         relationship: Some(InterfaceRelationship::Base),
@@ -3987,15 +4144,6 @@ fn graph_health_marks_frontend_required_interface_unavailable_when_active_provid
 #[test]
 fn graph_diagnostics_flag_backend_provider_restating_consumer_capability() {
     let dir = temp_dir("interface-capability-backend-test");
-    fs::write(
-        dir.join("interface.toml"),
-        r#"
-[capabilities]
-required = ["service.example.read"]
-optional = ["service.example.control"]
-"#,
-    )
-    .unwrap();
     let root = root_with_modules(
         &[
             ("@mesh/example-interface", ModuleKind::Interface),
@@ -4015,7 +4163,12 @@ optional = ["service.example.control"]
     interface.manifest.mesh.interface = Some(MeshInterfaceDeclaration {
         name: "mesh.example".into(),
         version: Some("1.0".into()),
-        file: Some("interface.toml".into()),
+        contract: Some(serde_json::json!({
+            "capabilities": {
+                "required": ["service.example.read"],
+                "optional": ["service.example.control"]
+            }
+        })),
         domain: Some("example".into()),
         extends: None,
         relationship: Some(InterfaceRelationship::Base),
@@ -4075,14 +4228,6 @@ optional = ["service.example.control"]
 #[test]
 fn graph_diagnostics_report_frontend_missing_interface_required_capability() {
     let dir = temp_dir("interface-capability-frontend-test");
-    fs::write(
-        dir.join("interface.toml"),
-        r#"
-[capabilities]
-required = ["service.example.read"]
-"#,
-    )
-    .unwrap();
     let root = root_with_modules(
         &[
             ("@mesh/example-interface", ModuleKind::Interface),
@@ -4103,7 +4248,9 @@ required = ["service.example.read"]
     interface.manifest.mesh.interface = Some(MeshInterfaceDeclaration {
         name: "mesh.example".into(),
         version: Some("1.0".into()),
-        file: Some("interface.toml".into()),
+        contract: Some(serde_json::json!({
+            "capabilities": { "required": ["service.example.read"] }
+        })),
         domain: Some("example".into()),
         extends: None,
         relationship: Some(InterfaceRelationship::Base),

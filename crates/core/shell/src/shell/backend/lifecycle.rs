@@ -27,6 +27,7 @@ impl Shell {
                 | BackendRuntimeStatus::InitFailed
                 | BackendRuntimeStatus::PollFailed
                 | BackendRuntimeStatus::Failed
+                | BackendRuntimeStatus::Quarantined
         );
         if is_failure {
             self.diagnostics.record_lifecycle_error(
@@ -113,6 +114,9 @@ impl Shell {
             .backend_runtimes
             .get(&interface)
             .is_some_and(|slot| slot.provider_id == provider_id);
+        if runtime_status == BackendRuntimeStatus::Running && event_provider_is_current {
+            self.note_backend_running(&interface);
+        }
         if matches!(
             runtime_status,
             BackendRuntimeStatus::InitFailed
@@ -127,6 +131,7 @@ impl Shell {
             );
             self.stop_backend_runtime(&interface);
             self.clear_active_provider_service_state(&interface, &provider_id);
+            self.supervise_backend_failure(&interface, &provider_id);
         }
     }
 

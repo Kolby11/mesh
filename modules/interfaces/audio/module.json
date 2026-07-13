@@ -8,9 +8,93 @@
     "interface": {
       "name": "mesh.audio",
       "version": "1.0",
-      "file": "interface.toml",
       "domain": "audio",
-      "relationship": "base"
+      "relationship": "base",
+      "contract": {
+        "state": [
+          {
+            "name": "available",
+            "type": "boolean",
+            "description": "Whether the audio service is reachable"
+          },
+          {
+            "name": "percent",
+            "type": "float",
+            "description": "Current default output volume as a percentage (0.0-100.0)"
+          },
+          {
+            "name": "muted",
+            "type": "boolean",
+            "description": "Whether the default output is muted"
+          },
+          {
+            "name": "source_module",
+            "type": "string",
+            "description": "Backend module ID that emitted this state (runtime-additive)"
+          }
+        ],
+        "methods": [
+          {
+            "name": "set_volume",
+            "args": [
+              { "name": "device_id", "type": "string" },
+              { "name": "volume", "type": "float" }
+            ],
+            "returns": "Result",
+            "coalesce": true
+          },
+          {
+            "name": "set_muted",
+            "args": [
+              { "name": "device_id", "type": "string" },
+              { "name": "muted", "type": "boolean" }
+            ],
+            "returns": "Result",
+            "coalesce": true,
+            "optimistic": { "field": "muted", "fromArg": "muted" }
+          },
+          { "name": "volume_up" },
+          { "name": "volume_down" },
+          {
+            "name": "toggle_mute",
+            "optimistic": { "field": "muted" }
+          }
+        ],
+        "events": [
+          {
+            "name": "VolumeChanged",
+            "payload": [
+              { "name": "device_id", "type": "string" },
+              { "name": "level", "type": "float" }
+            ]
+          }
+        ],
+        "types": {
+          "Device": {
+            "fields": [
+              { "name": "id", "type": "string" },
+              { "name": "name", "type": "string" },
+              { "name": "description", "type": "string" },
+              { "name": "is_default", "type": "boolean" },
+              { "name": "volume", "type": "float" },
+              { "name": "muted", "type": "boolean" }
+            ]
+          },
+          "Stream": {
+            "fields": [
+              { "name": "id", "type": "string" },
+              { "name": "name", "type": "string" },
+              { "name": "application", "type": "string" },
+              { "name": "volume", "type": "float" },
+              { "name": "muted", "type": "boolean" }
+            ]
+          }
+        },
+        "capabilities": {
+          "required": ["service.audio.read"],
+          "optional": ["service.audio.control"]
+        }
+      }
     }
   }
 }

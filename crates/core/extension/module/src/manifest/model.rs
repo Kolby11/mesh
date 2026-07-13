@@ -30,6 +30,11 @@ pub struct Manifest {
     pub provides: Vec<ProvidedInterface>,
     #[serde(default)]
     pub interface: Option<InterfaceSection>,
+    /// Inline interface contract declarations from a backend module
+    /// (`mesh.interfaces`): the low-friction contract carrier for
+    /// single-provider domains.
+    #[serde(default)]
+    pub interfaces: Vec<InterfaceSection>,
     #[serde(default)]
     pub extensions: Vec<ExtensionSection>,
     #[serde(default)]
@@ -674,7 +679,10 @@ pub struct ThemeDefaultsSection {
 pub struct InterfaceSection {
     pub name: String,
     pub version: String,
-    pub file: String,
+    /// Inline contract JSON (state/methods/events/types/capabilities), parsed
+    /// by `mesh_core_service::parse_interface_contract`.
+    #[serde(default)]
+    pub contract: Option<serde_json::Value>,
     #[serde(default)]
     pub extends: Option<String>,
 }

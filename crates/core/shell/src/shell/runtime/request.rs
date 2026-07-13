@@ -580,12 +580,33 @@ impl Shell {
             .get("ok")
             .and_then(|value| value.as_bool())
             .unwrap_or(false)
-            && interface == "mesh.audio"
-            && command == "set_muted"
-            && let Some(muted) = payload.get("muted").and_then(|value| value.as_bool())
         {
-            self.apply_optimistic_audio_muted_state(muted);
-            dispatch_result["optimistic"] = serde_json::json!(true);
+            let optimistic = self
+                .interfaces
+                .resolve(interface_canonical.as_ref(), None)
+                .contract
+                .as_ref()
+                .and_then(|contract| {
+                    contract
+                        .methods
+                        .iter()
+                        .find(|method| method.name == command)
+                        .and_then(|method| method.optimistic.clone())
+                });
+            if let Some(optimistic) = optimistic
+                && let Some(value) = self.optimistic_value_for_command(
+                    interface_canonical.as_ref(),
+                    &optimistic,
+                    payload,
+                )
+            {
+                self.apply_optimistic_service_state(
+                    interface_canonical.as_ref(),
+                    &optimistic.field,
+                    value,
+                );
+                dispatch_result["optimistic"] = serde_json::json!(true);
+            }
         }
 
         let provider_id = self

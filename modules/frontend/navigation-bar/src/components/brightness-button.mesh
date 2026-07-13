@@ -1,5 +1,5 @@
 <template>
-  <row class="brightness-row" title={t('nav.brightness') .. ' ' .. brightness_label}>
+  <row class="brightness-row {brightness_row_class}" title={t('nav.brightness') .. ' ' .. brightness_label}>
     <button
       class="brightness-ctrl"
       onclick={onBrightnessDown}
@@ -22,10 +22,13 @@
 
 <script lang="luau">
 local t = import("mesh.i18n", "t")
+-- Optional interface: nil until a mesh.brightness provider is installed.
+-- Without a provider the whole control hides instead of pretending to work.
 local brightness = require("mesh.brightness")
 
 brightness_level = 100
 brightness_label = "100%"
+brightness_row_class = brightness and "" or "brightness-unavailable"
 
 function render(self)
     if brightness and brightness.level ~= nil then
@@ -35,23 +38,21 @@ function render(self)
 end
 
 function onBrightnessDown()
+    if not brightness then
+        return
+    end
     brightness_level = math.max(0, brightness_level - 10)
     brightness_label = string.format("%d%%", brightness_level)
-    if brightness and type(brightness.decrease) == "function" then
-        brightness.decrease(10)
-    else
-        mesh.events.publish("shell.brightness-down", { step = 10 })
-    end
+    brightness.decrease(10)
 end
 
 function onBrightnessUp()
+    if not brightness then
+        return
+    end
     brightness_level = math.min(100, brightness_level + 10)
     brightness_label = string.format("%d%%", brightness_level)
-    if brightness and type(brightness.increase) == "function" then
-        brightness.increase(10)
-    else
-        mesh.events.publish("shell.brightness-up", { step = 10 })
-    end
+    brightness.increase(10)
 end
 </script>
 
@@ -111,6 +112,10 @@ end
     height: 18px;
     color: inherit;
     flex-shrink: 0;
+}
+
+.brightness-unavailable {
+    display: none;
 }
 
 @container (max-width: 720px) {

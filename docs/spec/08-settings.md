@@ -75,7 +75,7 @@ Rules:
 | ----- | -------------- | ---------------------- |
 | Component config | `<props>` defaults in `.mesh` | `<module>.props.global` / `.instances` |
 | Backend config | in-script `props {}` in `main.luau` | `<provider-module>.props.global` |
-| Interface shared config | `[props]` in `interface.toml` | `mesh.<interface>.props.global` |
+| Interface shared config | `props` in the contract JSON (`module.json`) | `mesh.<interface>.props.global` |
 | Surface placement | `mesh.surface` in the manifest | `<module>.surface.*` |
 | Shell knobs | core prop declarations | `shell.*` |
 | Keybinds | `mesh.keybinds` triggers | `shell.keyboard.surface_shortcuts` |

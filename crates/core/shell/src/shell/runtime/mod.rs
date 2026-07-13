@@ -186,7 +186,12 @@ impl Shell {
 
         self.file_watcher_active =
             file_watch::spawn_file_watcher(self.file_watch_paths(), tx.clone(), eventfd_raw);
-        self.spawn_backend_modules(&runtime, tx.clone(), eventfd_raw);
+        self.backend_respawn = Some(backend::BackendRespawnContext {
+            handle: runtime.handle().clone(),
+            tx: tx.clone(),
+            eventfd_fd: eventfd_raw,
+        });
+        self.spawn_backend_modules(runtime.handle(), tx.clone(), eventfd_raw);
         let ipc_socket_path = default_ipc_socket_path();
         spawn_ipc_server(&runtime, ipc_socket_path.clone(), tx, eventfd_raw).map_err(|source| {
             ShellRunError::IpcInit {
@@ -303,6 +308,7 @@ impl Shell {
             ShellMessage::BackendLifecycle { .. } => "backend_lifecycle",
             ShellMessage::BackendCommandResult { .. } => "backend_command_result",
             ShellMessage::BackendInterfaceEvent { .. } => "backend_interface_event",
+            ShellMessage::BackendRestartDue { .. } => "backend_restart_due",
             ShellMessage::FilesystemChanged => "filesystem_changed",
             ShellMessage::Ipc(_) => "ipc",
         };
@@ -354,6 +360,9 @@ impl Shell {
                     name,
                     payload,
                 )?);
+            }
+            ShellMessage::BackendRestartDue { interface } => {
+                self.handle_backend_restart_due(&interface);
             }
             ShellMessage::FilesystemChanged => {
                 self.schedule_reload_checks_now();

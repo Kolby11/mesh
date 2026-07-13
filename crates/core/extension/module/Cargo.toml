@@ -9,6 +9,7 @@ license.workspace = true
 mesh-core-capability = { workspace = true }
 mesh-core-component = { workspace = true }
 mesh-core-elements = { workspace = true }
+mesh-core-service = { workspace = true }
 mesh-core-theme = { workspace = true }
 
 serde = { workspace = true }

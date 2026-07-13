@@ -388,6 +388,17 @@ fn mesh_section() -> Node {
             ),
             field("interface", false, interface_node()),
             field(
+                "interfaces",
+                false,
+                Node {
+                    doc: "Inline interface contract declarations on a backend module — \
+                          the low-friction contract carrier for single-provider domains. \
+                          Multi-provider domains keep a standalone interface module.",
+                    type_hint: "array",
+                    kind: Kind::Array(Box::new(interface_node())),
+                },
+            ),
+            field(
                 "theme",
                 false,
                 scalar(
@@ -774,11 +785,7 @@ fn interface_node() -> Node {
                 scalar("Interface name, e.g. `mesh.audio`.", "string"),
             ),
             field("version", false, scalar("Interface version.", "string")),
-            field(
-                "file",
-                false,
-                scalar("Path to the interface definition file.", "path"),
-            ),
+            field("contract", false, contract_node()),
             field(
                 "domain",
                 false,
@@ -802,6 +809,156 @@ fn interface_node() -> Node {
                 "reason",
                 false,
                 scalar("Why this relationship exists.", "string"),
+            ),
+        ],
+    )
+}
+
+fn contract_node() -> Node {
+    let typed_field = || {
+        obj(
+            "A named, typed field.",
+            vec![
+                field("name", true, scalar("Field name.", "string")),
+                field(
+                    "type",
+                    true,
+                    scalar(
+                        "Type expression: string, int, float, boolean, object, any, a named \
+                         type from `types`, with optional `[]` (array) and `?` (optional) \
+                         suffixes.",
+                        "string",
+                    ),
+                ),
+                field("description", false, scalar("Field description.", "string")),
+            ],
+        )
+    };
+    obj(
+        "Inline interface contract JSON: state fields, command methods, events, \
+         named types, and consumer capabilities.",
+        vec![
+            field(
+                "state",
+                false,
+                Node {
+                    doc: "Public state fields every provider must emit; read through \
+                          the service proxy as plain field access.",
+                    type_hint: "array",
+                    kind: Kind::Array(Box::new(typed_field())),
+                },
+            ),
+            field(
+                "methods",
+                false,
+                Node {
+                    doc: "Mutating command methods callable from frontend scripts.",
+                    type_hint: "array",
+                    kind: Kind::Array(Box::new(obj(
+                        "A command method declaration.",
+                        vec![
+                            field("name", true, scalar("Command name.", "string")),
+                            field(
+                                "args",
+                                false,
+                                Node {
+                                    doc: "Typed command arguments.",
+                                    type_hint: "array",
+                                    kind: Kind::Array(Box::new(typed_field())),
+                                },
+                            ),
+                            field(
+                                "returns",
+                                false,
+                                scalar("Return type expression.", "string"),
+                            ),
+                            field(
+                                "coalesce",
+                                false,
+                                scalar(
+                                    "Coalesce queued duplicates to the most recent payload \
+                                     (idempotent setters only).",
+                                    "boolean",
+                                ),
+                            ),
+                            field(
+                                "optimistic",
+                                false,
+                                obj(
+                                    "Optimistic state patch applied on dispatch: set `field` \
+                                     from `fromArg`, or toggle the boolean field when \
+                                     `fromArg` is omitted.",
+                                    vec![
+                                        field(
+                                            "field",
+                                            true,
+                                            scalar("State field to patch.", "string"),
+                                        ),
+                                        field(
+                                            "fromArg",
+                                            false,
+                                            scalar(
+                                                "Argument supplying the optimistic value.",
+                                                "string",
+                                            ),
+                                        ),
+                                    ],
+                                ),
+                            ),
+                        ],
+                    ))),
+                },
+            ),
+            field(
+                "events",
+                false,
+                Node {
+                    doc: "Named events with typed payload fields.",
+                    type_hint: "array",
+                    kind: Kind::Array(Box::new(obj(
+                        "An event declaration.",
+                        vec![
+                            field("name", true, scalar("Event name.", "string")),
+                            field(
+                                "payload",
+                                false,
+                                Node {
+                                    doc: "Typed payload fields.",
+                                    type_hint: "array",
+                                    kind: Kind::Array(Box::new(typed_field())),
+                                },
+                            ),
+                        ],
+                    ))),
+                },
+            ),
+            field(
+                "types",
+                false,
+                scalar(
+                    "Named record types referenced by type expressions, keyed by \
+                     PascalCase name; each has a `fields` array.",
+                    "object",
+                ),
+            ),
+            field(
+                "capabilities",
+                false,
+                obj(
+                    "Consumer capabilities for this interface.",
+                    vec![
+                        field(
+                            "required",
+                            false,
+                            scalar("Capabilities consumers must hold.", "array"),
+                        ),
+                        field(
+                            "optional",
+                            false,
+                            scalar("Capabilities consumers may hold.", "array"),
+                        ),
+                    ],
+                ),
             ),
         ],
     )

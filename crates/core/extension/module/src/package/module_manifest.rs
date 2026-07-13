@@ -120,16 +120,23 @@ impl ModuleManifest {
                 optional_capabilities: Vec::new(),
             })
             .collect();
-        let interface = mesh.interface.clone().and_then(|interface| {
-            let version = interface.version?;
-            let file = interface.file?;
-            Some(manifest::InterfaceSection {
-                name: interface.name,
-                version,
-                file,
-                extends: interface.extends,
-            })
-        });
+        let map_interface_section =
+            |interface: MeshInterfaceDeclaration| -> Option<manifest::InterfaceSection> {
+                let version = interface.version?;
+                Some(manifest::InterfaceSection {
+                    name: interface.name,
+                    version,
+                    contract: interface.contract,
+                    extends: interface.extends,
+                })
+            };
+        let interface = mesh.interface.clone().and_then(map_interface_section);
+        let interfaces = mesh
+            .interfaces
+            .clone()
+            .into_iter()
+            .filter_map(map_interface_section)
+            .collect();
 
         let manifest_theme = mesh.theme.clone().or(contributed_theme);
 
@@ -159,6 +166,7 @@ impl ModuleManifest {
             service: None,
             provides,
             interface,
+            interfaces,
             extensions: Vec::new(),
             exports: manifest::ExportsSection::default(),
             provides_slots: HashMap::new(),
@@ -198,6 +206,13 @@ pub struct MeshModuleSection {
     pub implements: Vec<MeshProvidesDeclaration>,
     #[serde(default)]
     pub interface: Option<MeshInterfaceDeclaration>,
+    /// Inline interface contract declarations on a backend module. This is the
+    /// low-friction path for single-provider domains: the backend that
+    /// implements the interface also declares its contract. Multi-provider
+    /// domains should keep a standalone `interface` module, which always wins
+    /// over inline declarations of the same name.
+    #[serde(default)]
+    pub interfaces: Vec<MeshInterfaceDeclaration>,
     #[serde(default)]
     pub theme: Option<manifest::ThemeSection>,
     #[serde(default)]
@@ -289,13 +304,34 @@ impl MeshModuleSection {
                     "interface modules must declare mesh.interface.version".into(),
                 ));
             }
-            // `mesh.interface.file` (the contract TOML) is optional for v0: an
-            // interface module may ship only name/version/domain and let the
-            // contract be inferred from the provider's emitted state. When a
-            // file is declared but absent on disk, the graph still reports
-            // `missing_interface_contract_file`; contract-based validation
-            // (capabilities, events) simply does not apply until a contract
-            // file exists.
+            // `mesh.interface.contract` is optional for v0: an interface module
+            // may ship only name/version/domain and let the contract be
+            // inferred from the provider's emitted state. When absent, the
+            // graph reports `missing_interface_contract`; contract-based
+            // validation (capabilities, events) simply does not apply until a
+            // contract exists.
+        }
+        if !self.interfaces.is_empty() {
+            if self.kind != ModuleKind::Backend {
+                return Err(ModuleManifestError::Validation(
+                    "mesh.interfaces (inline contract declarations) is only supported for backend modules; interface modules declare mesh.interface".into(),
+                ));
+            }
+            for declaration in &self.interfaces {
+                declaration.validate()?;
+                if declaration.version.is_none() {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "mesh.interfaces entry '{}' must declare a version",
+                        declaration.name
+                    )));
+                }
+                if declaration.contract.is_none() {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "mesh.interfaces entry '{}' must declare a contract; an inline interface declaration exists to carry its contract",
+                        declaration.name
+                    )));
+                }
+            }
         }
         if self.kind == ModuleKind::Library && !self.capabilities.required.is_empty() {
             return Err(ModuleManifestError::Validation(
@@ -835,8 +871,10 @@ pub struct MeshInterfaceDeclaration {
     pub name: String,
     #[serde(default)]
     pub version: Option<String>,
+    /// Inline contract JSON (state/methods/events/types/capabilities). This is
+    /// the only contract carrier — there is no separate contract file format.
     #[serde(default)]
-    pub file: Option<String>,
+    pub contract: Option<serde_json::Value>,
     #[serde(default)]
     pub domain: Option<String>,
     #[serde(default)]
@@ -861,12 +899,13 @@ impl MeshInterfaceDeclaration {
                 "mesh.interface.version cannot be empty".into(),
             ));
         }
-        if let Some(file) = &self.file
-            && file.trim().is_empty()
+        if let Some(contract) = &self.contract
+            && !contract.is_object()
         {
-            return Err(ModuleManifestError::Validation(
-                "mesh.interface.file cannot be empty".into(),
-            ));
+            return Err(ModuleManifestError::Validation(format!(
+                "mesh interface declaration '{}' contract must be a JSON object",
+                self.name
+            )));
         }
         if let Some(domain) = &self.domain
             && domain.trim().is_empty()

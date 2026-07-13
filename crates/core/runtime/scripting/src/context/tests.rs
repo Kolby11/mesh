@@ -33,7 +33,6 @@ fn audio_catalog() -> InterfaceCatalog {
     catalog.register_contract(InterfaceContract {
         interface: "mesh.audio".into(),
         version: parse_contract_version("1.0").unwrap(),
-        file_path: PathBuf::from("<test>"),
         // State fields are documented core reads — not callable methods.
         state_fields: Vec::new(),
         // Only mutating command methods belong here.
@@ -52,24 +51,28 @@ fn audio_catalog() -> InterfaceCatalog {
                 ],
                 returns: Some("Result".into()),
                 coalesce: false,
+                optimistic: None,
             },
             InterfaceMethod {
                 name: "volume_up".into(),
                 args: Vec::new(),
                 returns: None,
                 coalesce: false,
+                optimistic: None,
             },
             InterfaceMethod {
                 name: "volume_down".into(),
                 args: Vec::new(),
                 returns: None,
                 coalesce: false,
+                optimistic: None,
             },
             InterfaceMethod {
                 name: "toggle_mute".into(),
                 args: Vec::new(),
                 returns: None,
                 coalesce: false,
+                optimistic: None,
             },
             InterfaceMethod {
                 name: "set_muted".into(),
@@ -85,11 +88,21 @@ fn audio_catalog() -> InterfaceCatalog {
                 ],
                 returns: Some("Result".into()),
                 coalesce: false,
+                optimistic: None,
             },
         ],
         events: vec![InterfaceEvent {
             name: "VolumeChanged".into(),
-            payload: Some("{ device_id: string, level: float }".into()),
+            payload: vec![
+                InterfaceArgument {
+                    name: "device_id".into(),
+                    arg_type: "string".into(),
+                },
+                InterfaceArgument {
+                    name: "level".into(),
+                    arg_type: "float".into(),
+                },
+            ],
         }],
         types: HashMap::new(),
         capabilities: ContractCapabilities::default(),

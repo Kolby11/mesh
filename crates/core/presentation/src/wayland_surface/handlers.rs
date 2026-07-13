@@ -66,18 +66,42 @@ impl CompositorHandler for State {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
-        _output: &wl_output::WlOutput,
+        surface: &wl_surface::WlSurface,
+        output: &wl_output::WlOutput,
     ) {
+        // Track which output this surface actually landed on so size
+        // resolution (spanning-bar clamp, dynamic-size fallback) can use that
+        // output's geometry instead of an arbitrary "first enumerated output"
+        // guess. Layer surfaces are created with `output: None` (compositor
+        // picks one), so this event is the only way to learn which output it
+        // chose — critical on multi-monitor setups where outputs differ in
+        // size (a wrong-output guess previously clamped spanning bars to a
+        // smaller monitor's width even when placed on a larger one).
+        if let Some((surface_id, entry)) = self
+            .surfaces
+            .iter_mut()
+            .find(|(_, entry)| entry.wl_surface() == surface)
+        {
+            tracing::debug!(surface_id = surface_id.as_str(), "wl_surface::enter fired");
+            entry.output = Some(output.clone());
+        }
     }
 
     fn surface_leave(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
-        _output: &wl_output::WlOutput,
+        surface: &wl_surface::WlSurface,
+        output: &wl_output::WlOutput,
     ) {
+        if let Some(entry) = self
+            .surfaces
+            .values_mut()
+            .find(|entry| entry.wl_surface() == surface)
+            && entry.output.as_ref() == Some(output)
+        {
+            entry.output = None;
+        }
     }
 }
 

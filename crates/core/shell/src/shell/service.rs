@@ -203,6 +203,23 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
                     }),
                 }
             }
+            // `shell.` is a reserved channel namespace handled by the arms
+            // above. An unknown shell.* channel must never fall through to the
+            // service-command path (it would demand a capability for a phantom
+            // `shell` interface); surface a targeted diagnostic instead.
+            other if other.starts_with("shell.") => {
+                tracing::warn!(
+                    source_module_id = %event.source_module_id,
+                    channel = %event.channel,
+                    "unknown shell channel published by frontend module"
+                );
+                Some(CoreRequest::PublishDiagnostics {
+                    message: format!(
+                        "Unknown shell channel '{}' published by '{}'; shell.* is reserved for core requests and service commands use mesh.<interface>.<command> channels",
+                        event.channel, event.source_module_id
+                    ),
+                })
+            }
             other => other.rfind('.').map(|pos| {
                 let interface = other[..pos].to_string();
                 let command = other[pos + 1..].to_string();
@@ -379,6 +396,28 @@ mod tests {
                 assert!(*defer_for_hover_bridge);
             }
             other => panic!("expected HidePopover request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn script_events_to_requests_rejects_unknown_shell_channels() {
+        let mut caps = mesh_core_capability::CapabilitySet::new();
+        caps.grant(Capability::new("service.shell.control"));
+        let requests = script_events_to_requests(vec![PublishedEvent {
+            channel: "shell.brightness-down".into(),
+            payload: serde_json::json!({ "step": 10 }),
+            source_module_id: "@mesh/navigation-bar".into(),
+            source_capabilities: caps,
+        }]);
+
+        match requests.as_slice() {
+            [CoreRequest::PublishDiagnostics { message }] => {
+                assert!(message.contains("Unknown shell channel"));
+                assert!(message.contains("shell.brightness-down"));
+            }
+            other => panic!(
+                "unknown shell.* channels must never become service commands, got {other:?}"
+            ),
         }
     }
 

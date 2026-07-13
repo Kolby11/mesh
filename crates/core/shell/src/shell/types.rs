@@ -243,6 +243,11 @@ pub(super) enum ShellMessage {
         name: String,
         payload: serde_json::Value,
     },
+    /// A supervised backend restart delay elapsed; respawn the interface's
+    /// best available provider.
+    BackendRestartDue {
+        interface: String,
+    },
     FilesystemChanged,
     Ipc(CoreRequest),
 }

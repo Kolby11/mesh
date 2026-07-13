@@ -26,9 +26,9 @@ ws3_class = "ws-btn"
 ws4_class = "ws-btn"
 ws5_class = "ws-btn"
 
-local wm = require("mesh.hyprland")
+local wm = require("mesh.wm")
 
-local function get_hyprland_state()
+local function get_wm_state()
     if wm then
         return wm.active_workspace
     end
@@ -44,7 +44,7 @@ local function sync_classes()
 end
 
 function render(self)
-    local active = get_hyprland_state()
+    local active = get_wm_state()
     if active then
         local n = tonumber(active) or 1
         if n ~= ws_active then
@@ -57,10 +57,10 @@ end
 local function switch_to(n)
     ws_active = n
     sync_classes()
-    if wm and type(wm.switch_workspace) == "function" then
-        wm.switch_workspace(n)
+    if wm and type(wm.focus_workspace) == "function" then
+        wm.focus_workspace(n)
     else
-        mesh.log.warn("[workspace-list] mesh.hyprland switch_workspace method is unavailable")
+        mesh.log.warn("[workspace-list] mesh.wm focus_workspace method is unavailable")
     end
 end
 

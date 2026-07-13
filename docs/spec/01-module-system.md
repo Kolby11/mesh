@@ -177,8 +177,8 @@ Per the props model ([03](03-components.md)) and settings model
 ## 4. Interfaces
 
 **Status: shipped** (registry, contracts, event validation, relationship
-metadata); the contract-file grammar is a restricted TOML dialect and may
-still evolve.
+metadata). Contracts are JSON objects inside `module.json` — no separate
+contract file format — with a validated type grammar.
 
 An interface is a named, versioned declaration of:
 
@@ -190,22 +190,7 @@ An interface is a named, versioned declaration of:
 - **Shared props** — user preferences that survive provider swaps
   ([08 §4](08-settings.md)).
 
-```toml
-# @mesh/audio-interface / interface.toml
-[[methods]]
-name = "set_volume"
-args = [{ name = "device_id", type = "string" }, { name = "level", type = "float" }]
-returns = "Result"
-
-[[events]]
-name    = "VolumeChanged"
-payload = "{ device_id: string, level: float }"
-
-[capabilities]
-required = ["service.audio.read"]
-```
-
-Interface modules are data-only packages:
+Interface modules are data-only packages carrying the contract inline:
 
 ```json
 {
@@ -215,20 +200,77 @@ Interface modules are data-only packages:
     "apiVersion": "0.1",
     "kind": "interface",
     "interface": {
-      "name": "mesh.audio", "version": "1.0", "file": "interface.toml",
-      "domain": "audio", "relationship": "base"
+      "name": "mesh.audio", "version": "1.0",
+      "domain": "audio", "relationship": "base",
+      "contract": {
+        "state": [
+          { "name": "available", "type": "boolean" },
+          { "name": "percent", "type": "float" },
+          { "name": "muted", "type": "boolean" }
+        ],
+        "methods": [
+          {
+            "name": "set_volume",
+            "args": [
+              { "name": "device_id", "type": "string" },
+              { "name": "volume", "type": "float" }
+            ],
+            "returns": "Result",
+            "coalesce": true
+          },
+          {
+            "name": "set_muted",
+            "args": [
+              { "name": "device_id", "type": "string" },
+              { "name": "muted", "type": "boolean" }
+            ],
+            "returns": "Result",
+            "coalesce": true,
+            "optimistic": { "field": "muted", "fromArg": "muted" }
+          }
+        ],
+        "events": [
+          {
+            "name": "VolumeChanged",
+            "payload": [
+              { "name": "device_id", "type": "string" },
+              { "name": "level", "type": "float" }
+            ]
+          }
+        ],
+        "capabilities": { "required": ["service.audio.read"] }
+      }
     }
   }
 }
 ```
 
-- `mesh.interface.file` is **optional** for v0: the contract can be inferred
-  from the provider's emitted state, and a backend may implement an interface
-  with **no separate interface module at all** (declare the name in
-  `mesh.implements` with no `baseModule`). Promote to a full contract package
-  once it's worth sharing. One model, cheaper path.
-- Contract-based validation (events, capabilities) applies once a contract
-  file exists. Missing declared files report `missing_interface_contract_file`.
+- **Type grammar.** Every `type`/`returns` expression is validated at graph
+  build: primitives (`string`, `int`, `float`, `boolean`, `object`, `any`),
+  PascalCase named types declared under `contract.types` (plus the builtin
+  `Result`), with `[]` (array) and `?` (optional) suffixes. Invalid
+  expressions or references to undeclared types produce
+  `invalid_interface_contract` diagnostics and the interface loads without a
+  typed contract.
+- **Inline declaration for single-provider domains.** A backend module may
+  declare its interface contract itself under `mesh.interfaces[]` (same
+  shape as `mesh.interface`) — no separate interface module needed. A
+  standalone interface module always wins over inline duplicates of the same
+  name; duplicate inline declarations resolve to the highest-priority
+  provider's copy, and every conflict emits
+  `duplicate_interface_declaration`. Promote an inline contract to a
+  standalone interface module once a second provider exists.
+- `mesh.interface.contract` is **optional** for v0: the contract can be
+  inferred from the provider's emitted state, and a backend may implement an
+  interface with **no declaration at all** (name in `mesh.implements` with no
+  `baseModule`). Interface modules without a contract report
+  `missing_interface_contract`.
+- **Optimistic methods.** A method may declare
+  `"optimistic": { "field", "fromArg"? }`: on successful dispatch the shell
+  patches the named public state field (from the named argument, or by
+  toggling the boolean field when `fromArg` is omitted) and re-applies it
+  until the provider confirms. This is the generic replacement for
+  service-specific optimistic state in core.
 - Do not put provider identity (`source_module`) in contract state — that is
   runtime metadata.
 

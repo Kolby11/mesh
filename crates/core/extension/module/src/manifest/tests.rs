@@ -768,6 +768,7 @@ fn manifest_with_dependencies(
         service: None,
         provides: Vec::new(),
         interface: None,
+        interfaces: Vec::new(),
         extensions: Vec::new(),
         exports: ExportsSection::default(),
         provides_slots: HashMap::new(),

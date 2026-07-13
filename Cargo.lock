@@ -1789,6 +1789,7 @@ dependencies = [
  "mesh-core-capability",
  "mesh-core-component",
  "mesh-core-elements",
+ "mesh-core-service",
  "mesh-core-theme",
  "serde",
  "serde_json",
@@ -1878,10 +1879,8 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "toml 0.8.23",
 ]
 
 [[package]]

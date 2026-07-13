@@ -15,7 +15,7 @@
       "interfaces": {
         "mesh.audio": ">=1.0",
         "mesh.power": ">=1.0",
-        "mesh.hyprland": ">=1.0",
+        "mesh.wm": ">=1.0",
         "mesh.theme": ">=1.0"
       },
       "optionalInterfaces": {
@@ -32,8 +32,8 @@
         "service.power.read",
         "service.brightness.read",
         "service.brightness.control",
-        "service.hyprland.read",
-        "service.hyprland.control",
+        "service.wm.read",
+        "service.wm.control",
         "service.media.read",
         "theme.read",
         "locale.read",

@@ -24,7 +24,8 @@ end
 function start(self)
     mesh.service.set_poll_interval(5000)
     local config = mesh.config()
-    sync_theme(config.current_theme or config.theme_id or state.current, {})
+    local shell = config.__shell or {}
+    sync_theme(shell.theme or config.theme_id or state.current, {})
 end
 
 function on_poll(self)

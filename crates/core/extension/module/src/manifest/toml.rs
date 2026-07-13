@@ -74,6 +74,7 @@ impl TomlManifest {
             service: self.service,
             provides: self.provides,
             interface: self.interface,
+            interfaces: Vec::new(),
             extensions: self.extensions,
             exports: self.exports,
             provides_slots: self.provides_slots,

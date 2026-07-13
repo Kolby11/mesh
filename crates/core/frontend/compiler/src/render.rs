@@ -1330,6 +1330,7 @@ mod tests {
             service: None,
             provides: vec![],
             interface: None,
+            interfaces: Vec::new(),
             extensions: vec![],
             exports: Default::default(),
             provides_slots: Default::default(),

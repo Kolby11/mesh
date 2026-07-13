@@ -5,6 +5,7 @@ use super::{
 };
 use crate::manifest;
 use mesh_core_component::{AttributeValue, SourceTag, TemplateNode, parse_component};
+use mesh_core_service::{ContractCapabilities, InterfaceContract, parse_interface_contract};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -28,6 +29,8 @@ pub struct InstalledModuleGraph {
     active_providers: HashMap<String, String>,
     frontend_requirements: HashMap<String, FrontendRequirementSet>,
     interface_declarations: HashMap<String, InterfaceDeclarationNode>,
+    /// Typed contracts parsed once from the declarations' contract JSON.
+    interface_contracts: HashMap<String, InterfaceContract>,
     interface_guidance: Vec<InterfaceGuidanceRecord>,
     diagnostics: Vec<ModuleGraphDiagnostic>,
     health: Vec<ModuleGraphHealthRecord>,
@@ -99,7 +102,7 @@ impl InstalledModuleGraph {
                         module_id: module_id.clone(),
                         name: interface.name.clone(),
                         version: interface.version.clone(),
-                        file: interface.file.clone(),
+                        contract: interface.contract.clone(),
                         domain: interface.domain.clone(),
                         extends: interface.extends.clone(),
                         relationship: interface.effective_relationship(),
@@ -144,6 +147,81 @@ impl InstalledModuleGraph {
                     .cmp(&a.priority)
                     .then_with(|| a.module_id.cmp(&b.module_id))
             });
+        }
+
+        // Collect inline interface declarations from backend modules
+        // (`mesh.interfaces`). A standalone interface module always wins for
+        // the same interface name; among duplicate inline declarations the
+        // highest-priority provider's copy wins. Losers become diagnostics,
+        // not errors — the graph stays loadable.
+        let mut manual_diagnostics: Vec<ModuleGraphDiagnostic> = Vec::new();
+        let mut backend_ids: Vec<String> = graph_modules
+            .values()
+            .filter(|node| node.enabled && node.kind == ModuleKind::Backend)
+            .map(|node| node.id.clone())
+            .collect();
+        backend_ids.sort();
+        let provider_priority = |interface: &str, module_id: &str| -> u32 {
+            backend_providers
+                .get(interface)
+                .and_then(|providers| {
+                    providers
+                        .iter()
+                        .find(|provider| provider.module_id == module_id)
+                })
+                .map(|provider| provider.priority)
+                .unwrap_or(0)
+        };
+        for module_id in backend_ids {
+            let Some(node) = graph_modules.get(&module_id) else {
+                continue;
+            };
+            for interface in &node.manifest.mesh.interfaces {
+                let candidate = InterfaceDeclarationNode {
+                    source: ContributionSource::new(node, &interface.name),
+                    module_id: module_id.clone(),
+                    name: interface.name.clone(),
+                    version: interface.version.clone(),
+                    contract: interface.contract.clone(),
+                    domain: interface.domain.clone(),
+                    extends: interface.extends.clone(),
+                    relationship: interface.effective_relationship(),
+                    reason: interface.reason.clone(),
+                };
+                match interface_declarations.get(&candidate.name) {
+                    None => {
+                        interface_declarations.insert(candidate.name.clone(), candidate);
+                    }
+                    Some(existing) => {
+                        let existing_is_interface_module = graph_modules
+                            .get(&existing.module_id)
+                            .is_some_and(|node| node.kind == ModuleKind::Interface);
+                        let replace = !existing_is_interface_module
+                            && provider_priority(&candidate.name, &candidate.module_id)
+                                > provider_priority(&existing.name, &existing.module_id);
+                        let (winner_id, loser_id) = if replace {
+                            (candidate.module_id.clone(), existing.module_id.clone())
+                        } else {
+                            (existing.module_id.clone(), candidate.module_id.clone())
+                        };
+                        manual_diagnostics.push(ModuleGraphDiagnostic {
+                            module_id: loser_id.clone(),
+                            contribution_id: Some(format!(
+                                "{loser_id}:interface:{}",
+                                candidate.name
+                            )),
+                            status: "duplicate_interface_declaration".into(),
+                            message: format!(
+                                "interface {} is declared by both {winner_id} and {loser_id}; the declaration from {winner_id} wins",
+                                candidate.name
+                            ),
+                        });
+                        if replace {
+                            interface_declarations.insert(candidate.name.clone(), candidate);
+                        }
+                    }
+                }
+            }
         }
 
         // Auto-select a provider when exactly one enabled backend implements an
@@ -230,13 +308,41 @@ impl InstalledModuleGraph {
             }
             None => None,
         };
+        // Parse every declared contract once. Invalid contracts become
+        // diagnostics and the interface simply has no typed contract.
+        let mut interface_contracts: HashMap<String, InterfaceContract> = HashMap::new();
+        for declaration in interface_declarations.values() {
+            let Some(value) = &declaration.contract else {
+                continue;
+            };
+            let version = declaration.version.as_deref().unwrap_or("1.0");
+            match parse_interface_contract(&declaration.name, version, value) {
+                Ok(contract) => {
+                    interface_contracts.insert(declaration.name.clone(), contract);
+                }
+                Err(err) => manual_diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: declaration.module_id.clone(),
+                    contribution_id: Some(format!(
+                        "{}:interface:{}",
+                        declaration.module_id, declaration.name
+                    )),
+                    status: "invalid_interface_contract".into(),
+                    message: format!(
+                        "interface {} declares an invalid contract: {err}",
+                        declaration.name
+                    ),
+                }),
+            }
+        }
+
         let interface_guidance = build_interface_guidance(&interface_declarations);
         let diagnostics = build_graph_diagnostics(
             &graph_modules,
             &frontend_requirements,
-            &interface_declarations,
             &backend_providers,
             &contributions,
+            &interface_contracts,
+            manual_diagnostics,
         );
         let health = build_graph_health(
             &backend_providers,
@@ -251,6 +357,7 @@ impl InstalledModuleGraph {
             active_providers: root.providers,
             frontend_requirements,
             interface_declarations,
+            interface_contracts,
             interface_guidance,
             diagnostics,
             health,
@@ -425,6 +532,16 @@ impl InstalledModuleGraph {
         &self.contributions.icon_packs
     }
 
+    /// Typed contracts parsed from declared interface contract JSON, keyed by
+    /// interface name.
+    pub fn interface_contracts(&self) -> &HashMap<String, InterfaceContract> {
+        &self.interface_contracts
+    }
+
+    pub fn interface_contract(&self, interface: &str) -> Option<&InterfaceContract> {
+        self.interface_contracts.get(interface)
+    }
+
     pub fn declared_interfaces(&self) -> Vec<&InterfaceDeclarationNode> {
         let mut interfaces = self.interface_declarations.values().collect::<Vec<_>>();
         interfaces.sort_by(|a, b| {
@@ -514,7 +631,9 @@ pub struct InterfaceDeclarationNode {
     pub module_id: String,
     pub name: String,
     pub version: Option<String>,
-    pub file: Option<String>,
+    /// Contract JSON declared in the module manifest. Parsed into a typed
+    /// [`InterfaceContract`] during graph construction.
+    pub contract: Option<serde_json::Value>,
     pub domain: Option<String>,
     pub extends: Option<String>,
     pub relationship: InterfaceRelationship,
@@ -546,31 +665,6 @@ pub struct ModuleGraphHealthRecord {
     pub provider_id: Option<String>,
     pub status: String,
     pub message: String,
-}
-
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-struct InterfaceContractCapabilityToml {
-    #[serde(default)]
-    capabilities: InterfaceContractCapabilitySection,
-}
-
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-struct InterfaceContractCapabilitySection {
-    #[serde(default)]
-    required: Vec<String>,
-    #[serde(default)]
-    optional: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-struct InterfaceContractEventsToml {
-    #[serde(default)]
-    events: Vec<InterfaceContractEventSection>,
-}
-
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-struct InterfaceContractEventSection {
-    name: String,
 }
 
 fn build_interface_guidance(
@@ -627,63 +721,6 @@ fn build_interface_guidance(
             .then_with(|| a.module_id.cmp(&b.module_id))
     });
     guidance
-}
-
-fn load_interface_contract_capabilities(
-    modules: &HashMap<String, InstalledModuleNode>,
-    declarations: &HashMap<String, InterfaceDeclarationNode>,
-) -> HashMap<String, InterfaceContractCapabilitySection> {
-    let mut capabilities = HashMap::new();
-    for declaration in declarations.values() {
-        let Some(file) = &declaration.file else {
-            continue;
-        };
-        let Some(module) = modules.get(&declaration.module_id) else {
-            continue;
-        };
-        let module_dir = module.manifest_path.parent().unwrap_or(Path::new("."));
-        let contract_path = module_dir.join(file);
-        let Ok(content) = std::fs::read_to_string(&contract_path) else {
-            continue;
-        };
-        let Ok(parsed) = toml::from_str::<InterfaceContractCapabilityToml>(&content) else {
-            continue;
-        };
-        capabilities.insert(declaration.name.clone(), parsed.capabilities);
-    }
-    capabilities
-}
-
-fn load_interface_contract_events(
-    modules: &HashMap<String, InstalledModuleNode>,
-    declarations: &HashMap<String, InterfaceDeclarationNode>,
-) -> HashMap<String, std::collections::HashSet<String>> {
-    let mut events = HashMap::new();
-    for declaration in declarations.values() {
-        let Some(file) = &declaration.file else {
-            continue;
-        };
-        let Some(module) = modules.get(&declaration.module_id) else {
-            continue;
-        };
-        let module_dir = module.manifest_path.parent().unwrap_or(Path::new("."));
-        let contract_path = module_dir.join(file);
-        let Ok(content) = std::fs::read_to_string(&contract_path) else {
-            continue;
-        };
-        let Ok(parsed) = toml::from_str::<InterfaceContractEventsToml>(&content) else {
-            continue;
-        };
-        events.insert(
-            declaration.name.clone(),
-            parsed
-                .events
-                .into_iter()
-                .map(|event| event.name)
-                .collect::<std::collections::HashSet<_>>(),
-        );
-    }
-    events
 }
 
 fn build_graph_health(
@@ -1255,14 +1292,29 @@ fn scan_files_recursive(dir: &Path, extension: &str) -> Vec<(std::path::PathBuf,
 fn build_graph_diagnostics(
     modules: &HashMap<String, InstalledModuleNode>,
     frontend_requirements: &HashMap<String, FrontendRequirementSet>,
-    interface_declarations: &HashMap<String, InterfaceDeclarationNode>,
     backend_providers: &HashMap<String, Vec<BackendProviderNode>>,
     contributions: &ModuleContributionIndex,
+    interface_contracts: &HashMap<String, InterfaceContract>,
+    manual_diagnostics: Vec<ModuleGraphDiagnostic>,
 ) -> Vec<ModuleGraphDiagnostic> {
-    let mut diagnostics = Vec::new();
-    let contract_capabilities =
-        load_interface_contract_capabilities(modules, interface_declarations);
-    let contract_events = load_interface_contract_events(modules, interface_declarations);
+    let mut diagnostics = manual_diagnostics;
+    let contract_capabilities: HashMap<String, ContractCapabilities> = interface_contracts
+        .iter()
+        .map(|(name, contract)| (name.clone(), contract.capabilities.clone()))
+        .collect();
+    let contract_events: HashMap<String, std::collections::HashSet<String>> = interface_contracts
+        .iter()
+        .map(|(name, contract)| {
+            (
+                name.clone(),
+                contract
+                    .events
+                    .iter()
+                    .map(|event| event.name.clone())
+                    .collect(),
+            )
+        })
+        .collect();
 
     diagnose_frontend_requirements(
         modules,
@@ -1284,7 +1336,7 @@ fn build_graph_diagnostics(
     diagnose_frontend_surfaces(contributions, &mut diagnostics);
     diagnose_required_binaries(modules, &mut diagnostics);
     diagnose_frontend_source_contracts(modules, &mut diagnostics);
-    diagnose_interface_contract_files(modules, &mut diagnostics);
+    diagnose_missing_interface_contracts(modules, &mut diagnostics);
     diagnose_duplicate_keybind_triggers(contributions, &mut diagnostics);
 
     diagnostics.sort_by(|a, b| {
@@ -1300,7 +1352,7 @@ fn diagnose_frontend_requirements(
     modules: &HashMap<String, InstalledModuleNode>,
     frontend_requirements: &HashMap<String, FrontendRequirementSet>,
     contributions: &ModuleContributionIndex,
-    contract_capabilities: &HashMap<String, InterfaceContractCapabilitySection>,
+    contract_capabilities: &HashMap<String, ContractCapabilities>,
     contract_events: &HashMap<String, std::collections::HashSet<String>>,
     diagnostics: &mut Vec<ModuleGraphDiagnostic>,
 ) {
@@ -1443,7 +1495,7 @@ fn diagnose_frontend_requirements(
 fn diagnose_backend_providers(
     modules: &HashMap<String, InstalledModuleNode>,
     backend_providers: &HashMap<String, Vec<BackendProviderNode>>,
-    contract_capabilities: &HashMap<String, InterfaceContractCapabilitySection>,
+    contract_capabilities: &HashMap<String, ContractCapabilities>,
     contract_events: &HashMap<String, std::collections::HashSet<String>>,
     diagnostics: &mut Vec<ModuleGraphDiagnostic>,
 ) {
@@ -1858,7 +1910,7 @@ fn diagnose_frontend_source_contracts(
     }
 }
 
-fn diagnose_interface_contract_files(
+fn diagnose_missing_interface_contracts(
     modules: &HashMap<String, InstalledModuleNode>,
     diagnostics: &mut Vec<ModuleGraphDiagnostic>,
 ) {
@@ -1866,22 +1918,18 @@ fn diagnose_interface_contract_files(
         .values()
         .filter(|m| m.enabled && m.kind == ModuleKind::Interface)
     {
-        if let Some(interface) = &module.manifest.mesh.interface {
-            if let Some(file) = &interface.file {
-                let module_dir = module.manifest_path.parent().unwrap_or(Path::new("."));
-                // Only validate on-disk modules; test fixtures use fictional paths.
-                if module_dir.exists() && !module_dir.join(file).exists() {
-                    diagnostics.push(ModuleGraphDiagnostic {
-                        module_id: module.id.clone(),
-                        contribution_id: None,
-                        status: "missing_interface_contract_file".into(),
-                        message: format!(
-                            "interface module {} declares contract file '{}' but it does not exist",
-                            module.id, file
-                        ),
-                    });
-                }
-            }
+        if let Some(interface) = &module.manifest.mesh.interface
+            && interface.contract.is_none()
+        {
+            diagnostics.push(ModuleGraphDiagnostic {
+                module_id: module.id.clone(),
+                contribution_id: None,
+                status: "missing_interface_contract".into(),
+                message: format!(
+                    "interface module {} declares {} without a contract; contract-based validation does not apply",
+                    module.id, interface.name
+                ),
+            });
         }
     }
 }

@@ -7,7 +7,7 @@
 <script lang="luau">
 window_title = "Desktop"
 
-local wm = require("mesh.hyprland")
+local wm = require("mesh.wm")
 
 function render(self)
     if wm and wm.active_window then

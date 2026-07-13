@@ -1,14 +1,12 @@
 use super::super::*;
-use super::candidates::{
-    backend_launch_candidates_from_graph, legacy_backend_candidates_from_discovery,
-};
+use super::candidates::backend_launch_candidates_from_graph;
 use super::{BackendLaunchCandidate, BackendRuntimeStatus};
 use rustix::fd::BorrowedFd;
 
 impl Shell {
     pub(in crate::shell) fn spawn_backend_modules(
         &mut self,
-        runtime: &Runtime,
+        runtime: &tokio::runtime::Handle,
         tx: mpsc::UnboundedSender<ShellMessage>,
         eventfd_fd: std::os::unix::io::RawFd,
     ) {
@@ -46,44 +44,42 @@ impl Shell {
                 }
             }
             Err(err) => {
-                tracing::warn!(
-                    "failed to load installed module graph from {}; using legacy backend discovery: {err}",
+                let message = format!(
+                    "failed to load installed module graph from {}; no backend services started: {err}",
                     graph_path.display()
                 );
-                for mut candidate in
-                    legacy_backend_candidates_from_discovery(&self.modules, &self.config)
-                {
-                    self.apply_shell_runtime_settings(&mut candidate);
-                    self.spawn_backend_candidate(runtime, tx.clone(), candidate, eventfd_fd);
-                }
+                tracing::error!("{message}");
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/shell".to_string(),
+                    "module_graph_load_failed",
+                    message,
+                );
             }
         }
     }
 
+    /// Inject the generic `__shell` context into every backend's settings:
+    /// ambient shell-owned state (active theme, locale) any provider may read
+    /// via `mesh.config().__shell`. This is deliberately service-agnostic —
+    /// core never injects per-interface values.
     pub(in crate::shell) fn apply_shell_runtime_settings(
         &self,
         candidate: &mut BackendLaunchCandidate,
     ) {
-        if candidate.interface != "mesh.theme" {
-            return;
-        }
-
-        let current_theme = self.theme.active().id.clone();
+        let shell_context = serde_json::json!({
+            "theme": self.theme.active().id.clone(),
+            "locale": self.locale.current(),
+        });
         if let Some(settings) = candidate.settings.as_object_mut() {
-            settings.insert(
-                "current_theme".to_string(),
-                serde_json::Value::String(current_theme),
-            );
+            settings.insert("__shell".to_string(), shell_context);
         } else {
-            candidate.settings = serde_json::json!({
-                "current_theme": current_theme,
-            });
+            candidate.settings = serde_json::json!({ "__shell": shell_context });
         }
     }
 
-    fn spawn_backend_candidate(
+    pub(in crate::shell) fn spawn_backend_candidate(
         &mut self,
-        runtime: &Runtime,
+        runtime: &tokio::runtime::Handle,
         tx: mpsc::UnboundedSender<ShellMessage>,
         candidate: BackendLaunchCandidate,
         eventfd_fd: std::os::unix::io::RawFd,

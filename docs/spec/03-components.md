@@ -167,9 +167,9 @@ generation has one input model:
   }
   ```
 
-- **Interfaces** declare provider-swap-surviving shared props in
-  `interface.toml` (`[props]`); every implementation reads them under the
-  contract's settings namespace ([08 §4](08-settings.md)).
+- **Interfaces** declare provider-swap-surviving shared props in the
+  contract JSON inside `module.json` (`contract.props`); every implementation
+  reads them under the contract's settings namespace ([08 §4](08-settings.md)).
 - **Shell core** declares its own knobs (tooltip timing, activation keys, …)
   with the same declaration model, generating the shell settings pages.
 

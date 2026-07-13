@@ -269,13 +269,13 @@ function on_stream_batch(self, program, lines)
     end
 end
 
-function on_command_switch_workspace(self)
+function on_command_focus_workspace(self)
     local payload = mesh.service.payload()
     local id = tonumber(payload.id)
     if not id then
         return { ok = false, error = "missing workspace id" }
     end
-    log_info("switch_workspace(" .. tostring(id) .. ")")
+    log_info("focus_workspace(" .. tostring(id) .. ")")
     local result = mesh.exec("hyprctl", { "dispatch", "workspace", tostring(id) })
     refresh_state(self)
     return { ok = result.success, error = result.stderr }

@@ -33,7 +33,8 @@ function render(self)
 end
 
 function onClockClick()
-    mesh.events.publish("shell.toggle-calendar", {})
+    -- No calendar surface exists yet; wire this to a real surface toggle
+    -- (shell.toggle-surface with its surface_id) once one ships.
 end
 </script>
 

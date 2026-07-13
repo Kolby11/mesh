@@ -113,8 +113,10 @@ impl Shell {
             service_handlers: HashMap::new(),
             backend_runtimes: HashMap::new(),
             backend_runtime_statuses: HashMap::new(),
+            backend_supervision: HashMap::new(),
+            backend_respawn: None,
             latest_service_state: HashMap::new(),
-            pending_audio_muted: None,
+            pending_optimistic_state: HashMap::new(),
             command_throttle: HashMap::new(),
             pending_popover_hides: HashMap::new(),
             profiling: runtime::profiling::ProfilingRuntimeState::default(),
@@ -173,22 +175,8 @@ impl Shell {
         &mut self,
         graph: &InstalledModuleGraph,
     ) {
-        for declaration in graph.declared_interfaces() {
-            let (Some(version), Some(file)) = (&declaration.version, &declaration.file) else {
-                continue;
-            };
-            let contract_dir = declaration
-                .source
-                .manifest_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."));
-            match load_interface_contract(contract_dir, &declaration.name, version, file) {
-                Ok(contract) => self.interfaces.register_contract(contract),
-                Err(err) => tracing::warn!(
-                    "failed to load graph interface contract for module {}: {err}",
-                    declaration.module_id
-                ),
-            }
+        for contract in graph.interface_contracts().values() {
+            self.interfaces.register_contract(contract.clone());
         }
 
         for provider in graph.backend_provider_contributions() {
@@ -215,20 +203,29 @@ impl Shell {
             match mesh_core_module::manifest::load_manifest(dir) {
                 Ok(loaded) => {
                     let id = loaded.manifest.package.id.clone();
-                    if loaded.manifest.package.module_type == ModuleType::Interface {
-                        if let Some(interface) = &loaded.manifest.interface {
-                            match load_interface_contract(
-                                dir,
-                                &interface.name,
-                                &interface.version,
-                                &interface.file,
-                            ) {
-                                Ok(contract) => self.interfaces.register_contract(contract),
-                                Err(err) => tracing::warn!(
-                                    "failed to load interface contract for module {}: {err}",
-                                    id
-                                ),
-                            }
+                    // Register declared contracts: `mesh.interface` on interface
+                    // modules and inline `mesh.interfaces` on backend modules.
+                    let declared_contract_sections = loaded
+                        .manifest
+                        .interface
+                        .iter()
+                        .filter(|_| loaded.manifest.package.module_type == ModuleType::Interface)
+                        .chain(loaded.manifest.interfaces.iter());
+                    for section in declared_contract_sections {
+                        let Some(contract_value) = &section.contract else {
+                            continue;
+                        };
+                        match parse_interface_contract(
+                            &section.name,
+                            &section.version,
+                            contract_value,
+                        ) {
+                            Ok(contract) => self.interfaces.register_contract(contract),
+                            Err(err) => tracing::warn!(
+                                "invalid interface contract {} in module {}: {err}",
+                                section.name,
+                                id
+                            ),
                         }
                     }
                     for provided in loaded.manifest.declared_provides() {
@@ -288,47 +285,7 @@ impl Shell {
             let path = entry.path();
             if path.is_dir() {
                 self.scan_module_dir(&path);
-            } else if path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"))
-                && path
-                    .parent()
-                    .and_then(|parent| parent.file_name())
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name == "interfaces")
-            {
-                self.scan_interface_file(&path);
             }
-        }
-    }
-
-    fn scan_interface_file(&mut self, path: &Path) {
-        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
-            return;
-        };
-        let interface_name = canonical_interface_name(stem);
-        match load_interface_contract(
-            path.parent().unwrap_or_else(|| Path::new(".")),
-            &interface_name,
-            "1.0",
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default(),
-        ) {
-            Ok(contract) => {
-                tracing::info!(
-                    "discovered interface contract: {} from {}",
-                    contract.interface,
-                    path.display()
-                );
-                self.interfaces.register_contract(contract);
-            }
-            Err(err) => tracing::warn!(
-                "failed to load interface contract {} from {}: {err}",
-                interface_name,
-                path.display()
-            ),
         }
     }
 

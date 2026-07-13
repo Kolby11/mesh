@@ -1,9 +1,10 @@
 /// Interface plumbing for MESH's module runtime.
 ///
-/// The source of truth is the interface contract module on disk plus the
-/// backend module that provides it. This crate hosts the registry and contract
-/// loader. All service interfaces are declared by modules; there are no
-/// hardcoded Rust trait adapters.
+/// The source of truth is the contract JSON declared in a module's
+/// `module.json` (standalone interface module or inline in a backend module)
+/// plus the backend module that provides it. This crate hosts the registry and
+/// the contract parser. All service interfaces are declared by modules; there
+/// are no hardcoded Rust trait adapters.
 ///
 /// # Runtime model
 ///
@@ -26,8 +27,9 @@ pub mod interface;
 pub mod registry;
 
 pub use contract::{
-    ContractCapabilities, ContractError, InterfaceArgument, InterfaceContract, InterfaceEvent,
-    InterfaceMethod, InterfaceTypeDef, load_interface_contract, parse_contract_version,
+    BaseType, ContractCapabilities, ContractError, ContractStateField, InterfaceArgument,
+    InterfaceContract, InterfaceEvent, InterfaceMethod, InterfaceTypeDef, OptimisticUpdate,
+    TypeExpr, contract_type_errors, parse_contract_version, parse_interface_contract,
     parse_version_req,
 };
 pub use interface::{

@@ -148,6 +148,13 @@ pub(super) struct SurfaceEntry {
     /// call-ordering around configure/remap.
     pub(super) input_region_rect: Option<DamageRect>,
     pub(super) input_region_dirty: bool,
+    /// The output this surface's `wl_surface` currently overlaps, tracked via
+    /// `wl_surface::enter`/`leave`. A surface can technically straddle more
+    /// than one output; the most recent `enter` wins, which is exactly what a
+    /// single-output-bound layer surface (the common case: `output: None` at
+    /// creation, compositor picks one) needs. `None` before the first `enter`
+    /// arrives (e.g. between surface creation and the first frame).
+    pub(super) output: Option<wl_output::WlOutput>,
 }
 
 struct SurfaceConfigHasher(u64);
@@ -213,6 +220,7 @@ impl SurfaceEntry {
             blur_region_dirty: false,
             input_region_rect: None,
             input_region_dirty: false,
+            output: None,
         }
     }
 
@@ -485,6 +493,63 @@ fn surface_change_requires_fresh_configure(
         || previous.margin_right != next.margin_right
         || previous.margin_bottom != next.margin_bottom
         || previous.margin_left != next.margin_left
+}
+
+/// Clamp a layer-surface config's size/margins to a known output's logical
+/// size. `output_size` must be the size of the output *this surface is
+/// actually on* — passing `None` (output not yet known) or another
+/// surface's/output's size produces wrong geometry: clamping a
+/// compositor-verified width down to a smaller, unrelated output's size
+/// centers the surface with dead space on both sides instead of spanning its
+/// real output edge-to-edge. See `output_logical_size_for_surface`.
+fn clamp_surface_config_to_output(
+    mut cfg: LayerSurfaceConfig,
+    output_size: Option<(u32, u32)>,
+) -> LayerSurfaceConfig {
+    let Some((output_width, output_height)) = output_size else {
+        return cfg;
+    };
+
+    if cfg.width == 0 || cfg.height == 0 {
+        return cfg;
+    }
+
+    let max_width = output_width.max(1);
+    let max_height = output_height.max(1);
+
+    cfg.width = cfg.width.min(max_width);
+    cfg.height = cfg.height.min(max_height);
+
+    match cfg.edge {
+        Some(Edge::Left) | None => {
+            let max_left = max_width.saturating_sub(cfg.width) as i32;
+            let max_top = max_height.saturating_sub(cfg.height) as i32;
+            cfg.margin_left = cfg.margin_left.clamp(0, max_left.max(0));
+            cfg.margin_top = cfg.margin_top.clamp(0, max_top.max(0));
+        }
+        Some(Edge::Right) => {
+            let max_right = max_width.saturating_sub(cfg.width) as i32;
+            let max_top = max_height.saturating_sub(cfg.height) as i32;
+            cfg.margin_right = cfg.margin_right.clamp(0, max_right.max(0));
+            cfg.margin_top = cfg.margin_top.clamp(0, max_top.max(0));
+        }
+        Some(Edge::Top) => {
+            let max_left = max_width.saturating_sub(cfg.width) as i32;
+            let max_right = max_width.saturating_sub(cfg.width) as i32;
+            cfg.margin_left = cfg.margin_left.clamp(0, max_left.max(0));
+            cfg.margin_right = cfg.margin_right.clamp(0, max_right.max(0));
+        }
+        Some(Edge::Bottom) => {
+            let max_left = max_width.saturating_sub(cfg.width) as i32;
+            let max_right = max_width.saturating_sub(cfg.width) as i32;
+            let max_bottom = max_height.saturating_sub(cfg.height) as i32;
+            cfg.margin_left = cfg.margin_left.clamp(0, max_left.max(0));
+            cfg.margin_right = cfg.margin_right.clamp(0, max_right.max(0));
+            cfg.margin_bottom = cfg.margin_bottom.clamp(0, max_bottom.max(0));
+        }
+    }
+
+    cfg
 }
 
 fn resolved_surface_size(entry: &SurfaceEntry, output_size: Option<(u32, u32)>) -> (u32, u32) {
@@ -815,7 +880,7 @@ impl LayerShellBackend {
 
     /// Apply a surface's desired config. Creates the layer surface lazily on first call.
     pub fn configure(&mut self, surface_id: &str, cfg: LayerSurfaceConfig) {
-        let cfg = self.clamp_surface_config(cfg);
+        let cfg = self.clamp_surface_config(surface_id, cfg);
         if cfg.keyboard_mode != KeyboardMode::OnDemand {
             self.state.release_surface_focus_grab(surface_id);
         }
@@ -1085,73 +1150,51 @@ impl LayerShellBackend {
         std::mem::take(&mut self.state.dismissed_popups)
     }
 
-    fn clamp_surface_config(&self, mut cfg: LayerSurfaceConfig) -> LayerSurfaceConfig {
-        let Some((output_width, output_height)) = self.output_logical_size() else {
-            return cfg;
-        };
-
-        if cfg.width == 0 || cfg.height == 0 {
-            return cfg;
-        }
-
-        let max_width = output_width.max(1);
-        let max_height = output_height.max(1);
-
-        cfg.width = cfg.width.min(max_width);
-        cfg.height = cfg.height.min(max_height);
-
-        match cfg.edge {
-            Some(Edge::Left) | None => {
-                let max_left = max_width.saturating_sub(cfg.width) as i32;
-                let max_top = max_height.saturating_sub(cfg.height) as i32;
-                cfg.margin_left = cfg.margin_left.clamp(0, max_left.max(0));
-                cfg.margin_top = cfg.margin_top.clamp(0, max_top.max(0));
-            }
-            Some(Edge::Right) => {
-                let max_right = max_width.saturating_sub(cfg.width) as i32;
-                let max_top = max_height.saturating_sub(cfg.height) as i32;
-                cfg.margin_right = cfg.margin_right.clamp(0, max_right.max(0));
-                cfg.margin_top = cfg.margin_top.clamp(0, max_top.max(0));
-            }
-            Some(Edge::Top) => {
-                let max_left = max_width.saturating_sub(cfg.width) as i32;
-                let max_right = max_width.saturating_sub(cfg.width) as i32;
-                cfg.margin_left = cfg.margin_left.clamp(0, max_left.max(0));
-                cfg.margin_right = cfg.margin_right.clamp(0, max_right.max(0));
-            }
-            Some(Edge::Bottom) => {
-                let max_left = max_width.saturating_sub(cfg.width) as i32;
-                let max_right = max_width.saturating_sub(cfg.width) as i32;
-                let max_bottom = max_height.saturating_sub(cfg.height) as i32;
-                cfg.margin_left = cfg.margin_left.clamp(0, max_left.max(0));
-                cfg.margin_right = cfg.margin_right.clamp(0, max_right.max(0));
-                cfg.margin_bottom = cfg.margin_bottom.clamp(0, max_bottom.max(0));
-            }
-        }
-
-        cfg
+    fn clamp_surface_config(&self, surface_id: &str, cfg: LayerSurfaceConfig) -> LayerSurfaceConfig {
+        clamp_surface_config_to_output(cfg, self.output_logical_size_for_surface(surface_id))
     }
 
-    fn output_logical_size(&self) -> Option<(u32, u32)> {
-        self.state
-            .output_state
-            .outputs()
-            .into_iter()
-            .find_map(|output| self.state.output_state.info(&output))
-            .and_then(|info| {
-                info.logical_size
-                    .or_else(|| {
-                        info.modes
-                            .iter()
-                            .find(|mode| mode.current)
-                            .map(|mode| (mode.dimensions.0, mode.dimensions.1))
-                    })
-                    .and_then(|(width, height)| {
-                        let width = u32::try_from(width).ok()?;
-                        let height = u32::try_from(height).ok()?;
-                        Some((width, height))
-                    })
-            })
+    /// Logical size of the output a specific surface is actually displayed
+    /// on. Layer surfaces are created with `output: None` (the compositor
+    /// picks one), so `entry.output` — populated from `wl_surface::enter` —
+    /// is the only reliable way to know which output that was.
+    ///
+    /// Deliberately returns `None`, not a guess, when `enter` hasn't fired
+    /// yet: on multi-monitor setups `wl_surface::enter` for a freshly-mapped
+    /// layer surface arrives *after* the compositor's own `configure` (and
+    /// so after the resulting re-configure this module sends back — verified
+    /// by tracing both events' timestamps), so at clamp time there is no
+    /// window where "first output in the registry" is a safe stand-in for
+    /// "this surface's output": on a laptop+external setup that guess is
+    /// often the *wrong*, smaller monitor, and clamping a compositor-verified
+    /// size down to it produces a centered, too-narrow bar with dead space on
+    /// both sides. Every value clamped here already came from this surface's
+    /// own compositor `configure` ack, so skipping the clamp when the real
+    /// output isn't known yet is safe — there is nothing to protect against.
+    fn output_logical_size_for_surface(&self, surface_id: &str) -> Option<(u32, u32)> {
+        let output = self
+            .state
+            .surfaces
+            .get(surface_id)
+            .and_then(|entry| entry.output.as_ref())?;
+        Self::logical_size_of(&self.state.output_state, output)
+    }
+
+    fn logical_size_of(output_state: &OutputState, output: &wl_output::WlOutput) -> Option<(u32, u32)> {
+        output_state.info(output).and_then(|info| {
+            info.logical_size
+                .or_else(|| {
+                    info.modes
+                        .iter()
+                        .find(|mode| mode.current)
+                        .map(|mode| (mode.dimensions.0, mode.dimensions.1))
+                })
+                .and_then(|(width, height)| {
+                    let width = u32::try_from(width).ok()?;
+                    let height = u32::try_from(height).ok()?;
+                    Some((width, height))
+                })
+        })
     }
 
     pub fn present_with_damage(
@@ -1400,11 +1443,12 @@ impl LayerShellBackend {
     }
 
     pub fn surface_size_if_known(&self, surface_id: &str) -> Option<(u32, u32)> {
+        let output_size = self.output_logical_size_for_surface(surface_id);
         self.state
             .surfaces
             .get(surface_id)
             .filter(|entry| entry.configured)
-            .map(|entry| resolved_surface_size(entry, self.output_logical_size()))
+            .map(|entry| resolved_surface_size(entry, output_size))
     }
 
     pub fn surface_waiting_for_frame_callback(&self, surface_id: &str) -> bool {
@@ -2159,6 +2203,58 @@ mod tests {
             (56, 1080),
             "left rails with height=0 must paint across the output height when the compositor leaves configure height unspecified"
         );
+    }
+
+    #[test]
+    fn clamp_skips_when_surface_output_is_unknown() {
+        // Multi-monitor regression: `wl_surface::enter` for a freshly-mapped
+        // layer surface arrives *after* the compositor's own `configure`, so
+        // at clamp time on a surface's first couple configures the real
+        // output is still unknown. A compositor-verified width (already
+        // resolved against the surface's real output) must pass through
+        // unclamped rather than being shrunk to an unrelated guessed output.
+        let mut cfg = base_cfg();
+        cfg.edge = Some(Edge::Top);
+        cfg.width = 3840; // resolved against the real (external, larger) output
+        cfg.height = 136;
+        cfg.margin_left = 0;
+        cfg.margin_right = 0;
+
+        let clamped = clamp_surface_config_to_output(cfg.clone(), None);
+        assert_eq!(clamped.width, 3840, "width must pass through unclamped when the surface's own output isn't known yet");
+        assert_eq!(clamped.margin_left, 0);
+        assert_eq!(clamped.margin_right, 0);
+    }
+
+    #[test]
+    fn clamp_does_not_shrink_top_surface_to_a_smaller_unrelated_output() {
+        // Same scenario as above, but exercising what used to happen when the
+        // clamp fell back to "whatever output is first in the registry"
+        // instead of skipping: a bar living on a 3840-wide external monitor
+        // must never be clamped down to a smaller 2880-wide laptop panel just
+        // because that happened to enumerate first. This shipped as a real
+        // bug — the bar rendered narrower than its output and got centered
+        // with dead space on both sides.
+        let mut cfg = base_cfg();
+        cfg.edge = Some(Edge::Top);
+        cfg.width = 3840;
+        cfg.height = 136;
+
+        let wrong_smaller_output = Some((2880, 1800));
+        let clamped = clamp_surface_config_to_output(cfg.clone(), wrong_smaller_output);
+        assert_eq!(
+            clamped.width, 2880,
+            "sanity check: clamping against a smaller output does shrink width (this is the behavior that must never fire for an output the surface isn't actually on)"
+        );
+
+        let real_matching_output = Some((3840, 2160));
+        let clamped = clamp_surface_config_to_output(cfg, real_matching_output);
+        assert_eq!(
+            clamped.width, 3840,
+            "clamping against the surface's real, matching output must leave a spanning width untouched"
+        );
+        assert_eq!(clamped.margin_left, 0);
+        assert_eq!(clamped.margin_right, 0);
     }
 
     #[test]

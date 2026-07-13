@@ -31,7 +31,7 @@ use mesh_core_module::package::{
 };
 use mesh_core_scripting::{PublishedEvent, ScriptState};
 use mesh_core_service::{
-    ContractCapabilities, InterfaceContract, InterfaceEvent, InterfaceMethod,
+    ContractCapabilities, InterfaceArgument, InterfaceContract, InterfaceEvent, InterfaceMethod,
     contract::ContractStateField, parse_contract_version,
 };
 use mesh_core_wayland::{ClipboardError, ClipboardWriter};
@@ -106,6 +106,7 @@ fn minimal_manifest(id: &str) -> Manifest {
         service: None,
         provides: Vec::new(),
         interface: None,
+        interfaces: Vec::new(),
         extensions: Vec::new(),
         exports: ExportsSection::default(),
         provides_slots: HashMap::new(),
@@ -186,7 +187,6 @@ fn test_contract(interface: &str) -> InterfaceContract {
     InterfaceContract {
         interface: interface.to_string(),
         version: parse_contract_version("1.0").unwrap(),
-        file_path: PathBuf::from("interface.toml"),
         state_fields: vec![
             ContractStateField {
                 name: "available".to_string(),
@@ -215,17 +215,40 @@ fn test_contract(interface: &str) -> InterfaceContract {
                 args: Vec::new(),
                 returns: Some("Result".to_string()),
                 coalesce: false,
+                optimistic: None,
             },
             InterfaceMethod {
                 name: "set_muted".to_string(),
-                args: Vec::new(),
+                args: vec![
+                    InterfaceArgument {
+                        name: "device_id".to_string(),
+                        arg_type: "string".to_string(),
+                    },
+                    InterfaceArgument {
+                        name: "muted".to_string(),
+                        arg_type: "boolean".to_string(),
+                    },
+                ],
                 returns: Some("Result".to_string()),
                 coalesce: false,
+                optimistic: Some(mesh_core_service::OptimisticUpdate {
+                    field: "muted".to_string(),
+                    from_arg: Some("muted".to_string()),
+                }),
             },
         ],
         events: vec![InterfaceEvent {
             name: "VolumeChanged".to_string(),
-            payload: Some("{ device_id: string, level: float }".to_string()),
+            payload: vec![
+                InterfaceArgument {
+                    name: "device_id".to_string(),
+                    arg_type: "string".to_string(),
+                },
+                InterfaceArgument {
+                    name: "level".to_string(),
+                    arg_type: "float".to_string(),
+                },
+            ],
         }],
         types: HashMap::new(),
         capabilities: ContractCapabilities::default(),
@@ -2521,18 +2544,6 @@ fn shell_registers_theme_provider_for_frontend_theme_proxy() {
 #[test]
 fn shell_registers_interface_contracts_and_providers_from_installed_graph() {
     let interface_dir = tempfile::tempdir().unwrap();
-    fs::write(
-        interface_dir.path().join("interface.toml"),
-        r#"
-[[methods]]
-name = "read"
-returns = "boolean"
-
-[capabilities]
-required = ["service.example.read"]
-"#,
-    )
-    .unwrap();
     let root = RootModuleGraphManifest::from_json_str(
         r#"{
               "name": "@mesh/test-config",
@@ -2560,9 +2571,12 @@ required = ["service.example.read"]
                     "interface": {
                       "name": "mesh.example",
                       "version": "1.0",
-                      "file": "interface.toml",
                       "domain": "example",
-                      "relationship": "base"
+                      "relationship": "base",
+                      "contract": {
+                        "methods": [{ "name": "read", "returns": "boolean" }],
+                        "capabilities": { "required": ["service.example.read"] }
+                      }
                     }
                   }
                 }"#,
@@ -3208,8 +3222,10 @@ fn set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms() 
         "inactive providers must not deliver audio state while set_muted is pending"
     );
     assert_eq!(
-        shell.pending_audio_muted,
-        Some(false),
+        shell
+            .pending_optimistic_state
+            .get(&("mesh.audio".to_string(), "muted".to_string())),
+        Some(&serde_json::json!(false)),
         "inactive provider updates must not clear pending mute state"
     );
 
@@ -3237,8 +3253,60 @@ fn set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms() 
         ))
         .unwrap();
     assert_eq!(
-        shell.pending_audio_muted, None,
+        shell
+            .pending_optimistic_state
+            .get(&("mesh.audio".to_string(), "muted".to_string())),
+        None,
         "matching backend confirmation should clear pending mute state"
+    );
+}
+
+#[test]
+fn backend_supervision_quarantines_provider_after_exhausted_restart_cycles() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+
+    // Each terminal failure of the current provider schedules a supervised
+    // restart; after the restart budget is exhausted the provider is
+    // quarantined for the session.
+    for cycle in 0..3u32 {
+        let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+        shell.handle_backend_lifecycle(
+            "mesh.audio".to_string(),
+            "@mesh/pipewire-audio".to_string(),
+            "poll".to_string(),
+            "failed".to_string(),
+            format!("boom {cycle}"),
+        );
+        let state = shell.backend_supervision.get("mesh.audio").unwrap();
+        assert_eq!(state.restart_count, cycle + 1);
+        assert!(state.quarantined_providers.is_empty());
+    }
+
+    // Fourth consecutive failure exceeds the restart budget: quarantine.
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    shell.handle_backend_lifecycle(
+        "mesh.audio".to_string(),
+        "@mesh/pipewire-audio".to_string(),
+        "poll".to_string(),
+        "failed".to_string(),
+        "boom final".to_string(),
+    );
+    let state = shell.backend_supervision.get("mesh.audio").unwrap();
+    assert!(
+        state
+            .quarantined_providers
+            .contains("@mesh/pipewire-audio"),
+        "provider should be quarantined after exhausting restart cycles"
+    );
+    assert_eq!(state.restart_count, 0, "failover restarts with a fresh budget");
+    assert_eq!(
+        shell
+            .backend_runtime_status("mesh.audio", "@mesh/pipewire-audio")
+            .map(|entry| entry.status),
+        Some(BackendRuntimeStatus::Quarantined)
     );
 }
 
@@ -5179,7 +5247,8 @@ fn shell_theme_backend_candidate_receives_resolved_active_theme_setting() {
     assert_eq!(
         candidate
             .settings
-            .get("current_theme")
+            .get("__shell")
+            .and_then(|shell| shell.get("theme"))
             .and_then(|value| value.as_str()),
         Some("mesh-default-dark")
     );
@@ -5206,7 +5275,8 @@ fn shell_theme_fallback_backend_restart_keeps_latest_state_on_resolved_theme() {
     shell.apply_shell_runtime_settings(&mut candidate);
     let current_theme = candidate
         .settings
-        .get("current_theme")
+        .get("__shell")
+        .and_then(|shell| shell.get("theme"))
         .and_then(|value| value.as_str())
         .unwrap()
         .to_string();
@@ -6534,7 +6604,7 @@ fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
     assert!(
         candidates
             .iter()
-            .any(|candidate| candidate.interface == "mesh.hyprland"
+            .any(|candidate| candidate.interface == "mesh.wm"
                 && candidate.module_id == "@mesh/hyprland-wm")
     );
     assert!(

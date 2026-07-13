@@ -120,11 +120,27 @@ modules/
     pipewire-audio/     ← audio via PipeWire
     pulseaudio-audio/   ← audio via PulseAudio
     networkmanager-network/ ← network via NetworkManager
+    hyprland-wm/        ← mesh.wm provider (contract declared inline in module.json)
+    upower-power/       ← mesh.power provider (contract declared inline in module.json)
 
   interfaces/
-    audio/              ← @mesh/audio-interface contract for mesh.audio
-    audio.toml          ← legacy source copy kept during migration
+    audio/              ← @mesh/audio-interface contract for mesh.audio (multi-provider)
 ```
+
+Interface contracts are **JSON inside `module.json`** — there is no separate
+contract file format. Multi-provider domains (audio) keep a standalone
+`interface` module whose `mesh.interface.contract` object declares state
+fields, methods, events, named types, and consumer capabilities. Single-
+provider domains declare the contract inline in the backend module under
+`mesh.interfaces[]` (same shape). A standalone interface module always wins
+over inline duplicates of the same name; conflicts and invalid contracts are
+graph diagnostics (`duplicate_interface_declaration`,
+`invalid_interface_contract`). Type expressions use a validated grammar:
+`string`, `int`, `float`, `boolean`, `object`, `any`, named types from
+`types`, plus `[]` (array) and `?` (optional) suffixes. Contract methods may
+carry `"optimistic": { "field", "fromArg" }` — the shell patches that public
+state field optimistically on dispatch and holds it until the provider
+confirms (generic; replaces the old audio-only mute handling).
 
 ### Canonical module workflow
 
@@ -137,6 +153,15 @@ interfaces with `mesh.implements`; the shipped graph keeps both
 requirements, resource packs, and libraries. Service-specific behavior belongs
 in Luau provider modules, not service-specific Rust APIs; Rust routes generic
 interface/provider records.
+
+Backend runtimes are **supervised**: a terminal failure (init failure, three
+consecutive poll failures, unexpected stop) schedules a restart with capped
+exponential backoff (1s..60s); after three failed restart cycles the provider
+is quarantined for the session and the shell fails over to the next-priority
+enabled provider for that interface. All transitions surface in
+`backend_runtime_statuses` / the debug Modules tab. `shell.*` is a reserved
+event-channel namespace: unknown `shell.*` publications become targeted
+diagnostics and never route into service-command dispatch.
 
 ```
 @mesh/navigation-bar

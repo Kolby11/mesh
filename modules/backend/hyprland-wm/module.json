@@ -7,9 +7,6 @@
     "apiVersion": "0.1",
     "kind": "backend",
     "uses": {
-      "modules": {
-        "@mesh/hyprland-interface": ">=1.0.0, <2.0.0"
-      },
       "capabilities": [
         "exec.hyprctl",
         "exec.sh"
@@ -56,11 +53,83 @@
       "supportedLocales": ["en"]
     },
     "entry": "src/main.luau",
+    "interfaces": [
+      {
+        "name": "mesh.wm",
+        "version": "1.0",
+        "domain": "wm",
+        "relationship": "base",
+        "contract": {
+          "state": [
+            {
+              "name": "available",
+              "type": "boolean",
+              "description": "Whether the compositor is running and reachable"
+            },
+            {
+              "name": "active_workspace",
+              "type": "int",
+              "description": "ID of the currently active workspace (1-based)"
+            },
+            {
+              "name": "active_window",
+              "type": "object?",
+              "description": "Active window info: { title, class } — nil when the desktop is focused"
+            },
+            {
+              "name": "workspaces",
+              "type": "Workspace[]",
+              "description": "List of known workspaces"
+            },
+            {
+              "name": "source_module",
+              "type": "string",
+              "description": "Backend module ID that emitted this state (runtime-additive)"
+            }
+          ],
+          "methods": [
+            {
+              "name": "focus_workspace",
+              "args": [{ "name": "id", "type": "int" }],
+              "returns": "Result"
+            }
+          ],
+          "events": [
+            {
+              "name": "WorkspaceChanged",
+              "payload": [
+                { "name": "id", "type": "int" },
+                { "name": "name", "type": "string" }
+              ]
+            },
+            {
+              "name": "WindowChanged",
+              "payload": [
+                { "name": "title", "type": "string" },
+                { "name": "class", "type": "string" }
+              ]
+            }
+          ],
+          "types": {
+            "Workspace": {
+              "fields": [
+                { "name": "id", "type": "int" },
+                { "name": "name", "type": "string" },
+                { "name": "windows", "type": "int" }
+              ]
+            }
+          },
+          "capabilities": {
+            "required": ["service.wm.read"],
+            "optional": ["service.wm.control"]
+          }
+        }
+      }
+    ],
     "implements": [
       {
-        "interface": "mesh.hyprland",
+        "interface": "mesh.wm",
         "version": "1.0",
-        "baseModule": "@mesh/hyprland-interface",
         "provider": "hyprland",
         "label": "Hyprland",
         "priority": 100

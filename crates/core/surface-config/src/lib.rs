@@ -287,6 +287,7 @@ mod tests {
             service: None,
             provides: Vec::new(),
             interface: None,
+            interfaces: Vec::new(),
             extensions: Vec::new(),
             exports: Default::default(),
             provides_slots: HashMap::new(),

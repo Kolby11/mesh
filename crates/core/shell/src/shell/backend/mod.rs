@@ -3,9 +3,11 @@ use super::*;
 mod candidates;
 mod lifecycle;
 mod spawn;
+mod supervision;
 
 #[cfg(test)]
 pub(in crate::shell) use candidates::backend_launch_candidates_from_graph;
+pub(in crate::shell) use supervision::{BackendRespawnContext, BackendSupervisionState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::shell) enum BackendRuntimeStatus {
@@ -22,6 +24,8 @@ pub(in crate::shell) enum BackendRuntimeStatus {
     PollFailed,
     Failed,
     Stopped,
+    /// Benched by the supervisor for this session after exhausting restarts.
+    Quarantined,
 }
 
 impl BackendRuntimeStatus {
@@ -40,6 +44,7 @@ impl BackendRuntimeStatus {
             Self::PollFailed => "poll_failed",
             Self::Failed => "failed",
             Self::Stopped => "stopped",
+            Self::Quarantined => "quarantined",
         }
     }
 
@@ -57,6 +62,7 @@ impl BackendRuntimeStatus {
             "running" => Self::Running,
             "poll_failed" => Self::PollFailed,
             "stopped" => Self::Stopped,
+            "quarantined" => Self::Quarantined,
             _ => Self::Failed,
         }
     }

@@ -26,7 +26,6 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
     catalog.register_contract(InterfaceContract {
         interface: "mesh.audio".into(),
         version: parse_contract_version("1.0").unwrap(),
-        file_path: PathBuf::from("<test>"),
         state_fields: Vec::new(),
         methods: vec![
             InterfaceMethod {
@@ -43,6 +42,7 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
                 ],
                 returns: None,
                 coalesce: false,
+                optimistic: None,
             },
             InterfaceMethod {
                 name: "set_muted".into(),
@@ -58,29 +58,42 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
                 ],
                 returns: None,
                 coalesce: false,
+                optimistic: None,
             },
             InterfaceMethod {
                 name: "volume_up".into(),
                 args: Vec::new(),
                 returns: None,
                 coalesce: false,
+                optimistic: None,
             },
             InterfaceMethod {
                 name: "volume_down".into(),
                 args: Vec::new(),
                 returns: None,
                 coalesce: false,
+                optimistic: None,
             },
             InterfaceMethod {
                 name: "toggle_mute".into(),
                 args: Vec::new(),
                 returns: None,
                 coalesce: false,
+                optimistic: None,
             },
         ],
         events: vec![InterfaceEvent {
             name: "VolumeChanged".into(),
-            payload: Some("{ device_id: string, level: float }".into()),
+            payload: vec![
+                InterfaceArgument {
+                    name: "device_id".into(),
+                    arg_type: "string".into(),
+                },
+                InterfaceArgument {
+                    name: "level".into(),
+                    arg_type: "float".into(),
+                },
+            ],
         }],
         types: HashMap::new(),
         capabilities: ContractCapabilities::default(),
@@ -96,7 +109,6 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
     catalog.register_contract(InterfaceContract {
         interface: "mesh.network".into(),
         version: parse_contract_version("1.0").unwrap(),
-        file_path: PathBuf::from("<test>"),
         state_fields: Vec::new(),
         methods: vec![
             InterfaceMethod {
@@ -107,6 +119,7 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
                 }],
                 returns: None,
                 coalesce: false,
+                optimistic: None,
             },
             InterfaceMethod {
                 name: "connect".into(),
@@ -116,6 +129,7 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
                 }],
                 returns: None,
                 coalesce: false,
+                optimistic: None,
             },
         ],
         events: Vec::new(),
@@ -133,7 +147,6 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
     catalog.register_contract(InterfaceContract {
         interface: "mesh.theme".into(),
         version: parse_contract_version("1.0").unwrap(),
-        file_path: PathBuf::from("<test>"),
         state_fields: Vec::new(),
         methods: Vec::new(),
         events: Vec::new(),
@@ -156,7 +169,6 @@ pub(super) fn audio_network_power_catalog() -> InterfaceCatalog {
     catalog.register_contract(InterfaceContract {
         interface: "mesh.power".into(),
         version: parse_contract_version("1.0").unwrap(),
-        file_path: PathBuf::from("<test>"),
         state_fields: Vec::new(),
         methods: Vec::new(),
         events: Vec::new(),
@@ -204,7 +216,6 @@ pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
         catalog.register_contract(InterfaceContract {
             interface: interface.into(),
             version: parse_contract_version("1.0").unwrap(),
-            file_path: PathBuf::from("<test>"),
             state_fields: Vec::new(),
             methods: Vec::new(),
             events: Vec::new(),
@@ -228,7 +239,6 @@ pub(super) fn debug_catalog() -> InterfaceCatalog {
     catalog.register_contract(InterfaceContract {
         interface: "mesh.debug".into(),
         version: parse_contract_version("1.0").unwrap(),
-        file_path: PathBuf::from("<test>"),
         state_fields: vec![
             ContractStateField {
                 name: "overlay_enabled".into(),
@@ -379,6 +389,7 @@ pub(super) fn minimal_test_manifest(id: &str) -> Manifest {
         service: None,
         provides: Vec::new(),
         interface: None,
+        interfaces: Vec::new(),
         extensions: Vec::new(),
         exports: ExportsSection::default(),
         provides_slots: HashMap::new(),

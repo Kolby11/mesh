@@ -32,136 +32,128 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph(
             continue;
         };
 
-        let Some(module) = graph.module(&active_provider.module_id) else {
-            statuses.push(BackendLifecycleStatusRecord {
-                interface: interface.clone(),
-                provider_id: Some(active_provider.module_id.clone()),
-                status: "invalid_manifest",
-                message: format!(
-                    "active provider {} is not installed",
-                    active_provider.module_id
-                ),
-            });
-            continue;
-        };
-
-        if !module.enabled || module.kind != ModuleKind::Backend {
-            statuses.push(BackendLifecycleStatusRecord {
-                interface: interface.clone(),
-                provider_id: Some(active_provider.module_id.clone()),
-                status: "invalid_manifest",
-                message: format!(
-                    "active provider {} is not an enabled backend module",
-                    active_provider.module_id
-                ),
-            });
-            continue;
+        match launch_candidate_for_provider(graph, modules, config, interfaces, active_provider) {
+            Ok(candidate) => candidates.push(candidate),
+            Err(status) => statuses.push(status),
         }
-
-        if active_provider.interface != interface {
-            statuses.push(BackendLifecycleStatusRecord {
-                interface: interface.clone(),
-                provider_id: Some(active_provider.module_id.clone()),
-                status: "invalid_manifest",
-                message: format!(
-                    "active provider {} was indexed for {}, not {interface}",
-                    active_provider.module_id, active_provider.interface
-                ),
-            });
-            continue;
-        }
-
-        if let Some(status) =
-            validate_backend_provider_contract(&interface, active_provider, interfaces)
-        {
-            statuses.push(status);
-            continue;
-        }
-
-        let Some(module) = modules.get(&active_provider.module_id) else {
-            statuses.push(BackendLifecycleStatusRecord {
-                interface: interface.clone(),
-                provider_id: Some(active_provider.module_id.clone()),
-                status: "invalid_manifest",
-                message: format!(
-                    "active provider {} has no discovered runtime manifest",
-                    active_provider.module_id
-                ),
-            });
-            continue;
-        };
-
-        if let Some(binary) = module
-            .manifest
-            .dependencies
-            .binaries
-            .iter()
-            .find(|binary| !binary.optional && !binary_available(&binary.name))
-        {
-            statuses.push(BackendLifecycleStatusRecord {
-                interface: interface.clone(),
-                provider_id: Some(active_provider.module_id.clone()),
-                status: "missing_binary",
-                message: format!(
-                    "backend provider {} requires unavailable binary {}{}",
-                    active_provider.module_id,
-                    binary.name,
-                    binary_package_hint(binary)
-                ),
-            });
-            continue;
-        }
-
-        let entrypoint = module.manifest.entrypoints.main.as_deref();
-        let Some(entrypoint) = entrypoint else {
-            statuses.push(BackendLifecycleStatusRecord {
-                interface: interface.clone(),
-                provider_id: Some(active_provider.module_id.clone()),
-                status: "missing_entrypoint",
-                message: format!(
-                    "backend provider {} has no service entrypoint",
-                    active_provider.module_id
-                ),
-            });
-            continue;
-        };
-
-        let entrypoint_path = module.path.join(entrypoint);
-        let Ok(script_source) = std::fs::read_to_string(&entrypoint_path) else {
-            statuses.push(BackendLifecycleStatusRecord {
-                interface: interface.clone(),
-                provider_id: Some(active_provider.module_id.clone()),
-                status: "missing_entrypoint",
-                message: format!(
-                    "backend provider {} entrypoint is unreadable: {}",
-                    active_provider.module_id,
-                    entrypoint_path.display()
-                ),
-            });
-            continue;
-        };
-
-        let capabilities = module
-            .manifest
-            .capabilities
-            .required
-            .iter()
-            .chain(module.manifest.capabilities.optional.iter())
-            .cloned()
-            .collect::<Vec<_>>();
-        let settings = backend_module_settings_json(config, &active_provider.module_id);
-        candidates.push(BackendLaunchCandidate {
-            module_id: active_provider.module_id.clone(),
-            interface: interface.clone(),
-            service_name: service_name_from_interface(&interface),
-            entrypoint_path,
-            script_source,
-            capabilities,
-            settings,
-        });
     }
 
     (candidates, statuses)
+}
+
+/// Build the launch candidate for one concrete provider of an interface,
+/// validating manifest state, contract registration, required binaries, and
+/// the entrypoint script. Shared by startup launch and supervised restarts.
+pub(in crate::shell) fn launch_candidate_for_provider(
+    graph: &InstalledModuleGraph,
+    modules: &HashMap<String, ModuleInstance>,
+    config: &ShellConfig,
+    interfaces: &InterfaceRegistry,
+    provider: &BackendProviderNode,
+) -> Result<BackendLaunchCandidate, BackendLifecycleStatusRecord> {
+    let interface = provider.interface.clone();
+    let Some(module) = graph.module(&provider.module_id) else {
+        return Err(BackendLifecycleStatusRecord {
+            interface,
+            provider_id: Some(provider.module_id.clone()),
+            status: "invalid_manifest",
+            message: format!("active provider {} is not installed", provider.module_id),
+        });
+    };
+
+    if !module.enabled || module.kind != ModuleKind::Backend {
+        return Err(BackendLifecycleStatusRecord {
+            interface,
+            provider_id: Some(provider.module_id.clone()),
+            status: "invalid_manifest",
+            message: format!(
+                "active provider {} is not an enabled backend module",
+                provider.module_id
+            ),
+        });
+    }
+
+    if let Some(status) = validate_backend_provider_contract(&interface, provider, interfaces) {
+        return Err(status);
+    }
+
+    let Some(module) = modules.get(&provider.module_id) else {
+        return Err(BackendLifecycleStatusRecord {
+            interface,
+            provider_id: Some(provider.module_id.clone()),
+            status: "invalid_manifest",
+            message: format!(
+                "active provider {} has no discovered runtime manifest",
+                provider.module_id
+            ),
+        });
+    };
+
+    if let Some(binary) = module
+        .manifest
+        .dependencies
+        .binaries
+        .iter()
+        .find(|binary| !binary.optional && !binary_available(&binary.name))
+    {
+        return Err(BackendLifecycleStatusRecord {
+            interface,
+            provider_id: Some(provider.module_id.clone()),
+            status: "missing_binary",
+            message: format!(
+                "backend provider {} requires unavailable binary {}{}",
+                provider.module_id,
+                binary.name,
+                binary_package_hint(binary)
+            ),
+        });
+    }
+
+    let entrypoint = module.manifest.entrypoints.main.as_deref();
+    let Some(entrypoint) = entrypoint else {
+        return Err(BackendLifecycleStatusRecord {
+            interface,
+            provider_id: Some(provider.module_id.clone()),
+            status: "missing_entrypoint",
+            message: format!(
+                "backend provider {} has no service entrypoint",
+                provider.module_id
+            ),
+        });
+    };
+
+    let entrypoint_path = module.path.join(entrypoint);
+    let Ok(script_source) = std::fs::read_to_string(&entrypoint_path) else {
+        return Err(BackendLifecycleStatusRecord {
+            interface,
+            provider_id: Some(provider.module_id.clone()),
+            status: "missing_entrypoint",
+            message: format!(
+                "backend provider {} entrypoint is unreadable: {}",
+                provider.module_id,
+                entrypoint_path.display()
+            ),
+        });
+    };
+
+    let capabilities = module
+        .manifest
+        .capabilities
+        .required
+        .iter()
+        .chain(module.manifest.capabilities.optional.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    let settings = backend_module_settings_json(config, &provider.module_id);
+    Ok(BackendLaunchCandidate {
+        module_id: provider.module_id.clone(),
+        service_name: service_name_from_interface(&interface),
+        interface,
+        entrypoint_path,
+        script_source,
+        capabilities,
+        settings,
+    })
 }
 
 fn backend_requirement_statuses(graph: &InstalledModuleGraph) -> Vec<BackendLifecycleStatusRecord> {
@@ -295,94 +287,6 @@ fn validate_backend_provider_contract(
     }
 
     None
-}
-
-pub(super) fn legacy_backend_candidates_from_discovery(
-    modules: &HashMap<String, ModuleInstance>,
-    config: &ShellConfig,
-) -> Vec<BackendLaunchCandidate> {
-    let mut module_ids: Vec<String> = modules.keys().cloned().collect();
-    module_ids.sort();
-    let mut services: HashMap<String, Vec<(&ModuleInstance, u32)>> = HashMap::new();
-
-    for module_id in module_ids {
-        let Some(module) = modules.get(&module_id) else {
-            continue;
-        };
-        if module.manifest.package.module_type != ModuleType::Backend {
-            continue;
-        }
-        let Some(service) = module.manifest.primary_service() else {
-            continue;
-        };
-        let service_name = service_name_from_interface(&service.provides);
-        services
-            .entry(service_name)
-            .or_default()
-            .push((module, service.priority));
-    }
-
-    let mut candidates = Vec::new();
-    for (service_name, mut service_candidates) in services {
-        service_candidates.sort_by(|(a, a_priority), (b, b_priority)| {
-            b_priority
-                .cmp(a_priority)
-                .then_with(|| a.manifest.package.id.cmp(&b.manifest.package.id))
-        });
-        let Some((module, _)) = service_candidates.into_iter().next() else {
-            continue;
-        };
-        let missing_binary = module
-            .manifest
-            .dependencies
-            .binaries
-            .iter()
-            .find(|binary| !binary.optional && !binary_available(&binary.name));
-        if let Some(binary) = missing_binary {
-            tracing::info!(
-                "skipping legacy backend '{}' for service '{}' because binary '{}' is unavailable",
-                module.manifest.package.id,
-                service_name,
-                binary.name
-            );
-            continue;
-        }
-        let Some(entrypoint) = module.manifest.entrypoints.main.as_deref() else {
-            tracing::warn!(
-                "legacy backend module {} has no service entrypoint",
-                module.manifest.package.id
-            );
-            continue;
-        };
-        let entrypoint_path = module.path.join(entrypoint);
-        let Ok(script_source) = std::fs::read_to_string(&entrypoint_path) else {
-            tracing::warn!(
-                "legacy backend module {} has no readable script at {}",
-                module.manifest.package.id,
-                entrypoint_path.display()
-            );
-            continue;
-        };
-        let capabilities = module
-            .manifest
-            .capabilities
-            .required
-            .iter()
-            .chain(module.manifest.capabilities.optional.iter())
-            .cloned()
-            .collect::<Vec<_>>();
-        candidates.push(BackendLaunchCandidate {
-            module_id: module.manifest.package.id.clone(),
-            interface: format!("mesh.{service_name}"),
-            service_name,
-            entrypoint_path,
-            script_source,
-            capabilities,
-            settings: backend_module_settings_json(config, &module.manifest.package.id),
-        });
-    }
-
-    candidates
 }
 
 fn backend_module_settings_json(config: &ShellConfig, module_id: &str) -> serde_json::Value {

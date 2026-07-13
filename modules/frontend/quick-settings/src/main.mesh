@@ -151,14 +151,15 @@ function onVolumeChange(event)
 end
 
 function onBrightnessChange(event)
+    -- mesh.brightness is optional; without a provider the slider only
+    -- reflects local state and applies nothing.
+    if not brightness then
+        return
+    end
     local val = math.max(0, math.min(100, math.floor(tonumber(event.value) or 100)))
     brightness_level = val
     brightness_label = string.format("%d%%", val)
-    if brightness and type(brightness.set) == "function" then
-        brightness.set(val)
-    else
-        mesh.events.publish("shell.set-brightness", { level = val })
-    end
+    brightness.set(val)
 end
 
 function onThemeDark()

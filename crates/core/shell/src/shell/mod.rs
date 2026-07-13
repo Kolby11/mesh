@@ -15,7 +15,7 @@ use mesh_core_module::{DependencyGraphError, ModuleType, validate_module_depende
 use mesh_core_service::{
     InterfaceContract, InterfaceProvider, InterfaceRegistry, ServiceRegistry,
     canonical_interface_name, canonical_interface_name_cow, canonical_interface_name_owned,
-    load_interface_contract,
+    parse_interface_contract,
 };
 use mesh_core_theme::ThemeEngine;
 use mesh_core_wayland::{ClipboardWriter, Layer, StubSurface, WaylandClipboard};
@@ -397,8 +397,12 @@ pub struct Shell {
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,
     backend_runtime_statuses: BackendRuntimeStatusMap,
+    backend_supervision: HashMap<String, backend::BackendSupervisionState>,
+    backend_respawn: Option<backend::BackendRespawnContext>,
     latest_service_state: HashMap<String, LatestServiceState>,
-    pending_audio_muted: Option<bool>,
+    /// Contract-declared optimistic state patches awaiting provider
+    /// confirmation, keyed by (interface, state field).
+    pending_optimistic_state: HashMap<(String, String), serde_json::Value>,
     command_throttle: HashMap<(String, String), CommandThrottleState>,
     pending_popover_hides: HashMap<SurfaceId, std::time::Instant>,
     profiling: runtime::profiling::ProfilingRuntimeState,

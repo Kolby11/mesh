@@ -209,6 +209,12 @@ impl Shell {
                         surface_id = %surface_id,
                         width = configured_width,
                         height = configured_height,
+                        edge = ?surface.edge,
+                        exclusive_zone = surface.exclusive_zone,
+                        margin_top = surface.margin_top,
+                        margin_right = surface.margin_right,
+                        margin_bottom = surface.margin_bottom,
+                        margin_left = surface.margin_left,
                         first_layer_configure,
                         rerender_attempts,
                         "sending layer-surface configure"

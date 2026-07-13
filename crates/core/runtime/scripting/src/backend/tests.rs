@@ -460,7 +460,7 @@ fn shell_theme_backend_initializes_from_configured_current_theme() {
     );
     let mut ctx = BackendScriptContext::new_with_settings(
         "@mesh/shell-theme",
-        serde_json::json!({ "current_theme": "mesh-default-light" }),
+        serde_json::json!({ "__shell": { "theme": "mesh-default-light" } }),
     );
     ctx.load_script(&script).unwrap();
 
