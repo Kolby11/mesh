@@ -1,7 +1,10 @@
 use super::super::*;
-use mesh_core_service::{InterfaceArgument, TypeExpr};
+#[cfg(test)]
+use mesh_core_service::InterfaceArgument;
+use mesh_core_service::TypeExpr;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 thread_local! {
     static CONTRACT_TYPE_CACHE: RefCell<HashMap<String, TypeExpr>> =
@@ -219,8 +222,13 @@ impl Shell {
         &mut self,
         event: &ServiceEvent,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        self.rebuild_service_delivery_index_if_needed();
+        let target_indices = self.service_delivery_targets(event);
         let mut requests = VecDeque::new();
-        for runtime in &mut self.components {
+        for index in target_indices {
+            let Some(runtime) = self.components.get_mut(index) else {
+                continue;
+            };
             if !runtime.component.observes_service_event(event) {
                 continue;
             }
@@ -232,6 +240,67 @@ impl Shell {
             );
         }
         Ok(requests)
+    }
+
+    pub(in crate::shell) fn rebuild_service_delivery_index_if_needed(&mut self) {
+        if !self.service_delivery_index.dirty {
+            return;
+        }
+
+        let mut index = ServiceDeliveryIndex::default();
+        for (component_index, runtime) in self.components.iter().enumerate() {
+            let Some(summary) = runtime.component.service_observation_summary() else {
+                index.fallback_components.push(component_index);
+                continue;
+            };
+            for service in summary.update_services {
+                index
+                    .update_services
+                    .entry(service)
+                    .or_default()
+                    .push(component_index);
+            }
+            for ServiceInterfaceEventSubscription { service, event } in summary.interface_events {
+                index
+                    .interface_events
+                    .entry(service)
+                    .or_default()
+                    .entry(event)
+                    .or_default()
+                    .push(component_index);
+            }
+        }
+        self.service_delivery_index = index;
+    }
+
+    fn service_delivery_targets(&self, event: &ServiceEvent) -> Vec<usize> {
+        let mut targets = self.service_delivery_index.fallback_components.clone();
+        match event {
+            ServiceEvent::Updated { service, .. } => {
+                let service_name = crate::shell::service::service_name_from_interface_cow(service);
+                if let Some(indices) = self
+                    .service_delivery_index
+                    .update_services
+                    .get(service_name.as_ref())
+                {
+                    targets.extend(indices.iter().copied());
+                }
+            }
+            ServiceEvent::InterfaceEvent { service, name, .. } => {
+                let service_name = crate::shell::service::service_name_from_interface_cow(service);
+                if let Some(indices) = self
+                    .service_delivery_index
+                    .interface_events
+                    .get(service_name.as_ref())
+                    .and_then(|events| events.get(name))
+                {
+                    targets.extend(indices.iter().copied());
+                }
+            }
+        }
+        targets.sort_unstable();
+        targets.dedup();
+        targets
     }
 
     pub(in crate::shell) fn broadcast_backend_interface_event(
@@ -277,40 +346,32 @@ impl Shell {
         payload: &serde_json::Value,
     ) {
         let resolution = self.interfaces.resolve(interface, None);
-        let Some(contract) = resolution.contract.as_ref() else {
+        let Some(contract) = resolution.contract else {
             return;
         };
-        for warning in service_state_contract_warnings(contract, payload) {
+        let warnings = {
+            let cache = self.validation_cache_for_contract(contract);
+            service_state_contract_warnings_cached(cache, payload)
+        };
+        for warning in warnings {
             self.record_service_contract_warning(interface, provider_id, warning);
         }
     }
 
     fn service_event_contract_warnings(
-        &self,
+        &mut self,
         interface: &str,
         event_name: &str,
         payload: &serde_json::Value,
     ) -> Vec<String> {
         let resolution = self.interfaces.resolve(interface, None);
-        let Some(contract) = resolution.contract.as_ref() else {
+        let Some(contract) = resolution.contract else {
             return vec![format!(
                 "event '{event_name}' emitted for unknown interface {interface}"
             )];
         };
-        let Some(event) = contract
-            .events
-            .iter()
-            .find(|event| event.name == event_name)
-        else {
-            return vec![format!(
-                "event '{event_name}' is not declared for {}",
-                contract.interface
-            )];
-        };
-        if event.payload.is_empty() {
-            return Vec::new();
-        }
-        event_payload_contract_warnings(&contract.interface, event_name, &event.payload, payload)
+        let cache = self.validation_cache_for_contract(contract);
+        event_payload_contract_warnings_cached(cache, event_name, payload)
     }
 
     fn record_service_contract_warning(
@@ -348,8 +409,63 @@ impl Shell {
         replay_result?;
         Ok(requests)
     }
+
+    fn validation_cache_for_contract(
+        &mut self,
+        contract: Arc<InterfaceContract>,
+    ) -> &ContractValidationCache {
+        let interface = contract.interface.clone();
+        let rebuild = self
+            .service_contract_validation
+            .get(&interface)
+            .is_none_or(|cache| !Arc::ptr_eq(&cache.contract, &contract));
+        if rebuild {
+            self.service_contract_validation
+                .insert(interface.clone(), build_contract_validation_cache(contract));
+        }
+        self.service_contract_validation
+            .get(&interface)
+            .expect("contract validation cache inserted")
+    }
 }
 
+fn build_contract_validation_cache(contract: Arc<InterfaceContract>) -> ContractValidationCache {
+    let state_fields = contract
+        .state_fields
+        .iter()
+        .filter(|field| !is_runtime_metadata_state_field(&field.name))
+        .map(|field| CompiledContractField {
+            name: field.name.clone(),
+            field_type: field.field_type.clone(),
+            value_type: cached_contract_value_type(&field.field_type),
+        })
+        .collect();
+    let events = contract
+        .events
+        .iter()
+        .map(|event| {
+            (
+                event.name.clone(),
+                event
+                    .payload
+                    .iter()
+                    .map(|field| CompiledContractField {
+                        name: field.name.clone(),
+                        field_type: field.arg_type.clone(),
+                        value_type: cached_contract_value_type(&field.arg_type),
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    ContractValidationCache {
+        contract,
+        state_fields,
+        events,
+    }
+}
+
+#[cfg(test)]
 fn service_state_contract_warnings(
     contract: &InterfaceContract,
     payload: &serde_json::Value,
@@ -388,6 +504,41 @@ fn service_state_contract_warnings(
     warnings
 }
 
+fn service_state_contract_warnings_cached(
+    cache: &ContractValidationCache,
+    payload: &serde_json::Value,
+) -> Vec<String> {
+    let Some(object) = payload.as_object() else {
+        return vec![format!(
+            "state for {} must be a JSON object, got {}",
+            cache.contract.interface,
+            json_type_name(payload)
+        )];
+    };
+
+    let mut warnings = Vec::new();
+    for field in &cache.state_fields {
+        let Some(value) = object.get(&field.name) else {
+            warnings.push(format!(
+                "missing required state field '{}' for {}",
+                field.name, cache.contract.interface
+            ));
+            continue;
+        };
+        if !field.value_type.matches(value) {
+            warnings.push(format!(
+                "state field '{}' for {} expected {}, got {}",
+                field.name,
+                cache.contract.interface,
+                field.field_type,
+                json_type_name(value)
+            ));
+        }
+    }
+    warnings
+}
+
+#[cfg(test)]
 fn event_payload_contract_warnings(
     interface: &str,
     event_name: &str,
@@ -415,6 +566,57 @@ fn event_payload_contract_warnings(
             warnings.push(format!(
                 "event '{event_name}' for {interface} payload field '{field_name}' expected {}, got {}",
                 field.arg_type,
+                json_type_name(value)
+            ));
+        }
+    }
+    warnings
+}
+
+fn event_payload_contract_warnings_cached(
+    cache: &ContractValidationCache,
+    event_name: &str,
+    payload: &serde_json::Value,
+) -> Vec<String> {
+    let Some(fields) = cache.events.get(event_name) else {
+        return vec![format!(
+            "event '{event_name}' is not declared for {}",
+            cache.contract.interface
+        )];
+    };
+    if fields.is_empty() {
+        return Vec::new();
+    }
+    compiled_event_payload_contract_warnings(&cache.contract.interface, event_name, fields, payload)
+}
+
+fn compiled_event_payload_contract_warnings(
+    interface: &str,
+    event_name: &str,
+    fields: &[CompiledContractField],
+    payload: &serde_json::Value,
+) -> Vec<String> {
+    let Some(object) = payload.as_object() else {
+        return vec![format!(
+            "event '{event_name}' for {interface} must be a JSON object, got {}",
+            json_type_name(payload)
+        )];
+    };
+
+    let mut warnings = Vec::new();
+    for field in fields {
+        let Some(value) = object.get(field.name.as_str()) else {
+            warnings.push(format!(
+                "event '{event_name}' for {interface} missing required payload field '{}'",
+                field.name
+            ));
+            continue;
+        };
+        if !field.value_type.matches(value) {
+            let field_name = field.name.as_str();
+            warnings.push(format!(
+                "event '{event_name}' for {interface} payload field '{field_name}' expected {}, got {}",
+                field.field_type,
                 json_type_name(value)
             ));
         }
@@ -460,11 +662,48 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
 #[cfg(test)]
 mod contract_validation_tests {
     use super::*;
+    use mesh_core_service::{ContractCapabilities, InterfaceContract, InterfaceEvent};
+    use std::sync::Arc;
 
     fn field(name: &str, arg_type: &str) -> InterfaceArgument {
         InterfaceArgument {
             name: name.to_string(),
             arg_type: arg_type.to_string(),
+        }
+    }
+
+    fn validation_contract(event_count: usize, fields_per_event: usize) -> InterfaceContract {
+        InterfaceContract {
+            interface: "mesh.audio".to_string(),
+            version: mesh_core_service::parse_contract_version("1.0").unwrap(),
+            state_fields: vec![
+                mesh_core_service::contract::ContractStateField {
+                    name: "available".to_string(),
+                    field_type: "boolean".to_string(),
+                    description: None,
+                },
+                mesh_core_service::contract::ContractStateField {
+                    name: "percent".to_string(),
+                    field_type: "float".to_string(),
+                    description: None,
+                },
+                mesh_core_service::contract::ContractStateField {
+                    name: "source_module".to_string(),
+                    field_type: "string".to_string(),
+                    description: None,
+                },
+            ],
+            methods: Vec::new(),
+            events: (0..event_count)
+                .map(|event_index| InterfaceEvent {
+                    name: format!("Event{event_index}"),
+                    payload: (0..fields_per_event)
+                        .map(|field_index| field(&format!("field_{field_index}"), "float"))
+                        .collect(),
+                })
+                .collect(),
+            types: HashMap::new(),
+            capabilities: ContractCapabilities::default(),
         }
     }
 
@@ -495,6 +734,34 @@ mod contract_validation_tests {
     }
 
     #[test]
+    fn cached_contract_validation_preserves_warning_text() {
+        let contract = Arc::new(validation_contract(2, 2));
+        let cache = build_contract_validation_cache(Arc::clone(&contract));
+        let state_warnings = service_state_contract_warnings_cached(
+            &cache,
+            &serde_json::json!({ "available": true, "percent": "loud" }),
+        );
+        assert_eq!(
+            state_warnings,
+            service_state_contract_warnings(
+                &contract,
+                &serde_json::json!({ "available": true, "percent": "loud" }),
+            )
+        );
+        assert_eq!(state_warnings.len(), 1);
+        assert!(state_warnings[0].contains("state field 'percent'"));
+
+        let event_warnings = event_payload_contract_warnings_cached(
+            &cache,
+            "Event1",
+            &serde_json::json!({ "field_0": "bad" }),
+        );
+        assert_eq!(event_warnings.len(), 2);
+        assert!(event_warnings[0].contains("payload field 'field_0' expected float"));
+        assert!(event_warnings[1].contains("missing required payload field 'field_1'"));
+    }
+
+    #[test]
     fn cached_type_matching_follows_shared_grammar() {
         let cases = [
             (serde_json::json!(true), "boolean", true),
@@ -519,5 +786,58 @@ mod contract_validation_tests {
     #[test]
     fn invalid_type_expressions_degrade_to_permissive_matching() {
         assert!(cached_contract_value_type("[string]").matches(&serde_json::json!(1)));
+    }
+
+    // cargo test -p mesh-core-shell --release -- contract_validation_cache_beats_event_schema_scan --ignored --nocapture
+    #[test]
+    #[ignore = "release-only contract validation cache microbenchmark"]
+    fn contract_validation_cache_beats_event_schema_scan() {
+        let contract = Arc::new(validation_contract(64, 8));
+        let cache = build_contract_validation_cache(Arc::clone(&contract));
+        let event_name = "Event63";
+        let payload = serde_json::Value::Object(
+            (0..8)
+                .map(|index| (format!("field_{index}"), serde_json::json!(index as f64)))
+                .collect(),
+        );
+        let iterations = 100_000usize;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let event = contract
+                .events
+                .iter()
+                .find(|event| event.name == event_name)
+                .unwrap();
+            old_total += event_payload_contract_warnings(
+                &contract.interface,
+                std::hint::black_box(event_name),
+                &event.payload,
+                std::hint::black_box(&payload),
+            )
+            .len();
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            new_total += event_payload_contract_warnings_cached(
+                std::hint::black_box(&cache),
+                std::hint::black_box(event_name),
+                std::hint::black_box(&payload),
+            )
+            .len();
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "contract event validation: scan+parse {old_time:?}; cached {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, 0);
+        assert_eq!(new_total, 0);
+        assert!(new_time < old_time);
     }
 }

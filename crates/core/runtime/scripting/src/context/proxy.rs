@@ -350,13 +350,13 @@ fn record_tracked_field_once(
     service_name: &str,
     key: &str,
 ) {
-    if !observed_state_fields
-        .lock()
-        .unwrap()
-        .insert(key.to_string())
-    {
+    let mut observed = observed_state_fields.lock().unwrap();
+    if observed.contains(key) {
         return;
     }
+    observed.insert(key.to_string());
+    drop(observed);
+
     tracked_service_fields
         .lock()
         .unwrap()
@@ -402,4 +402,92 @@ fn consume_self_arg(args: &mlua::Variadic<LuaValue>) -> usize {
 
 fn service_control_capability(service_name: &str) -> Capability {
     Capability::new(format!("service.{service_name}.control"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sinks() -> (
+        Arc<Mutex<HashMap<String, HashSet<String>>>>,
+        Arc<Mutex<HashSet<String>>>,
+    ) {
+        (
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashSet::new())),
+        )
+    }
+
+    #[test]
+    fn repeated_tracked_field_reads_record_once() {
+        let (tracked, observed) = sinks();
+        record_tracked_field_once(&tracked, &observed, "audio", "percent");
+        record_tracked_field_once(&tracked, &observed, "audio", "percent");
+        record_tracked_field_once(&tracked, &observed, "audio", "muted");
+
+        let tracked = tracked.lock().unwrap();
+        let audio = tracked.get("audio").expect("audio reads");
+        assert_eq!(audio.len(), 2);
+        assert!(audio.contains("percent"));
+        assert!(audio.contains("muted"));
+    }
+
+    // cargo test -p mesh-core-scripting --release -- tracked_field_duplicate_read_gate_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only tracked service-field read microbenchmark"]
+    fn tracked_field_duplicate_read_gate_benchmark() {
+        fn old_record(
+            tracked_service_fields: &Arc<Mutex<HashMap<String, HashSet<String>>>>,
+            observed_state_fields: &Arc<Mutex<HashSet<String>>>,
+            service_name: &str,
+            key: &str,
+        ) {
+            if !observed_state_fields
+                .lock()
+                .unwrap()
+                .insert(key.to_string())
+            {
+                return;
+            }
+            tracked_service_fields
+                .lock()
+                .unwrap()
+                .entry(service_name.to_string())
+                .or_default()
+                .insert(key.to_string());
+        }
+
+        let iterations = 1_000_000usize;
+        let (old_tracked, old_observed) = sinks();
+        old_record(&old_tracked, &old_observed, "audio", "percent");
+        let old_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            old_record(
+                std::hint::black_box(&old_tracked),
+                std::hint::black_box(&old_observed),
+                std::hint::black_box("audio"),
+                std::hint::black_box("percent"),
+            );
+        }
+        let old_time = old_started.elapsed();
+
+        let (new_tracked, new_observed) = sinks();
+        record_tracked_field_once(&new_tracked, &new_observed, "audio", "percent");
+        let new_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            record_tracked_field_once(
+                std::hint::black_box(&new_tracked),
+                std::hint::black_box(&new_observed),
+                std::hint::black_box("audio"),
+                std::hint::black_box("percent"),
+            );
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "duplicate tracked service reads: allocate-insert {old_time:?}; borrowed-gate {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
+    }
 }

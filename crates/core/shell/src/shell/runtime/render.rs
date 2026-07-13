@@ -7,7 +7,6 @@ use mesh_core_presentation::{
 };
 use mesh_core_render::{DamageRect, DisplayPaintCommand};
 use smallvec::SmallVec;
-use std::collections::HashSet;
 
 const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 
@@ -463,6 +462,7 @@ impl Shell {
         }
         self.components_want_render = components_want_render_after_frame;
         self.presented_last_frame = any_component_presented;
+        self.service_delivery_index.mark_dirty();
         Ok(())
     }
 
@@ -483,7 +483,7 @@ impl Shell {
             self.components[index].entering_child_node_keys.clear();
             self.components[index]
                 .component
-                .set_entering_child_keys(HashSet::new());
+                .set_entering_child_keys_from_slice(&[]);
             return Ok(false);
         }
         let requested_keys: SmallVec<[&str; 4]> = requests
@@ -504,17 +504,18 @@ impl Shell {
                 .set_closing_child_keys_from_slice(&[]);
             self.components[index]
                 .component
-                .set_entering_child_keys(HashSet::new());
+                .set_entering_child_keys_from_slice(&[]);
             return Ok(false);
         }
 
         let now = std::time::Instant::now();
         let mut child_index = 0;
         while child_index < self.components[index].children.len() {
-            let node_key = self.components[index].children[child_index]
-                .node_key
-                .clone();
-            if requested_keys.contains(&node_key.as_str()) {
+            if requested_keys.contains(
+                &self.components[index].children[child_index]
+                    .node_key
+                    .as_str(),
+            ) {
                 self.components[index].children[child_index].closing_until = None;
                 child_index += 1;
                 continue;
@@ -531,9 +532,14 @@ impl Shell {
                     self.destroy_child_surface_at(index, child_index);
                 }
                 None => {
-                    let duration = self.components[index]
-                        .component
-                        .child_hide_transition_ms(&node_key);
+                    let duration = {
+                        let node_key = self.components[index].children[child_index]
+                            .node_key
+                            .as_str();
+                        self.components[index]
+                            .component
+                            .child_hide_transition_ms(node_key)
+                    };
                     if duration == 0 {
                         self.destroy_child_surface_at(index, child_index);
                     } else {
@@ -1391,6 +1397,54 @@ mod performance_tests {
         );
         assert_eq!(hash_count, borrowed_count);
         assert!(borrowed_time < hash_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- child_reconcile_borrowed_key_check_beats_clone_per_child --ignored --nocapture
+    #[test]
+    #[ignore = "release-only child reconcile key microbenchmark"]
+    fn child_reconcile_borrowed_key_check_beats_clone_per_child() {
+        let children: Vec<String> = (0..16)
+            .map(|index| format!("root/{index}/popover"))
+            .collect();
+        let requested: SmallVec<[&str; 4]> = [
+            "root/0/popover",
+            "root/4/popover",
+            "root/8/popover",
+            "root/12/popover",
+        ]
+        .into_iter()
+        .collect();
+        let iterations = 500_000usize;
+
+        let clone_started = Instant::now();
+        let mut clone_count = 0usize;
+        for _ in 0..iterations {
+            for child in &children {
+                let node_key = black_box(child).clone();
+                if requested.contains(&node_key.as_str()) {
+                    clone_count += 1;
+                }
+            }
+        }
+        let clone_time = clone_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_count = 0usize;
+        for _ in 0..iterations {
+            for child in &children {
+                if requested.contains(&black_box(child).as_str()) {
+                    borrowed_count += 1;
+                }
+            }
+        }
+        let borrowed_time = borrowed_started.elapsed();
+
+        eprintln!(
+            "child reconcile key check: clone {clone_time:?}; borrowed {borrowed_time:?}; ratio {:.1}x; counts={clone_count}/{borrowed_count}",
+            clone_time.as_secs_f64() / borrowed_time.as_secs_f64()
+        );
+        assert_eq!(clone_count, borrowed_count);
+        assert!(borrowed_time < clone_time);
     }
 }
 

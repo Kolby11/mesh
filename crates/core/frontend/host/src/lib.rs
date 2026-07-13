@@ -14,6 +14,18 @@ use mesh_core_wayland::{KeyboardMode, ShellSurface};
 
 pub type SurfaceId = String;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServiceObservationSummary {
+    pub update_services: Vec<String>,
+    pub interface_events: Vec<ServiceInterfaceEventSubscription>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ServiceInterfaceEventSubscription {
+    pub service: String,
+    pub event: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChildSurfaceRequest {
     pub node_key: String,
@@ -242,6 +254,9 @@ pub trait ShellComponent: Send {
     fn observes_service_event(&self, _event: &ServiceEvent) -> bool {
         true
     }
+    fn service_observation_summary(&self) -> Option<ServiceObservationSummary> {
+        None
+    }
     fn wants_tick(&self) -> bool {
         true
     }
@@ -438,6 +453,11 @@ pub trait ShellComponent: Send {
     /// paint, then clears the keys so normal CSS transitions animate it to its
     /// resting state instead of exposing the resting frame first.
     fn set_entering_child_keys(&mut self, _keys: std::collections::HashSet<String>) {}
+    /// Borrowed variant for hot reconciliation paths. Implementations can
+    /// compare against their existing state before allocating an owned set.
+    fn set_entering_child_keys_from_slice(&mut self, keys: &[&str]) {
+        self.set_entering_child_keys(keys.iter().map(|key| (*key).to_owned()).collect());
+    }
     /// Best-known logical content size for surface sizing: the measured content
     /// size once a paint has produced one, otherwise the manifest-declared
     /// width/height. Never returns a zero/`1x1` placeholder, so popup creation

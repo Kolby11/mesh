@@ -139,8 +139,7 @@ pub(super) struct ScrollAnimation {
 
 #[derive(Debug, Clone)]
 struct ScheduledHandler {
-    instance_key: String,
-    handler: String,
+    namespaced_handler: String,
     deadline: Instant,
 }
 

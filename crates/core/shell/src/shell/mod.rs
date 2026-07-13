@@ -52,12 +52,14 @@ use mesh_core_render::{DebugOverlay, PixelBuffer};
 use sounds::{SoundKind, play_shell_sound};
 use surface_layout::{default_surface_visibility, load_active_theme};
 use types::{
-    CommandThrottleState, ComponentRuntime, LatestServiceState, ServiceCommandMsg,
-    SettingsWatchState, ShellCoreState, ShellMessage, SurfaceState, TargetRef, ThemeWatchState,
+    CommandThrottleState, CompiledContractField, ComponentRuntime, ContractValidationCache,
+    LatestServiceState, ServiceCommandMsg, ServiceDeliveryIndex, SettingsWatchState,
+    ShellCoreState, ShellMessage, SurfaceState, TargetRef, ThemeWatchState,
 };
 pub use types::{
     ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, KeyModifiers,
-    ServiceEvent, ShellComponent, SurfaceId, TabFocusTarget,
+    ServiceEvent, ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent,
+    SurfaceId, TabFocusTarget,
 };
 
 use service::{service_capabilities, service_name_from_interface};
@@ -377,6 +379,7 @@ pub struct Shell {
     /// so stale `wants_render()` flags cannot spin the idle loop.
     presented_last_frame: bool,
     component_by_surface: HashMap<SurfaceId, usize>,
+    service_delivery_index: ServiceDeliveryIndex,
     surfaces: HashMap<SurfaceId, StubSurface>,
     clipboard: Box<dyn ClipboardWriter>,
     presentation_engine: PresentationEngine,
@@ -400,6 +403,7 @@ pub struct Shell {
     backend_supervision: HashMap<String, backend::BackendSupervisionState>,
     backend_respawn: Option<backend::BackendRespawnContext>,
     latest_service_state: HashMap<String, LatestServiceState>,
+    service_contract_validation: HashMap<String, ContractValidationCache>,
     /// Contract-declared optimistic state patches awaiting provider
     /// confirmation, keyed by (interface, state field).
     pending_optimistic_state: HashMap<(String, String), serde_json::Value>,

@@ -1,5 +1,13 @@
 use super::*;
 
+fn scheduled_handler_name(instance_key: &str, handler: &str) -> String {
+    if handler.starts_with("__mesh_embed__::") {
+        handler.to_string()
+    } else {
+        format!("__mesh_embed__::{instance_key}::{handler}")
+    }
+}
+
 fn apply_runtime_props(
     runtime: &mut EmbeddedFrontendRuntime,
     props: &HashMap<String, serde_json::Value>,
@@ -59,8 +67,7 @@ impl FrontendSurfaceComponent {
                     self.scheduled_handlers.insert(
                         key.to_string(),
                         ScheduledHandler {
-                            instance_key: instance_key.to_string(),
-                            handler: handler.to_string(),
+                            namespaced_handler: scheduled_handler_name(instance_key, handler),
                             deadline: Instant::now() + Duration::from_millis(delay_ms),
                         },
                     );
@@ -1156,4 +1163,91 @@ fn keybind_trigger_descriptor(trigger: &mesh_core_module::KeybindTrigger) -> ser
         "key": trigger.key.clone(),
         "modifiers": trigger.modifiers.clone(),
     })
+}
+
+#[cfg(test)]
+mod scheduled_handler_tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn scheduled_handler_name_namespaces_plain_handlers_once() {
+        assert_eq!(
+            scheduled_handler_name("@mesh/panel/local:Clock", "close"),
+            "__mesh_embed__::@mesh/panel/local:Clock::close"
+        );
+        assert_eq!(
+            scheduled_handler_name("@mesh/panel", "__mesh_embed__::@mesh/panel::close"),
+            "__mesh_embed__::@mesh/panel::close"
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- scheduled_handler_cached_name_beats_tick_format --ignored --nocapture
+    #[test]
+    #[ignore = "release-only scheduled handler dispatch microbenchmark"]
+    fn scheduled_handler_cached_name_beats_tick_format() {
+        let now = Instant::now();
+        let old_handlers = (0..256)
+            .map(|index| {
+                (
+                    format!("handler-{index}"),
+                    (
+                        format!("@mesh/panel/local:Child{index}"),
+                        "closeBridge".to_string(),
+                        now - Duration::from_millis(1),
+                    ),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let new_handlers = old_handlers
+            .iter()
+            .map(|(key, (instance_key, handler, deadline))| {
+                (
+                    key.clone(),
+                    ScheduledHandler {
+                        namespaced_handler: scheduled_handler_name(instance_key, handler),
+                        deadline: *deadline,
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let iterations = 20_000usize;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let due = old_handlers
+                .iter()
+                .filter(|(_, (_, _, deadline))| *deadline <= now)
+                .map(|(key, (instance_key, handler, _))| {
+                    (
+                        key.clone(),
+                        format!("__mesh_embed__::{instance_key}::{handler}"),
+                    )
+                })
+                .collect::<Vec<_>>();
+            old_total = old_total.wrapping_add(std::hint::black_box(due.len()));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let due = new_handlers
+                .iter()
+                .filter(|(_, scheduled)| scheduled.deadline <= now)
+                .map(|(key, scheduled)| (key.clone(), scheduled.namespaced_handler.clone()))
+                .collect::<Vec<_>>();
+            new_total = new_total.wrapping_add(std::hint::black_box(due.len()));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "scheduled handler dispatch prep: format-on-tick {old_time:?}; cached-name {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
 }

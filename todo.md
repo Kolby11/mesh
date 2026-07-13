@@ -260,7 +260,12 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       walks (P); child buffers are still repainted eagerly even though sparse
       child damage now reaches presentation (U). Route child targets through
       the retained display-list + damage path and delete the immediate-mode
-      painter twins (P structure item).
+      painter twins (P structure item). Progress 2026-07-13: child-surface
+      reconciliation now uses borrowed entering-key slices for empty/common
+      paths and checks retained child node keys by borrowed `&str` instead of
+      cloning each key before requested-key membership. Release benchmark over
+      8M child-key checks measured 64.3ms clone-before-check versus 6.7ms
+      borrowed comparison (~9.6x faster for that subpath).
 - [ ] Fractional HiDPI forces full-surface repaint every frame; fix the
       logical-vs-physical damage-clip mismatch through the painter. CPU-side
       experiment showed no win — re-test with compositor/upload damage
@@ -283,12 +288,32 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
 
 - [ ] Per-paint element metrics: lazy `refs.<name>` field resolution for
       frames where metrics really changed (A; publication is already
-      diff-gated and snapshots are lazy/sparse).
+      diff-gated and snapshots are lazy/sparse). Progress 2026-07-13:
+      `refs.<name>` now caches the live element proxy table and element
+      method closures after first access, while field reads still resolve
+      against the current `__mesh_element_metrics` table. Release benchmark
+      over 100,000 handler probes measured 342.5ms rebuilding proxy/function
+      objects versus 134.9ms cached (~2.5x faster). Remaining: Rust-side lazy
+      metrics storage so changed frames avoid whole-snapshot JSON→Lua
+      publication when scripts read only a few fields.
 - [ ] Handler dispatch: graph-wide instance-key interning (B; dispatch-path
-      borrowing landed).
-- [ ] Shell-side subscription index (service → component indices) so event
-      routing is a lookup, not N mutex acquisitions per event (C;
-      component-local summary experiment rejected — see log).
+      borrowing landed). Progress 2026-07-13: scheduled handler dispatch now
+      precomputes the `__mesh_embed__::{instance_key}::{handler}` target when
+      `shell.schedule-handler` is received, so due ticks clone one cached
+      handler string instead of cloning instance+handler and formatting every
+      time. Release benchmark over 5.12M due-handler prep entries measured
+      351.4ms format-on-tick versus 207.8ms cached-name (~1.7x faster).
+      Remaining: full graph-wide instance-key interning for ordinary handler
+      dispatch.
+- [x] Shell-side subscription index (service → component indices) so event
+      routing is a lookup, not N mutex acquisitions per event (C). Shipped
+      2026-07-13: components can expose a `ServiceObservationSummary`; shell
+      builds a dirty-refresh delivery index keyed by service update name and
+      interface event name, with unknown-summary components preserved on the
+      legacy fallback gate. Index refreshes after component registration,
+      mount, and render/template dependency discovery. Release benchmark:
+      20,000 `mesh.audio` events across 256 summarized components measured
+      202.8ms full scan versus 20.3ms indexed (~10x faster).
 - [ ] Push-based backend host API primitives (D-Bus signal subscribe,
       fd/socket watch, stream adoption) so providers are event-driven and the
       safety poll is fallback (C). Includes investigating `pw-dump --monitor`
@@ -297,14 +322,41 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
 - [ ] Handler sync fast path still round-trips every known global per handler
       (env read + conversion + deep-compare); needs `_ENV` as a forwarding
       proxy or Rust-owned globals — measure read-through cost first; pairs
-      with v1.17 (R).
-- [ ] Contract validation: move compiled event schemas / type classifications
-      onto the registered contract (S; shell-side caches landed). Minor:
-      broader API cleanup for retained interface names outside the command
-      path (S).
+      with v1.17 (R). Progress 2026-07-13: `mesh.ui.request_redraw()` now uses
+      a Rust atomic side-channel instead of a Lua global flag, removing the
+      idle `__mesh_request_redraw` `_ENV` read from every handler sync; release
+      benchmark over 1M idle redraw checks measured 159.7ms Lua global reads
+      versus 1.8ms atomic checks (~90.6x faster for that check). The assigned
+      new-global write log now has an atomic pending flag, so handlers that do
+      not create new globals skip the empty mutex drain; release benchmark over
+      1M empty checks measured 5.8ms mutex drain versus 1.7ms atomic pending
+      check (~3.3x faster for that subpath). Remaining: every known global is
+      still read unless the future `_ENV` forwarding proxy/Rust-owned-global
+      architecture lands.
+- [x] Contract validation: move compiled event schemas / type classifications
+      out of the per-event path (S). Shipped 2026-07-13: shell now keeps a
+      contract-validation cache keyed by the resolved contract `Arc`, with
+      runtime-metadata state fields filtered once, compiled `TypeExpr`s stored
+      per state/event payload field, and interface events addressed through an
+      event-name map instead of a linear scan. Cache rebuilds automatically
+      when the registry resolves a replacement contract. Release benchmark:
+      100,000 validations against the last event in a 64-event contract
+      measured 23.5ms uncached scan versus 10.7ms cached (~2.2x faster).
+      Remaining S follow-up: broader API cleanup for retained interface names
+      outside the command path.
 - [ ] Storage reads clone per Lua access; future attempt needs shared
       immutable JSON values or lock avoidance without an extra Lua table
-      lookup (I; naive Lua-side cache rejected — see log).
+      lookup (I; naive Lua-side cache rejected — see log). Progress
+      2026-07-13: storage `__index` now borrows string keys, calls read sinks
+      with `&str`, and converts the stored JSON value by reference under the
+      storage lock instead of cloning the `Value` per Lua read. Release
+      benchmark over 100,000 nested table reads measured 1.987s cloned
+      key/value versus 1.633s borrowed key/value (~1.2x faster). Storage-read
+      tracking now uses an atomic boolean instead of locking a mutex for every
+      read when render dependency tracking is off; release benchmark over 1M
+      false checks measured 4.5ms mutex versus 0.44ms atomic (~10.2x faster
+      for that check). Remaining: broader shared immutable storage values or
+      lock avoidance for larger wins.
 
 ### P2 — typing & interning (→ v1.23)
 
@@ -343,8 +395,14 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       (pairs with component memoization and v1.27).
 - [ ] Per-rebuild prop churn — remaining: prop state writes and style-rule
       merge caching (M).
-- [ ] Per-node build allocations — remaining: unique tracked-read string
-      allocations (M).
+- [x] Per-node build allocations — unique tracked-read string allocations
+      reduced 2026-07-13: service proxy tracking now checks the per-evaluation
+      observed-field set by borrowed `&str` before allocating `String`s for a
+      newly observed field. Duplicate field reads no longer allocate a rejected
+      key string. Release benchmark: 1,000,000 duplicate tracked reads measured
+      31.5ms allocate-before-insert versus 16.5ms borrowed gate (~1.9x faster).
+      Remaining M follow-ups: broader typed composition channels and other
+      per-node allocation sources tracked separately.
 
 ### P2 — presentation & memory (H/U)
 

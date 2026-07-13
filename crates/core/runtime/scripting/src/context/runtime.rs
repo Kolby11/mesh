@@ -193,6 +193,7 @@ pub struct ScriptContext {
     user_global_keys: Vec<String>,
     user_global_key_set: HashSet<String>,
     assigned_global_keys: Arc<Mutex<HashSet<String>>>,
+    pending_assigned_global_keys: Arc<AtomicBool>,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
     published_events: Vec<PublishedEvent>,
@@ -204,8 +205,9 @@ pub struct ScriptContext {
     storage: Arc<Mutex<ScopedStorage>>,
     tracked_storage_keys: Arc<Mutex<HashSet<String>>>,
     changed_storage_keys: Arc<Mutex<HashSet<String>>>,
-    tracking_storage_reads: Arc<Mutex<bool>>,
+    tracking_storage_reads: Arc<AtomicBool>,
     pending_side_channels: Arc<AtomicBool>,
+    pending_redraw: Arc<AtomicBool>,
     /// Set when another component instance touches this context through a live
     /// `bind:this` proxy. The shell consumes this before doing the expensive
     /// cross-instance state resync.
@@ -349,6 +351,7 @@ impl ScriptContext {
             user_global_keys: Vec::new(),
             user_global_key_set: HashSet::new(),
             assigned_global_keys: Arc::new(Mutex::new(HashSet::new())),
+            pending_assigned_global_keys: Arc::new(AtomicBool::new(false)),
             tracked_service_fields: Arc::new(Mutex::new(HashMap::new())),
             subscribed_interface_events: Arc::new(Mutex::new(HashMap::new())),
             published_events: Vec::new(),
@@ -360,8 +363,9 @@ impl ScriptContext {
             storage: Arc::new(Mutex::new(storage)),
             tracked_storage_keys: Arc::new(Mutex::new(HashSet::new())),
             changed_storage_keys: Arc::new(Mutex::new(HashSet::new())),
-            tracking_storage_reads: Arc::new(Mutex::new(false)),
+            tracking_storage_reads: Arc::new(AtomicBool::new(false)),
             pending_side_channels: Arc::new(AtomicBool::new(false)),
+            pending_redraw: Arc::new(AtomicBool::new(false)),
             live_binding_external_accessed: Arc::new(AtomicBool::new(false)),
             last_element_metrics_fingerprint: None,
             cached_self_table: None,
@@ -394,11 +398,13 @@ impl ScriptContext {
         let meta = lua.create_table().map_err(lua_err)?;
         meta.set("__index", lua.globals()).map_err(lua_err)?;
         let assigned_global_keys = Arc::clone(&self.assigned_global_keys);
+        let pending_assigned_global_keys = Arc::clone(&self.pending_assigned_global_keys);
         meta.set(
             "__newindex",
             lua.create_function(move |_, (table, key, value): (Table, String, LuaValue)| {
                 if !key.starts_with("__") {
                     assigned_global_keys.lock().unwrap().insert(key.clone());
+                    pending_assigned_global_keys.store(true, Ordering::Release);
                 }
                 table.raw_set(key, value)
             })
@@ -420,6 +426,8 @@ impl ScriptContext {
             .filter_map(|result| result.ok().map(|(key, _)| key))
             .collect();
         self.assigned_global_keys.lock().unwrap().clear();
+        self.pending_assigned_global_keys
+            .store(false, Ordering::Release);
 
         Ok(())
     }
@@ -434,6 +442,8 @@ impl ScriptContext {
         self.user_global_key_set.clear();
         self.last_element_metrics_fingerprint = None;
         self.assigned_global_keys.lock().unwrap().clear();
+        self.pending_assigned_global_keys
+            .store(false, Ordering::Release);
         self.subscribed_interface_events.lock().unwrap().clear();
         self.vm = None;
     }
@@ -455,6 +465,8 @@ impl ScriptContext {
         self.user_global_keys.clear();
         self.user_global_key_set.clear();
         self.assigned_global_keys.lock().unwrap().clear();
+        self.pending_assigned_global_keys
+            .store(false, Ordering::Release);
         {
             let mut shared_interface_bindings = self.shared_interface_bindings.lock().unwrap();
             shared_interface_bindings.bindings.clear();
@@ -605,6 +617,22 @@ impl ScriptContext {
             .get::<Table>("__mesh_service_payload_ptrs")
             .ok()
             .and_then(|table| table.get::<Option<String>>(service).ok().flatten())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn clear_refs_proxy_cache_for_benchmark(&mut self) {
+        let _ = self.ensure_initialized();
+        let Ok(refs) = self.env().get::<Table>("refs") else {
+            return;
+        };
+        let keys = refs
+            .clone()
+            .pairs::<String, LuaValue>()
+            .filter_map(|result| result.ok().map(|(key, _)| key))
+            .collect::<Vec<_>>();
+        for key in keys {
+            let _ = refs.raw_set(key, LuaValue::Nil);
+        }
     }
 
     /// Publish the latest per-paint element metrics so live `refs.<name>` reads
@@ -998,9 +1026,9 @@ impl ScriptContext {
         self.ensure_initialized()?;
         if self.has_handler("render") {
             self.clear_tracked_storage_keys();
-            *self.tracking_storage_reads.lock().unwrap() = true;
+            self.tracking_storage_reads.store(true, Ordering::Release);
             let result = self.call_handler("render", &[]);
-            *self.tracking_storage_reads.lock().unwrap() = false;
+            self.tracking_storage_reads.store(false, Ordering::Release);
             result?;
             Ok(true)
         } else {
@@ -1044,13 +1072,13 @@ impl ScriptContext {
                 });
             }),
             Arc::new(move |key| {
-                if *tracking_storage_reads.lock().unwrap() {
-                    tracked_storage_keys.lock().unwrap().insert(key);
+                if tracking_storage_reads.load(Ordering::Acquire) {
+                    tracked_storage_keys.lock().unwrap().insert(key.to_string());
                 }
             }),
             Arc::new(move |key| {
                 pending_storage_side_channels.store(true, Ordering::Release);
-                changed_storage_keys.lock().unwrap().insert(key);
+                changed_storage_keys.lock().unwrap().insert(key.to_string());
             }),
         )
         .map_err(lua_err)?;
@@ -1161,9 +1189,6 @@ impl ScriptContext {
         let mesh_for_require = mesh.clone();
         globals.set("mesh", mesh).map_err(lua_err)?;
         globals
-            .set("__mesh_request_redraw", false)
-            .map_err(lua_err)?;
-        globals
             .set("__mesh_locale_current", "en")
             .map_err(lua_err)?;
 
@@ -1226,16 +1251,16 @@ impl ScriptContext {
 
     fn install_ui_api(
         &mut self,
-        globals: &mlua::Table,
+        _globals: &mlua::Table,
         mesh_ui_api: &Table,
     ) -> Result<(), ScriptError> {
-        let env_for_redraw = globals.clone();
+        let pending_redraw = Arc::clone(&self.pending_redraw);
         mesh_ui_api
             .set(
                 "request_redraw",
                 self.lua()
                     .create_function(move |_lua, ()| {
-                        env_for_redraw.set("__mesh_request_redraw", true)?;
+                        pending_redraw.store(true, Ordering::Release);
                         Ok(())
                     })
                     .map_err(lua_err)?,
@@ -1756,6 +1781,8 @@ impl ScriptContext {
                 }
             }
             self.assigned_global_keys.lock().unwrap().clear();
+            self.pending_assigned_global_keys
+                .store(false, Ordering::Release);
         } else {
             // Fast path: only check known user global keys.
             for key in &self.user_global_keys {
@@ -1774,35 +1801,35 @@ impl ScriptContext {
                     }
                 }
             }
-            let assigned_keys = {
-                let mut assigned = self.assigned_global_keys.lock().unwrap();
-                assigned.drain().collect::<Vec<_>>()
-            };
-            for name in assigned_keys {
-                if name.starts_with("__")
-                    || self.builtin_globals.contains(&name)
-                    || self.user_global_key_set.contains(&name)
-                {
-                    continue;
-                }
-                self.user_global_key_set.insert(name.clone());
-                self.user_global_keys.push(name.clone());
-                if let Ok(lua_value) = self.env().get::<LuaValue>(name.as_str())
-                    && !matches!(lua_value, LuaValue::Nil | LuaValue::Function(_))
-                    && let Ok(value) = self.lua().from_value::<Value>(lua_value)
-                {
-                    self.state.set(name, value);
+            if self
+                .pending_assigned_global_keys
+                .swap(false, Ordering::AcqRel)
+            {
+                let assigned_keys = {
+                    let mut assigned = self.assigned_global_keys.lock().unwrap();
+                    assigned.drain().collect::<Vec<_>>()
+                };
+                for name in assigned_keys {
+                    if name.starts_with("__")
+                        || self.builtin_globals.contains(&name)
+                        || self.user_global_key_set.contains(&name)
+                    {
+                        continue;
+                    }
+                    self.user_global_key_set.insert(name.clone());
+                    self.user_global_keys.push(name.clone());
+                    if let Ok(lua_value) = self.env().get::<LuaValue>(name.as_str())
+                        && !matches!(lua_value, LuaValue::Nil | LuaValue::Function(_))
+                        && let Ok(value) = self.lua().from_value::<Value>(lua_value)
+                    {
+                        self.state.set(name, value);
+                    }
                 }
             }
         }
 
-        if self
-            .env()
-            .get::<bool>("__mesh_request_redraw")
-            .unwrap_or(false)
-        {
+        if self.pending_redraw.swap(false, Ordering::AcqRel) {
             self.state.dirty = true;
-            let _ = self.env().set("__mesh_request_redraw", false);
         }
     }
 
@@ -1984,6 +2011,35 @@ impl ScriptContext {
                 self.state.set(key.clone(), value);
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn old_global_redraw_flag_sync_for_benchmark(&mut self) {
+        if self
+            .env()
+            .get::<bool>("__mesh_request_redraw")
+            .unwrap_or(false)
+        {
+            self.state.dirty = true;
+            let _ = self.env().set("__mesh_request_redraw", false);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_redraw_for_benchmark(&self) -> bool {
+        self.pending_redraw.swap(false, Ordering::AcqRel)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn old_empty_assigned_globals_drain_for_benchmark(&mut self) -> usize {
+        let mut assigned = self.assigned_global_keys.lock().unwrap();
+        assigned.drain().count()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_assigned_globals_for_benchmark(&self) -> bool {
+        self.pending_assigned_global_keys
+            .swap(false, Ordering::AcqRel)
     }
 }
 

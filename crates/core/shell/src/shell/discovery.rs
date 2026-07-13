@@ -176,6 +176,7 @@ impl Shell {
             components_want_render: false,
             presented_last_frame: true,
             component_by_surface: HashMap::new(),
+            service_delivery_index: ServiceDeliveryIndex::default(),
             surfaces: HashMap::new(),
             clipboard: Box::new(WaylandClipboard::default()),
             presentation_engine: PresentationEngine::select(),
@@ -199,6 +200,7 @@ impl Shell {
             backend_supervision: HashMap::new(),
             backend_respawn: None,
             latest_service_state: HashMap::new(),
+            service_contract_validation: HashMap::new(),
             pending_optimistic_state: HashMap::new(),
             command_throttle: HashMap::new(),
             pending_popover_hides: HashMap::new(),
@@ -448,6 +450,7 @@ impl Shell {
         self.components.push(ComponentRuntime::new(component));
         self.component_by_surface
             .insert(surface_id, component_index);
+        self.service_delivery_index.mark_dirty();
     }
 
     pub(super) fn mount_components(&mut self) -> Result<VecDeque<CoreRequest>, ShellRunError> {
@@ -468,6 +471,7 @@ impl Shell {
                     .map_err(ShellRunError::Component)?,
             );
         }
+        self.service_delivery_index.mark_dirty();
         Ok(requests)
     }
 }

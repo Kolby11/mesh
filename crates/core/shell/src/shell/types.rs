@@ -1,12 +1,15 @@
 pub use mesh_core_frontend_host::{
     ChildSurfaceKind, ChildSurfaceRequest, ComponentContext, ComponentError, ComponentInput,
-    ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers, ServiceEvent, ShellComponent,
-    SurfaceId, TabFocusTarget,
+    ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers, ServiceEvent,
+    ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent, SurfaceId,
+    TabFocusTarget,
 };
 use mesh_core_presentation::{LayerSurfaceConfig, LayerSurfaceSizePolicy, PopupConfig};
 use mesh_core_render::PixelBuffer;
+use mesh_core_service::{InterfaceContract, TypeExpr};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 /// Identifies which surface owned by a [`ComponentRuntime`] a piece of work
@@ -109,6 +112,34 @@ pub(super) struct ComponentRuntime {
     /// Newly requested child nodes waiting for one parent repaint with the
     /// scoped entrance class before their popup surface is mapped.
     pub(super) entering_child_node_keys: HashSet<String>,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct ServiceDeliveryIndex {
+    pub(super) dirty: bool,
+    pub(super) fallback_components: Vec<usize>,
+    pub(super) update_services: HashMap<String, Vec<usize>>,
+    pub(super) interface_events: HashMap<String, HashMap<String, Vec<usize>>>,
+}
+
+impl ServiceDeliveryIndex {
+    pub(super) fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ContractValidationCache {
+    pub(super) contract: Arc<InterfaceContract>,
+    pub(super) state_fields: Vec<CompiledContractField>,
+    pub(super) events: HashMap<String, Vec<CompiledContractField>>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct CompiledContractField {
+    pub(super) name: String,
+    pub(super) field_type: String,
+    pub(super) value_type: TypeExpr,
 }
 
 impl ComponentRuntime {

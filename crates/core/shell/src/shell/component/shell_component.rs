@@ -1,6 +1,7 @@
 use super::runtime_tree::RetainedTreeDirtySummary;
 use super::*;
 use crate::shell::component::runtime::script_has_service_read;
+use crate::shell::{ServiceInterfaceEventSubscription, ServiceObservationSummary};
 
 impl FrontendSurfaceComponent {
     /// Drop every retained render/layout cache so the next paint rebuilds the
@@ -269,6 +270,44 @@ impl ShellComponent for FrontendSurfaceComponent {
             .any(|runtime| Self::runtime_observes_service_event(runtime, event))
     }
 
+    fn service_observation_summary(&self) -> Option<ServiceObservationSummary> {
+        let Ok(runtimes) = self.runtimes.lock() else {
+            return None;
+        };
+        let mut update_services = std::collections::HashSet::new();
+        let mut interface_events = std::collections::HashSet::new();
+        for runtime in runtimes.values() {
+            for (service, fields) in runtime.script_ctx.tracked_service_fields() {
+                if !fields.is_empty() {
+                    update_services.insert(service);
+                }
+            }
+            for (service, events) in runtime.script_ctx.subscribed_interface_events() {
+                if !events.is_empty() {
+                    update_services.insert(service.clone());
+                    for event in events {
+                        interface_events.insert(ServiceInterfaceEventSubscription {
+                            service: service.clone(),
+                            event,
+                        });
+                    }
+                }
+            }
+        }
+        let mut update_services = update_services.into_iter().collect::<Vec<_>>();
+        update_services.sort();
+        let mut interface_events = interface_events.into_iter().collect::<Vec<_>>();
+        interface_events.sort_by(|a, b| {
+            a.service
+                .cmp(&b.service)
+                .then_with(|| a.event.cmp(&b.event))
+        });
+        Some(ServiceObservationSummary {
+            update_services,
+            interface_events,
+        })
+    }
+
     fn wants_tick(&self) -> bool {
         let tooltip_delay_pending = self.hover_start.is_some() && !self.tooltip_visible;
         let tooltip_fade_pending = self.tooltip_visible
@@ -321,19 +360,12 @@ impl ShellComponent for FrontendSurfaceComponent {
             .scheduled_handlers
             .iter()
             .filter(|(_, scheduled)| scheduled.deadline <= now)
-            .map(|(key, scheduled)| {
-                (
-                    key.clone(),
-                    scheduled.instance_key.clone(),
-                    scheduled.handler.clone(),
-                )
-            })
+            .map(|(key, scheduled)| (key.clone(), scheduled.namespaced_handler.clone()))
             .collect();
 
         let mut requests = Vec::new();
-        for (key, instance_key, handler) in due_handlers {
+        for (key, namespaced_handler) in due_handlers {
             self.scheduled_handlers.remove(&key);
-            let namespaced_handler = format!("__mesh_embed__::{instance_key}::{handler}");
             requests.extend(self.call_namespaced_handler(&namespaced_handler, &[])?);
         }
 
@@ -1211,6 +1243,18 @@ impl ShellComponent for FrontendSurfaceComponent {
             return;
         }
         self.entering_child_keys = keys;
+        self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
+    }
+
+    fn set_entering_child_keys_from_slice(&mut self, keys: &[&str]) {
+        if self.entering_child_keys.len() == keys.len()
+            && keys
+                .iter()
+                .all(|key| self.entering_child_keys.contains(*key))
+        {
+            return;
+        }
+        self.entering_child_keys = keys.iter().map(|key| (*key).to_owned()).collect();
         self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
     }
 

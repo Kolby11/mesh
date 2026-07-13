@@ -1628,7 +1628,7 @@ fn mesh_request_redraw_marks_dirty_without_global_change() {
     ctx.load_script(
         r#"
 function request()
-    __mesh_request_redraw = true
+    mesh.ui.request_redraw()
 end
 "#,
     )
@@ -1641,6 +1641,110 @@ end
     ctx.state.clear_dirty();
     ctx.sync_state_from_lua();
     assert!(!ctx.state.is_dirty());
+}
+
+// Run with:
+// cargo test -p mesh-core-scripting --release -- atomic_redraw_idle_check_beats_lua_global_read --ignored --nocapture
+#[test]
+#[ignore]
+fn atomic_redraw_idle_check_beats_lua_global_read() {
+    use std::time::Instant;
+
+    let iterations = 1_000_000usize;
+    let mut old_ctx = ScriptContext::new("@test/redraw-old", CapabilitySet::new()).unwrap();
+    old_ctx.load_script("function noop() end").unwrap();
+    let old_started = Instant::now();
+    for _ in 0..iterations {
+        old_ctx.old_global_redraw_flag_sync_for_benchmark();
+    }
+    let old_time = old_started.elapsed();
+
+    let new_ctx = ScriptContext::new("@test/redraw-new", CapabilitySet::new()).unwrap();
+    let new_started = Instant::now();
+    let mut pending_count = 0usize;
+    for _ in 0..iterations {
+        pending_count += usize::from(new_ctx.pending_redraw_for_benchmark());
+    }
+    let new_time = new_started.elapsed();
+
+    eprintln!(
+        "idle redraw sync check: Lua global read {old_time:?}; atomic check {new_time:?}; ratio {:.1}x; pending={pending_count}",
+        old_time.as_secs_f64() / new_time.as_secs_f64()
+    );
+    assert_eq!(pending_count, 0);
+    assert!(new_time < old_time);
+}
+
+// Run with:
+// cargo test -p mesh-core-scripting --release -- assigned_global_pending_flag_beats_empty_mutex_drain --ignored --nocapture
+#[test]
+#[ignore]
+fn assigned_global_pending_flag_beats_empty_mutex_drain() {
+    use std::time::Instant;
+
+    let iterations = 1_000_000usize;
+    let mut ctx = ScriptContext::new("@test/assigned-empty", CapabilitySet::new()).unwrap();
+    ctx.load_script("value = 1\nfunction noop() end").unwrap();
+
+    let drain_started = Instant::now();
+    let mut drain_count = 0usize;
+    for _ in 0..iterations {
+        drain_count += ctx.old_empty_assigned_globals_drain_for_benchmark();
+    }
+    let drain_time = drain_started.elapsed();
+
+    let pending_started = Instant::now();
+    let mut pending_count = 0usize;
+    for _ in 0..iterations {
+        pending_count += usize::from(ctx.pending_assigned_globals_for_benchmark());
+    }
+    let pending_time = pending_started.elapsed();
+
+    eprintln!(
+        "assigned globals empty check: mutex drain {drain_time:?}; atomic pending {pending_time:?}; ratio {:.1}x; counts={drain_count}/{pending_count}",
+        drain_time.as_secs_f64() / pending_time.as_secs_f64()
+    );
+    assert_eq!(drain_count, pending_count);
+    assert!(pending_time < drain_time);
+}
+
+// Run with:
+// cargo test -p mesh-core-scripting --release -- storage_tracking_atomic_check_beats_mutex_check --ignored --nocapture
+#[test]
+#[ignore]
+fn storage_tracking_atomic_check_beats_mutex_check() {
+    use std::hint::black_box;
+    use std::sync::Mutex;
+    use std::sync::atomic::AtomicBool;
+    use std::time::Instant;
+
+    let iterations = 1_000_000usize;
+    let tracking_mutex = Mutex::new(false);
+    let mutex_started = Instant::now();
+    let mut mutex_count = 0usize;
+    for _ in 0..iterations {
+        if black_box(*black_box(&tracking_mutex).lock().unwrap()) {
+            mutex_count += 1;
+        }
+    }
+    let mutex_time = mutex_started.elapsed();
+
+    let tracking_atomic = AtomicBool::new(false);
+    let atomic_started = Instant::now();
+    let mut atomic_count = 0usize;
+    for _ in 0..iterations {
+        if black_box(black_box(&tracking_atomic).load(Ordering::Acquire)) {
+            atomic_count += 1;
+        }
+    }
+    let atomic_time = atomic_started.elapsed();
+
+    eprintln!(
+        "storage tracking false check: mutex {mutex_time:?}; atomic {atomic_time:?}; ratio {:.1}x; counts={mutex_count}/{atomic_count}",
+        mutex_time.as_secs_f64() / atomic_time.as_secs_f64()
+    );
+    assert_eq!(mutex_count, atomic_count);
+    assert!(atomic_time < mutex_time);
 }
 
 #[test]
@@ -2857,6 +2961,40 @@ end
 }
 
 #[test]
+fn refs_cache_element_proxies_without_stale_metrics() {
+    let mut ctx = ScriptContext::new("@test/refs-cache", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+same_proxy = false
+same_method = false
+width = -1
+function measure()
+    local first = refs.panel
+    local second = refs.panel
+    same_proxy = first == second
+    same_method = first.focus == second.focus
+    width = second.width
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.apply_element_metrics(&serde_json::json!({
+        "panel": { "width": 320.0, "height": 48.0 }
+    }));
+    ctx.call_handler("measure", &[]).unwrap();
+    assert_eq!(ctx.state.get("same_proxy"), Some(serde_json::json!(true)));
+    assert_eq!(ctx.state.get("same_method"), Some(serde_json::json!(true)));
+    assert_eq!(ctx.state.get("width"), Some(serde_json::json!(320)));
+
+    ctx.apply_element_metrics(&serde_json::json!({
+        "panel": { "width": 200.0, "height": 48.0 }
+    }));
+    ctx.call_handler("measure", &[]).unwrap();
+    assert_eq!(ctx.state.get("width"), Some(serde_json::json!(200)));
+}
+
+#[test]
 fn element_metrics_fingerprint_skips_unchanged_lua_publication() {
     let mut ctx = ScriptContext::new("@test/refs-fingerprint", CapabilitySet::new()).unwrap();
     ctx.load_script("function init() end").unwrap();
@@ -2923,6 +3061,56 @@ fn unchanged_element_metrics_skip_lua_conversion() {
         new_ns * 10 < old_ns,
         "unchanged metrics should avoid repeated JSON-to-Lua conversion"
     );
+}
+
+// Run with:
+// cargo test -p mesh-core-scripting --release -- cached_refs_proxy_beats_rebuilding_per_handler --ignored --nocapture
+#[test]
+#[ignore]
+fn cached_refs_proxy_beats_rebuilding_per_handler() {
+    use std::time::Instant;
+
+    let metrics = serde_json::json!({
+        "panel": {
+            "width": 320.0,
+            "height": 48.0,
+            "attributes": { "class": "toolbar" }
+        }
+    });
+    let source = r#"
+width = -1
+function probe()
+    local panel = refs.panel
+    local focus = panel.focus
+    width = panel.width
+end
+"#;
+    let iterations = 100_000usize;
+
+    let mut rebuild_ctx = ScriptContext::new("@mesh/refs-rebuild", CapabilitySet::new()).unwrap();
+    rebuild_ctx.load_script(source).unwrap();
+    rebuild_ctx.apply_element_metrics(&metrics);
+    let rebuild_start = Instant::now();
+    for _ in 0..iterations {
+        rebuild_ctx.clear_refs_proxy_cache_for_benchmark();
+        rebuild_ctx.call_handler("probe", &[]).unwrap();
+    }
+    let rebuild_time = rebuild_start.elapsed();
+
+    let mut cached_ctx = ScriptContext::new("@mesh/refs-cached", CapabilitySet::new()).unwrap();
+    cached_ctx.load_script(source).unwrap();
+    cached_ctx.apply_element_metrics(&metrics);
+    let cached_start = Instant::now();
+    for _ in 0..iterations {
+        cached_ctx.call_handler("probe", &[]).unwrap();
+    }
+    let cached_time = cached_start.elapsed();
+
+    eprintln!(
+        "refs proxy access: rebuild {rebuild_time:?}; cached {cached_time:?}; ratio {:.1}x",
+        rebuild_time.as_secs_f64() / cached_time.as_secs_f64()
+    );
+    assert!(cached_time < rebuild_time);
 }
 
 #[test]
