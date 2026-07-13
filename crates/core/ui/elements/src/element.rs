@@ -1446,24 +1446,11 @@ pub fn element_snapshot(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Elem
     let client_height = (height - node.computed_style.padding.vertical()).max(0.0);
     let client_right = client_left + client_width;
     let client_bottom = client_top + client_height;
-    let scroll_x = node
-        .attributes
-        .get("_mesh_scroll_x")
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0);
-    let scroll_y = node
-        .attributes
-        .get("_mesh_scroll_y")
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0);
-    let attr_f32 = |key: &str| {
-        node.attributes
-            .get(key)
-            .and_then(|value| value.parse::<f32>().ok())
-            .unwrap_or(0.0)
-    };
-    let max_scroll_left = attr_f32("_mesh_scroll_max_x");
-    let max_scroll_top = attr_f32("_mesh_scroll_max_y");
+    let scroll = node.resolved_scroll_metrics();
+    let scroll_x = scroll.x;
+    let scroll_y = scroll.y;
+    let max_scroll_left = scroll.max_x;
+    let max_scroll_top = scroll.max_y;
     // Full content extent = viewport content box + the overflow we can scroll to.
     let scroll_width = client_width + max_scroll_left;
     let scroll_height = client_height + max_scroll_top;
@@ -1527,23 +1514,144 @@ pub fn element_snapshot(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Elem
         pressed: state.pressed,
         invalid: state.invalid,
         value: state.value,
-        attributes: node
-            .attributes
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect(),
+        attributes: node.attributes.clone(),
     }
 }
 
 pub fn element_snapshot_json(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Value {
-    let snapshot = element_snapshot(node, offset_x, offset_y);
-    let mut value = serde_json::to_value(snapshot).unwrap_or_else(|_| json!({}));
-    let Some(object) = value.as_object_mut() else {
-        return value;
-    };
+    let mut object = element_snapshot_json_object(node, offset_x, offset_y);
+    expose_tag_specific_fields(&mut object, node);
+    Value::Object(object)
+}
 
-    expose_tag_specific_fields(object, node);
-    value
+fn element_snapshot_json_object(
+    node: &WidgetNode,
+    offset_x: f32,
+    offset_y: f32,
+) -> Map<String, Value> {
+    let left = node.layout.x + offset_x;
+    let top = node.layout.y + offset_y;
+    let width = node.layout.width.max(0.0);
+    let height = node.layout.height.max(0.0);
+    let right = left + width;
+    let bottom = top + height;
+    let client_left = left + node.computed_style.padding.left;
+    let client_top = top + node.computed_style.padding.top;
+    let client_width = (width - node.computed_style.padding.horizontal()).max(0.0);
+    let client_height = (height - node.computed_style.padding.vertical()).max(0.0);
+    let client_right = client_left + client_width;
+    let client_bottom = client_top + client_height;
+    let scroll = node.resolved_scroll_metrics();
+    let scroll_x = scroll.x;
+    let scroll_y = scroll.y;
+    let max_scroll_left = scroll.max_x;
+    let max_scroll_top = scroll.max_y;
+    let scroll_width = client_width + max_scroll_left;
+    let scroll_height = client_height + max_scroll_top;
+    let state = ElementStateSnapshot::from(node.state);
+
+    let mut object = Map::with_capacity(45 + node.attributes.len());
+    object.insert(
+        "key".into(),
+        Value::String(node.mesh_key().unwrap_or_default().to_owned()),
+    );
+    object.insert(
+        "id".into(),
+        node.attributes
+            .get("id")
+            .cloned()
+            .map(Value::String)
+            .unwrap_or(Value::Null),
+    );
+    object.insert(
+        "ref".into(),
+        node.attributes
+            .get("ref")
+            .cloned()
+            .map(Value::String)
+            .unwrap_or(Value::Null),
+    );
+    object.insert("tag".into(), Value::String(node.tag.clone()));
+    object.insert(
+        "element_type".into(),
+        Value::String(element_type_for_tag(&node.tag).type_name.to_string()),
+    );
+    insert_f32(&mut object, "x", left);
+    insert_f32(&mut object, "y", top);
+    insert_f32(&mut object, "left", left);
+    insert_f32(&mut object, "top", top);
+    insert_f32(&mut object, "right", right);
+    insert_f32(&mut object, "bottom", bottom);
+    insert_f32(&mut object, "width", width);
+    insert_f32(&mut object, "height", height);
+    insert_f32(&mut object, "client_left", client_left);
+    insert_f32(&mut object, "client_top", client_top);
+    insert_f32(&mut object, "client_width", client_width);
+    insert_f32(&mut object, "client_height", client_height);
+    let client_bound_rect = element_rect_json(
+        client_left,
+        client_top,
+        client_right,
+        client_bottom,
+        client_width,
+        client_height,
+    );
+    object.insert("clientBoundRect".into(), client_bound_rect.clone());
+    object.insert("client_bound_rect".into(), client_bound_rect);
+    object.insert(
+        "bounding_client_rect".into(),
+        element_rect_json(left, top, right, bottom, width, height),
+    );
+    insert_f32(&mut object, "scroll_x", scroll_x);
+    insert_f32(&mut object, "scroll_y", scroll_y);
+    insert_f32(&mut object, "scroll_left", scroll_x);
+    insert_f32(&mut object, "scroll_top", scroll_y);
+    insert_f32(&mut object, "scroll_width", scroll_width);
+    insert_f32(&mut object, "scroll_height", scroll_height);
+    insert_f32(&mut object, "max_scroll_left", max_scroll_left);
+    insert_f32(&mut object, "max_scroll_top", max_scroll_top);
+    object.insert("hovered".into(), Value::Bool(state.hovered));
+    object.insert("active".into(), Value::Bool(state.active));
+    object.insert("focused".into(), Value::Bool(state.focused));
+    object.insert("disabled".into(), Value::Bool(state.disabled));
+    object.insert("read_only".into(), Value::Bool(state.read_only));
+    object.insert("required".into(), Value::Bool(state.required));
+    object.insert("selected".into(), Value::Bool(state.selected));
+    object.insert("checked".into(), Value::Bool(state.checked));
+    object.insert("expanded".into(), Value::Bool(state.expanded));
+    object.insert("pressed".into(), Value::Bool(state.pressed));
+    object.insert("invalid".into(), Value::Bool(state.invalid));
+    object.insert("value".into(), Value::Bool(state.value));
+
+    let mut attributes = Map::with_capacity(node.attributes.len());
+    for (key, value) in &node.attributes {
+        attributes.insert(key.clone(), Value::String(value.clone()));
+    }
+    object.insert("attributes".into(), Value::Object(attributes));
+
+    object
+}
+
+fn element_rect_json(
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+    width: f32,
+    height: f32,
+) -> Value {
+    let mut rect = Map::with_capacity(6);
+    insert_f32(&mut rect, "left", left);
+    insert_f32(&mut rect, "top", top);
+    insert_f32(&mut rect, "right", right);
+    insert_f32(&mut rect, "bottom", bottom);
+    insert_f32(&mut rect, "width", width);
+    insert_f32(&mut rect, "height", height);
+    Value::Object(rect)
+}
+
+fn insert_f32(object: &mut Map<String, Value>, key: &'static str, value: f32) {
+    object.insert(key.into(), json!(value));
 }
 
 fn expose_tag_specific_fields(object: &mut Map<String, Value>, node: &WidgetNode) {
@@ -1579,7 +1687,9 @@ fn coerce_field_value(raw: &str, field_type: ElementFieldType) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Dimension, Edges};
+    use crate::{Dimension, Edges, WidgetScrollMetrics};
+    use std::collections::BTreeMap;
+    use std::time::Instant;
 
     #[test]
     fn icon_snapshot_exposes_base_and_icon_fields() {
@@ -1605,6 +1715,42 @@ mod tests {
     }
 
     #[test]
+    fn element_snapshot_json_matches_serde_snapshot_shape() {
+        fn old_snapshot_json(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Value {
+            let snapshot = element_snapshot(node, offset_x, offset_y);
+            let mut value = serde_json::to_value(snapshot).expect("snapshot serializes");
+            expose_tag_specific_fields(value.as_object_mut().expect("snapshot object"), node);
+            value
+        }
+
+        let mut node = WidgetNode::new("input");
+        node.set_mesh_key("root/0");
+        node.attributes.insert("id".into(), "search".into());
+        node.attributes.insert("ref".into(), "searchBox".into());
+        node.attributes.insert("type".into(), "search".into());
+        node.attributes.insert("value".into(), "mesh".into());
+        node.layout.x = 10.0;
+        node.layout.y = 20.0;
+        node.layout.width = 160.0;
+        node.layout.height = 32.0;
+        node.computed_style.padding = Edges::all(4.0);
+        node.state.focused = true;
+        node.scroll_metrics = Some(WidgetScrollMetrics {
+            x: 1.0,
+            y: 2.0,
+            max_x: 3.0,
+            max_y: 4.0,
+            content_width: 0.0,
+            content_height: 0.0,
+        });
+
+        assert_eq!(
+            element_snapshot_json(&node, 5.0, 7.0),
+            old_snapshot_json(&node, 5.0, 7.0)
+        );
+    }
+
+    #[test]
     fn input_type_def_is_lookupable_by_tag() {
         let def = element_type_for_tag("input");
 
@@ -1624,6 +1770,36 @@ mod tests {
         assert_eq!(value["element_type"], "InputElement");
         assert_eq!(value["type"], "search");
         assert_eq!(value["value"], "mesh");
+    }
+
+    #[test]
+    fn element_snapshot_reads_typed_scroll_metrics_before_legacy_attributes() {
+        let mut node = WidgetNode::new("scroll-area");
+        node.layout.width = 120.0;
+        node.layout.height = 80.0;
+        node.attributes.insert("_mesh_scroll_x".into(), "1".into());
+        node.attributes.insert("_mesh_scroll_y".into(), "2".into());
+        node.attributes
+            .insert("_mesh_scroll_max_x".into(), "3".into());
+        node.attributes
+            .insert("_mesh_scroll_max_y".into(), "4".into());
+        node.scroll_metrics = Some(WidgetScrollMetrics {
+            x: 11.0,
+            y: 22.0,
+            max_x: 33.0,
+            max_y: 44.0,
+            content_width: 153.0,
+            content_height: 124.0,
+        });
+
+        let snapshot = element_snapshot(&node, 0.0, 0.0);
+
+        assert_eq!(snapshot.scroll_x, 11.0);
+        assert_eq!(snapshot.scroll_y, 22.0);
+        assert_eq!(snapshot.max_scroll_left, 33.0);
+        assert_eq!(snapshot.max_scroll_top, 44.0);
+        assert_eq!(snapshot.scroll_width, 153.0);
+        assert_eq!(snapshot.scroll_height, 124.0);
     }
 
     #[test]
@@ -1724,6 +1900,183 @@ mod tests {
         assert!(snapshot.pressed);
         assert!(snapshot.invalid);
         assert!(snapshot.value);
+    }
+
+    // cargo test -p mesh-core-elements --release -- typed_scroll_metrics_beat_snapshot_attribute_parsing --ignored --nocapture
+    #[test]
+    #[ignore = "release-only element snapshot scroll metric microbenchmark"]
+    fn typed_scroll_metrics_beat_snapshot_attribute_parsing() {
+        fn old_scroll_metrics_from_attributes(node: &WidgetNode) -> (f32, f32, f32, f32) {
+            let scroll_x = node
+                .attributes
+                .get("_mesh_scroll_x")
+                .and_then(|value| value.parse::<f32>().ok())
+                .unwrap_or(0.0);
+            let scroll_y = node
+                .attributes
+                .get("_mesh_scroll_y")
+                .and_then(|value| value.parse::<f32>().ok())
+                .unwrap_or(0.0);
+            let max_scroll_left = node
+                .attributes
+                .get("_mesh_scroll_max_x")
+                .and_then(|value| value.parse::<f32>().ok())
+                .unwrap_or(0.0);
+            let max_scroll_top = node
+                .attributes
+                .get("_mesh_scroll_max_y")
+                .and_then(|value| value.parse::<f32>().ok())
+                .unwrap_or(0.0);
+            (scroll_x, scroll_y, max_scroll_left, max_scroll_top)
+        }
+
+        let mut node = WidgetNode::new("scroll-area");
+        node.attributes
+            .insert("_mesh_scroll_x".into(), "12.5".into());
+        node.attributes
+            .insert("_mesh_scroll_y".into(), "24.75".into());
+        node.attributes
+            .insert("_mesh_scroll_max_x".into(), "360.125".into());
+        node.attributes
+            .insert("_mesh_scroll_max_y".into(), "480.875".into());
+        node.scroll_metrics = Some(WidgetScrollMetrics {
+            x: 12.5,
+            y: 24.75,
+            max_x: 360.125,
+            max_y: 480.875,
+            content_width: 0.0,
+            content_height: 0.0,
+        });
+        let iterations = 2_000_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0.0f32;
+        for _ in 0..iterations {
+            let (x, y, max_x, max_y) =
+                old_scroll_metrics_from_attributes(std::hint::black_box(&node));
+            old_total += std::hint::black_box(x + y + max_x + max_y);
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0.0f32;
+        for _ in 0..iterations {
+            let scroll = std::hint::black_box(&node).resolved_scroll_metrics();
+            new_total += std::hint::black_box(scroll.x + scroll.y + scroll.max_x + scroll.max_y);
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "element snapshot scroll metrics: attribute parse {old_time:?}; typed metrics {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- direct_element_snapshot_json_beats_serde_roundtrip --ignored --nocapture
+    #[test]
+    #[ignore = "release-only element snapshot JSON construction microbenchmark"]
+    fn direct_element_snapshot_json_beats_serde_roundtrip() {
+        fn old_snapshot_json(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Value {
+            let snapshot = element_snapshot(node, offset_x, offset_y);
+            let mut value = serde_json::to_value(snapshot).unwrap_or_else(|_| json!({}));
+            if let Some(object) = value.as_object_mut() {
+                expose_tag_specific_fields(object, node);
+            }
+            value
+        }
+
+        let mut node = WidgetNode::new("input");
+        node.set_mesh_key("root/0");
+        node.attributes.insert("id".into(), "search".into());
+        node.attributes.insert("ref".into(), "searchBox".into());
+        node.attributes.insert("type".into(), "search".into());
+        node.attributes.insert("value".into(), "mesh".into());
+        node.attributes
+            .insert("placeholder".into(), "Search".into());
+        node.layout.x = 10.0;
+        node.layout.y = 20.0;
+        node.layout.width = 160.0;
+        node.layout.height = 32.0;
+        node.computed_style.padding = Edges::all(4.0);
+        node.state.focused = true;
+        node.scroll_metrics = Some(WidgetScrollMetrics {
+            x: 1.0,
+            y: 2.0,
+            max_x: 3.0,
+            max_y: 4.0,
+            content_width: 0.0,
+            content_height: 0.0,
+        });
+        let iterations = 200_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let value = old_snapshot_json(std::hint::black_box(&node), 5.0, 7.0);
+            old_total =
+                old_total.wrapping_add(std::hint::black_box(value.as_object().unwrap().len()));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let value = element_snapshot_json(std::hint::black_box(&node), 5.0, 7.0);
+            new_total =
+                new_total.wrapping_add(std::hint::black_box(value.as_object().unwrap().len()));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "element snapshot JSON: serde roundtrip {old_time:?}; direct object {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- btreemap_attribute_clone_beats_collect_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only element snapshot attribute clone microbenchmark"]
+    fn btreemap_attribute_clone_beats_collect_clone() {
+        fn old_attribute_clone(node: &WidgetNode) -> BTreeMap<String, String> {
+            node.attributes
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect()
+        }
+
+        let mut node = WidgetNode::new("input");
+        for index in 0..16 {
+            node.attributes
+                .insert(format!("attr{index}"), format!("value{index}"));
+        }
+        let iterations = 500_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let attributes = old_attribute_clone(std::hint::black_box(&node));
+            old_total = old_total.wrapping_add(std::hint::black_box(attributes.len()));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let attributes = std::hint::black_box(&node).attributes.clone();
+            new_total = new_total.wrapping_add(std::hint::black_box(attributes.len()));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "element snapshot attributes: collect clone {old_time:?}; BTreeMap clone {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 
     #[test]

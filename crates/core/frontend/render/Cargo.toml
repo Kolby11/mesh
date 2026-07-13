@@ -31,6 +31,7 @@ fontdb = "0.23"
 image = "0.24"
 resvg = "0.44"
 skia-safe = "0.97"
+smallvec = "1"
 swash = "0.2"
 zeno = "0.3"
 

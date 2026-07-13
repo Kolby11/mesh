@@ -309,6 +309,33 @@ impl LayoutEngine {
         intrinsic_cache: &mut IntrinsicLayoutCache,
         measurer: Option<&dyn TextMeasurer>,
     ) {
+        Self::compute_incremental_with_dirty_nodes(
+            root,
+            state,
+            available_width,
+            available_height,
+            dirty_layout,
+            dirty_structural,
+            None,
+            intrinsic_cache,
+            measurer,
+        );
+    }
+
+    /// Compute layout by mutating a retained per-surface Taffy tree, optionally
+    /// limiting style/context synchronization to known layout-relevant dirty
+    /// nodes on non-structural frames.
+    pub fn compute_incremental_with_dirty_nodes(
+        root: &mut WidgetNode,
+        state: &mut PerSurfaceLayoutState,
+        available_width: f32,
+        available_height: f32,
+        dirty_layout: bool,
+        dirty_structural: bool,
+        dirty_node_ids: Option<&HashSet<NodeId>>,
+        intrinsic_cache: &mut IntrinsicLayoutCache,
+        measurer: Option<&dyn TextMeasurer>,
+    ) {
         if !state.valid {
             compute_fresh_retained_layout(
                 root,
@@ -363,6 +390,7 @@ impl LayoutEngine {
             root,
             state,
             dirty_layout,
+            dirty_node_ids,
             &mut node_map,
             &mut text_nodes,
             &mut report,
@@ -829,25 +857,29 @@ fn update_retained_node_styles(
     node: &WidgetNode,
     state: &mut PerSurfaceLayoutState,
     mark_dirty: bool,
+    dirty_node_ids: Option<&HashSet<NodeId>>,
     node_id_to_taffy: &mut HashMap<NodeId, TaffyNodeId>,
     text_nodes: &mut HashMap<NodeId, TextMeasureData>,
     report: &mut TaffyLayoutReport,
 ) {
     if let Some(taffy_id) = retained_taffy_id(node, state) {
-        let style = taffy_style_for_node(node, report);
-        if let Err(error) = state.tree.set_style(taffy_id, style) {
-            tracing::warn!(
-                target: "mesh::layout",
-                error = %error,
-                "failed to update retained taffy style"
-            );
-        }
-        if mark_dirty && let Err(error) = state.tree.mark_dirty(taffy_id) {
-            tracing::warn!(
-                target: "mesh::layout",
-                error = %error,
-                "failed to mark retained taffy node dirty"
-            );
+        let node_dirty = dirty_node_ids.is_none_or(|ids| ids.contains(&node.id));
+        if node_dirty {
+            let style = taffy_style_for_node(node, report);
+            if let Err(error) = state.tree.set_style(taffy_id, style) {
+                tracing::warn!(
+                    target: "mesh::layout",
+                    error = %error,
+                    "failed to update retained taffy style"
+                );
+            }
+            if mark_dirty && let Err(error) = state.tree.mark_dirty(taffy_id) {
+                tracing::warn!(
+                    target: "mesh::layout",
+                    error = %error,
+                    "failed to mark retained taffy node dirty"
+                );
+            }
         }
         if let Err(error) = update_text_context(node, &mut state.tree, taffy_id, text_nodes) {
             tracing::warn!(
@@ -864,6 +896,7 @@ fn update_retained_node_styles(
             child,
             state,
             mark_dirty,
+            dirty_node_ids,
             node_id_to_taffy,
             text_nodes,
             report,
@@ -1890,6 +1923,7 @@ mod tests {
                 std::hint::black_box(&root),
                 &mut state,
                 false,
+                None,
                 &mut node_map,
                 &mut text_nodes,
                 &mut report,
@@ -1984,6 +2018,47 @@ mod tests {
             100.0,
             true,
             false,
+            &mut cache,
+            None,
+        );
+        LayoutEngine::compute_with_intrinsic_cache_and_measurer(
+            &mut fresh,
+            200.0,
+            100.0,
+            &mut IntrinsicLayoutCache::default(),
+            None,
+        );
+
+        assert_layout_maps_eq(&keyed_layouts(&retained), &keyed_layouts(&fresh));
+    }
+
+    #[test]
+    fn retained_layout_syncs_only_known_dirty_styles() {
+        let mut retained = retained_fixture();
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            false,
+            &mut cache,
+            None,
+        );
+
+        retained.children[0].computed_style.width = Dimension::Px(80.0);
+        let dirty_ids = HashSet::from([retained.children[0].id]);
+        let mut fresh = retained.clone();
+        LayoutEngine::compute_incremental_with_dirty_nodes(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            true,
+            false,
+            Some(&dirty_ids),
             &mut cache,
             None,
         );

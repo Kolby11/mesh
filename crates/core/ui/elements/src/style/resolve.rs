@@ -1026,31 +1026,7 @@ impl<'a> StyleResolver<'a> {
         attrs: &StyleNodeAttrs,
         context: StyleContext,
     ) -> ComputedStyle {
-        let (mut style, default_variables) =
-            self.cached_theme_component_defaults_no_diagnostics(attrs.tag, attrs.module_id());
-
-        VARIABLE_SCRATCH.with(|scratch| {
-            let mut variables = scratch.borrow_mut();
-            variables.clear();
-            variables.extend(default_variables);
-
-            index.for_each_candidate_rule_index(attrs, |rule_idx| {
-                let Some(rule) = rules.get(rule_idx) else {
-                    return;
-                };
-                if rule_matches_attrs(rule, attrs, context) {
-                    for decl in index.no_diagnostics_declarations(rule_idx) {
-                        self.apply_indexed_declaration_no_diagnostics(
-                            &mut style,
-                            decl,
-                            &mut variables,
-                        );
-                    }
-                }
-            });
-        });
-
-        style
+        self.resolve_node_style_with_attrs_indexed_inner(rules, index, attrs, context, None)
     }
 
     fn cached_theme_component_defaults_no_diagnostics(
@@ -1076,10 +1052,11 @@ impl<'a> StyleResolver<'a> {
             style.direction = FlexDirection::Column;
         }
         let mut default_variables = HashMap::new();
-        self.apply_theme_component_defaults_no_diagnostics(
+        self.apply_theme_component_defaults(
             &mut style,
             tag,
             module_id,
+            None,
             &mut default_variables,
         );
         let cached = (style, default_variables);
@@ -1136,28 +1113,61 @@ impl<'a> StyleResolver<'a> {
         attrs: &StyleNodeAttrs,
         context: StyleContext,
     ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
-        let (mut style, mut variables, mut diagnostics) =
-            self.cached_theme_component_defaults_with_diagnostics(attrs.tag, attrs.module_id());
+        let mut diagnostics = Vec::new();
+        let style = self.resolve_node_style_with_attrs_indexed_inner(
+            rules,
+            index,
+            attrs,
+            context,
+            Some(&mut diagnostics),
+        );
+        (style, diagnostics)
+    }
 
-        index.for_each_candidate_rule_index(attrs, |rule_idx| {
-            let Some(rule) = rules.get(rule_idx) else {
-                return;
-            };
-            if rule_matches_attrs(rule, attrs, context) {
-                let selector = index.selector_diagnostic(rule_idx);
-                for decl in index.no_diagnostics_declarations(rule_idx) {
-                    self.apply_indexed_declaration_with_diagnostics(
-                        &mut style,
-                        decl,
-                        selector,
-                        &mut diagnostics,
-                        &mut variables,
-                    );
+    fn resolve_node_style_with_attrs_indexed_inner(
+        &self,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
+        attrs: &StyleNodeAttrs,
+        context: StyleContext,
+        mut diagnostics: Option<&mut Vec<StyleDiagnostic>>,
+    ) -> ComputedStyle {
+        let (mut style, default_variables) = if let Some(diagnostics) = diagnostics.as_mut() {
+            let (style, variables, default_diagnostics) =
+                self.cached_theme_component_defaults_with_diagnostics(attrs.tag, attrs.module_id());
+            diagnostics.extend(default_diagnostics);
+            (style, variables)
+        } else {
+            self.cached_theme_component_defaults_no_diagnostics(attrs.tag, attrs.module_id())
+        };
+
+        VARIABLE_SCRATCH.with(|scratch| {
+            let mut scratch_variables = scratch.borrow_mut();
+            scratch_variables.clear();
+            scratch_variables.extend(default_variables);
+
+            index.for_each_candidate_rule_index(attrs, |rule_idx| {
+                let Some(rule) = rules.get(rule_idx) else {
+                    return;
+                };
+                if rule_matches_attrs(rule, attrs, context) {
+                    let selector = index.selector_diagnostic(rule_idx);
+                    for decl in index.no_diagnostics_declarations(rule_idx) {
+                        let diagnostic_sink = diagnostics
+                            .as_mut()
+                            .map(|diagnostics| (selector, &mut **diagnostics));
+                        self.apply_indexed_declaration(
+                            &mut style,
+                            decl,
+                            diagnostic_sink,
+                            &mut scratch_variables,
+                        );
+                    }
                 }
-            }
+            });
         });
 
-        (style, diagnostics)
+        style
     }
 
     fn cached_theme_component_defaults_with_diagnostics(
@@ -1191,7 +1201,7 @@ impl<'a> StyleResolver<'a> {
             &mut style,
             tag,
             module_id,
-            &mut diagnostics,
+            Some(&mut diagnostics),
             &mut default_variables,
         );
         let cached = (style, default_variables, diagnostics);
@@ -1376,46 +1386,22 @@ impl<'a> StyleResolver<'a> {
         style: &mut ComputedStyle,
         tag: &str,
         module_id: Option<&str>,
-        diagnostics: &mut Vec<StyleDiagnostic>,
+        mut diagnostics: Option<&mut Vec<StyleDiagnostic>>,
         variables: &mut HashMap<String, StyleValue>,
     ) {
         if let Some(defaults) = self.theme.component_defaults("base") {
-            self.apply_theme_defaults_map(style, "base", defaults, diagnostics, variables);
+            self.apply_theme_defaults_map(style, "base", defaults, &mut diagnostics, variables);
         }
         if let Some(defaults) = self.theme.component_defaults(tag) {
-            self.apply_theme_defaults_map(style, tag, defaults, diagnostics, variables);
+            self.apply_theme_defaults_map(style, tag, defaults, &mut diagnostics, variables);
         }
         if let Some(module_id) = module_id {
             self.seed_module_theme_variables(module_id, variables);
             if let Some(defaults) = self.theme.module_component_defaults(module_id, "base") {
-                self.apply_theme_defaults_map(style, "base", defaults, diagnostics, variables);
+                self.apply_theme_defaults_map(style, "base", defaults, &mut diagnostics, variables);
             }
             if let Some(defaults) = self.theme.module_component_defaults(module_id, tag) {
-                self.apply_theme_defaults_map(style, tag, defaults, diagnostics, variables);
-            }
-        }
-    }
-
-    fn apply_theme_component_defaults_no_diagnostics(
-        &self,
-        style: &mut ComputedStyle,
-        tag: &str,
-        module_id: Option<&str>,
-        variables: &mut HashMap<String, StyleValue>,
-    ) {
-        if let Some(defaults) = self.theme.component_defaults("base") {
-            self.apply_theme_defaults_map_no_diagnostics(style, defaults, variables);
-        }
-        if let Some(defaults) = self.theme.component_defaults(tag) {
-            self.apply_theme_defaults_map_no_diagnostics(style, defaults, variables);
-        }
-        if let Some(module_id) = module_id {
-            self.seed_module_theme_variables(module_id, variables);
-            if let Some(defaults) = self.theme.module_component_defaults(module_id, "base") {
-                self.apply_theme_defaults_map_no_diagnostics(style, defaults, variables);
-            }
-            if let Some(defaults) = self.theme.module_component_defaults(module_id, tag) {
-                self.apply_theme_defaults_map_no_diagnostics(style, defaults, variables);
+                self.apply_theme_defaults_map(style, tag, defaults, &mut diagnostics, variables);
             }
         }
     }
@@ -1457,33 +1443,24 @@ impl<'a> StyleResolver<'a> {
         style: &mut ComputedStyle,
         component_name: &str,
         defaults: &mesh_core_theme::ComponentDefaults,
-        diagnostics: &mut Vec<StyleDiagnostic>,
+        diagnostics: &mut Option<&mut Vec<StyleDiagnostic>>,
         variables: &mut HashMap<String, StyleValue>,
     ) {
+        let selector = diagnostics
+            .as_ref()
+            .map(|_| format!("@theme:{component_name}"));
         for (property, value) in defaults {
             let declaration = Declaration {
                 property: property.clone(),
                 value: classify_theme_style_value(value),
             };
-            self.apply_declaration_with_diagnostics(
-                style,
-                &declaration,
-                Some(format!("@theme:{component_name}")),
-                diagnostics,
-                variables,
-            );
-        }
-    }
-
-    fn apply_theme_defaults_map_no_diagnostics(
-        &self,
-        style: &mut ComputedStyle,
-        defaults: &mesh_core_theme::ComponentDefaults,
-        variables: &mut HashMap<String, StyleValue>,
-    ) {
-        for (property, value) in defaults {
-            let value = classify_theme_style_value(value);
-            self.apply_property_value_no_diagnostics(style, property, &value, variables);
+            let declaration = IndexedDeclaration::from_declaration(&declaration);
+            let diagnostic_sink = diagnostics.as_mut().and_then(|diagnostics| {
+                selector
+                    .as_deref()
+                    .map(|selector| (selector, &mut **diagnostics))
+            });
+            self.apply_indexed_declaration(style, &declaration, diagnostic_sink, variables);
         }
     }
 
@@ -1497,50 +1474,11 @@ impl<'a> StyleResolver<'a> {
         self.apply_property_value_no_diagnostics(style, &decl.property, &decl.value, variables);
     }
 
-    fn apply_indexed_declaration_no_diagnostics(
+    fn apply_indexed_declaration(
         &self,
         style: &mut ComputedStyle,
         decl: &IndexedDeclaration,
-        variables: &mut HashMap<String, StyleValue>,
-    ) {
-        match &decl.property {
-            IndexedProperty::Custom(property) => {
-                variables.insert(property.clone(), decl.value.clone());
-            }
-            IndexedProperty::Lowered {
-                name,
-                strict_animation,
-                background_image,
-            } => {
-                if *strict_animation
-                    && self
-                        .validate_animation_value_with_variables(&decl.value, variables)
-                        .is_err()
-                {
-                    return;
-                }
-                if *background_image {
-                    let resolved = self.resolve_value_with_variables(&decl.value, variables);
-                    if !is_supported_background_image(&resolved) {
-                        return;
-                    }
-                }
-                apply_declaration(style, name, &decl.value, self, variables);
-            }
-            IndexedProperty::DiagnosticOnly(_)
-            | IndexedProperty::Deferred(_)
-            | IndexedProperty::OutOfScope(_)
-            | IndexedProperty::Unsupported(_)
-            | IndexedProperty::DeprecatedToken(_) => {}
-        }
-    }
-
-    fn apply_indexed_declaration_with_diagnostics(
-        &self,
-        style: &mut ComputedStyle,
-        decl: &IndexedDeclaration,
-        selector: &str,
-        diagnostics: &mut Vec<StyleDiagnostic>,
+        mut diagnostics: Option<(&str, &mut Vec<StyleDiagnostic>)>,
         variables: &mut HashMap<String, StyleValue>,
     ) {
         match &decl.property {
@@ -1548,46 +1486,45 @@ impl<'a> StyleResolver<'a> {
                 variables.insert(property.clone(), decl.value.clone());
             }
             IndexedProperty::DiagnosticOnly(property) => {
-                diagnostics.push(StyleDiagnostic {
-                    property: property.clone(),
-                    selector: Some(selector.to_owned()),
-                    message: format!(
+                push_indexed_style_diagnostic(
+                    &mut diagnostics,
+                    property.clone(),
+                    format!(
                         "diagnostic-only CSS property '{property}' is accepted by the parser but not lowered into ComputedStyle"
                     ),
-                });
+                );
             }
             IndexedProperty::Deferred(property) => {
-                diagnostics.push(StyleDiagnostic {
-                    property: property.clone(),
-                    selector: Some(selector.to_owned()),
-                    message: format!(
+                push_indexed_style_diagnostic(
+                    &mut diagnostics,
+                    property.clone(),
+                    format!(
                         "deferred CSS property '{property}' is accepted by the parser but not lowered in the current painter profile"
                     ),
-                });
+                );
             }
             IndexedProperty::OutOfScope(property) => {
-                diagnostics.push(StyleDiagnostic {
-                    property: property.clone(),
-                    selector: Some(selector.to_owned()),
-                    message: format!(
+                push_indexed_style_diagnostic(
+                    &mut diagnostics,
+                    property.clone(),
+                    format!(
                         "unsupported CSS property '{property}' is out-of-scope for the MESH shell CSS profile"
                     ),
-                });
+                );
             }
             IndexedProperty::Unsupported(property) => {
-                diagnostics.push(StyleDiagnostic {
-                    property: property.clone(),
-                    selector: Some(selector.to_owned()),
-                    message: format!("unsupported CSS property '{property}'"),
-                });
+                push_indexed_style_diagnostic(
+                    &mut diagnostics,
+                    property.clone(),
+                    format!("unsupported CSS property '{property}'"),
+                );
             }
             IndexedProperty::DeprecatedToken(property) => {
-                diagnostics.push(StyleDiagnostic {
-                    property: property.clone(),
-                    selector: Some(selector.to_owned()),
-                    message: "deprecated token() references are not supported; use var(--...)"
-                        .to_string(),
-                });
+                push_indexed_style_diagnostic(
+                    &mut diagnostics,
+                    property.clone(),
+                    "deprecated token() references are not supported; use var(--...)".to_string(),
+                );
             }
             IndexedProperty::Lowered {
                 name,
@@ -1599,33 +1536,33 @@ impl<'a> StyleResolver<'a> {
                     && !variables.contains_key(variable_name)
                     && self.cached_theme_token_value(variable_name).is_missing()
                 {
-                    diagnostics.push(StyleDiagnostic {
-                        property: name.clone(),
-                        selector: Some(selector.to_owned()),
-                        message: format!(
+                    push_indexed_style_diagnostic(
+                        &mut diagnostics,
+                        name.clone(),
+                        format!(
                             "unsupported CSS variable reference '{variable_name}' for property '{name}'"
                         ),
-                    });
+                    );
                 }
                 if *strict_animation
                     && let Err(token_name) =
                         self.validate_animation_value_with_variables(&decl.value, variables)
                 {
-                    diagnostics.push(StyleDiagnostic {
-                        property: name.clone(),
-                        selector: Some(selector.to_owned()),
-                        message: format!("unresolved animation token reference '{token_name}'"),
-                    });
+                    push_indexed_style_diagnostic(
+                        &mut diagnostics,
+                        name.clone(),
+                        format!("unresolved animation token reference '{token_name}'"),
+                    );
                     return;
                 }
                 if *background_image {
                     let resolved = self.resolve_value_with_variables(&decl.value, variables);
                     if !is_supported_background_image(&resolved) {
-                        diagnostics.push(StyleDiagnostic {
-                            property: name.clone(),
-                            selector: Some(selector.to_owned()),
-                            message: format!("unsupported background-image '{resolved}'"),
-                        });
+                        push_indexed_style_diagnostic(
+                            &mut diagnostics,
+                            name.clone(),
+                            format!("unsupported background-image '{resolved}'"),
+                        );
                         return;
                     }
                 }
@@ -1634,6 +1571,7 @@ impl<'a> StyleResolver<'a> {
         }
     }
 
+    #[cfg(test)]
     fn apply_property_value_no_diagnostics(
         &self,
         style: &mut ComputedStyle,
@@ -2035,6 +1973,20 @@ pub(super) fn lowered_css_properties() -> &'static [&'static str] {
     LOWERED_CSS_PROPERTIES
 }
 
+fn push_indexed_style_diagnostic(
+    diagnostics: &mut Option<(&str, &mut Vec<StyleDiagnostic>)>,
+    property: String,
+    message: String,
+) {
+    if let Some((selector, diagnostics)) = diagnostics.as_mut() {
+        diagnostics.push(StyleDiagnostic {
+            property,
+            selector: Some((*selector).to_string()),
+            message,
+        });
+    }
+}
+
 css_property_table! {
 fn apply_declaration(
     style: &mut ComputedStyle,
@@ -2211,9 +2163,10 @@ fn apply_declaration(
                 resolver.with_resolved_str(value, variables, |resolved| parse_first_time_ms(resolved))
         }
         "transition-timing-function" => {
-            first_transition_mut(&mut style.transitions).easing = parse_easing_keyword(
-                first_comma_item(&resolver.resolve_value_with_variables(value, variables)),
-            )
+            first_transition_mut(&mut style.transitions).easing =
+                resolver.with_resolved_str(value, variables, |resolved| {
+                    parse_easing_keyword(first_comma_item(resolved))
+                })
         }
         "transition-property" => {
             first_transition_mut(&mut style.transitions).properties =
@@ -2226,9 +2179,10 @@ fn apply_declaration(
             style.transitions = parse_transition_shorthand(&resolved);
         }
         "animation-name" => {
-            first_animation_mut(&mut style.animations).name = parse_animation_name(
-                first_comma_item(&resolver.resolve_value_with_variables(value, variables)),
-            )
+            first_animation_mut(&mut style.animations).name =
+                resolver.with_resolved_str(value, variables, |resolved| {
+                    parse_animation_name(first_comma_item(resolved))
+                })
         }
         "animation-duration" => {
             first_animation_mut(&mut style.animations).duration_ms =
@@ -2239,30 +2193,34 @@ fn apply_declaration(
                 resolver.with_resolved_str(value, variables, |resolved| parse_first_time_ms(resolved))
         }
         "animation-timing-function" => {
-            first_animation_mut(&mut style.animations).easing = parse_easing_keyword(
-                first_comma_item(&resolver.resolve_value_with_variables(value, variables)),
-            )
+            first_animation_mut(&mut style.animations).easing =
+                resolver.with_resolved_str(value, variables, |resolved| {
+                    parse_easing_keyword(first_comma_item(resolved))
+                })
         }
         "animation-iteration-count" => {
             first_animation_mut(&mut style.animations).iteration_count =
-                parse_animation_iteration_count(first_comma_item(
-                    &resolver.resolve_value_with_variables(value, variables),
-                ))
+                resolver.with_resolved_str(value, variables, |resolved| {
+                    parse_animation_iteration_count(first_comma_item(resolved))
+                })
         }
         "animation-direction" => {
-            first_animation_mut(&mut style.animations).direction = parse_animation_direction(
-                first_comma_item(&resolver.resolve_value_with_variables(value, variables)),
-            )
+            first_animation_mut(&mut style.animations).direction =
+                resolver.with_resolved_str(value, variables, |resolved| {
+                    parse_animation_direction(first_comma_item(resolved))
+                })
         }
         "animation-fill-mode" => {
-            first_animation_mut(&mut style.animations).fill_mode = parse_animation_fill_mode(
-                first_comma_item(&resolver.resolve_value_with_variables(value, variables)),
-            )
+            first_animation_mut(&mut style.animations).fill_mode =
+                resolver.with_resolved_str(value, variables, |resolved| {
+                    parse_animation_fill_mode(first_comma_item(resolved))
+                })
         }
         "animation-play-state" => {
-            first_animation_mut(&mut style.animations).play_state = parse_animation_play_state(
-                first_comma_item(&resolver.resolve_value_with_variables(value, variables)),
-            )
+            first_animation_mut(&mut style.animations).play_state =
+                resolver.with_resolved_str(value, variables, |resolved| {
+                    parse_animation_play_state(first_comma_item(resolved))
+                })
         }
         "animation" => {
             style.animations =
@@ -2685,9 +2643,10 @@ mod tests {
         let mut indexed = ComputedStyle::default();
         let mut indexed_variables = HashMap::new();
         for declaration in index.no_diagnostics_declarations(0) {
-            resolver.apply_indexed_declaration_no_diagnostics(
+            resolver.apply_indexed_declaration(
                 &mut indexed,
                 declaration,
+                None,
                 &mut indexed_variables,
             );
         }
@@ -2790,7 +2749,7 @@ mod tests {
             &mut replayed_style,
             "benchmark-card",
             None,
-            &mut replayed_diagnostics,
+            Some(&mut replayed_diagnostics),
             &mut replayed_variables,
         );
 
@@ -2883,11 +2842,10 @@ mod tests {
                 if rule_matches_attrs(rule, &attrs, StyleContext::default()) {
                     let selector = selector_to_diagnostic_string(&rule.selector);
                     for decl in index.no_diagnostics_declarations(rule_idx) {
-                        resolver.apply_indexed_declaration_with_diagnostics(
+                        resolver.apply_indexed_declaration(
                             std::hint::black_box(&mut style),
                             decl,
-                            &selector,
-                            &mut diagnostics,
+                            Some((&selector, &mut diagnostics)),
                             &mut variables,
                         );
                     }
@@ -4187,6 +4145,131 @@ mod tests {
         style.flex_grow + style.flex_shrink + basis
     }
 
+    #[test]
+    fn animation_keyword_properties_resolve_borrowed_tokens() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "animation.easing".into(),
+            TokenValue::String("ease-in-out".into()),
+        );
+        theme.tokens.insert(
+            "animation.direction".into(),
+            TokenValue::String("reverse".into()),
+        );
+        theme
+            .tokens
+            .insert("animation.fill".into(), TokenValue::String("both".into()));
+        theme
+            .tokens
+            .insert("animation.play".into(), TokenValue::String("paused".into()));
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let mut style = ComputedStyle::default();
+
+        apply_declaration(
+            &mut style,
+            "transition-timing-function",
+            &StyleValue::Var("--animation-easing".into()),
+            &resolver,
+            &variables,
+        );
+        apply_declaration(
+            &mut style,
+            "animation-timing-function",
+            &StyleValue::Var("--animation-easing".into()),
+            &resolver,
+            &variables,
+        );
+        apply_declaration(
+            &mut style,
+            "animation-direction",
+            &StyleValue::Var("--animation-direction".into()),
+            &resolver,
+            &variables,
+        );
+        apply_declaration(
+            &mut style,
+            "animation-fill-mode",
+            &StyleValue::Var("--animation-fill".into()),
+            &resolver,
+            &variables,
+        );
+        apply_declaration(
+            &mut style,
+            "animation-play-state",
+            &StyleValue::Var("--animation-play".into()),
+            &resolver,
+            &variables,
+        );
+
+        assert_eq!(
+            first_transition_mut(&mut style.transitions).easing,
+            TransitionEasing::EaseInOut
+        );
+        let animation = first_animation_mut(&mut style.animations);
+        assert_eq!(animation.easing, TransitionEasing::EaseInOut);
+        assert_eq!(animation.direction, AnimationDirection::Reverse);
+        assert_eq!(animation.fill_mode, AnimationFillMode::Both);
+        assert_eq!(animation.play_state, AnimationPlayState::Paused);
+    }
+
+    // cargo test -p mesh-core-elements --release -- animation_keyword_token_resolution_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only animation keyword token resolution microbenchmark"]
+    fn animation_keyword_token_resolution_beats_string_clone() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.tokens.insert(
+            "animation.easing".into(),
+            TokenValue::String("ease-in-out".into()),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let variables = HashMap::new();
+        let value = StyleValue::Var("--animation-easing".into());
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0u32;
+        for _ in 0..iterations {
+            let resolved =
+                resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
+            let easing = parse_easing_keyword(first_comma_item(&resolved));
+            old_accumulator =
+                old_accumulator.wrapping_add(std::hint::black_box(easing_score(easing)));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0u32;
+        for _ in 0..iterations {
+            let easing =
+                resolver.with_resolved_str(std::hint::black_box(&value), &variables, |resolved| {
+                    parse_easing_keyword(first_comma_item(resolved))
+                });
+            new_accumulator =
+                new_accumulator.wrapping_add(std::hint::black_box(easing_score(easing)));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "animation keyword token resolution: string clone {old_time:?}; borrowed fast path {new_time:?}; ratio {:.1}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
+    }
+
+    fn easing_score(easing: TransitionEasing) -> u32 {
+        match easing {
+            TransitionEasing::Linear => 1,
+            TransitionEasing::Ease => 2,
+            TransitionEasing::EaseIn => 3,
+            TransitionEasing::EaseOut => 4,
+            TransitionEasing::EaseInOut => 5,
+            TransitionEasing::CubicBezier(_, _, _, _) => 6,
+            TransitionEasing::Steps(_, _) => 7,
+        }
+    }
+
     // cargo test -p mesh-core-elements --release -- overflow_theme_token_resolution_beats_string_clone --ignored --nocapture
     #[test]
     #[ignore = "release-only overflow token resolution microbenchmark"]
@@ -4436,9 +4519,12 @@ mod tests {
         for _ in 0..iterations {
             let mut style = ComputedStyle::default();
             let mut variables = HashMap::new();
-            resolver.apply_theme_defaults_map_no_diagnostics(
+            let mut diagnostics = None;
+            resolver.apply_theme_defaults_map(
                 std::hint::black_box(&mut style),
+                "benchmark-card",
                 &defaults,
+                &mut diagnostics,
                 &mut variables,
             );
             new_accumulator =
@@ -4489,9 +4575,10 @@ mod tests {
         for _ in 0..iterations {
             let mut style = ComputedStyle::default();
             let mut variables = HashMap::new();
-            resolver.apply_theme_component_defaults_no_diagnostics(
+            resolver.apply_theme_component_defaults(
                 std::hint::black_box(&mut style),
                 "benchmark-card",
+                None,
                 None,
                 &mut variables,
             );
@@ -4540,7 +4627,7 @@ mod tests {
                 &mut style,
                 tag,
                 None,
-                &mut diagnostics,
+                Some(&mut diagnostics),
                 &mut variables,
             );
             (style, diagnostics)
@@ -4914,9 +5001,10 @@ mod tests {
             let mut style = ComputedStyle::default();
             let mut variables = HashMap::new();
             for declaration in indexed_declarations {
-                resolver.apply_indexed_declaration_no_diagnostics(
+                resolver.apply_indexed_declaration(
                     std::hint::black_box(&mut style),
                     declaration,
+                    None,
                     &mut variables,
                 );
             }

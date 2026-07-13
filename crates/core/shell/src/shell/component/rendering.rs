@@ -467,13 +467,19 @@ impl FrontendSurfaceComponent {
         let dirty_structural =
             dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
         let dirty_layout = dirty_types.contains(ComponentDirtyFlags::LAYOUT);
-        LayoutEngine::compute_incremental(
+        let layout_dirty_node_ids = if dirty_layout && !dirty_structural {
+            self.retained_tree.layout_dirty_node_ids(tree)
+        } else {
+            None
+        };
+        LayoutEngine::compute_incremental_with_dirty_nodes(
             tree,
             &mut self.layout_state,
             width as f32,
             height as f32,
             dirty_layout,
             dirty_structural,
+            layout_dirty_node_ids.as_ref(),
             &mut self.intrinsic_layout_cache,
             Some(&measurer),
         );
@@ -498,30 +504,30 @@ impl FrontendSurfaceComponent {
     /// Compares current hover/focus state against previous frame's state to
     /// identify which nodes changed.
     fn collect_interaction_changed_node_ids(&self, tree: &WidgetNode) -> InteractionChangedNodeIds {
-        let mut changed_keys: HashSet<&str> = HashSet::new();
+        let mut changed_ids: HashSet<NodeId> = HashSet::new();
 
         // Collect keys that had hover change: union of old and new hovered paths.
         for key in &self.previous_hovered_path {
-            changed_keys.insert(key.as_str());
+            changed_ids.insert(stable_runtime_node_id(key));
         }
         for key in &self.hovered_path {
-            changed_keys.insert(key.as_str());
+            changed_ids.insert(stable_runtime_node_id(key));
         }
 
         // Collect keys that had focus change.
         if let Some(ref prev) = self.previous_focused_key {
-            changed_keys.insert(prev.as_str());
+            changed_ids.insert(stable_runtime_node_id(prev));
         }
         if let Some(ref curr) = self.focused_key {
-            changed_keys.insert(curr.as_str());
+            changed_ids.insert(stable_runtime_node_id(curr));
         }
 
-        if changed_keys.is_empty() {
+        if changed_ids.is_empty() {
             return InteractionChangedNodeIds::default(); // first frame: no previous state
         }
 
         let mut ids = InteractionChangedNodeIds::default();
-        collect_changed_subtree_node_ids(tree, &changed_keys, false, &mut ids);
+        collect_changed_subtree_node_ids(tree, &changed_ids, false, &mut ids);
         ids
     }
 
@@ -715,12 +721,11 @@ struct InteractionChangedNodeIds {
 
 fn collect_changed_subtree_node_ids(
     node: &WidgetNode,
-    changed_keys: &HashSet<&str>,
+    changed_ids: &HashSet<NodeId>,
     parent_affected: bool,
     out: &mut InteractionChangedNodeIds,
 ) {
-    let node_key = node.mesh_key();
-    let directly_affected = node_key.is_some_and(|key| changed_keys.contains(key));
+    let directly_affected = changed_ids.contains(&node.id);
     let node_affected = parent_affected || directly_affected;
     if node_affected {
         out.affected.insert(node.id);
@@ -730,7 +735,7 @@ fn collect_changed_subtree_node_ids(
     }
 
     for child in &node.children {
-        collect_changed_subtree_node_ids(child, changed_keys, node_affected, out);
+        collect_changed_subtree_node_ids(child, changed_ids, node_affected, out);
     }
 }
 
@@ -858,7 +863,7 @@ mod interaction_changed_key_tests {
                 keyed_node("root/1", vec![keyed_node("root/1/0", vec![])]),
             ],
         );
-        let changed = HashSet::from(["root/0"]);
+        let changed = HashSet::from([stable_runtime_node_id("root/0")]);
         let mut affected = InteractionChangedNodeIds::default();
 
         collect_changed_subtree_node_ids(&tree, &changed, false, &mut affected);
@@ -917,14 +922,13 @@ mod interaction_changed_key_tests {
     #[test]
     #[ignore = "release-only interaction changed-set microbenchmark"]
     fn interaction_changed_node_ids_beat_runtime_key_clones() {
-        fn build(key: String, width: usize, depth: usize, next_id: &mut NodeId) -> WidgetNode {
+        fn build(key: String, width: usize, depth: usize) -> WidgetNode {
             let mut node = WidgetNode::new("box");
-            node.id = *next_id;
-            *next_id += 1;
+            node.id = stable_runtime_node_id(&key);
             node.attributes.insert("_mesh_key".into(), key.clone());
             if depth > 0 {
                 node.children = (0..width)
-                    .map(|index| build(format!("{key}/{index}"), width, depth - 1, next_id))
+                    .map(|index| build(format!("{key}/{index}"), width, depth - 1))
                     .collect();
             }
             node
@@ -945,11 +949,10 @@ mod interaction_changed_key_tests {
             }
         }
 
-        let mut next_id = 1;
-        let tree = build("root".into(), 4, 5, &mut next_id);
+        let tree = build("root".into(), 4, 5);
         let iterations = 2_000;
         let old_changed = HashSet::from(["root/0".to_string()]);
-        let new_changed = HashSet::from(["root/0"]);
+        let new_changed = HashSet::from([stable_runtime_node_id("root/0")]);
 
         let old_started = Instant::now();
         let mut old_count = 0;
@@ -983,24 +986,26 @@ mod interaction_changed_key_tests {
     #[test]
     #[ignore = "release-only targeted default merge microbenchmark"]
     fn targeted_default_merge_skips_unaffected_subtrees() {
-        fn build(key: String, width: usize, depth: usize, next_id: &mut NodeId) -> WidgetNode {
-            let id = *next_id;
-            *next_id += 1;
+        fn build(key: String, width: usize, depth: usize) -> WidgetNode {
             let mut node = WidgetNode::new(if depth % 2 == 0 { "column" } else { "text" });
-            node.id = id;
+            node.id = stable_runtime_node_id(&key);
             node.attributes.insert("_mesh_key".into(), key.clone());
             if depth > 0 {
                 node.children = (0..width)
-                    .map(|index| build(format!("{key}/{index}"), width, depth - 1, next_id))
+                    .map(|index| build(format!("{key}/{index}"), width, depth - 1))
                     .collect();
             }
             node
         }
 
-        let mut next_id = 1;
-        let tree = build("root".into(), 4, 5, &mut next_id);
+        let tree = build("root".into(), 4, 5);
         let mut affected = InteractionChangedNodeIds::default();
-        collect_changed_subtree_node_ids(&tree, &HashSet::from(["root/0/0"]), false, &mut affected);
+        collect_changed_subtree_node_ids(
+            &tree,
+            &HashSet::from([stable_runtime_node_id("root/0/0")]),
+            false,
+            &mut affected,
+        );
         let iterations = 5_000;
 
         let old_started = Instant::now();

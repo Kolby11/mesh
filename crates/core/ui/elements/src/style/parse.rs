@@ -165,16 +165,17 @@ pub(super) fn apply_border_shorthand(style: &mut ComputedStyle, value: &str) {
 }
 
 pub(super) fn apply_flex_shorthand(style: &mut ComputedStyle, value: &str) {
-    let parts = value.split_whitespace().collect::<Vec<_>>();
-    if parts.len() >= 3 {
-        if let Ok(grow) = parts[0].parse::<f32>() {
-            style.flex_grow = grow;
-        }
-        if let Ok(shrink) = parts[1].parse::<f32>() {
-            style.flex_shrink = shrink;
-        }
-        style.flex_basis = parse_dimension(parts[2]);
+    let mut parts = value.split_whitespace();
+    let (Some(grow), Some(shrink), Some(basis)) = (parts.next(), parts.next(), parts.next()) else {
+        return;
+    };
+    if let Ok(grow) = grow.parse::<f32>() {
+        style.flex_grow = grow;
     }
+    if let Ok(shrink) = shrink.parse::<f32>() {
+        style.flex_shrink = shrink;
+    }
+    style.flex_basis = parse_dimension(basis);
 }
 
 pub(super) fn apply_font_shorthand(style: &mut ComputedStyle, value: &str) {
@@ -208,14 +209,14 @@ pub(super) fn apply_font_shorthand(style: &mut ComputedStyle, value: &str) {
 }
 
 pub(super) fn parse_overflow_shorthand(value: &str) -> (Overflow, Overflow) {
-    let parts = value.split_whitespace().collect::<Vec<_>>();
-    match parts.as_slice() {
-        [one] => {
+    let mut parts = value.split_whitespace();
+    match (parts.next(), parts.next()) {
+        (Some(one), None) => {
             let overflow = parse_overflow(one);
             (overflow, overflow)
         }
-        [x, y, ..] => (parse_overflow(x), parse_overflow(y)),
-        [] => (Overflow::Visible, Overflow::Visible),
+        (Some(x), Some(y)) => (parse_overflow(x), parse_overflow(y)),
+        (None, _) => (Overflow::Visible, Overflow::Visible),
     }
 }
 
@@ -633,7 +634,6 @@ pub fn parse_animation_shorthand(value: &str) -> Vec<AnimationStyle> {
 }
 
 pub(super) fn parse_transform_origin(value: &str) -> TransformOrigin {
-    let parts: Vec<&str> = value.split_whitespace().collect();
     let parse_axis = |s: &str| -> TransformOriginValue {
         match s {
             "left" | "top" => TransformOriginValue::Percent(0.0),
@@ -647,14 +647,15 @@ pub(super) fn parse_transform_origin(value: &str) -> TransformOrigin {
         }
     };
 
-    match parts.as_slice() {
-        [] => TransformOrigin::default(),
-        [one] => {
+    let mut parts = value.split_whitespace();
+    match (parts.next(), parts.next()) {
+        (None, _) => TransformOrigin::default(),
+        (Some(one), None) => {
             let x = parse_axis(one);
             let y = TransformOriginValue::Percent(50.0);
             TransformOrigin { x, y }
         }
-        [x_str, y_str, ..] => {
+        (Some(x_str), Some(y_str)) => {
             let x = parse_axis(x_str);
             let y = parse_axis(y_str);
             TransformOrigin { x, y }
@@ -827,5 +828,246 @@ pub(super) fn parse_dimension(s: &str) -> Dimension {
         "fit" => Dimension::Fit,
         _ if s.ends_with('%') => Dimension::Percent(s.trim_end_matches('%').parse().unwrap_or(0.0)),
         _ => Dimension::Px(parse_px(s)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn flex_shorthand_parses_three_fields_without_extra_tokens() {
+        let mut style = ComputedStyle::default();
+
+        apply_flex_shorthand(&mut style, "2 3 240px ignored");
+
+        assert_eq!(style.flex_grow, 2.0);
+        assert_eq!(style.flex_shrink, 3.0);
+        assert_eq!(style.flex_basis, Dimension::Px(240.0));
+    }
+
+    #[test]
+    fn flex_shorthand_ignores_incomplete_values() {
+        let mut style = ComputedStyle::default();
+        style.flex_grow = 9.0;
+        style.flex_shrink = 8.0;
+        style.flex_basis = Dimension::Px(7.0);
+
+        apply_flex_shorthand(&mut style, "1 2");
+
+        assert_eq!(style.flex_grow, 9.0);
+        assert_eq!(style.flex_shrink, 8.0);
+        assert_eq!(style.flex_basis, Dimension::Px(7.0));
+    }
+
+    #[test]
+    fn overflow_shorthand_parses_without_collecting_extra_tokens() {
+        assert_eq!(
+            parse_overflow_shorthand("hidden auto ignored"),
+            (Overflow::Hidden, Overflow::Auto)
+        );
+        assert_eq!(
+            parse_overflow_shorthand("scroll"),
+            (Overflow::Scroll, Overflow::Scroll)
+        );
+        assert_eq!(
+            parse_overflow_shorthand(""),
+            (Overflow::Visible, Overflow::Visible)
+        );
+    }
+
+    #[test]
+    fn transform_origin_parses_without_collecting_extra_tokens() {
+        assert_eq!(
+            parse_transform_origin("25% bottom ignored"),
+            TransformOrigin {
+                x: TransformOriginValue::Percent(25.0),
+                y: TransformOriginValue::Percent(100.0),
+            }
+        );
+        assert_eq!(
+            parse_transform_origin("left"),
+            TransformOrigin {
+                x: TransformOriginValue::Percent(0.0),
+                y: TransformOriginValue::Percent(50.0),
+            }
+        );
+        assert_eq!(parse_transform_origin(""), TransformOrigin::default());
+    }
+
+    // cargo test -p mesh-core-elements --release -- iterator_flex_shorthand_beats_vec_collect --ignored --nocapture
+    #[test]
+    #[ignore = "release-only flex shorthand parser microbenchmark"]
+    fn iterator_flex_shorthand_beats_vec_collect() {
+        fn old_apply_flex_shorthand(style: &mut ComputedStyle, value: &str) {
+            let parts = value.split_whitespace().collect::<Vec<_>>();
+            if parts.len() >= 3 {
+                if let Ok(grow) = parts[0].parse::<f32>() {
+                    style.flex_grow = grow;
+                }
+                if let Ok(shrink) = parts[1].parse::<f32>() {
+                    style.flex_shrink = shrink;
+                }
+                style.flex_basis = parse_dimension(parts[2]);
+            }
+        }
+
+        let value = "2 1 240px";
+        let iterations = 2_000_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0.0f32;
+        for _ in 0..iterations {
+            let mut style = ComputedStyle::default();
+            old_apply_flex_shorthand(&mut style, std::hint::black_box(value));
+            old_total += std::hint::black_box(style.flex_grow + style.flex_shrink);
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0.0f32;
+        for _ in 0..iterations {
+            let mut style = ComputedStyle::default();
+            apply_flex_shorthand(&mut style, std::hint::black_box(value));
+            new_total += std::hint::black_box(style.flex_grow + style.flex_shrink);
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "flex shorthand parser: Vec collect {old_time:?}; iterator fields {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- iterator_overflow_shorthand_beats_vec_collect --ignored --nocapture
+    #[test]
+    #[ignore = "release-only overflow shorthand parser microbenchmark"]
+    fn iterator_overflow_shorthand_beats_vec_collect() {
+        fn old_parse_overflow_shorthand(value: &str) -> (Overflow, Overflow) {
+            let parts = value.split_whitespace().collect::<Vec<_>>();
+            match parts.as_slice() {
+                [one] => {
+                    let overflow = parse_overflow(one);
+                    (overflow, overflow)
+                }
+                [x, y, ..] => (parse_overflow(x), parse_overflow(y)),
+                [] => (Overflow::Visible, Overflow::Visible),
+            }
+        }
+
+        fn score((x, y): (Overflow, Overflow)) -> u32 {
+            overflow_score(x).wrapping_add(overflow_score(y))
+        }
+
+        fn overflow_score(overflow: Overflow) -> u32 {
+            match overflow {
+                Overflow::Visible => 1,
+                Overflow::Hidden => 2,
+                Overflow::Scroll => 3,
+                Overflow::Auto => 4,
+            }
+        }
+
+        let value = "hidden auto";
+        let iterations = 3_000_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0u32;
+        for _ in 0..iterations {
+            old_total = old_total.wrapping_add(std::hint::black_box(score(
+                old_parse_overflow_shorthand(std::hint::black_box(value)),
+            )));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0u32;
+        for _ in 0..iterations {
+            new_total = new_total.wrapping_add(std::hint::black_box(score(
+                parse_overflow_shorthand(std::hint::black_box(value)),
+            )));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "overflow shorthand parser: Vec collect {old_time:?}; iterator fields {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- iterator_transform_origin_beats_vec_collect --ignored --nocapture
+    #[test]
+    #[ignore = "release-only transform-origin parser microbenchmark"]
+    fn iterator_transform_origin_beats_vec_collect() {
+        fn old_parse_transform_origin(value: &str) -> TransformOrigin {
+            let parts: Vec<&str> = value.split_whitespace().collect();
+            let parse_axis = |s: &str| -> TransformOriginValue {
+                match s {
+                    "left" | "top" => TransformOriginValue::Percent(0.0),
+                    "right" | "bottom" => TransformOriginValue::Percent(100.0),
+                    "center" => TransformOriginValue::Percent(50.0),
+                    _ if s.ends_with('%') => {
+                        let v = s.trim_end_matches('%').parse::<f32>().unwrap_or(50.0);
+                        TransformOriginValue::Percent(v)
+                    }
+                    _ => TransformOriginValue::Px(parse_px(s)),
+                }
+            };
+
+            match parts.as_slice() {
+                [] => TransformOrigin::default(),
+                [one] => {
+                    let x = parse_axis(one);
+                    let y = TransformOriginValue::Percent(50.0);
+                    TransformOrigin { x, y }
+                }
+                [x_str, y_str, ..] => {
+                    let x = parse_axis(x_str);
+                    let y = parse_axis(y_str);
+                    TransformOrigin { x, y }
+                }
+            }
+        }
+
+        fn score(origin: TransformOrigin) -> f32 {
+            fn axis_score(value: TransformOriginValue) -> f32 {
+                match value {
+                    TransformOriginValue::Percent(value) | TransformOriginValue::Px(value) => value,
+                }
+            }
+            axis_score(origin.x) + axis_score(origin.y)
+        }
+
+        let value = "25% bottom";
+        let iterations = 3_000_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0.0f32;
+        for _ in 0..iterations {
+            old_total += std::hint::black_box(score(old_parse_transform_origin(
+                std::hint::black_box(value),
+            )));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0.0f32;
+        for _ in 0..iterations {
+            new_total +=
+                std::hint::black_box(score(parse_transform_origin(std::hint::black_box(value))));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "transform-origin parser: Vec collect {old_time:?}; iterator fields {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 }

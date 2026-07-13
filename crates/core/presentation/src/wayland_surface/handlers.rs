@@ -1,4 +1,5 @@
 use super::*;
+use std::borrow::Cow;
 
 impl CompositorHandler for State {
     fn scale_factor_changed(
@@ -488,8 +489,13 @@ impl KeyboardHandler for State {
             .as_deref()
             .and_then(|s| s.chars().next())
             .filter(|ch| !ch.is_control());
-        self.keyboard_repeat =
-            self.keyboard_repeat_state(&surface_id, &name, mods.clone(), ch, Instant::now());
+        self.keyboard_repeat = self.keyboard_repeat_state(
+            &surface_id,
+            name.as_ref(),
+            mods.clone(),
+            ch,
+            Instant::now(),
+        );
         let key_surface_id = if ch.is_some() || self.keyboard_repeat.is_some() {
             surface_id.clone()
         } else {
@@ -497,7 +503,7 @@ impl KeyboardHandler for State {
         };
         self.events.push(DevWindowEvent::Key {
             surface_id: key_surface_id,
-            event: DevWindowKeyEvent::Pressed(name, mods),
+            event: DevWindowKeyEvent::Pressed(name.into_owned(), mods),
         });
         if let Some(ch) = ch {
             self.events.push(DevWindowEvent::Char { surface_id, ch });
@@ -516,10 +522,10 @@ impl KeyboardHandler for State {
             return;
         };
         let name = keysym_name(event.keysym);
-        self.clear_keyboard_repeat_for_key(&name);
+        self.clear_keyboard_repeat_for_key(name.as_ref());
         self.events.push(DevWindowEvent::Key {
             surface_id,
-            event: DevWindowKeyEvent::Released(name),
+            event: DevWindowKeyEvent::Released(name.into_owned()),
         });
     }
 
@@ -557,29 +563,29 @@ impl KeyboardHandler for State {
     }
 }
 
-fn keysym_name(sym: Keysym) -> String {
+fn keysym_name(sym: Keysym) -> Cow<'static, str> {
     sym.name()
         .map(normalize_keysym_name)
-        .unwrap_or_else(|| format!("{:#x}", sym.raw()))
+        .unwrap_or_else(|| Cow::Owned(format!("{:#x}", sym.raw())))
 }
 
-fn normalize_keysym_name(name: &str) -> String {
+fn normalize_keysym_name(name: &'static str) -> Cow<'static, str> {
     // `xkeysym::Keysym::name()` returns Rust-constant identifiers like `XK_Tab`.
     // Strip the prefix so downstream key matching sees the bare xkbcommon name.
     let name = name.strip_prefix("XK_").unwrap_or(name);
     match name {
-        "Return" | "KP_Enter" => "Enter".into(),
-        "space" | "KP_Space" => "Space".into(),
-        "Tab" | "ISO_Left_Tab" => "Tab".into(),
-        "BackSpace" => "Backspace".into(),
-        "Left" | "KP_Left" => "ArrowLeft".into(),
-        "Right" | "KP_Right" => "ArrowRight".into(),
-        "Up" | "KP_Up" => "ArrowUp".into(),
-        "Down" | "KP_Down" => "ArrowDown".into(),
-        "Prior" => "PageUp".into(),
-        "Next" => "PageDown".into(),
-        "Escape" => "Esc".into(),
-        other => other.to_string(),
+        "Return" | "KP_Enter" => Cow::Borrowed("Enter"),
+        "space" | "KP_Space" => Cow::Borrowed("Space"),
+        "Tab" | "ISO_Left_Tab" => Cow::Borrowed("Tab"),
+        "BackSpace" => Cow::Borrowed("Backspace"),
+        "Left" | "KP_Left" => Cow::Borrowed("ArrowLeft"),
+        "Right" | "KP_Right" => Cow::Borrowed("ArrowRight"),
+        "Up" | "KP_Up" => Cow::Borrowed("ArrowUp"),
+        "Down" | "KP_Down" => Cow::Borrowed("ArrowDown"),
+        "Prior" => Cow::Borrowed("PageUp"),
+        "Next" => Cow::Borrowed("PageDown"),
+        "Escape" => Cow::Borrowed("Esc"),
+        other => Cow::Borrowed(other),
     }
 }
 
@@ -706,6 +712,7 @@ impl Dispatch<OrgKdeKwinBlur, ()> for State {
 #[cfg(test)]
 mod tests {
     use super::normalize_keysym_name;
+    use std::borrow::Cow;
 
     #[test]
     fn normalize_keysym_name_maps_common_xkb_names_to_shell_names() {
@@ -717,5 +724,14 @@ mod tests {
         assert_eq!(normalize_keysym_name("Right"), "ArrowRight");
         assert_eq!(normalize_keysym_name("Up"), "ArrowUp");
         assert_eq!(normalize_keysym_name("Down"), "ArrowDown");
+    }
+
+    #[test]
+    fn normalize_keysym_name_borrows_common_names() {
+        assert!(matches!(
+            normalize_keysym_name("Return"),
+            Cow::Borrowed("Enter")
+        ));
+        assert!(matches!(normalize_keysym_name("XK_a"), Cow::Borrowed("a")));
     }
 }

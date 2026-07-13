@@ -35,7 +35,7 @@ use mesh_core_animation::transition::TransitionAnimator;
 pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
 use runtime_tree::{
     NodeServiceFieldDependencies, RetainedWidgetTree, RuntimeAnnotationContext,
-    annotate_runtime_tree, collect_element_metrics, input_accepts_char,
+    annotate_runtime_tree, collect_element_metrics, input_accepts_char, stable_runtime_node_id,
 };
 
 use mesh_core_capability::{Capability, CapabilitySet};

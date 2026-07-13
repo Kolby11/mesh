@@ -1834,6 +1834,7 @@ dependencies = [
  "peniko 0.6.1",
  "resvg",
  "skia-safe",
+ "smallvec",
  "swash",
  "taffy",
  "tempfile",

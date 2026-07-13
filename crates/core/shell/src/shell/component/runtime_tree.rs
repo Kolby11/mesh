@@ -179,6 +179,38 @@ impl RetainedWidgetTree {
         self.last_dirty
     }
 
+    pub(super) fn layout_dirty_node_ids(&self, root: &WidgetNode) -> Option<HashSet<NodeId>> {
+        let mut fresh_snapshots = HashMap::new();
+        collect_retained_snapshots(root, &mut fresh_snapshots);
+
+        let mut dirty_ids = HashSet::new();
+        for (&node_id, fresh) in &fresh_snapshots {
+            let previous_key = self.node_keys.get(&node_id).copied()?;
+            let previous = self.nodes.get(previous_key)?;
+            let (flags, _) = previous.diff_flags(fresh);
+            if flags.is_empty() {
+                continue;
+            }
+            if flags.intersects(RetainedNodeDirtyFlags::INSERTED | RetainedNodeDirtyFlags::CHILDREN)
+            {
+                return None;
+            }
+            if flags.intersects(
+                RetainedNodeDirtyFlags::LAYOUT
+                    | RetainedNodeDirtyFlags::STYLE
+                    | RetainedNodeDirtyFlags::ATTRIBUTES,
+            ) {
+                dirty_ids.insert(node_id);
+            }
+        }
+
+        if fresh_snapshots.len() != self.node_keys.len() {
+            return None;
+        }
+
+        Some(dirty_ids)
+    }
+
     #[cfg(test)]
     fn dirty_flags_for(&self, node_id: NodeId) -> RetainedNodeDirtyFlags {
         self.node_keys
@@ -480,10 +512,7 @@ fn attributes_fingerprint(node: &WidgetNode) -> u64 {
     let mut hasher = RuntimeTreeHasher::default();
     node.tag.hash(&mut hasher);
     for (key, value) in &node.attributes {
-        if key == "_mesh_key" {
-            continue;
-        }
-        if key == "_mesh_focused" {
+        if is_typed_runtime_annotation_attribute(key) {
             continue;
         }
         if key == "content" && !node.children.is_empty() {
@@ -504,6 +533,20 @@ fn attributes_fingerprint(node: &WidgetNode) -> u64 {
         }
     }
     hasher.finish()
+}
+
+fn is_typed_runtime_annotation_attribute(key: &str) -> bool {
+    matches!(
+        key,
+        "_mesh_key"
+            | "_mesh_focused"
+            | "_mesh_scroll_x"
+            | "_mesh_scroll_y"
+            | "_mesh_scroll_max_x"
+            | "_mesh_scroll_max_y"
+            | "_mesh_content_width"
+            | "_mesh_content_height"
+    )
 }
 
 fn hash_json_value(value: &serde_json::Value, hasher: &mut impl Hasher) {
@@ -837,7 +880,6 @@ fn annotate_runtime_tree_inner(
     }
     node.accessibility.focused = node.state.focused;
 
-    let source_tag = source_element_tag(node).to_string();
     match node.tag.as_str() {
         "input" => {
             let value = context
@@ -860,12 +902,17 @@ fn annotate_runtime_tree_inner(
         _ => {}
     }
 
-    if node_is_source(node, &["switch", "checkbox", "radio", "option"]) {
+    let source_tag = source_element_tag(node);
+    let checkable_choice = matches!(source_tag, "switch" | "checkbox" | "radio" | "option");
+    let selects_choice = matches!(source_tag, "radio" | "option");
+    let selectable_group = matches!(source_tag, "select" | "radio-group");
+
+    if checkable_choice {
         node.attributes.insert(
             "checked".into(),
             if checked { "true" } else { "false" }.into(),
         );
-        if matches!(source_tag.as_str(), "radio" | "option") {
+        if selects_choice {
             node.attributes.insert(
                 "selected".into(),
                 if checked { "true" } else { "false" }.into(),
@@ -877,7 +924,7 @@ fn annotate_runtime_tree_inner(
         node.accessibility.state.selected = checked;
     }
 
-    if node_is_source(node, &["select", "radio-group"])
+    if selectable_group
         && let Some(value) = context
             .input_values
             .get(key_str)
@@ -1050,6 +1097,16 @@ mod tests {
             &scroll_offsets,
         );
         annotate_runtime_tree(node, "root".to_string(), &mut context);
+    }
+
+    fn benchmark_plain_tree(width: usize, depth: usize) -> WidgetNode {
+        let mut node = WidgetNode::new(if depth % 2 == 0 { "box" } else { "row" });
+        if depth > 0 {
+            node.children = (0..width)
+                .map(|_| benchmark_plain_tree(width, depth - 1))
+                .collect();
+        }
+        node
     }
 
     #[derive(Default)]
@@ -1249,6 +1306,29 @@ mod tests {
     }
 
     #[test]
+    fn attribute_fingerprint_ignores_scroll_annotations_tracked_by_layout_fingerprint() {
+        let mut node = WidgetNode::new("scroll-area");
+        node.attributes.insert("_mesh_key".into(), "root/0".into());
+        node.attributes.insert("class".into(), "scroller".into());
+        let original_attributes = attributes_fingerprint(&node);
+        let original_layout = layout_fingerprint(&node);
+
+        node.attributes
+            .insert("_mesh_scroll_y".into(), "12.5".into());
+        node.attributes
+            .insert("_mesh_scroll_max_y".into(), "40".into());
+        node.attributes
+            .insert("_mesh_content_height".into(), "120".into());
+
+        assert_eq!(attributes_fingerprint(&node), original_attributes);
+        assert_ne!(layout_fingerprint(&node), original_layout);
+
+        node.attributes
+            .insert("class".into(), "scroller active".into());
+        assert_ne!(attributes_fingerprint(&node), original_attributes);
+    }
+
+    #[test]
     fn attribute_fingerprint_tracks_typed_handler_arg_changes() {
         let mut node = WidgetNode::new("button");
         node.event_handler_calls.insert(
@@ -1368,6 +1448,133 @@ mod tests {
         );
         assert_ne!(old_accumulator, 0);
         assert_ne!(new_accumulator, 0);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- scroll_annotation_skip_beats_redundant_attribute_hash --ignored --nocapture
+    #[test]
+    #[ignore = "release-only scroll annotation fingerprint microbenchmark"]
+    fn scroll_annotation_skip_beats_redundant_attribute_hash() {
+        fn old_attributes_fingerprint(node: &WidgetNode) -> u64 {
+            let mut hasher = RuntimeTreeHasher::default();
+            node.tag.hash(&mut hasher);
+            for (key, value) in &node.attributes {
+                if key == "_mesh_key" || key == "_mesh_focused" {
+                    continue;
+                }
+                if key == "content" && !node.children.is_empty() {
+                    continue;
+                }
+                key.hash(&mut hasher);
+                value.hash(&mut hasher);
+            }
+            hasher.finish()
+        }
+
+        let mut node = WidgetNode::new("scroll-area");
+        node.attributes.insert("_mesh_key".into(), "root/0".into());
+        node.attributes.insert("class".into(), "scroller".into());
+        node.attributes
+            .insert("_mesh_scroll_x".into(), "12.5".into());
+        node.attributes
+            .insert("_mesh_scroll_y".into(), "24.75".into());
+        node.attributes
+            .insert("_mesh_scroll_max_x".into(), "360.125".into());
+        node.attributes
+            .insert("_mesh_scroll_max_y".into(), "480.875".into());
+        node.attributes
+            .insert("_mesh_content_width".into(), "720.25".into());
+        node.attributes
+            .insert("_mesh_content_height".into(), "960.5".into());
+        let iterations = 2_000_000;
+
+        let old_started = Instant::now();
+        let mut old_accumulator = 0u64;
+        for _ in 0..iterations {
+            old_accumulator = old_accumulator
+                .wrapping_add(old_attributes_fingerprint(std::hint::black_box(&node)));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_accumulator = 0u64;
+        for _ in 0..iterations {
+            new_accumulator =
+                new_accumulator.wrapping_add(attributes_fingerprint(std::hint::black_box(&node)));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "scroll annotation fingerprint: redundant attribute hash {old_time:?}; skipped {new_time:?}; ratio {:.1}x; accumulators={old_accumulator:x}/{new_accumulator:x}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_ne!(old_accumulator, 0);
+        assert_ne!(new_accumulator, 0);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- lazy_source_tag_checks_beat_eager_annotation_allocation --ignored --nocapture
+    #[test]
+    #[ignore = "release-only runtime annotation source-tag microbenchmark"]
+    fn lazy_source_tag_checks_beat_eager_annotation_allocation() {
+        fn old_eager_source_tag_walk(node: &WidgetNode) -> usize {
+            let source_tag = source_element_tag(node).to_string();
+            let mut total = source_tag.len();
+            if node_is_source(node, &["switch", "checkbox", "radio", "option"])
+                && matches!(source_tag.as_str(), "radio" | "option")
+            {
+                total += 1;
+            }
+            if node_is_source(node, &["select", "radio-group"]) {
+                total += 1;
+            }
+            for child in &node.children {
+                total += old_eager_source_tag_walk(child);
+            }
+            total
+        }
+
+        fn new_lazy_source_tag_walk(node: &WidgetNode) -> usize {
+            let source_tag = source_element_tag(node);
+            let checkable_choice = matches!(source_tag, "switch" | "checkbox" | "radio" | "option");
+            let selects_choice = matches!(source_tag, "radio" | "option");
+            let selectable_group = matches!(source_tag, "select" | "radio-group");
+            let mut total = usize::from(checkable_choice) * source_tag.len();
+            if checkable_choice && selects_choice {
+                total += 1;
+            }
+            if selectable_group {
+                total += 1;
+            }
+            for child in &node.children {
+                total += new_lazy_source_tag_walk(child);
+            }
+            total
+        }
+
+        let tree = benchmark_plain_tree(4, 5);
+        let iterations = 20_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total += old_eager_source_tag_walk(std::hint::black_box(&tree));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            new_total += new_lazy_source_tag_walk(std::hint::black_box(&tree));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "runtime annotation source tags: eager allocation {old_time:?}; lazy borrowed checks {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_ne!(old_total, 0);
+        assert_eq!(new_total, 0);
         assert!(new_time < old_time);
     }
 

@@ -6,6 +6,7 @@ use skia_safe::{
     PathBuilder, Point, RRect, Rect, TileMode, canvas::SaveLayerRec, gradient as skia_gradient,
     image_filters, images,
 };
+use smallvec::SmallVec;
 
 pub(crate) const MAX_EFFECT_BLUR_RADIUS: f32 = 96.0;
 use mesh_core_elements::lru::LruCache;
@@ -492,8 +493,8 @@ impl SkiaPaintBackend {
         commands: &[PainterCommand],
         diagnostics: &mut Vec<PainterDiagnostic>,
     ) {
-        let mut clip_stack: Vec<ClipRect> = Vec::with_capacity(commands.len().min(32));
-        let mut layer_stack: Vec<ActivePainterLayer> = Vec::with_capacity(commands.len().min(8));
+        let mut clip_stack: SmallVec<[ClipRect; 8]> = SmallVec::new();
+        let mut layer_stack: SmallVec<[ActivePainterLayer; 4]> = SmallVec::new();
         for command in commands {
             match command {
                 PainterCommand::PushClip(clip) => {
@@ -1453,4 +1454,83 @@ fn skia_paint(color: Color, anti_alias: bool) -> skia_safe::Paint {
     paint.set_color(crate::surface::buffer::skia_color(color));
     paint.set_blend_mode(skia_safe::BlendMode::SrcOver);
     paint
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn painter_clip_and_layer_stacks_stay_inline_for_common_depths() {
+        let mut clip_stack: SmallVec<[ClipRect; 8]> = SmallVec::new();
+        let mut layer_stack: SmallVec<[ActivePainterLayer; 4]> = SmallVec::new();
+
+        for index in 0..8 {
+            clip_stack.push(ClipRect {
+                x: index,
+                y: index,
+                width: 100,
+                height: 50,
+            });
+        }
+        for save_count in 0..4 {
+            layer_stack.push(ActivePainterLayer { save_count });
+        }
+
+        assert!(!clip_stack.spilled());
+        assert!(!layer_stack.spilled());
+    }
+
+    // cargo test -p mesh-core-render --release -- painter_stack_smallvec_beats_per_batch_vec_allocation --ignored --nocapture
+    #[test]
+    #[ignore = "release-only painter stack allocation microbenchmark"]
+    fn painter_stack_smallvec_beats_per_batch_vec_allocation() {
+        let iterations = 8_000_000;
+        let clip = ClipRect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 64,
+        };
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let mut clip_stack: Vec<ClipRect> = Vec::with_capacity(8);
+            let mut layer_stack: Vec<ActivePainterLayer> = Vec::with_capacity(4);
+            for _ in 0..4 {
+                clip_stack.push(clip);
+            }
+            for save_count in 0..2 {
+                layer_stack.push(ActivePainterLayer { save_count });
+            }
+            old_total += clip_stack.len() + layer_stack.len();
+            layer_stack.pop();
+            clip_stack.pop();
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let mut clip_stack: SmallVec<[ClipRect; 8]> = SmallVec::new();
+            let mut layer_stack: SmallVec<[ActivePainterLayer; 4]> = SmallVec::new();
+            for _ in 0..4 {
+                clip_stack.push(clip);
+            }
+            for save_count in 0..2 {
+                layer_stack.push(ActivePainterLayer { save_count });
+            }
+            new_total += clip_stack.len() + layer_stack.len();
+            layer_stack.pop();
+            clip_stack.pop();
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "painter stacks: per-batch Vec {old_time:?}; SmallVec {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+    }
 }

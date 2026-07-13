@@ -282,8 +282,26 @@ duplicating it.
       `elements` or `refs`, while reading scroll offsets directly for traversal
       through unpublished ancestors. A sparse-ref 341-node release benchmark
       over 2,000 publications measured 1.872s for eager per-node snapshots
-      versus 205.920ms for lazy snapshots (9.1x faster). Lazy field resolution
-      remains open for frames where metrics really changed.
+      versus 205.920ms for lazy snapshots (9.1x faster). Progress 2026-07-13:
+      element snapshot scroll fields now read the runtime's typed
+      `WidgetNode::scroll_metrics` via `resolved_scroll_metrics()` instead of
+      parsing `_mesh_scroll_*` attributes when typed metrics are present, while
+      preserving the legacy attribute fallback. A release microbenchmark over
+      2M scroll metric reads measured 106.047ms for attribute parsing versus
+      6.085ms for typed metrics (17.4x faster for that snapshot subpath). Lazy
+      field resolution remains open for frames where metrics really changed.
+      Progress 2026-07-13: `element_snapshot_json` now builds the public JSON
+      object directly instead of building an `ElementSnapshot`, cloning
+      attributes into a `BTreeMap`, and serializing it back through serde before
+      adding tag-specific fields. Parity coverage compares the direct builder
+      against the old serde shape; a release microbenchmark over 200k input
+      snapshots measured 530.347ms for the serde roundtrip versus 459.070ms
+      direct (1.2x faster). Progress 2026-07-13: the public
+      `element_snapshot()` path now clones the node attribute map directly
+      instead of rebuilding it through iterator collection; a release
+      microbenchmark over 500k 16-attribute clones measured 360.630ms for
+      collect-clone versus 193.524ms for `BTreeMap::clone()` (1.9x faster for
+      that snapshot subpath).
 - [ ] **Stringly-typed template expression values.** `eval_expr` returns
       `String` for everything (`frontend/compiler/src/expr.rs:26,162`);
       numeric ops re-`parse::<f64>` both sides per evaluation
@@ -413,7 +431,15 @@ duplicating it.
       release microbenchmark over 2M fingerprints measured 98.724ms with the
       redundant key hash versus 44.799ms without it (2.2x faster). Scroll and
       other shell annotations remain hashed until they have equivalent typed
-      change tracking. Progress 2026-07-04: retained snapshot `child_ids` now
+      change tracking. Progress 2026-07-13: retained attribute fingerprints now
+      skip `_mesh_scroll_*` and `_mesh_content_*` annotations because
+      `layout_fingerprint()` already tracks the same resolved typed scroll
+      metrics. A standalone Rust benchmark matching the attribute-hash loop
+      measured 475.5ms with redundant scroll/content attribute hashing versus
+      32.9ms with the typed-annotation skip over 2M hashes (14.5x faster for
+      that subpath); in-crate shell verification remains blocked locally by
+      the missing `xkbcommon.pc` system dependency. Progress 2026-07-04:
+      retained snapshot `child_ids` now
       use inline storage for up to eight children, eliminating the per-node
       heap allocation for normal UI trees while spilling safely for wider
       containers. A 4-child release microbenchmark over 2M snapshots measured
@@ -482,7 +508,21 @@ duplicating it.
       default fills across unrelated subtrees. Added regression coverage and a
       release-only benchmark; the local dev-shell run measured 2.593s for
       full-tree default merge versus 1.923s targeted over 5k synthetic
-      interaction updates (1.3x faster).
+      interaction updates (1.3x faster). Progress 2026-07-12: the mandatory
+      `annotate_runtime_tree` traversal no longer allocates a
+      `source_element_tag(node).to_string()` for every node; it borrows the
+      source tag only in the choice/select branches that need it. Added a
+      release-only benchmark over 20k plain-tree walks; the local dev-shell run
+      measured 250.396ms for eager allocation versus 58.000ms for lazy
+      borrowed checks (4.3x faster for that annotation subpath). Progress
+      2026-07-13: interaction changed-subtree collection now converts changed
+      hover/focus runtime paths to stable `NodeId`s once, then matches
+      `node.id` during the tree walk instead of probing string key sets for
+      every node. A standalone Rust microbenchmark matching the collector shape
+      measured 825.6ms for the string-key collector versus 498.4ms for the
+      `NodeId` collector over 20k synthetic updates (1.66x faster); in-crate
+      shell tests/benchmark remain blocked locally by the missing `xkbcommon.pc`
+      system dependency.
 - [ ] **Layout + display list**: Taffy tree rebuilt per layout pass and
       display-list subtree flattening per update are already tracked
       (v1.21). Reaffirmed as the dominant structural-frame costs behind
@@ -593,7 +633,29 @@ duplicating it.
       Progress 2026-07-06: `flex` now resolves simple values through the
       borrowed path before applying shorthand semantics. A release benchmark
       over 500k flex token resolutions measured 80.558ms for the string-clone
-      path versus 73.508ms for the borrowed path (1.1x faster).
+      path versus 73.508ms for the borrowed path (1.1x faster). Progress
+      2026-07-13: `apply_flex_shorthand` now reads the first three whitespace
+      fields directly instead of collecting all tokens into a temporary `Vec`.
+      A release microbenchmark over 2M flex shorthand parses measured
+      150.266ms for `Vec` collect versus 129.296ms for iterator fields (1.2x
+      faster for that parser subpath). Progress 2026-07-13:
+      `parse_overflow_shorthand` now reads the first two whitespace fields
+      directly instead of collecting into a temporary `Vec`. A release
+      microbenchmark over 3M overflow shorthand parses measured 81.771ms for
+      `Vec` collect versus 61.478ms for iterator fields (1.3x faster for that
+      parser subpath). Progress 2026-07-13: `parse_transform_origin` now reads
+      the first two whitespace fields directly instead of collecting into a
+      temporary `Vec`. A release microbenchmark over 3M transform-origin
+      parses measured 93.661ms for `Vec` collect versus 65.960ms for iterator
+      fields (1.4x faster for that parser subpath). Progress 2026-07-13:
+      animation keyword
+      properties (`transition-timing-function`, `animation-name`,
+      `animation-timing-function`, `animation-iteration-count`,
+      `animation-direction`, `animation-fill-mode`, `animation-play-state`) now
+      use the borrowed simple-value resolver before parsing first-list-item
+      keywords. A release benchmark over 500k timing-function token
+      resolutions measured 29.373ms for the string-clone path versus 25.064ms
+      for the borrowed path (1.2x faster).
 - [x] **Theme component defaults re-applied per node from string maps.**
       `apply_theme_component_defaults` parses `HashMap<String, String>`
       defaults on every node resolution (already visible in the
@@ -615,7 +677,7 @@ duplicating it.
         from the prototype (~98.5x faster).
 ### F. Animation & layout per-frame overhead
 
-- [ ] **Retained Taffy layout still re-syncs every node's style per pass.**
+- [x] **Retained Taffy layout still re-syncs every node's style per pass.**
       `compute_incremental` → `update_retained_node_styles` walks the whole
       tree rebuilding `taffy_style_for_node` and re-populating
       `node_map`/`text_nodes` HashMaps on every layout-dirty frame
@@ -638,7 +700,16 @@ duplicating it.
       `node_map`/`text_nodes` allocations made the end-to-end layout pass
       slightly slower (77.502ms scratch versus 77.033ms fresh, 0.99x), because
       full style synchronization and map clearing dominate. The prototype was
-      reverted.
+      reverted. Completed 2026-07-12 with the T-layout closure:
+      non-structural layout frames now feed retained layout-relevant dirty
+      `NodeId`s into `LayoutEngine::compute_incremental_with_dirty_nodes`, so
+      Taffy `set_style`/`mark_dirty` is limited to dirty nodes while structural
+      uncertainty still falls back to the full retained sync. `node_map` and
+      text measurement context remain populated for all retained nodes because
+      they are needed by layout output and measurement callbacks. Verification:
+      `cargo test -p mesh-core-elements retained_layout` passes; shell crate
+      verification remains blocked by the missing `xkbcommon.pc` system
+      dependency.
 
 ### G. Lua runtime — state sync & handler overhead
 
@@ -761,7 +832,12 @@ multiplied by O(n) tree clones is where interaction latency actually goes.
       child key at every edge. Added key-string regression coverage and a
       release-only benchmark; the local dev-shell run measured 1.091s for
       `format!("{key}/{index}")` versus 421.848ms for append/truncate over
-      20k broad-tree iterations (2.6x faster).
+      20k broad-tree iterations (2.6x faster). Progress 2026-07-13: scroll
+      overflow annotation now uses the same append/truncate path strategy and
+      avoids cloning existing scroll-offset keys during steady-state lookups.
+      A release benchmark over 20k broad-tree annotation passes measured
+      988.379ms for recursive formatted child keys versus 710.105ms for the
+      path buffer (1.4x faster).
 - [ ] **`finalize_tree` closing-popover pass: O(closing-keys × tree)**
       `find_node_by_key_mut` per closing key (`rendering.rs:273-279`).
       Trivial count in practice; fold into the fused annotation walk (D)
@@ -1280,7 +1356,7 @@ Performance:
       ~2.4x faster locally (652.3ms -> 270.3ms for 20k diagnostic resolutions
       over 80 rules). Remaining follow-up: gate diagnostics by rules/tree
       generation or move unsupported CSS validation fully static.
-- [ ] **Per-declaration static validation re-runs per node per pass.**
+- [x] **Per-declaration static validation re-runs per node per pass.**
       `apply_declaration_no_diagnostics` runs `style_profile_status`,
       `is_supported_css_property`, `contains_deprecated_token_reference` (a
       string scan of the value), and `is_strict_animation_property` for every
@@ -1301,6 +1377,12 @@ Performance:
       matched node. Release benchmark over 500k compound-selector lookups
       measured 45.176ms per-node formatting versus 214.902us from indexed
       strings (210.2x faster).
+      Completed 2026-07-13: the remaining theme-default diagnostics and
+      no-diagnostics paths now also apply through `IndexedDeclaration`
+      metadata, and indexed style resolution uses one diagnostics-optional
+      loop. Production restyle/default application no longer re-runs static
+      declaration classification per matched node; the old uncached helper is
+      retained only for direct declaration diagnostics/tests.
 - [x] **`seed_module_theme_variables` allocates two Strings per module token
       per node per pass** — `format!("--{}", name.replace('.', "-"))`
       (`resolve.rs:857-876`). Precompute the CSS-variable-keyed token map once
@@ -1369,18 +1451,29 @@ Structure / correctness:
       format. CSS parsing preserves declaration order, duplicate properties
       move to their latest declaration position, and component-default
       iteration now applies authored CSS order deterministically.
-- [ ] **The diagnostics/no-diagnostics path duplication caused the drift.**
+- [x] **The diagnostics/no-diagnostics path duplication caused the drift.**
       Four near-identical function pairs (`resolve_node_style_with_attrs*`,
       `apply_theme_defaults_map*`, `apply_declaration_*`) exist so the
       diagnostics path could stay separate; that duplication is exactly where
       the per-node index rebuild survived. When fixing the first item, fold
       diagnostics into a sink parameter (`Option<&mut Vec<StyleDiagnostic>>`)
-      on one path so the two cannot diverge again.
-- [ ] Design note (fine, but document): selector matching has no CSS
+      on one path so the two cannot diverge again. Completed 2026-07-13:
+      indexed style resolution now runs through one inner
+      diagnostics-optional loop, indexed declaration application uses one
+      optional diagnostics sink, and theme component-default application uses
+      the same indexed declaration path for diagnostics and no-diagnostics
+      prototype caches. The remaining uncached declaration-with-diagnostics
+      helper is outside the production indexed restyle/default path. Verified
+      with `cargo test -p mesh-core-elements indexed` and
+      `cargo test -p mesh-core-elements theme_defaults`.
+- [x] Design note (fine, but document): selector matching has no CSS
       specificity — candidate rules apply in source-index order (last wins),
       and descendant combinators are rejected at parse with a diagnostic
       (`ui/component/src/style.rs:100`). Worth one paragraph in
       `docs/spec/04-styling.md` so authors don't expect specificity semantics.
+      Completed 2026-07-13: `docs/spec/04-styling.md` §6.1 already documents
+      the supported selector subset, compile-time rejection of descendant/child
+      combinators, and the no-specificity source-order cascade contract.
 
 ### P. Rendering & paint — 2026-07-04 deep dive
 
@@ -1442,7 +1535,7 @@ Performance:
       zeroed allocation can be much cheaper in this workload. Do not retry this
       shape without measuring against real rotated subtree painting and memory
       bandwidth, or without a way to track dirty coverage inside the temp.
-- [ ] **Minor inner-loop allocations in the Skia backend.**
+- [x] **Minor inner-loop allocations in the Skia backend.**
       `execute_commands_on_canvas` allocates clip/layer stacks per batch
       (`painter/backend.rs:479-480`); the gradient shader cache key includes
       absolute rect position (`backend.rs:18`), so an animated/moving gradient
@@ -1459,7 +1552,12 @@ Performance:
       regressed isolated stack bookkeeping badly: 31.812ms for the existing
       Vec path versus 350.183ms inline over 8M four-clip/four-layer batches.
       Clip/layer stack allocation remains open; a future attempt should use a
-      proven small-vector implementation or reuse scratch storage.
+      proven small-vector implementation or reuse scratch storage. Completed
+      2026-07-13: `execute_commands_on_canvas` now uses `SmallVec` for the
+      common shallow clip/layer stacks, with inline-capacity coverage and a
+      release-only bookkeeping benchmark. `cargo check -p mesh-core-render`
+      passes; render test binaries still cannot link in this environment
+      because `freetype`/`fontconfig` are missing.
 
 Structure:
 
@@ -1860,7 +1958,7 @@ text measurement. Confirms the F-item paint-only fast path is in place
 
 Performance:
 
-- [ ] **Unconditional `set_style` per node defeats Taffy's internal caching on
+- [x] **Unconditional `set_style` per node defeats Taffy's internal caching on
       every layout-dirty frame.** `update_retained_node_styles` converts all
       ~60 style fields (`taffy_style_for_node`) and calls
       `state.tree.set_style` for **every** node whenever layout is dirty
@@ -1876,6 +1974,17 @@ Performance:
       optimized direct Taffy microbenchmark (46.115ms unconditional
       `set_style` versus 51.642ms skip-equal over 2k×512 equal-style updates),
       so this needs the retained dirty-bit feed rather than an equality guard.
+      Completed 2026-07-12: `RetainedWidgetTree` now derives a
+      layout-relevant dirty `NodeId` set from the finalized tree before the
+      retained-tree update, falling back to the full path on structural
+      uncertainty. `LayoutEngine::compute_incremental_with_dirty_nodes` uses
+      that set to call `set_style`/`mark_dirty` only for dirty nodes while
+      still refreshing text measurement context and output layout maps for
+      all retained nodes. Added retained-layout parity coverage for the
+      narrow dirty-node path. Verification: `cargo test -p mesh-core-elements
+      retained_layout` passes; shell crate verification is still blocked by
+      the missing system `xkbcommon.pc` dependency from
+      `smithay-client-toolkit`.
 - [x] **Text measurement clones the content String twice per node per pass.**
       `update_text_context`/`build_taffy_tree` clone every text node's
       `content` into `TextMeasureData` per layout-dirty and structural pass
@@ -1921,10 +2030,11 @@ Structure:
       migration so `_mesh_key` strings have no remaining hot consumers.
       Completed for retained layout on 2026-07-09; interaction/refs maps remain
       separate follow-up consumers of `_mesh_key`.
-- [ ] Healthy/confirmed: paint-only frames skip all layout sync; fresh
+- [x] Healthy/confirmed: paint-only frames skip all layout sync; fresh
       `node_map`/`text_nodes` maps per pass were measured (scratch reuse
       rejected 2026-07-04); intrinsic text cache is LRU-bounded; Taffy
-      diagnostics are report-gated.
+      diagnostics are report-gated. Confirmed 2026-07-12 while closing the
+      retained dirty-node style-sync path.
 
 ### U. Presentation & memory — 2026-07-04 deep dive
 
@@ -2010,7 +2120,14 @@ Performance:
       the old clone-before-schedule shape versus 7.198ms borrowed over 500k
       non-repeating key presses (2.3x faster for that isolated repeat setup
       path). `keysym_name` allocation and public event payload `String` clones
-      remain open.
+      remain open. Progress 2026-07-13: Wayland `keysym_name` now returns a
+      `Cow<'static, str>` and `normalize_keysym_name` borrows common xkb names
+      through repeat filtering/release matching, only owning the key name at
+      the public `DevWindowEvent` boundary or for raw numeric fallbacks.
+      Focused presentation tests remain blocked in this environment by the
+      missing `xkbcommon.pc` system dependency; source check confirms
+      `xkeysym::Keysym::name()` returns `Option<&'static str>`. The remaining
+      cleanup is the public `String` event payload shape.
 - [ ] **Child popup targets force a full-buffer present every frame.**
       `paint_and_present_child_surface` sets `force_full_present = true`
       unconditionally after each child paint (`shell/runtime/render.rs:789-791`),
@@ -2028,7 +2145,7 @@ Performance:
       damage (84 logical px), a 27.4x smaller present/upload region. The
       deeper child-subtree retained-paint path remains open: child buffers are
       still repainted eagerly before presenting sparse damage.
-- [ ] **`wait_for_surface_configure` runs up to 10 blocking roundtrips on the
+- [x] **`wait_for_surface_configure` runs up to 10 blocking roundtrips on the
       shell thread.** Called from `present_with_damage` (`backend.rs:1130`)
       and `surface_size` (`backend.rs:1324`) whenever the surface is not yet
       configured (`backend.rs:1405-1432`). Fine for first map, but a
@@ -2043,7 +2160,12 @@ Performance:
       returns to the render loop if the surface is still unconfigured. This
       removes the previous worst case of 10 blocking roundtrips on the shell
       thread; delayed/dead configure now costs at most the 2ms local budget per
-      attempt before other surfaces and IPC work can continue.
+      attempt before other surfaces and IPC work can continue. Completed
+      2026-07-13 verification: the shipped backend is deadline-bounded by
+      `SURFACE_CONFIGURE_WAIT_DEADLINE` and polls the Wayland fd until either
+      the surface configures or the deadline expires. The deadline is now
+      500ms, not 2ms, because the shorter budget regressed first-configure
+      sizing on startup; the old fixed 10-roundtrip loop is gone.
 - [x] Minor per-present allocations: `attach_shm_buffer` builds two
       `Vec<DamageRect>` per present (`backend.rs:334-343`) and
       `protocol_damage_rects` re-allocates via `to_vec` even in the ≤16
@@ -2070,7 +2192,7 @@ Performance:
 
 Structure:
 
-- [ ] Healthy/confirmed: SHM pool reuse with per-buffer pending-damage
+- [x] Healthy/confirmed: SHM pool reuse with per-buffer pending-damage
       refresh and the busy-buffer overflow slot (`backend.rs:265-316`);
       surface config fingerprint gating with the keyboard-only reconfigure
       carve-out (`backend.rs:198-227,454-469`); popup reconcile gated on
@@ -2083,7 +2205,10 @@ Structure:
       fd + shell eventfd together with no spin (`backend.rs:1510-1602`);
       pointer/scroll coalescing at the engine boundary
       (`presentation/src/lib.rs:427-481`). The dev-window backend is dev-only
-      and was not audited for hot-path cost.
+      and was not audited for hot-path cost. Confirmed 2026-07-13 against the
+      current presentation backend; existing regression coverage includes
+      disjoint pending-damage preservation/collapse, keyboard-only configure
+      retention, and unchanged blur-region dirtiness.
 
 ### V. Shell orchestrator, threading & startup — 2026-07-04 deep dive
 
