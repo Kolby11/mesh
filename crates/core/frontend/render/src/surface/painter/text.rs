@@ -698,7 +698,7 @@ impl FrontendRenderEngine {
         let font_size = 12.0 * scale;
         let pad_h = (8.0 * scale) as i32;
         let pad_v = (5.0 * scale) as i32;
-        let max_text_w = 220.0 * scale;
+        let max_text_w = 320.0 * scale;
 
         let (text_w, text_h) =
             self.text_renderer

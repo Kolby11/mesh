@@ -10,10 +10,10 @@ use super::types::{
 use mesh_core_interaction::{
     annotate_overflow_tree, collect_focus_traversal, find_click_handler, find_event_handler,
     find_node_bounds_by_key, find_node_by_key, find_node_path_at, find_nodes_by_keys,
-    find_scrollable_at_with_limits, find_tooltip_by_key, find_tooltip_container_bounds,
-    is_input_key, is_slider_key, measure_content_size, next_focus_target, node_is_source,
-    parse_namespaced_handler, pointer_event_handler_hit, pointer_press_hit,
-    scroll_into_view_offsets, scroll_limits, source_element_tag,
+    find_scrollable_at_with_limits, find_tooltip_by_key, is_input_key, is_slider_key,
+    measure_content_size, next_focus_target, node_is_source, parse_namespaced_handler,
+    pointer_event_handler_hit, pointer_press_hit, scroll_into_view_offsets, scroll_limits,
+    source_element_tag,
 };
 mod animation;
 mod catalog;
@@ -69,8 +69,8 @@ use mesh_core_render::{
     RenderObjectTree, RetainedDisplayList, SharedTextMeasurer, TextCacheMetrics, TextRenderer,
 };
 
-const TOOLTIP_OVERLAY_WIDTH: u32 = 240;
-const TOOLTIP_OVERLAY_HEIGHT: u32 = 80;
+const TOOLTIP_OVERLAY_WIDTH: u32 = 352;
+const TOOLTIP_OVERLAY_HEIGHT: u32 = 200;
 
 /// Extra logical pixels a parent layer surface reserves beyond its content so
 /// tooltips can paint outside the content box (e.g. below a bar).

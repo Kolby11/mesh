@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -1019,6 +1019,133 @@ fn load_installed_module_graph_auto_discovers_modules() {
     let frontends = graph.frontend_modules();
     assert_eq!(frontends.len(), 1);
     assert_eq!(frontends[0].id, "@me/panel");
+}
+
+#[test]
+fn parallel_discovered_manifest_loading_preserves_directory_order() {
+    let root = temp_dir("parallel-manifest-order");
+    let modules_dir = root.join("modules");
+    let ids = ["gamma", "alpha", "beta"];
+    for id in ids {
+        let module_dir = modules_dir.join(id);
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(
+            module_dir.join("module.json"),
+            format!(
+                r#"{{
+  "name": "@me/{id}",
+  "version": "0.1.0",
+  "mesh": {{
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "entry": "src/main.mesh"
+  }}
+}}"#
+            ),
+        )
+        .unwrap();
+    }
+
+    let module_dirs = discover_module_dirs(&modules_dir);
+    let serial = load_discovered_module_manifests_serial(&module_dirs).unwrap();
+    let parallel = load_discovered_module_manifests(&module_dirs).unwrap();
+    let serial_ids = serial
+        .iter()
+        .map(|(_, loaded)| loaded.manifest.name.as_str())
+        .collect::<Vec<_>>();
+    let parallel_ids = parallel
+        .iter()
+        .map(|(_, loaded)| loaded.manifest.name.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(serial_ids, parallel_ids);
+    assert_eq!(parallel_ids, vec!["@me/alpha", "@me/beta", "@me/gamma"]);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+#[ignore = "release-only startup manifest loading microbenchmark"]
+fn parallel_discovered_manifest_loading_beats_serial_benchmark() {
+    if rayon::current_num_threads() <= 1 {
+        eprintln!("skipping benchmark: rayon has one worker thread");
+        return;
+    }
+
+    let root = temp_dir("parallel-manifest-benchmark");
+    let modules_dir = root.join("modules");
+    let module_count = 192;
+    for index in 0..module_count {
+        let module_dir = modules_dir.join(format!("frontend/module-{index:03}"));
+        fs::create_dir_all(&module_dir).unwrap();
+        let mut slots = String::new();
+        for slot in 0..16 {
+            slots.push_str(&format!(
+                r#""slot-{slot}": [{{ "widget": "@bench/module-{index:03}", "id": "item-{slot}", "order": {slot}, "props": {{ "label": "Item {slot}", "index": {index} }} }}]"#
+            ));
+            if slot + 1 < 16 {
+                slots.push(',');
+            }
+        }
+        fs::write(
+            module_dir.join("module.json"),
+            format!(
+                r#"{{
+  "name": "@bench/module-{index:03}",
+  "version": "0.1.0",
+  "mesh": {{
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "entry": "src/main.mesh",
+    "capabilities": {{
+      "required": ["shell.surface"],
+      "optional": ["service.demo.read", "service.demo.write"]
+    }},
+    "icons": {{
+      "required": ["audio-volume-high", "settings"],
+      "optional": ["weather-clear", "network-wireless"]
+    }},
+    "slots": {{
+      {slots}
+    }}
+  }}
+}}"#
+            ),
+        )
+        .unwrap();
+    }
+
+    let module_dirs = discover_module_dirs(&modules_dir);
+    assert_eq!(module_dirs.len(), module_count);
+
+    let warmup = load_discovered_module_manifests(&module_dirs).unwrap();
+    assert_eq!(warmup.len(), module_count);
+
+    let iterations = 12;
+    let serial_start = Instant::now();
+    for _ in 0..iterations {
+        let loaded = load_discovered_module_manifests_serial(&module_dirs).unwrap();
+        assert_eq!(loaded.len(), module_count);
+    }
+    let serial_elapsed = serial_start.elapsed();
+
+    let parallel_start = Instant::now();
+    for _ in 0..iterations {
+        let loaded = load_discovered_module_manifests(&module_dirs).unwrap();
+        assert_eq!(loaded.len(), module_count);
+    }
+    let parallel_elapsed = parallel_start.elapsed();
+
+    eprintln!(
+        "manifest load over {iterations} iterations and {module_count} modules: serial {serial_elapsed:?}; parallel {parallel_elapsed:?}; ratio {:.1}x",
+        serial_elapsed.as_secs_f64() / parallel_elapsed.as_secs_f64()
+    );
+    assert!(
+        parallel_elapsed < serial_elapsed,
+        "parallel manifest loading should beat serial loading"
+    );
+
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

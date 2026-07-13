@@ -1430,17 +1430,18 @@ impl FrontendSurfaceComponent {
         let element_offset = owner_node.and_then(|node| node.computed_style.tooltip_offset);
         let element_bounds =
             find_node_bounds_by_key(tree, &owner_key, 0.0, 0.0).or(self.hovered_element_bounds);
-        // The box the tooltip should stay inside for automatic placement:
-        // the owner's innermost clipping ancestor, or the whole paint surface.
-        let container_bounds = find_tooltip_container_bounds(tree, &owner_key);
+        // Tooltips are overlay chrome. They should be constrained by the
+        // tooltip-padded paint surface, not by a scroll/clip container inside
+        // the component tree.
+        let container_bounds = None;
 
         // Measure the real logical tooltip box (mirrors render_tooltip's
-        // geometry at scale 1: 12px Inter, 1.3 line height, 220px wrap width,
+        // geometry at scale 1: 12px Inter, 1.3 line height, 320px wrap width,
         // 8px/5px padding) so fit checks match what actually paints.
         let (text_w, text_h) =
-            SharedTextMeasurer.measure_styled(&text, "Inter", 12.0, 400, 1.3, Some(220.0));
+            SharedTextMeasurer.measure_styled(&text, "Inter", 12.0, 400, 1.3, Some(320.0));
         let tooltip_size = (
-            (text_w.ceil() + 16.0).min(220.0 + 16.0),
+            (text_w.ceil() + 16.0).min(320.0 + 16.0),
             (text_h.ceil() + 10.0).max(12.0 + 10.0),
         );
 

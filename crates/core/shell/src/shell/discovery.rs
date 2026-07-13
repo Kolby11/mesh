@@ -1,8 +1,91 @@
 use super::component::{FrontendCatalog, FrontendSurfaceComponent};
 use super::*;
+use rayon::prelude::*;
 use std::collections::HashSet;
 
 const BUILTIN_DEBUG_INSPECTOR_ID: &str = "@mesh/debug-inspector";
+
+#[derive(Debug)]
+pub(super) struct DiscoveredModuleManifest {
+    pub(super) dir: PathBuf,
+    pub(super) loaded:
+        Result<mesh_core_module::LoadedManifest, mesh_core_module::manifest::ManifestError>,
+}
+
+pub(super) fn discover_shell_module_manifests(
+    module_dirs: &[PathBuf],
+) -> Vec<DiscoveredModuleManifest> {
+    let manifest_dirs = discover_shell_module_manifest_dirs(module_dirs);
+    load_shell_module_manifests(&manifest_dirs)
+}
+
+pub(super) fn discover_shell_module_manifest_dirs(module_dirs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut discovered = Vec::new();
+    for dir in module_dirs {
+        if !dir.exists() {
+            tracing::debug!("module directory does not exist: {}", dir.display());
+            continue;
+        }
+        discovered.extend(discover_shell_module_manifest_dirs_under(dir));
+    }
+    discovered
+}
+
+fn discover_shell_module_manifest_dirs_under(dir: &Path) -> Vec<PathBuf> {
+    if shell_module_manifest_exists(dir) {
+        return vec![dir.to_path_buf()];
+    }
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            tracing::warn!("failed to read module directory {}: {e}", dir.display());
+            return Vec::new();
+        }
+    };
+    let mut child_dirs = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    child_dirs.sort();
+
+    child_dirs
+        .par_iter()
+        .flat_map(|path| discover_shell_module_manifest_dirs_under(path))
+        .collect()
+}
+
+fn shell_module_manifest_exists(dir: &Path) -> bool {
+    dir.join("package.json").exists()
+        || dir.join("module.json").exists()
+        || dir.join("mesh.toml").exists()
+}
+
+pub(super) fn load_shell_module_manifests(
+    module_dirs: &[PathBuf],
+) -> Vec<DiscoveredModuleManifest> {
+    module_dirs
+        .par_iter()
+        .map(|dir| DiscoveredModuleManifest {
+            dir: dir.clone(),
+            loaded: mesh_core_module::manifest::load_manifest(dir),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+pub(super) fn load_shell_module_manifests_serial(
+    module_dirs: &[PathBuf],
+) -> Vec<DiscoveredModuleManifest> {
+    module_dirs
+        .iter()
+        .map(|dir| DiscoveredModuleManifest {
+            dir: dir.clone(),
+            loaded: mesh_core_module::manifest::load_manifest(dir),
+        })
+        .collect()
+}
 
 impl Shell {
     pub fn new() -> Self {
@@ -125,12 +208,12 @@ impl Shell {
 
     pub fn discover_modules(&mut self) {
         let module_dirs = std::mem::take(&mut self.module_dirs);
-        for dir in &module_dirs {
-            if !dir.exists() {
-                tracing::debug!("module directory does not exist: {}", dir.display());
-                continue;
+        let discovered = discover_shell_module_manifests(&module_dirs);
+        for discovered in discovered {
+            match discovered.loaded {
+                Ok(loaded) => self.register_loaded_module(&discovered.dir, loaded),
+                Err(e) => tracing::warn!("failed to load module {}: {e}", discovered.dir.display()),
             }
-            self.scan_module_dir(dir);
         }
         self.module_dirs = module_dirs;
         self.register_installed_graph_interfaces();
@@ -194,99 +277,65 @@ impl Shell {
         }
     }
 
-    fn scan_module_dir(&mut self, dir: &Path) {
-        let has_manifest = dir.join("package.json").exists()
-            || dir.join("module.json").exists()
-            || dir.join("mesh.toml").exists();
-        let has_module_manifest = dir.join("module.json").exists();
-        if has_manifest || has_module_manifest {
-            match mesh_core_module::manifest::load_manifest(dir) {
-                Ok(loaded) => {
-                    let id = loaded.manifest.package.id.clone();
-                    // Register declared contracts: `mesh.interface` on interface
-                    // modules and inline `mesh.interfaces` on backend modules.
-                    let declared_contract_sections = loaded
-                        .manifest
-                        .interface
-                        .iter()
-                        .filter(|_| loaded.manifest.package.module_type == ModuleType::Interface)
-                        .chain(loaded.manifest.interfaces.iter());
-                    for section in declared_contract_sections {
-                        let Some(contract_value) = &section.contract else {
-                            continue;
-                        };
-                        match parse_interface_contract(
-                            &section.name,
-                            &section.version,
-                            contract_value,
-                        ) {
-                            Ok(contract) => self.interfaces.register_contract(contract),
-                            Err(err) => tracing::warn!(
-                                "invalid interface contract {} in module {}: {err}",
-                                section.name,
-                                id
-                            ),
-                        }
-                    }
-                    for provided in loaded.manifest.declared_provides() {
-                        self.interfaces.register(InterfaceProvider {
-                            interface: canonical_interface_name(&provided.interface),
-                            version: provided.version.clone(),
-                            base_module: provided.base_module.clone(),
-                            provider_module: id.clone(),
-                            backend_name: provided
-                                .backend_name
-                                .clone()
-                                .unwrap_or_else(|| id.clone()),
-                            priority: provided.priority,
-                        });
-                    }
-                    tracing::info!(
-                        "discovered module: {} v{} ({}) from {}",
-                        id,
-                        loaded.manifest.package.version,
-                        loaded.manifest.package.module_type,
-                        loaded.source
-                    );
-                    register_module_icon_pack(&id, dir, loaded.manifest.assets.as_ref());
-                    register_icon_pack_module(&id, dir, loaded.manifest.icon_pack.as_ref());
-                    register_frontend_icon_bindings(
-                        &id,
-                        &loaded.manifest,
-                        self.settings
-                            .modules
-                            .get(&id)
-                            .and_then(|m| m.icons.as_ref()),
-                    );
-                    self.modules.insert(
-                        id,
-                        ModuleInstance::new(
-                            loaded.manifest,
-                            dir.to_path_buf(),
-                            loaded.path,
-                            loaded.source,
-                        ),
-                    );
-                }
-                Err(e) => tracing::warn!("failed to load module {}: {e}", dir.display()),
-            }
-            return;
-        }
-
-        let entries = match std::fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(e) => {
-                tracing::warn!("failed to read module directory {}: {e}", dir.display());
-                return;
-            }
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                self.scan_module_dir(&path);
+    fn register_loaded_module(&mut self, dir: &Path, loaded: mesh_core_module::LoadedManifest) {
+        let id = loaded.manifest.package.id.clone();
+        // Register declared contracts: `mesh.interface` on interface modules
+        // and inline `mesh.interfaces` on backend modules.
+        let declared_contract_sections = loaded
+            .manifest
+            .interface
+            .iter()
+            .filter(|_| loaded.manifest.package.module_type == ModuleType::Interface)
+            .chain(loaded.manifest.interfaces.iter());
+        for section in declared_contract_sections {
+            let Some(contract_value) = &section.contract else {
+                continue;
+            };
+            match parse_interface_contract(&section.name, &section.version, contract_value) {
+                Ok(contract) => self.interfaces.register_contract(contract),
+                Err(err) => tracing::warn!(
+                    "invalid interface contract {} in module {}: {err}",
+                    section.name,
+                    id
+                ),
             }
         }
+        for provided in loaded.manifest.declared_provides() {
+            self.interfaces.register(InterfaceProvider {
+                interface: canonical_interface_name(&provided.interface),
+                version: provided.version.clone(),
+                base_module: provided.base_module.clone(),
+                provider_module: id.clone(),
+                backend_name: provided.backend_name.clone().unwrap_or_else(|| id.clone()),
+                priority: provided.priority,
+            });
+        }
+        tracing::info!(
+            "discovered module: {} v{} ({}) from {}",
+            id,
+            loaded.manifest.package.version,
+            loaded.manifest.package.module_type,
+            loaded.source
+        );
+        register_module_icon_pack(&id, dir, loaded.manifest.assets.as_ref());
+        register_icon_pack_module(&id, dir, loaded.manifest.icon_pack.as_ref());
+        register_frontend_icon_bindings(
+            &id,
+            &loaded.manifest,
+            self.settings
+                .modules
+                .get(&id)
+                .and_then(|m| m.icons.as_ref()),
+        );
+        self.modules.insert(
+            id,
+            ModuleInstance::new(
+                loaded.manifest,
+                dir.to_path_buf(),
+                loaded.path,
+                loaded.source,
+            ),
+        );
     }
 
     pub fn resolve_modules(&mut self) -> Result<(), ShellRunError> {

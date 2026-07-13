@@ -6,6 +6,7 @@ use super::{
 use crate::manifest;
 use mesh_core_component::{AttributeValue, SourceTag, TemplateNode, parse_component};
 use mesh_core_service::{ContractCapabilities, InterfaceContract, parse_interface_contract};
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -2434,8 +2435,8 @@ pub fn load_installed_module_graph(
         // own manifests (each declares its `name` and `kind`). The root file
         // then only holds decisions — `disabled`, `providers`, `layout`,
         // `theme`. A discovered module is enabled unless named in `disabled`.
-        for module_dir in discover_module_dirs(&modules_dir) {
-            let loaded = load_module_manifest(&module_dir)?;
+        let module_dirs = discover_module_dirs(&modules_dir);
+        for (module_dir, loaded) in load_discovered_module_manifests(&module_dirs)? {
             let name = loaded.manifest.name.clone();
             let kind = loaded.manifest.mesh.kind;
             let relative = module_dir
@@ -2463,11 +2464,35 @@ pub fn load_installed_module_graph(
     InstalledModuleGraph::from_parts(root, modules)
 }
 
+pub(super) fn load_discovered_module_manifests(
+    module_dirs: &[PathBuf],
+) -> Result<Vec<(PathBuf, LoadedModuleManifest)>, ModuleManifestError> {
+    let loaded = module_dirs
+        .par_iter()
+        .map(|module_dir| {
+            load_module_manifest(module_dir).map(|loaded| (module_dir.clone(), loaded))
+        })
+        .collect::<Vec<_>>();
+    loaded.into_iter().collect()
+}
+
+#[cfg(test)]
+pub(super) fn load_discovered_module_manifests_serial(
+    module_dirs: &[PathBuf],
+) -> Result<Vec<(PathBuf, LoadedModuleManifest)>, ModuleManifestError> {
+    module_dirs
+        .iter()
+        .map(|module_dir| {
+            load_module_manifest(module_dir).map(|loaded| (module_dir.clone(), loaded))
+        })
+        .collect()
+}
+
 /// Recursively find directories under `modules_dir` that contain a
 /// `module.json`. Descent stops once a `module.json` is found, so nested
 /// resources inside a module are never treated as separate modules. Results are
 /// sorted for deterministic ordering.
-fn discover_module_dirs(modules_dir: &Path) -> Vec<PathBuf> {
+pub(super) fn discover_module_dirs(modules_dir: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     discover_module_dirs_into(modules_dir, &mut found);
     found.sort();

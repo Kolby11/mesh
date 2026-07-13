@@ -1791,6 +1791,7 @@ dependencies = [
  "mesh-core-elements",
  "mesh-core-service",
  "mesh-core-theme",
+ "rayon",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

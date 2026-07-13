@@ -1,5 +1,5 @@
 <props>
-  track_width:  { type: "size", default: "20px", label: t("var.track_width") }
+  track_width:  { type: "size", default: "32px", label: t("var.track_width") }
   track_height: { type: "size", default: "100px", label: t("var.track_height") }
   anim_ms:      { type: "duration", default: 120, min: 0, max: 600, label: t("var.anim_ms") }
 </props>
@@ -132,12 +132,13 @@ end
 .audio-popover-shell {
     width: fit-content;
     height: fit-content;
-    min-width: 36px;
-    max-width: 48px;
+    min-width: 56px;
+    max-width: 72px;
     min-height: 180px;
     max-height: 260px;
     padding: 0 var(--spacing-sm) var(--spacing-sm) var(--spacing-sm);
     background: transparent;
+    overflow: visible;
     opacity: 1;
     transition: opacity prop(anim_ms) var(--animation-curves-bezier-standard);
 }
@@ -150,6 +151,7 @@ end
     gap: var(--spacing-xs);
     padding: var(--spacing-sm);
     align-items: center;
+    overflow: visible;
     border-radius: var(--radius-lg);
     background: var(--color-surface-container);
     color: var(--color-on-surface);

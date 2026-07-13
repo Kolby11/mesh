@@ -1456,6 +1456,28 @@ fn tooltip_rounded_corner_outside_shape_stays_transparent_to_underlay() {
 }
 
 #[test]
+fn long_tooltip_paints_past_legacy_width_cap() {
+    let engine = FrontendRenderEngine::new();
+    let mut buffer = PixelBuffer::new(360, 72);
+    let underlay = Color::from_hex("#224466").unwrap();
+    buffer.clear(underlay);
+
+    engine.render_tooltip(
+        "Audio output volume is controlled by the system mixer device",
+        8.0,
+        10.0,
+        &mut buffer,
+        1.0,
+    );
+
+    assert_ne!(
+        pixel(&buffer, 300, 20),
+        underlay,
+        "long tooltip chrome should extend beyond the old 240px overlay width"
+    );
+}
+
+#[test]
 fn tooltip_clipped_repaint_does_not_mutate_pixels_outside_damage() {
     let engine = FrontendRenderEngine::new();
     let mut buffer = PixelBuffer::new(96, 48);

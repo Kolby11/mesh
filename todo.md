@@ -356,7 +356,17 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       payloads are still owned `String`s; move to `Arc<str>`/numeric ids
       (U; lookup index and key-name borrowing landed).
 - [ ] Startup: parallelize module discovery + manifest parsing (frontend
-      compilation already runs through Rayon) (H/V).
+      compilation already runs through Rayon) (H/V). Progress 2026-07-13:
+      installed-graph auto-discovery now loads sorted module manifests through
+      an ordered Rayon pipeline, preserving deterministic graph assembly while
+      moving per-module file IO and JSON parsing off the startup thread.
+      Release benchmark over 12 iterations of 192 synthetic modules measured
+      80.5ms serial versus 12.5ms parallel (~6.5x faster). Follow-up same day:
+      shell legacy discovery now separates deterministic recursive manifest-dir
+      discovery from serial registration and loads manifests in parallel; release
+      benchmark over 12 iterations of 192 synthetic modules measured 24.2ms
+      serial versus 5.4ms parallel (~4.5x faster). Remaining: measure real
+      startup profile impact with canonical v1.21 workloads.
 - [ ] Rotation transforms allocate a temp `PixelBuffer` + full subtree
       repaint per frame; low priority until rotation ships in surfaces
       (P; scratch-buffer reuse rejected — see log).
