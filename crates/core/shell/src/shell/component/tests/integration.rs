@@ -9,6 +9,7 @@ pub(super) use std::collections::HashMap;
 pub(super) use std::path::PathBuf;
 
 mod bind_live;
+mod component_memo;
 mod debug;
 mod element_refs;
 mod props;

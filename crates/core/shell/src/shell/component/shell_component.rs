@@ -7,6 +7,7 @@ impl FrontendSurfaceComponent {
     /// tree from scratch. Shared by `theme_changed` and `locale_changed`, which
     /// both invalidate the entire retained pipeline.
     fn reset_render_caches(&mut self) {
+        self.clear_component_memo();
         self.last_tree = None;
         self.cached_restyle_rules = None;
         self.cached_style_rule_index = None;

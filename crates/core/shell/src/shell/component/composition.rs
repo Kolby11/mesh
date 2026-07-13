@@ -6,7 +6,7 @@ use mesh_core_frontend::FrontendCompositionResolver;
 use mesh_core_interaction::source_element_tag;
 use mesh_core_module::ModuleType;
 
-use super::{FrontendSurfaceComponent, PROMOTED_POPOVER_MARKER};
+use super::{FrontendSurfaceComponent, PROMOTED_POPOVER_MARKER, memo};
 
 impl FrontendCompositionResolver for FrontendSurfaceComponent {
     fn evaluate_template_expression(
@@ -47,9 +47,20 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
     ) -> Option<WidgetNode> {
         if let Some(entry) = self.frontend_catalog.modules.get(&host.package.id) {
             if let Some(component) = entry.compiled.local_components.get(alias) {
+                let instance_key = format!("{host_instance_key}/local:{alias}");
+                let props_fingerprint =
+                    memo::component_props_fingerprint(props, prop_handler_calls);
+                if let Some(node) = self.lookup_component_memo(
+                    &instance_key,
+                    props_fingerprint,
+                    container_width,
+                    container_height,
+                ) {
+                    return Some(node);
+                }
+                let marks_before = self.memo_effect_marks();
                 let bind_this = props.get("__mesh_bind_this").cloned();
                 let props_json = runtime_props_json(props);
-                let instance_key = format!("{host_instance_key}/local:{alias}");
                 let mut node = self.render_local_component(
                     &entry.compiled.manifest,
                     alias,
@@ -70,6 +81,14 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 if let Some(binding) = bind_this.and_then(|value| simple_state_binding(&value)) {
                     self.bind_child_instance(host_instance_key, &binding, &instance_key);
                 }
+                self.store_component_memo(
+                    &instance_key,
+                    props_fingerprint,
+                    container_width,
+                    container_height,
+                    marks_before,
+                    &node,
+                );
                 return Some(node);
             }
         }
@@ -106,6 +125,10 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             self.pending_surface_states
                 .borrow_mut()
                 .insert(module_id, !hidden);
+            // Portal visibility must be re-published on every build; an
+            // enclosing subtree containing this write is not memoizable.
+            self.portal_state_writes
+                .set(self.portal_state_writes.get().wrapping_add(1));
             let mut placeholder = WidgetNode::new("box");
             placeholder.computed_style.width = Dimension::Px(0.0);
             placeholder.computed_style.height = Dimension::Px(0.0);
@@ -115,9 +138,19 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             return Some(placeholder);
         }
 
+        let instance_key = format!("{host_instance_key}/import:{alias}");
+        let props_fingerprint = memo::component_props_fingerprint(props, prop_handler_calls);
+        if let Some(node) = self.lookup_component_memo(
+            &instance_key,
+            props_fingerprint,
+            container_width,
+            container_height,
+        ) {
+            return Some(node);
+        }
+        let marks_before = self.memo_effect_marks();
         let props_json = runtime_props_json(props);
         let bind_this = props.get("__mesh_bind_this").cloned();
-        let instance_key = format!("{host_instance_key}/import:{alias}");
         let mut node = self.render_embedded_instance(
             &instance_key,
             &module_id,
@@ -144,13 +177,21 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         // toggling a hover popover never relayouts its trigger; only open popovers
         // are additionally promoted to a child surface.
         if embedded_root_is_popover(&node) {
-            let mut node = node;
             self.has_promoted_popover_wrappers.set(true);
+            self.popover_wrapper_marks
+                .set(self.popover_wrapper_marks.get().wrapping_add(1));
             node.attributes.insert("hidden".into(), "true".into());
             node.attributes
                 .insert(PROMOTED_POPOVER_MARKER.into(), "true".into());
-            return Some(node);
         }
+        self.store_component_memo(
+            &instance_key,
+            props_fingerprint,
+            container_width,
+            container_height,
+            marks_before,
+            &node,
+        );
         Some(node)
     }
 

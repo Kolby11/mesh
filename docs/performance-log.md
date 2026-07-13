@@ -2264,3 +2264,50 @@ Structure:
 14. Paint/script pipelining + tile-parallel raster (K) — after the
     per-surface split proves the phase boundary; pairs naturally with the
     GPU work (v1.25).
+
+---
+
+## 2026-07-13 — Component-level render memoization shipped (section I)
+
+`render_import` (`crates/core/shell/src/shell/component/composition.rs`) now
+memoizes each imported/local component instance's built subtree
+(`crates/core/shell/src/shell/component/memo.rs`). Entry key/validity:
+
+- props fingerprint (props map + typed `EventHandlerCall`s, structural JSON
+  hashing for args),
+- the instance's own `ScriptState::mutation_generation` **and** every
+  descendant instance's generation (descendants found by hierarchical
+  instance-key prefix, so a nested child's state change invalidates every
+  enclosing cached subtree),
+- active theme `Arc` pointer identity (`refresh_active_theme` swaps the Arc
+  only on real theme changes),
+- active locale,
+- container size the subtree was built against (first build runs pre-layout,
+  so entries settle from the second build onward).
+
+Build side effects are made replayable or vetoed via mark counters on
+`FrontendSurfaceComponent`: promoted-popover wrappers and error placeholders
+inside a cached subtree re-set their per-build presence flags on reuse;
+surface-portal visibility writes (`pending_surface_states`) veto caching.
+`bind:this` live bindings persist on the shared surface VM, so hits safely
+skip re-installation. Tracked service reads accumulate on the `ScriptContext`
+and cached nodes carry `service_field_reads`, so service observation and
+`NodeServiceFieldDependencies` stay intact across hits. The cache clears in
+`reset_render_caches` (theme change, locale change, source reload — the same
+sites that clear runtimes).
+
+Coverage: `component_memo.rs` integration tests for unchanged-sibling reuse
+(identical pixels), prop-change invalidation with sibling reuse,
+descendant-generation invalidation through an enclosing component, and
+popover-promotion flag replay on cache hits. Release benchmark
+(`memoized_rebuild_beats_full_child_reeval`): 200 full rebuild+paint cycles
+of a 12-distinct-child surface measured 212.7ms forced-miss versus 134.5ms
+memoized (1.6x end-to-end including the untouched restyle/layout/paint
+stages; hits=2400/2400).
+
+Known limits: repeated same-alias instances share one runtime (pre-existing
+module-identity limitation), so their alternating prop application bumps the
+shared generation and every lookup misses — correct but unaccelerated until
+per-occurrence instance identity lands. `render_slot` instances are not yet
+memoized. Only public script members are reactive (unchanged contract):
+template expressions over private locals were never guaranteed to re-render.

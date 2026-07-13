@@ -21,6 +21,7 @@ mod composition;
 mod diagnostics;
 mod input;
 mod interaction_state;
+mod memo;
 mod rendering;
 mod runtime;
 mod runtime_tree;
@@ -494,6 +495,22 @@ pub(super) struct FrontendSurfaceComponent {
     has_active_keyframe_animation: bool,
     has_promoted_popover_wrappers: Cell<bool>,
     has_error_placeholders: Cell<bool>,
+    /// Memoized built subtrees for embedded/local component instances, keyed
+    /// by instance key. An entry is reused wholesale on rebuild when the
+    /// instance's props, script-state generations (own + descendants), theme,
+    /// locale, and container size are unchanged — skipping template
+    /// re-evaluation, style resolution, and prop sync for that subtree.
+    component_memo: RefCell<HashMap<String, memo::ComponentMemoEntry>>,
+    /// Monotonic counters for build side effects that a memoized subtree must
+    /// replay (popover wrapper promotion, error placeholders) or that veto
+    /// caching entirely (surface-portal state writes). `render_import`
+    /// snapshots them around a child build; a delta records the effect on the
+    /// stored entry.
+    popover_wrapper_marks: Cell<u64>,
+    error_placeholder_marks: Cell<u64>,
+    portal_state_writes: Cell<u64>,
+    /// Number of `render_import` calls served from `component_memo`.
+    component_memo_hits: Cell<u64>,
     narrow_path_active: bool,
     affected_node_count: u64,
     profiling_enabled: bool,
@@ -675,6 +692,11 @@ impl FrontendSurfaceComponent {
             has_active_keyframe_animation: false,
             has_promoted_popover_wrappers: Cell::new(false),
             has_error_placeholders: Cell::new(false),
+            component_memo: RefCell::new(HashMap::new()),
+            popover_wrapper_marks: Cell::new(0),
+            error_placeholder_marks: Cell::new(0),
+            portal_state_writes: Cell::new(0),
+            component_memo_hits: Cell::new(0),
             narrow_path_active: false,
             affected_node_count: 0,
             profiling_enabled: false,

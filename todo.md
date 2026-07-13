@@ -214,11 +214,25 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
 - [ ] **Component-level render memoization (I) — largest structural win.**
       Cache each embedded/local instance's built subtree keyed by (props
       fingerprint, `ScriptState::mutation_generation`, locale/theme
-      generation) and reuse it wholesale on rebuild. Prerequisite (M): build
-      is not a pure function — `render_import` mutates shell state via
-      RefCells (`pending_surface_states`, `portal_hidden_bindings`,
-      `has_promoted_popover_wrappers`, live `bind:this` installation); make
-      these explicit build outputs (a `BuildEffects` struct) first.
+      generation) and reuse it wholesale on rebuild.
+      Shipped 2026-07-13 (`shell/component/memo.rs`): `render_import` now
+      memoizes each imported/local instance's built subtree keyed by props
+      fingerprint (props + typed handler calls), the instance's own **and
+      every descendant instance's** mutation generation, theme `Arc`
+      identity, locale, and container size. Build side effects are handled
+      by mark counters: promoted-popover wrappers and error placeholders
+      replay their presence flags on reuse; surface-portal state writes veto
+      caching. Cache cleared by `reset_render_caches` (theme/locale/source
+      reload). Coverage: unchanged-sibling reuse, prop invalidation,
+      descendant-generation invalidation, popover-flag replay. Release
+      benchmark: 200 rebuild+paint cycles of a 12-child surface measured
+      212.7ms forced-miss versus 134.5ms memoized (1.6x end-to-end,
+      including the untouched restyle/layout/paint stages).
+      Remaining: repeated same-alias instances share one runtime and always
+      miss (needs per-occurrence instance identity — see the "multiple
+      instances" module-system item); `render_slot` instances are not yet
+      memoized; the M `BuildEffects` formalization still applies to future
+      build side effects (new effects must add a mark counter or veto).
 - [ ] Affected-subtree template re-evaluation via
       `NodeServiceFieldDependencies`; `narrow_script_update` still rebuilds
       the full tree before diffing → v1.27
