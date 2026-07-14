@@ -180,20 +180,17 @@ impl RetainedWidgetTree {
     }
 
     pub(super) fn layout_dirty_node_ids(&self, root: &WidgetNode) -> Option<HashSet<NodeId>> {
-        let mut fresh_snapshots = HashMap::new();
-        collect_retained_snapshots(root, &mut fresh_snapshots);
-
-        let mut dirty_ids = HashSet::new();
-        for (&node_id, fresh) in &fresh_snapshots {
-            let previous_key = self.node_keys.get(&node_id).copied()?;
-            let previous = self.nodes.get(previous_key)?;
+        // The result is normally sparse, but reserving against the retained
+        // node count avoids repeated rehashes on layout-heavy frames.
+        let mut dirty_ids = HashSet::with_capacity(self.node_keys.len().min(256));
+        let total = self.visit_fresh_snapshots(root, &mut |node_id, previous, fresh| {
             let (flags, _) = previous.diff_flags(fresh);
             if flags.is_empty() {
-                continue;
+                return true;
             }
             if flags.intersects(RetainedNodeDirtyFlags::INSERTED | RetainedNodeDirtyFlags::CHILDREN)
             {
-                return None;
+                return false;
             }
             if flags.intersects(
                 RetainedNodeDirtyFlags::LAYOUT
@@ -202,13 +199,10 @@ impl RetainedWidgetTree {
             ) {
                 dirty_ids.insert(node_id);
             }
-        }
+            true
+        })?;
 
-        if fresh_snapshots.len() != self.node_keys.len() {
-            return None;
-        }
-
-        Some(dirty_ids)
+        (total == self.node_keys.len()).then_some(dirty_ids)
     }
 
     #[cfg(test)]
@@ -226,35 +220,63 @@ impl RetainedWidgetTree {
     }
 
     pub(super) fn narrow_script_diff(&self, root: &WidgetNode) -> Option<(HashSet<NodeId>, usize)> {
-        let mut fresh_snapshots = HashMap::new();
-        collect_retained_snapshots(root, &mut fresh_snapshots);
-        let total = fresh_snapshots.len();
-
-        let mut affected = HashSet::new();
-        for (&node_id, fresh) in &fresh_snapshots {
-            let prev_key = match self.node_keys.get(&node_id).copied() {
-                Some(key) => key,
-                None => return None, // INSERTED
-            };
-            let prev = match self.nodes.get(prev_key) {
-                Some(snap) => snap,
-                None => return None, // INSERTED
-            };
-            let (flags, _) = prev.diff_flags(fresh);
+        let mut affected = HashSet::with_capacity(self.node_keys.len().min(256));
+        let total = self.visit_fresh_snapshots(root, &mut |node_id, previous, fresh| {
+            let (flags, _) = previous.diff_flags(fresh);
             if flags.is_empty() {
-                continue;
+                return true;
             }
             if flags.contains(RetainedNodeDirtyFlags::CHILDREN) {
-                return None; // structural change
+                return false; // structural change
             }
             let ancestor_only_flags =
                 RetainedNodeDirtyFlags::LAYOUT | RetainedNodeDirtyFlags::ATTRIBUTES;
             if !fresh.child_ids.is_empty() && flags.difference(ancestor_only_flags).is_empty() {
-                continue;
+                return true;
             }
             affected.insert(node_id);
+            true
+        })?;
+
+        (total == self.node_keys.len()).then_some((affected, total))
+    }
+
+    /// Compare a fresh widget tree directly with the retained slotmap.
+    ///
+    /// The analysis callers only need each node's previous snapshot; they do
+    /// not need a second `NodeId -> snapshot` table. Walking the tree directly
+    /// avoids allocating and populating that temporary map on every narrow or
+    /// layout analysis pass. Returning the visited count preserves detection
+    /// of removed nodes, while a missing retained key detects inserted nodes.
+    fn visit_fresh_snapshots(
+        &self,
+        node: &WidgetNode,
+        visit: &mut impl FnMut(NodeId, &RetainedNodeSnapshot, &RetainedNodeSnapshot) -> bool,
+    ) -> Option<usize> {
+        fn walk(
+            retained: &RetainedWidgetTree,
+            node: &WidgetNode,
+            visit: &mut impl FnMut(NodeId, &RetainedNodeSnapshot, &RetainedNodeSnapshot) -> bool,
+            total: &mut usize,
+        ) -> bool {
+            let Some(key) = retained.node_keys.get(&node.id).copied() else {
+                return false;
+            };
+            let Some(previous) = retained.nodes.get(key) else {
+                return false;
+            };
+            let fresh = retained_snapshot(node);
+            *total += 1;
+            if !visit(node.id, previous, &fresh) {
+                return false;
+            }
+            node.children
+                .iter()
+                .all(|child| walk(retained, child, visit, total))
         }
-        Some((affected, total))
+
+        let mut total = 0;
+        walk(self, node, visit, &mut total).then_some(total)
     }
 }
 
@@ -718,11 +740,13 @@ pub(super) fn collect_element_metrics(
     ref_keys: &mut HashMap<String, String>,
 ) {
     let node_key = node.mesh_key();
+    let id = collect_refs.then(|| node.attributes.get("id")).flatten();
+    let reference = collect_refs.then(|| node.attributes.get("ref")).flatten();
+    let binding = collect_refs
+        .then(|| node.attributes.get("_mesh_bind_this"))
+        .flatten();
     let publishes_element = collect_elements && node_key.is_some();
-    let publishes_ref = collect_refs
-        && (node.attributes.contains_key("id")
-            || node.attributes.contains_key("ref")
-            || node.attributes.contains_key("_mesh_bind_this"));
+    let publishes_ref = id.is_some() || reference.is_some() || binding.is_some();
 
     let metrics = (publishes_element || publishes_ref)
         .then(|| element_snapshot_json(node, offset_x, offset_y));
@@ -733,19 +757,19 @@ pub(super) fn collect_element_metrics(
     // Map each `refs.<name>` to the node's runtime key so imperative element
     // actions (focus/blur/…) can resolve a name back to the live widget node.
     if collect_refs && let Some(metrics) = metrics.as_ref() {
-        if let Some(id) = node.attributes.get("id") {
+        if let Some(id) = id {
             refs.insert(id.clone(), metrics.clone());
             if let Some(key) = node_key {
                 ref_keys.insert(id.clone(), key.to_owned());
             }
         }
-        if let Some(reference) = node.attributes.get("ref") {
+        if let Some(reference) = reference {
             refs.insert(reference.clone(), metrics.clone());
             if let Some(key) = node_key {
                 ref_keys.insert(reference.clone(), key.to_owned());
             }
         }
-        if let Some(binding) = node.attributes.get("_mesh_bind_this") {
+        if let Some(binding) = binding {
             refs.insert(binding.clone(), metrics.clone());
             if let Some(key) = node_key {
                 ref_keys.insert(binding.clone(), key.to_owned());
@@ -775,7 +799,7 @@ pub(super) fn collect_element_metrics(
 pub(super) struct RuntimeAnnotationContext<'a> {
     focused_key: &'a Option<String>,
     focus_visible_key: &'a Option<String>,
-    hovered_path: &'a [String],
+    hovered_keys: HashSet<&'a str>,
     active_key: &'a Option<String>,
     active_slider_key: &'a Option<String>,
     input_values: &'a HashMap<String, String>,
@@ -801,7 +825,7 @@ impl<'a> RuntimeAnnotationContext<'a> {
         Self {
             focused_key,
             focus_visible_key,
-            hovered_path,
+            hovered_keys: hovered_path.iter().map(String::as_str).collect(),
             active_key,
             active_slider_key,
             input_values,
@@ -858,10 +882,7 @@ fn annotate_runtime_tree_inner(
             || (context.focus_visible_key.is_none()
                 && context.focused_key.as_deref() == Some(key_str)
                 && node.tag == "input"),
-        hovered: context
-            .hovered_path
-            .iter()
-            .any(|hovered_key| hovered_key == key_str),
+        hovered: context.hovered_keys.contains(key_str),
         active: context.active_key.as_deref() == Some(key_str),
         disabled,
         checked,
@@ -1026,8 +1047,10 @@ fn truthy_attribute(value: &str) -> bool {
 pub(super) struct NodeServiceFieldDependencies {
     /// node_id → set of (service, field) pairs that node reads
     forward: HashMap<NodeId, HashSet<(String, String)>>,
-    /// (service, field) → set of node_ids that read it
-    reverse: HashMap<(String, String), HashSet<NodeId>>,
+    /// service → field → set of node_ids that read it. The nested shape keeps
+    /// reverse lookups borrowed, avoiding two temporary String allocations for
+    /// every service update field comparison.
+    reverse: HashMap<String, HashMap<String, HashSet<NodeId>>>,
 }
 
 impl NodeServiceFieldDependencies {
@@ -1042,9 +1065,9 @@ impl NodeServiceFieldDependencies {
     /// Returns node IDs that read `(service, field)`. Empty set if none.
     pub(super) fn nodes_reading_field(&self, service: &str, field: &str) -> &HashSet<NodeId> {
         static EMPTY: std::sync::OnceLock<HashSet<NodeId>> = std::sync::OnceLock::new();
-        let key = (service.to_string(), field.to_string());
         self.reverse
-            .get(&key)
+            .get(service)
+            .and_then(|fields| fields.get(field))
             .unwrap_or_else(|| EMPTY.get_or_init(HashSet::new))
     }
 
@@ -1060,10 +1083,12 @@ impl NodeServiceFieldDependencies {
 fn collect_node_service_deps(node: &WidgetNode, deps: &mut NodeServiceFieldDependencies) {
     if !node.service_field_reads.is_empty() {
         let entry = deps.forward.entry(node.id).or_default();
-        for pair in &node.service_field_reads {
-            entry.insert(pair.clone());
+        for (service, field) in &node.service_field_reads {
+            entry.insert((service.clone(), field.clone()));
             deps.reverse
-                .entry(pair.clone())
+                .entry(service.clone())
+                .or_default()
+                .entry(field.clone())
                 .or_default()
                 .insert(node.id);
         }
@@ -1780,6 +1805,74 @@ mod tests {
         assert!(move_time < clone_time);
     }
 
+    // cargo test -p mesh-core-shell --release -- direct_narrow_diff_walk_beats_snapshot_map --ignored --nocapture
+    #[test]
+    #[ignore = "release-only direct narrow-diff walk microbenchmark"]
+    fn direct_narrow_diff_walk_beats_snapshot_map() {
+        fn map_narrow_script_diff(
+            retained: &RetainedWidgetTree,
+            root: &WidgetNode,
+        ) -> Option<(HashSet<NodeId>, usize)> {
+            let mut fresh_snapshots = HashMap::with_capacity(retained.node_keys.len());
+            collect_retained_snapshots(root, &mut fresh_snapshots);
+            let total = fresh_snapshots.len();
+            let mut affected = HashSet::new();
+            for (&node_id, fresh) in &fresh_snapshots {
+                let previous_key = retained.node_keys.get(&node_id).copied()?;
+                let previous = retained.nodes.get(previous_key)?;
+                let (flags, _) = previous.diff_flags(fresh);
+                if flags.is_empty() {
+                    continue;
+                }
+                if flags.contains(RetainedNodeDirtyFlags::CHILDREN) {
+                    return None;
+                }
+                let ancestor_only_flags =
+                    RetainedNodeDirtyFlags::LAYOUT | RetainedNodeDirtyFlags::ATTRIBUTES;
+                if !fresh.child_ids.is_empty() && flags.difference(ancestor_only_flags).is_empty() {
+                    continue;
+                }
+                affected.insert(node_id);
+            }
+            Some((affected, total))
+        }
+
+        let mut tree = benchmark_plain_tree(2, 9);
+        annotate_with_empty_context(&mut tree);
+        let mut retained = RetainedWidgetTree::default();
+        retained.update(&tree);
+        let iterations = 2_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total ^= std::hint::black_box(map_narrow_script_diff(
+                std::hint::black_box(&retained),
+                std::hint::black_box(&tree),
+            ))
+            .map(|(_, total)| total)
+            .unwrap_or_default();
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            new_total ^=
+                std::hint::black_box(retained.narrow_script_diff(std::hint::black_box(&tree)))
+                    .map(|(_, total)| total)
+                    .unwrap_or_default();
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+        eprintln!(
+            "narrow diff: temporary snapshot map {old_time:?}; direct slotmap walk {new_time:?}; ratio {:.2}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+    }
+
     #[test]
     fn annotate_runtime_tree_assigns_stable_ids_from_runtime_keys() {
         let mut first = WidgetNode::new("row");
@@ -1797,6 +1890,43 @@ mod tests {
         assert_eq!(first.children[0].mesh_key(), Some("root/0"));
         assert!(!first.attributes.contains_key("_mesh_key"));
         assert!(!first.children[0].attributes.contains_key("_mesh_key"));
+    }
+
+    // cargo test -p mesh-core-shell --release -- hovered_key_set_beats_path_scan --ignored --nocapture
+    #[test]
+    #[ignore = "release-only hover membership microbenchmark"]
+    fn hovered_key_set_beats_path_scan() {
+        let hovered_path: Vec<String> = (0..64).map(|index| format!("root/{index}")).collect();
+        let keys: Vec<String> = (0..4_096).map(|index| format!("root/{index}")).collect();
+        let hovered_keys: HashSet<&str> = hovered_path.iter().map(String::as_str).collect();
+        let iterations = 2_000usize;
+
+        let old_started = Instant::now();
+        let mut old_matches = 0usize;
+        for _ in 0..iterations {
+            for key in &keys {
+                old_matches +=
+                    std::hint::black_box(hovered_path.iter().any(|hovered_key| hovered_key == key))
+                        as usize;
+            }
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_matches = 0usize;
+        for _ in 0..iterations {
+            for key in &keys {
+                new_matches += std::hint::black_box(hovered_keys.contains(key.as_str())) as usize;
+            }
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_matches, new_matches);
+        assert!(new_time < old_time);
+        eprintln!(
+            "hovered key membership: path scan {old_time:?}; hash set {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
     }
 
     // cargo test -p mesh-core-shell --release -- mutable_runtime_key_paths_beat_format_per_child --ignored --nocapture
@@ -1905,6 +2035,63 @@ mod tests {
     }
 
     #[test]
+    fn direct_snapshot_analysis_preserves_layout_dirty_detection() {
+        let mut tree = WidgetNode::new("row");
+        tree.children.push(WidgetNode::new("button"));
+        annotate_with_empty_context(&mut tree);
+
+        let mut retained = RetainedWidgetTree::default();
+        retained.update(&tree);
+        assert_eq!(retained.layout_dirty_node_ids(&tree), Some(HashSet::new()));
+
+        tree.children[0].layout.width = 42.0;
+        assert_eq!(
+            retained.layout_dirty_node_ids(&tree),
+            Some(HashSet::from([tree.children[0].id]))
+        );
+
+        tree.children.push(WidgetNode::new("text"));
+        assert_eq!(retained.layout_dirty_node_ids(&tree), None);
+    }
+
+    // cargo test -p mesh-core-shell --release -- retained_analysis_result_capacity_beats_growth --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained analysis result allocation microbenchmark"]
+    fn retained_analysis_result_capacity_beats_growth() {
+        let ids: Vec<NodeId> = (0..4_096).collect();
+        let iterations = 20_000usize;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let mut ids_set = HashSet::new();
+            for &id in &ids {
+                ids_set.insert(id);
+            }
+            old_total += std::hint::black_box(ids_set.len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let mut ids_set = HashSet::with_capacity(ids.len().min(256));
+            for &id in &ids {
+                ids_set.insert(id);
+            }
+            new_total += std::hint::black_box(ids_set.len());
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_total, new_total);
+        eprintln!(
+            "retained analysis result set: growth {old_time:?}; reserved {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
+    }
+
+    #[test]
     #[should_panic(expected = "runtime NodeId collision")]
     fn retained_snapshot_collection_panics_on_duplicate_node_ids() {
         let mut root = WidgetNode::new("row");
@@ -1966,5 +2153,53 @@ mod tests {
         let deps = NodeServiceFieldDependencies::build(&root);
         let result = deps.nodes_reading_field("bogus", "x");
         assert!(result.is_empty());
+    }
+
+    // cargo test -p mesh-core-shell --release -- service_dependency_borrowed_lookup_beats_tuple_allocation --ignored --nocapture
+    #[test]
+    #[ignore = "release-only service dependency lookup microbenchmark"]
+    fn service_dependency_borrowed_lookup_beats_tuple_allocation() {
+        let mut node = WidgetNode::new("text");
+        for index in 0..64 {
+            node.service_field_reads
+                .push(("audio".into(), format!("field_{index}")));
+        }
+        let mut root = WidgetNode::new("column");
+        root.children.push(node);
+        let deps = NodeServiceFieldDependencies::build(&root);
+        let fields: Vec<String> = (0..64).map(|index| format!("field_{index}")).collect();
+        let old_reverse: HashMap<(String, String), HashSet<NodeId>> = fields
+            .iter()
+            .map(|field| {
+                (
+                    ("audio".into(), field.clone()),
+                    HashSet::from([root.children[0].id]),
+                )
+            })
+            .collect();
+        let iterations = 1_000_000usize;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for index in 0..iterations {
+            let key = ("audio".to_string(), fields[index % 64].clone());
+            old_total += std::hint::black_box(old_reverse.get(&key).unwrap().len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for index in 0..iterations {
+            new_total +=
+                std::hint::black_box(deps.nodes_reading_field("audio", &fields[index % 64]).len());
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_total, new_total);
+        eprintln!(
+            "service dependency lookup: tuple allocation {old_time:?}; borrowed nested map {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
     }
 }

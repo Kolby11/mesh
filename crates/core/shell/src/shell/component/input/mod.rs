@@ -468,15 +468,12 @@ impl FrontendSurfaceComponent {
                 continue;
             }
             let event = self.build_click_event_for(tree, key, Some(node), *bounds, x, y);
+            let args = std::slice::from_ref(&event);
             if has_pointerleave {
-                requests.extend(self.call_resolved_node_handler(
-                    node,
-                    "pointerleave",
-                    &[event.clone()],
-                )?);
+                requests.extend(self.call_resolved_node_handler(node, "pointerleave", args)?);
             }
             if has_mouseleave {
-                requests.extend(self.call_resolved_node_handler(node, "mouseleave", &[event])?);
+                requests.extend(self.call_resolved_node_handler(node, "mouseleave", args)?);
             }
         }
         for key in entered_keys {
@@ -489,15 +486,12 @@ impl FrontendSurfaceComponent {
                 continue;
             }
             let event = self.build_click_event_for(tree, key, Some(node), *bounds, x, y);
+            let args = std::slice::from_ref(&event);
             if has_pointerenter {
-                requests.extend(self.call_resolved_node_handler(
-                    node,
-                    "pointerenter",
-                    &[event.clone()],
-                )?);
+                requests.extend(self.call_resolved_node_handler(node, "pointerenter", args)?);
             }
             if has_mouseenter {
-                requests.extend(self.call_resolved_node_handler(node, "mouseenter", &[event])?);
+                requests.extend(self.call_resolved_node_handler(node, "mouseenter", args)?);
             }
         }
         Ok(requests)

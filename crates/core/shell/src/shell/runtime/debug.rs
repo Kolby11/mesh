@@ -171,6 +171,8 @@ fn debug_service_payload(
         "active_surfaces": snapshot.active_surfaces.clone(),
         "benchmarks": benchmark_snapshot_json(&snapshot.benchmarks),
         "profiling": snapshot.profiling.as_ref().map(profiling_snapshot_json),
+        "profiling_stream": snapshot.profiling.as_ref().map(profiling_stream_json),
+        "chrome_trace": snapshot.profiling.as_ref().map(profiling_chrome_trace_json),
     })
 }
 
@@ -1214,6 +1216,55 @@ fn profiling_snapshot_json(snapshot: &mesh_core_debug::ProfilingSnapshot) -> ser
     })
 }
 
+/// Bounded, order-stable samples for consumers that need an event stream rather
+/// than aggregate stage summaries. Surface samples are sourced from their
+/// per-surface buckets so records duplicated into the shell roll-up appear once.
+fn profiling_stream_json(snapshot: &mesh_core_debug::ProfilingSnapshot) -> serde_json::Value {
+    let mut samples = Vec::new();
+    for summary in &snapshot.shell.stages {
+        samples.extend(
+            summary
+                .recent_samples
+                .iter()
+                .filter(|sample| sample.surface_id.is_none())
+                .map(profiling_sample_json),
+        );
+    }
+    for surface in &snapshot.surfaces {
+        for summary in &surface.stages {
+            samples.extend(summary.recent_samples.iter().map(profiling_sample_json));
+        }
+    }
+    samples.sort_by_key(|sample| sample["order"].as_u64().unwrap_or(u64::MAX));
+    serde_json::Value::Array(samples)
+}
+
+/// Chrome trace / Perfetto-compatible complete events. Timestamps are monotonic
+/// microseconds from the active profiling session, captured alongside each sample.
+fn profiling_chrome_trace_json(snapshot: &mesh_core_debug::ProfilingSnapshot) -> serde_json::Value {
+    let stream = profiling_stream_json(snapshot);
+    let mut events = stream
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|sample| {
+            let surface_id = sample["surface_id"].as_str().unwrap_or("shell");
+            serde_json::json!({
+                "name": sample["stage"],
+                "cat": "mesh",
+                "ph": "X",
+                "pid": "mesh-shell",
+                "tid": surface_id,
+                "ts": sample["timestamp_micros"],
+                "dur": sample["duration_micros"],
+                "args": { "trigger": sample["trigger_kind"], "module_id": sample["module_id"] },
+            })
+        })
+        .collect::<Vec<_>>();
+    events.sort_by_key(|event| event["ts"].as_u64().unwrap_or(u64::MAX));
+    serde_json::json!({ "traceEvents": events, "displayTimeUnit": "ms" })
+}
+
 fn profiling_scope_snapshot_json(
     snapshot: &mesh_core_debug::ProfilingScopeSnapshot,
 ) -> serde_json::Value {
@@ -1350,6 +1401,7 @@ fn profiling_sample_json(sample: &mesh_core_debug::ProfilingSample) -> serde_jso
     serde_json::json!({
         "stage": sample.stage.label(),
         "order": sample.order,
+        "timestamp_micros": sample.timestamp_micros,
         "duration_micros": sample.duration_micros,
         "surface_id": sample.surface_id,
         "module_id": sample.module_id,
@@ -1386,6 +1438,7 @@ fn profiling_backend_sample_json(
     serde_json::json!({
         "stage": sample.stage.label(),
         "order": sample.order,
+        "timestamp_micros": sample.timestamp_micros,
         "duration_micros": sample.duration_micros,
         "trigger_kind": sample.trigger_kind,
     })

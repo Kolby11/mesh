@@ -428,10 +428,18 @@ impl FrontendSurfaceComponent {
             .collect::<Vec<_>>();
 
         self.record_duplicate_surface_shortcut_diagnostics(&resolved);
+        let mut shortcuts_by_keybind = HashMap::with_capacity(resolved.len());
+        for shortcut in &resolved {
+            shortcuts_by_keybind
+                .entry(shortcut.keybind_id.clone())
+                .or_insert_with(Vec::new)
+                .push(format_shortcut_for_accessibility(shortcut));
+        }
         *self.resolved_surface_shortcuts_cache.borrow_mut() = Some(ResolvedSurfaceShortcutsCache {
             keyboard_settings: keyboard_settings.clone(),
             locale: active_locale,
             shortcuts: resolved.clone(),
+            shortcuts_by_keybind,
         });
         resolved
     }
@@ -556,15 +564,14 @@ impl FrontendSurfaceComponent {
             return;
         }
         let keyboard_settings = self.current_keyboard_settings();
-        let mut shortcuts_by_keybind: HashMap<String, Vec<String>> = HashMap::new();
-        for shortcut in self.resolved_surface_shortcuts(&keyboard_settings) {
-            let accessibility_shortcut = format_shortcut_for_accessibility(&shortcut);
-            shortcuts_by_keybind
-                .entry(shortcut.keybind_id)
-                .or_default()
-                .push(accessibility_shortcut);
+        // Resolve once to validate the cache key and populate the derived
+        // accessibility index on a miss. Subsequent finalize passes borrow
+        // the preformatted index instead of rebuilding it.
+        self.resolved_surface_shortcuts(&keyboard_settings);
+        let cache = self.resolved_surface_shortcuts_cache.borrow();
+        if let Some(cached) = cache.as_ref() {
+            annotate_nodes_by_keybind(tree, &cached.shortcuts_by_keybind);
         }
-        annotate_nodes_by_keybind(tree, &shortcuts_by_keybind);
     }
 
     pub(in crate::shell::component) fn debug_surface_keybinds(
@@ -928,11 +935,17 @@ fn annotate_nodes_by_keybind(
     node: &mut WidgetNode,
     shortcuts_by_keybind: &HashMap<String, Vec<String>>,
 ) {
-    if let Some(keybind_id) = node.attributes.get("keybind").cloned()
-        && let Some(shortcuts) = shortcuts_by_keybind.get(&keybind_id)
-    {
+    let (mut replace_keybind_label, shortcuts) = match node.attributes.get("keybind") {
+        Some(keybind_id) => (
+            node.accessibility.keyboard_shortcut.as_deref() == Some(keybind_id),
+            shortcuts_by_keybind.get(keybind_id),
+        ),
+        None => (false, None),
+    };
+    if let Some(shortcuts) = shortcuts {
         for shortcut in shortcuts {
-            apply_accessibility_shortcut(node, &keybind_id, shortcut);
+            apply_accessibility_shortcut(node, replace_keybind_label, shortcut);
+            replace_keybind_label = false;
         }
     }
     for child in &mut node.children {
@@ -942,12 +955,12 @@ fn annotate_nodes_by_keybind(
 
 fn apply_accessibility_shortcut(
     node: &mut WidgetNode,
-    keybind_id: &str,
+    replace_keybind_label: bool,
     accessibility_shortcut: &str,
 ) {
     match node.accessibility.keyboard_shortcut.as_deref() {
         Some(existing) if existing == accessibility_shortcut => {}
-        Some(existing) if existing == keybind_id => {
+        Some(_) if replace_keybind_label => {
             node.accessibility.keyboard_shortcut = Some(accessibility_shortcut.to_string());
         }
         Some(existing) => {
@@ -999,7 +1012,7 @@ mod shortcut_annotation_tests {
             .get("keybind")
             .is_some_and(|value| value == keybind_id)
         {
-            apply_accessibility_shortcut(node, keybind_id, accessibility_shortcut);
+            apply_accessibility_shortcut(node, false, accessibility_shortcut);
             return;
         }
 
@@ -1095,5 +1108,57 @@ mod shortcut_annotation_tests {
             new_time < old_time,
             "single traversal should beat one tree walk per shortcut declaration"
         );
+    }
+
+    // cargo test -p mesh-core-shell --release -- cached_shortcut_accessibility_index_beats_rebuild --ignored --nocapture
+    #[test]
+    #[ignore = "release-only cached shortcut index microbenchmark"]
+    fn cached_shortcut_accessibility_index_beats_rebuild() {
+        let keybinds = 24;
+        let resolved: Vec<_> = (0..keybinds)
+            .map(|index| ResolvedSurfaceShortcut {
+                keybind_id: format!("action-{index}"),
+                key: char::from(b'a' + (index as u8 % 26)).to_string(),
+                modifiers: vec!["Control".into()],
+                trigger_kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                source: KeybindResolutionSource::ModuleDefault,
+            })
+            .collect();
+        let mut cached = HashMap::with_capacity(resolved.len());
+        for shortcut in &resolved {
+            cached
+                .entry(shortcut.keybind_id.clone())
+                .or_insert_with(Vec::new)
+                .push(format_shortcut_for_accessibility(shortcut));
+        }
+        let iterations = 1_000usize;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let mut rebuilt = HashMap::with_capacity(resolved.len());
+            for shortcut in &resolved {
+                rebuilt
+                    .entry(shortcut.keybind_id.clone())
+                    .or_insert_with(Vec::new)
+                    .push(format_shortcut_for_accessibility(shortcut));
+            }
+            old_total += std::hint::black_box(rebuilt.len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            new_total += std::hint::black_box(cached.len());
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_total, new_total);
+        eprintln!(
+            "shortcut accessibility index: rebuild {old_time:?}; cached borrow {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
     }
 }

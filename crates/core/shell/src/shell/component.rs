@@ -9,11 +9,11 @@ use super::types::{
 };
 use mesh_core_interaction::{
     annotate_overflow_tree, collect_focus_traversal, find_click_handler, find_event_handler,
-    find_node_bounds_by_key, find_node_by_key, find_node_path_at, find_nodes_by_keys,
-    find_scrollable_at_with_limits, find_tooltip_by_key, is_input_key, is_slider_key,
-    measure_content_size, next_focus_target, node_is_source, parse_namespaced_handler,
-    pointer_event_handler_hit, pointer_press_hit, scroll_into_view_offsets, scroll_limits,
-    source_element_tag,
+    find_node_bounds_by_key, find_node_by_key, find_node_path_at, find_node_with_bounds_by_key,
+    find_nodes_by_keys, find_scrollable_at_with_limits, find_tooltip_by_key, is_input_key,
+    is_slider_key, measure_content_size, next_focus_target, node_is_source,
+    parse_namespaced_handler, pointer_event_handler_hit, pointer_press_hit,
+    scroll_into_view_offsets, scroll_limits, source_element_tag,
 };
 mod animation;
 mod catalog;
@@ -490,6 +490,12 @@ pub(super) struct FrontendSurfaceComponent {
     transitions: TransitionAnimator,
     keyframe_animations: HashMap<String, mesh_core_animation::keyframes::ActiveKeyframeAnimation>,
     keyframe_rules: HashMap<String, mesh_core_animation::keyframes::KeyframeRule>,
+    previous_visual_styles_scratch:
+        HashMap<String, mesh_core_animation::transition::AnimatableStyle>,
+    /// Per-animation-pass key sets. Retain their hash-table allocations across
+    /// ticks because the same surface is usually traversed every frame.
+    animation_live_keys_scratch: HashSet<String>,
+    animation_live_keyframe_keys_scratch: HashSet<String>,
     has_animatable_style_rules: bool,
     has_active_keyframe_animation: bool,
     has_promoted_popover_wrappers: Cell<bool>,
@@ -568,6 +574,7 @@ struct ResolvedSurfaceShortcutsCache {
     keyboard_settings: mesh_core_config::KeyboardSettings,
     locale: String,
     shortcuts: Vec<ResolvedSurfaceShortcut>,
+    shortcuts_by_keybind: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -687,6 +694,9 @@ impl FrontendSurfaceComponent {
             transitions: TransitionAnimator::new(),
             keyframe_animations: HashMap::new(),
             keyframe_rules: HashMap::new(),
+            previous_visual_styles_scratch: HashMap::new(),
+            animation_live_keys_scratch: HashSet::new(),
+            animation_live_keyframe_keys_scratch: HashSet::new(),
             has_animatable_style_rules,
             has_active_keyframe_animation: false,
             has_promoted_popover_wrappers: Cell::new(false),

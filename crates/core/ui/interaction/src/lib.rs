@@ -8,10 +8,11 @@ pub use focus::{collect_focus_traversal, find_focusable_at, next_focus_target};
 pub use hit_test::find_click_handler;
 pub use hit_test::{
     PointerEventHandlerHit, PointerHit, PointerPressHit, PointerPressNode, find_event_handler,
-    find_node_bounds_by_key, find_node_by_key, find_node_path_at, find_nodes_by_keys,
-    find_tooltip_by_key, find_tooltip_container_bounds, find_tooltip_text_by_key, is_input_key,
-    is_slider_key, namespace_event_handlers, node_is_source, parse_namespaced_handler,
-    pointer_event_handler_hit, pointer_hit_test, pointer_press_hit, source_element_tag,
+    find_node_bounds_by_key, find_node_by_key, find_node_path_at, find_node_with_bounds_by_key,
+    find_nodes_by_keys, find_tooltip_by_key, find_tooltip_container_bounds,
+    find_tooltip_text_by_key, is_input_key, is_slider_key, namespace_event_handlers,
+    node_is_source, parse_namespaced_handler, pointer_event_handler_hit, pointer_hit_test,
+    pointer_press_hit, source_element_tag,
 };
 pub use scroll::{
     ScrollableHit, annotate_overflow_tree, find_scrollable_at, find_scrollable_at_with_limits,

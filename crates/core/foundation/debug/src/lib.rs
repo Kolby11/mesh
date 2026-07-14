@@ -323,6 +323,8 @@ pub struct ProfilingBackendStageSummary {
 pub struct ProfilingBackendSample {
     pub stage: ProfilingBackendStage,
     pub order: u64,
+    /// Monotonic microseconds since profiling was enabled.
+    pub timestamp_micros: u64,
     pub duration_micros: u64,
     pub trigger_kind: Option<String>,
 }
@@ -331,6 +333,8 @@ pub struct ProfilingBackendSample {
 pub struct ProfilingSample {
     pub stage: ProfilingStage,
     pub order: u64,
+    /// Monotonic microseconds since profiling was enabled.
+    pub timestamp_micros: u64,
     pub duration_micros: u64,
     pub surface_id: Option<String>,
     pub module_id: Option<String>,

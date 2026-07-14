@@ -525,7 +525,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             && !self.render_hooks_pending;
         let run_style_animation_pass = self.should_run_style_animation_pass();
         let previous_visual_styles = if run_style_animation_pass && self.last_tree.is_some() {
-            self.previous_visual_styles()
+            self.take_previous_visual_styles()
         } else {
             Default::default()
         };
@@ -577,6 +577,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 &previous_visual_styles,
                 &surface_css_props,
             );
+            self.restore_previous_visual_styles(previous_visual_styles);
         }
         let retained_dirty = self.retained_tree.update(&tree);
         let retained_tree_generation = self.retained_tree.generation();

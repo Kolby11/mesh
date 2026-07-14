@@ -6,7 +6,7 @@ use mesh_core_debug::{
     ProfilingSurfaceSnapshot,
 };
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const DEFAULT_RECENT_CAPACITY: usize = 16;
 
@@ -123,6 +123,7 @@ struct BackendAccumulator {
 #[derive(Debug)]
 pub(crate) struct ProfilingRuntimeState {
     session_id: u64,
+    session_started: Instant,
     next_sample_order: u64,
     recent_capacity: usize,
     shell: ScopeAccumulator,
@@ -134,6 +135,7 @@ impl Default for ProfilingRuntimeState {
     fn default() -> Self {
         Self {
             session_id: 0,
+            session_started: Instant::now(),
             next_sample_order: 0,
             recent_capacity: DEFAULT_RECENT_CAPACITY,
             shell: ScopeAccumulator::default(),
@@ -146,6 +148,7 @@ impl Default for ProfilingRuntimeState {
 impl ProfilingRuntimeState {
     pub(crate) fn reset_for_new_session(&mut self, session_id: u64) {
         self.session_id = session_id;
+        self.session_started = Instant::now();
         self.next_sample_order = 0;
         self.shell = ScopeAccumulator::default();
         self.surfaces.clear();
@@ -316,6 +319,11 @@ impl ProfilingRuntimeState {
         let sample = ProfilingSample {
             stage,
             order: self.next_sample_order,
+            timestamp_micros: self
+                .session_started
+                .elapsed()
+                .as_micros()
+                .min(u128::from(u64::MAX)) as u64,
             duration_micros: duration.as_micros().min(u128::from(u64::MAX)) as u64,
             surface_id: surface_id.map(str::to_string),
             module_id: module_id.map(str::to_string),
@@ -335,6 +343,11 @@ impl ProfilingRuntimeState {
         let sample = ProfilingBackendSample {
             stage,
             order: self.next_sample_order,
+            timestamp_micros: self
+                .session_started
+                .elapsed()
+                .as_micros()
+                .min(u128::from(u64::MAX)) as u64,
             duration_micros: duration.as_micros().min(u128::from(u64::MAX)) as u64,
             trigger_kind: trigger_kind.map(str::to_string),
         };

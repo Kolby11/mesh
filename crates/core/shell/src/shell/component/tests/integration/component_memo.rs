@@ -1,6 +1,6 @@
 use super::*;
 use crate::shell::ComponentContext;
-use crate::shell::component::catalog::FrontendCatalog;
+use crate::shell::component::catalog::{FrontendCatalog, ResolvedSlotContribution};
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_frontend::CompiledFrontendModule;
 use mesh_core_render::PixelBuffer;
@@ -127,6 +127,137 @@ label = ""
         node_with_content(component.last_tree.as_ref().unwrap(), "static").is_some(),
         "memoized child subtree still renders its content"
     );
+}
+
+fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
+    let mut parent_manifest = minimal_test_manifest(PARENT_ID);
+    parent_manifest
+        .provides_slots
+        .insert("main".into(), mesh_core_module::SlotDefinition::default());
+    let parent_compiled = CompiledFrontendModule {
+        manifest: parent_manifest,
+        source_path: PathBuf::from("src/main.mesh"),
+        component: parse_component("<template><slot name=\"main\"/></template>").unwrap(),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
+    };
+    let widget_id = "@test/memo-slot-widget";
+    let mut widget_manifest = minimal_test_manifest(widget_id);
+    widget_manifest.package.module_type = mesh_core_module::ModuleType::Widget;
+    let widget_compiled = CompiledFrontendModule {
+        manifest: widget_manifest,
+        source_path: PathBuf::from("src/main.mesh"),
+        component: parse_component("<template><text content=\"{label}\"/></template>").unwrap(),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
+    };
+    let catalog = FrontendCatalog {
+        modules: HashMap::from([
+            (
+                PARENT_ID.into(),
+                FrontendCatalogEntry {
+                    module_dir: PathBuf::from("."),
+                    compiled: parent_compiled.clone(),
+                },
+            ),
+            (
+                widget_id.into(),
+                FrontendCatalogEntry {
+                    module_dir: PathBuf::from("."),
+                    compiled: widget_compiled,
+                },
+            ),
+        ]),
+        slot_contributions: HashMap::from([(
+            format!("{PARENT_ID}:main"),
+            (0..contribution_count)
+                .map(|index| {
+                    let props = serde_json::Map::from_iter([(
+                        "label".into(),
+                        serde_json::Value::String(format!("static slot {index}")),
+                    )]);
+                    ResolvedSlotContribution {
+                        source_module_id: "@test/contributor".into(),
+                        widget_id: widget_id.into(),
+                        contribution_id: format!("status-{index}"),
+                        order: index as i64,
+                        props_fingerprint: crate::shell::component::memo::slot_props_fingerprint(
+                            &props,
+                        ),
+                        props,
+                    }
+                })
+                .collect(),
+        )]),
+    };
+    let mut component = FrontendSurfaceComponent::new(
+        parent_compiled,
+        PathBuf::from("."),
+        catalog,
+        InterfaceCatalog::default(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: PARENT_ID.into(),
+            surface_id: PARENT_ID.into(),
+            diagnostics: Diagnostics::new(PARENT_ID),
+        })
+        .unwrap();
+    component.visible = true;
+    component
+}
+
+#[test]
+fn unchanged_slot_contribution_reuses_memoized_subtree() {
+    let mut component = memo_slot_surface(1);
+
+    let theme = default_theme();
+    let mut initial = PixelBuffer::new(160, 60);
+    component.paint(&theme, 160, 60, &mut initial, 1.0).unwrap();
+    rebuild(&mut component, 160, 60);
+    let hits_before = component.component_memo_hit_count();
+    let second = rebuild(&mut component, 160, 60);
+
+    assert_eq!(component.component_memo_hit_count(), hits_before + 1);
+    assert_eq!(initial.data, second.data);
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "static slot 0").is_some());
+}
+
+// cargo test -p mesh-core-shell --release -- slot_memoized_rebuild_beats_full_reeval --ignored --nocapture
+#[test]
+#[ignore = "release-only slot contribution render memoization benchmark"]
+fn slot_memoized_rebuild_beats_full_reeval() {
+    let mut component = memo_slot_surface(12);
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(400, 300);
+    component.paint(&theme, 400, 300, &mut buffer, 1.0).unwrap();
+    rebuild(&mut component, 400, 300);
+    let iterations = 200;
+
+    let miss_started = std::time::Instant::now();
+    for _ in 0..iterations {
+        component.clear_component_memo();
+        rebuild(&mut component, 400, 300);
+    }
+    let miss_time = miss_started.elapsed();
+
+    rebuild(&mut component, 400, 300);
+    let hits_before = component.component_memo_hit_count();
+    let hit_started = std::time::Instant::now();
+    for _ in 0..iterations {
+        rebuild(&mut component, 400, 300);
+    }
+    let hit_time = hit_started.elapsed();
+    let hits = component.component_memo_hit_count() - hits_before;
+
+    eprintln!(
+        "slot memoization: forced-miss rebuilds {miss_time:?}; memoized rebuilds {hit_time:?}; ratio {:.1}x; hits={hits}",
+        miss_time.as_secs_f64() / hit_time.as_secs_f64()
+    );
+    assert_eq!(hits, iterations * 12);
+    assert!(hit_time < miss_time);
 }
 
 #[test]

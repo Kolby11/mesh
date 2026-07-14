@@ -183,6 +183,8 @@ pub struct RetainedDisplayList {
     ordered_entries_scratch: Vec<(DisplayListKey, DisplayListEntry)>,
     next_entries_scratch: HashMap<DisplayListKey, DisplayListEntry>,
     next_subtrees_scratch: HashMap<NodeId, Arc<RetainedPaintSubtree>>,
+    dirty_ancestors_scratch: HashSet<NodeId>,
+    ancestor_path_scratch: Vec<NodeId>,
     command_spans: Arc<[RetainedCommandSpan]>,
     paint_commands: Arc<[DisplayPaintCommand]>,
     command_kinds: Arc<[DisplayPaintCommandKind]>,
@@ -203,6 +205,8 @@ impl Default for RetainedDisplayList {
             ordered_entries_scratch: Vec::new(),
             next_entries_scratch: HashMap::new(),
             next_subtrees_scratch: HashMap::new(),
+            dirty_ancestors_scratch: HashSet::new(),
+            ancestor_path_scratch: Vec::new(),
             command_spans: Vec::new().into(),
             paint_commands: Vec::new().into(),
             command_kinds: Vec::new().into(),
@@ -853,6 +857,7 @@ impl RetainedDisplayList {
         if self.root_id == Some(root.id)
             && self.surface_size == Some((surface.width, surface.height))
             && self.entries == next
+            && !dirty_summary.is_some_and(RenderObjectDirtySummary::any)
         {
             next.clear();
             self.next_entries_scratch = next;
@@ -887,7 +892,16 @@ impl RetainedDisplayList {
             local_metrics,
         ) = match decision {
             LocalReuseDecision::RebuildDirtySubtrees => {
-                let rebuild_ancestors = collect_dirty_ancestor_ids(root, dirty_node_ids);
+                let mut rebuild_ancestors = std::mem::take(&mut self.dirty_ancestors_scratch);
+                rebuild_ancestors.clear();
+                let mut ancestor_path = std::mem::take(&mut self.ancestor_path_scratch);
+                ancestor_path.clear();
+                collect_dirty_ancestor_ids_into(
+                    root,
+                    dirty_node_ids,
+                    &mut ancestor_path,
+                    &mut rebuild_ancestors,
+                );
                 let mut next_subtrees = std::mem::take(&mut self.next_subtrees_scratch);
                 next_subtrees.clear();
                 let mut local_metrics = LocalReuseMetrics::default();
@@ -907,6 +921,8 @@ impl RetainedDisplayList {
                     &mut next_subtrees,
                     &mut local_metrics,
                 );
+                self.dirty_ancestors_scratch = rebuild_ancestors;
+                self.ancestor_path_scratch = ancestor_path;
                 (
                     Arc::clone(&subtree.commands),
                     Arc::clone(&subtree.kinds),
@@ -1596,23 +1612,27 @@ fn collect_display_entries(
     }
 }
 
+#[cfg(test)]
 fn collect_dirty_ancestor_ids(
     root: &WidgetNode,
     dirty_node_ids: &HashSet<NodeId>,
 ) -> HashSet<NodeId> {
-    if dirty_node_ids.is_empty() {
-        return HashSet::new();
-    }
     let mut ancestors = HashSet::new();
     let mut path = Vec::new();
-    collect_dirty_ancestor_ids_inner(
-        root,
-        dirty_node_ids,
-        dirty_node_ids.len(),
-        &mut path,
-        &mut ancestors,
-    );
+    collect_dirty_ancestor_ids_into(root, dirty_node_ids, &mut path, &mut ancestors);
     ancestors
+}
+
+fn collect_dirty_ancestor_ids_into(
+    root: &WidgetNode,
+    dirty_node_ids: &HashSet<NodeId>,
+    path: &mut Vec<NodeId>,
+    ancestors: &mut HashSet<NodeId>,
+) {
+    if dirty_node_ids.is_empty() {
+        return;
+    }
+    collect_dirty_ancestor_ids_inner(root, dirty_node_ids, dirty_node_ids.len(), path, ancestors);
 }
 
 fn collect_dirty_ancestor_ids_inner(
@@ -4068,6 +4088,54 @@ mod tests {
         );
         assert_eq!(old_total, new_total);
         assert!(new_time * 2 < old_time);
+    }
+
+    // cargo test -p mesh-core-render --release -- dirty_ancestor_scratch_reuse_beats_fresh_allocations --ignored --nocapture
+    #[test]
+    #[ignore = "release-only dirty ancestor scratch microbenchmark"]
+    fn dirty_ancestor_scratch_reuse_beats_fresh_allocations() {
+        fn build_subtree(next_id: &mut NodeId, width: usize, depth: usize) -> WidgetNode {
+            let id = *next_id;
+            *next_id += 1;
+            let mut root = node(id, "box", 0.0, 0.0, 20.0, 20.0);
+            if depth > 0 {
+                root.children = (0..width)
+                    .map(|_| build_subtree(next_id, width, depth - 1))
+                    .collect();
+            }
+            root
+        }
+
+        let mut next_id = 1;
+        let root = build_subtree(&mut next_id, 5, 5);
+        let dirty = HashSet::from([root.children[0].children[0].children[0].id]);
+        let iterations = 50_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total += std::hint::black_box(collect_dirty_ancestor_ids(&root, &dirty).len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0usize;
+        let mut ancestors = HashSet::new();
+        let mut path = Vec::new();
+        for _ in 0..iterations {
+            ancestors.clear();
+            path.clear();
+            collect_dirty_ancestor_ids_into(&root, &dirty, &mut path, &mut ancestors);
+            new_total += std::hint::black_box(ancestors.len());
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_total, new_total);
+        eprintln!(
+            "dirty ancestor scratch: fresh {old_time:?}; reused {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
     }
 
     #[test]

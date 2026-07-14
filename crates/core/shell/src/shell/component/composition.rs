@@ -8,6 +8,37 @@ use mesh_core_module::ModuleType;
 
 use super::{FrontendSurfaceComponent, PROMOTED_POPOVER_MARKER, memo};
 
+fn slot_instance_key(host_instance_key: &str, slot_name: &str, contribution_id: &str) -> String {
+    let mut key = String::with_capacity(
+        host_instance_key.len() + "/slot:".len() + slot_name.len() + 1 + contribution_id.len(),
+    );
+    key.push_str(host_instance_key);
+    key.push_str("/slot:");
+    key.push_str(slot_name);
+    key.push('/');
+    key.push_str(contribution_id);
+    key
+}
+
+fn embedded_instance_key(host_instance_key: &str, kind: &str, identifier: &str) -> String {
+    let mut key =
+        String::with_capacity(host_instance_key.len() + 1 + kind.len() + 1 + identifier.len());
+    key.push_str(host_instance_key);
+    key.push('/');
+    key.push_str(kind);
+    key.push(':');
+    key.push_str(identifier);
+    key
+}
+
+fn slot_id(module_id: &str, slot_name: &str) -> String {
+    let mut id = String::with_capacity(module_id.len() + 1 + slot_name.len());
+    id.push_str(module_id);
+    id.push(':');
+    id.push_str(slot_name);
+    id
+}
+
 impl FrontendCompositionResolver for FrontendSurfaceComponent {
     fn evaluate_template_expression(
         &self,
@@ -47,7 +78,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
     ) -> Option<WidgetNode> {
         if let Some(entry) = self.frontend_catalog.modules.get(&host.package.id) {
             if let Some(component) = entry.compiled.local_components.get(alias) {
-                let instance_key = format!("{host_instance_key}/local:{alias}");
+                let instance_key = embedded_instance_key(host_instance_key, "local", alias);
                 let props_fingerprint =
                     memo::component_props_fingerprint(props, prop_handler_calls);
                 if let Some(node) = self.lookup_component_memo(
@@ -138,7 +169,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             return Some(placeholder);
         }
 
-        let instance_key = format!("{host_instance_key}/import:{alias}");
+        let instance_key = embedded_instance_key(host_instance_key, "import", alias);
         let props_fingerprint = memo::component_props_fingerprint(props, prop_handler_calls);
         if let Some(node) = self.lookup_component_memo(
             &instance_key,
@@ -207,7 +238,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             return Vec::new();
         };
 
-        let slot_id = format!("{}:{slot_name}", host.package.id);
+        let slot_id = slot_id(&host.package.id, slot_name);
         let accepts_widget = host
             .provides_slots
             .get(slot_name)
@@ -215,8 +246,9 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             .map(|accepts| accepts == "widget")
             .unwrap_or(false);
 
-        let mut nodes = Vec::new();
-        for contribution in self.frontend_catalog.slot_contributions_for(&slot_id) {
+        let contributions = self.frontend_catalog.slot_contributions_for(&slot_id);
+        let mut nodes = Vec::with_capacity(contributions.len());
+        for contribution in contributions {
             let Some(entry) = self.frontend_catalog.modules.get(&contribution.widget_id) else {
                 nodes.push(self.build_error_widget(format!(
                     "slot '{slot_id}' references missing module '{}'",
@@ -235,22 +267,39 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 continue;
             }
 
-            let props_json: HashMap<String, serde_json::Value> = contribution
-                .props
-                .iter()
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect();
-            let instance_key = format!(
-                "{host_instance_key}/slot:{slot_name}/{}",
-                contribution.contribution_id
-            );
-            let mut node = self.render_embedded_instance(
+            let instance_key =
+                slot_instance_key(host_instance_key, slot_name, &contribution.contribution_id);
+            let mut node = if let Some(node) = self.lookup_component_memo(
                 &instance_key,
-                &contribution.widget_id,
-                &props_json,
+                contribution.props_fingerprint,
                 container_width,
                 container_height,
-            );
+            ) {
+                node
+            } else {
+                let marks_before = self.memo_effect_marks();
+                let props_json: HashMap<String, serde_json::Value> = contribution
+                    .props
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect();
+                let node = self.render_embedded_instance(
+                    &instance_key,
+                    &contribution.widget_id,
+                    &props_json,
+                    container_width,
+                    container_height,
+                );
+                self.store_component_memo(
+                    &instance_key,
+                    contribution.props_fingerprint,
+                    container_width,
+                    container_height,
+                    marks_before,
+                    &node,
+                );
+                node
+            };
             node.attributes.insert(
                 "_mesh_slot_source".into(),
                 contribution.source_module_id.clone(),
@@ -274,11 +323,17 @@ fn embedded_root_is_popover(node: &WidgetNode) -> bool {
 }
 
 fn runtime_props_json(props: &BTreeMap<String, String>) -> HashMap<String, serde_json::Value> {
-    let public_count = props
-        .keys()
-        .filter(|key| runtime_prop_is_public(key.as_str()))
-        .count();
-    let mut props_json = HashMap::with_capacity(public_count);
+    // Typical embedded components have only a few props. Avoid a separate
+    // count pass there while keeping precise capacity for larger prop maps.
+    let capacity = if props.len() <= 8 {
+        props.len()
+    } else {
+        props
+            .keys()
+            .filter(|key| runtime_prop_is_public(key.as_str()))
+            .count()
+    };
+    let mut props_json = HashMap::with_capacity(capacity);
     for (key, value) in props {
         if runtime_prop_is_public(key) {
             props_json.insert(key.clone(), decode_prop_value(value));
@@ -324,17 +379,15 @@ fn apply_prop_handler_calls(
         }
         return;
     }
-    let handlers_by_value = prop_handler_calls
-        .iter()
-        .filter_map(|(prop_name, call)| {
-            props.get(prop_name).map(|handler| (handler.as_str(), call))
-        })
+    let mut handlers_by_value = HashMap::with_capacity(prop_handler_calls.len());
+    for (prop_name, call) in prop_handler_calls {
+        let Some(handler) = props.get(prop_name) else {
+            continue;
+        };
         // Preserve the old BTreeMap iteration behavior when multiple props
         // resolve to the same handler: the first prop wins.
-        .fold(HashMap::new(), |mut index, (handler, call)| {
-            index.entry(handler).or_insert(call);
-            index
-        });
+        handlers_by_value.entry(handler.as_str()).or_insert(call);
+    }
     apply_indexed_prop_handler_calls(node, &handlers_by_value);
 }
 
@@ -363,21 +416,19 @@ fn apply_indexed_prop_handler_calls(
     node: &mut WidgetNode,
     handlers_by_value: &HashMap<&str, &EventHandlerCall>,
 ) {
-    let handler_calls = node
-        .event_handlers
-        .iter()
-        .filter_map(|(event_name, handler)| {
-            handlers_by_value.get(handler.as_str()).map(|call| {
-                (
-                    event_name.clone(),
-                    EventHandlerCall {
-                        handler: handler.clone(),
-                        args: call.args.clone(),
-                    },
-                )
-            })
-        })
-        .collect::<Vec<_>>();
+    let mut handler_calls = Vec::with_capacity(node.event_handlers.len());
+    for (event_name, handler) in &node.event_handlers {
+        let Some(call) = handlers_by_value.get(handler.as_str()) else {
+            continue;
+        };
+        handler_calls.push((
+            event_name.clone(),
+            EventHandlerCall {
+                handler: handler.clone(),
+                args: call.args.clone(),
+            },
+        ));
+    }
     for (event_name, call) in handler_calls {
         node.event_handler_calls.insert(event_name, call);
     }
@@ -403,6 +454,87 @@ fn simple_state_binding(binding: &str) -> Option<String> {
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn slot_instance_key_matches_legacy_format() {
+        assert_eq!(
+            slot_instance_key("@mesh/panel/local:Toolbar", "main", "battery-status"),
+            "@mesh/panel/local:Toolbar/slot:main/battery-status"
+        );
+        assert_eq!(
+            embedded_instance_key("@mesh/panel/local:Toolbar", "local", "BatteryStatus"),
+            "@mesh/panel/local:Toolbar/local:BatteryStatus"
+        );
+        assert_eq!(
+            embedded_instance_key("@mesh/panel/local:Toolbar", "import", "audio_controls"),
+            "@mesh/panel/local:Toolbar/import:audio_controls"
+        );
+        assert_eq!(
+            slot_id("@mesh/panel", "primary_actions"),
+            "@mesh/panel:primary_actions"
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- slot_instance_key_presizing_beats_format_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only slot instance-key construction microbenchmark"]
+    fn slot_instance_key_presizing_beats_format_benchmark() {
+        let host = "@mesh/panel/local:Toolbar/import:StatusCluster";
+        let slot = "primary_actions";
+        let contribution = "network-status-very-long-contribution-identifier";
+        let iterations = 1_000_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total ^= std::hint::black_box(format!("{host}/slot:{slot}/{contribution}").len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            new_total ^= std::hint::black_box(slot_instance_key(host, slot, contribution).len());
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "slot instance key: format {old_time:?}; presized {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- slot_id_presizing_beats_format_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only slot id construction microbenchmark"]
+    fn slot_id_presizing_beats_format_benchmark() {
+        let module_id = "@mesh/panel/local:StatusCluster/import:NetworkControls";
+        let name = "primary_actions";
+        let iterations = 1_000_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total ^= std::hint::black_box(format!("{module_id}:{name}").len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            new_total ^= std::hint::black_box(slot_id(module_id, name).len());
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "slot id: format {old_time:?}; presized {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
 
     fn handler_tree(child_count: usize) -> WidgetNode {
         let mut root = WidgetNode::new("box");

@@ -114,12 +114,26 @@ pub(super) struct ComponentRuntime {
     pub(super) entering_child_node_keys: HashSet<String>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct ServiceDeliveryIndex {
     pub(super) dirty: bool,
     pub(super) fallback_components: Vec<usize>,
     pub(super) update_services: HashMap<String, Vec<usize>>,
     pub(super) interface_events: HashMap<String, HashMap<String, Vec<usize>>>,
+}
+
+impl Default for ServiceDeliveryIndex {
+    fn default() -> Self {
+        Self {
+            // Components may be registered before the first delivery. Build
+            // the index lazily from that initial component set instead of
+            // treating an empty index as authoritative.
+            dirty: true,
+            fallback_components: Vec::new(),
+            update_services: HashMap::new(),
+            interface_events: HashMap::new(),
+        }
+    }
 }
 
 impl ServiceDeliveryIndex {

@@ -184,10 +184,10 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
 
 ### P0 — measurement infrastructure (do before more hot-path work)
 
-- [ ] Fix the local dev environment (`xkbcommon.pc`, `freetype`, `fontconfig`
+- [x] Fix the local dev environment (`xkbcommon.pc`, `freetype`, `fontconfig`
       via `nix develop`) so `mesh-core-shell` / `mesh-core-render` tests and
-      in-crate benchmarks run again — several recent changes shipped with
-      standalone approximations instead of in-crate verification.
+      in-crate benchmarks run again — verified 2026-07-14 with the shell
+      regression suite and a release-only in-crate benchmark.
 - [ ] Canonical shell workload profiles (idle, pointer move, text update,
       scroll, icon grid, animation, theme reload, resize) → v1.21 (L tier 3
       harness; several open items say "measure with v1.21 profiles first")
@@ -196,7 +196,12 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
 - [ ] L tier 2 — cause attribution: per-rule restyle time, per-instance build
       time, per-command-kind paint time, wasted-work counters (L)
 - [ ] L tier 3 — `mesh.debug.profiling_stream` over IPC, Chrome-trace/Perfetto
-      export, CI regression baseline with tolerance band (L)
+      export, CI regression baseline with tolerance band (L). Progress
+      2026-07-14: the existing `mesh.debug` service payload now exposes a
+      bounded, order-stable `profiling_stream` of shell and surface samples,
+      deduplicated against shell roll-ups. Chrome-trace/Perfetto-compatible
+      complete events now include monotonic session timestamps, durations, and
+      per-surface lanes. Remaining: CI tolerance enforcement.
 
 ### P0 — scheduling & invalidation
 
@@ -228,30 +233,76 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       benchmark: 200 rebuild+paint cycles of a 12-child surface measured
       212.7ms forced-miss versus 134.5ms memoized (1.6x end-to-end,
       including the untouched restyle/layout/paint stages).
-      Remaining: repeated same-alias instances share one runtime and always
-      miss (needs per-occurrence instance identity — see the "multiple
-      instances" module-system item); `render_slot` instances are not yet
-      memoized; the M `BuildEffects` formalization still applies to future
-      build side effects (new effects must add a mark counter or veto).
+      Added 2026-07-14: manifest slot contributions now share the same
+      generation-aware memo contract, keyed by a stable JSON-props fingerprint;
+      their `_mesh_slot_source` annotation remains per-render and portal writes
+      still veto caching. Release benchmark: 200 rebuild+paint cycles of 12
+      slot contributions measured 133.6ms forced-miss versus 96.1ms memoized
+      (1.4x end-to-end). Slot-prop cache probes now hash the ordered manifest
+      map directly rather than allocate/sort a scratch vector; 1M 24-prop
+      fingerprints measured 894.2ms versus 860.8ms (~3.9% faster). Their
+      fingerprint is now computed once while the immutable frontend catalog is
+      built, removing that hash from every render-time slot memo probe; 1M
+      24-prop probes measured 949.6ms render-time hashing versus 0.44ms for
+      the precomputed read (~2162x for the eliminated operation). Embedded
+      local/import/slot instance keys now use a single pre-sized allocation
+      rather than `format!`; 1M representative slot keys measured 76.2ms
+      versus 13.8ms (~5.5x faster). Slot catalog lookup IDs and memo
+      descendant prefixes now also use one pre-sized allocation: 1M long IDs
+      measured 55.1ms versus 0.44ms and 47.5ms versus 0.43ms respectively.
+      Embedded local runtime IDs use the same construction, and cycle detection
+      short-circuits after its second matching ancestor; a 64-entry-stack
+      benchmark measured 74.2ms formatting/full scan versus 1.3ms for the
+      helpers (~57.1x combined). The compiler's handler namespace construction
+      now uses the pre-sized path too (83.6ms versus 13.5ms for 1M names,
+      ~6.2x). Remaining:
+      repeated same-alias instances share one
+      runtime and always miss (needs per-occurrence instance identity — see the
+      "multiple instances" module-system item); the M `BuildEffects`
+      formalization still applies to future build side effects (new effects must
+      add a mark counter or veto).
 - [ ] Affected-subtree template re-evaluation via
       `NodeServiceFieldDependencies`; `narrow_script_update` still rebuilds
-      the full tree before diffing → v1.27
+      the full tree before diffing → v1.27. Added 2026-07-14: narrow ancestor
+      expansion now walks a reusable ancestor stack instead of allocating a
+      full NodeId→parent map; the 1,365-node benchmark measured 78.2ms parent
+      map versus 29.7ms stack walk (2.6x). An interim pass reserved the
+      retained-node count for fresh narrow/layout snapshot maps. Follow-up
+      2026-07-14: narrow and layout analysis now walks the retained slotmap directly
+      instead of building a temporary fresh snapshot map; a same-run release
+      benchmark measured 396.1ms map-based versus 317.1ms direct over 2,000
+      passes (1.25x). The returned affected-node sets now reserve a capped
+      initial capacity to avoid resize churn without overallocating sparse
+      changes; a 4,096-node release microbenchmark measured 2.327s growing
+      versus 2.238s reserved (1.04x). Service-field reverse dependencies now
+      use a nested service→field index, removing two temporary String
+      allocations per queried field; 1M release lookups measured 33.7ms
+      tuple-key allocation versus 27.7ms borrowed lookup (1.2x).
 - [ ] Generation-aware retained-tree diff: skip clean subtrees using dirty
       bits → v1.27. Remaining after landed progress: clean-subtree skipping,
-      slotmap-keyed snapshot reuse (D).
+      slotmap-keyed snapshot reuse (D). `RenderObjectTree` now counts visited
+      nodes and skips the full retained-object stale-entry scan on clean
+      non-structural updates; a 4,096-entry release benchmark measured 65.3µs
+      retain scanning versus 10.7µs conditional skip (6.1x).
 - [ ] Triple full-tree fingerprinting on dirty frames: make
       `RetainedWidgetTree` the single fingerprint pass; render-object tree and
       display entries consume its per-node dirty flags (N).
 - [ ] Any non-clean frame bypasses all generation shortcuts
       (`use_generation_shortcuts` requires an empty dirty set); widen to
-      per-node dirty scoping together with the §N unification (P).
+      per-node dirty scoping together with the §N unification (P). Interaction
+      changed-key sets now reserve path-derived capacity, and descendant nodes
+      of an already-affected interaction subtree skip redundant changed-set
+      hash probes.
 - [ ] Fuse the remaining unconditional `finalize_tree` annotation walks into
       one traversal → v1.27 (D; conditional walks already presence-gated,
       naive fusion rejected — see log).
 - [ ] Display-list segment/rope command storage → v1.21: stop flattening
       retained subtrees into per-ancestor copies (O(n × depth) storage and
       re-copy, N addendum); dirty parents with layout/clip/transform changes
-      still force descendant command rebuilds (N addendum).
+      still force descendant command rebuilds (N addendum). Dirty-ancestor
+      collection now reuses its path and ancestor-set allocations during
+      retained subtree rebuilds; a release benchmark measured 6.39ms fresh
+      versus 4.38ms reused over 50,000 sparse walks (1.46x).
 - [ ] Retain Taffy node state across structural layout passes;
       `build_taffy_tree` still rebuilds a fresh TaffyTree per structural
       layout → v1.21 (non-structural dirty-node sync landed, T).
@@ -295,7 +346,31 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       over 100,000 handler probes measured 342.5ms rebuilding proxy/function
       objects versus 134.9ms cached (~2.5x faster). Remaining: Rust-side lazy
       metrics storage so changed frames avoid whole-snapshot JSON→Lua
-      publication when scripts read only a few fields.
+      publication when scripts read only a few fields. Added 2026-07-14:
+      metrics collection now looks up `id`, `ref`, and `_mesh_bind_this` once
+      per node and reuses those borrows for publication, avoiding the prior
+      contains-then-get map probes. The existing release ref-only benchmark
+      remains 7.24s collect-both versus 3.91s refs-only (~1.9x).
+      Added 2026-07-14: refs publication now applies the live proxy while
+      borrowing the snapshot, then moves that same JSON value into script
+      state instead of cloning the full refs table. A release ownership
+      benchmark measured 1.601s clone versus 996.7ms move over 20,000
+      256-entry snapshots (1.6x).
+      Ref-name → node-key publication now reuses its `HashMap` backing storage
+      between paints; a release benchmark measured 1.368s fresh versus 719ms
+      reused over 20,000 512-entry maps (1.9x).
+      Added 2026-07-14: runtime annotation now indexes the active hover path
+      once per tree pass rather than scanning it for every node; the release
+      lookup benchmark measured 137.7ms path scans versus 56.8ms hash-set
+      membership (2.4x). Shortcut accessibility annotation also borrows each
+      node's keybind ID for lookup and pre-sizes its keybind index from the
+      resolved shortcut count. Finalization now reuses prior hover/focus
+      snapshot storage via `clone_from`, and interaction result sets reserve
+      their directly changed-key lower bound only on non-empty changes. The
+      resolved shortcut cache now also retains the preformatted accessibility
+      index, so unchanged finalize passes borrow it instead of rebuilding the
+      map; the release microbenchmark measured 3.297ms rebuild versus 2.4µs
+      cached lookup over 1,000 probes.
 - [ ] Handler dispatch: graph-wide instance-key interning (B; dispatch-path
       borrowing landed). Progress 2026-07-13: scheduled handler dispatch now
       precomputes the `__mesh_embed__::{instance_key}::{handler}` target when
@@ -303,6 +378,9 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       handler string instead of cloning instance+handler and formatting every
       time. Release benchmark over 5.12M due-handler prep entries measured
       351.4ms format-on-tick versus 207.8ms cached-name (~1.7x faster).
+      The schedule-time namespace builder now uses one pre-sized allocation;
+      1M representative names measured 83.7ms `format!` versus 13.5ms
+      pre-sized construction (~6.2x faster).
       Follow-up same day: denied service-command routing now checks the
       borrowed cached control capability before command/interface string
       allocation; release benchmark over 200,000 denied events measured 36.3ms
@@ -324,7 +402,11 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       legacy fallback gate. Index refreshes after component registration,
       mount, and render/template dependency discovery. Release benchmark:
       20,000 `mesh.audio` events across 256 summarized components measured
-      202.8ms full scan versus 20.3ms indexed (~10x faster).
+      202.8ms full scan versus 20.3ms indexed (~10x faster). Validation
+      2026-07-14 fixed initial lazy-index construction so the first event is
+      never dropped; the rebuilt index is then marked clean. A fresh release
+      run measured 204.4ms full scan versus 15.3ms indexed (~13.4x), with the
+      accepted-delivery profiling regression covered.
 - [ ] Push-based backend host API primitives (D-Bus signal subscribe,
       fd/socket watch, stream adoption) so providers are event-driven and the
       safety poll is fallback (C). Includes investigating `pw-dump --monitor`
@@ -385,7 +467,10 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       `focused_key`, `scroll_offsets`, `input_values`, `slider_values`);
       migrate to `NodeId` together with metrics/refs publication so
       `_mesh_key` strings lose their last hot consumers (Q); runtime key-path
-      strings are still allocated for interaction/refs (J).
+      strings are still allocated for interaction/refs (J). Scroll overflow
+      annotation now reserves the reusable root key-path buffer; a 20,000-pass
+      release benchmark measured 796.1ms unreserved versus 769.5ms reserved
+      (1.03x).
 - [ ] Allocator-level profile mode (allocation counts per render pass) →
       v1.23
 - [ ] Magic-string protocol at the composition boundary (`__mesh_embed__::`,
@@ -405,7 +490,13 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
 - [ ] No keyed list diffing; `{#for}` identity is positional — add `key=`
       (pairs with component memoization and v1.27).
 - [ ] Per-rebuild prop churn — remaining: prop state writes and style-rule
-      merge caching (M).
+      merge caching (M). Added 2026-07-14: slot result vectors reserve their
+      catalog-known contribution count; small (up to eight) runtime prop maps
+      skip a separate public-prop count pass; multi-prop handler indexes and
+      per-node matched-call buffers reserve their known upper bounds. The
+      existing release benchmarks continue to show runtime-prop construction
+      at 608.1ms filtered collect versus 441.8ms presized (1.4x) and indexed
+      handler matching at 944.8ms repeated scan versus 524.2ms (1.8x).
 - [x] Per-node build allocations — unique tracked-read string allocations
       reduced 2026-07-13: service proxy tracking now checks the per-evaluation
       observed-field set by borrowed `&str` before allocating `String`s for a
@@ -464,10 +555,17 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       degraded-mode boot, then delete (V).
 - [ ] Slider drags with `change`/`release` handlers still take script
       invalidation; closing this fully needs v1.18 narrow invalidation
-      (J; handlerless drags already use interaction restyle).
+      (J; handlerless drags already use interaction restyle). Added 2026-07-14:
+      active-slider pointer moves now resolve the node and transformed,
+      scroll-adjusted bounds in one allocation-free traversal rather than
+      separate node and bounds searches. Paired text-input and hover
+      enter/leave handler dispatches also reuse one immutable JSON event
+      payload instead of cloning it for the second synchronous handler.
 - [ ] Interaction frames still re-apply string style declarations per node;
       folds into typed declarations → v1.23 and narrower invalidation →
-      v1.18 (P1 renderer item; indexed declaration metadata landed).
+      v1.18 (P1 renderer item; indexed declaration metadata landed). Animation
+      frames now reuse live-key sets and previous-style snapshot storage;
+      release microbenchmarks measured 2.35x and 1.68x over fresh allocations.
 - [ ] Minor: display-list `update_inner` is ~220 lines mixing diff, damage,
       and metrics assembly; split when next touched (N).
 

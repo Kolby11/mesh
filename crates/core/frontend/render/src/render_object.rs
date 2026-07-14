@@ -156,7 +156,7 @@ impl RenderObjectTree {
         self.update_epoch += 1;
         let update_epoch = self.update_epoch;
 
-        update_retained_render_objects(
+        let visited = update_retained_render_objects(
             root,
             None,
             &mut self.objects,
@@ -165,10 +165,16 @@ impl RenderObjectTree {
             &mut dirty_nodes,
         );
 
-        let before_remove = self.objects.len();
-        self.objects
-            .retain(|_, object| object.last_seen_epoch == update_epoch);
-        dirty.removed = before_remove.saturating_sub(self.objects.len());
+        // A normal non-structural update visits every retained object and
+        // cannot leave stale entries behind. Avoid scanning the entire map
+        // with `retain` unless the visit count or map length proves that the
+        // tree structure changed.
+        if self.objects.len() != retained_len || visited != retained_len {
+            let before_remove = self.objects.len();
+            self.objects
+                .retain(|_, object| object.last_seen_epoch == update_epoch);
+            dirty.removed = before_remove.saturating_sub(self.objects.len());
+        }
 
         if self.root != Some(root.id) {
             dirty.reordered += usize::from(self.root.is_some());
@@ -278,7 +284,7 @@ fn update_retained_render_objects(
     update_epoch: u64,
     dirty: &mut RenderObjectDirtySummary,
     dirty_nodes: &mut HashSet<NodeId>,
-) {
+) -> usize {
     match objects.get_mut(&node.id) {
         Some(current) => {
             let before = *dirty;
@@ -317,8 +323,9 @@ fn update_retained_render_objects(
         }
     }
 
+    let mut visited = 1;
     for child in &node.children {
-        update_retained_render_objects(
+        visited += update_retained_render_objects(
             child,
             Some(node.id),
             objects,
@@ -327,6 +334,7 @@ fn update_retained_render_objects(
             dirty_nodes,
         );
     }
+    visited
 }
 
 fn render_object_paint_data(
@@ -634,6 +642,43 @@ mod tests {
         );
         assert_eq!(visited_count, epoch_count);
         assert!(epoch_time < visited_time);
+    }
+
+    // cargo test -p mesh-core-render --release -- render_object_clean_update_skips_retain_scan --ignored --nocapture
+    #[test]
+    #[ignore = "release-only render-object clean retain-scan microbenchmark"]
+    fn render_object_clean_update_skips_retain_scan() {
+        let entries = 4_096usize;
+        let iterations = 20_000usize;
+        let source: HashMap<u64, u64> = (0..entries as u64).map(|id| (id, id)).collect();
+
+        let old_started = Instant::now();
+        let mut old = source.clone();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old.retain(|_, _| true);
+            old_total += std::hint::black_box(old.len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let new = source;
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let visited = new.len();
+            if visited != new.len() {
+                unreachable!("clean update should not enter stale-object cleanup");
+            }
+            new_total += std::hint::black_box(new.len());
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_total, new_total);
+        eprintln!(
+            "render-object clean update: retain scan {old_time:?}; conditional skip {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
     }
 
     // cargo test -p mesh-core-render --release -- typed_scroll_geometry_beats_string_parsing --ignored --nocapture

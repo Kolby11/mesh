@@ -270,6 +270,7 @@ impl Shell {
                     .push(component_index);
             }
         }
+        index.dirty = false;
         self.service_delivery_index = index;
     }
 

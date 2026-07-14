@@ -1125,7 +1125,14 @@ fn namespaced_handler(host_instance_key: &str, handler: &str) -> String {
     if handler.starts_with("__mesh_embed__::") {
         handler.to_string()
     } else {
-        format!("__mesh_embed__::{host_instance_key}::{handler}")
+        let mut namespaced = String::with_capacity(
+            "__mesh_embed__::".len() + host_instance_key.len() + "::".len() + handler.len(),
+        );
+        namespaced.push_str("__mesh_embed__::");
+        namespaced.push_str(host_instance_key);
+        namespaced.push_str("::");
+        namespaced.push_str(handler);
+        namespaced
     }
 }
 
@@ -2388,5 +2395,53 @@ mod tests {
         );
         assert_eq!(owned_total, borrowed_total);
         assert!(borrowed_time < owned_time);
+    }
+
+    #[test]
+    fn namespaced_handler_matches_legacy_format() {
+        assert_eq!(
+            namespaced_handler("@mesh/panel/local:Toolbar", "onToggle"),
+            "__mesh_embed__::@mesh/panel/local:Toolbar::onToggle"
+        );
+        assert_eq!(
+            namespaced_handler(
+                "@mesh/panel",
+                "__mesh_embed__::@mesh/other::already_namespaced",
+            ),
+            "__mesh_embed__::@mesh/other::already_namespaced"
+        );
+    }
+
+    // cargo test -p mesh-core-frontend --release -- compiler_handler_namespace_presizing_beats_format_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only compiler handler namespace microbenchmark"]
+    fn compiler_handler_namespace_presizing_beats_format_benchmark() {
+        use std::time::Instant;
+
+        let instance_key = "@mesh/panel/local:StatusCluster/import:NetworkControls";
+        let handler = "onConnectionStateChanged";
+        let iterations = 1_000_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total ^=
+                std::hint::black_box(format!("__mesh_embed__::{instance_key}::{handler}").len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            new_total ^= std::hint::black_box(namespaced_handler(instance_key, handler).len());
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "compiler handler namespace: format {old_time:?}; presized {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 }

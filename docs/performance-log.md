@@ -32,6 +32,44 @@ section noted.
 | 2026-07-12 | Hand-rolled inline clip/layer stacks in the Skia backend | P | 350.183ms inline vs 31.812ms `Vec` over 8M batches; later solved with `SmallVec` (2026-07-13) |
 | 2026-07-12 | `tree.style(id) == new_style` equality guard before Taffy `set_style` | T | Slower than unconditional `set_style` (51.642ms vs 46.115ms); needed the retained dirty-bit feed, which landed 2026-07-12 |
 
+## 2026-07-14 follow-up — five measured hot-path changes
+
+- Retained narrow/layout analysis caps its initial result-set capacity at 256;
+  a 4,096-node release microbenchmark measured 2.327s growing versus 2.238s
+  reserved (1.04x), avoiding unbounded sparse-frame over-allocation.
+- Surface shortcut resolution retains the preformatted accessibility index;
+  1,000 release probes measured 3.297ms rebuilding versus 2.4µs borrowing
+  the cached map.
+- Element-metrics publication moves the refs JSON value into script state after
+  borrowing it for the live proxy, eliminating a full snapshot clone; 20,000
+  256-entry release snapshots measured 1.601s clone versus 996.7ms move (1.6x).
+- Scroll overflow annotation reserves the reusable root key-path buffer;
+  20,000 release passes measured 796.1ms unreserved versus 769.5ms reserved
+  (1.03x).
+- Service-field reverse dependencies use a nested borrowed lookup instead of
+  allocating a `(String, String)` key per query; 1M release lookups measured
+  33.7ms tuple allocation versus 27.7ms nested lookup (1.2x).
+
+## 2026-07-14 follow-up — retained/render scratch reuse
+
+- Clean `RenderObjectTree` updates now skip the full stale-entry scan when the
+  visited count and retained map length prove that no structure changed; a
+  4,096-entry release benchmark measured 65.3µs retain scanning versus 10.7µs
+  conditional skip (6.1x).
+- Retained display-list dirty-ancestor collection reuses its path vector and
+  ancestor set; 50,000 sparse release walks measured 6.39ms fresh versus
+  4.38ms reused (1.46x).
+- Animation passes reuse the live-key sets and previous-style snapshot map;
+  release benchmarks measured 2.35x and 1.68x versus fresh allocations.
+- Element-metrics publication reuses the ref-name → node-key map backing
+  storage between paints; 20,000 512-entry release maps measured 1.368s fresh
+  versus 719ms reused (1.90x).
+- The shell service-delivery index now starts dirty so its first event lazily
+  builds from the registered component set instead of being dropped, then the
+  built index is marked clean. A fresh release validation measured 204.4ms
+  full scan versus 15.3ms indexed across the existing 20,000-event/256-component
+  workload (~13.4x) while the accepted-delivery regression test passes.
+
 ---
 
 ## Non-performance completed items
@@ -85,7 +123,7 @@ Items owned by a milestone are listed with their milestone reference.
 - [ ] Avoid flattening retained display-list subtrees into a new flat command buffer on each update; move toward segment/rope-style command storage → v1.21. Progress 2026-07-05: `RetainedDisplayList::update_inner` now detects unchanged display entries for the same root/surface before rebuilding paint subtrees, preserving the existing flat command arrays on no-op updates. Added regression coverage for zero subtree/command rebuilds on unchanged trees and a release-only benchmark showing unchanged update at ~2.6x faster than fresh flat rebuild (349.0ms → 922.3ms for 1k iterations on the local profile run).
 - [ ] Replace per-node string/hash-heavy style matching with interned/typed node keys; remaining after first pass: interned tags, classes, attribute keys → v1.23
 - [ ] Retain Taffy node state across layout passes; `build_taffy_tree` rebuilds a fresh TaffyTree every layout → v1.21
-- [ ] Affected-subtree template re-evaluation: `narrow_script_update` rebuilds the full tree (full template eval) then diffs; use `NodeServiceFieldDependencies` to re-evaluate only nodes whose tracked fields changed → v1.27
+- [ ] Affected-subtree template re-evaluation: `narrow_script_update` rebuilds the full tree (full template eval) then diffs; use `NodeServiceFieldDependencies` to re-evaluate only nodes whose tracked fields changed → v1.27. Progress 2026-07-14: narrow and layout analysis now walk the retained slotmap directly instead of building a temporary fresh snapshot map; a same-run release benchmark measured 396.1ms map-based versus 317.1ms direct over 2,000 passes (1.25x). The larger affected-subtree re-evaluation remains open.
 - [ ] Generation-aware retained-tree diff: `RetainedWidgetTree::update` FNV-hashes every node's style + attribute strings per paint; skip clean subtrees using dirty bits → v1.27
 - [ ] Fuse the five per-frame `finalize_tree` annotation walks into one traversal; move hot annotations from string attributes to typed `WidgetNode` fields → v1.27
 

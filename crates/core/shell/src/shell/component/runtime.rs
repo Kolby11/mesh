@@ -4,8 +4,31 @@ fn scheduled_handler_name(instance_key: &str, handler: &str) -> String {
     if handler.starts_with("__mesh_embed__::") {
         handler.to_string()
     } else {
-        format!("__mesh_embed__::{instance_key}::{handler}")
+        let mut namespaced = String::with_capacity(
+            "__mesh_embed__::".len() + instance_key.len() + "::".len() + handler.len(),
+        );
+        namespaced.push_str("__mesh_embed__::");
+        namespaced.push_str(instance_key);
+        namespaced.push_str("::");
+        namespaced.push_str(handler);
+        namespaced
     }
+}
+
+fn render_stack_contains_cycle(stack: &[String], module_id: &str) -> bool {
+    stack
+        .iter()
+        .filter(|ancestor| ancestor.as_str() == module_id)
+        .nth(1)
+        .is_some()
+}
+
+fn local_component_runtime_id(host_module_id: &str, alias: &str) -> String {
+    let mut component_id = String::with_capacity(host_module_id.len() + 2 + alias.len());
+    component_id.push_str(host_module_id);
+    component_id.push_str("::");
+    component_id.push_str(alias);
+    component_id
 }
 
 fn apply_runtime_props(
@@ -433,7 +456,7 @@ impl FrontendSurfaceComponent {
 
         let mut runtime = self.create_runtime_for_component(
             instance_key,
-            format!("{host_module_id}::{alias}"),
+            local_component_runtime_id(host_module_id, alias),
             host_manifest,
             component,
             props,
@@ -495,14 +518,7 @@ impl FrontendSurfaceComponent {
         container_width: f32,
         container_height: f32,
     ) -> WidgetNode {
-        if self
-            .render_stack
-            .borrow()
-            .iter()
-            .filter(|ancestor| ancestor.as_str() == module_id)
-            .count()
-            >= 2
-        {
+        if render_stack_contains_cycle(&self.render_stack.borrow(), module_id) {
             return self.build_error_widget(format!("composition cycle blocked for '{module_id}'"));
         }
 
@@ -1181,6 +1197,93 @@ mod scheduled_handler_tests {
             scheduled_handler_name("@mesh/panel", "__mesh_embed__::@mesh/panel::close"),
             "__mesh_embed__::@mesh/panel::close"
         );
+    }
+
+    #[test]
+    fn runtime_key_helpers_match_legacy_behavior() {
+        assert_eq!(
+            local_component_runtime_id("@mesh/panel", "Toolbar"),
+            "@mesh/panel::Toolbar"
+        );
+        let stack = vec![
+            "@mesh/panel".to_string(),
+            "@mesh/audio".to_string(),
+            "@mesh/panel".to_string(),
+        ];
+        assert!(render_stack_contains_cycle(&stack, "@mesh/panel"));
+        assert!(!render_stack_contains_cycle(&stack, "@mesh/audio"));
+    }
+
+    // cargo test -p mesh-core-shell --release -- embedded_runtime_helpers_beat_format_and_full_cycle_scan_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only embedded runtime helper microbenchmark"]
+    fn embedded_runtime_helpers_beat_format_and_full_cycle_scan_benchmark() {
+        let host = "@mesh/panel/local:StatusCluster/import:NetworkControls";
+        let alias = "BatteryIndicator";
+        let module = "@mesh/panel";
+        let mut stack = vec![module.to_string(), module.to_string()];
+        stack.extend((0..62).map(|index| format!("@mesh/other-{index}")));
+        let iterations = 1_000_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let id = format!("{host}::{alias}");
+            let is_cycle = stack
+                .iter()
+                .filter(|ancestor| ancestor.as_str() == module)
+                .count()
+                >= 2;
+            old_total ^= std::hint::black_box(id.len() + usize::from(is_cycle));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let id = local_component_runtime_id(host, alias);
+            let is_cycle = render_stack_contains_cycle(&stack, module);
+            new_total ^= std::hint::black_box(id.len() + usize::from(is_cycle));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "embedded runtime helpers: format/full scan {old_time:?}; presized/short-circuit {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- scheduled_handler_name_presizing_beats_format_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only scheduled handler namespace microbenchmark"]
+    fn scheduled_handler_name_presizing_beats_format_benchmark() {
+        let instance_key = "@mesh/panel/local:StatusCluster/import:NetworkControls";
+        let handler = "onConnectionStateChanged";
+        let iterations = 1_000_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total ^=
+                std::hint::black_box(format!("__mesh_embed__::{instance_key}::{handler}").len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            new_total ^= std::hint::black_box(scheduled_handler_name(instance_key, handler).len());
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "scheduled handler namespace: format {old_time:?}; presized {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 
     // cargo test -p mesh-core-shell --release -- scheduled_handler_cached_name_beats_tick_format --ignored --nocapture

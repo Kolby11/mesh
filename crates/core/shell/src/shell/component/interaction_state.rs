@@ -43,7 +43,11 @@ impl FrontendSurfaceComponent {
     pub(super) fn publish_element_metrics(&self, tree: &WidgetNode, usage: ElementMetricUsage) {
         let mut elements = serde_json::Map::new();
         let mut refs = serde_json::Map::new();
-        let mut ref_keys = HashMap::new();
+        let mut ref_keys = {
+            let mut stored = self.ref_node_keys.borrow_mut();
+            std::mem::take(&mut *stored)
+        };
+        ref_keys.clear();
         collect_element_metrics(
             tree,
             0.0,
@@ -74,13 +78,16 @@ impl FrontendSurfaceComponent {
                     );
             }
             if let (Some(refs), Some(fingerprint)) = (refs, refs_fingerprint) {
-                root_runtime
-                    .script_ctx
-                    .state_mut()
-                    .set_host_value_with_fingerprint("refs", refs.clone(), fingerprint);
+                // The live proxy only borrows this snapshot. Apply it first,
+                // then move the same JSON value into script state instead of
+                // cloning the complete refs table for the state write.
                 root_runtime
                     .script_ctx
                     .apply_element_metrics_with_fingerprint(&refs, fingerprint);
+                root_runtime
+                    .script_ctx
+                    .state_mut()
+                    .set_host_value_with_fingerprint("refs", refs, fingerprint);
             }
         }
         // Remember name -> node key so drained element actions resolve their target.

@@ -2968,6 +2968,58 @@ fn debug_snapshot_backfills_mesh_debug_service_state() {
         serde_json::json!(snapshot.active_surfaces)
     );
     assert!(latest.state["profiling"].is_null());
+    assert!(latest.state["profiling_stream"].is_null());
+}
+
+#[test]
+fn debug_snapshot_exposes_deduplicated_ordered_profiling_stream() {
+    let mut shell = Shell::new();
+    shell.debug.profiling_enabled = true;
+    shell.debug.profiling_session_id = 1;
+    shell.profiling.record_shell_stage(
+        ProfilingStage::InputHandling,
+        std::time::Duration::from_micros(7),
+        Some("input"),
+    );
+    shell.profiling.record_surface_stage(
+        "@test/surface",
+        Some("@test/module"),
+        ProfilingStage::Paint,
+        std::time::Duration::from_micros(11),
+        Some("paint"),
+    );
+
+    shell.build_debug_snapshot();
+    let latest = shell
+        .latest_service_state
+        .get(mesh_core_debug::DEBUG_INTERFACE)
+        .expect("debug snapshot should publish state");
+    let stream = latest.state["profiling_stream"]
+        .as_array()
+        .expect("profiling stream should be an array");
+
+    assert_eq!(
+        stream.len(),
+        2,
+        "surface samples must not be duplicated from the shell roll-up"
+    );
+    assert!(
+        stream.windows(2).all(|pair| {
+            pair[0]["order"].as_u64().unwrap() < pair[1]["order"].as_u64().unwrap()
+        })
+    );
+    assert!(
+        stream
+            .iter()
+            .all(|sample| sample["timestamp_micros"].is_u64())
+    );
+    assert_eq!(stream[1]["surface_id"], serde_json::json!("@test/surface"));
+    let trace = latest.state["chrome_trace"]["traceEvents"]
+        .as_array()
+        .expect("chrome trace should contain events");
+    assert_eq!(trace.len(), 2);
+    assert_eq!(trace[1]["ph"], serde_json::json!("X"));
+    assert_eq!(trace[1]["tid"], serde_json::json!("@test/surface"));
 }
 
 #[test]

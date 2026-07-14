@@ -493,8 +493,10 @@ impl FrontendSurfaceComponent {
         self.annotate_selection_tree(tree, theme);
 
         // Store current interaction state for next frame's targeted restyle diff.
-        self.previous_hovered_path = self.hovered_path.clone();
-        self.previous_focused_key = self.focused_key.clone();
+        // Preserve the prior frame's allocation while replacing its contents.
+        // Interaction paths typically have the same depth across pointer moves.
+        self.previous_hovered_path.clone_from(&self.hovered_path);
+        self.previous_focused_key.clone_from(&self.focused_key);
         self.interaction_snapshot_valid = true;
     }
 
@@ -504,7 +506,8 @@ impl FrontendSurfaceComponent {
     /// Compares current hover/focus state against previous frame's state to
     /// identify which nodes changed.
     fn collect_interaction_changed_node_ids(&self, tree: &WidgetNode) -> InteractionChangedNodeIds {
-        let mut changed_ids: HashSet<NodeId> = HashSet::new();
+        let mut changed_ids =
+            HashSet::with_capacity(self.previous_hovered_path.len() + self.hovered_path.len() + 2);
 
         // Collect keys that had hover change: union of old and new hovered paths.
         for key in &self.previous_hovered_path {
@@ -526,7 +529,12 @@ impl FrontendSurfaceComponent {
             return InteractionChangedNodeIds::default(); // first frame: no previous state
         }
 
-        let mut ids = InteractionChangedNodeIds::default();
+        // At least the directly changed keys become affected roots. Reserve
+        // that known lower bound only after the empty (common) case above.
+        let mut ids = InteractionChangedNodeIds {
+            affected: HashSet::with_capacity(changed_ids.len()),
+            roots: HashSet::with_capacity(changed_ids.len()),
+        };
         collect_changed_subtree_node_ids(tree, &changed_ids, false, &mut ids);
         ids
     }
@@ -725,7 +733,9 @@ fn collect_changed_subtree_node_ids(
     parent_affected: bool,
     out: &mut InteractionChangedNodeIds,
 ) {
-    let directly_affected = changed_ids.contains(&node.id);
+    // Once an ancestor is affected, every descendant belongs to the same
+    // targeted restyle subtree. Avoid a hash lookup per descendant.
+    let directly_affected = !parent_affected && changed_ids.contains(&node.id);
     let node_affected = parent_affected || directly_affected;
     if node_affected {
         out.affected.insert(node.id);
@@ -771,6 +781,40 @@ mod interaction_changed_key_tests {
             node
         }
         build(0, width, depth)
+    }
+
+    // cargo test -p mesh-core-shell --release -- hover_snapshot_clone_from_reuses_path_storage -- --ignored --nocapture
+    #[test]
+    #[ignore = "release-only hover snapshot storage microbenchmark"]
+    fn hover_snapshot_clone_from_reuses_path_storage() {
+        let current: Vec<String> = (0..32)
+            .map(|index| format!("root/section/{index}/button"))
+            .collect();
+        let iterations = 100_000usize;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let snapshot = std::hint::black_box(current.clone());
+            old_total += std::hint::black_box(snapshot.len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_snapshot = current.clone();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            new_snapshot.clone_from(std::hint::black_box(&current));
+            new_total += std::hint::black_box(new_snapshot.len());
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+        eprintln!(
+            "hover snapshot: assignment clone {old_time:?}; clone_from {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
     }
 
     fn broad_keyed_tree_with_selected_text(width: usize, depth: usize) -> (WidgetNode, String) {
@@ -882,6 +926,80 @@ mod interaction_changed_key_tests {
                 crate::shell::component::runtime_tree::stable_runtime_node_id("root/0")
             ])
         );
+    }
+
+    // cargo test -p mesh-core-shell --release -- narrow_ancestor_stack_beats_parent_map_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only narrow ancestor expansion microbenchmark"]
+    fn narrow_ancestor_stack_beats_parent_map_benchmark() {
+        fn old_build_parent_map(
+            node: &WidgetNode,
+            parent_id: Option<NodeId>,
+            parents: &mut HashMap<NodeId, NodeId>,
+        ) {
+            if let Some(parent_id) = parent_id {
+                parents.insert(node.id, parent_id);
+            }
+            for child in &node.children {
+                old_build_parent_map(child, Some(node.id), parents);
+            }
+        }
+
+        fn old_expand(tree: &WidgetNode, affected: &HashSet<NodeId>) -> HashSet<NodeId> {
+            let mut full_affected = affected.clone();
+            let mut parents = HashMap::new();
+            old_build_parent_map(tree, None, &mut parents);
+            for &leaf_id in affected {
+                let mut current = leaf_id;
+                while let Some(&parent) = parents.get(&current) {
+                    full_affected.insert(parent);
+                    current = parent;
+                }
+            }
+            full_affected
+        }
+
+        fn branch(key: &str, depth: usize) -> WidgetNode {
+            let children = (depth > 0)
+                .then(|| {
+                    (0..4)
+                        .map(|index| branch(&format!("{key}/{index}"), depth - 1))
+                        .collect()
+                })
+                .unwrap_or_default();
+            keyed_node(key, children)
+        }
+
+        let tree = branch("root", 5);
+        let affected = HashSet::from([
+            stable_runtime_node_id("root/0/1/2/3/0"),
+            stable_runtime_node_id("root/2/3/0/1/2"),
+            stable_runtime_node_id("root/3/2/1/0/3"),
+        ]);
+        let iterations = 2_000;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total ^= std::hint::black_box(old_expand(&tree, &affected).len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            let mut full_affected = affected.clone();
+            narrow_expand_ancestors(&tree, &affected, &mut full_affected);
+            new_total ^= std::hint::black_box(full_affected.len());
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "narrow ancestors: parent map {old_time:?}; stack walk {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 
     #[test]
@@ -1251,26 +1369,22 @@ pub(super) fn narrow_expand_ancestors(
     affected: &HashSet<NodeId>,
     full_affected: &mut HashSet<NodeId>,
 ) {
-    let mut parent_map = HashMap::new();
-    narrow_build_parent_map(tree, None, &mut parent_map);
-    for &leaf_id in affected.iter() {
-        let mut current = leaf_id;
-        while let Some(&parent) = parent_map.get(&current) {
-            full_affected.insert(parent);
-            current = parent;
-        }
-    }
+    let mut ancestors = Vec::new();
+    narrow_collect_ancestors(tree, affected, &mut ancestors, full_affected);
 }
 
-fn narrow_build_parent_map(
+fn narrow_collect_ancestors(
     node: &WidgetNode,
-    parent_id: Option<NodeId>,
-    parent_map: &mut HashMap<NodeId, NodeId>,
+    affected: &HashSet<NodeId>,
+    ancestors: &mut Vec<NodeId>,
+    full_affected: &mut HashSet<NodeId>,
 ) {
-    if let Some(pid) = parent_id {
-        parent_map.insert(node.id, pid);
+    if affected.contains(&node.id) {
+        full_affected.extend(ancestors.iter().copied());
     }
+    ancestors.push(node.id);
     for child in &node.children {
-        narrow_build_parent_map(child, Some(node.id), parent_map);
+        narrow_collect_ancestors(child, affected, ancestors, full_affected);
     }
+    ancestors.pop();
 }

@@ -255,7 +255,10 @@ pub fn annotate_overflow_tree(
     key: &str,
     scroll_offsets: &mut HashMap<String, ScrollOffsetState>,
 ) -> Option<ContentBounds> {
-    let mut key_path = key.to_string();
+    // Descendant indices are appended in place. Reserve a small path budget
+    // up front so common shallow trees do not grow the String repeatedly.
+    let mut key_path = String::with_capacity(key.len() + 64);
+    key_path.push_str(key);
     annotate_overflow_tree_with_path(node, &mut key_path, scroll_offsets)
 }
 
@@ -697,6 +700,76 @@ mod scroll_into_view_tests {
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-interaction --release -- annotate_overflow_tree_reserved_path_beats_unreserved --ignored --nocapture
+    #[test]
+    #[ignore = "release-only reserved scroll key-path microbenchmark"]
+    fn annotate_overflow_tree_reserved_path_beats_unreserved() {
+        fn unreserved(
+            node: &mut WidgetNode,
+            key: &str,
+            scroll_offsets: &mut HashMap<String, ScrollOffsetState>,
+        ) -> Option<ContentBounds> {
+            let mut key_path = key.to_string();
+            annotate_overflow_tree_with_path(node, &mut key_path, scroll_offsets)
+        }
+
+        let tree = {
+            fn build(width: usize, depth: usize, key: &str) -> WidgetNode {
+                let mut node = node(key, "column", 0.0, 0.0, 120.0, 120.0);
+                node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Auto;
+                if depth > 0 {
+                    node.children = (0..width)
+                        .map(|index| build(width, depth - 1, &format!("{key}/{index}")))
+                        .collect();
+                }
+                node
+            }
+            build(5, 4, "root")
+        };
+        fn collect_keys(node: &WidgetNode, keys: &mut Vec<String>) {
+            if let Some(key) = node.mesh_key() {
+                keys.push(key.to_string());
+            }
+            for child in &node.children {
+                collect_keys(child, keys);
+            }
+        }
+        let mut keys = Vec::new();
+        collect_keys(&tree, &mut keys);
+        let offsets = keys
+            .into_iter()
+            .map(|key| (key, ScrollOffsetState::default()))
+            .collect::<HashMap<_, _>>();
+        let iterations = 20_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_tree = tree.clone();
+        let mut old_offsets = offsets.clone();
+        let mut old_total = 0.0;
+        for _ in 0..iterations {
+            unreserved(&mut old_tree, "root", &mut old_offsets);
+            old_total += std::hint::black_box(old_tree.layout.width);
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_tree = tree;
+        let mut new_offsets = offsets;
+        let mut new_total = 0.0;
+        for _ in 0..iterations {
+            annotate_overflow_tree(&mut new_tree, "root", &mut new_offsets);
+            new_total += std::hint::black_box(new_tree.layout.width);
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_total, new_total);
+        eprintln!(
+            "scroll key-path capacity: unreserved {old_time:?}; reserved {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
         assert!(new_time < old_time);
     }
 }

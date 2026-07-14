@@ -7,6 +7,7 @@ use mesh_core_module::lifecycle::ModuleInstance;
 use mesh_core_module::package::InstalledModuleGraph;
 use rayon::prelude::*;
 
+use super::memo;
 use crate::shell::ShellRunError;
 
 #[derive(Debug, Clone)]
@@ -27,6 +28,7 @@ pub(super) struct ResolvedSlotContribution {
     pub(super) widget_id: String,
     pub(super) contribution_id: String,
     pub(super) order: i64,
+    pub(super) props_fingerprint: u64,
     pub(super) props: serde_json::Map<String, serde_json::Value>,
 }
 
@@ -78,6 +80,7 @@ impl FrontendCatalog {
                     .entry(slot_id.clone())
                     .or_default();
                 for (index, contribution) in contributions.iter().enumerate() {
+                    let props = contribution.props.clone();
                     bucket.push(ResolvedSlotContribution {
                         source_module_id: module_id.clone(),
                         widget_id: contribution
@@ -89,7 +92,8 @@ impl FrontendCatalog {
                             .clone()
                             .unwrap_or_else(|| format!("{module_id}:{slot_id}:{index}")),
                         order: contribution.order.unwrap_or(0),
-                        props: contribution.props.clone(),
+                        props_fingerprint: memo::slot_props_fingerprint(&props),
+                        props,
                     });
                 }
             }

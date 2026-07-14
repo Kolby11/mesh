@@ -93,11 +93,28 @@ impl FrontendSurfaceComponent {
         self.apply_style_animations_with_previous(tree, &previous_styles, &surface_css_props);
     }
 
+    #[cfg(test)]
     pub(super) fn previous_visual_styles(&self) -> HashMap<String, AnimatableStyle> {
         self.last_tree
             .as_ref()
             .map(collect_visual_styles)
             .unwrap_or_default()
+    }
+
+    pub(super) fn take_previous_visual_styles(&mut self) -> HashMap<String, AnimatableStyle> {
+        let mut styles = std::mem::take(&mut self.previous_visual_styles_scratch);
+        styles.clear();
+        if let Some(last_tree) = self.last_tree.as_ref() {
+            collect_visual_styles_into(last_tree, &mut styles);
+        }
+        styles
+    }
+
+    pub(super) fn restore_previous_visual_styles(
+        &mut self,
+        styles: HashMap<String, AnimatableStyle>,
+    ) {
+        self.previous_visual_styles_scratch = styles;
     }
 
     pub(super) fn apply_style_animations_with_previous(
@@ -107,8 +124,10 @@ impl FrontendSurfaceComponent {
         surface_css_props: &SurfaceCssProps,
     ) {
         let now = Instant::now();
-        let mut live_keys = HashSet::new();
-        let mut live_keyframe_keys = HashSet::new();
+        let mut live_keys = std::mem::take(&mut self.animation_live_keys_scratch);
+        live_keys.clear();
+        let mut live_keyframe_keys = std::mem::take(&mut self.animation_live_keyframe_keys_scratch);
+        live_keyframe_keys.clear();
         let mut has_active_animation = false;
         let mut active_animation_bucket = AnimationPropertyBucket::None;
         let mut has_active_keyframe_animation = false;
@@ -136,6 +155,8 @@ impl FrontendSurfaceComponent {
         self.keyframe_rules
             .retain(|key, _| live_keyframe_keys.contains(key));
         self.has_active_keyframe_animation = has_active_keyframe_animation;
+        self.animation_live_keys_scratch = live_keys;
+        self.animation_live_keyframe_keys_scratch = live_keyframe_keys;
 
         if has_active_animation || has_active_keyframe_animation {
             // Animations only mutate style/layout, never script state — keep
@@ -407,6 +428,7 @@ impl FrontendSurfaceComponent {
     }
 }
 
+#[cfg(test)]
 pub(super) fn collect_visual_styles(root: &WidgetNode) -> HashMap<String, AnimatableStyle> {
     let mut styles = HashMap::new();
     collect_visual_styles_into(root, &mut styles);
@@ -463,5 +485,90 @@ mod tests {
             active_transition_bucket(width),
             AnimationPropertyBucket::LayoutAffecting
         );
+    }
+
+    // cargo test -p mesh-core-shell --release -- animation_live_key_scratch_reuse_beats_fresh_sets --ignored --nocapture
+    #[test]
+    #[ignore = "release-only animation live-key scratch microbenchmark"]
+    fn animation_live_key_scratch_reuse_beats_fresh_sets() {
+        let keys: Vec<String> = (0..512).map(|index| format!("root/{index}")).collect();
+        let iterations = 20_000usize;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            let mut live = HashSet::new();
+            for key in &keys {
+                live.insert(key.clone());
+            }
+            old_total += std::hint::black_box(live.len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        let mut live = HashSet::new();
+        for _ in 0..iterations {
+            live.clear();
+            for key in &keys {
+                live.insert(key.clone());
+            }
+            new_total += std::hint::black_box(live.len());
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_total, new_total);
+        eprintln!(
+            "animation live-key sets: fresh {old_time:?}; scratch reuse {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- animation_previous_style_scratch_reuse_beats_fresh_map --ignored --nocapture
+    #[test]
+    #[ignore = "release-only animation previous-style scratch microbenchmark"]
+    fn animation_previous_style_scratch_reuse_beats_fresh_map() {
+        fn build_tree(next_id: &mut usize, width: usize, depth: usize) -> WidgetNode {
+            let id = *next_id;
+            *next_id += 1;
+            let mut node = WidgetNode::new("box");
+            node.set_mesh_key(format!("root/{id}"));
+            if depth > 0 {
+                node.children = (0..width)
+                    .map(|_| build_tree(next_id, width, depth - 1))
+                    .collect();
+            }
+            node
+        }
+
+        let mut next_id = 0;
+        let root = build_tree(&mut next_id, 4, 5);
+        let iterations = 20_000usize;
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total +=
+                std::hint::black_box(collect_visual_styles(std::hint::black_box(&root)).len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_total = 0usize;
+        let mut styles = HashMap::new();
+        for _ in 0..iterations {
+            styles.clear();
+            collect_visual_styles_into(std::hint::black_box(&root), &mut styles);
+            new_total += std::hint::black_box(styles.len());
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_total, new_total);
+        eprintln!(
+            "animation previous styles: fresh map {old_time:?}; scratch reuse {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
     }
 }

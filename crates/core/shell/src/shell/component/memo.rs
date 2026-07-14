@@ -89,6 +89,30 @@ pub(super) fn component_props_fingerprint(
     hasher.finish()
 }
 
+/// Stable fingerprint for manifest-provided slot props. Slot contributions use
+/// JSON values rather than template attributes, but otherwise have the same
+/// cache contract as ordinary embedded components.
+pub(super) fn slot_props_fingerprint(props: &serde_json::Map<String, serde_json::Value>) -> u64 {
+    // `serde_json::Map` is the ordered map representation in this workspace;
+    // contribution props originate in a manifest and therefore already have a
+    // stable key order. Avoid allocating a sortable scratch vector on every
+    // memo probe.
+    let mut hasher = std::hash::DefaultHasher::new();
+    props.len().hash(&mut hasher);
+    for (key, value) in props {
+        key.hash(&mut hasher);
+        hash_json_value(value, &mut hasher);
+    }
+    hasher.finish()
+}
+
+fn descendant_instance_prefix(instance_key: &str) -> String {
+    let mut prefix = String::with_capacity(instance_key.len() + 1);
+    prefix.push_str(instance_key);
+    prefix.push('/');
+    prefix
+}
+
 fn hash_json_value(value: &serde_json::Value, hasher: &mut impl Hasher) {
     match value {
         serde_json::Value::Null => 0u8.hash(hasher),
@@ -200,7 +224,7 @@ impl FrontendSurfaceComponent {
             self.component_memo.borrow_mut().remove(instance_key);
             return;
         }
-        let descendant_prefix = format!("{instance_key}/");
+        let descendant_prefix = descendant_instance_prefix(instance_key);
         let generations = {
             let runtimes = self.runtimes.lock().unwrap();
             let mut generations = Vec::new();
@@ -236,5 +260,132 @@ impl FrontendSurfaceComponent {
     #[cfg(test)]
     pub(super) fn component_memo_hit_count(&self) -> u64 {
         self.component_memo_hits.get()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn descendant_instance_prefix_matches_legacy_format() {
+        assert_eq!(
+            descendant_instance_prefix("@mesh/panel/local:Toolbar"),
+            "@mesh/panel/local:Toolbar/"
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- descendant_instance_prefix_presizing_beats_format_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only memo descendant-prefix microbenchmark"]
+    fn descendant_instance_prefix_presizing_beats_format_benchmark() {
+        let instance_key = "@mesh/panel/local:StatusCluster/import:NetworkControls";
+        let iterations = 1_000_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0usize;
+        for _ in 0..iterations {
+            old_total ^= std::hint::black_box(format!("{instance_key}/").len());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0usize;
+        for _ in 0..iterations {
+            new_total ^= std::hint::black_box(descendant_instance_prefix(instance_key).len());
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "memo descendant prefix: format {old_time:?}; presized {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    fn sorted_scratch_fingerprint(props: &serde_json::Map<String, serde_json::Value>) -> u64 {
+        let mut entries: Vec<_> = props.iter().collect();
+        entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        let mut hasher = std::hash::DefaultHasher::new();
+        entries.len().hash(&mut hasher);
+        for (key, value) in entries {
+            key.hash(&mut hasher);
+            hash_json_value(value, &mut hasher);
+        }
+        hasher.finish()
+    }
+
+    // cargo test -p mesh-core-shell --release -- slot_props_fingerprint_avoids_sort_scratch_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only slot prop fingerprint microbenchmark"]
+    fn slot_props_fingerprint_avoids_sort_scratch_benchmark() {
+        let props = (0..24)
+            .map(|index| {
+                (
+                    format!("prop_{index:02}"),
+                    serde_json::json!({ "enabled": index % 2 == 0, "value": index }),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>();
+        let iterations = 1_000_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0u64;
+        for _ in 0..iterations {
+            old_total ^= std::hint::black_box(sorted_scratch_fingerprint(&props));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0u64;
+        for _ in 0..iterations {
+            new_total ^= std::hint::black_box(slot_props_fingerprint(&props));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "slot prop fingerprint: sort scratch {old_time:?}; ordered map {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- slot_catalog_precompute_avoids_render_time_hash_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only slot catalog fingerprint microbenchmark"]
+    fn slot_catalog_precompute_avoids_render_time_hash_benchmark() {
+        let props = (0..24)
+            .map(|index| {
+                (
+                    format!("prop_{index:02}"),
+                    serde_json::json!({ "enabled": index % 2 == 0, "value": index }),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>();
+        let precomputed = slot_props_fingerprint(&props);
+        let iterations = 1_000_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0u64;
+        for _ in 0..iterations {
+            old_total ^= std::hint::black_box(slot_props_fingerprint(&props));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0u64;
+        for _ in 0..iterations {
+            new_total ^= std::hint::black_box(precomputed);
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "slot catalog fingerprint: render-time hash {old_time:?}; precomputed read {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
     }
 }

@@ -398,6 +398,95 @@ fn element_action_ref_keys_move_restore_beats_full_clone() {
     assert!(new_time < old_time);
 }
 
+// cargo test -p mesh-core-shell --release -- refs_snapshot_move_beats_json_clone --ignored --nocapture
+#[test]
+#[ignore = "release-only refs snapshot ownership microbenchmark"]
+fn refs_snapshot_move_beats_json_clone() {
+    let entries = 256usize;
+    let iterations = 20_000usize;
+    let make_snapshot = || {
+        let mut refs = serde_json::Map::with_capacity(entries);
+        for index in 0..entries {
+            refs.insert(
+                format!("ref_{index}"),
+                serde_json::json!({
+                    "left": index,
+                    "top": index + 1,
+                    "width": 120,
+                    "height": 24,
+                }),
+            );
+        }
+        serde_json::Value::Object(refs)
+    };
+
+    let old_started = std::time::Instant::now();
+    let mut old_total = 0usize;
+    for _ in 0..iterations {
+        let value = make_snapshot();
+        let state_value = value.clone();
+        old_total += std::hint::black_box(state_value.as_object().unwrap().len());
+    }
+    let old_time = old_started.elapsed();
+
+    let new_started = std::time::Instant::now();
+    let mut new_total = 0usize;
+    for _ in 0..iterations {
+        let value = make_snapshot();
+        new_total += std::hint::black_box(value.as_object().unwrap().len());
+        let _state_value = value;
+    }
+    let new_time = new_started.elapsed();
+
+    assert_eq!(old_total, new_total);
+    eprintln!(
+        "refs snapshot ownership: clone {old_time:?}; move {new_time:?}; ratio {:.1}x",
+        old_time.as_secs_f64() / new_time.as_secs_f64()
+    );
+    assert!(new_time < old_time);
+}
+
+// cargo test -p mesh-core-shell --release -- element_ref_key_map_scratch_reuse_beats_fresh_allocations --ignored --nocapture
+#[test]
+#[ignore = "release-only element ref-key scratch microbenchmark"]
+fn element_ref_key_map_scratch_reuse_beats_fresh_allocations() {
+    let entries = 512usize;
+    let iterations = 20_000usize;
+    let keys: Vec<(String, String)> = (0..entries)
+        .map(|index| (format!("ref_{index}"), format!("root/{index}")))
+        .collect();
+
+    let old_started = std::time::Instant::now();
+    let mut old_total = 0usize;
+    for _ in 0..iterations {
+        let mut ref_keys = HashMap::new();
+        for (name, node_key) in &keys {
+            ref_keys.insert(name.clone(), node_key.clone());
+        }
+        old_total += std::hint::black_box(ref_keys.len());
+    }
+    let old_time = old_started.elapsed();
+
+    let new_started = std::time::Instant::now();
+    let mut new_total = 0usize;
+    let mut ref_keys = HashMap::new();
+    for _ in 0..iterations {
+        ref_keys.clear();
+        for (name, node_key) in &keys {
+            ref_keys.insert(name.clone(), node_key.clone());
+        }
+        new_total += std::hint::black_box(ref_keys.len());
+    }
+    let new_time = new_started.elapsed();
+
+    assert_eq!(old_total, new_total);
+    eprintln!(
+        "element ref-key map: fresh {old_time:?}; scratch reuse {new_time:?}; ratio {:.2}x",
+        old_time.as_secs_f64() / new_time.as_secs_f64()
+    );
+    assert!(new_time < old_time);
+}
+
 // cargo test -p mesh-core-shell --release -- runtime_prop_sync_single_lock_beats_contains_then_get_mut --ignored --nocapture
 #[test]
 #[ignore = "release-only runtime prop sync lock microbenchmark"]

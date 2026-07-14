@@ -88,8 +88,9 @@ impl FrontendSurfaceComponent {
         value: &str,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let payload = serde_json::json!(value);
-        let mut requests = self.call_node_handler(tree, input_key, "input", &[payload.clone()])?;
-        requests.extend(self.call_node_handler(tree, input_key, "change", &[payload])?);
+        let args = std::slice::from_ref(&payload);
+        let mut requests = self.call_node_handler(tree, input_key, "input", args)?;
+        requests.extend(self.call_node_handler(tree, input_key, "change", args)?);
         Ok(requests)
     }
 
@@ -117,7 +118,9 @@ impl FrontendSurfaceComponent {
         x: f32,
         y: f32,
     ) {
-        let Some(node) = find_node_by_key(tree, slider_key) else {
+        let Some((node, (left, top, right, bottom))) =
+            find_node_with_bounds_by_key(tree, slider_key)
+        else {
             return;
         };
         let is_vertical = node
@@ -125,11 +128,6 @@ impl FrontendSurfaceComponent {
             .get("orient")
             .map(|v| v == "vertical")
             .unwrap_or(false);
-        let Some((left, top, right, bottom)) = find_node_bounds_by_key(tree, slider_key, 0.0, 0.0)
-        else {
-            return;
-        };
-
         let min = node
             .attributes
             .get("min")

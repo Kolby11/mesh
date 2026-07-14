@@ -272,6 +272,38 @@ pub fn find_node_bounds_by_key(
     None
 }
 
+/// Resolves a keyed node and its content bounds in one traversal. This is the
+/// allocation-free counterpart to [`find_nodes_by_keys`] for callers that need
+/// exactly one active node, such as slider drags.
+pub fn find_node_with_bounds_by_key<'a>(
+    node: &'a WidgetNode,
+    key: &str,
+) -> Option<(&'a WidgetNode, ContentBounds)> {
+    find_node_with_bounds_by_key_at(node, key, 0.0, 0.0)
+}
+
+fn find_node_with_bounds_by_key_at<'a>(
+    node: &'a WidgetNode,
+    key: &str,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<(&'a WidgetNode, ContentBounds)> {
+    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
+    if node.mesh_key().is_some_and(|value| value == key) {
+        return Some((node, node_rect_with_offset(node, offset_x, offset_y)));
+    }
+
+    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
+    for child in &node.children {
+        if let Some(found) =
+            find_node_with_bounds_by_key_at(child, key, child_offset_x, child_offset_y)
+        {
+            return Some(found);
+        }
+    }
+    None
+}
+
 /// Return the root-to-deepest key path under the cursor, regardless of type.
 pub fn find_node_path_at(node: &WidgetNode, x: f32, y: f32) -> Option<Vec<String>> {
     find_node_path_at_offset(node, x, y, 0.0, 0.0)
