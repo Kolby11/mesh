@@ -497,6 +497,10 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       existing release benchmarks continue to show runtime-prop construction
       at 608.1ms filtered collect versus 441.8ms presized (1.4x) and indexed
       handler matching at 944.8ms repeated scan versus 524.2ms (1.8x).
+      Unchanged runtime prop publication now compares host-owned JSON by
+      reference and clones only on change; 100,000 nested-value release writes
+      measured 15.5ms for the owned unchanged gate versus 4.3ms borrowed
+      (~3.6x). Remaining: style-rule merge caching.
 - [x] Per-node build allocations — unique tracked-read string allocations
       reduced 2026-07-13: service proxy tracking now checks the per-evaluation
       observed-field set by borrowed `&str` before allocating `String`s for a

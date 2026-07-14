@@ -69,6 +69,10 @@ section noted.
   built index is marked clean. A fresh release validation measured 204.4ms
   full scan versus 15.3ms indexed across the existing 20,000-event/256-component
   workload (~13.4x) while the accepted-delivery regression test passes.
+- Unchanged embedded-component prop publication now borrows host-owned JSON
+  values, cloning only when a prop changes. A 100,000-write release benchmark
+  measured 15.5ms for the owned unchanged gate versus 4.3ms for the borrowed
+  gate (~3.6x); eager Lua writes measured 130.3ms.
 
 ---
 

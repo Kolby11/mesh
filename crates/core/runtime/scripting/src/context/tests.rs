@@ -531,6 +531,21 @@ fn unchanged_member_state_write_is_skipped() {
             .unwrap()
     );
     assert_ne!(ctx.state().mutation_generation(), generation);
+
+    let generation = ctx.state().mutation_generation();
+    let changed = serde_json::json!("changed");
+    assert!(
+        !ctx.set_member_state_if_changed_ref("label", &changed)
+            .unwrap()
+    );
+    assert_eq!(ctx.state().mutation_generation(), generation);
+
+    let changed_again = serde_json::json!({ "nested": [1, 2, 3] });
+    assert!(
+        ctx.set_member_state_if_changed_ref("label", &changed_again)
+            .unwrap()
+    );
+    assert_eq!(ctx.state().get_ref("label"), Some(&changed_again));
 }
 
 // Run with:
@@ -548,8 +563,10 @@ fn unchanged_member_state_write_benchmark() {
     let iterations = 100_000usize;
     let mut eager = ScriptContext::new("@mesh/eager-member", CapabilitySet::new()).unwrap();
     let mut gated = ScriptContext::new("@mesh/gated-member", CapabilitySet::new()).unwrap();
+    let mut borrowed = ScriptContext::new("@mesh/borrowed-member", CapabilitySet::new()).unwrap();
     eager.set_member_state("config", value.clone()).unwrap();
     gated.set_member_state("config", value.clone()).unwrap();
+    borrowed.set_member_state("config", value.clone()).unwrap();
 
     let eager_started = Instant::now();
     for _ in 0..iterations {
@@ -568,12 +585,23 @@ fn unchanged_member_state_write_benchmark() {
     }
     let gated_time = gated_started.elapsed();
 
+    let borrowed_started = Instant::now();
+    let mut borrowed_changed = 0usize;
+    for _ in 0..iterations {
+        borrowed_changed += borrowed
+            .set_member_state_if_changed_ref("config", std::hint::black_box(&value))
+            .unwrap() as usize;
+    }
+    let borrowed_time = borrowed_started.elapsed();
+
     eprintln!(
-        "unchanged member prop: eager {eager_time:?}; gated {gated_time:?}; ratio {:.1}x; changed={changed}",
-        eager_time.as_secs_f64() / gated_time.as_secs_f64()
+        "unchanged member prop: eager {eager_time:?}; owned gate {gated_time:?}; borrowed gate {borrowed_time:?}; borrowed/owned ratio {:.1}x; changed={changed}/{borrowed_changed}",
+        gated_time.as_secs_f64() / borrowed_time.as_secs_f64()
     );
     assert_eq!(changed, 0);
+    assert_eq!(borrowed_changed, 0);
     assert!(gated_time < eager_time);
+    assert!(borrowed_time < gated_time);
 }
 
 #[test]

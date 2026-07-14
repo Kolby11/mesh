@@ -40,7 +40,7 @@ fn apply_runtime_props(
         let result = if skip_unchanged {
             runtime
                 .script_ctx
-                .set_member_state_if_changed(key, value.clone())
+                .set_member_state_if_changed_ref(key, value)
                 .map(|_| ())
         } else {
             runtime.script_ctx.set_member_state(key, value.clone())

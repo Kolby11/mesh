@@ -739,6 +739,28 @@ impl ScriptContext {
         Ok(true)
     }
 
+    /// Borrow a candidate public-member value and clone it only when the
+    /// member actually changed.
+    ///
+    /// This is the preferred form for host-owned snapshots such as component
+    /// props: unchanged rebuilds can compare against the current state without
+    /// first cloning a potentially nested JSON value merely to discard it.
+    pub fn set_member_state_if_changed_ref(
+        &mut self,
+        name: &str,
+        value: &Value,
+    ) -> Result<bool, ScriptError> {
+        if self
+            .state
+            .get_ref(name)
+            .is_some_and(|current| current == value)
+        {
+            return Ok(false);
+        }
+        self.set_member_state(name, value.clone())?;
+        Ok(true)
+    }
+
     pub fn tracked_service_fields(&self) -> HashMap<String, HashSet<String>> {
         self.tracked_service_fields.lock().unwrap().clone()
     }
