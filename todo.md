@@ -188,9 +188,15 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       via `nix develop`) so `mesh-core-shell` / `mesh-core-render` tests and
       in-crate benchmarks run again — verified 2026-07-14 with the shell
       regression suite and a release-only in-crate benchmark.
-- [ ] Canonical shell workload profiles (idle, pointer move, text update,
+- [x] Canonical shell workload profiles (idle, pointer move, text update,
       scroll, icon grid, animation, theme reload, resize) → v1.21 (L tier 3
-      harness; several open items say "measure with v1.21 profiles first")
+      harness; several open items say "measure with v1.21 profiles first").
+      Shipped 2026-07-15: all eight are typed benchmark scenarios exposed in
+      `mesh.debug`, the inspector fallback catalog, and debug-benchmark IPC,
+      with stable shipped targets, stage priorities, and fresh-session hints.
+      The prior hover, surface open/close, keyboard traversal, and backend
+      update scenarios remain available; `pointer_update` stays stable as the
+      compatibility ID for the pointer-move profile.
 - [ ] L tier 1 — in-shell perf HUD via the existing `DebugOverlay`: frame
       waterfall strip, live counters, paint flashing on damage rects (L)
 - [ ] L tier 2 — cause attribution: per-rule restyle time, per-instance build

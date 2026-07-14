@@ -2186,11 +2186,11 @@ fn debug_snapshot_resolves_module_graph_layout_label_with_active_locale() {
 }
 
 #[test]
-fn benchmark_snapshot_exposes_five_stable_scenarios() {
+fn benchmark_snapshot_exposes_canonical_and_interaction_scenarios() {
     let mut shell = Shell::new();
     let snapshot = shell.build_debug_snapshot();
 
-    assert_eq!(snapshot.benchmarks.scenarios.len(), 5);
+    assert_eq!(snapshot.benchmarks.scenarios.len(), 12);
     assert_eq!(
         snapshot
             .benchmarks
@@ -2199,9 +2199,16 @@ fn benchmark_snapshot_exposes_five_stable_scenarios() {
             .map(|scenario| scenario.id.id())
             .collect::<Vec<_>>(),
         vec![
+            "idle",
             "hover",
             "surface_open_close",
             "pointer_update",
+            "text_update",
+            "scroll",
+            "icon_grid",
+            "animation",
+            "theme_reload",
+            "resize",
             "keyboard_traversal",
             "backend_update",
         ]
@@ -2214,6 +2221,81 @@ fn benchmark_snapshot_exposes_five_stable_scenarios() {
             .map(|scenario| scenario.label.as_str()),
         Some("Backend-driven update")
     );
+}
+
+#[test]
+fn benchmark_canonical_profiles_bind_expected_stages_and_surfaces() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    shell.record_shell_profiling_stage(
+        ProfilingStage::SchedulerIdle,
+        std::time::Duration::from_micros(500),
+        Some("timeout"),
+    );
+    for (surface, stage, micros) in [
+        ("@mesh/settings", ProfilingStage::InputHandling, 11),
+        ("@mesh/settings", ProfilingStage::TreeBuild, 22),
+        ("@mesh/settings", ProfilingStage::Layout, 33),
+        ("@mesh/debug-inspector", ProfilingStage::IconImageRaster, 44),
+        ("@mesh/debug-inspector", ProfilingStage::Paint, 55),
+        ("@mesh/navigation-bar", ProfilingStage::InputHandling, 60),
+        ("@mesh/navigation-bar", ProfilingStage::StyleRestyle, 66),
+        ("@mesh/navigation-bar", ProfilingStage::TreeBuild, 77),
+        ("@mesh/navigation-bar", ProfilingStage::Layout, 88),
+        ("@mesh/navigation-bar", ProfilingStage::Paint, 99),
+    ] {
+        shell.record_surface_profiling_stage(
+            surface,
+            Some(surface),
+            stage,
+            std::time::Duration::from_micros(micros),
+            Some("canonical_profile"),
+        );
+    }
+
+    let snapshot = shell.build_debug_snapshot();
+    let scenario = |id: &str| {
+        snapshot
+            .benchmarks
+            .scenarios
+            .iter()
+            .find(|scenario| scenario.id.id() == id)
+            .expect("canonical scenario")
+    };
+    for id in [
+        "idle",
+        "pointer_update",
+        "text_update",
+        "scroll",
+        "icon_grid",
+        "animation",
+        "theme_reload",
+        "resize",
+    ] {
+        assert_eq!(
+            scenario(id).status,
+            mesh_core_debug::BenchmarkScenarioStatus::Complete,
+            "{id} should resolve from its canonical stage samples"
+        );
+    }
+    assert!(
+        scenario("idle")
+            .primary_metric
+            .starts_with("scheduler_idle:")
+    );
+    assert!(
+        scenario("text_update")
+            .secondary_metric
+            .starts_with("tree_build:")
+    );
+    assert!(
+        scenario("icon_grid")
+            .primary_metric
+            .starts_with("icon_image_raster:")
+    );
+    assert!(scenario("resize").primary_metric.starts_with("layout:"));
 }
 
 #[test]
@@ -2241,7 +2323,7 @@ fn benchmark_payload_keeps_scenarios_inert_when_profiling_disabled() {
     let scenarios = latest.state["benchmarks"]["scenarios"]
         .as_array()
         .expect("benchmarks.scenarios should serialize as an array");
-    assert_eq!(scenarios.len(), 5);
+    assert_eq!(scenarios.len(), 12);
     assert!(scenarios.iter().all(|scenario| {
         scenario["status"] == serde_json::json!("Profiling off")
             && scenario["hint"] == serde_json::json!("Start profiling first")
@@ -2260,16 +2342,23 @@ fn benchmark_payload_serializes_targets_statuses_and_metrics() {
     let scenarios = latest.state["benchmarks"]["scenarios"]
         .as_array()
         .expect("benchmarks.scenarios should serialize as an array");
-    assert_eq!(scenarios.len(), 5);
+    assert_eq!(scenarios.len(), 12);
     assert_eq!(
         scenarios
             .iter()
             .map(|scenario| scenario["id"].as_str().unwrap())
             .collect::<Vec<_>>(),
         vec![
+            "idle",
             "hover",
             "surface_open_close",
             "pointer_update",
+            "text_update",
+            "scroll",
+            "icon_grid",
+            "animation",
+            "theme_reload",
+            "resize",
             "keyboard_traversal",
             "backend_update",
         ]
@@ -2280,14 +2369,21 @@ fn benchmark_payload_serializes_targets_statuses_and_metrics() {
             .map(|scenario| scenario["target"].as_str().unwrap())
             .collect::<Vec<_>>(),
         vec![
+            "shell scheduler",
             "@mesh/navigation-bar",
             "@mesh/audio-popover",
             "@mesh/navigation-bar audio controls",
+            "@mesh/settings text controls",
+            "@mesh/settings",
+            "@mesh/debug-inspector",
+            "@mesh/navigation-bar",
+            "active theme + @mesh/navigation-bar",
+            "@mesh/navigation-bar",
             "@mesh/navigation-bar focus chain",
             "mesh.audio -> @mesh/pipewire-audio",
         ]
     );
-    let backend_update = &scenarios[4];
+    let backend_update = &scenarios[11];
     assert_eq!(
         backend_update["label"],
         serde_json::json!("Backend-driven update")
@@ -2876,9 +2972,16 @@ fn phase18_benchmark_payload_preserves_render_visible_contract_after_lookup_cach
     assert_eq!(
         scenario_ids,
         [
+            "idle",
             "hover",
             "surface_open_close",
             "pointer_update",
+            "text_update",
+            "scroll",
+            "icon_grid",
+            "animation",
+            "theme_reload",
+            "resize",
             "keyboard_traversal",
             "backend_update"
         ]
@@ -2890,7 +2993,7 @@ fn phase18_benchmark_payload_preserves_render_visible_contract_after_lookup_cach
         .iter()
         .filter(|scenario| scenario.target.contains("@mesh/navigation-bar"))
         .collect();
-    assert_eq!(navigation_rows.len(), 3);
+    assert_eq!(navigation_rows.len(), 6);
     assert!(
         navigation_rows.iter().all(|scenario| {
             scenario.status == mesh_core_debug::BenchmarkScenarioStatus::Complete

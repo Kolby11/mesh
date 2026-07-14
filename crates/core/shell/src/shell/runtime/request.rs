@@ -1251,9 +1251,16 @@ fn point_in_rect(x: f32, y: f32, rect: (i32, i32, i32, i32)) -> bool {
 
 fn benchmark_scenario_id(scenario_id: &str) -> Option<BenchmarkScenarioId> {
     match scenario_id {
+        "idle" => Some(BenchmarkScenarioId::Idle),
         "hover" => Some(BenchmarkScenarioId::Hover),
         "surface_open_close" => Some(BenchmarkScenarioId::SurfaceOpenClose),
         "pointer_update" => Some(BenchmarkScenarioId::PointerUpdate),
+        "text_update" => Some(BenchmarkScenarioId::TextUpdate),
+        "scroll" => Some(BenchmarkScenarioId::Scroll),
+        "icon_grid" => Some(BenchmarkScenarioId::IconGrid),
+        "animation" => Some(BenchmarkScenarioId::Animation),
+        "theme_reload" => Some(BenchmarkScenarioId::ThemeReload),
+        "resize" => Some(BenchmarkScenarioId::Resize),
         "keyboard_traversal" => Some(BenchmarkScenarioId::KeyboardTraversal),
         "backend_update" => Some(BenchmarkScenarioId::BackendUpdate),
         _ => None,

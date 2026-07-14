@@ -82,6 +82,15 @@ section noted.
   value benchmark measured 418.9ms owned versus 247.1ms borrowed (~1.7x); CSS
   projection maps also reserve their declared prop count up front.
 
+## 2026-07-15 — canonical profiling workloads
+
+- The typed debug benchmark contract now exposes idle, pointer move, text
+  update, scroll, icon grid, animation, theme reload, and resize profiles with
+  stable shipped targets and stage priorities. Inspector fallback rows and IPC
+  scenario parsing use the same IDs; existing interaction scenarios remain for
+  compatibility. Profile guidance requires a fresh profiling session per
+  workload so accumulated summaries remain comparable.
+
 ---
 
 ## Non-performance completed items

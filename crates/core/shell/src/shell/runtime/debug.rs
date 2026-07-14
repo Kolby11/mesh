@@ -546,9 +546,16 @@ fn benchmark_snapshot(
     let profiling_view =
         profiling.map(|profiling| BenchmarkProfilingView::new(profiling, backend_runtimes));
     let scenarios = [
+        BenchmarkScenarioId::Idle,
         BenchmarkScenarioId::Hover,
         BenchmarkScenarioId::SurfaceOpenClose,
         BenchmarkScenarioId::PointerUpdate,
+        BenchmarkScenarioId::TextUpdate,
+        BenchmarkScenarioId::Scroll,
+        BenchmarkScenarioId::IconGrid,
+        BenchmarkScenarioId::Animation,
+        BenchmarkScenarioId::ThemeReload,
+        BenchmarkScenarioId::Resize,
         BenchmarkScenarioId::KeyboardTraversal,
         BenchmarkScenarioId::BackendUpdate,
     ]
@@ -607,8 +614,11 @@ fn benchmark_scenario_snapshot(
 }
 
 struct BenchmarkProfilingView<'a> {
+    shell: &'a mesh_core_debug::ProfilingScopeSnapshot,
     navigation_bar: Option<&'a mesh_core_debug::ProfilingSurfaceSnapshot>,
     audio_popover: Option<&'a mesh_core_debug::ProfilingSurfaceSnapshot>,
+    settings: Option<&'a mesh_core_debug::ProfilingSurfaceSnapshot>,
+    debug_inspector: Option<&'a mesh_core_debug::ProfilingSurfaceSnapshot>,
     backend_update_backend: Option<&'a mesh_core_debug::ProfilingBackendSnapshot>,
     backend_runtime_available: bool,
 }
@@ -620,14 +630,19 @@ impl<'a> BenchmarkProfilingView<'a> {
     ) -> Self {
         let navigation_bar = profiling_surface(profiling, "@mesh/navigation-bar");
         let audio_popover = profiling_surface(profiling, "@mesh/audio-popover");
+        let settings = profiling_surface(profiling, "@mesh/settings");
+        let debug_inspector = profiling_surface(profiling, "@mesh/debug-inspector");
         let backend_update_provider_id =
             backend_update_provider_id(Some(profiling), backend_runtimes);
         let backend_update_backend = backend_update_backend(profiling, backend_update_provider_id);
         let backend_runtime_available = backend_update_runtime_available(backend_runtimes);
 
         Self {
+            shell: &profiling.shell,
             navigation_bar,
             audio_popover,
+            settings,
+            debug_inspector,
             backend_update_backend,
             backend_runtime_available,
         }
@@ -668,11 +683,22 @@ fn benchmark_target(
     backend_runtimes: &[mesh_core_debug::BackendRuntimeEntry],
 ) -> String {
     match id {
+        mesh_core_debug::BenchmarkScenarioId::Idle => "shell scheduler".to_string(),
         mesh_core_debug::BenchmarkScenarioId::Hover => "@mesh/navigation-bar".to_string(),
         mesh_core_debug::BenchmarkScenarioId::SurfaceOpenClose => "@mesh/audio-popover".to_string(),
         mesh_core_debug::BenchmarkScenarioId::PointerUpdate => {
             "@mesh/navigation-bar audio controls".to_string()
         }
+        mesh_core_debug::BenchmarkScenarioId::TextUpdate => {
+            "@mesh/settings text controls".to_string()
+        }
+        mesh_core_debug::BenchmarkScenarioId::Scroll => "@mesh/settings".to_string(),
+        mesh_core_debug::BenchmarkScenarioId::IconGrid => "@mesh/debug-inspector".to_string(),
+        mesh_core_debug::BenchmarkScenarioId::Animation => "@mesh/navigation-bar".to_string(),
+        mesh_core_debug::BenchmarkScenarioId::ThemeReload => {
+            "active theme + @mesh/navigation-bar".to_string()
+        }
+        mesh_core_debug::BenchmarkScenarioId::Resize => "@mesh/navigation-bar".to_string(),
         mesh_core_debug::BenchmarkScenarioId::KeyboardTraversal => {
             "@mesh/navigation-bar focus chain".to_string()
         }
@@ -692,6 +718,11 @@ fn benchmark_metrics(
     String,
 ) {
     match id {
+        mesh_core_debug::BenchmarkScenarioId::Idle => shell_benchmark_metrics(
+            profiling_view.shell,
+            mesh_core_debug::ProfilingStage::SchedulerIdle,
+            "Leave the shell idle after starting a fresh profiling session",
+        ),
         mesh_core_debug::BenchmarkScenarioId::Hover => surface_benchmark_metrics(
             profiling_view.navigation_bar,
             &[
@@ -720,6 +751,75 @@ fn benchmark_metrics(
                 mesh_core_debug::ProfilingStage::TotalSurfaceRender,
             ],
             "Adjust the navigation-bar audio controls while profiling is live",
+        ),
+        mesh_core_debug::BenchmarkScenarioId::TextUpdate => surface_benchmark_metrics(
+            profiling_view.settings,
+            &[
+                mesh_core_debug::ProfilingStage::InputHandling,
+                mesh_core_debug::ProfilingStage::RuntimeUpdateHandling,
+            ],
+            &[
+                mesh_core_debug::ProfilingStage::TreeBuild,
+                mesh_core_debug::ProfilingStage::TextShaping,
+                mesh_core_debug::ProfilingStage::TotalSurfaceRender,
+            ],
+            "Edit a text control on @mesh/settings in a fresh profiling session",
+        ),
+        mesh_core_debug::BenchmarkScenarioId::Scroll => surface_benchmark_metrics(
+            profiling_view.settings,
+            &[mesh_core_debug::ProfilingStage::InputHandling],
+            &[
+                mesh_core_debug::ProfilingStage::Layout,
+                mesh_core_debug::ProfilingStage::Paint,
+                mesh_core_debug::ProfilingStage::TotalSurfaceRender,
+            ],
+            "Scroll @mesh/settings in a fresh profiling session",
+        ),
+        mesh_core_debug::BenchmarkScenarioId::IconGrid => surface_benchmark_metrics(
+            profiling_view.debug_inspector,
+            &[
+                mesh_core_debug::ProfilingStage::IconImageRaster,
+                mesh_core_debug::ProfilingStage::PaintTraversal,
+            ],
+            &[
+                mesh_core_debug::ProfilingStage::Paint,
+                mesh_core_debug::ProfilingStage::TotalSurfaceRender,
+            ],
+            "Open the debug inspector icon-heavy view in a fresh profiling session",
+        ),
+        mesh_core_debug::BenchmarkScenarioId::Animation => surface_benchmark_metrics(
+            profiling_view.navigation_bar,
+            &[
+                mesh_core_debug::ProfilingStage::StyleRestyle,
+                mesh_core_debug::ProfilingStage::RuntimeUpdateHandling,
+            ],
+            &[
+                mesh_core_debug::ProfilingStage::Paint,
+                mesh_core_debug::ProfilingStage::TotalSurfaceRender,
+            ],
+            "Run navigation-bar transitions in a fresh profiling session",
+        ),
+        mesh_core_debug::BenchmarkScenarioId::ThemeReload => surface_benchmark_metrics(
+            profiling_view.navigation_bar,
+            &[
+                mesh_core_debug::ProfilingStage::TreeBuild,
+                mesh_core_debug::ProfilingStage::StyleRestyle,
+            ],
+            &[
+                mesh_core_debug::ProfilingStage::Layout,
+                mesh_core_debug::ProfilingStage::TotalSurfaceRender,
+            ],
+            "Reload the active theme in a fresh profiling session",
+        ),
+        mesh_core_debug::BenchmarkScenarioId::Resize => surface_benchmark_metrics(
+            profiling_view.navigation_bar,
+            &[mesh_core_debug::ProfilingStage::Layout],
+            &[
+                mesh_core_debug::ProfilingStage::Paint,
+                mesh_core_debug::ProfilingStage::PresentCommit,
+                mesh_core_debug::ProfilingStage::TotalSurfaceRender,
+            ],
+            "Resize the navigation-bar output in a fresh profiling session",
         ),
         mesh_core_debug::BenchmarkScenarioId::KeyboardTraversal => surface_benchmark_metrics(
             profiling_view.navigation_bar,
@@ -766,6 +866,27 @@ fn surface_benchmark_metrics(
         ),
         _ => waiting_for_samples(),
     }
+}
+
+fn shell_benchmark_metrics(
+    shell: &mesh_core_debug::ProfilingScopeSnapshot,
+    stage: mesh_core_debug::ProfilingStage,
+    hint: &str,
+) -> (
+    mesh_core_debug::BenchmarkScenarioStatus,
+    String,
+    String,
+    String,
+) {
+    let Some(summary) = shell.stages.iter().find(|summary| summary.stage == stage) else {
+        return waiting_for_samples();
+    };
+    (
+        mesh_core_debug::BenchmarkScenarioStatus::Complete,
+        profiling_stage_metric(summary),
+        format!("redraw_count: {}", shell.redraw_count),
+        hint.to_string(),
+    )
 }
 
 fn surface_render_benchmark_metrics(

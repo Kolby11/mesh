@@ -289,6 +289,11 @@ end
 
 local benchmark_definitions = {
     {
+        id = "idle",
+        title = "Idle scheduler",
+        target = "shell scheduler",
+    },
+    {
         id = "hover",
         title = "Hover",
         target = "@mesh/navigation-bar",
@@ -300,8 +305,38 @@ local benchmark_definitions = {
     },
     {
         id = "pointer_update",
-        title = "Pointer-driven update",
+        title = "Pointer move",
         target = "@mesh/navigation-bar audio controls",
+    },
+    {
+        id = "text_update",
+        title = "Text update",
+        target = "@mesh/settings text controls",
+    },
+    {
+        id = "scroll",
+        title = "Scroll",
+        target = "@mesh/settings",
+    },
+    {
+        id = "icon_grid",
+        title = "Icon grid",
+        target = "@mesh/debug-inspector",
+    },
+    {
+        id = "animation",
+        title = "Animation tick",
+        target = "@mesh/navigation-bar",
+    },
+    {
+        id = "theme_reload",
+        title = "Theme reload",
+        target = "active theme + @mesh/navigation-bar",
+    },
+    {
+        id = "resize",
+        title = "Resize",
+        target = "@mesh/navigation-bar",
     },
     {
         id = "keyboard_traversal",

@@ -78,3 +78,21 @@ alongside system captures when stage attribution is needed:
 
 The system profiler identifies hot native call stacks; the built-in profiler
 attributes work to MESH render stages and surfaces.
+
+The debug inspector's Benchmark view exposes the stable canonical profile IDs
+and their stage/target guidance:
+
+| Profile ID | Target | Primary evidence |
+| --- | --- | --- |
+| `idle` | shell scheduler | scheduler idle duration and redraw count |
+| `pointer_update` | navigation-bar audio controls | input/runtime handling, then layout/paint |
+| `text_update` | settings text controls | input/runtime handling, then tree build/text shaping |
+| `scroll` | settings surface | input handling, then layout/paint |
+| `icon_grid` | debug inspector | icon raster/paint traversal, then paint |
+| `animation` | navigation bar | restyle/runtime handling, then paint |
+| `theme_reload` | active theme + navigation bar | tree build/restyle, then layout/render |
+| `resize` | navigation bar | layout, then paint/present |
+
+Start a fresh profiling session for each profile so aggregated stage summaries
+contain only that workload. The older hover, surface-open/close, keyboard, and
+backend-update scenarios remain available for interaction regressions.

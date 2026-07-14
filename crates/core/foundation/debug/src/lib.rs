@@ -88,9 +88,16 @@ pub struct BenchmarkScenarioSnapshot {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum BenchmarkScenarioId {
+    Idle,
     Hover,
     SurfaceOpenClose,
     PointerUpdate,
+    TextUpdate,
+    Scroll,
+    IconGrid,
+    Animation,
+    ThemeReload,
+    Resize,
     KeyboardTraversal,
     BackendUpdate,
 }
@@ -98,9 +105,16 @@ pub enum BenchmarkScenarioId {
 impl BenchmarkScenarioId {
     pub fn id(self) -> &'static str {
         match self {
+            Self::Idle => "idle",
             Self::Hover => "hover",
             Self::SurfaceOpenClose => "surface_open_close",
             Self::PointerUpdate => "pointer_update",
+            Self::TextUpdate => "text_update",
+            Self::Scroll => "scroll",
+            Self::IconGrid => "icon_grid",
+            Self::Animation => "animation",
+            Self::ThemeReload => "theme_reload",
+            Self::Resize => "resize",
             Self::KeyboardTraversal => "keyboard_traversal",
             Self::BackendUpdate => "backend_update",
         }
@@ -108,9 +122,16 @@ impl BenchmarkScenarioId {
 
     pub fn label(self) -> &'static str {
         match self {
+            Self::Idle => "Idle scheduler",
             Self::Hover => "Hover",
             Self::SurfaceOpenClose => "Surface open/close",
-            Self::PointerUpdate => "Pointer-driven update",
+            Self::PointerUpdate => "Pointer move",
+            Self::TextUpdate => "Text update",
+            Self::Scroll => "Scroll",
+            Self::IconGrid => "Icon grid",
+            Self::Animation => "Animation tick",
+            Self::ThemeReload => "Theme reload",
+            Self::Resize => "Resize",
             Self::KeyboardTraversal => "Keyboard traversal",
             Self::BackendUpdate => "Backend-driven update",
         }

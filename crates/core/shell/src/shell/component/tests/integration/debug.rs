@@ -505,7 +505,7 @@ fn settings_surface_renders_modules_providers_theme_and_locale() {
 }
 
 #[test]
-fn debug_inspector_benchmark_view_renders_five_rows_when_profiling_off() {
+fn debug_inspector_benchmark_view_renders_canonical_rows_when_profiling_off() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -539,9 +539,16 @@ fn debug_inspector_benchmark_view_renders_five_rows_when_profiling_off() {
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Benchmark / Interaction"));
     for title in [
+        "Idle scheduler",
         "Hover",
         "Surface open/close",
-        "Pointer-driven update",
+        "Pointer move",
+        "Text update",
+        "Scroll",
+        "Icon grid",
+        "Animation tick",
+        "Theme reload",
+        "Resize",
         "Keyboard traversal",
         "Backend-driven update",
     ] {
@@ -621,9 +628,16 @@ fn debug_inspector_benchmark_view_renders_waiting_rows_when_profiling_live_witho
             .any(|line| line.contains("Run a scenario while profiling is live"))
     );
     for title in [
+        "Idle scheduler",
         "Hover",
         "Surface open/close",
-        "Pointer-driven update",
+        "Pointer move",
+        "Text update",
+        "Scroll",
+        "Icon grid",
+        "Animation tick",
+        "Theme reload",
+        "Resize",
         "Keyboard traversal",
         "Backend-driven update",
     ] {
