@@ -504,6 +504,10 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       now prepared once per host-module/alias pair and reused across cache
       misses; 20,000 preparations of a 64-rule cascade measured 706.0ms versus
       10.7µs for cached access (eliminated work; ~66,069x in isolation).
+      JSON→typed-prop validation and CSS projection now borrow their source
+      values instead of deep-cloning before conversion, and CSS prop maps
+      pre-size from the declaration count; 20,000 nested-value conversions
+      measured 418.9ms owned versus 247.1ms borrowed (~1.7x).
 - [x] Per-node build allocations — unique tracked-read string allocations
       reduced 2026-07-13: service proxy tracking now checks the per-evaluation
       observed-field set by borrowed `&str` before allocating `String`s for a

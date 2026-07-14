@@ -1015,7 +1015,7 @@ fn validate_json_prop(
     def: &mesh_core_component::PropDef,
     value: serde_json::Value,
 ) -> Option<serde_json::Value> {
-    let prop_value = mesh_core_component::json_to_prop_value(value.clone())?;
+    let prop_value = mesh_core_component::json_to_prop_value_ref(&value)?;
     match mesh_core_component::validate_prop_value(def, &prop_value) {
         Ok(()) => Some(value),
         Err(err) => {

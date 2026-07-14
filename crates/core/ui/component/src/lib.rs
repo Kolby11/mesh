@@ -242,6 +242,21 @@ pub fn json_to_prop_value(value: serde_json::Value) -> Option<PropValue> {
     }
 }
 
+/// Convert a JSON value to the scalar prop domain without taking ownership.
+///
+/// Host/runtime callers frequently need to validate or project a value while
+/// retaining the original JSON. Borrowing avoids a deep clone for arrays and
+/// objects before their compatibility string conversion.
+pub fn json_to_prop_value_ref(value: &serde_json::Value) -> Option<PropValue> {
+    match value {
+        serde_json::Value::String(value) => Some(PropValue::String(value.clone())),
+        serde_json::Value::Number(value) => value.as_f64().map(PropValue::Number),
+        serde_json::Value::Bool(value) => Some(PropValue::Bool(*value)),
+        serde_json::Value::Null => None,
+        other => Some(PropValue::String(other.to_string())),
+    }
+}
+
 fn validate_size_prop(def: &PropDef, value: &PropValue) -> Result<(), PropValidationError> {
     match value {
         PropValue::Number(n) => validate_numeric_bounds(def, *n),
@@ -459,4 +474,75 @@ pub struct ScriptBlock {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScriptLang {
     Luau,
+}
+
+#[cfg(test)]
+mod prop_value_conversion_tests {
+    use super::*;
+
+    #[test]
+    fn borrowed_json_prop_conversion_matches_owned_conversion() {
+        let values = [
+            serde_json::json!("text"),
+            serde_json::json!(42.5),
+            serde_json::json!(true),
+            serde_json::Value::Null,
+            serde_json::json!({"nested": [1, 2, 3]}),
+            serde_json::json!(["a", "b"]),
+        ];
+
+        for value in values {
+            assert_eq!(
+                json_to_prop_value_ref(&value),
+                json_to_prop_value(value.clone())
+            );
+        }
+    }
+
+    // cargo test -p mesh-core-component --release -- borrowed_json_prop_conversion_avoids_nested_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only borrowed prop conversion microbenchmark"]
+    fn borrowed_json_prop_conversion_avoids_nested_clone() {
+        use std::time::Instant;
+
+        let value = serde_json::json!({
+            "items": (0..64)
+                .map(|index| serde_json::json!({
+                    "id": index,
+                    "label": "x".repeat(128),
+                    "enabled": index % 2 == 0
+                }))
+                .collect::<Vec<_>>()
+        });
+        let iterations = 20_000usize;
+
+        let owned_started = Instant::now();
+        let mut owned_total = 0usize;
+        for _ in 0..iterations {
+            let converted = json_to_prop_value(std::hint::black_box(value.clone())).unwrap();
+            owned_total += match converted {
+                PropValue::String(value) => value.len(),
+                _ => 0,
+            };
+        }
+        let owned_time = owned_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_total = 0usize;
+        for _ in 0..iterations {
+            let converted = json_to_prop_value_ref(std::hint::black_box(&value)).unwrap();
+            borrowed_total += match converted {
+                PropValue::String(value) => value.len(),
+                _ => 0,
+            };
+        }
+        let borrowed_time = borrowed_started.elapsed();
+
+        eprintln!(
+            "nested JSON prop conversion: owned {owned_time:?}; borrowed {borrowed_time:?}; ratio {:.1}x; bytes={owned_total}/{borrowed_total}",
+            owned_time.as_secs_f64() / borrowed_time.as_secs_f64()
+        );
+        assert_eq!(owned_total, borrowed_total);
+        assert!(borrowed_time < owned_time);
+    }
 }

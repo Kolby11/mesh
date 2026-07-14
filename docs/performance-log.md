@@ -77,6 +77,10 @@ section noted.
   vector and its selector index per host-module/alias pair. Over 20,000
   iterations of a 64-rule cascade, rebuilding took 706.0ms while borrowing the
   prepared entry took 10.7µs (~66,069x for the eliminated preparation work).
+- Runtime validation and CSS projection convert JSON props by reference rather
+  than deep-cloning values that the caller retains. A 20,000-iteration nested
+  value benchmark measured 418.9ms owned versus 247.1ms borrowed (~1.7x); CSS
+  projection maps also reserve their declared prop count up front.
 
 ---
 

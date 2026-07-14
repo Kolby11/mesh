@@ -108,10 +108,10 @@ pub fn resolve_css_props(
     block: Option<&PropsBlock>,
     state: Option<&dyn VariableStore>,
 ) -> HashMap<String, StyleValue> {
-    let mut map = HashMap::new();
     let Some(block) = block else {
-        return map;
+        return HashMap::new();
     };
+    let mut map = HashMap::with_capacity(block.props.len());
     // The shell publishes one `props` table in script state (the precedence-
     // resolved value per name); script writes round-trip back into it.
     let props_state_borrowed = state.and_then(|store| store.get_ref("props"));
@@ -126,7 +126,7 @@ pub fn resolve_css_props(
             props_state
                 .and_then(|obj| obj.get(&def.name))
                 .and_then(|value| {
-                    mesh_core_component::json_to_prop_value(value.clone()).and_then(|value| {
+                    mesh_core_component::json_to_prop_value_ref(value).and_then(|value| {
                         match mesh_core_component::prop_value_to_css(def, &value) {
                             Ok(css) => Some(css),
                             Err(err) => {
