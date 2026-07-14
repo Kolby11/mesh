@@ -24,16 +24,56 @@ use std::collections::{BTreeMap, HashMap};
 
 pub(crate) struct BuildStyleContext<'a, 'theme> {
     rules: &'a [StyleRule],
-    index: StyleRuleIndex,
+    index: BuildStyleRuleIndex<'a>,
     resolver: &'a StyleResolver<'theme>,
     namespace_handlers: bool,
+}
+
+enum BuildStyleRuleIndex<'a> {
+    Owned(StyleRuleIndex),
+    Borrowed(&'a StyleRuleIndex),
+}
+
+impl BuildStyleRuleIndex<'_> {
+    fn as_ref(&self) -> &StyleRuleIndex {
+        match self {
+            Self::Owned(index) => index,
+            Self::Borrowed(index) => index,
+        }
+    }
+}
+
+/// Owned, indexed style rules for a component embedded under a stable host.
+///
+/// Local component source and its host module's rules are immutable for the
+/// lifetime of a compiled catalog. Preparing the combined rules once avoids
+/// cloning both rule sets and rebuilding `StyleRuleIndex` on every cache miss.
+#[derive(Debug)]
+pub struct PreparedComponentStyleRules {
+    rules: Vec<StyleRule>,
+    index: StyleRuleIndex,
+}
+
+impl PreparedComponentStyleRules {
+    pub fn new(component: &mesh_core_component::ComponentFile, host_rules: &[StyleRule]) -> Self {
+        let component_rules = component
+            .style
+            .as_ref()
+            .map(|style| style.rules.as_slice())
+            .unwrap_or(&[]);
+        let mut rules = Vec::with_capacity(host_rules.len() + component_rules.len());
+        rules.extend_from_slice(host_rules);
+        rules.extend_from_slice(component_rules);
+        let index = StyleRuleIndex::new(&rules);
+        Self { rules, index }
+    }
 }
 
 impl<'a, 'theme> BuildStyleContext<'a, 'theme> {
     pub(crate) fn new(rules: &'a [StyleRule], resolver: &'a StyleResolver<'theme>) -> Self {
         Self {
             rules,
-            index: StyleRuleIndex::new(rules),
+            index: BuildStyleRuleIndex::Owned(StyleRuleIndex::new(rules)),
             resolver,
             namespace_handlers: false,
         }
@@ -42,6 +82,18 @@ impl<'a, 'theme> BuildStyleContext<'a, 'theme> {
     pub(crate) fn with_handler_namespacing(mut self, enabled: bool) -> Self {
         self.namespace_handlers = enabled;
         self
+    }
+
+    fn from_prepared(
+        prepared: &'a PreparedComponentStyleRules,
+        resolver: &'a StyleResolver<'theme>,
+    ) -> Self {
+        Self {
+            rules: &prepared.rules,
+            index: BuildStyleRuleIndex::Borrowed(&prepared.index),
+            resolver,
+            namespace_handlers: false,
+        }
     }
 }
 
@@ -326,6 +378,7 @@ pub fn build_widget_tree_from_component(
         instance_key,
         state,
         host_rules,
+        None,
         false,
     )
 }
@@ -355,6 +408,36 @@ pub fn build_embedded_widget_tree_from_component(
         instance_key,
         state,
         host_rules,
+        None,
+        true,
+    )
+}
+
+/// Build an embedded component using an already merged and indexed host/local
+/// style-rule set.
+#[allow(clippy::too_many_arguments)]
+pub fn build_embedded_widget_tree_from_component_with_prepared_styles(
+    component: &mesh_core_component::ComponentFile,
+    host_manifest: &Manifest,
+    theme: &Theme,
+    container_width: f32,
+    container_height: f32,
+    composition: Option<&dyn FrontendCompositionResolver>,
+    instance_key: &str,
+    state: Option<&dyn VariableStore>,
+    prepared_styles: &PreparedComponentStyleRules,
+) -> WidgetNode {
+    build_widget_tree_from_component_inner(
+        component,
+        host_manifest,
+        theme,
+        container_width,
+        container_height,
+        composition,
+        instance_key,
+        state,
+        &[],
+        Some(prepared_styles),
         true,
     )
 }
@@ -370,14 +453,15 @@ fn build_widget_tree_from_component_inner(
     instance_key: &str,
     state: Option<&dyn VariableStore>,
     host_rules: &[mesh_core_component::style::StyleRule],
+    prepared_styles: Option<&PreparedComponentStyleRules>,
     namespace_handlers: bool,
 ) -> WidgetNode {
     let resolver =
         StyleResolver::new(theme).with_props(resolve_css_props(component.props.as_ref(), state));
-    let component_rules: &[mesh_core_component::style::StyleRule] = component
+    let component_rules = component
         .style
         .as_ref()
-        .map(|s| s.rules.as_slice())
+        .map(|style| style.rules.as_slice())
         .unwrap_or(&[]);
     let merged: Vec<mesh_core_component::style::StyleRule>;
     let rules: &[mesh_core_component::style::StyleRule] = if host_rules.is_empty() {
@@ -398,8 +482,11 @@ fn build_widget_tree_from_component_inner(
             container_width,
             container_height,
         };
-        let build_style =
-            BuildStyleContext::new(rules, &resolver).with_handler_namespacing(namespace_handlers);
+        let build_style = match prepared_styles {
+            Some(prepared) => BuildStyleContext::from_prepared(prepared, &resolver),
+            None => BuildStyleContext::new(rules, &resolver),
+        }
+        .with_handler_namespacing(namespace_handlers);
         let children: Vec<WidgetNode> = template
             .root
             .iter()
@@ -779,7 +866,7 @@ fn build_element_node(
     node.event_handler_calls = event_handler_calls;
     node.computed_style = build_style.resolver.resolve_node_style_for_module_indexed(
         build_style.rules,
-        &build_style.index,
+        build_style.index.as_ref(),
         &tag,
         style_classes,
         style_id,
@@ -1405,6 +1492,116 @@ mod tests {
             slider.event_handlers.get("release"),
             Some(&"onSliderRelease".into())
         );
+    }
+
+    #[test]
+    fn prepared_component_styles_match_per_build_rule_merging() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<template><box class="target" /></template>
+<style>.target { height: 12px; color: #abcdef; }</style>
+"#,
+        )
+        .unwrap();
+        let host = mesh_core_component::parse_component(
+            r#"
+<template><box /></template>
+<style>.target { width: 34px; padding: 2px; }</style>
+"#,
+        )
+        .unwrap();
+        let host_rules = &host.style.as_ref().unwrap().rules;
+        let manifest = test_manifest();
+        let theme = mesh_core_theme::default_theme();
+
+        let legacy = build_embedded_widget_tree_from_component(
+            &component,
+            &manifest,
+            &theme,
+            200.0,
+            80.0,
+            None,
+            "root/local:target",
+            None,
+            host_rules,
+        );
+        let prepared = PreparedComponentStyleRules::new(&component, host_rules);
+        let cached = build_embedded_widget_tree_from_component_with_prepared_styles(
+            &component,
+            &manifest,
+            &theme,
+            200.0,
+            80.0,
+            None,
+            "root/local:target",
+            None,
+            &prepared,
+        );
+
+        assert_eq!(cached.tag, legacy.tag);
+        assert_eq!(cached.attributes, legacy.attributes);
+        assert_eq!(cached.children.len(), legacy.children.len());
+        let cached_target = cached.children.first().expect("prepared target");
+        let legacy_target = legacy.children.first().expect("legacy target");
+        assert_eq!(cached_target.tag, legacy_target.tag);
+        assert_eq!(cached_target.attributes, legacy_target.attributes);
+        assert_eq!(
+            format!("{:?}", cached_target.computed_style),
+            format!("{:?}", legacy_target.computed_style)
+        );
+    }
+
+    // cargo test -p mesh-core-frontend --release -- prepared_component_style_rules_avoid_remerge_and_reindex --ignored --nocapture
+    #[test]
+    #[ignore = "release-only prepared component-style benchmark"]
+    fn prepared_component_style_rules_avoid_remerge_and_reindex() {
+        use std::time::Instant;
+
+        let rules = (0..32)
+            .map(|index| {
+                format!(
+                    ".item-{index} {{ width: {}px; height: {}px; color: #abcdef; }}",
+                    index + 1,
+                    index + 2
+                )
+            })
+            .collect::<String>();
+        let component = mesh_core_component::parse_component(&format!(
+            "<template><box class=\"item-31\" /></template><style>{rules}</style>"
+        ))
+        .unwrap();
+        let host = mesh_core_component::parse_component(&format!(
+            "<template><box /></template><style>{rules}</style>"
+        ))
+        .unwrap();
+        let host_rules = &host.style.as_ref().unwrap().rules;
+        let iterations = 20_000usize;
+
+        let rebuild_started = Instant::now();
+        let mut rebuilt_rules = 0usize;
+        for _ in 0..iterations {
+            let prepared = PreparedComponentStyleRules::new(
+                std::hint::black_box(&component),
+                std::hint::black_box(host_rules),
+            );
+            rebuilt_rules += std::hint::black_box(prepared.rules.len());
+        }
+        let rebuild_time = rebuild_started.elapsed();
+
+        let prepared = PreparedComponentStyleRules::new(&component, host_rules);
+        let reuse_started = Instant::now();
+        let mut reused_rules = 0usize;
+        for _ in 0..iterations {
+            reused_rules += std::hint::black_box(&prepared).rules.len();
+        }
+        let reuse_time = reuse_started.elapsed();
+
+        eprintln!(
+            "component style preparation: rebuild {rebuild_time:?}; cached reuse {reuse_time:?}; ratio {:.1}x; rules={rebuilt_rules}/{reused_rules}",
+            rebuild_time.as_secs_f64() / reuse_time.as_secs_f64()
+        );
+        assert_eq!(rebuilt_rules, reused_rules);
+        assert!(reuse_time < rebuild_time);
     }
 
     const PROP_COMPONENT: &str = r#"

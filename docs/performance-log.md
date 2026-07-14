@@ -73,6 +73,10 @@ section noted.
   values, cloning only when a prop changes. A 100,000-write release benchmark
   measured 15.5ms for the owned unchanged gate versus 4.3ms for the borrowed
   gate (~3.6x); eager Lua writes measured 130.3ms.
+- Local component style cascades now cache the merged host/component rule
+  vector and its selector index per host-module/alias pair. Over 20,000
+  iterations of a 64-rule cascade, rebuilding took 706.0ms while borrowing the
+  prepared entry took 10.7µs (~66,069x for the eliminated preparation work).
 
 ---
 

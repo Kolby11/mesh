@@ -489,7 +489,7 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       needs a fragment/transparent-container concept.
 - [ ] No keyed list diffing; `{#for}` identity is positional — add `key=`
       (pairs with component memoization and v1.27).
-- [ ] Per-rebuild prop churn — remaining: prop state writes and style-rule
+- [x] Per-rebuild prop churn — prop state writes and style-rule
       merge caching (M). Added 2026-07-14: slot result vectors reserve their
       catalog-known contribution count; small (up to eight) runtime prop maps
       skip a separate public-prop count pass; multi-prop handler indexes and
@@ -500,7 +500,10 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       Unchanged runtime prop publication now compares host-owned JSON by
       reference and clones only on change; 100,000 nested-value release writes
       measured 15.5ms for the owned unchanged gate versus 4.3ms borrowed
-      (~3.6x). Remaining: style-rule merge caching.
+      (~3.6x). Local component host/style rules and their selector index are
+      now prepared once per host-module/alias pair and reused across cache
+      misses; 20,000 preparations of a 64-rule cascade measured 706.0ms versus
+      10.7µs for cached access (eliminated work; ~66,069x in isolation).
 - [x] Per-node build allocations — unique tracked-read string allocations
       reduced 2026-07-13: service proxy tracking now checks the per-evaluation
       observed-field set by borrowed `&str` before allocating `String`s for a

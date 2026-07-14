@@ -496,17 +496,36 @@ impl FrontendSurfaceComponent {
         let theme = self.active_theme.borrow().clone();
         let state = self.runtime_state(instance_key).unwrap_or_default();
         let bound = LocaleBoundState::new(&state, &self.locale);
-        let node = mesh_core_frontend::build_embedded_widget_tree_from_component(
-            component,
-            host,
-            &theme,
-            container_width,
-            container_height,
-            Some(self),
-            instance_key,
-            Some(&bound),
-            host_rules,
-        );
+        let prepared_styles = {
+            let cached = self.prepared_component_styles.borrow();
+            cached
+                .get(&host.package.id)
+                .and_then(|components| components.get(alias))
+                .cloned()
+        }
+        .unwrap_or_else(|| {
+            let prepared = Arc::new(mesh_core_frontend::PreparedComponentStyleRules::new(
+                component, host_rules,
+            ));
+            self.prepared_component_styles
+                .borrow_mut()
+                .entry(host.package.id.clone())
+                .or_default()
+                .insert(alias.to_string(), Arc::clone(&prepared));
+            prepared
+        });
+        let node =
+            mesh_core_frontend::build_embedded_widget_tree_from_component_with_prepared_styles(
+                component,
+                host,
+                &theme,
+                container_width,
+                container_height,
+                Some(self),
+                instance_key,
+                Some(&bound),
+                &prepared_styles,
+            );
         node
     }
 

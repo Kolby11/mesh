@@ -19,8 +19,9 @@ use std::path::PathBuf;
 pub use accessibility::root_accessibility_role;
 pub use compile::{CompileFrontendError, compile_frontend_module, is_frontend_module};
 pub use render::{
-    build_embedded_widget_tree_from_component, build_widget_tree_from_component,
-    props_settings_schema, resolve_css_props,
+    PreparedComponentStyleRules, build_embedded_widget_tree_from_component,
+    build_embedded_widget_tree_from_component_with_prepared_styles,
+    build_widget_tree_from_component, props_settings_schema, resolve_css_props,
 };
 pub use style::merge_missing_defaults;
 pub use tags::UiTag;
