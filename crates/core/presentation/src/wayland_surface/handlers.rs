@@ -344,9 +344,18 @@ impl PointerHandler for State {
                     ..
                 } => {
                     let (x, y) = (event.position.0 as f32, event.position.1 as f32);
-                    let dx = -horizontal.absolute as f32;
-                    let dy = -vertical.absolute as f32;
+                    let dx = normalized_axis_delta(horizontal.absolute, horizontal.discrete);
+                    let dy = normalized_axis_delta(vertical.absolute, vertical.discrete);
                     if dx.abs() > f32::EPSILON || dy.abs() > f32::EPSILON {
+                        tracing::debug!(
+                            surface_id = surface_id.as_ref(),
+                            ?source,
+                            x,
+                            y,
+                            dx,
+                            dy,
+                            "Wayland pointer axis input"
+                        );
                         if source == Some(wl_pointer::AxisSource::Finger) {
                             self.events.push(DevWindowEvent::TwoFingerScroll {
                                 surface_id,
@@ -369,6 +378,19 @@ impl PointerHandler for State {
             }
         }
     }
+}
+
+/// Convert SCTK's axis payload into MESH's direction convention (positive is
+/// up/left). Compositors normally provide the continuous `absolute` value,
+/// but the protocol also permits step-only axis frames. Dropping those frames
+/// makes some pointer devices appear completely inert to component handlers.
+fn normalized_axis_delta(absolute: f64, discrete: i32) -> f32 {
+    let protocol_delta = if absolute.is_finite() && absolute.abs() > f64::EPSILON {
+        absolute as f32
+    } else {
+        discrete as f32
+    };
+    -protocol_delta
 }
 
 impl ActivationHandler for State {
@@ -1012,6 +1034,24 @@ delegate_touch!(State);
 #[cfg(test)]
 mod tests {
     use super::normalize_keysym_name;
+    use super::normalized_axis_delta;
+
+    #[test]
+    fn axis_delta_prefers_continuous_motion_and_normalizes_direction() {
+        assert_eq!(normalized_axis_delta(2.5, 1), -2.5);
+        assert_eq!(normalized_axis_delta(-3.0, -1), 3.0);
+    }
+
+    #[test]
+    fn axis_delta_preserves_step_only_frames() {
+        assert_eq!(normalized_axis_delta(0.0, 1), -1.0);
+        assert_eq!(normalized_axis_delta(0.0, -1), 1.0);
+    }
+
+    #[test]
+    fn axis_delta_falls_back_when_continuous_motion_is_not_finite() {
+        assert_eq!(normalized_axis_delta(f64::NAN, 1), -1.0);
+    }
     use std::borrow::Cow;
 
     #[test]
