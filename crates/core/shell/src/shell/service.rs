@@ -194,6 +194,20 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
             }),
         "shell.toggle-debug-overlay" => Some(CoreRequest::ToggleDebugOverlay),
         "shell.toggle-debug-layout-bounds" => Some(CoreRequest::ToggleDebugLayoutBounds),
+        "shell.toggle-debug-element-picker" => Some(CoreRequest::ToggleDebugElementPicker),
+        "shell.open-debug-source" if event.source_module_id == "@mesh/debug-inspector" => {
+            let path = event.payload.get("path").and_then(|value| value.as_str())?;
+            let line = event
+                .payload
+                .get("line")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(1)
+                .clamp(1, u64::from(u32::MAX)) as u32;
+            Some(CoreRequest::OpenDebugSource {
+                path: path.to_string(),
+                line,
+            })
+        }
         "shell.toggle-debug-profiling" => Some(CoreRequest::ToggleDebugProfiling),
         "shell.run-debug-benchmark" => {
             match event.payload.get("scenario_id").and_then(|v| v.as_str()) {
@@ -455,6 +469,18 @@ mod tests {
                 source_capabilities: mesh_core_capability::CapabilitySet::new(),
             },
             PublishedEvent {
+                channel: "shell.toggle-debug-element-picker".into(),
+                payload: serde_json::json!({}),
+                source_module_id: "@mesh/debug-inspector".into(),
+                source_capabilities: mesh_core_capability::CapabilitySet::new(),
+            },
+            PublishedEvent {
+                channel: "shell.open-debug-source".into(),
+                payload: serde_json::json!({ "path": "/tmp/example.mesh", "line": 42 }),
+                source_module_id: "@mesh/debug-inspector".into(),
+                source_capabilities: mesh_core_capability::CapabilitySet::new(),
+            },
+            PublishedEvent {
                 channel: "shell.toggle-debug-profiling".into(),
                 payload: serde_json::json!({}),
                 source_module_id: "@mesh/debug-inspector".into(),
@@ -472,6 +498,15 @@ mod tests {
         ));
         assert!(matches!(
             requests.get(2),
+            Some(CoreRequest::ToggleDebugElementPicker)
+        ));
+        assert!(matches!(
+            requests.get(3),
+            Some(CoreRequest::OpenDebugSource { path, line })
+                if path == "/tmp/example.mesh" && *line == 42
+        ));
+        assert!(matches!(
+            requests.get(4),
             Some(CoreRequest::ToggleDebugProfiling)
         ));
     }

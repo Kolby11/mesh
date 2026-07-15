@@ -1,0 +1,84 @@
+<template>
+  <column class="elements-view" hidden={hidden}>
+    <row class="elements-toolbar">
+      <column class="elements-heading">
+        <text class="section-title">Element inspector</text>
+        <text class="section-copy">Pick any visible element, then inspect its source and computed box model.</text>
+      </column>
+      <button class={picker_button_class} onclick={onTogglePicker} aria-label={picker_button_label}>
+        <text class="picker-button-text">{picker_button_text}</text>
+      </button>
+    </row>
+    <empty-state class="empty-card" hidden={empty_hidden}>
+      <column class="empty-copy">
+        <text class="empty-title">No element selected</text>
+        <text class="empty-text">Start picking, hover over another surface, and click to keep its details here.</text>
+      </column>
+    </empty-state>
+    <column class="element-details" hidden={details_hidden}>
+      <box class="element-card"><column class="element-copy">
+        <text class="element-title">{element_title}</text>
+        <text class="element-meta">{element_selector}</text>
+        <text class="source-path">{source_file}</text>
+        <text class="element-meta">{module_label}</text>
+        <button class="open-source-button" onclick={onOpenSource} aria-label="Open selected element source in VS Code">
+          <text class="open-source-button-text">{open_source_button_text}</text>
+        </button>
+      </column></box>
+      <box class="element-card"><column class="element-copy">
+        <text class="card-title">Box model</text>
+        <text class="box-size">{size_label}</text>
+        <text class="box-row box-margin">margin  {margin_label}</text>
+        <text class="box-row box-border">border  {border_label}</text>
+        <text class="box-row box-padding">padding {padding_label}</text>
+        <text class="box-row box-content">content {content_size_label}</text>
+      </column></box>
+      <box class="element-card"><column class="element-copy">
+        <text class="card-title">Computed</text>
+        {#for row in computed_rows}
+          <row class="computed-row"><text class="computed-name">{row.name}</text><text class="computed-value">{row.value}</text></row>
+        {/for}
+      </column></box>
+    </column>
+  </column>
+</template>
+
+<script lang="luau">
+hidden = false
+empty_hidden = false
+details_hidden = true
+picker_button_class = "picker-button"
+picker_button_label = "Start selecting an element"
+picker_button_text = "Select element"
+element_title = "element"
+element_selector = ""
+source_file = "Source unavailable"
+module_label = ""
+size_label = "0 × 0"
+margin_label = "0"
+border_label = "0"
+padding_label = "0"
+content_size_label = "0 × 0"
+computed_rows = {}
+open_source_button_text = "Open in VS Code"
+</script>
+
+<style>
+  .elements-view, .element-details, .element-copy, .empty-copy { gap: var(--spacing-md); }
+  .elements-toolbar { width: 100%; align-items: center; justify-content: space-between; gap: var(--spacing-md); }
+  .elements-heading { flex-grow: 1; gap: var(--spacing-xs); }
+  .section-title, .element-title, .card-title, .empty-title { font-size: var(--typography-size-sm); font-weight: 700; color: var(--color-on-surface); }
+  .section-copy, .element-meta, .empty-text, .computed-name, .computed-value { font-size: var(--typography-size-xs); color: var(--color-on-surface-variant); }
+  .picker-button { padding: var(--spacing-sm) var(--spacing-md); gap: var(--spacing-xs); border-radius: var(--radius-md); background: var(--color-primary-container); color: var(--color-on-primary-container); }
+  .picker-button-active { background: var(--color-primary); color: var(--color-on-primary); }
+  .picker-button-text { font-size: var(--typography-size-xs); font-weight: 700; }
+  .empty-card, .element-card { width: 100%; padding: var(--spacing-md); border-radius: var(--radius-md); background: var(--color-surface-container); border-width: 1px; border-style: solid; border-color: var(--color-outline-variant); }
+  .source-path { font-size: var(--typography-size-xs); color: var(--color-primary); }
+  .open-source-button { align-self: start; padding: var(--spacing-sm) var(--spacing-md); border-radius: var(--radius-md); background: var(--color-secondary-container); color: var(--color-on-secondary-container); }
+  .open-source-button-text { font-size: var(--typography-size-xs); font-weight: 700; }
+  .box-size { font-size: var(--typography-size-sm); color: var(--color-on-surface); }
+  .box-row { padding: var(--spacing-xs); font-size: var(--typography-size-xs); color: #172026; }
+  .box-margin { background: #f9cc9d; } .box-border { background: #fddd9b; } .box-padding { background: #c4d69b; } .box-content { background: #8cb6c0; }
+  .computed-row { width: 100%; justify-content: space-between; gap: var(--spacing-md); }
+  .computed-name { flex-grow: 1; } .computed-value { color: var(--color-on-surface); }
+</style>

@@ -23,7 +23,6 @@ pub use render::{
     build_embedded_widget_tree_from_component_with_prepared_styles,
     build_widget_tree_from_component, props_settings_schema, resolve_css_props,
 };
-pub use style::merge_missing_defaults;
 pub use tags::UiTag;
 
 /// A `VariableStore` overlay used during `{#for}` iteration.
@@ -824,9 +823,7 @@ mod tests {
         // The synthetic <column> wrapper a {#for} block compiles into is
         // invisible authoring structure, not an author-styled container.
         // Regression test for a bug where it silently inherited
-        // container_style's 12px padding / 8px gap, shifting every child
-        // (worst for absolutely-positioned ones, since the padding offsets
-        // their containing block).
+        // author-facing column theme defaults, separating every child.
         let source = r#"
 <template>
   <box>
@@ -1317,6 +1314,100 @@ mod tests {
             }
         }
         None
+    }
+
+    #[test]
+    fn component_css_fully_overrides_theme_primitive_defaults() {
+        let compiled = make_test_module(
+            r#"
+<template>
+  <row class="restyled-row">
+    <button class="flat-button">Plain</button>
+    <icon class="restyled-icon" name="test" />
+  </row>
+</template>
+<style>
+  .restyled-row {
+    flex-direction: column;
+    width: auto;
+    height: auto;
+    padding: 0;
+    gap: 0;
+  }
+  .flat-button {
+    padding: 0;
+    gap: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+  .restyled-icon {
+    width: 31px;
+    height: 29px;
+    padding: 7px;
+    border-radius: 9px;
+    background: #123456;
+  }
+</style>
+"#,
+        );
+        let theme = mesh_core_theme::default_theme();
+        let tree = compiled.build_preview_tree(&theme, 400, 300);
+
+        let row = find_first_by_tag(&tree, "row").expect("row");
+        assert_eq!(
+            row.computed_style.direction,
+            mesh_core_elements::FlexDirection::Column
+        );
+        assert_eq!(
+            row.computed_style.width,
+            mesh_core_elements::Dimension::Auto
+        );
+        assert_eq!(
+            row.computed_style.height,
+            mesh_core_elements::Dimension::Auto
+        );
+        assert_eq!(
+            row.computed_style.padding,
+            mesh_core_elements::Edges::zero()
+        );
+        assert_eq!(row.computed_style.gap, 0.0);
+
+        let button = find_first_by_tag(&tree, "button").expect("button");
+        assert_eq!(
+            button.computed_style.padding,
+            mesh_core_elements::Edges::zero()
+        );
+        assert_eq!(button.computed_style.gap, 0.0);
+        assert_eq!(
+            button.computed_style.border_radius,
+            mesh_core_elements::Corners::zero()
+        );
+        assert_eq!(
+            button.computed_style.background_color,
+            mesh_core_elements::Color::TRANSPARENT
+        );
+
+        let icon = find_first_by_tag(&tree, "icon").expect("icon");
+        assert_eq!(
+            icon.computed_style.width,
+            mesh_core_elements::Dimension::Px(31.0)
+        );
+        assert_eq!(
+            icon.computed_style.height,
+            mesh_core_elements::Dimension::Px(29.0)
+        );
+        assert_eq!(
+            icon.computed_style.padding,
+            mesh_core_elements::Edges::all(7.0)
+        );
+        assert_eq!(
+            icon.computed_style.border_radius,
+            mesh_core_elements::Corners::all(9.0)
+        );
+        assert_eq!(
+            icon.computed_style.background_color,
+            mesh_core_elements::Color::from_hex("#123456").expect("color")
+        );
     }
 
     fn make_test_module(source: &str) -> CompiledFrontendModule {

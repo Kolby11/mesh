@@ -1912,7 +1912,10 @@ fn selection_input_contract_debug_shortcuts_remain_global() {
         shell_global_shortcut_request("Tab", true, false, true),
         Some(CoreRequest::CycleDebugTab)
     ));
-    assert!(shell_global_shortcut_request("c", true, false, false).is_none());
+    assert!(matches!(
+        shell_global_shortcut_request("c", true, true, false),
+        Some(CoreRequest::ToggleDebugElementPicker)
+    ));
 }
 
 #[test]

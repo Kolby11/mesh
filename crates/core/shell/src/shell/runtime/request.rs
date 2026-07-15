@@ -28,13 +28,44 @@ fn service_unavailable_response() -> serde_json::Value {
 }
 
 impl Shell {
-    fn invalidate_debug_layout_bounds_targets(&mut self) {
+    pub(in crate::shell) fn invalidate_debug_layout_bounds_targets(&mut self) {
         for runtime in &mut self.components {
             runtime.component.request_paint();
             runtime.parent.force_full_present = true;
             for child in &mut runtime.children {
                 child.target.force_full_present = true;
             }
+        }
+    }
+
+    fn open_debug_source_in_editor(&self, path: &str, line: u32) {
+        let requested = match std::path::Path::new(path).canonicalize() {
+            Ok(path) if path.extension().and_then(|ext| ext.to_str()) == Some("mesh") => path,
+            _ => {
+                tracing::warn!(path, "refusing to open invalid debug source path");
+                return;
+            }
+        };
+        let is_loaded_source = self.components.iter().any(|runtime| {
+            runtime
+                .component
+                .watched_source_paths()
+                .into_iter()
+                .filter_map(|candidate| candidate.canonicalize().ok())
+                .any(|candidate| candidate == requested)
+        });
+        if !is_loaded_source {
+            tracing::warn!(path = %requested.display(), "refusing to open source outside loaded frontend modules");
+            return;
+        }
+
+        let target = format!("{}:{}", requested.display(), line.max(1));
+        if let Err(error) = std::process::Command::new("code")
+            .arg("--goto")
+            .arg(&target)
+            .spawn()
+        {
+            tracing::warn!(%error, %target, "failed to launch VS Code for inspected element");
         }
     }
 
@@ -423,6 +454,20 @@ impl Shell {
                     }
                 );
                 self.invalidate_debug_layout_bounds_targets();
+                Ok(VecDeque::new())
+            }
+            CoreRequest::ToggleDebugElementPicker => {
+                self.debug.toggle_element_picker();
+                self.invalidate_debug_layout_bounds_targets();
+                if self.debug.element_picker_enabled && !self.debug.enabled {
+                    self.debug.enabled = true;
+                    self.set_surface_visibility(DEBUG_INSPECTOR_SURFACE_ID.to_string(), true)
+                } else {
+                    Ok(VecDeque::new())
+                }
+            }
+            CoreRequest::OpenDebugSource { path, line } => {
+                self.open_debug_source_in_editor(&path, line);
                 Ok(VecDeque::new())
             }
             CoreRequest::ToggleDebugProfiling => {
@@ -1235,6 +1280,8 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::TransferTabFocus { .. } => "transfer_tab_focus",
         CoreRequest::ToggleDebugOverlay => "toggle_debug_overlay",
         CoreRequest::ToggleDebugLayoutBounds => "toggle_debug_layout_bounds",
+        CoreRequest::ToggleDebugElementPicker => "toggle_debug_element_picker",
+        CoreRequest::OpenDebugSource { .. } => "open_debug_source",
         CoreRequest::ToggleDebugProfiling => "toggle_debug_profiling",
         CoreRequest::RunDebugBenchmark { .. } => "run_debug_benchmark",
         CoreRequest::CycleDebugTab => "cycle_debug_tab",

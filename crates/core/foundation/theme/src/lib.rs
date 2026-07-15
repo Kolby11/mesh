@@ -1214,4 +1214,32 @@ mod tests {
             )
         );
     }
+
+    #[test]
+    fn shipped_default_css_theme_owns_primitive_styles() {
+        let theme = embedded_default_theme();
+
+        let base = theme.component_defaults("base").expect("base defaults");
+        assert_eq!(base.get("padding").map(String::as_str), Some("0"));
+        assert_eq!(
+            base.get("background").map(String::as_str),
+            Some("transparent")
+        );
+        assert_eq!(
+            base.get("color").map(String::as_str),
+            Some("var(--color-on-surface)")
+        );
+
+        let row = theme.component_defaults("row").expect("row defaults");
+        assert_eq!(row.get("padding").map(String::as_str), Some("0"));
+        assert_eq!(row.get("gap").map(String::as_str), Some("8"));
+        assert_eq!(row.get("width").map(String::as_str), Some("fit"));
+
+        let button = theme.component_defaults("button").expect("button defaults");
+        assert_eq!(button.get("padding").map(String::as_str), Some("10"));
+        assert_eq!(
+            button.get("background").map(String::as_str),
+            Some("#2b2633")
+        );
+    }
 }

@@ -1088,9 +1088,6 @@ impl<'a> StyleResolver<'a> {
         }
 
         let mut style = ComputedStyle::default();
-        if tag == "column" {
-            style.direction = FlexDirection::Column;
-        }
         let mut default_variables = HashMap::new();
         self.apply_theme_component_defaults(
             &mut style,
@@ -1232,9 +1229,6 @@ impl<'a> StyleResolver<'a> {
         }
 
         let mut style = ComputedStyle::default();
-        if tag == "column" {
-            style.direction = FlexDirection::Column;
-        }
         let mut diagnostics = Vec::new();
         let mut default_variables = HashMap::new();
         self.apply_theme_component_defaults(

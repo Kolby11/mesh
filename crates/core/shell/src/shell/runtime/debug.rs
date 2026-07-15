@@ -157,6 +157,8 @@ fn debug_service_payload(
     serde_json::json!({
         "overlay_enabled": debug.enabled,
         "layout_bounds_enabled": debug.show_layout_bounds,
+        "element_picker_enabled": debug.element_picker_enabled,
+        "inspected_element": debug.inspected_element.clone(),
         "profiling_enabled": debug.profiling_enabled,
         "profiling_session_id": debug.profiling_session_id,
         "active_view": debug.active_view.label(),

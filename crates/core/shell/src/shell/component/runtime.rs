@@ -583,7 +583,7 @@ impl FrontendSurfaceComponent {
         let active_theme = self.active_theme.borrow().clone();
         self.render_stack.borrow_mut().push(module_id.to_string());
         let measurer = SharedTextMeasurer;
-        let tree = entry.compiled.build_tree_with_state(
+        let mut tree = entry.compiled.build_tree_with_state(
             &active_theme,
             container_width.max(0.0).ceil() as u32,
             container_height.max(0.0).ceil() as u32,
@@ -592,6 +592,10 @@ impl FrontendSurfaceComponent {
             instance_key,
             Some(self),
             Some(&measurer),
+        );
+        super::composition::annotate_source_file(
+            &mut tree,
+            &entry.compiled.source_path.display().to_string(),
         );
         self.render_stack.borrow_mut().pop();
         tree

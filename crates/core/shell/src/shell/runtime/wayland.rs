@@ -143,6 +143,68 @@ impl Shell {
                 }
             }
 
+            // Element picker input is handled by the shell before the target
+            // component sees it. This mirrors browser devtools: moving updates
+            // the highlight and clicking freezes the current selection instead
+            // of activating the inspected control.
+            if self.debug.element_picker_enabled
+                && target_surface_id != "@mesh/debug-inspector"
+                && let Some((x, y, selected)) = match &event {
+                    RoutedWindowEvent::PointerMove { x, y } => Some((*x, *y, false)),
+                    RoutedWindowEvent::PointerButton {
+                        x,
+                        y,
+                        pressed: true,
+                    } => Some((*x, *y, true)),
+                    _ => None,
+                }
+            {
+                let debug_tree = match target {
+                    TargetRef::Parent => {
+                        self.components[index].component.last_widget_tree().cloned()
+                    }
+                    TargetRef::Child(child_index) => {
+                        let child = &self.components[index].children[child_index];
+                        self.components[index].component.child_surface_debug_tree(
+                            &child.node_key,
+                            (
+                                child.content_padding.0 as f32,
+                                child.content_padding.1 as f32,
+                            ),
+                        )
+                    }
+                };
+                if let Some(tree) = debug_tree
+                    && let Some(hit) = mesh_core_interaction::inspect_hit_test(&tree, x, y)
+                {
+                    let fallback_source = self.components[index]
+                        .component
+                        .source_path()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_default();
+                    let mut inspected = inspected_element_json(
+                        target_surface_id,
+                        hit.node,
+                        hit.bounds,
+                        &fallback_source,
+                    );
+                    if selected
+                        && let Some(source_file) = inspected
+                            .get("source_file")
+                            .and_then(|value| value.as_str())
+                        && let Some(line) = source_line_for_node(source_file, hit.node)
+                    {
+                        inspected["source_line"] = serde_json::json!(line);
+                    }
+                    self.debug.inspected_element = Some(inspected);
+                }
+                if selected {
+                    self.debug.element_picker_enabled = false;
+                }
+                self.invalidate_debug_layout_bounds_targets();
+                continue;
+            }
+
             let input = match event {
                 RoutedWindowEvent::PointerButton {
                     x,
@@ -292,6 +354,112 @@ impl Shell {
         }
         Ok(())
     }
+}
+
+fn edge_json(edges: mesh_core_elements::style::Edges) -> serde_json::Value {
+    serde_json::json!({
+        "top": edges.top,
+        "right": edges.right,
+        "bottom": edges.bottom,
+        "left": edges.left,
+    })
+}
+
+fn inspected_element_json(
+    surface_id: &str,
+    node: &mesh_core_elements::WidgetNode,
+    bounds: mesh_core_interaction::ContentBounds,
+    fallback_source: &str,
+) -> serde_json::Value {
+    let style = &node.computed_style;
+    let source_file = node
+        .attributes
+        .get("_mesh_source_file")
+        .map(String::as_str)
+        .unwrap_or(fallback_source);
+    let source_tag = mesh_core_interaction::source_element_tag(node);
+    serde_json::json!({
+        "surface_id": surface_id,
+        "key": node.mesh_key().unwrap_or(""),
+        "tag": source_tag,
+        "runtime_tag": node.tag,
+        "module_id": node.module_id().unwrap_or(""),
+        "source_file": source_file,
+        "source_line": 1,
+        "id": node.attributes.get("id").cloned().unwrap_or_default(),
+        "classes": node.attributes.get("class").cloned().unwrap_or_default(),
+        "content": node.attributes.get("content").cloned().unwrap_or_default(),
+        "bounds": {
+            "x": bounds.0,
+            "y": bounds.1,
+            "width": (bounds.2 - bounds.0).max(0.0),
+            "height": (bounds.3 - bounds.1).max(0.0),
+        },
+        "box_model": {
+            "margin": edge_json(style.margin),
+            "border": edge_json(style.border_width),
+            "padding": edge_json(style.padding),
+        },
+        "style": {
+            "display": format!("{:?}", style.display).to_lowercase(),
+            "position": format!("{:?}", style.position).to_lowercase(),
+            "opacity": style.opacity,
+            "gap": style.gap,
+            "font_family": style.font_family.as_ref(),
+            "font_size": style.font_size,
+            "font_weight": style.font_weight,
+            "z_index": style.z_index,
+            "overflow_x": format!("{:?}", style.overflow_x).to_lowercase(),
+            "overflow_y": format!("{:?}", style.overflow_y).to_lowercase(),
+        }
+    })
+}
+
+/// Best-effort source lookup for the selected runtime node. Template parsing
+/// does not yet retain spans, so score matching opening tags by id/classes.
+/// Repeated loop instances intentionally resolve to their shared template line.
+fn source_line_for_node(path: &str, node: &mesh_core_elements::WidgetNode) -> Option<u32> {
+    let source = std::fs::read_to_string(path).ok()?;
+    let lines = source.lines().collect::<Vec<_>>();
+    let tag = mesh_core_interaction::source_element_tag(node);
+    let opening = format!("<{tag}");
+    let id = node.attributes.get("id").filter(|value| !value.is_empty());
+    let classes = node
+        .attributes
+        .get("class")
+        .map(|value| value.split_whitespace().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let mut best: Option<(usize, u32)> = None;
+
+    for (index, line) in lines.iter().enumerate() {
+        let Some(column) = line.find(&opening) else {
+            continue;
+        };
+        let mut markup = line[column..].to_string();
+        for continuation in lines.iter().skip(index + 1).take(7) {
+            if markup.contains('>') {
+                break;
+            }
+            markup.push(' ');
+            markup.push_str(continuation.trim());
+        }
+        let mut score = 1usize;
+        if let Some(id) = id
+            && (markup.contains(&format!("id=\"{id}\"")) || markup.contains(&format!("id='{id}'")))
+        {
+            score += 100;
+        }
+        for class in &classes {
+            if markup.contains(class) {
+                score += 10;
+            }
+        }
+        if best.is_none_or(|(best_score, _)| score > best_score) {
+            best = Some((score, (index + 1) as u32));
+        }
+    }
+
+    best.map(|(_, line)| line)
 }
 
 #[derive(Debug)]
@@ -584,6 +752,23 @@ mod tests {
                 y: 22.0,
             }
         ));
+    }
+
+    #[test]
+    fn inspected_node_source_line_prefers_matching_class() {
+        let source = "<template>\n  <row class=\"other\" />\n  <row\n    class=\"right-cluster\"\n  />\n</template>\n";
+        let file = tempfile::Builder::new().suffix(".mesh").tempfile().unwrap();
+        std::fs::write(file.path(), source).unwrap();
+        let mut node = mesh_core_elements::WidgetNode::new("row");
+        node.attributes
+            .insert("data-mesh-element".into(), "row".into());
+        node.attributes
+            .insert("class".into(), "right-cluster".into());
+
+        assert_eq!(
+            source_line_for_node(file.path().to_str().unwrap(), &node),
+            Some(3)
+        );
     }
 
     #[test]

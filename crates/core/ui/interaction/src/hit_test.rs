@@ -26,6 +26,46 @@ pub struct PointerEventHandlerHit<'a> {
     pub bounds: ContentBounds,
 }
 
+/// Deepest visible layout node under a point. Unlike the normal pointer hit,
+/// this intentionally includes non-interactive and synthetic nodes so the
+/// debug element picker can inspect everything that was painted.
+#[derive(Debug, Clone, Copy)]
+pub struct InspectHit<'a> {
+    pub node: &'a WidgetNode,
+    pub bounds: ContentBounds,
+}
+
+pub fn inspect_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<InspectHit<'_>> {
+    inspect_hit_test_inner(node, x, y, 0.0, 0.0)
+}
+
+fn inspect_hit_test_inner(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<InspectHit<'_>> {
+    if node_is_hidden(node) {
+        return None;
+    }
+    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
+    let inside = layout_contains_with_offset(node, x, y, offset_x, offset_y);
+    if !inside && node_clips_children(node) {
+        return None;
+    }
+    let (child_x, child_y) = child_offsets_with_scroll(node, offset_x, offset_y);
+    for child in node.children.iter().rev() {
+        if let Some(hit) = inspect_hit_test_inner(child, x, y, child_x, child_y) {
+            return Some(hit);
+        }
+    }
+    inside.then(|| InspectHit {
+        node,
+        bounds: node_rect_with_offset(node, offset_x, offset_y),
+    })
+}
+
 type TooltipHit = (String, String, ContentBounds);
 
 /// Resolve all pointer-motion metadata in the same tree traversal.
@@ -1207,5 +1247,36 @@ mod tests {
             find_node_path_at(&root, 30.0, 30.0),
             Some(vec!["root".into(), "button".into()])
         );
+    }
+
+    #[test]
+    fn inspector_hit_finds_deepest_non_interactive_node_and_its_bounds() {
+        let mut root = WidgetNode::new("column");
+        root.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 100.0,
+        };
+        let mut card = WidgetNode::new("box");
+        card.layout = LayoutRect {
+            x: 20.0,
+            y: 10.0,
+            width: 80.0,
+            height: 40.0,
+        };
+        let mut label = WidgetNode::new("text");
+        label.layout = LayoutRect {
+            x: 30.0,
+            y: 18.0,
+            width: 50.0,
+            height: 16.0,
+        };
+        card.children.push(label);
+        root.children.push(card);
+
+        let hit = inspect_hit_test(&root, 40.0, 24.0).expect("text should be inspectable");
+        assert_eq!(hit.node.tag, "text");
+        assert_eq!(hit.bounds, (30.0, 18.0, 80.0, 34.0));
     }
 }

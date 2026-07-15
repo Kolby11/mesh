@@ -551,6 +551,11 @@ pub struct HealthEntry {
 pub struct DebugOverlayState {
     pub enabled: bool,
     pub show_layout_bounds: bool,
+    /// Chrome-style element picker. While active, pointer input is captured
+    /// by the shell and the deepest node under the cursor is highlighted.
+    pub element_picker_enabled: bool,
+    /// Last node under the picker cursor, also retained after click selection.
+    pub inspected_element: Option<serde_json::Value>,
     pub active_tab: DebugTab,
     pub active_view: DebugInspectorView,
     pub profiling_enabled: bool,
@@ -566,6 +571,13 @@ impl DebugOverlayState {
 
     pub fn toggle_layout_bounds(&mut self) {
         self.show_layout_bounds = !self.show_layout_bounds;
+    }
+
+    pub fn toggle_element_picker(&mut self) {
+        self.element_picker_enabled = !self.element_picker_enabled;
+        if self.element_picker_enabled {
+            self.inspected_element = None;
+        }
     }
 
     pub fn cycle_tab(&mut self) {

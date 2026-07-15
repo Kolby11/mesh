@@ -1,19 +1,22 @@
 <template>
   <tabs class="view-tabs" label="Debug inspector views">
-    <tab class={overview_tab_class} onactivate={onOverview} onclick={onOverview}>
-      <text class="view-tab-label">Overview</text>
+    <tab class={overview_tab_class} onactivate={onOverview} onclick={onOverview} aria-label="Overview" tooltip="Overview">
+      <text class="view-tab-icon">▦</text>
     </tab>
-    <tab class={modules_tab_class} onactivate={onModules} onclick={onModules}>
-      <text class="view-tab-label">Modules</text>
+    <tab class={elements_tab_class} onactivate={onElements} onclick={onElements} aria-label="Elements" tooltip="Elements">
+      <text class="view-tab-icon">⌖</text>
     </tab>
-    <tab class={surfaces_tab_class} onactivate={onSurfaces} onclick={onSurfaces}>
-      <text class="view-tab-label">Surfaces</text>
+    <tab class={modules_tab_class} onactivate={onModules} onclick={onModules} aria-label="Modules" tooltip="Modules">
+      <text class="view-tab-icon">◫</text>
     </tab>
-    <tab class={backend_tab_class} onactivate={onBackendServices} onclick={onBackendServices}>
-      <text class="view-tab-label">Backends</text>
+    <tab class={surfaces_tab_class} onactivate={onSurfaces} onclick={onSurfaces} aria-label="Surfaces" tooltip="Surfaces">
+      <text class="view-tab-icon">▱</text>
     </tab>
-    <tab class={benchmark_tab_class} onactivate={onBenchmark} onclick={onBenchmark}>
-      <text class="view-tab-label">Bench</text>
+    <tab class={backend_tab_class} onactivate={onBackendServices} onclick={onBackendServices} aria-label="Backends" tooltip="Backends">
+      <text class="view-tab-icon">⚙</text>
+    </tab>
+    <tab class={benchmark_tab_class} onactivate={onBenchmark} onclick={onBenchmark} aria-label="Benchmarks" tooltip="Benchmarks">
+      <text class="view-tab-icon">◷</text>
     </tab>
   </tabs>
 </template>
@@ -24,7 +27,8 @@
 <style>
   .view-tabs {
     width: 100%;
-    gap: var(--spacing-md);
+    justify-content: center;
+    gap: var(--spacing-xs);
     flex-wrap: nowrap;
     border-bottom-width: 1px;
     border-bottom-style: solid;
@@ -32,9 +36,12 @@
   }
 
   .view-tab {
+    width: 36px;
+    height: 32px;
     flex-shrink: 0;
-    padding-inline: var(--spacing-xs);
-    padding-block: var(--spacing-sm);
+    padding: 0;
+    justify-content: center;
+    align-items: center;
     background: transparent;
     border-width: 0;
     border-bottom-width: 2px;
@@ -46,15 +53,15 @@
     border-bottom-color: var(--color-primary);
   }
 
-  .view-tab-label {
-    font-size: var(--typography-size-xs);
+  .view-tab-icon {
+    font-size: var(--typography-size-md);
     font-weight: 600;
     color: var(--color-on-surface-variant);
     text-align: center;
   }
 
-  .view-tab-active .view-tab-label {
-    font-size: var(--typography-size-xs);
+  .view-tab-active .view-tab-icon {
+    font-size: var(--typography-size-md);
     font-weight: 700;
     color: var(--color-primary);
     text-align: center;

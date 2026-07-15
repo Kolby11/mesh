@@ -2,10 +2,15 @@
     <dialog class="inspector-shell" aria-label="Debug Inspector">
         <column class="inspector-root">
             <row class="inspector-header">
-                <column class="header-copy">
-                    <text class="inspector-title">Debug Inspector</text>
-                    <text class="inspector-status">{session_status}</text>
-                </column>
+                <button
+                    class={picker_header_button_class}
+                    onclick={onToggleElementPicker}
+                    aria-label={picker_button_label}
+                    tooltip={picker_button_label}
+                >
+                    <text class="inspect-crosshair">⌖</text>
+                    <text class="inspect-trigger-text">{picker_header_button_text}</text>
+                </button>
                 <button class="icon-button" onclick={onCloseInspector} aria-label="Close debug inspector">
                     <icon name="window-close" size="16" />
                 </button>
@@ -21,11 +26,13 @@
 
             <ViewTabs
                 onOverview={showOverview}
+                onElements={showElements}
                 onModules={showModules}
                 onSurfaces={showSurfaces}
                 onBackendServices={showBackendServices}
                 onBenchmark={showBenchmark}
                 overview_tab_class={overview_tab_class}
+                elements_tab_class={elements_tab_class}
                 modules_tab_class={modules_tab_class}
                 surfaces_tab_class={surfaces_tab_class}
                 backend_tab_class={backend_tab_class}
@@ -33,6 +40,28 @@
             />
 
             <column class="inspector-body">
+                <ElementsView
+                    hidden={elements_hidden}
+                    onTogglePicker={onToggleElementPicker}
+                    onOpenSource={onOpenSelectedSource}
+                    picker_button_class={picker_button_class}
+                    picker_button_label={picker_button_label}
+                    picker_button_text={picker_button_text}
+                    empty_hidden={element_empty_hidden}
+                    details_hidden={element_details_hidden}
+                    element_title={element_title}
+                    element_selector={element_selector}
+                    source_file={element_source_file}
+                    module_label={element_module_label}
+                    size_label={element_size_label}
+                    margin_label={element_margin_label}
+                    border_label={element_border_label}
+                    padding_label={element_padding_label}
+                    content_size_label={element_content_size_label}
+                    computed_rows={element_computed_rows}
+                    open_source_button_text={element_open_source_button_text}
+                />
+
                 <OverviewView
                     hidden={overview_hidden}
                     state_title={overview_state_title}
@@ -92,6 +121,7 @@
 <script lang="luau">
 local BackendServicesView = require("./components/backend-services-view.mesh")
 local BenchmarkView = require("./components/benchmark-view.mesh")
+local ElementsView = require("./components/elements-view.mesh")
 local ModulesView = require("./components/modules-view.mesh")
 local OverviewView = require("./components/overview-view.mesh")
 local SurfacesView = require("./components/surfaces-view.mesh")
@@ -102,11 +132,13 @@ local debug_service = require("mesh.debug")
 active_view = "overview"
 last_service_active_view = ""
 overview_hidden = false
+elements_hidden = true
 modules_hidden = true
 surfaces_hidden = true
 backend_hidden = true
 benchmark_hidden = true
 overview_tab_class = "view-tab view-tab-active"
+elements_tab_class = "view-tab"
 modules_tab_class = "view-tab"
 surfaces_tab_class = "view-tab"
 backend_tab_class = "view-tab"
@@ -151,6 +183,24 @@ backend_empty = true
 backend_empty_hidden = false
 backend_rows = {}
 benchmark_rows = {}
+picker_button_class = "picker-button"
+picker_button_label = "Inspect element (Ctrl+Shift+C)"
+picker_button_text = "Select element"
+picker_header_button_class = "inspect-trigger"
+picker_header_button_text = "Inspect element"
+element_empty_hidden = false
+element_details_hidden = true
+element_title = "element"
+element_selector = ""
+element_source_file = "Source unavailable"
+element_module_label = ""
+element_size_label = "0 × 0"
+element_margin_label = "0"
+element_border_label = "0"
+element_padding_label = "0"
+element_content_size_label = "0 × 0"
+element_computed_rows = {}
+element_open_source_button_text = "Open in VS Code"
 
 local function count_list(value)
     if type(value) == "table" then
@@ -161,11 +211,13 @@ end
 
 local function sync_view_state()
     overview_hidden = active_view ~= "overview"
+    elements_hidden = active_view ~= "elements"
     modules_hidden = active_view ~= "modules"
     surfaces_hidden = active_view ~= "surfaces"
     backend_hidden = active_view ~= "backend_services"
     benchmark_hidden = active_view ~= "benchmark"
     overview_tab_class = active_view == "overview" and "view-tab view-tab-active" or "view-tab"
+    elements_tab_class = active_view == "elements" and "view-tab view-tab-active" or "view-tab"
     modules_tab_class = active_view == "modules" and "view-tab view-tab-active" or "view-tab"
     surfaces_tab_class = active_view == "surfaces" and "view-tab view-tab-active" or "view-tab"
     backend_tab_class = active_view == "backend_services" and "view-tab view-tab-active" or "view-tab"
@@ -714,6 +766,11 @@ function showOverview()
     sync_view_state()
 end
 
+function showElements()
+    active_view = "elements"
+    sync_view_state()
+end
+
 function showModules()
     active_view = "modules"
     sync_view_state()
@@ -746,6 +803,120 @@ function onToggleLayoutBounds()
     mesh.events.publish("shell.toggle-debug-layout-bounds", {})
 end
 
+function onToggleElementPicker()
+    if not (debug_service and debug_service.element_picker_enabled) then
+        active_view = "elements"
+        sync_view_state()
+    end
+    mesh.events.publish("shell.toggle-debug-element-picker", {})
+end
+
+function onOpenSelectedSource()
+    local selected = debug_service and debug_service.inspected_element
+    if type(selected) ~= "table" then
+        return
+    end
+    mesh.events.publish("shell.open-debug-source", {
+        path = tostring(selected.source_file or ""),
+        line = tonumber(selected.source_line) or 1,
+    })
+end
+
+local function number_label(value)
+    local number = tonumber(value) or 0
+    return string.format("%.0f", number)
+end
+
+local function edge_label(edge)
+    if type(edge) ~= "table" then
+        return "0"
+    end
+    return string.format(
+        "%s %s %s %s",
+        number_label(edge.top),
+        number_label(edge.right),
+        number_label(edge.bottom),
+        number_label(edge.left)
+    )
+end
+
+local function sync_element_inspector()
+    local selected = debug_service and debug_service.inspected_element
+    local picking = debug_service and debug_service.element_picker_enabled
+    if picking then
+        picker_button_class = "picker-button picker-button-active"
+        picker_button_text = "Picking…"
+        picker_button_label = "Stop selecting an element"
+        picker_header_button_class = "inspect-trigger inspect-trigger-active"
+        picker_header_button_text = "Click an element…"
+    else
+        picker_button_class = "picker-button"
+        picker_button_text = "Select element"
+        picker_button_label = "Inspect element (Ctrl+Shift+C)"
+        picker_header_button_class = "inspect-trigger"
+        picker_header_button_text = "Inspect element"
+    end
+    if type(selected) ~= "table" then
+        element_empty_hidden = false
+        element_details_hidden = true
+        return
+    end
+
+    element_empty_hidden = true
+    element_details_hidden = false
+    local tag = tostring(selected.tag or "element")
+    local id = tostring(selected.id or "")
+    local classes = tostring(selected.classes or "")
+    element_title = "<" .. tag .. ">"
+    element_selector = tag
+    if id ~= "" then element_selector = element_selector .. "#" .. id end
+    if classes ~= "" then
+        element_selector = element_selector .. "." .. string.gsub(classes, "%s+", ".")
+    end
+    element_source_file = tostring(selected.source_file or "Source unavailable")
+    element_open_source_button_text = string.format(
+        "Open in VS Code · line %s",
+        tostring(selected.source_line or 1)
+    )
+    element_module_label = string.format(
+        "%s · %s",
+        tostring(selected.module_id or "unknown module"),
+        tostring(selected.surface_id or "unknown surface")
+    )
+    local bounds = selected.bounds or {}
+    local width = tonumber(bounds.width) or 0
+    local height = tonumber(bounds.height) or 0
+    element_size_label = string.format("%s × %s px", number_label(width), number_label(height))
+    local box = selected.box_model or {}
+    element_margin_label = edge_label(box.margin)
+    element_border_label = edge_label(box.border)
+    element_padding_label = edge_label(box.padding)
+    local horizontal = 0
+    local vertical = 0
+    for _, edge in ipairs({ box.border, box.padding }) do
+        if type(edge) == "table" then
+            horizontal = horizontal + (tonumber(edge.left) or 0) + (tonumber(edge.right) or 0)
+            vertical = vertical + (tonumber(edge.top) or 0) + (tonumber(edge.bottom) or 0)
+        end
+    end
+    element_content_size_label = string.format(
+        "%s × %s px",
+        number_label(math.max(0, width - horizontal)),
+        number_label(math.max(0, height - vertical))
+    )
+    local style = selected.style or {}
+    element_computed_rows = {
+        { name = "display", value = tostring(style.display or "") },
+        { name = "position", value = tostring(style.position or "") },
+        { name = "opacity", value = tostring(style.opacity or "") },
+        { name = "gap", value = number_label(style.gap) .. "px" },
+        { name = "font", value = string.format("%spx %s", number_label(style.font_size), tostring(style.font_family or "")) },
+        { name = "font-weight", value = tostring(style.font_weight or "") },
+        { name = "overflow", value = string.format("%s / %s", tostring(style.overflow_x or ""), tostring(style.overflow_y or "")) },
+        { name = "z-index", value = tostring(style.z_index or "") },
+    }
+end
+
 function runBenchmarkScenarioById(scenario_id)
     if not (debug_service and debug_service.profiling_enabled) then
         mesh.events.publish("shell.toggle-debug-profiling", {})
@@ -756,6 +927,7 @@ end
 
 function render()
     if not debug_service then
+        sync_element_inspector()
         session_status = "Debug service unavailable"
         profiling_badge = "Unavailable"
         profiling_copy = "The shell debug service has not been published yet."
@@ -783,10 +955,15 @@ function render()
         return
     end
 
+    sync_element_inspector()
+
     local profiling = debug_service.profiling
     local surface_samples = nil
     local backend_samples = nil
     sync_service_active_view()
+    if debug_service.element_picker_enabled then
+        active_view = "elements"
+    end
 
     if debug_service.overlay_enabled then
         overlay_value = "Visible"
@@ -918,24 +1095,37 @@ end
 
     .inspector-header {
         width: 100%;
-        align-items: start;
+        justify-content: flex-end;
+        align-items: center;
         gap: var(--spacing-sm);
     }
 
-    .header-copy {
-        flex-grow: 1;
-        gap: 2px;
+    .inspect-trigger {
+        height: 32px;
+        padding-inline: var(--spacing-md);
+        gap: var(--spacing-xs);
+        align-items: center;
+        border-radius: var(--radius-full);
+        background: var(--color-primary-container);
+        color: var(--color-on-primary-container);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--color-primary);
     }
 
-    .inspector-title {
+    .inspect-trigger-active {
+        background: var(--color-primary);
+        color: var(--color-on-primary);
+    }
+
+    .inspect-crosshair {
         font-size: var(--typography-size-md);
         font-weight: 700;
-        color: var(--color-on-surface);
     }
 
-    .inspector-status {
+    .inspect-trigger-text {
         font-size: var(--typography-size-xs);
-        color: var(--color-on-surface-variant);
+        font-weight: 700;
     }
 
     .icon-button {

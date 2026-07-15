@@ -332,6 +332,7 @@ fn shell_global_shortcut_request(
 ) -> Option<CoreRequest> {
     match key.to_ascii_lowercase().as_str() {
         "d" if ctrl && shift => Some(CoreRequest::ToggleDebugOverlay),
+        "c" if ctrl && shift => Some(CoreRequest::ToggleDebugElementPicker),
         "tab" | "iso_left_tab" if ctrl && debug_enabled => Some(CoreRequest::CycleDebugTab),
         _ => None,
     }

@@ -89,6 +89,8 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                         .map(|style| style.rules.as_slice())
                         .unwrap_or(&[]),
                 );
+                let source_path = local_component_source_path(&entry.compiled, alias);
+                annotate_source_file(&mut node, &source_path);
                 apply_prop_handler_calls(&mut node, props, prop_handler_calls);
                 if let Some(binding) = bind_this.and_then(|value| simple_state_binding(&value)) {
                     self.bind_child_instance(host_instance_key, &binding, &instance_key);
@@ -300,6 +302,43 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
 
         nodes
     }
+}
+
+pub(super) fn annotate_source_file(node: &mut WidgetNode, source_path: &str) {
+    node.attributes
+        .insert("_mesh_source_file".into(), source_path.into());
+    for child in &mut node.children {
+        annotate_source_file(child, source_path);
+    }
+}
+
+fn local_component_source_path(
+    compiled: &mesh_core_frontend::CompiledFrontendModule,
+    alias: &str,
+) -> String {
+    let normalized_alias = alias
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    compiled
+        .watched_paths
+        .iter()
+        .find(|path| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(|stem| {
+                    stem.chars()
+                        .filter(|ch| ch.is_ascii_alphanumeric())
+                        .flat_map(char::to_lowercase)
+                        .collect::<String>()
+                        == normalized_alias
+                })
+                .unwrap_or(false)
+        })
+        .unwrap_or(&compiled.source_path)
+        .display()
+        .to_string()
 }
 
 /// Returns true when an embedded component's rendered tree has a `<popover>` as its

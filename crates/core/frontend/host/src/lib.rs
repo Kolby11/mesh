@@ -234,6 +234,11 @@ pub enum CoreRequest {
     },
     ToggleDebugOverlay,
     ToggleDebugLayoutBounds,
+    ToggleDebugElementPicker,
+    OpenDebugSource {
+        path: String,
+        line: u32,
+    },
     ToggleDebugProfiling,
     RunDebugBenchmark {
         scenario_id: String,

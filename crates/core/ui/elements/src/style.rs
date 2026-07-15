@@ -967,9 +967,17 @@ box.card { padding: 3px; }
         let target_ids = std::collections::HashSet::from([1, 2]);
         resolver.restyle_subtree_for_ids(&mut root, &rules, StyleContext::default(), &target_ids);
 
+        let idle_button = resolver.resolve_node_style(
+            &[],
+            "button",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
         assert_eq!(
             root.children[0].computed_style.background_color,
-            ComputedStyle::default().background_color
+            idle_button.background_color
         );
         assert_eq!(
             root.children[1].computed_style.background_color,
@@ -1659,7 +1667,15 @@ box.card { padding: 3px; }
         let (style, diagnostics) = resolve_class(&resolver, &rules, "audio-popover");
 
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        assert_eq!(style.background_color, Color::from_hex("#211F26").unwrap());
+        assert_eq!(
+            style.background_color,
+            Color {
+                r: 24,
+                g: 26,
+                b: 34,
+                a: 173,
+            }
+        );
         assert_eq!(style.color, Color::from_hex("#E6E1E5").unwrap());
         assert_eq!(style.padding, Edges::all(8.0));
         assert_eq!(style.border_radius, Corners::all(16.0));

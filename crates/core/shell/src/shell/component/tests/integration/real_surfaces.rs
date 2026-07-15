@@ -1349,6 +1349,11 @@ fn shipped_navigation_icon_rasterizes_pixels_on_real_surface() {
     let cluster = first_node_by_class(tree, "right-cluster").expect("control cluster node");
     let cluster_right = cluster.layout.x + cluster.layout.width;
     assert!(
+        cluster.layout.height <= 40.0,
+        "right control cluster should shrink-wrap its 40px controls, got {:?}",
+        cluster.layout
+    );
+    assert!(
         cluster.layout.x >= 0.0 && cluster_right <= width as f32,
         "right control cluster bounds [x={}, right={cluster_right}] should fall inside the \
          {width}px surface so all of its controls stay visible",
@@ -1859,7 +1864,8 @@ fn debug_inspector_overview_renders_profiling_off_state_on_real_surface() {
     component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
 
     let text = rendered_text(&component);
-    assert!(text.iter().any(|line| line == "Debug Inspector"));
+    assert!(text.iter().any(|line| line == "Inspect element"));
+    assert!(!text.iter().any(|line| line == "Debug Inspector"));
     assert!(text.iter().any(|line| line == "Profiling is off"));
     assert!(text.iter().any(|line| line.contains("Enable profiling")));
     assert!(text.iter().any(|line| line == "Start profiling"));

@@ -1106,6 +1106,35 @@ impl Shell {
                 }];
             }
         }
+        if visible
+            && let Some(element) = self.debug.inspected_element.as_ref()
+            && element.get("surface_id").and_then(|value| value.as_str())
+                == Some(surface_id.as_str())
+            && let Some(bounds) = element.get("bounds")
+        {
+            let number = |name: &str| {
+                bounds
+                    .get(name)
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(0.0) as f32
+            };
+            let buffer = self.components[index]
+                .target_mut(target)
+                .paint_buffer
+                .as_mut()
+                .expect("paint buffer initialised");
+            self.debug_overlay.paint_element_highlight(
+                buffer,
+                scale,
+                (number("x"), number("y"), number("width"), number("height")),
+            );
+            present_damage = vec![DamageRect {
+                x: 0,
+                y: 0,
+                width: width.max(1),
+                height: height.max(1),
+            }];
+        }
 
         let mut presented = false;
         let present_started = self.profiling_enabled().then(std::time::Instant::now);

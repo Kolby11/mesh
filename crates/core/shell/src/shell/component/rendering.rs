@@ -368,7 +368,7 @@ impl FrontendSurfaceComponent {
                     } else {
                         resolver.restyle_subtree_cached(tree, restyle_rules, context, index_cache);
                     }
-                    merge_runtime_primitive_defaults(tree);
+                    apply_runtime_attribute_state(tree);
                 }
             } else {
                 // Narrow restyle: only restyle state-changed nodes and their
@@ -397,7 +397,7 @@ impl FrontendSurfaceComponent {
                         &affected_keys.affected,
                     );
                 }
-                merge_runtime_primitive_defaults_for_ids(tree, &affected_keys.roots);
+                apply_runtime_attribute_state_for_ids(tree, &affected_keys.roots);
             }
             reused_retained_layout = !dirty_types.contains(ComponentDirtyFlags::LAYOUT);
         } else {
@@ -406,7 +406,7 @@ impl FrontendSurfaceComponent {
             } else {
                 resolver.restyle_subtree_cached(tree, restyle_rules, context, index_cache);
             }
-            merge_runtime_primitive_defaults(tree);
+            apply_runtime_attribute_state(tree);
         }
         let restyle_elapsed = restyle_started.elapsed();
         self.record_profiling_stage_with_elapsed(
@@ -760,13 +760,10 @@ fn runtime_style_diagnostic_props_fingerprint(props: &SurfaceCssProps) -> u64 {
     combined
 }
 
-fn merge_runtime_primitive_defaults(node: &mut WidgetNode) {
-    if node.tag != "surface" {
-        mesh_core_frontend::merge_missing_defaults(&node.tag, &mut node.computed_style);
-    }
+fn apply_runtime_attribute_state(node: &mut WidgetNode) {
     apply_hidden_attribute_layout(node);
     for child in &mut node.children {
-        merge_runtime_primitive_defaults(child);
+        apply_runtime_attribute_state(child);
     }
 }
 
@@ -782,18 +779,18 @@ fn apply_hidden_attribute_layout(node: &mut WidgetNode) {
     }
 }
 
-fn merge_runtime_primitive_defaults_for_ids(
+fn apply_runtime_attribute_state_for_ids(
     node: &mut WidgetNode,
     affected_ids: &HashSet<NodeId>,
 ) -> bool {
     let node_affected = affected_ids.contains(&node.id);
     if node_affected {
-        merge_runtime_primitive_defaults(node);
+        apply_runtime_attribute_state(node);
         return true;
     }
     let mut descendant_affected = false;
     for child in &mut node.children {
-        descendant_affected |= merge_runtime_primitive_defaults_for_ids(child, affected_ids);
+        descendant_affected |= apply_runtime_attribute_state_for_ids(child, affected_ids);
     }
     descendant_affected
 }
@@ -1364,7 +1361,7 @@ mod interaction_changed_key_tests {
             crate::shell::component::runtime_tree::stable_runtime_node_id("root/0"),
         ]);
 
-        merge_runtime_primitive_defaults_for_ids(&mut tree, &affected);
+        apply_runtime_attribute_state_for_ids(&mut tree, &affected);
 
         assert_eq!(
             tree.children[0].computed_style.direction,
@@ -1472,7 +1469,7 @@ mod interaction_changed_key_tests {
         let mut old_total = 0.0f32;
         for _ in 0..iterations {
             let mut tree = tree.clone();
-            merge_runtime_primitive_defaults(std::hint::black_box(&mut tree));
+            apply_runtime_attribute_state(std::hint::black_box(&mut tree));
             old_total += std::hint::black_box(tree.children[0].computed_style.gap);
         }
         let old_time = old_started.elapsed();
@@ -1481,7 +1478,7 @@ mod interaction_changed_key_tests {
         let mut new_total = 0.0f32;
         for _ in 0..iterations {
             let mut tree = tree.clone();
-            merge_runtime_primitive_defaults_for_ids(
+            apply_runtime_attribute_state_for_ids(
                 std::hint::black_box(&mut tree),
                 std::hint::black_box(&affected.roots),
             );

@@ -1,5 +1,5 @@
 use mesh_core_component::style::{Selector, StyleRule};
-use mesh_core_elements::style::{AlignSelf, Display, FlexDirection};
+use mesh_core_elements::style::FlexDirection;
 use mesh_core_elements::{ComputedStyle, Dimension, StyleContext};
 use std::cell::RefCell;
 
@@ -178,246 +178,36 @@ fn resolve_dimension_for_context(dimension: Dimension, available: f32) -> f32 {
     }
 }
 
-pub fn merge_missing_defaults(tag: &str, style: &mut ComputedStyle) {
-    let defaults = default_leaf_style(tag);
-
-    match tag {
-        "icon" => {
-            style.background_color = mesh_core_elements::Color::TRANSPARENT;
-            style.border_radius = mesh_core_elements::Corners::zero();
-            style.padding = mesh_core_elements::Edges::zero();
-        }
-        "span" => {
-            style.background_color = mesh_core_elements::Color::TRANSPARENT;
-            style.padding = mesh_core_elements::Edges::zero();
-            style.align_self = AlignSelf::Start;
-        }
-        _ => {}
-    }
-
-    if style.background_color.a == 0 && defaults.background_color.a > 0 {
-        style.background_color = defaults.background_color;
-    }
-    if style.color.a == 0 {
-        style.color = defaults.color;
-    }
-    if style.padding.top == 0.0
-        && style.padding.right == 0.0
-        && style.padding.bottom == 0.0
-        && style.padding.left == 0.0
-    {
-        style.padding = defaults.padding;
-    }
-    // `Auto` here means no CSS rule ever assigned a width/height (there is no
-    // meaningful distinct intent behind an author writing `width: auto;`
-    // versus writing nothing at all — both mean "let the layout decide").
-    // Containers (box/column/row) default to `Fit` — sized to the bounding
-    // box of their own content, including absolutely-positioned children —
-    // rather than the bare stretch/hug behavior plain `Auto` gives them.
-    if style.width == Dimension::Auto {
-        style.width = defaults.width;
-    }
-    if style.height == Dimension::Auto {
-        style.height = defaults.height;
-    }
-    if style.gap == 0.0 {
-        style.gap = defaults.gap;
-    }
-    if style.border_radius.top_left == 0.0 {
-        style.border_radius = defaults.border_radius;
-    }
-    if style.overflow_x == ComputedStyle::default().overflow_x {
-        style.overflow_x = defaults.overflow_x;
-    }
-    if style.overflow_y == ComputedStyle::default().overflow_y {
-        style.overflow_y = defaults.overflow_y;
-    }
-    if style.font_size == ComputedStyle::default().font_size {
-        style.font_size = defaults.font_size;
-    }
-    match tag {
-        "column" | "row" if style.direction != defaults.direction => {
-            style.direction = defaults.direction;
-        }
-        _ => {}
-    }
-}
-
 pub(crate) fn surface_style(_surface_id: &str, width: u32, height: u32) -> ComputedStyle {
-    let mut style = container_style("column");
-    style.padding = mesh_core_elements::Edges::all(0.0);
-    style.gap = 0.0;
+    let mut style = ComputedStyle::default();
+    style.direction = FlexDirection::Column;
     style.width = mesh_core_elements::Dimension::Px(width as f32);
     style.height = mesh_core_elements::Dimension::Px(height as f32);
-    style.background_color = mesh_core_elements::Color::TRANSPARENT;
     style
 }
 
-pub(crate) fn container_style(tag: &str) -> ComputedStyle {
+/// Style for the synthetic `<column>` wrapper `{#for}`/`{#if}` blocks are
+/// compiled into. This wrapper is invisible authoring structure, not a real
+/// layout container an author styled. Its layout is compiler structure and is
+/// intentionally independent from author-facing `column` theme defaults.
+pub(crate) fn synthetic_wrapper_style() -> ComputedStyle {
+    let mut style = ComputedStyle::default();
+    style.direction = FlexDirection::Column;
+    style
+}
+
+pub(crate) fn embedded_root_style() -> ComputedStyle {
+    let mut style = ComputedStyle::default();
+    style.direction = FlexDirection::Column;
+    style
+}
+
+pub(crate) fn slot_style(tag: &str) -> ComputedStyle {
     let mut style = ComputedStyle::default();
     style.direction = if tag == "column" {
         FlexDirection::Column
     } else {
         FlexDirection::Row
     };
-    style.padding = mesh_core_elements::Edges::all(12.0);
-    style.gap = 8.0;
-    style.color = mesh_core_elements::Color::WHITE;
     style
-}
-
-/// Style for the synthetic `<column>` wrapper `{#for}`/`{#if}` blocks are
-/// compiled into. This wrapper is invisible authoring structure, not a real
-/// layout container an author styled — it must not carry `container_style`'s
-/// 12px padding / 8px gap defaults, or every control-flow block silently
-/// shifts its children by that padding (bit absolutely-positioned children
-/// hardest, since the padding offsets their containing block).
-pub(crate) fn synthetic_wrapper_style() -> ComputedStyle {
-    let mut style = container_style("column");
-    style.padding = mesh_core_elements::Edges::all(0.0);
-    style.gap = 0.0;
-    style.background_color = mesh_core_elements::Color::TRANSPARENT;
-    style.width = mesh_core_elements::Dimension::Auto;
-    style.height = mesh_core_elements::Dimension::Auto;
-    style
-}
-
-pub(crate) fn embedded_root_style() -> ComputedStyle {
-    let mut style = container_style("column");
-    style.padding = mesh_core_elements::Edges::all(0.0);
-    style.gap = 0.0;
-    style.background_color = mesh_core_elements::Color::TRANSPARENT;
-    style.width = mesh_core_elements::Dimension::Auto;
-    style.height = mesh_core_elements::Dimension::Auto;
-    style
-}
-
-pub(crate) fn slot_style(tag: &str) -> ComputedStyle {
-    let mut style = container_style(tag);
-    style.padding = mesh_core_elements::Edges::all(0.0);
-    style.background_color = mesh_core_elements::Color::TRANSPARENT;
-    style.border_radius = mesh_core_elements::Corners::all(0.0);
-    style.width = mesh_core_elements::Dimension::Auto;
-    style.height = mesh_core_elements::Dimension::Auto;
-    style
-}
-
-pub(crate) fn text_style() -> ComputedStyle {
-    let mut style = ComputedStyle::default();
-    style.display = Display::Flex;
-    style.color = mesh_core_elements::Color::WHITE;
-    style.font_size = 14.0;
-    style.background_color = mesh_core_elements::Color::TRANSPARENT;
-    style
-}
-
-fn default_leaf_style(tag: &str) -> ComputedStyle {
-    let mut style = match tag {
-        "column" | "row" => {
-            let mut style = container_style(tag);
-            style.width = mesh_core_elements::Dimension::Fit;
-            style.height = mesh_core_elements::Dimension::Fit;
-            style
-        }
-        "button" => {
-            let mut style = container_style("row");
-            style.background_color = mesh_core_elements::Color::from_hex("#2b2633")
-                .unwrap_or(mesh_core_elements::Color::BLACK);
-            style.border_radius = mesh_core_elements::Corners::all(12.0);
-            style.padding = mesh_core_elements::Edges::all(10.0);
-            style
-        }
-        "input" => {
-            let mut style = container_style("row");
-            style.background_color = mesh_core_elements::Color::from_hex("#221f28")
-                .unwrap_or(mesh_core_elements::Color::BLACK);
-            style.border_radius = mesh_core_elements::Corners::all(10.0);
-            style.padding = mesh_core_elements::Edges::all(10.0);
-            style.height = mesh_core_elements::Dimension::Px(44.0);
-            style.border_width = mesh_core_elements::Edges::all(1.0);
-            style.border_color = mesh_core_elements::Color::from_hex("#3b3644")
-                .unwrap_or(mesh_core_elements::Color::WHITE);
-            style
-        }
-        "slider" => {
-            let mut style = container_style("row");
-            style.height = mesh_core_elements::Dimension::Px(36.0);
-            style.padding = mesh_core_elements::Edges::all(8.0);
-            style
-        }
-        "scroll" => {
-            let mut style = container_style("column");
-            style.background_color = mesh_core_elements::Color::TRANSPARENT;
-            style.height = mesh_core_elements::Dimension::Px(220.0);
-            style.padding = mesh_core_elements::Edges::all(0.0);
-            style.overflow_x = mesh_core_elements::Overflow::Hidden;
-            style.overflow_y = mesh_core_elements::Overflow::Auto;
-            style
-        }
-        "icon" => {
-            let mut style = ComputedStyle::default();
-            style.width = mesh_core_elements::Dimension::Px(18.0);
-            style.height = mesh_core_elements::Dimension::Px(18.0);
-            style.background_color = mesh_core_elements::Color::TRANSPARENT;
-            style
-        }
-        "box" => {
-            let mut style = ComputedStyle::default();
-            style.background_color = mesh_core_elements::Color::TRANSPARENT;
-            style.width = mesh_core_elements::Dimension::Fit;
-            style.height = mesh_core_elements::Dimension::Fit;
-            style
-        }
-        "popover" => {
-            // A `<popover>` is a placement wrapper promoted to its own xdg_popup
-            // surface, not a generic container — it must not inherit
-            // `container_style`'s 12px padding/8px gap defaults meant for
-            // column/row layout boxes.
-            let mut style = ComputedStyle::default();
-            style.background_color = mesh_core_elements::Color::TRANSPARENT;
-            style
-        }
-        "text" => text_style(),
-        "span" => {
-            let mut style = ComputedStyle::default();
-            style.background_color = mesh_core_elements::Color::TRANSPARENT;
-            style.align_self = AlignSelf::Start;
-            style.direction = FlexDirection::Row;
-            style.padding = mesh_core_elements::Edges::zero();
-            style.gap = 0.0;
-            style
-        }
-        _ => container_style("column"),
-    };
-
-    if tag == "text" {
-        style.height = mesh_core_elements::Dimension::Px(22.0);
-    }
-
-    style
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn popover_default_style_has_no_padding_or_gap() {
-        // `<popover>` is a placement wrapper (promoted to its own xdg_popup
-        // surface), not a generic layout container — it must not inherit
-        // `container_style`'s 12px padding / 8px gap defaults, or an author's
-        // explicit `padding: 0;` gets silently backfilled by
-        // `merge_missing_defaults` right back to a visible ring of space.
-        let defaults = default_leaf_style("popover");
-        assert_eq!(defaults.padding, mesh_core_elements::Edges::zero());
-        assert_eq!(defaults.gap, 0.0);
-    }
-
-    #[test]
-    fn popover_explicit_zero_padding_survives_default_merge() {
-        let mut style = ComputedStyle::default();
-        style.padding = mesh_core_elements::Edges::zero();
-        merge_missing_defaults("popover", &mut style);
-        assert_eq!(style.padding, mesh_core_elements::Edges::zero());
-    }
 }

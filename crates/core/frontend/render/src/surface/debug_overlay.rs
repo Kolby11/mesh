@@ -113,6 +113,77 @@ impl DebugOverlay {
         };
         paint_bounds_recursive(engine, root, buffer, scale, full, 0, 0.0, 0.0);
     }
+
+    /// Paint the active element-picker target using the familiar devtools
+    /// translucent blue fill and a high-contrast outline.
+    pub fn paint_element_highlight(
+        &self,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        bounds: (f32, f32, f32, f32),
+    ) {
+        let engine = FrontendRenderEngine::new();
+        let (x, y, width, height) = bounds;
+        let rect = ClipRect {
+            x: (x * scale).round() as i32,
+            y: (y * scale).round() as i32,
+            width: (width * scale).round().max(0.0) as i32,
+            height: (height * scale).round().max(0.0) as i32,
+        };
+        if rect.width <= 0 || rect.height <= 0 {
+            return;
+        }
+        let full = ClipRect {
+            x: 0,
+            y: 0,
+            width: buffer.width as i32,
+            height: buffer.height as i32,
+        };
+        paint_bounds_rect(
+            &engine,
+            buffer,
+            rect,
+            Color {
+                r: 66,
+                g: 165,
+                b: 245,
+                a: 72,
+            },
+            full,
+        );
+        let outline = Color {
+            r: 33,
+            g: 150,
+            b: 243,
+            a: 255,
+        };
+        for edge in [
+            ClipRect {
+                width: rect.width,
+                height: 2,
+                ..rect
+            },
+            ClipRect {
+                y: rect.y + rect.height - 2,
+                width: rect.width,
+                height: 2,
+                ..rect
+            },
+            ClipRect {
+                width: 2,
+                height: rect.height,
+                ..rect
+            },
+            ClipRect {
+                x: rect.x + rect.width - 2,
+                width: 2,
+                height: rect.height,
+                ..rect
+            },
+        ] {
+            paint_bounds_rect(&engine, buffer, edge, outline, full);
+        }
+    }
 }
 
 impl Default for DebugOverlay {

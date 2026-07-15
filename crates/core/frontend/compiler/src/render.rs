@@ -1,7 +1,7 @@
 use crate::expr::eval_expr;
 use crate::style::{
-    InheritedStyleMask, child_style_context, inherit_text_style, inherited_style_mask,
-    merge_missing_defaults, slot_style, synthetic_wrapper_style, text_style,
+    InheritedStyleMask, child_style_context, inherit_text_style, inherited_style_mask, slot_style,
+    synthetic_wrapper_style,
 };
 use crate::tags::lower_source_tag;
 use crate::{FrontendCompositionResolver, LayeredStore};
@@ -550,7 +550,16 @@ pub(crate) fn build_widget_node(
             attach_module_id(&mut node, &manifest.package.id);
             node.attributes
                 .insert("content".into(), text.content.clone());
-            node.computed_style = text_style();
+            node.computed_style = build_style.resolver.resolve_node_style_for_module_indexed(
+                build_style.rules,
+                build_style.index.as_ref(),
+                "text",
+                &[],
+                None,
+                container_context,
+                Default::default(),
+                Some(&manifest.package.id),
+            );
             if let Some(parent_style) = parent_style {
                 inherit_text_style(
                     &mut node.computed_style,
@@ -579,7 +588,16 @@ pub(crate) fn build_widget_node(
                 .unwrap_or_else(|| format!("{{ {} }}", expr.expression));
             node.attributes.insert("content".into(), content);
             node.service_field_reads = tracking_store.map(|t| t.into_reads()).unwrap_or_default();
-            node.computed_style = text_style();
+            node.computed_style = build_style.resolver.resolve_node_style_for_module_indexed(
+                build_style.rules,
+                build_style.index.as_ref(),
+                "text",
+                &[],
+                None,
+                container_context,
+                Default::default(),
+                Some(&manifest.package.id),
+            );
             if let Some(parent_style) = parent_style {
                 inherit_text_style(
                     &mut node.computed_style,
@@ -874,7 +892,6 @@ fn build_element_node(
         Default::default(),
         Some(&manifest.package.id),
     );
-    merge_missing_defaults(&tag, &mut node.computed_style);
     if let Some(parent_style) = parent_style {
         inherit_text_style(&mut node.computed_style, parent_style, inherited_mask);
     }
