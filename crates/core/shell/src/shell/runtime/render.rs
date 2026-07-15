@@ -903,6 +903,17 @@ impl Shell {
                 height: height.saturating_sub(pad_top + pad_bottom),
             }),
         );
+        // Frosted popover content declares `backdrop-filter`; hand the region
+        // to the compositor blur protocol like the parent surface path does.
+        let child_blur_region = self.components[index]
+            .component
+            .child_surface_blur_region(&node_key);
+        self.presentation_engine.update_blur_region(
+            &self.components[index].children[child_index]
+                .target
+                .surface_id,
+            child_blur_region,
+        );
         match self.present_surface_target(
             index,
             TargetRef::Child(child_index),
@@ -1572,48 +1583,7 @@ fn map_popover_constraint(adjustment: PopoverConstraintAdjustment) -> PopupConst
 /// Returns `None` when no nodes have `backdrop_filter.blur_radius > 0.0`,
 /// which means no `kde_blur` protocol calls are emitted (BLUR-04).
 fn compute_blur_region(commands: &[DisplayPaintCommand]) -> Option<DamageRect> {
-    let mut union: Option<DamageRect> = None;
-    for cmd in commands {
-        if cmd.node.style.backdrop_filter.blur_radius <= 0.0 {
-            continue;
-        }
-        // Clamp negative origins to 0 and shrink dimensions by the clipped leading
-        // edge to avoid silently snapping partially off-screen nodes to (0,0) (CR-02).
-        let raw_x = cmd.node.layout.x;
-        let raw_y = cmd.node.layout.y;
-        let x = raw_x.max(0.0) as u32;
-        let y = raw_y.max(0.0) as u32;
-        let width = ((cmd.node.layout.width + raw_x.min(0.0)).max(0.0) as u32).max(1);
-        let height = ((cmd.node.layout.height + raw_y.min(0.0)).max(0.0) as u32).max(1);
-        let rect = DamageRect {
-            x,
-            y,
-            width,
-            height,
-        };
-        union = Some(match union {
-            None => rect,
-            Some(current) => {
-                let left = current.x.min(rect.x);
-                let top = current.y.min(rect.y);
-                let right = current
-                    .x
-                    .saturating_add(current.width)
-                    .max(rect.x.saturating_add(rect.width));
-                let bottom = current
-                    .y
-                    .saturating_add(current.height)
-                    .max(rect.y.saturating_add(rect.height));
-                DamageRect {
-                    x: left,
-                    y: top,
-                    width: right.saturating_sub(left),
-                    height: bottom.saturating_sub(top),
-                }
-            }
-        });
-    }
-    union
+    mesh_core_render::display_list::backdrop_blur_region_union(commands)
 }
 
 #[cfg(test)]

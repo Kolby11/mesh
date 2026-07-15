@@ -311,12 +311,12 @@ pub fn annotate_overflow_node(
         .map(|(_, _, _, max_y)| (max_y - content_origin_y).max(0.0))
         .unwrap_or(0.0);
 
-    let max_x = if node.computed_style.overflow_x.clips_contents() {
+    let max_x = if node.computed_style.overflow_x.is_scrollable() {
         (content_width - viewport_width).max(0.0)
     } else {
         0.0
     };
-    let max_y = if node.computed_style.overflow_y.clips_contents() {
+    let max_y = if node.computed_style.overflow_y.is_scrollable() {
         (content_height - viewport_height).max(0.0)
     } else {
         0.0

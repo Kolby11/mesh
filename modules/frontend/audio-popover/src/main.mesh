@@ -153,7 +153,10 @@ end
     align-items: center;
     overflow: visible;
     border-radius: var(--radius-lg);
-    background: var(--color-surface-container);
+    /* Frosted glass matching the navigation bar: translucent card over the
+    compositor-blurred backdrop (org_kde_kwin_blur). */
+    background: rgba(24, 26, 34, 0.68);
+    backdrop-filter: blur(20px);
     color: var(--color-on-surface);
 }
 

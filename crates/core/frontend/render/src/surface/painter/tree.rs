@@ -945,21 +945,25 @@ fn push_box_shadow_command(
 }
 
 fn push_backdrop_filter_command(
-    _commands: &mut Vec<PainterCommand>,
-    _rect: ClipRect,
-    _radius: f32,
+    commands: &mut Vec<PainterCommand>,
+    rect: ClipRect,
+    radius: f32,
     filter: VisualFilter,
-    _clip: ClipRect,
+    clip: ClipRect,
 ) {
-    // CPU software blur removed per BLUR-03.
-    // Compositor blur is handled by org_kde_kwin_blur protocol
-    // (see crates/core/presentation). The backdrop_filter data
-    // continues to flow through the display list for region
-    // computation even though we don't render it on the CPU.
+    // In-surface backdrop blur: blurs content already painted beneath this
+    // node within the same surface buffer. Compositor-side blur of content
+    // *behind* the surface stays on the org_kde_kwin_blur protocol
+    // (see crates/core/presentation); the two compose.
     if filter.is_none() {
         return;
     }
-    // No-op: blur is offloaded to compositor or rendered flat.
+    commands.push(PainterCommand::ApplyFilter {
+        rect,
+        radius,
+        filter: PainterFilter::Backdrop(filter),
+        clip,
+    });
 }
 
 /// Builds the vector-path draw command for a `checkbox` tick or `radio` dot

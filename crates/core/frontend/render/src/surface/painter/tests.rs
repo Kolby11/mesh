@@ -622,14 +622,15 @@ fn painter_primitive_box_rounded_shadow_and_filters_emit_effect_classes() {
     let mut buffer = PixelBuffer::new(32, 32);
     engine.render_tree(&root, &mut buffer, 1.0);
 
-    // BLUR-03: backdrop_filter no longer emits ApplyFilter::Backdrop; CPU blur
-    // is offloaded to the compositor via org_kde_kwin_blur protocol.
+    // backdrop_filter emits ApplyFilter::Backdrop for in-surface blur (the
+    // org_kde_kwin_blur protocol additionally blurs behind the surface).
     // CSS filter (non-backdrop) is encoded in DrawRoundedRect.paint.filter,
-    // so there is no separate apply_filter command either.
+    // so it adds no separate apply_filter command.
     let classes = painter_command_classes(&recorded.recorded_commands());
-    assert_eq!(classes, vec!["draw_shadow", "draw_rounded_rect"]);
-    assert!(classes.contains(&"draw_shadow"));
-    assert!(classes.contains(&"draw_rounded_rect"));
+    assert_eq!(
+        classes,
+        vec!["draw_shadow", "apply_filter", "draw_rounded_rect"]
+    );
 }
 
 #[test]
@@ -2119,10 +2120,11 @@ fn painter_helper_lowering_routes_effect_helpers_through_command_backend() {
         clip,
     );
 
-    // BLUR-03: apply_backdrop_filter is now a no-op; CPU blur offloaded to compositor.
-    // Only fill and shadow commands are emitted; no ApplyFilter::Backdrop.
+    // Fill, shadow, and in-surface backdrop blur all lower to backend
+    // commands; the org_kde_kwin_blur protocol additionally blurs behind the
+    // surface.
     let commands = recorded.recorded_commands();
-    assert_eq!(commands.len(), 2);
+    assert_eq!(commands.len(), 3);
     assert!(matches!(
         commands[0],
         PainterCommand::DrawRoundedRect {
@@ -2134,6 +2136,13 @@ fn painter_helper_lowering_routes_effect_helpers_through_command_backend() {
         }
     ));
     assert!(matches!(commands[1], PainterCommand::DrawShadow { .. }));
+    assert!(matches!(
+        commands[2],
+        PainterCommand::ApplyFilter {
+            filter: PainterFilter::Backdrop(VisualFilter { blur_radius: 3.0 }),
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -2785,4 +2794,298 @@ fn retained_replay_batches_adjacent_non_content_nodes() {
         vec![2],
         "expected exactly one non-empty batched display command execution, got {call_sizes:?}"
     );
+}
+
+/// Two opaque halves (red left, blue right) with a transparent frosted panel
+/// straddling the color boundary. In-surface backdrop blur must mix the two
+/// colors inside the panel while pixels outside the panel stay pure.
+fn backdrop_blur_scene(left_color: Color) -> WidgetNode {
+    let blue = Color {
+        r: 0,
+        g: 0,
+        b: 255,
+        a: 255,
+    };
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 32.0,
+            height: 32.0,
+        },
+        Color::TRANSPARENT,
+    );
+    let left = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 16.0,
+            height: 32.0,
+        },
+        left_color,
+    );
+    let right = node(
+        "box",
+        LayoutRect {
+            x: 16.0,
+            y: 0.0,
+            width: 16.0,
+            height: 32.0,
+        },
+        blue,
+    );
+    let mut frosted = node(
+        "box",
+        LayoutRect {
+            x: 8.0,
+            y: 8.0,
+            width: 16.0,
+            height: 16.0,
+        },
+        Color::TRANSPARENT,
+    );
+    frosted.computed_style.backdrop_filter = VisualFilter { blur_radius: 4.0 };
+    root.children.push(left);
+    root.children.push(right);
+    root.children.push(frosted);
+    let mut id = 1;
+    root.id = id;
+    for child in &mut root.children {
+        id += 1;
+        child.id = id;
+    }
+    root
+}
+
+#[test]
+fn retained_backdrop_filter_blurs_content_beneath() {
+    let red = Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let root = backdrop_blur_scene(red);
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 32, 32, true, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 32,
+            height: 32,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+
+    let engine = FrontendRenderEngine::new();
+    let mut buffer = PixelBuffer::new(32, 32);
+    engine.render_selected_display_list_for_module(&selected, &mut buffer, 1.0, None, None, None);
+
+    // Inside the frosted panel, next to the color boundary: blur mixes red and
+    // blue.
+    let mixed = pixel(&buffer, 15, 16);
+    assert!(
+        mixed.r > 16 && mixed.b > 16,
+        "backdrop blur should mix red and blue inside the panel, got {mixed:?}"
+    );
+    // Same column outside the panel: untouched pure red.
+    let pure = pixel(&buffer, 15, 2);
+    assert!(
+        pure.r > 247 && pure.b < 8,
+        "pixels outside the frosted panel must stay pure, got {pure:?}"
+    );
+}
+
+/// Changing content beneath a frosted panel and repainting only the expanded
+/// sparse damage must produce the same pixels as a fresh full repaint.
+/// Without `expand_damage_for_backdrop_filters` the blur would keep stale
+/// pixels from the previous frame on the far side of the panel.
+#[test]
+fn sparse_repaint_with_backdrop_damage_expansion_matches_full_repaint() {
+    let red = Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let green = Color {
+        r: 0,
+        g: 255,
+        b: 0,
+        a: 255,
+    };
+    let engine = FrontendRenderEngine::new();
+
+    let mut list = RetainedDisplayList::default();
+    let first = backdrop_blur_scene(red);
+    list.update(&first, 32, 32, true, true);
+    let mut buffer = PixelBuffer::new(32, 32);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 32,
+            height: 32,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+    engine.render_selected_display_list_for_module(&selected, &mut buffer, 1.0, None, None, None);
+
+    // Change the left half red → green and repaint only the expanded damage.
+    let second = backdrop_blur_scene(green);
+    list.update(&second, 32, 32, false, true);
+    let mut damage: Vec<DamageRect> = list.damage_rects().to_vec();
+    assert!(
+        !damage.is_empty(),
+        "left-half color change must produce damage"
+    );
+    assert!(
+        list.expand_damage_for_backdrop_filters(&mut damage),
+        "damage touching the frosted panel's read region must expand"
+    );
+    let selected =
+        list.select_paint_commands_for_rects(&damage, DisplayListRepaintPolicy::MinimalDamage);
+    for rect in &damage {
+        buffer.clear_rect(rect.x, rect.y, rect.width, rect.height, Color::TRANSPARENT);
+        engine.render_selected_display_list_for_module(
+            &selected,
+            &mut buffer,
+            1.0,
+            Some((rect.x, rect.y, rect.width, rect.height)),
+            None,
+            None,
+        );
+    }
+
+    let mut full_buffer = PixelBuffer::new(32, 32);
+    let full = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 32,
+            height: 32,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+    engine.render_selected_display_list_for_module(&full, &mut full_buffer, 1.0, None, None, None);
+
+    assert_eq!(
+        buffer.data, full_buffer.data,
+        "sparse repaint with backdrop damage expansion must match a full repaint"
+    );
+}
+
+/// Navigation-bar shape: the surface ROOT carries `backdrop-filter` with a
+/// translucent background (its in-surface backdrop is empty — the compositor
+/// blurs behind the surface), and a child button's background changes on
+/// hover. The root contributes no backdrop region, so damage stays sparse;
+/// the sparse repaint must still match a full repaint pixel-for-pixel.
+fn frosted_root_bar(button_color: Color) -> WidgetNode {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 64.0,
+            height: 24.0,
+        },
+        Color {
+            r: 10,
+            g: 10,
+            b: 14,
+            a: 191,
+        },
+    );
+    root.computed_style.backdrop_filter = VisualFilter { blur_radius: 20.0 };
+    let button = node(
+        "box",
+        LayoutRect {
+            x: 40.0,
+            y: 4.0,
+            width: 16.0,
+            height: 16.0,
+        },
+        button_color,
+    );
+    root.children.push(button);
+    root.id = 1;
+    root.children[0].id = 2;
+    root
+}
+
+#[test]
+fn sparse_hover_repaint_under_frosted_root_matches_full_repaint() {
+    let idle = Color {
+        r: 40,
+        g: 40,
+        b: 48,
+        a: 255,
+    };
+    let hover = Color {
+        r: 90,
+        g: 90,
+        b: 110,
+        a: 255,
+    };
+    let engine = FrontendRenderEngine::new();
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&frosted_root_bar(idle), 64, 24, true, true);
+    let mut buffer = PixelBuffer::new(64, 24);
+    let full = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 64,
+            height: 24,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+    engine.render_selected_display_list_for_module(&full, &mut buffer, 1.0, None, None, None);
+
+    // Hover: only the button's background changes.
+    list.update(&frosted_root_bar(hover), 64, 24, false, true);
+    let mut damage: Vec<DamageRect> = list.damage_rects().to_vec();
+    assert!(!damage.is_empty(), "hover change must produce damage");
+    list.expand_damage_for_backdrop_filters(&mut damage);
+    let selected =
+        list.select_paint_commands_for_rects(&damage, DisplayListRepaintPolicy::MinimalDamage);
+    for rect in &damage {
+        buffer.clear_rect(rect.x, rect.y, rect.width, rect.height, Color::TRANSPARENT);
+        engine.render_selected_display_list_for_module(
+            &selected,
+            &mut buffer,
+            1.0,
+            Some((rect.x, rect.y, rect.width, rect.height)),
+            None,
+            None,
+        );
+    }
+
+    let mut full_buffer = PixelBuffer::new(64, 24);
+    let full = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 64,
+            height: 24,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+    engine.render_selected_display_list_for_module(&full, &mut full_buffer, 1.0, None, None, None);
+
+    for y in 0..24 {
+        for x in 0..64 {
+            let sparse = pixel(&buffer, x, y);
+            let fresh = pixel(&full_buffer, x, y);
+            assert_eq!(
+                sparse, fresh,
+                "sparse hover repaint diverged from full repaint at ({x},{y})"
+            );
+        }
+    }
 }

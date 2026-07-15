@@ -689,7 +689,32 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
 
 - [ ] GPU rendering after retained layout, smart invalidation, and damage
       tracking ship → v1.25: `wgpu`/Skia-GPU surface per output, retained
-      display list as command source, SHM fallback (D).
+      display list as command source, SHM fallback (D). Plan written
+      2026-07-15 (`.planning/todos/pending/2026-07-15-gpu-rendering-backend.md`):
+      Skia-GL (Ganesh) first — same Canvas API as the shipped raster backend,
+      EGL buffer-age partial present preserves the damage pipeline; wgpu/Vello
+      stays the replacement candidate behind the backend-neutral painter API.
+- [ ] Real in-surface blur — plan in
+      `.planning/todos/pending/2026-07-15-in-surface-blur.md`. Shipped
+      2026-07-15: in-surface `backdrop-filter` executes on both the retained
+      display-list path and the immediate painter (BLUR-03 no-ops removed;
+      Skia `apply_backdrop_filter_impl` was already implemented). Sparse
+      damage is blur-aware: the display list tracks backdrop read regions
+      (node rect + 3×radius pad) for blur nodes that have painted content
+      beneath them in paint order, and `expand_damage_for_backdrop_filters`
+      grows intersecting effective-damage rects to the whole region at the
+      shell choke point, so the blur re-reads a consistently repainted
+      backdrop (pixel-parity test: sparse expanded repaint == full repaint).
+      A surface root with an empty in-surface backdrop (nav bar) contributes
+      no region, so bar damage stays minimal. Promoted child popup surfaces
+      now also get compositor blur regions (`child_surface_blur_region` →
+      `update_blur_region`), driven by the child display list's
+      backdrop-filter nodes; frosted bubble popovers (language/theme) and the
+      audio popover use translucent cards + `backdrop-filter`. Remaining:
+      element `filter: blur()` still blurs only the node's own painted shape
+      (mask filter) — full subtree blur needs layer push/pop command kinds in
+      the retained display list; downsample-blur-upsample bounding and the
+      GPU path per the plan doc.
 - [ ] Eliminate service-specific Rust branches: the hardcoded `mesh.audio`
       optimistic-mute merge in `normalize_service_event` /
       `apply_optimistic_audio_muted_state` should become an optimistic-state

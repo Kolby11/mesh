@@ -980,6 +980,20 @@ impl SkiaPaintBackend {
             return;
         };
         let save_count = canvas.save();
+        // The backdrop save_layer snapshots and redraws the full canvas clip
+        // (its bounds rec is an allocation hint, not a clip), so the effective
+        // clip must be applied to the canvas or a damage-clipped replay would
+        // re-blur and rewrite pixels outside the cleared damage region.
+        canvas.clip_rect(
+            Rect::from_xywh(
+                clipped.x as f32,
+                clipped.y as f32,
+                clipped.width as f32,
+                clipped.height as f32,
+            ),
+            None,
+            false,
+        );
         let rect = Rect::from_xywh(
             rect.x as f32,
             rect.y as f32,

@@ -690,6 +690,16 @@ impl ShellComponent for FrontendSurfaceComponent {
             &tooltip_damage_rects,
             effective_damage_rects,
         );
+        // In-surface backdrop-filter nodes re-read the pixels beneath them, so
+        // damage touching a blur read region must repaint that whole region or
+        // the blur would mix freshly painted and stale-frame backdrop pixels.
+        if !effective_damage.full_surface
+            && self
+                .retained_display_list
+                .expand_damage_for_backdrop_filters(&mut effective_damage.rects)
+        {
+            effective_damage.rect = bounding_damage_rect(&effective_damage.rects, surface_damage);
+        }
         let _paint_damage = if effective_damage.full_surface {
             Some(surface_damage)
         } else {
@@ -1154,6 +1164,14 @@ impl ShellComponent for FrontendSurfaceComponent {
             Some(self.compiled.manifest.package.id.as_str()),
         );
         Ok(true)
+    }
+
+    fn child_surface_blur_region(&self, node_key: &str) -> Option<DamageRect> {
+        let tree = self.last_tree.as_ref()?;
+        let node = find_node_by_key(tree, node_key)?;
+        let child_display_lists = self.child_display_lists.borrow();
+        let display_list = child_display_lists.get(&node.id)?;
+        mesh_core_render::display_list::backdrop_blur_region_union(display_list.paint_commands())
     }
 
     fn child_hide_transition_ms(&self, node_key: &str) -> u64 {

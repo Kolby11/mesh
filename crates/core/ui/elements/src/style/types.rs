@@ -859,8 +859,14 @@ impl Overflow {
         !matches!(self, Self::Visible)
     }
 
-    pub fn shows_scrollbar_when_overflowing(self) -> bool {
+    /// Whether this axis lets the user scroll to reveal clipped content.
+    /// `Hidden` clips like `Auto`/`Scroll` but never scrolls.
+    pub fn is_scrollable(self) -> bool {
         matches!(self, Self::Auto | Self::Scroll)
+    }
+
+    pub fn shows_scrollbar_when_overflowing(self) -> bool {
+        self.is_scrollable()
     }
 
     pub fn always_shows_scrollbar(self) -> bool {

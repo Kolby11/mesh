@@ -197,6 +197,7 @@ pub struct RetainedDisplayList {
     command_spans: Arc<[RetainedCommandSpan]>,
     paint_commands: Arc<[DisplayPaintCommand]>,
     command_kinds: Arc<[DisplayPaintCommandKind]>,
+    backdrop_regions: Vec<DamageRect>,
     last_metrics: DisplayListMetrics,
     last_damage_rects: Vec<DamageRect>,
 }
@@ -220,6 +221,7 @@ impl Default for RetainedDisplayList {
             command_spans: Vec::new().into(),
             paint_commands: Vec::new().into(),
             command_kinds: Vec::new().into(),
+            backdrop_regions: Vec::new(),
             last_metrics: DisplayListMetrics::default(),
             last_damage_rects: Vec::new(),
         }
@@ -1047,6 +1049,8 @@ impl RetainedDisplayList {
             }
         };
 
+        let backdrop_regions = compute_backdrop_regions(paint_commands.as_ref(), surface);
+
         let mut damage: Option<DamageRect> = None;
         let mut damage_rects = std::mem::take(&mut self.last_damage_rects);
         damage_rects.clear();
@@ -1173,6 +1177,7 @@ impl RetainedDisplayList {
         self.command_spans = command_spans;
         self.paint_commands = paint_commands;
         self.command_kinds = command_kinds;
+        self.backdrop_regions = backdrop_regions;
         self.root_id = Some(root.id);
         self.retained_tree_generation = retained_tree_generation;
         self.surface_size = Some((surface.width, surface.height));
@@ -1298,6 +1303,44 @@ impl RetainedDisplayList {
 
     pub fn damage_rects(&self) -> &[DamageRect] {
         &self.last_damage_rects
+    }
+
+    /// Regions where an in-surface `backdrop-filter` node has painted content
+    /// beneath it in paint order (node rect inflated by the blur kernel reach).
+    pub fn backdrop_filter_regions(&self) -> &[DamageRect] {
+        &self.backdrop_regions
+    }
+
+    /// Expands every damage rect that intersects an active backdrop-filter
+    /// region to cover that whole region, so the blur re-reads freshly painted
+    /// backdrop pixels instead of mixing pixels from different frames. Runs to
+    /// a fixpoint so chained/overlapping blur regions cascade. Returns whether
+    /// any rect grew.
+    pub fn expand_damage_for_backdrop_filters(&self, rects: &mut [DamageRect]) -> bool {
+        if self.backdrop_regions.is_empty() || rects.is_empty() {
+            return false;
+        }
+        let mut expanded = false;
+        loop {
+            let mut changed = false;
+            for region in &self.backdrop_regions {
+                for rect in rects.iter_mut() {
+                    if !rect.intersects(*region) {
+                        continue;
+                    }
+                    let union = rect.union(*region);
+                    if union != *rect {
+                        *rect = union;
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+            expanded = true;
+        }
+        expanded
     }
 
     pub fn paint_commands(&self) -> &[DisplayPaintCommand] {
@@ -2259,6 +2302,106 @@ fn command_bounds(command: &DisplayPaintCommand) -> DamageRect {
         width: clip.width.max(0) as u32,
         height: clip.height.max(0) as u32,
     }
+}
+
+/// Logical-coordinate union rect of all display commands whose node has an
+/// active `backdrop-filter: blur(...)`. Drives compositor-side blur region
+/// declarations (org_kde_kwin_blur); `None` means no blur protocol calls
+/// should be emitted. Negative origins are clamped to 0 with the clipped
+/// leading edge subtracted from the dimensions, so partially off-screen
+/// nodes don't silently snap to (0,0).
+pub fn backdrop_blur_region_union(commands: &[DisplayPaintCommand]) -> Option<DamageRect> {
+    let mut union: Option<DamageRect> = None;
+    for cmd in commands {
+        if cmd.node.style.backdrop_filter.blur_radius <= 0.0 {
+            continue;
+        }
+        let raw_x = cmd.node.layout.x;
+        let raw_y = cmd.node.layout.y;
+        let rect = DamageRect {
+            x: raw_x.max(0.0) as u32,
+            y: raw_y.max(0.0) as u32,
+            width: ((cmd.node.layout.width + raw_x.min(0.0)).max(0.0) as u32).max(1),
+            height: ((cmd.node.layout.height + raw_y.min(0.0)).max(0.0) as u32).max(1),
+        };
+        union = Some(match union {
+            None => rect,
+            Some(current) => current.union(rect),
+        });
+    }
+    union
+}
+
+/// Screen-space region an in-surface `backdrop-filter` node reads and
+/// rewrites: its layout rect inflated by the blur kernel reach (3× radius,
+/// matching the painter's `apply_backdrop_filter_impl` pad), clipped to the
+/// surface.
+fn backdrop_read_region(node: &DisplayPaintNode, surface: DamageRect) -> Option<DamageRect> {
+    let radius = node.style.backdrop_filter.blur_radius;
+    if radius <= 0.0 {
+        return None;
+    }
+    let pad = radius * 3.0;
+    let left = node.layout.x - pad;
+    let top = node.layout.y - pad;
+    let right = node.layout.x + node.layout.width + pad;
+    let bottom = node.layout.y + node.layout.height + pad;
+    let x = left.max(0.0).floor() as u32;
+    let y = top.max(0.0).floor() as u32;
+    let right = right.max(0.0).ceil() as u32;
+    let bottom = bottom.max(0.0).ceil() as u32;
+    clip_rect(
+        DamageRect {
+            x,
+            y,
+            width: right.saturating_sub(x),
+            height: bottom.saturating_sub(y),
+        },
+        surface,
+    )
+}
+
+/// Whether replaying this command writes any pixels; used to decide if a
+/// backdrop-filter node actually has in-surface content beneath it.
+/// Conservative: over-reporting only costs an identity blur pass.
+fn display_command_paints_pixels(command: &DisplayPaintCommand) -> bool {
+    if command.kind == DisplayPaintCommandKind::Scrollbars {
+        return true;
+    }
+    let style = &command.node.style;
+    !matches!(command.node.content, DisplayPaintContent::None)
+        || style.background_color.a > 0
+        || !matches!(style.background_paint, BackgroundPaint::None)
+        || (style.border_width.top > 0.0 && style.border_color.a > 0)
+        || (!style.box_shadow.is_none() && !style.box_shadow.inset)
+        || style.backdrop_filter.blur_radius > 0.0
+}
+
+/// Collects the read regions of backdrop-filter nodes that have painted
+/// content beneath them in paint order. A backdrop node with nothing beneath
+/// (e.g. a frosted surface root whose in-surface backdrop is empty — the
+/// compositor blurs what's behind the surface) contributes no region, so it
+/// never widens sparse damage.
+fn compute_backdrop_regions(
+    commands: &[DisplayPaintCommand],
+    surface: DamageRect,
+) -> Vec<DamageRect> {
+    let mut regions = Vec::new();
+    for (index, command) in commands.iter().enumerate() {
+        if command.kind != DisplayPaintCommandKind::Node {
+            continue;
+        }
+        let Some(region) = backdrop_read_region(&command.node, surface) else {
+            continue;
+        };
+        let has_backdrop_content = commands[..index].iter().any(|earlier| {
+            display_command_paints_pixels(earlier) && command_bounds(earlier).intersects(region)
+        });
+        if has_backdrop_content {
+            regions.push(region);
+        }
+    }
+    regions
 }
 
 fn command_has_effect_overflow(command: &DisplayPaintCommand) -> bool {
@@ -6042,5 +6185,94 @@ mod tests {
         );
         assert_eq!(old_total, new_total);
         assert!(new_time * 10 < old_time * 9);
+    }
+
+    fn frosted_node(id: NodeId, x: f32, y: f32, width: f32, height: f32) -> WidgetNode {
+        let mut frosted = node(id, "box", x, y, width, height);
+        frosted.computed_style.background_color = Color::TRANSPARENT;
+        frosted.computed_style.backdrop_filter = VisualFilter { blur_radius: 4.0 };
+        frosted
+    }
+
+    #[test]
+    fn backdrop_regions_require_painted_content_beneath() {
+        // Frosted node with nothing painted beneath it (transparent root):
+        // its in-surface backdrop is empty, so it must not widen damage.
+        let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+        root.computed_style.background_color = Color::TRANSPARENT;
+        root.children.push(frosted_node(2, 20.0, 20.0, 40.0, 40.0));
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 100, 100, true, true);
+        assert!(
+            list.backdrop_filter_regions().is_empty(),
+            "backdrop with empty in-surface backdrop must contribute no region"
+        );
+
+        // Opaque content painted beneath the frosted node activates it. The
+        // region is the node rect inflated by the 3x blur-kernel pad.
+        let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+        root.computed_style.background_color = Color::TRANSPARENT;
+        root.children.push(node(2, "box", 0.0, 0.0, 50.0, 100.0));
+        root.children.push(frosted_node(3, 20.0, 20.0, 40.0, 40.0));
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 100, 100, true, true);
+        assert_eq!(
+            list.backdrop_filter_regions(),
+            &[DamageRect {
+                x: 8,
+                y: 8,
+                width: 64,
+                height: 64,
+            }],
+            "active backdrop region should be the node rect plus 12px pad"
+        );
+    }
+
+    #[test]
+    fn expand_damage_for_backdrop_filters_grows_intersecting_rects() {
+        let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+        root.computed_style.background_color = Color::TRANSPARENT;
+        root.children.push(node(2, "box", 0.0, 0.0, 50.0, 100.0));
+        root.children.push(frosted_node(3, 20.0, 20.0, 40.0, 40.0));
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 100, 100, true, true);
+
+        // Damage far from the frosted region stays untouched.
+        let mut disjoint = [DamageRect {
+            x: 80,
+            y: 80,
+            width: 10,
+            height: 10,
+        }];
+        assert!(!list.expand_damage_for_backdrop_filters(&mut disjoint));
+        assert_eq!(
+            disjoint[0],
+            DamageRect {
+                x: 80,
+                y: 80,
+                width: 10,
+                height: 10,
+            }
+        );
+
+        // Damage touching the read region grows to cover the whole region so
+        // the blur re-reads a consistently repainted backdrop.
+        let mut touching = [DamageRect {
+            x: 0,
+            y: 30,
+            width: 10,
+            height: 10,
+        }];
+        assert!(list.expand_damage_for_backdrop_filters(&mut touching));
+        assert_eq!(
+            touching[0],
+            DamageRect {
+                x: 0,
+                y: 8,
+                width: 72,
+                height: 64,
+            },
+            "expanded damage must union the backdrop read region"
+        );
     }
 }
