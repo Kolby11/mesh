@@ -1,3 +1,7 @@
+<props>
+  scroll_sensitivity: { type: "number", default: 5, min: 1, max: 100, step: 1 }
+</props>
+
 <template>
   <button
     class="brightness-button {brightness_button_class}"
@@ -20,6 +24,14 @@ brightness_level = 100
 brightness_label = "100%"
 brightness_icon = "display-brightness-high"
 brightness_button_class = brightness and "" or "brightness-unavailable"
+
+local function normalized_scroll_sensitivity()
+    local amount = tonumber(props and props.scroll_sensitivity)
+    if amount == nil or amount ~= amount or amount == math.huge or amount == -math.huge or amount <= 0 then
+        return 5
+    end
+    return math.max(1, math.min(100, amount))
+end
 
 local function update_brightness_copy(level)
     brightness_level = math.max(0, math.min(100, math.floor(tonumber(level) or 100)))
@@ -53,14 +65,16 @@ function onBrightnessScroll(event)
         return
     end
 
+    local amount = normalized_scroll_sensitivity()
+
     -- The input boundary normalizes wheel and trackpad deltas alike:
     -- positive is up and negative is down.
     if dy > 0 then
-        update_brightness_copy(brightness_level + 5)
-        brightness.increase(5)
+        update_brightness_copy(brightness_level + amount)
+        brightness.increase(amount)
     else
-        update_brightness_copy(brightness_level - 5)
-        brightness.decrease(5)
+        update_brightness_copy(brightness_level - amount)
+        brightness.decrease(amount)
     end
 end
 </script>
