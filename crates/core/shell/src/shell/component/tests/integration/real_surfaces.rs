@@ -1341,7 +1341,7 @@ fn shipped_navigation_brightness_uses_one_level_icon_and_scrolls_both_input_kind
                 x: button_x,
                 y: button_y,
                 dx: 0.0,
-                dy: 1.0,
+                dy: -1.0,
             },
         )
         .unwrap();
@@ -1362,7 +1362,7 @@ fn shipped_navigation_brightness_uses_one_level_icon_and_scrolls_both_input_kind
                 x: button_x,
                 y: button_y,
                 dx: 0.0,
-                dy: -1.0,
+                dy: 1.0,
             },
         )
         .unwrap();

@@ -53,12 +53,8 @@ function onBrightnessScroll(event)
         return
     end
 
-    -- Wheel deltas describe scroll direction, while touchpad deltas describe
-    -- physical finger movement. Normalize both so positive means "up".
-    if event.type == "twofingerscroll" then
-        dy = -dy
-    end
-
+    -- The input boundary normalizes wheel and trackpad deltas alike:
+    -- positive is up and negative is down.
     if dy > 0 then
         update_brightness_copy(brightness_level + 5)
         brightness.increase(5)
