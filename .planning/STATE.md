@@ -28,7 +28,7 @@ See: `.planning/PROJECT.md` (updated 2026-06-18)
 Phase: 104 (Retained TaffyTree) — GAP CLOSURE (7 suspects remain)
 Plan: 3 of 3
 Status: shell suite 54->7 failing; remaining 7 documented as regression suspects
-Last activity: 2026-06-22 -- gap-closure pass; fixture/harness drift from shipped-module rewrites resolved
+Last activity: 2026-07-15 - Completed quick task 260715-wnu: Parameterize brightness component scroll scaling for future settings-controlled sensitivity
 
 ```
 Progress: [████████████░░░░░░░░] 33% impl; shell suite 347 pass / 7 fail (was 54 fail)
@@ -81,6 +81,12 @@ Decisions are logged in PROJECT.md Key Decisions table. v1.20 decisions archived
 ### Blockers/Concerns
 
 - Phase 104 full shell verification is blocked by current dirty-tree navigation/module/service test failures. Focused retained-layout tests pass and `mesh-core-shell` builds under Nix; full `nix develop -c cargo test --package mesh-core-shell` fails 54 tests against changed shipped surfaces/module graph. See `.planning/phases/104-retained-taffytree/104-VERIFICATION.md`.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260715-wnu | Parameterize brightness component scroll scaling for future settings-controlled sensitivity | 2026-07-15 | afc65c5e | [260715-wnu-parameterize-brightness-component-scroll](./quick/260715-wnu-parameterize-brightness-component-scroll/) |
 
 ## Deferred Items
 
