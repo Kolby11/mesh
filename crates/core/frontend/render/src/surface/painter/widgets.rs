@@ -218,10 +218,10 @@ impl FrontendRenderEngine {
         let display_value: Cow<'_, str> = if input.mask_text && !input.value.is_empty() {
             Cow::Owned("*".repeat(input.value.chars().count()))
         } else {
-            Cow::Borrowed(input.value.as_str())
+            Cow::Borrowed(input.value.as_ref())
         };
         let text = if display_value.is_empty() {
-            input.placeholder.as_str()
+            input.placeholder.as_ref()
         } else {
             display_value.as_ref()
         };
@@ -550,7 +550,7 @@ impl FrontendRenderEngine {
         if let Some(src) = &icon_paint.src {
             icon::draw_icon_from_path_in_session(
                 session,
-                std::path::Path::new(src),
+                std::path::Path::new(src.as_ref()),
                 x,
                 y,
                 w,

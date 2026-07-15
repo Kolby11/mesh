@@ -436,6 +436,12 @@ pub trait ShellComponent: Send {
     fn child_surface_paint_generation(&self, _node_key: &str) -> Option<u64> {
         None
     }
+    /// Return logical child-local damage produced by the most recent
+    /// `paint_child_surface` call. `None` keeps the conservative full-surface
+    /// present used by components without retained child damage tracking.
+    fn child_surface_present_damage(&self, _node_key: &str) -> Option<Vec<DamageRect>> {
+        None
+    }
     /// Union rect of the child subtree's nodes with an active
     /// `backdrop-filter`, in child-local logical coordinates (including the
     /// content padding offset passed to `paint_child_surface`). Drives the

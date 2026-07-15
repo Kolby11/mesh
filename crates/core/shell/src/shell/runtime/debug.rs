@@ -1451,7 +1451,7 @@ fn profiling_invalidation_json(
 fn profiling_paint_snapshot_json(
     paint: &mesh_core_debug::RetainedPaintSnapshot,
 ) -> serde_json::Value {
-    serde_json::json!({
+    let mut snapshot = serde_json::json!({
         "retained_generation": paint.retained_generation,
         "entries_total": paint.entries_total,
         "entries_reused": paint.entries_reused,
@@ -1490,7 +1490,27 @@ fn profiling_paint_snapshot_json(
         "raster_cache_bypasses": paint.raster_cache_bypasses,
         "raster_cache_opaque_hits": paint.raster_cache_opaque_hits,
         "raster_cache_translucent_hits": paint.raster_cache_translucent_hits,
-    })
+    });
+    let object = snapshot
+        .as_object_mut()
+        .expect("profiling paint snapshot is an object");
+    for (name, value) in [
+        ("glyph_cache_hits", paint.glyph_cache_hits),
+        ("glyph_cache_misses", paint.glyph_cache_misses),
+        ("glyph_cache_entries", paint.glyph_cache_entries),
+        ("glyph_cache_capacity", paint.glyph_cache_capacity),
+        ("font_bytes_cache_hits", paint.font_bytes_cache_hits),
+        ("font_bytes_cache_misses", paint.font_bytes_cache_misses),
+        ("font_bytes_cache_entries", paint.font_bytes_cache_entries),
+        ("font_bytes_cache_capacity", paint.font_bytes_cache_capacity),
+        ("skia_glyph_cache_hits", paint.skia_glyph_cache_hits),
+        ("skia_glyph_cache_misses", paint.skia_glyph_cache_misses),
+        ("skia_glyph_cache_entries", paint.skia_glyph_cache_entries),
+        ("skia_glyph_cache_capacity", paint.skia_glyph_cache_capacity),
+    ] {
+        object.insert(name.to_string(), value.into());
+    }
+    snapshot
 }
 
 fn profiling_paint_barriers_json(

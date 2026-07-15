@@ -200,7 +200,11 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
 - [ ] L tier 1 — in-shell perf HUD via the existing `DebugOverlay`: frame
       waterfall strip, live counters, paint flashing on damage rects (L)
 - [ ] L tier 2 — cause attribution: per-rule restyle time, per-instance build
-      time, per-command-kind paint time, wasted-work counters (L)
+      time, per-command-kind paint time, wasted-work counters (L). Progress
+      2026-07-15: retained paint profiling now reports per-paint hit/miss and
+      occupancy/capacity metrics for glyph raster, font-bytes, and thread-local
+      Skia glyph caches through `mesh.debug`, making icon-font cache pressure
+      visible alongside the existing text and raster-cache metrics.
 - [ ] L tier 3 — `mesh.debug.profiling_stream` over IPC, Chrome-trace/Perfetto
       export, CI regression baseline with tolerance band (L). Progress
       2026-07-14: the existing `mesh.debug` service payload now exposes a
@@ -381,7 +385,7 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       faster), with identical geometry and stable existing node IDs. The fresh
       builder remains only for stateless compatibility calls and invalid-cache
       initialization.
-- [ ] Child popup surfaces bypass the retained pipeline: full clear + repaint
+- [x] Child popup surfaces bypass the retained pipeline: full clear + repaint
       through the immediate-mode painter per present, plus per-frame key
       walks (P); child buffers are still repainted eagerly even though sparse
       child damage now reaches presentation (U). Route child targets through
@@ -412,10 +416,12 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       of calling the immediate tree painter. Pixel parity is covered. A
       61-node popup over 400 root-opacity transition frames measured 38.0ms
       immediate versus 30.9ms retained (1.23x); a one-descendant sparse
-      material workload measured 17.5ms versus 4.83ms (3.61x). Remaining:
-      consume child-local damage for partial buffer clear/raster/present rather
-      than replaying the full retained command stream on every changed child
-      generation.
+      material workload measured 17.5ms versus 4.83ms (3.61x). Completed
+      2026-07-15: changed promoted children now consume their retained local
+      damage for physical partial clears and clipped command replay, expand
+      damage for backdrop filters, and forward the same logical rectangles to
+      presentation. Legacy painters, fresh buffers, and scale changes retain
+      the conservative full-surface fallback.
 - [x] Fractional HiDPI forces full-surface repaint every frame → v1.21. Done
       2026-07-15: logical damage is now converted to physical painter-buffer
       coordinates by flooring near edges and ceiling far edges before clear
@@ -483,7 +489,7 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       index, so unchanged finalize passes borrow it instead of rebuilding the
       map; the release microbenchmark measured 3.297ms rebuild versus 2.4µs
       cached lookup over 1,000 probes.
-- [ ] Handler dispatch: graph-wide instance-key interning (B; dispatch-path
+- [x] Handler dispatch: graph-wide instance-key interning (B; dispatch-path
       borrowing landed). Progress 2026-07-13: scheduled handler dispatch now
       precomputes the `__mesh_embed__::{instance_key}::{handler}` target when
       `shell.schedule-handler` is received, so due ticks clone one cached
@@ -513,8 +519,12 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       materializes it for published-event or live-binding post-processing.
       Across 2M release lookups, owned-ID dispatch measured 41.4ms/41.0ms
       versus 30.9ms/31.4ms borrowed (1.34x/1.30x).
-      Remaining: full graph-wide instance-key interning for ordinary handler
-      dispatch.
+      Completed 2026-07-15: each frontend surface now interns local, imported,
+      and slot instance paths as shared `Arc<str>` values using retained
+      construction scratch space. Runtime lookup, live-binding and portal-owner
+      graphs, component memo generations, and ordinary borrowed handler
+      dispatch now share those keys; repeated composition no longer allocates
+      a fresh instance-key string.
 - [x] Shell-side subscription index (service → component indices) so event
       routing is a lookup, not N mutex acquisitions per event (C). Shipped
       2026-07-13: components can expose a `ServiceObservationSummary`; shell
@@ -582,13 +592,25 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
 - [ ] Interned `Symbol`/`TagId` types; typed `WidgetNode` representation
       (tag/attrs/content as strings today), small-map attributes, and moving
       remaining shell annotations to typed fields (v1.23; `mesh_key` and
-      scroll metrics already typed).
+      scroll metrics already typed). Progress 2026-07-15: retained display
+      payloads for text, input value/placeholder, and icon source/name now use
+      `Arc<str>` with pointer-first equality. Dirty-node rebuilds reuse the
+      prior allocation when payload bytes are unchanged, avoiding string
+      allocation for style-only updates. Widget-tree tags/attributes and the
+      broader symbol types remain open.
 - [ ] Typed style declarations end-to-end: resolve theme tokens to typed
       values once per theme load; `apply_declaration` consumes typed values,
       strings only for diagnostics (E; borrowed simple-value fast paths
-      landed across properties).
+      landed across properties). Progress 2026-07-15: static diagnostic
+      property/message prototypes are prepared once per `StyleRuleIndex`
+      generation, removing repeated per-matched-node message formatting while
+      preserving diagnostic parity and rule-index invalidation. Typed style
+      value lowering remains open.
 - [ ] Typed template-expression attribute storage; internal evaluation is
-      already typed, results still stringify into attributes (A).
+      already typed, results still stringify into attributes (A). Progress
+      2026-07-15: boolean, nil, number, string, and compound JSON values remain
+      typed through expression evaluation; attribute-boundary stringification
+      is still the remaining step.
 - [ ] Interaction identity is string-keyed end to end (`hovered_path`,
       `focused_key`, `scroll_offsets`, `input_values`, `slider_values`);
       migrate to `NodeId` together with metrics/refs publication so
@@ -605,10 +627,12 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
 
 ### P2 — composition correctness & structure (M)
 
-- [ ] **`and`/`or` template expressions diverge from Lua semantics**
+- [x] **`and`/`or` template expressions diverge from Lua semantics**
       (correctness): `{name or "Anonymous"}` renders `true`/`false`;
       `is_truthy` treats `"0"`/`""` as falsy; `a or b and c` parses with
-      inverted precedence. Fix as part of the typed expression-value enum.
+      inverted precedence. Fixed 2026-07-15: `and`/`or` short-circuit and
+      return operand values, only `false`/`nil` are falsy, `and` binds tighter
+      than `or`, and missing paths participate as nil values.
 - [ ] Typed handler-call linkage matches by value equality; two props bound
       to the same handler name get the wrong args — link by prop name.
 - [ ] `{#if}`/`{#for}` always wrap children in a synthetic `column` node;

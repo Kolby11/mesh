@@ -636,7 +636,47 @@ mod tests {
         assert_eq!(expr::eval_expr("count > limit", &store), "true");
         assert_eq!(expr::eval_expr("count == '12'", &store), "true");
         assert_eq!(expr::eval_expr("enabled and count > limit", &store), "true");
-        assert_eq!(expr::eval_expr("not empty", &store), "true");
+        assert_eq!(expr::eval_expr("not empty", &store), "false");
+    }
+
+    #[test]
+    fn eval_expr_and_or_use_luau_values_truthiness_and_precedence() {
+        let store = MapStore(
+            [
+                ("name".to_string(), serde_json::json!("Mesh")),
+                ("zero".to_string(), serde_json::json!(0)),
+                ("empty".to_string(), serde_json::json!("")),
+                ("disabled".to_string(), serde_json::json!(false)),
+                ("nothing".to_string(), serde_json::Value::Null),
+                ("fallback".to_string(), serde_json::json!("fallback")),
+                ("last".to_string(), serde_json::json!("last")),
+            ]
+            .into_iter()
+            .collect(),
+        );
+
+        assert_eq!(expr::eval_expr("name or fallback", &store), "Mesh");
+        assert_eq!(
+            expr::eval_expr("missing or 'Anonymous'", &store),
+            "Anonymous"
+        );
+        assert_eq!(expr::eval_expr("disabled or fallback", &store), "fallback");
+        assert_eq!(expr::eval_expr("nothing or fallback", &store), "fallback");
+        assert_eq!(expr::eval_expr("zero or fallback", &store), "0");
+        assert_eq!(expr::eval_expr("empty or fallback", &store), "");
+        assert_eq!(expr::eval_expr("zero and fallback", &store), "fallback");
+        assert_eq!(expr::eval_expr("empty and fallback", &store), "fallback");
+        assert_eq!(expr::eval_expr("disabled and fallback", &store), "false");
+
+        assert_eq!(expr::eval_expr("name or disabled and last", &store), "Mesh");
+        assert_eq!(
+            expr::eval_expr("(name or disabled) and last", &store),
+            "last"
+        );
+        assert_eq!(expr::eval_expr("false or fallback", &store), "fallback");
+        assert_eq!(expr::eval_expr("nil or fallback", &store), "fallback");
+        assert_eq!(expr::eval_expr("not zero", &store), "false");
+        assert_eq!(expr::eval_expr("not empty", &store), "false");
     }
 
     // Run with:

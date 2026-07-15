@@ -10,20 +10,12 @@ pub(crate) fn json_value_to_string(value: serde_json::Value) -> String {
     }
 }
 
-fn json_value_ref_to_string(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::Null => String::new(),
-        serde_json::Value::String(value) => value.clone(),
-        other => other.to_string(),
-    }
-}
-
 /// Evaluate a template expression against the current variable store.
 ///
 /// Supports a subset of Luau expression syntax:
 /// - `"string literal"` / `'string literal'`
 /// - `not x` - boolean negation
-/// - `cond and a or b` - ternary (Lua idiom)
+/// - `a and b`, `a or b` - short-circuiting value selection
 /// - `x == y`, `x ~= y`, `x > y`, `x >= y`, `x < y`, `x <= y` - comparisons
 /// - `x .. y` - string concatenation
 /// - `t(expr)` - translation where expr is any expression (literal, variable, concat, etc.)
@@ -80,12 +72,6 @@ enum CompiledExpr {
     /// `#name` — length of an array/string/object variable.
     Length(String),
     Not(Rc<CompiledExpr>),
-    /// `cond and a or b` Lua ternary idiom.
-    Ternary {
-        cond: Rc<CompiledExpr>,
-        then_val: Rc<CompiledExpr>,
-        else_val: Rc<CompiledExpr>,
-    },
     And(Rc<CompiledExpr>, Rc<CompiledExpr>),
     Or(Rc<CompiledExpr>, Rc<CompiledExpr>),
     Compare {
@@ -97,6 +83,8 @@ enum CompiledExpr {
     /// `t(expr)` — evaluate the inner expression, then translate the result.
     TranslateExpr(Rc<CompiledExpr>),
     Literal(String),
+    LiteralBool(bool),
+    LiteralNil,
     /// Bare variable or dotted path lookup.
     Path(String),
 }
@@ -106,32 +94,29 @@ impl CompiledExpr {
         match self {
             Self::TranslateExpr(_) => true,
             Self::Not(inner) => inner.uses_translation(),
-            Self::Ternary {
-                cond,
-                then_val,
-                else_val,
-            } => {
-                cond.uses_translation()
-                    || then_val.uses_translation()
-                    || else_val.uses_translation()
-            }
             Self::And(lhs, rhs)
             | Self::Or(lhs, rhs)
             | Self::Concat(lhs, rhs)
             | Self::Compare { lhs, rhs, .. } => lhs.uses_translation() || rhs.uses_translation(),
-            Self::Literal(_) | Self::Path(_) | Self::Length(_) => false,
+            Self::Literal(_)
+            | Self::LiteralBool(_)
+            | Self::LiteralNil
+            | Self::Path(_)
+            | Self::Length(_) => false,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 enum ExprValue {
+    Nil,
     Bool(bool),
     Number {
         value: f64,
         source: Option<NumberSource>,
     },
     String(String),
+    Json(serde_json::Value),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -159,6 +144,7 @@ impl NumberSource {
 impl ExprValue {
     fn into_string(self) -> String {
         match self {
+            Self::Nil => String::new(),
             Self::Bool(value) => {
                 if value {
                     "true".into()
@@ -170,11 +156,13 @@ impl ExprValue {
                 source.map_or_else(|| format_number(value), NumberSource::into_string)
             }
             Self::String(value) => value,
+            Self::Json(value) => value.to_string(),
         }
     }
 
     fn as_string(&self) -> String {
         match self {
+            Self::Nil => String::new(),
             Self::Bool(value) => {
                 if *value {
                     "true".into()
@@ -187,22 +175,19 @@ impl ExprValue {
                 .map(NumberSource::as_string)
                 .unwrap_or_else(|| format_number(*value)),
             Self::String(value) => value.clone(),
+            Self::Json(value) => value.to_string(),
         }
     }
 
     fn is_truthy(&self) -> bool {
-        match self {
-            Self::Bool(value) => *value,
-            Self::Number { value, .. } => *value != 0.0,
-            Self::String(value) => !matches!(value.as_str(), "false" | "nil" | "" | "0"),
-        }
+        !matches!(self, Self::Nil | Self::Bool(false))
     }
 
     fn numeric_value(&self) -> Option<f64> {
         match self {
             Self::Number { value, .. } => Some(*value),
             Self::String(value) => value.parse::<f64>().ok(),
-            Self::Bool(_) => None,
+            Self::Nil | Self::Bool(_) | Self::Json(_) => None,
         }
     }
 }
@@ -214,27 +199,14 @@ fn parse_expr(expr: &str) -> CompiledExpr {
         return parse_expr(&expr[1..expr.len() - 1]);
     }
 
-    if let Some(inner) = expr.strip_prefix('#') {
-        return CompiledExpr::Length(inner.trim().to_string());
-    }
-
-    if let Some(inner) = expr.strip_prefix("not ") {
-        return CompiledExpr::Not(Rc::new(parse_expr(inner.trim())));
-    }
-
-    if let Some((lhs, rest)) = split_op(expr, " and ") {
-        if let Some((then_val, else_val)) = split_op(rest, " or ") {
-            return CompiledExpr::Ternary {
-                cond: Rc::new(parse_expr(lhs)),
-                then_val: Rc::new(parse_expr(then_val)),
-                else_val: Rc::new(parse_expr(else_val)),
-            };
-        }
-        return CompiledExpr::And(Rc::new(parse_expr(lhs)), Rc::new(parse_expr(rest)));
-    }
-
+    // Parse from lowest to highest precedence. This makes `and` bind more
+    // tightly than `or`, as it does in Luau.
     if let Some((lhs, rhs)) = split_op(expr, " or ") {
         return CompiledExpr::Or(Rc::new(parse_expr(lhs)), Rc::new(parse_expr(rhs)));
+    }
+
+    if let Some((lhs, rhs)) = split_op(expr, " and ") {
+        return CompiledExpr::And(Rc::new(parse_expr(lhs)), Rc::new(parse_expr(rhs)));
     }
 
     for (token, op) in [
@@ -258,12 +230,27 @@ fn parse_expr(expr: &str) -> CompiledExpr {
         return CompiledExpr::Concat(Rc::new(parse_expr(lhs)), Rc::new(parse_expr(rhs)));
     }
 
+    if let Some(inner) = expr.strip_prefix("not ") {
+        return CompiledExpr::Not(Rc::new(parse_expr(inner.trim())));
+    }
+
+    if let Some(inner) = expr.strip_prefix('#') {
+        return CompiledExpr::Length(inner.trim().to_string());
+    }
+
     if let Some(arg) = expr.strip_prefix("t(").and_then(|s| s.strip_suffix(')')) {
         return CompiledExpr::TranslateExpr(Rc::new(parse_expr(arg.trim())));
     }
 
     if let Some(s) = strip_string_literal(expr) {
         return CompiledExpr::Literal(s);
+    }
+
+    match expr {
+        "true" => return CompiledExpr::LiteralBool(true),
+        "false" => return CompiledExpr::LiteralBool(false),
+        "nil" => return CompiledExpr::LiteralNil,
+        _ => {}
     }
 
     CompiledExpr::Path(expr.to_string())
@@ -290,28 +277,19 @@ fn eval_compiled(expr: &CompiledExpr, store: &dyn mesh_core_elements::VariableSt
             }
         }
         CompiledExpr::Not(inner) => ExprValue::Bool(!eval_compiled(inner, store).is_truthy()),
-        CompiledExpr::Ternary {
-            cond,
-            then_val,
-            else_val,
-        } => {
-            if eval_compiled(cond, store).is_truthy() {
-                eval_compiled(then_val, store)
-            } else {
-                eval_compiled(else_val, store)
-            }
-        }
         CompiledExpr::And(lhs, rhs) => {
-            if !eval_compiled(lhs, store).is_truthy() {
-                return ExprValue::Bool(false);
+            let lhs = eval_compiled(lhs, store);
+            if !lhs.is_truthy() {
+                return lhs;
             }
-            ExprValue::Bool(eval_compiled(rhs, store).is_truthy())
+            eval_compiled(rhs, store)
         }
         CompiledExpr::Or(lhs, rhs) => {
-            if eval_compiled(lhs, store).is_truthy() {
-                return ExprValue::Bool(true);
+            let lhs = eval_compiled(lhs, store);
+            if lhs.is_truthy() {
+                return lhs;
             }
-            ExprValue::Bool(eval_compiled(rhs, store).is_truthy())
+            eval_compiled(rhs, store)
         }
         CompiledExpr::Compare { op, lhs, rhs } => {
             let l = eval_compiled(lhs, store);
@@ -346,6 +324,8 @@ fn eval_compiled(expr: &CompiledExpr, store: &dyn mesh_core_elements::VariableSt
             ExprValue::String(store.translate(&resolved).unwrap_or(resolved))
         }
         CompiledExpr::Literal(s) => ExprValue::String(s.clone()),
+        CompiledExpr::LiteralBool(value) => ExprValue::Bool(*value),
+        CompiledExpr::LiteralNil => ExprValue::Nil,
         CompiledExpr::Path(path) => eval_path(path, store),
     }
 }
@@ -438,11 +418,12 @@ fn eval_path(expr: &str, store: &dyn mesh_core_elements::VariableStore) -> ExprV
         };
     }
 
-    ExprValue::String(expr.to_string())
+    ExprValue::Nil
 }
 
 fn json_value_to_expr_value(value: serde_json::Value) -> ExprValue {
     match value {
+        serde_json::Value::Null => ExprValue::Nil,
         serde_json::Value::Bool(value) => ExprValue::Bool(value),
         serde_json::Value::Number(value) => {
             if let Some(number) = value.as_f64() {
@@ -454,12 +435,14 @@ fn json_value_to_expr_value(value: serde_json::Value) -> ExprValue {
                 ExprValue::String(value.to_string())
             }
         }
-        other => ExprValue::String(json_value_to_string(other)),
+        serde_json::Value::String(value) => ExprValue::String(value),
+        other => ExprValue::Json(other),
     }
 }
 
 fn json_value_ref_to_expr_value(value: &serde_json::Value) -> ExprValue {
     match value {
+        serde_json::Value::Null => ExprValue::Nil,
         serde_json::Value::Bool(value) => ExprValue::Bool(*value),
         serde_json::Value::Number(value) => value
             .as_f64()
@@ -468,7 +451,8 @@ fn json_value_ref_to_expr_value(value: &serde_json::Value) -> ExprValue {
                 source: Some(NumberSource::Json(value.clone())),
             })
             .unwrap_or_else(|| ExprValue::String(value.to_string())),
-        other => ExprValue::String(json_value_ref_to_string(other)),
+        serde_json::Value::String(value) => ExprValue::String(value.clone()),
+        other => ExprValue::Json(other.clone()),
     }
 }
 

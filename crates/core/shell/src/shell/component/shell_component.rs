@@ -129,7 +129,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                                 .script_ctx
                                 .set_member_state(&binding, serde_json::json!(!*visible))
                                 .map_err(|source| ComponentError::Script {
-                                    component_id: component_id.clone(),
+                                    component_id: component_id.to_string(),
                                     source,
                                 })?;
                             state_dirty = true;
@@ -840,6 +840,18 @@ impl ShellComponent for FrontendSurfaceComponent {
             snapshot.paint.raster_cache_opaque_hits = paint_metrics.raster_cache_opaque_hits;
             snapshot.paint.raster_cache_translucent_hits =
                 paint_metrics.raster_cache_translucent_hits;
+            snapshot.paint.glyph_cache_hits = paint_metrics.glyph_cache_hits;
+            snapshot.paint.glyph_cache_misses = paint_metrics.glyph_cache_misses;
+            snapshot.paint.glyph_cache_entries = paint_metrics.glyph_cache_entries;
+            snapshot.paint.glyph_cache_capacity = paint_metrics.glyph_cache_capacity;
+            snapshot.paint.font_bytes_cache_hits = paint_metrics.font_bytes_cache_hits;
+            snapshot.paint.font_bytes_cache_misses = paint_metrics.font_bytes_cache_misses;
+            snapshot.paint.font_bytes_cache_entries = paint_metrics.font_bytes_cache_entries;
+            snapshot.paint.font_bytes_cache_capacity = paint_metrics.font_bytes_cache_capacity;
+            snapshot.paint.skia_glyph_cache_hits = paint_metrics.skia_glyph_cache_hits;
+            snapshot.paint.skia_glyph_cache_misses = paint_metrics.skia_glyph_cache_misses;
+            snapshot.paint.skia_glyph_cache_entries = paint_metrics.skia_glyph_cache_entries;
+            snapshot.paint.skia_glyph_cache_capacity = paint_metrics.skia_glyph_cache_capacity;
         }
         if self.profiling_enabled {
             self.profiling_records.push(ComponentProfilingRecord {
@@ -1150,20 +1162,66 @@ impl ShellComponent for FrontendSurfaceComponent {
             logical_width,
             logical_height,
             false,
-            false,
+            true,
         );
 
-        buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
-        mesh_core_render::paint_display_list_for_module_with_profiling_metrics(
-            display_list.paint_commands(),
-            buffer,
-            scale,
-            None,
-            None,
-            None,
-            Some(self.compiled.manifest.package.id.as_str()),
+        let mut damage_rects = display_list.damage_rects().to_vec();
+        // A raster can be requested solely because the physical buffer was
+        // replaced (for example after a scale change) while the logical
+        // display list remains unchanged. Rebuild the whole fresh buffer in
+        // that case; the damage accessor below returns `None` so presentation
+        // uses the matching full-surface fallback.
+        if damage_rects.is_empty() {
+            damage_rects.push(DamageRect {
+                x: 0,
+                y: 0,
+                width: logical_width.max(1),
+                height: logical_height.max(1),
+            });
+        }
+        display_list.expand_damage_for_backdrop_filters(&mut damage_rects);
+        let selected = display_list.select_paint_commands_for_rects(
+            &damage_rects,
+            DisplayListRepaintPolicy::MinimalDamage,
         );
+        for damage in damage_rects {
+            let physical_damage =
+                scale_damage_rect_to_buffer(damage, scale, buffer.width, buffer.height);
+            buffer.clear_rect(
+                physical_damage.x,
+                physical_damage.y,
+                physical_damage.width,
+                physical_damage.height,
+                mesh_core_elements::style::Color::TRANSPARENT,
+            );
+            mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
+                &selected,
+                buffer,
+                scale,
+                Some((
+                    physical_damage.x,
+                    physical_damage.y,
+                    physical_damage.width,
+                    physical_damage.height,
+                )),
+                None,
+                None,
+                Some(self.compiled.manifest.package.id.as_str()),
+            );
+        }
         Ok(true)
+    }
+
+    fn child_surface_present_damage(&self, node_key: &str) -> Option<Vec<DamageRect>> {
+        let node = find_node_by_key(self.last_tree.as_ref()?, node_key)?;
+        let child_display_lists = self.child_display_lists.borrow();
+        let display_list = child_display_lists.get(&node.id)?;
+        if display_list.damage_rects().is_empty() {
+            return None;
+        }
+        let mut damage = display_list.damage_rects().to_vec();
+        display_list.expand_damage_for_backdrop_filters(&mut damage);
+        Some(damage)
     }
 
     fn child_surface_blur_region(&self, node_key: &str) -> Option<DamageRect> {
@@ -2440,6 +2498,36 @@ fn merge_paint_metrics(
     total.raster_cache_translucent_hits = total
         .raster_cache_translucent_hits
         .saturating_add(next.raster_cache_translucent_hits);
+    total.glyph_cache_hits = total.glyph_cache_hits.saturating_add(next.glyph_cache_hits);
+    total.glyph_cache_misses = total
+        .glyph_cache_misses
+        .saturating_add(next.glyph_cache_misses);
+    total.glyph_cache_entries = total.glyph_cache_entries.max(next.glyph_cache_entries);
+    total.glyph_cache_capacity = total.glyph_cache_capacity.max(next.glyph_cache_capacity);
+    total.font_bytes_cache_hits = total
+        .font_bytes_cache_hits
+        .saturating_add(next.font_bytes_cache_hits);
+    total.font_bytes_cache_misses = total
+        .font_bytes_cache_misses
+        .saturating_add(next.font_bytes_cache_misses);
+    total.font_bytes_cache_entries = total
+        .font_bytes_cache_entries
+        .max(next.font_bytes_cache_entries);
+    total.font_bytes_cache_capacity = total
+        .font_bytes_cache_capacity
+        .max(next.font_bytes_cache_capacity);
+    total.skia_glyph_cache_hits = total
+        .skia_glyph_cache_hits
+        .saturating_add(next.skia_glyph_cache_hits);
+    total.skia_glyph_cache_misses = total
+        .skia_glyph_cache_misses
+        .saturating_add(next.skia_glyph_cache_misses);
+    total.skia_glyph_cache_entries = total
+        .skia_glyph_cache_entries
+        .max(next.skia_glyph_cache_entries);
+    total.skia_glyph_cache_capacity = total
+        .skia_glyph_cache_capacity
+        .max(next.skia_glyph_cache_capacity);
 }
 
 fn union_damage(current: DamageRect, next: DamageRect) -> DamageRect {

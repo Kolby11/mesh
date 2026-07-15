@@ -65,6 +65,57 @@ use std::time::{Duration, Instant};
 
 pub(super) type SurfaceCssProps = HashMap<String, mesh_core_component::style::StyleValue>;
 
+#[derive(Default)]
+struct InstanceKeyInterner {
+    keys: HashSet<Arc<str>>,
+    scratch: String,
+}
+
+impl InstanceKeyInterner {
+    fn intern(&mut self, key: &str) -> Arc<str> {
+        if let Some(key) = self.keys.get(key) {
+            return Arc::clone(key);
+        }
+        let key: Arc<str> = Arc::from(key);
+        self.keys.insert(Arc::clone(&key));
+        key
+    }
+
+    fn intern_embedded(&mut self, host: &str, kind: &str, identifier: &str) -> Arc<str> {
+        self.scratch.clear();
+        self.scratch
+            .reserve(host.len() + 1 + kind.len() + 1 + identifier.len());
+        self.scratch.push_str(host);
+        self.scratch.push('/');
+        self.scratch.push_str(kind);
+        self.scratch.push(':');
+        self.scratch.push_str(identifier);
+        if let Some(key) = self.keys.get(self.scratch.as_str()) {
+            return Arc::clone(key);
+        }
+        let key: Arc<str> = Arc::from(self.scratch.as_str());
+        self.keys.insert(Arc::clone(&key));
+        key
+    }
+
+    fn intern_slot(&mut self, host: &str, slot: &str, contribution: &str) -> Arc<str> {
+        self.scratch.clear();
+        self.scratch
+            .reserve(host.len() + "/slot:".len() + slot.len() + 1 + contribution.len());
+        self.scratch.push_str(host);
+        self.scratch.push_str("/slot:");
+        self.scratch.push_str(slot);
+        self.scratch.push('/');
+        self.scratch.push_str(contribution);
+        if let Some(key) = self.keys.get(self.scratch.as_str()) {
+            return Arc::clone(key);
+        }
+        let key: Arc<str> = Arc::from(self.scratch.as_str());
+        self.keys.insert(Arc::clone(&key));
+        key
+    }
+}
+
 use mesh_core_render::{
     DamageRect, DisplayListMetrics, DisplayListRepaintPolicy, DisplayPaintCommand, PixelBuffer,
     RenderObjectTree, RetainedDisplayList, SharedTextMeasurer, TextCacheMetrics, TextRenderer,
@@ -494,7 +545,8 @@ pub(super) struct FrontendSurfaceComponent {
     /// Timestamp when the current tooltip became visible (for fade-in animation timing).
     tooltip_appeared_at: Option<std::time::Instant>,
     last_tooltip_damage: Option<DamageRect>,
-    runtimes: Arc<Mutex<HashMap<String, EmbeddedFrontendRuntime>>>,
+    runtimes: Arc<Mutex<HashMap<Arc<str>, EmbeddedFrontendRuntime>>>,
+    instance_keys: RefCell<InstanceKeyInterner>,
     /// The single Lua realm shared by every component instance in this surface.
     /// Each runtime's `ScriptContext` attaches a clone, so sibling/child
     /// components can hold live `bind:this` references to one another.
@@ -541,12 +593,12 @@ pub(super) struct FrontendSurfaceComponent {
     /// portal may be declared inside a nested child component (e.g. a
     /// navigation-bar button), not the surface's root component, so the
     /// write-back must target that child's `_ENV`, not the root's.
-    portal_hidden_bindings: RefCell<HashMap<String, (String, String)>>,
+    portal_hidden_bindings: RefCell<HashMap<String, (Arc<str>, String)>>,
     /// `parent_instance_key -> [(binding, child_instance_key)]` for live
     /// `bind:this` references. After a parent event handler runs, each linked
     /// child is re-synced so values its parent mutated through the live proxy
     /// re-render. Refreshed every render by `bind_child_instance`.
-    bound_children: RefCell<HashMap<String, Vec<(String, String)>>>,
+    bound_children: RefCell<HashMap<Arc<str>, Vec<(String, Arc<str>)>>>,
     /// `refs.<name>` -> live widget node key, rebuilt every paint by
     /// `publish_element_metrics`. Lets imperative element actions
     /// (`refs.<name>:focus()`) resolve a script-facing ref name back to the
@@ -570,7 +622,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// instance's props, script-state generations (own + descendants), theme,
     /// locale, and container size are unchanged — skipping template
     /// re-evaluation, style resolution, and prop sync for that subtree.
-    component_memo: RefCell<HashMap<String, memo::ComponentMemoEntry>>,
+    component_memo: RefCell<HashMap<Arc<str>, memo::ComponentMemoEntry>>,
     /// Host-module → local-component alias → immutable merged rules and
     /// selector index. Local source and host styles are stable for this
     /// compiled surface, so cache misses can reuse the prepared style input.
@@ -752,6 +804,7 @@ impl FrontendSurfaceComponent {
             tooltip_appeared_at: None,
             last_tooltip_damage: None,
             runtimes: Arc::new(Mutex::new(HashMap::new())),
+            instance_keys: RefCell::new(InstanceKeyInterner::default()),
             surface_vm: SurfaceVm::new(),
             render_stack: RefCell::new(Vec::new()),
             active_theme: RefCell::new(Arc::new(default_theme())),

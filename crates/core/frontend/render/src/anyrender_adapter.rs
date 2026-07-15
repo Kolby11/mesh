@@ -238,7 +238,7 @@ mod tests {
     fn anyrender_encodes_icon_command() {
         let icon = DisplayIconPaint {
             src: None,
-            name: Some("audio-volume-high".to_string()),
+            name: Some("audio-volume-high".into()),
             size: Some(24),
         };
         let c = cmd(
@@ -267,8 +267,8 @@ mod tests {
         assert!(diagnostics.is_empty());
 
         let input = DisplayInputPaint {
-            value: String::new(),
-            placeholder: String::new(),
+            value: "".into(),
+            placeholder: "".into(),
             mask_text: false,
             focused: false,
         };
@@ -295,7 +295,7 @@ mod tests {
     #[test]
     fn anyrender_text_without_parley_emits_diagnostic() {
         let text = DisplayTextPaint {
-            text: "Hello".to_string(),
+            text: "Hello".into(),
             selection: None,
         };
         let c = cmd(

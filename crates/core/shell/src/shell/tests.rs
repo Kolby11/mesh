@@ -777,6 +777,7 @@ struct PopoverHarnessState {
     profiling_enabled: Vec<bool>,
     hide_transition_ms: u64,
     paint_generation: Option<u64>,
+    present_damage: Option<Vec<mesh_core_render::DamageRect>>,
 }
 
 impl Default for PopoverHarnessState {
@@ -792,6 +793,7 @@ impl Default for PopoverHarnessState {
             profiling_enabled: Vec::new(),
             hide_transition_ms: 0,
             paint_generation: None,
+            present_damage: None,
         }
     }
 }
@@ -922,6 +924,13 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
 
     fn child_surface_paint_generation(&self, _node_key: &str) -> Option<u64> {
         self.state.lock().unwrap().paint_generation
+    }
+
+    fn child_surface_present_damage(
+        &self,
+        _node_key: &str,
+    ) -> Option<Vec<mesh_core_render::DamageRect>> {
+        self.state.lock().unwrap().present_damage.clone()
     }
 
     fn child_hide_transition_ms(&self, _node_key: &str) -> u64 {
@@ -3540,6 +3549,18 @@ fn profiling_snapshot_exposes_typed_surface_invalidation_counts() {
                 raster_cache_bypasses: 1,
                 raster_cache_opaque_hits: 5,
                 raster_cache_translucent_hits: 3,
+                glyph_cache_hits: 12,
+                glyph_cache_misses: 2,
+                glyph_cache_entries: 900,
+                glyph_cache_capacity: 1_024,
+                font_bytes_cache_hits: 2,
+                font_bytes_cache_misses: 1,
+                font_bytes_cache_entries: 20,
+                font_bytes_cache_capacity: 32,
+                skia_glyph_cache_hits: 7,
+                skia_glyph_cache_misses: 3,
+                skia_glyph_cache_entries: 400,
+                skia_glyph_cache_capacity: 512,
                 ..Default::default()
             },
             text: TextCacheSnapshot {
@@ -3596,6 +3617,12 @@ fn profiling_snapshot_exposes_typed_surface_invalidation_counts() {
     assert_eq!(invalidation.paint.raster_cache_bypasses, 1);
     assert_eq!(invalidation.paint.raster_cache_opaque_hits, 5);
     assert_eq!(invalidation.paint.raster_cache_translucent_hits, 3);
+    assert_eq!(invalidation.paint.glyph_cache_hits, 12);
+    assert_eq!(invalidation.paint.glyph_cache_entries, 900);
+    assert_eq!(invalidation.paint.glyph_cache_capacity, 1_024);
+    assert_eq!(invalidation.paint.font_bytes_cache_entries, 20);
+    assert_eq!(invalidation.paint.skia_glyph_cache_misses, 3);
+    assert_eq!(invalidation.paint.skia_glyph_cache_capacity, 512);
     assert_eq!(invalidation.text.layout_hits, 4);
     assert_eq!(invalidation.text.layout_misses, 1);
     assert!(invalidation.text.glyph_cache_active);
@@ -4262,6 +4289,14 @@ fn profiling_debug_payload_serializes_phase26_surface_attribution_labels() {
                 raster_cache_bypasses: 1,
                 raster_cache_opaque_hits: 4,
                 raster_cache_translucent_hits: 2,
+                glyph_cache_hits: 11,
+                glyph_cache_misses: 3,
+                glyph_cache_entries: 700,
+                glyph_cache_capacity: 1_024,
+                font_bytes_cache_entries: 18,
+                font_bytes_cache_capacity: 32,
+                skia_glyph_cache_entries: 250,
+                skia_glyph_cache_capacity: 512,
                 ..Default::default()
             },
             text: TextCacheSnapshot {
@@ -4358,11 +4393,27 @@ fn profiling_debug_payload_serializes_phase26_surface_attribution_labels() {
         serde_json::json!(2)
     );
     assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["glyph_cache_hits"],
+        serde_json::json!(11)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["glyph_cache_capacity"],
+        serde_json::json!(1_024)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["font_bytes_cache_entries"],
+        serde_json::json!(18)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["skia_glyph_cache_capacity"],
+        serde_json::json!(512)
+    );
+    assert_eq!(
         latest.state["benchmarks"]["scenarios"]
             .as_array()
             .expect("benchmark scenarios should stay serialized")
             .len(),
-        5
+        12
     );
 }
 
@@ -6052,6 +6103,7 @@ fn component_runtime_resolves_parent_and_child_surface_targets() {
             last_paint_exiting: None,
             last_paint_scale_bits: None,
             last_paint_content_offset: None,
+            pending_present_damage: Vec::new(),
         });
 
     // Both surface ids now map to the same component, each tagged with its
@@ -6156,6 +6208,39 @@ fn child_surface_presents_full_damage_every_frame() {
             .all(|damage| damage.len() == 1 && damage[0].x == 0 && damage[0].y == 0),
         "every child popup present should carry full-surface damage, got {child_damage:?}"
     );
+}
+
+#[test]
+fn child_surface_forwards_retained_local_damage_to_presentation() {
+    let sparse_damage = mesh_core_render::DamageRect {
+        x: 11,
+        y: 7,
+        width: 9,
+        height: 5,
+    };
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState {
+        paint_generation: Some(1),
+        present_damage: Some(vec![sparse_damage]),
+        ..Default::default()
+    }));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(Arc::clone(&state))));
+
+    render_components_until_child_popup(&mut shell);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    state.lock().unwrap().paint_generation = Some(2);
+    shell.render_components().unwrap();
+
+    let (_, damage) = shell
+        .presentation_engine
+        .testing_presented_damage()
+        .iter()
+        .rev()
+        .find(|(surface, _)| surface == &child_id)
+        .expect("changed child popup should be presented");
+    assert_eq!(damage, &[sparse_damage]);
 }
 
 #[test]

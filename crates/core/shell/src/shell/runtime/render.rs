@@ -621,6 +621,7 @@ impl Shell {
                     last_paint_exiting: None,
                     last_paint_scale_bits: None,
                     last_paint_content_offset: None,
+                    pending_present_damage: Vec::new(),
                 });
                 self.rebuild_component_surface_index();
                 TargetRef::Child(self.components[index].children.len() - 1)
@@ -875,20 +876,22 @@ impl Shell {
             self.destroy_child_surface_at(index, child_index);
             return Ok(false);
         }
+        let child_damage = self.components[index]
+            .component
+            .child_surface_present_damage(&node_key);
         self.components[index].children[child_index].last_paint_generation = paint_generation;
         self.components[index].children[child_index].last_paint_exiting = Some(exiting);
         self.components[index].children[child_index].last_paint_scale_bits = Some(scale.to_bits());
         self.components[index].children[child_index].last_paint_content_offset =
             Some(content_offset);
-        // `paint_child_surface` clears and fully repaints the child buffer
-        // every frame, so any pixel may have changed since the last present.
-        // The child has no incremental damage tracking of its own; presenting
-        // anything narrower than the full surface leaves the compositor (and
-        // the SHM copy path, which only refreshes reported rects) showing
-        // stale pixels — popover enter/exit transitions freeze on frame one.
-        self.components[index].children[child_index]
-            .target
-            .force_full_present = true;
+        let child = &mut self.components[index].children[child_index];
+        match child_damage {
+            Some(damage) => child.pending_present_damage = damage,
+            None => {
+                child.pending_present_damage.clear();
+                child.target.force_full_present = true;
+            }
+        }
         // Restrict pointer input to the true (unpadded) content rect, same
         // pattern as the parent tooltip surface: the padding exists so
         // shadow/filter overshoot can paint, not to receive input.
@@ -1042,9 +1045,9 @@ impl Shell {
 
         let mut present_damage: Vec<DamageRect> = match target {
             TargetRef::Parent => self.components[index].component.take_present_damage(),
-            // Child surfaces always present with `force_full_present` set by
-            // `paint_and_present_child_surface`; full damage is filled in below.
-            TargetRef::Child(_) => Vec::new(),
+            TargetRef::Child(child_index) => std::mem::take(
+                &mut self.components[index].children[child_index].pending_present_damage,
+            ),
         };
         // Scale change or explicit force-full triggers full-buffer present (per HDPI-04)
         let mut force_full = false;

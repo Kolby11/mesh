@@ -89,14 +89,22 @@ fn glyph_cache() -> &'static Mutex<LruCache<GlyphCacheKey, Option<CachedGlyph>>>
 
 fn font_bytes(path: &Path) -> Option<Arc<[u8]>> {
     let cache = font_bytes_cache();
-    if let Ok(mut guard) = cache.lock()
-        && let Some(bytes) = guard.get(path)
-    {
-        return Some(Arc::clone(bytes));
-    }
+    let entries = match cache.lock() {
+        Ok(mut guard) => {
+            let entries = guard.len();
+            if let Some(bytes) = guard.get(path) {
+                profiling::record_font_bytes_cache_lookup(true, entries, FONT_BYTES_CACHE_CAPACITY);
+                return Some(Arc::clone(bytes));
+            }
+            entries
+        }
+        Err(_) => 0,
+    };
+    profiling::record_font_bytes_cache_lookup(false, entries, FONT_BYTES_CACHE_CAPACITY);
     let bytes: Arc<[u8]> = std::fs::read(path).ok()?.into();
     if let Ok(mut guard) = cache.lock() {
         guard.insert(Arc::from(path), Arc::clone(&bytes));
+        profiling::update_font_bytes_cache_entries(guard.len(), FONT_BYTES_CACHE_CAPACITY);
     }
     Some(bytes)
 }
@@ -164,13 +172,17 @@ fn rasterize(
 
 fn cache_lookup(key: GlyphCacheKey) -> Option<Option<CachedGlyph>> {
     let cache = glyph_cache();
-    cache.lock().ok()?.get(&key).cloned()
+    let mut guard = cache.lock().ok()?;
+    let value = guard.get(&key).cloned();
+    profiling::record_glyph_cache_lookup(value.is_some(), guard.len(), GLYPH_CACHE_CAPACITY);
+    value
 }
 
 fn cache_store(key: GlyphCacheKey, value: Option<CachedGlyph>) {
     let cache = glyph_cache();
     if let Ok(mut guard) = cache.lock() {
         guard.insert(key, value);
+        profiling::update_glyph_cache_entries(guard.len(), GLYPH_CACHE_CAPACITY);
     }
 }
 
@@ -341,9 +353,12 @@ pub fn draw_font_glyph_on_canvas(
 
     let skia_image = ICON_GLYPH_SKIA.with(|cell| {
         let mut atlas = cell.borrow_mut();
+        let entries = atlas.len();
         if let Some(img) = atlas.get(&key) {
+            profiling::record_skia_glyph_cache_lookup(true, entries, ICON_GLYPH_SKIA_CAPACITY);
             return Some(img.clone());
         }
+        profiling::record_skia_glyph_cache_lookup(false, entries, ICON_GLYPH_SKIA_CAPACITY);
         let info = ImageInfo::new(
             (glyph.width as i32, glyph.height as i32),
             ColorType::Alpha8,
@@ -354,6 +369,7 @@ pub fn draw_font_glyph_on_canvas(
         let data = Data::new_copy(&glyph.pixels);
         let img = images::raster_from_data(&info, data, row_bytes)?;
         atlas.insert(key, img.clone());
+        profiling::update_skia_glyph_cache_entries(atlas.len(), ICON_GLYPH_SKIA_CAPACITY);
         Some(img)
     });
     let Some(skia_image) = skia_image else {
@@ -480,6 +496,10 @@ mod tests {
             metrics.icon_image_raster_micros, 0,
             "cache hits should keep cached glyph blits out of icon_image_raster timing"
         );
+        assert_eq!(metrics.glyph_cache_hits, 1);
+        assert_eq!(metrics.glyph_cache_misses, 0);
+        assert_eq!(metrics.glyph_cache_entries, 1);
+        assert_eq!(metrics.glyph_cache_capacity, GLYPH_CACHE_CAPACITY as u64);
         assert!(
             buffer.data.iter().any(|channel| *channel > 0),
             "cached glyph draw should still paint into the destination buffer"

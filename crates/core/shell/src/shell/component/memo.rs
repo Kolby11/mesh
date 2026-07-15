@@ -37,6 +37,7 @@
 
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use mesh_core_elements::{EventHandlerCall, WidgetNode};
 
@@ -49,7 +50,7 @@ pub(super) struct ComponentMemoEntry {
     locale: String,
     /// `(instance_key, mutation_generation)` for the instance itself plus
     /// every descendant runtime that existed when the entry was stored.
-    generations: Vec<(String, u64)>,
+    generations: Vec<(Arc<str>, u64)>,
     /// The cached subtree contains promoted `<popover>` wrappers; reuse must
     /// re-set `has_promoted_popover_wrappers` so `finalize_tree` collapses them.
     marks_popover: bool,
@@ -229,7 +230,7 @@ impl FrontendSurfaceComponent {
             let runtimes = self.runtimes.lock().unwrap();
             let mut generations = Vec::new();
             for (key, runtime) in runtimes.iter() {
-                if key == instance_key || key.starts_with(&descendant_prefix) {
+                if key.as_ref() == instance_key || key.starts_with(&descendant_prefix) {
                     generations.push((
                         key.clone(),
                         runtime.script_ctx.state().mutation_generation(),
@@ -239,7 +240,7 @@ impl FrontendSurfaceComponent {
             generations
         };
         self.component_memo.borrow_mut().insert(
-            instance_key.to_string(),
+            self.instance_keys.borrow_mut().intern(instance_key),
             ComponentMemoEntry {
                 props_fingerprint,
                 container_bits: (container_width.to_bits(), container_height.to_bits()),

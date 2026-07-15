@@ -424,7 +424,7 @@ impl FrontendSurfaceComponent {
         self.runtimes
             .lock()
             .unwrap()
-            .insert(self.id().to_string(), runtime);
+            .insert(self.instance_keys.borrow_mut().intern(self.id()), runtime);
         Ok(())
     }
 
@@ -451,10 +451,10 @@ impl FrontendSurfaceComponent {
         let mut runtime = self.create_runtime(instance_key, &entry.compiled, props)?;
         Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
         apply_runtime_props(&mut runtime, props, false);
-        self.runtimes
-            .lock()
-            .unwrap()
-            .insert(instance_key.to_string(), runtime);
+        self.runtimes.lock().unwrap().insert(
+            self.instance_keys.borrow_mut().intern(instance_key),
+            runtime,
+        );
 
         Ok(())
     }
@@ -492,10 +492,10 @@ impl FrontendSurfaceComponent {
         )?;
         Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
         apply_runtime_props(&mut runtime, props, false);
-        self.runtimes
-            .lock()
-            .unwrap()
-            .insert(instance_key.to_string(), runtime);
+        self.runtimes.lock().unwrap().insert(
+            self.instance_keys.borrow_mut().intern(instance_key),
+            runtime,
+        );
 
         Ok(())
     }
@@ -689,7 +689,10 @@ impl FrontendSurfaceComponent {
             .get(instance_key)
             .is_some_and(|links| !links.is_empty())
             || bound_children.iter().any(|(parent_key, links)| {
-                parent_key != instance_key && links.iter().any(|(_, child)| child == instance_key)
+                parent_key.as_ref() != instance_key
+                    && links
+                        .iter()
+                        .any(|(_, child)| child.as_ref() == instance_key)
             })
     }
 
@@ -701,17 +704,19 @@ impl FrontendSurfaceComponent {
     /// post-handler sync, so its Rust-side reactive state would otherwise stay
     /// stale until some other event re-rendered it.
     fn resync_binding_neighbors(&mut self, instance_key: &str) -> (bool, Vec<CoreRequest>) {
-        let neighbor_keys: Vec<String> = {
+        let neighbor_keys: Vec<Arc<str>> = {
             let bound_children = self.bound_children.borrow();
-            let mut keys: Vec<String> = bound_children
+            let mut keys: Vec<Arc<str>> = bound_children
                 .get(instance_key)
-                .map(|links| links.iter().map(|(_, key)| key.clone()).collect())
+                .map(|links| links.iter().map(|(_, key)| Arc::clone(key)).collect())
                 .unwrap_or_default();
             for (parent_key, links) in bound_children.iter() {
-                if parent_key != instance_key
-                    && links.iter().any(|(_, child)| child == instance_key)
+                if parent_key.as_ref() != instance_key
+                    && links
+                        .iter()
+                        .any(|(_, child)| child.as_ref() == instance_key)
                 {
-                    keys.push(parent_key.clone());
+                    keys.push(Arc::clone(parent_key));
                 }
             }
             keys.sort();

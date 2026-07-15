@@ -275,6 +275,18 @@ pub struct RetainedPaintSnapshot {
     pub raster_cache_bypasses: u64,
     pub raster_cache_opaque_hits: u64,
     pub raster_cache_translucent_hits: u64,
+    pub glyph_cache_hits: u64,
+    pub glyph_cache_misses: u64,
+    pub glyph_cache_entries: u64,
+    pub glyph_cache_capacity: u64,
+    pub font_bytes_cache_hits: u64,
+    pub font_bytes_cache_misses: u64,
+    pub font_bytes_cache_entries: u64,
+    pub font_bytes_cache_capacity: u64,
+    pub skia_glyph_cache_hits: u64,
+    pub skia_glyph_cache_misses: u64,
+    pub skia_glyph_cache_entries: u64,
+    pub skia_glyph_cache_capacity: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

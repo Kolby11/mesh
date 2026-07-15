@@ -94,6 +94,10 @@ pub(super) struct ChildSurface {
     /// Scale and logical content origin used for the cached raster.
     pub(super) last_paint_scale_bits: Option<u32>,
     pub(super) last_paint_content_offset: Option<(u32, u32)>,
+    /// Logical child-local damage awaiting presentation after the latest
+    /// retained raster. Legacy child painters leave this empty and request a
+    /// full present through `target.force_full_present` instead.
+    pub(super) pending_present_damage: Vec<mesh_core_render::DamageRect>,
 }
 
 pub(super) struct ComponentRuntime {

@@ -298,10 +298,16 @@ pub enum CheckmarkKind {
     Dot,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct DisplayTextPaint {
-    pub text: String,
+    pub text: Arc<str>,
     pub selection: Option<DisplayTextSelectionPaint>,
+}
+
+impl PartialEq for DisplayTextPaint {
+    fn eq(&self, other: &Self) -> bool {
+        shared_str_eq(&self.text, &other.text) && self.selection == other.selection
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -316,12 +322,21 @@ pub struct DisplayTextSelectionPaint {
     pub text_y: f32,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct DisplayInputPaint {
-    pub value: String,
-    pub placeholder: String,
+    pub value: Arc<str>,
+    pub placeholder: Arc<str>,
     pub mask_text: bool,
     pub focused: bool,
+}
+
+impl PartialEq for DisplayInputPaint {
+    fn eq(&self, other: &Self) -> bool {
+        shared_str_eq(&self.value, &other.value)
+            && shared_str_eq(&self.placeholder, &other.placeholder)
+            && self.mask_text == other.mask_text
+            && self.focused == other.focused
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -332,11 +347,31 @@ pub struct DisplaySliderPaint {
     pub vertical: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct DisplayIconPaint {
-    pub src: Option<String>,
-    pub name: Option<String>,
+    pub src: Option<Arc<str>>,
+    pub name: Option<Arc<str>>,
     pub size: Option<u32>,
+}
+
+impl PartialEq for DisplayIconPaint {
+    fn eq(&self, other: &Self) -> bool {
+        optional_shared_str_eq(&self.src, &other.src)
+            && optional_shared_str_eq(&self.name, &other.name)
+            && self.size == other.size
+    }
+}
+
+fn shared_str_eq(left: &Arc<str>, right: &Arc<str>) -> bool {
+    Arc::ptr_eq(left, right) || left.as_ref() == right.as_ref()
+}
+
+fn optional_shared_str_eq(left: &Option<Arc<str>>, right: &Option<Arc<str>>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => shared_str_eq(left, right),
+        (None, None) => true,
+        _ => false,
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -1932,7 +1967,17 @@ fn build_paint_subtree(
     let transform = style.transform;
     let offset_x = offset_x + transform.translate_x;
     let offset_y = offset_y + transform.translate_y;
-    let paint_node = Arc::new(build_paint_node(node, offset_x, offset_y));
+    let previous_paint_node = previous_subtrees
+        .get(&node.id)
+        .and_then(|subtree| subtree.commands.first())
+        .filter(|command| command.node.id == node.id)
+        .map(|command| command.node.as_ref());
+    let paint_node = Arc::new(build_paint_node_with_previous(
+        node,
+        offset_x,
+        offset_y,
+        previous_paint_node,
+    ));
     let bounds = node_clip_for(&paint_node);
     let visual_bounds = visual_clip_for(&paint_node);
     let node_clip = intersect_display_clip(clip, visual_bounds);
@@ -2626,6 +2671,15 @@ fn rects_intersect_any(bounds: DamageRect, rects: &[DamageRect]) -> bool {
 }
 
 fn build_paint_node(node: &WidgetNode, offset_x: f32, offset_y: f32) -> DisplayPaintNode {
+    build_paint_node_with_previous(node, offset_x, offset_y, None)
+}
+
+fn build_paint_node_with_previous(
+    node: &WidgetNode,
+    offset_x: f32,
+    offset_y: f32,
+    previous: Option<&DisplayPaintNode>,
+) -> DisplayPaintNode {
     let opacity = node.computed_style.opacity;
     DisplayPaintNode {
         id: node.id,
@@ -2657,7 +2711,7 @@ fn build_paint_node(node: &WidgetNode, offset_x: f32, offset_y: f32) -> DisplayP
             icon_grade: node.computed_style.icon_grade,
             icon_optical_size: node.computed_style.icon_optical_size,
         },
-        content: build_paint_content(node),
+        content: build_paint_content_with_previous(node, previous.map(|node| &node.content)),
         scrollbars: {
             let scroll = node.resolved_scroll_metrics();
             DisplayScrollbars {
@@ -2696,24 +2750,46 @@ fn opacity_color(color: Color, opacity: f32) -> Color {
     }
 }
 
+#[cfg(test)]
 fn build_paint_content(node: &WidgetNode) -> DisplayPaintContent {
+    build_paint_content_with_previous(node, None)
+}
+
+fn build_paint_content_with_previous(
+    node: &WidgetNode,
+    previous: Option<&DisplayPaintContent>,
+) -> DisplayPaintContent {
     match node.tag.as_str() {
         "text" => DisplayPaintContent::Text(DisplayTextPaint {
-            text: node
-                .attributes
-                .get("text")
-                .cloned()
-                .or_else(|| node.attributes.get("content").cloned())
-                .unwrap_or_default(),
+            text: retained_display_str(
+                node.attributes
+                    .get("text")
+                    .or_else(|| node.attributes.get("content"))
+                    .map_or("", String::as_str),
+                match previous {
+                    Some(DisplayPaintContent::Text(text)) => Some(&text.text),
+                    _ => None,
+                },
+            ),
             selection: build_text_selection(node),
         }),
         "input" => DisplayPaintContent::Input(DisplayInputPaint {
-            value: node.attributes.get("value").cloned().unwrap_or_default(),
-            placeholder: node
-                .attributes
-                .get("placeholder")
-                .cloned()
-                .unwrap_or_default(),
+            value: retained_display_str(
+                node.attributes.get("value").map_or("", String::as_str),
+                match previous {
+                    Some(DisplayPaintContent::Input(input)) => Some(&input.value),
+                    _ => None,
+                },
+            ),
+            placeholder: retained_display_str(
+                node.attributes
+                    .get("placeholder")
+                    .map_or("", String::as_str),
+                match previous {
+                    Some(DisplayPaintContent::Input(input)) => Some(&input.placeholder),
+                    _ => None,
+                },
+            ),
             mask_text: node
                 .attributes
                 .get("type")
@@ -2733,8 +2809,20 @@ fn build_paint_content(node: &WidgetNode) -> DisplayPaintContent {
                 .is_some_and(|value| value == "vertical"),
         }),
         "icon" => DisplayPaintContent::Icon(DisplayIconPaint {
-            src: node.attributes.get("src").cloned(),
-            name: node.attributes.get("name").cloned(),
+            src: retained_optional_display_str(
+                node.attributes.get("src").map(String::as_str),
+                match previous {
+                    Some(DisplayPaintContent::Icon(icon)) => icon.src.as_ref(),
+                    _ => None,
+                },
+            ),
+            name: retained_optional_display_str(
+                node.attributes.get("name").map(String::as_str),
+                match previous {
+                    Some(DisplayPaintContent::Icon(icon)) => icon.name.as_ref(),
+                    _ => None,
+                },
+            ),
             size: node
                 .attributes
                 .get("size")
@@ -2750,6 +2838,20 @@ fn build_paint_content(node: &WidgetNode) -> DisplayPaintContent {
         }),
         _ => DisplayPaintContent::None,
     }
+}
+
+fn retained_display_str(value: &str, previous: Option<&Arc<str>>) -> Arc<str> {
+    match previous {
+        Some(previous) if previous.as_ref() == value => Arc::clone(previous),
+        _ => Arc::from(value),
+    }
+}
+
+fn retained_optional_display_str(
+    value: Option<&str>,
+    previous: Option<&Arc<str>>,
+) -> Option<Arc<str>> {
+    value.map(|value| retained_display_str(value, previous))
 }
 
 /// A `checkbox`/`radio` is checked when its `checked` attribute is present and
@@ -3320,6 +3422,63 @@ mod tests {
             a: 255,
         };
         node
+    }
+
+    #[test]
+    fn display_text_payload_clone_shares_the_text_allocation() {
+        let mut text_node = node(1, "text", 0.0, 0.0, 100.0, 20.0);
+        text_node
+            .attributes
+            .insert("content".into(), "shared display text".into());
+
+        let DisplayPaintContent::Text(first) = build_paint_content(&text_node) else {
+            panic!("text node must produce text paint content");
+        };
+        let cloned = first.clone();
+
+        assert!(Arc::ptr_eq(&first.text, &cloned.text));
+        assert_eq!(first, cloned);
+        assert_eq!(first.text.as_ref(), "shared display text");
+    }
+
+    #[test]
+    fn rebuilt_display_node_retains_unchanged_text_allocation() {
+        let mut text_node = node(1, "text", 0.0, 0.0, 100.0, 20.0);
+        text_node
+            .attributes
+            .insert("content".into(), "retained display text".into());
+        let first = build_paint_node(&text_node, 0.0, 0.0);
+
+        text_node.computed_style.font_size += 1.0;
+        let rebuilt = build_paint_node_with_previous(&text_node, 0.0, 0.0, Some(&first));
+        let DisplayPaintContent::Text(first_text) = &first.content else {
+            panic!("text node must produce text paint content");
+        };
+        let DisplayPaintContent::Text(rebuilt_text) = &rebuilt.content else {
+            panic!("text node must produce text paint content");
+        };
+
+        assert!(Arc::ptr_eq(&first_text.text, &rebuilt_text.text));
+    }
+
+    #[test]
+    fn display_payload_equality_falls_back_to_text_content() {
+        let first = DisplayIconPaint {
+            src: Some(Arc::from("icons/search.svg")),
+            name: Some(Arc::from("search")),
+            size: Some(16),
+        };
+        let second = DisplayIconPaint {
+            src: Some(Arc::from("icons/search.svg")),
+            name: Some(Arc::from("search")),
+            size: Some(16),
+        };
+
+        assert!(!Arc::ptr_eq(
+            first.src.as_ref().expect("first src"),
+            second.src.as_ref().expect("second src")
+        ));
+        assert_eq!(first, second);
     }
 
     fn display_entry_benchmark_tree(rows: usize, cols: usize) -> WidgetNode {
@@ -5876,7 +6035,7 @@ mod tests {
             .expect("text command");
         match &text_command.node.content {
             DisplayPaintContent::Text(text) => {
-                assert_eq!(text.text, "hello");
+                assert_eq!(text.text.as_ref(), "hello");
                 let selection = text.selection.expect("selection payload");
                 assert_eq!(selection.anchor_x, 2.0);
                 assert_eq!(selection.focus_y, 9.0);

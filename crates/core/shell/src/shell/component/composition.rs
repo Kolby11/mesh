@@ -8,29 +8,6 @@ use mesh_core_module::ModuleType;
 
 use super::{FrontendSurfaceComponent, PROMOTED_POPOVER_MARKER, memo};
 
-fn slot_instance_key(host_instance_key: &str, slot_name: &str, contribution_id: &str) -> String {
-    let mut key = String::with_capacity(
-        host_instance_key.len() + "/slot:".len() + slot_name.len() + 1 + contribution_id.len(),
-    );
-    key.push_str(host_instance_key);
-    key.push_str("/slot:");
-    key.push_str(slot_name);
-    key.push('/');
-    key.push_str(contribution_id);
-    key
-}
-
-fn embedded_instance_key(host_instance_key: &str, kind: &str, identifier: &str) -> String {
-    let mut key =
-        String::with_capacity(host_instance_key.len() + 1 + kind.len() + 1 + identifier.len());
-    key.push_str(host_instance_key);
-    key.push('/');
-    key.push_str(kind);
-    key.push(':');
-    key.push_str(identifier);
-    key
-}
-
 fn slot_id(module_id: &str, slot_name: &str) -> String {
     let mut id = String::with_capacity(module_id.len() + 1 + slot_name.len());
     id.push_str(module_id);
@@ -78,7 +55,11 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
     ) -> Option<WidgetNode> {
         if let Some(entry) = self.frontend_catalog.modules.get(&host.package.id) {
             if let Some(component) = entry.compiled.local_components.get(alias) {
-                let instance_key = embedded_instance_key(host_instance_key, "local", alias);
+                let instance_key = self.instance_keys.borrow_mut().intern_embedded(
+                    host_instance_key,
+                    "local",
+                    alias,
+                );
                 let props_fingerprint =
                     memo::component_props_fingerprint(props, prop_handler_calls);
                 if let Some(node) = self.lookup_component_memo(
@@ -149,9 +130,13 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 .get("__mesh_binding_hidden")
                 .and_then(|binding| simple_state_binding(binding))
             {
-                self.portal_hidden_bindings
-                    .borrow_mut()
-                    .insert(module_id.clone(), (host_instance_key.to_string(), binding));
+                self.portal_hidden_bindings.borrow_mut().insert(
+                    module_id.clone(),
+                    (
+                        self.instance_keys.borrow_mut().intern(host_instance_key),
+                        binding,
+                    ),
+                );
             }
             self.pending_surface_states
                 .borrow_mut()
@@ -169,7 +154,10 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             return Some(placeholder);
         }
 
-        let instance_key = embedded_instance_key(host_instance_key, "import", alias);
+        let instance_key =
+            self.instance_keys
+                .borrow_mut()
+                .intern_embedded(host_instance_key, "import", alias);
         let props_fingerprint = memo::component_props_fingerprint(props, prop_handler_calls);
         if let Some(node) = self.lookup_component_memo(
             &instance_key,
@@ -267,8 +255,11 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 continue;
             }
 
-            let instance_key =
-                slot_instance_key(host_instance_key, slot_name, &contribution.contribution_id);
+            let instance_key = self.instance_keys.borrow_mut().intern_slot(
+                host_instance_key,
+                slot_name,
+                &contribution.contribution_id,
+            );
             let mut node = if let Some(node) = self.lookup_component_memo(
                 &instance_key,
                 contribution.props_fingerprint,
@@ -457,16 +448,17 @@ mod tests {
 
     #[test]
     fn slot_instance_key_matches_legacy_format() {
+        let mut interner = super::super::InstanceKeyInterner::default();
+        let slot = interner.intern_slot("@mesh/panel/local:Toolbar", "main", "battery-status");
+        assert_eq!(&*slot, "@mesh/panel/local:Toolbar/slot:main/battery-status");
+        let repeated = interner.intern_slot("@mesh/panel/local:Toolbar", "main", "battery-status");
+        assert!(std::sync::Arc::ptr_eq(&slot, &repeated));
         assert_eq!(
-            slot_instance_key("@mesh/panel/local:Toolbar", "main", "battery-status"),
-            "@mesh/panel/local:Toolbar/slot:main/battery-status"
-        );
-        assert_eq!(
-            embedded_instance_key("@mesh/panel/local:Toolbar", "local", "BatteryStatus"),
+            &*interner.intern_embedded("@mesh/panel/local:Toolbar", "local", "BatteryStatus"),
             "@mesh/panel/local:Toolbar/local:BatteryStatus"
         );
         assert_eq!(
-            embedded_instance_key("@mesh/panel/local:Toolbar", "import", "audio_controls"),
+            &*interner.intern_embedded("@mesh/panel/local:Toolbar", "import", "audio_controls"),
             "@mesh/panel/local:Toolbar/import:audio_controls"
         );
         assert_eq!(
@@ -475,10 +467,10 @@ mod tests {
         );
     }
 
-    // cargo test -p mesh-core-shell --release -- slot_instance_key_presizing_beats_format_benchmark --ignored --nocapture
+    // cargo test -p mesh-core-shell --release -- slot_instance_key_interning_beats_rebuilding_benchmark --ignored --nocapture
     #[test]
     #[ignore = "release-only slot instance-key construction microbenchmark"]
-    fn slot_instance_key_presizing_beats_format_benchmark() {
+    fn slot_instance_key_interning_beats_rebuilding_benchmark() {
         let host = "@mesh/panel/local:Toolbar/import:StatusCluster";
         let slot = "primary_actions";
         let contribution = "network-status-very-long-contribution-identifier";
@@ -493,13 +485,14 @@ mod tests {
 
         let new_started = Instant::now();
         let mut new_total = 0usize;
+        let mut interner = super::super::InstanceKeyInterner::default();
         for _ in 0..iterations {
-            new_total ^= std::hint::black_box(slot_instance_key(host, slot, contribution).len());
+            new_total ^= std::hint::black_box(interner.intern_slot(host, slot, contribution).len());
         }
         let new_time = new_started.elapsed();
 
         eprintln!(
-            "slot instance key: format {old_time:?}; presized {new_time:?}; ratio {:.2}x",
+            "slot instance key: rebuild {old_time:?}; interned {new_time:?}; ratio {:.2}x",
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_total, new_total);
@@ -958,13 +951,16 @@ impl FrontendSurfaceComponent {
         // after a live cross-call mutates its `_ENV` directly.
         let mut bound_children = self.bound_children.borrow_mut();
         let links = bound_children
-            .entry(host_instance_key.to_string())
+            .entry(self.instance_keys.borrow_mut().intern(host_instance_key))
             .or_default();
         if !links
             .iter()
-            .any(|(b, key)| b == binding && key == child_instance_key)
+            .any(|(b, key)| b == binding && key.as_ref() == child_instance_key)
         {
-            links.push((binding.to_string(), child_instance_key.to_string()));
+            links.push((
+                binding.to_string(),
+                self.instance_keys.borrow_mut().intern(child_instance_key),
+            ));
         }
     }
 }

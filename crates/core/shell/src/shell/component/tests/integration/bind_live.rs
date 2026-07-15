@@ -56,7 +56,7 @@ fn child_runtime_value(
         .runtimes
         .lock()
         .unwrap()
-        .get(&child_key)
+        .get(child_key.as_str())
         .and_then(|runtime| runtime.script_ctx.state().get(name))
 }
 
@@ -161,7 +161,7 @@ value = 0
 
     {
         let mut runtimes = component.runtimes.lock().unwrap();
-        let child = runtimes.get_mut(&child_key).unwrap();
+        let child = runtimes.get_mut(child_key.as_str()).unwrap();
         child.script_ctx.state.set("value", serde_json::json!(123));
         child.script_ctx.state.clear_dirty();
     }
@@ -217,7 +217,7 @@ other = 0
     let old_started = Instant::now();
     for _ in 0..iterations {
         let mut runtimes = component.runtimes.lock().unwrap();
-        let child = runtimes.get_mut(&child_key).unwrap();
+        let child = runtimes.get_mut(child_key.as_str()).unwrap();
         child.script_ctx.resync_state();
         std::hint::black_box(child.script_ctx.state().mutation_generation());
     }
@@ -226,7 +226,7 @@ other = 0
     let new_started = Instant::now();
     for _ in 0..iterations {
         let mut runtimes = component.runtimes.lock().unwrap();
-        let child = runtimes.get_mut(&child_key).unwrap();
+        let child = runtimes.get_mut(child_key.as_str()).unwrap();
         if child.script_ctx.take_live_binding_external_accessed() {
             child.script_ctx.resync_state();
         }

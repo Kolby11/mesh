@@ -418,11 +418,10 @@ enum IndexedProperty {
         strict_animation: bool,
         background_image: bool,
     },
-    DiagnosticOnly(String),
-    Deferred(String),
-    OutOfScope(String),
-    Unsupported(String),
-    DeprecatedToken(String),
+    StaticDiagnostic {
+        property: String,
+        message: String,
+    },
 }
 
 impl IndexedDeclaration {
@@ -443,21 +442,43 @@ impl IndexedProperty {
             match status {
                 StyleProfileStatus::Implemented => {}
                 StyleProfileStatus::DiagnosticOnly => {
-                    return Self::DiagnosticOnly(property.to_owned());
+                    return Self::StaticDiagnostic {
+                        property: property.to_owned(),
+                        message: format!(
+                            "diagnostic-only CSS property '{property}' is accepted by the parser but not lowered into ComputedStyle"
+                        ),
+                    };
                 }
                 StyleProfileStatus::Deferred => {
-                    return Self::Deferred(property.to_owned());
+                    return Self::StaticDiagnostic {
+                        property: property.to_owned(),
+                        message: format!(
+                            "deferred CSS property '{property}' is accepted by the parser but not lowered in the current painter profile"
+                        ),
+                    };
                 }
                 StyleProfileStatus::OutOfScope => {
-                    return Self::OutOfScope(property.to_owned());
+                    return Self::StaticDiagnostic {
+                        property: property.to_owned(),
+                        message: format!(
+                            "unsupported CSS property '{property}' is out-of-scope for the MESH shell CSS profile"
+                        ),
+                    };
                 }
             }
         }
         if !is_supported_css_property(property) {
-            return Self::Unsupported(property.to_owned());
+            return Self::StaticDiagnostic {
+                property: property.to_owned(),
+                message: format!("unsupported CSS property '{property}'"),
+            };
         }
         if contains_deprecated_token_reference(value) {
-            return Self::DeprecatedToken(property.to_owned());
+            return Self::StaticDiagnostic {
+                property: property.to_owned(),
+                message: "deprecated token() references are not supported; use var(--...)"
+                    .to_owned(),
+            };
         }
         Self::Lowered {
             name: property.to_owned(),
@@ -1504,46 +1525,8 @@ impl<'a> StyleResolver<'a> {
             IndexedProperty::Custom(property) => {
                 variables.insert(property.clone(), decl.value.clone());
             }
-            IndexedProperty::DiagnosticOnly(property) => {
-                push_indexed_style_diagnostic(
-                    &mut diagnostics,
-                    property.clone(),
-                    format!(
-                        "diagnostic-only CSS property '{property}' is accepted by the parser but not lowered into ComputedStyle"
-                    ),
-                );
-            }
-            IndexedProperty::Deferred(property) => {
-                push_indexed_style_diagnostic(
-                    &mut diagnostics,
-                    property.clone(),
-                    format!(
-                        "deferred CSS property '{property}' is accepted by the parser but not lowered in the current painter profile"
-                    ),
-                );
-            }
-            IndexedProperty::OutOfScope(property) => {
-                push_indexed_style_diagnostic(
-                    &mut diagnostics,
-                    property.clone(),
-                    format!(
-                        "unsupported CSS property '{property}' is out-of-scope for the MESH shell CSS profile"
-                    ),
-                );
-            }
-            IndexedProperty::Unsupported(property) => {
-                push_indexed_style_diagnostic(
-                    &mut diagnostics,
-                    property.clone(),
-                    format!("unsupported CSS property '{property}'"),
-                );
-            }
-            IndexedProperty::DeprecatedToken(property) => {
-                push_indexed_style_diagnostic(
-                    &mut diagnostics,
-                    property.clone(),
-                    "deprecated token() references are not supported; use var(--...)".to_string(),
-                );
+            IndexedProperty::StaticDiagnostic { property, message } => {
+                push_indexed_static_style_diagnostic(&mut diagnostics, property, message);
             }
             IndexedProperty::Lowered {
                 name,
@@ -2002,6 +1985,20 @@ fn push_indexed_style_diagnostic(
             property,
             selector: Some((*selector).to_string()),
             message,
+        });
+    }
+}
+
+fn push_indexed_static_style_diagnostic(
+    diagnostics: &mut Option<(&str, &mut Vec<StyleDiagnostic>)>,
+    property: &str,
+    message: &str,
+) {
+    if let Some((selector, diagnostics)) = diagnostics.as_mut() {
+        diagnostics.push(StyleDiagnostic {
+            property: property.to_owned(),
+            selector: Some((*selector).to_string()),
+            message: message.to_owned(),
         });
     }
 }
@@ -2652,6 +2649,98 @@ mod tests {
         assert_eq!(cached.0.background_color, allocating.0.background_color);
         assert_eq!(cached.1, allocating.1);
         assert!(!cached.1.is_empty());
+    }
+
+    #[test]
+    fn indexed_static_diagnostic_prototypes_match_uncached_resolution() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("proof".into()),
+            declarations: vec![
+                Declaration {
+                    property: "border-style".into(),
+                    value: StyleValue::Literal("solid".into()),
+                },
+                Declaration {
+                    property: "grid-template-columns".into(),
+                    value: StyleValue::Literal("1fr 1fr".into()),
+                },
+                Declaration {
+                    property: "unsupported-proof-property".into(),
+                    value: StyleValue::Literal("proof".into()),
+                },
+                Declaration {
+                    property: "color".into(),
+                    value: StyleValue::Literal("token(color.primary)".into()),
+                },
+            ],
+            container_query: None,
+        }];
+        let index = StyleRuleIndex::new(&rules);
+        let classes = vec!["proof".to_string()];
+
+        let uncached = resolver
+            .resolve_node_style_with_diagnostics(
+                &rules,
+                "box",
+                &classes,
+                None,
+                StyleContext::default(),
+                ElementState::default(),
+            )
+            .1;
+        let indexed = resolver
+            .resolve_node_style_with_diagnostics_for_module_indexed(
+                &rules,
+                &index,
+                "box",
+                &classes,
+                None,
+                StyleContext::default(),
+                ElementState::default(),
+                None,
+            )
+            .1;
+
+        assert_eq!(indexed, uncached);
+        assert_eq!(indexed.len(), 4);
+    }
+
+    #[test]
+    fn rebuilding_rule_index_invalidates_static_diagnostic_prototypes() {
+        fn diagnostics_for(property: &str) -> Vec<StyleDiagnostic> {
+            let theme = mesh_core_theme::default_theme();
+            let resolver = StyleResolver::new(&theme);
+            let rules = vec![StyleRule {
+                selector: Selector::Class("proof".into()),
+                declarations: vec![Declaration {
+                    property: property.into(),
+                    value: StyleValue::Literal("proof".into()),
+                }],
+                container_query: None,
+            }];
+            let index = StyleRuleIndex::new(&rules);
+            resolver
+                .resolve_node_style_with_diagnostics_for_module_indexed(
+                    &rules,
+                    &index,
+                    "box",
+                    &["proof".into()],
+                    None,
+                    StyleContext::default(),
+                    ElementState::default(),
+                    None,
+                )
+                .1
+        }
+
+        let unsupported = diagnostics_for("unsupported-proof-property");
+        let diagnostic_only = diagnostics_for("border-style");
+
+        assert_eq!(unsupported[0].property, "unsupported-proof-property");
+        assert_eq!(diagnostic_only[0].property, "border-style");
+        assert_ne!(unsupported[0].message, diagnostic_only[0].message);
     }
 
     // cargo test -p mesh-core-elements --release -- cached_node_classes_beat_diagnostic_resplit --ignored --nocapture

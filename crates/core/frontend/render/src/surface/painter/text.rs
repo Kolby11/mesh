@@ -603,10 +603,10 @@ impl FrontendRenderEngine {
                         inner_width,
                     ))
                 } else {
-                    std::borrow::Cow::Borrowed(text.text.as_str())
+                    std::borrow::Cow::Borrowed(text.text.as_ref())
                 }
             } else {
-                std::borrow::Cow::Borrowed(text.text.as_str())
+                std::borrow::Cow::Borrowed(text.text.as_ref())
             };
 
         let effective_align =
