@@ -581,14 +581,16 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
         let retained_dirty = self.retained_tree.update(&tree);
         let retained_tree_generation = self.retained_tree.generation();
-        let use_generation_shortcuts =
-            dirty_types.is_empty() && !requires_tree_rebuild && !self.surface_pixels_invalid;
         let render_object_started = std::time::Instant::now();
-        let render_object_dirty = if use_generation_shortcuts {
-            self.retained_render_objects
-                .update_for_retained_generation(&tree, retained_tree_generation)
-        } else {
+        let render_object_dirty = if retained_dirty.is_structural() {
             self.retained_render_objects.update(&tree)
+        } else {
+            self.retained_render_objects
+                .update_for_retained_dirty_nodes(
+                    &tree,
+                    retained_tree_generation,
+                    self.retained_tree.dirty_node_ids(),
+                )
         };
         self.record_profiling_stage_with_elapsed(
             mesh_core_debug::ProfilingStage::RenderObjectSync,
@@ -612,28 +614,16 @@ impl ShellComponent for FrontendSurfaceComponent {
         };
         let display_list_started = std::time::Instant::now();
         let display_list_span = tracing::debug_span!("display_list_update").entered();
-        let display_list_metrics = if use_generation_shortcuts {
-            self.retained_display_list.update_for_retained_generation(
-                &tree,
-                retained_tree_generation,
-                render_object_dirty,
-                self.retained_render_objects.dirty_node_ids(),
-                content_width,
-                content_height,
-                self.surface_pixels_invalid,
-                true,
-            )
-        } else {
-            self.retained_display_list.update_with_dirty_nodes(
-                &tree,
-                render_object_dirty,
-                self.retained_render_objects.dirty_node_ids(),
-                content_width,
-                content_height,
-                self.surface_pixels_invalid,
-                true,
-            )
-        };
+        let display_list_metrics = self.retained_display_list.update_for_retained_generation(
+            &tree,
+            retained_tree_generation,
+            render_object_dirty,
+            self.retained_render_objects.dirty_node_ids(),
+            content_width,
+            content_height,
+            self.surface_pixels_invalid,
+            true,
+        );
         drop(display_list_span);
         self.record_profiling_stage_with_elapsed(
             mesh_core_debug::ProfilingStage::RetainedDisplayListUpdate,

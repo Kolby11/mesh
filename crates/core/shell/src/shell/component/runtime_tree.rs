@@ -37,6 +37,10 @@ impl RetainedTreeDirtySummary {
             || self.state > 0
     }
 
+    pub(super) fn is_structural(self) -> bool {
+        self.inserted > 0 || self.removed > 0 || self.children > 0
+    }
+
     fn add_flags(&mut self, flags: RetainedNodeDirtyFlags) {
         if flags.contains(RetainedNodeDirtyFlags::LAYOUT) {
             self.layout += 1;
@@ -90,12 +94,14 @@ pub(super) struct RetainedWidgetTree {
     nodes: SlotMap<RetainedNodeKey, RetainedNodeSnapshot>,
     node_keys: HashMap<NodeId, RetainedNodeKey>,
     dirty: SecondaryMap<RetainedNodeKey, RetainedNodeDirtyFlags>,
+    dirty_node_ids: HashSet<NodeId>,
     last_dirty: RetainedTreeDirtySummary,
     // Scratch map reused each frame to avoid per-frame allocation.
     next_nodes_scratch: HashMap<NodeId, RetainedNodeSnapshot>,
     // Dirty slots are transient but interaction frames repopulate them often.
     // Swap the previous map into scratch so its slot allocation is retained.
     next_dirty_scratch: SecondaryMap<RetainedNodeKey, RetainedNodeDirtyFlags>,
+    next_dirty_node_ids_scratch: HashSet<NodeId>,
 }
 
 impl RetainedWidgetTree {
@@ -109,6 +115,8 @@ impl RetainedWidgetTree {
         let mut dirty = RetainedTreeDirtySummary::default();
         let mut next_dirty = std::mem::take(&mut self.next_dirty_scratch);
         next_dirty.clear();
+        let mut next_dirty_node_ids = std::mem::take(&mut self.next_dirty_node_ids_scratch);
+        next_dirty_node_ids.clear();
 
         // Remove stale nodes before draining the scratch map. This lets the
         // update loop move changed snapshots into retained storage instead of
@@ -140,6 +148,7 @@ impl RetainedWidgetTree {
                         dirty.add_flags(flags);
                         dirty.changed_state_bits |= node_state_bits;
                         next_dirty.insert(previous, flags);
+                        next_dirty_node_ids.insert(node_id);
                         if let Some(slot) = self.nodes.get_mut(previous) {
                             *slot = next;
                         }
@@ -164,6 +173,9 @@ impl RetainedWidgetTree {
         }
         let previous_dirty = std::mem::replace(&mut self.dirty, next_dirty);
         self.next_dirty_scratch = previous_dirty;
+        let previous_dirty_node_ids =
+            std::mem::replace(&mut self.dirty_node_ids, next_dirty_node_ids);
+        self.next_dirty_node_ids_scratch = previous_dirty_node_ids;
         self.last_dirty = dirty;
 
         // Return the scratch map, preserving its backing allocation for the next frame.
@@ -177,6 +189,21 @@ impl RetainedWidgetTree {
 
     pub(super) fn last_dirty(&self) -> RetainedTreeDirtySummary {
         self.last_dirty
+    }
+
+    /// Existing node IDs marked dirty by the most recent authoritative diff.
+    ///
+    /// Insertions are intentionally omitted: structural updates take the full
+    /// downstream synchronization path and do not consume this sparse set.
+    pub(super) fn dirty_node_ids(&self) -> &HashSet<NodeId> {
+        &self.dirty_node_ids
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_node_dirty(&self, node_id: NodeId) -> bool {
+        self.node_keys
+            .get(&node_id)
+            .is_some_and(|key| self.dirty.contains_key(*key))
     }
 
     pub(super) fn layout_dirty_node_ids(&self, root: &WidgetNode) -> Option<HashSet<NodeId>> {
@@ -806,7 +833,7 @@ pub(super) struct RuntimeAnnotationContext<'a> {
     slider_values: &'a mut HashMap<String, f32>,
     slider_script_values: &'a mut HashMap<String, f32>,
     checked_values: &'a HashMap<String, bool>,
-    scroll_offsets: &'a HashMap<String, ScrollOffsetState>,
+    scroll_offsets: &'a mut HashMap<String, ScrollOffsetState>,
 }
 
 impl<'a> RuntimeAnnotationContext<'a> {
@@ -820,7 +847,7 @@ impl<'a> RuntimeAnnotationContext<'a> {
         slider_values: &'a mut HashMap<String, f32>,
         slider_script_values: &'a mut HashMap<String, f32>,
         checked_values: &'a HashMap<String, bool>,
-        scroll_offsets: &'a HashMap<String, ScrollOffsetState>,
+        scroll_offsets: &'a mut HashMap<String, ScrollOffsetState>,
     ) -> Self {
         Self {
             focused_key,
@@ -837,6 +864,7 @@ impl<'a> RuntimeAnnotationContext<'a> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn annotate_runtime_tree(
     node: &mut WidgetNode,
     key: String,
@@ -844,7 +872,17 @@ pub(super) fn annotate_runtime_tree(
 ) {
     let node_id = stable_runtime_node_id(&key);
     let mut key = key;
-    annotate_runtime_tree_inner(node, &mut key, node_id, context);
+    annotate_runtime_tree_inner(node, &mut key, node_id, context, false);
+}
+
+pub(super) fn annotate_runtime_and_overflow_tree(
+    node: &mut WidgetNode,
+    key: String,
+    context: &mut RuntimeAnnotationContext<'_>,
+) {
+    let node_id = stable_runtime_node_id(&key);
+    let mut key = key;
+    annotate_runtime_tree_inner(node, &mut key, node_id, context, true);
 }
 
 fn annotate_runtime_tree_inner(
@@ -852,7 +890,8 @@ fn annotate_runtime_tree_inner(
     key: &mut String,
     node_id: NodeId,
     context: &mut RuntimeAnnotationContext<'_>,
-) {
+    annotate_overflow: bool,
+) -> Option<mesh_core_interaction::ContentBounds> {
     node.id = node_id;
     node.set_mesh_key(key.clone());
 
@@ -966,15 +1005,42 @@ fn annotate_runtime_tree_inner(
     scroll.x = offset.x;
     scroll.y = offset.y;
 
+    let mut children_bounds: Option<mesh_core_interaction::ContentBounds> = None;
     for (index, child) in node.children.iter_mut().enumerate() {
         let previous_len = key.len();
         {
             use std::fmt::Write as _;
             let _ = write!(key, "/{index}");
         }
-        annotate_runtime_tree_inner(child, key, child_runtime_node_id(node_id, index), context);
+        let child_bounds = annotate_runtime_tree_inner(
+            child,
+            key,
+            child_runtime_node_id(node_id, index),
+            context,
+            annotate_overflow,
+        );
+        if let Some(next) = child_bounds {
+            children_bounds = Some(match children_bounds {
+                Some(current) => (
+                    current.0.min(next.0),
+                    current.1.min(next.1),
+                    current.2.max(next.2),
+                    current.3.max(next.3),
+                ),
+                None => next,
+            });
+        }
         key.truncate(previous_len);
     }
+
+    annotate_overflow.then(|| {
+        mesh_core_interaction::annotate_overflow_node(
+            node,
+            key,
+            context.scroll_offsets,
+            children_bounds,
+        )
+    })
 }
 
 fn annotate_slider_node(
@@ -1108,7 +1174,7 @@ mod tests {
         let mut slider_values = HashMap::new();
         let mut slider_script_values = HashMap::new();
         let checked_values = HashMap::new();
-        let scroll_offsets = HashMap::new();
+        let mut scroll_offsets = HashMap::new();
         let mut context = RuntimeAnnotationContext::new(
             &None,
             &None,
@@ -1119,7 +1185,7 @@ mod tests {
             &mut slider_values,
             &mut slider_script_values,
             &checked_values,
-            &scroll_offsets,
+            &mut scroll_offsets,
         );
         annotate_runtime_tree(node, "root".to_string(), &mut context);
     }
@@ -2001,12 +2067,16 @@ mod tests {
             retained.dirty_flags_for(child_id),
             RetainedNodeDirtyFlags::INSERTED
         );
+        assert!(retained.is_node_dirty(child_id));
+        assert!(retained.dirty_node_ids().is_empty());
 
         let clean = retained.update(&tree);
         assert!(!clean.any());
         assert_eq!(retained.generation(), 1);
         assert_eq!(retained.retained_key_for_node_id(child_id), Some(child_key));
         assert!(retained.dirty_flags_for(child_id).is_empty());
+        assert!(!retained.is_node_dirty(child_id));
+        assert!(retained.dirty_node_ids().is_empty());
 
         tree.children[0].layout.width = 42.0;
         tree.children[0].computed_style.background_color = Color::BLACK;
@@ -2025,12 +2095,150 @@ mod tests {
         assert_eq!(retained.last_dirty(), dirty);
         assert_eq!(retained.generation(), 2);
         assert_eq!(retained.retained_key_for_node_id(child_id), Some(child_key));
+        assert!(retained.is_node_dirty(child_id));
+        assert_eq!(retained.dirty_node_ids(), &HashSet::from([child_id]));
         assert_eq!(
             retained.dirty_flags_for(child_id),
             RetainedNodeDirtyFlags::LAYOUT
                 | RetainedNodeDirtyFlags::STYLE
                 | RetainedNodeDirtyFlags::ATTRIBUTES
                 | RetainedNodeDirtyFlags::STATE
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- direct_dirty_node_id_membership_beats_slot_indirection --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained dirty-node membership microbenchmark"]
+    fn direct_dirty_node_id_membership_beats_slot_indirection() {
+        fn collect_node_ids(node: &WidgetNode, ids: &mut Vec<NodeId>) {
+            ids.push(node.id);
+            for child in &node.children {
+                collect_node_ids(child, ids);
+            }
+        }
+
+        let mut tree = benchmark_plain_tree(4, 5);
+        annotate_with_empty_context(&mut tree);
+        let mut retained = RetainedWidgetTree::default();
+        retained.update(&tree);
+        tree.children[0].computed_style.background_color = Color::BLACK;
+        retained.update(&tree);
+
+        let mut node_ids = Vec::new();
+        collect_node_ids(&tree, &mut node_ids);
+        assert_eq!(retained.dirty_node_ids().len(), 1);
+
+        let iterations = 10_000;
+        let indirect_started = Instant::now();
+        let mut indirect_total = 0usize;
+        for _ in 0..iterations {
+            for &node_id in &node_ids {
+                indirect_total +=
+                    usize::from(std::hint::black_box(retained.is_node_dirty(node_id)));
+            }
+        }
+        let indirect_time = indirect_started.elapsed();
+
+        let direct_started = Instant::now();
+        let mut direct_total = 0usize;
+        for _ in 0..iterations {
+            for &node_id in &node_ids {
+                direct_total += usize::from(std::hint::black_box(
+                    retained.dirty_node_ids().contains(&node_id),
+                ));
+            }
+        }
+        let direct_time = direct_started.elapsed();
+
+        assert_eq!(direct_total, indirect_total);
+        eprintln!(
+            "retained dirty membership: slot-indirect {indirect_time:?}; direct NodeId set {direct_time:?}; ratio {:.1}x",
+            indirect_time.as_secs_f64() / direct_time.as_secs_f64()
+        );
+        assert!(
+            direct_time * 10 < indirect_time * 9,
+            "direct dirty NodeId membership should beat slot-indirect lookups by at least 10%"
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- fused_runtime_overflow_annotation_beats_two_tree_walks --ignored --nocapture
+    #[test]
+    #[ignore = "release-only fused finalize annotation benchmark"]
+    fn fused_runtime_overflow_annotation_beats_two_tree_walks() {
+        fn annotate(
+            tree: &mut WidgetNode,
+            scroll_offsets: &mut HashMap<String, ScrollOffsetState>,
+            fused: bool,
+        ) {
+            let input_values = HashMap::new();
+            let mut slider_values = HashMap::new();
+            let mut slider_script_values = HashMap::new();
+            let checked_values = HashMap::new();
+            let mut context = RuntimeAnnotationContext::new(
+                &None,
+                &None,
+                &[],
+                &None,
+                &None,
+                &input_values,
+                &mut slider_values,
+                &mut slider_script_values,
+                &checked_values,
+                scroll_offsets,
+            );
+            if fused {
+                annotate_runtime_and_overflow_tree(tree, "root".to_string(), &mut context);
+            } else {
+                annotate_runtime_tree(tree, "root".to_string(), &mut context);
+                drop(context);
+                mesh_core_interaction::annotate_overflow_tree(tree, "root", scroll_offsets);
+            }
+        }
+
+        let tree = benchmark_plain_tree(4, 5);
+        let mut separate_tree = tree.clone();
+        let mut fused_tree = tree.clone();
+        let mut separate_offsets = HashMap::new();
+        let mut fused_offsets = HashMap::new();
+        annotate(&mut separate_tree, &mut separate_offsets, false);
+        annotate(&mut fused_tree, &mut fused_offsets, true);
+        assert_eq!(format!("{fused_tree:?}"), format!("{separate_tree:?}"));
+        assert_eq!(fused_offsets.len(), separate_offsets.len());
+        for (key, fused_offset) in &fused_offsets {
+            let separate_offset = separate_offsets.get(key).expect("matching scroll key");
+            assert_eq!(fused_offset.x.to_bits(), separate_offset.x.to_bits());
+            assert_eq!(fused_offset.y.to_bits(), separate_offset.y.to_bits());
+        }
+
+        let iterations = 2_000;
+        let separate_started = Instant::now();
+        for _ in 0..iterations {
+            annotate(
+                std::hint::black_box(&mut separate_tree),
+                std::hint::black_box(&mut separate_offsets),
+                false,
+            );
+        }
+        let separate_time = separate_started.elapsed();
+
+        let fused_started = Instant::now();
+        for _ in 0..iterations {
+            annotate(
+                std::hint::black_box(&mut fused_tree),
+                std::hint::black_box(&mut fused_offsets),
+                true,
+            );
+        }
+        let fused_time = fused_started.elapsed();
+
+        assert_eq!(format!("{fused_tree:?}"), format!("{separate_tree:?}"));
+        eprintln!(
+            "runtime + overflow annotation: separate {separate_time:?}; fused {fused_time:?}; ratio {:.1}x",
+            separate_time.as_secs_f64() / fused_time.as_secs_f64()
+        );
+        assert!(
+            fused_time * 10 < separate_time * 9,
+            "fused runtime/overflow annotation should beat separate walks by at least 10%"
         );
     }
 

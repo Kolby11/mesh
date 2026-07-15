@@ -8,12 +8,12 @@ use super::types::{
     TabFocusTarget,
 };
 use mesh_core_interaction::{
-    annotate_overflow_tree, collect_focus_traversal, find_click_handler, find_event_handler,
-    find_node_bounds_by_key, find_node_by_key, find_node_path_at, find_node_with_bounds_by_key,
-    find_nodes_by_keys, find_scrollable_at_with_limits, find_tooltip_by_key, is_input_key,
-    is_slider_key, measure_content_size, next_focus_target, node_is_source,
-    parse_namespaced_handler, pointer_event_handler_hit, pointer_press_hit,
-    scroll_into_view_offsets, scroll_limits, source_element_tag,
+    collect_focus_traversal, find_click_handler, find_event_handler, find_node_bounds_by_key,
+    find_node_by_key, find_node_path_at, find_node_with_bounds_by_key, find_nodes_by_keys,
+    find_scrollable_at_with_limits, find_tooltip_by_key, is_input_key, is_slider_key,
+    measure_content_size, next_focus_target, node_is_source, parse_namespaced_handler,
+    pointer_event_handler_hit, pointer_press_hit, scroll_into_view_offsets, scroll_limits,
+    source_element_tag,
 };
 mod animation;
 mod catalog;
@@ -36,7 +36,8 @@ use mesh_core_animation::transition::TransitionAnimator;
 pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
 use runtime_tree::{
     NodeServiceFieldDependencies, RetainedWidgetTree, RuntimeAnnotationContext,
-    annotate_runtime_tree, collect_element_metrics, input_accepts_char, stable_runtime_node_id,
+    annotate_runtime_and_overflow_tree, collect_element_metrics, input_accepts_char,
+    stable_runtime_node_id,
 };
 
 use mesh_core_capability::{Capability, CapabilitySet};

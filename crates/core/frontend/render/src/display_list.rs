@@ -21,6 +21,14 @@ pub enum DisplayPrimitiveSlot {
     Generic,
 }
 
+const DISPLAY_PRIMITIVE_SLOTS: [DisplayPrimitiveSlot; 5] = [
+    DisplayPrimitiveSlot::Background,
+    DisplayPrimitiveSlot::Border,
+    DisplayPrimitiveSlot::Text,
+    DisplayPrimitiveSlot::Icon,
+    DisplayPrimitiveSlot::Generic,
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DisplayListKey {
     pub node_id: NodeId,
@@ -532,11 +540,9 @@ impl<'a> SelectedDisplayListPaint<'a> {
 struct RetainedPaintSubtree {
     commands: Arc<[DisplayPaintCommand]>,
     kinds: Arc<[DisplayPaintCommandKind]>,
-    command_spans: Arc<[RetainedCommandSpan]>,
     effect_overflow_count: u64,
     pruning: PruningMetrics,
     command_span: Option<RetainedSubtreeSpan>,
-    #[cfg(test)]
     child_order: Option<Arc<[usize]>>,
 }
 
@@ -545,11 +551,9 @@ impl Default for RetainedPaintSubtree {
         Self {
             commands: Vec::new().into(),
             kinds: Vec::new().into(),
-            command_spans: Vec::new().into(),
             effect_overflow_count: 0,
             pruning: PruningMetrics::default(),
             command_span: None,
-            #[cfg(test)]
             child_order: None,
         }
     }
@@ -559,7 +563,6 @@ impl Default for RetainedPaintSubtree {
 struct RetainedSubtreeSpan {
     bounds: DamageRect,
     local_bounds: DamageRect,
-    #[cfg(test)]
     command_count: usize,
     includes_scrollbars: bool,
 }
@@ -568,14 +571,12 @@ struct RetainedSubtreeSpan {
 struct PaintSubtreeBuilder {
     commands: Vec<DisplayPaintCommand>,
     kinds: Vec<DisplayPaintCommandKind>,
-    child_command_spans: Vec<RetainedCommandSpan>,
     effect_overflow_count: u64,
     pruning: PruningMetrics,
     bounds: DamageRect,
     local_bounds: DamageRect,
     includes_scrollbars: bool,
     local_command_count: usize,
-    #[cfg(test)]
     child_order: Option<Arc<[usize]>>,
 }
 
@@ -603,15 +604,6 @@ impl PaintSubtreeBuilder {
     }
 
     fn append_child(&mut self, child_subtree: &RetainedPaintSubtree) {
-        let command_offset = self.commands.len();
-        self.child_command_spans
-            .reserve(child_subtree.command_spans.len());
-        self.child_command_spans
-            .extend(child_subtree.command_spans.iter().copied().map(|mut span| {
-                span.start = span.start.saturating_add(command_offset);
-                span.end = span.end.saturating_add(command_offset);
-                span
-            }));
         self.effect_overflow_count = self
             .effect_overflow_count
             .saturating_add(child_subtree.effect_overflow_count);
@@ -649,7 +641,7 @@ impl PaintSubtreeBuilder {
             .saturating_add(child_subtree.pruning.preclipped_descendants);
     }
 
-    fn into_retained(self, owner: NodeId) -> RetainedPaintSubtree {
+    fn into_retained(self) -> RetainedPaintSubtree {
         let command_count = self.local_command_count;
         let command_span = if command_count == 0 {
             None
@@ -657,55 +649,16 @@ impl PaintSubtreeBuilder {
             Some(RetainedSubtreeSpan {
                 bounds: self.bounds,
                 local_bounds: self.local_bounds,
-                #[cfg(test)]
                 command_count,
                 includes_scrollbars: self.includes_scrollbars,
             })
         };
-        let mut command_spans =
-            Vec::with_capacity(self.child_command_spans.len() + usize::from(command_count > 0) * 2);
-        if let Some(span) = command_span {
-            let has_children = self.commands.len() > command_count;
-            if !has_children || command_count <= 1 {
-                command_spans.push(RetainedCommandSpan {
-                    owner,
-                    start: 0,
-                    end: command_count.min(2),
-                    bounds: span.local_bounds,
-                    command_count: command_count.min(2),
-                    includes_scrollbars: command_count > 1,
-                });
-            } else {
-                command_spans.push(RetainedCommandSpan {
-                    owner,
-                    start: 0,
-                    end: 1,
-                    bounds: span.local_bounds,
-                    command_count: 1,
-                    includes_scrollbars: false,
-                });
-                if span.includes_scrollbars {
-                    let scrollbar_index = self.commands.len().saturating_sub(1);
-                    command_spans.push(RetainedCommandSpan {
-                        owner,
-                        start: scrollbar_index,
-                        end: scrollbar_index.saturating_add(1),
-                        bounds: span.local_bounds,
-                        command_count: 1,
-                        includes_scrollbars: true,
-                    });
-                }
-            }
-        }
-        command_spans.extend(self.child_command_spans);
         RetainedPaintSubtree {
             commands: self.commands.into(),
             kinds: self.kinds.into(),
-            command_spans: command_spans.into(),
             effect_overflow_count: self.effect_overflow_count,
             pruning: self.pruning,
             command_span,
-            #[cfg(test)]
             child_order: self.child_order,
         }
     }
@@ -838,6 +791,18 @@ impl RetainedDisplayList {
             );
         }
 
+        let dirty_summary = dirty_summary.unwrap_or_default();
+        let empty_dirty_nodes = HashSet::new();
+        let dirty_node_ids = dirty_node_ids.unwrap_or(&empty_dirty_nodes);
+        let patch_sparse_entries = (!cfg!(debug_assertions) || cfg!(test))
+            && self.can_patch_sparse_entries(
+                root,
+                dirty_summary,
+                dirty_node_ids,
+                surface.width,
+                surface.height,
+            );
+
         #[cfg(debug_assertions)]
         let mut ordered_entries = std::mem::take(&mut self.ordered_entries_scratch);
         #[cfg(debug_assertions)]
@@ -852,12 +817,13 @@ impl RetainedDisplayList {
             Some(&mut ordered_entries),
             #[cfg(not(debug_assertions))]
             None,
+            patch_sparse_entries.then_some(dirty_node_ids),
             &mut next,
         );
         if self.root_id == Some(root.id)
             && self.surface_size == Some((surface.width, surface.height))
             && self.entries == next
-            && !dirty_summary.is_some_and(RenderObjectDirtySummary::any)
+            && !dirty_summary.any()
         {
             next.clear();
             self.next_entries_scratch = next;
@@ -872,9 +838,6 @@ impl RetainedDisplayList {
                 partial_present_supported,
             );
         }
-        let dirty_summary = dirty_summary.unwrap_or_default();
-        let empty_dirty_nodes = HashSet::new();
-        let dirty_node_ids = dirty_node_ids.unwrap_or(&empty_dirty_nodes);
         let decision = self.local_reuse_decision(
             root,
             dirty_summary,
@@ -923,10 +886,11 @@ impl RetainedDisplayList {
                 );
                 self.dirty_ancestors_scratch = rebuild_ancestors;
                 self.ancestor_path_scratch = ancestor_path;
+                let command_spans = build_command_spans(root, &next_subtrees).into();
                 (
                     Arc::clone(&subtree.commands),
                     Arc::clone(&subtree.kinds),
-                    Arc::clone(&subtree.command_spans),
+                    command_spans,
                     subtree.effect_overflow_count,
                     subtree.pruning,
                     next_subtrees,
@@ -952,10 +916,11 @@ impl RetainedDisplayList {
                     &mut next_subtrees,
                     &mut local_metrics,
                 );
+                let command_spans = build_command_spans(root, &next_subtrees).into();
                 (
                     Arc::clone(&subtree.commands),
                     Arc::clone(&subtree.kinds),
-                    Arc::clone(&subtree.command_spans),
+                    command_spans,
                     subtree.effect_overflow_count,
                     subtree.pruning,
                     next_subtrees,
@@ -967,38 +932,84 @@ impl RetainedDisplayList {
         let mut damage: Option<DamageRect> = None;
         let mut damage_rects = std::mem::take(&mut self.last_damage_rects);
         damage_rects.clear();
-        let mut reused = 0u64;
-        let mut rebuilt = 0u64;
-        let mut inserted = 0u64;
-        for (key, next_entry) in &next {
-            match self.entries.get(key) {
-                Some(previous) if previous == next_entry => reused = reused.saturating_add(1),
-                Some(previous) => {
-                    rebuilt = rebuilt.saturating_add(1);
-                    damage = union_damage(damage, previous.bounds);
-                    damage = union_damage(damage, next_entry.bounds);
-                    push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
-                    push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
-                }
-                None => {
-                    inserted = inserted.saturating_add(1);
-                    rebuilt = rebuilt.saturating_add(1);
-                    damage = union_damage(damage, next_entry.bounds);
-                    push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
+        let (reused, rebuilt, removed) = if patch_sparse_entries {
+            let mut rebuilt = 0u64;
+            let mut removed = 0u64;
+            for node_id in dirty_node_ids {
+                for slot in DISPLAY_PRIMITIVE_SLOTS {
+                    let key = DisplayListKey {
+                        node_id: *node_id,
+                        slot,
+                    };
+                    let previous = self.entries.get(&key).copied();
+                    let next_entry = next.remove(&key);
+                    match (previous, next_entry) {
+                        (Some(previous), Some(next_entry)) if previous == next_entry => {}
+                        (Some(previous), Some(next_entry)) => {
+                            rebuilt = rebuilt.saturating_add(1);
+                            damage = union_damage(damage, previous.bounds);
+                            damage = union_damage(damage, next_entry.bounds);
+                            push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
+                            push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
+                            self.entries.insert(key, next_entry);
+                        }
+                        (None, Some(next_entry)) => {
+                            rebuilt = rebuilt.saturating_add(1);
+                            damage = union_damage(damage, next_entry.bounds);
+                            push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
+                            self.entries.insert(key, next_entry);
+                        }
+                        (Some(previous), None) => {
+                            removed = removed.saturating_add(1);
+                            damage = union_damage(damage, previous.bounds);
+                            push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
+                            self.entries.remove(&key);
+                        }
+                        (None, None) => {}
+                    }
                 }
             }
-        }
+            debug_assert!(
+                next.is_empty(),
+                "sparse display-entry collection emitted an unknown primitive slot"
+            );
+            let reused = (self.entries.len() as u64).saturating_sub(rebuilt);
+            (reused, rebuilt, removed)
+        } else {
+            let mut reused = 0u64;
+            let mut rebuilt = 0u64;
+            let mut inserted = 0u64;
+            for (key, next_entry) in &next {
+                match self.entries.get(key) {
+                    Some(previous) if previous == next_entry => reused = reused.saturating_add(1),
+                    Some(previous) => {
+                        rebuilt = rebuilt.saturating_add(1);
+                        damage = union_damage(damage, previous.bounds);
+                        damage = union_damage(damage, next_entry.bounds);
+                        push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
+                        push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
+                    }
+                    None => {
+                        inserted = inserted.saturating_add(1);
+                        rebuilt = rebuilt.saturating_add(1);
+                        damage = union_damage(damage, next_entry.bounds);
+                        push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
+                    }
+                }
+            }
 
-        let mut removed = 0u64;
-        if inserted > 0 || next.len() != self.entries.len() {
-            for (key, previous) in &self.entries {
-                if !next.contains_key(key) {
-                    removed = removed.saturating_add(1);
-                    damage = union_damage(damage, previous.bounds);
-                    push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
+            let mut removed = 0u64;
+            if inserted > 0 || next.len() != self.entries.len() {
+                for (key, previous) in &self.entries {
+                    if !next.contains_key(key) {
+                        removed = removed.saturating_add(1);
+                        damage = union_damage(damage, previous.bounds);
+                        push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
+                    }
                 }
             }
-        }
+            (reused, rebuilt, removed)
+        };
 
         let full_surface_damage = force_full_damage || damage.is_none() && self.entries.is_empty();
         let damage_rect = if full_surface_damage {
@@ -1026,9 +1037,14 @@ impl RetainedDisplayList {
         if rebuilt > 0 || removed > 0 || force_full_damage {
             self.generation = self.generation.saturating_add(1);
         }
-        let mut previous_entries = std::mem::replace(&mut self.entries, next);
-        previous_entries.clear();
-        self.next_entries_scratch = previous_entries;
+        if patch_sparse_entries {
+            next.clear();
+            self.next_entries_scratch = next;
+        } else {
+            let mut previous_entries = std::mem::replace(&mut self.entries, next);
+            previous_entries.clear();
+            self.next_entries_scratch = previous_entries;
+        }
         let mut previous_subtrees = std::mem::replace(&mut self.subtrees, subtrees);
         previous_subtrees.clear();
         self.next_subtrees_scratch = previous_subtrees;
@@ -1423,6 +1439,29 @@ impl RetainedDisplayList {
 
         LocalReuseDecision::FallbackFull { broad_dirty: false }
     }
+
+    fn can_patch_sparse_entries(
+        &self,
+        root: &WidgetNode,
+        dirty_summary: RenderObjectDirtySummary,
+        dirty_node_ids: &HashSet<NodeId>,
+        surface_width: u32,
+        surface_height: u32,
+    ) -> bool {
+        self.root_id == Some(root.id)
+            && self.surface_size == Some((surface_width, surface_height))
+            && !self.entries.is_empty()
+            && !dirty_node_ids.is_empty()
+            && dirty_node_ids.len() <= (self.subtrees.len() / 4).max(8)
+            && dirty_summary.any()
+            && dirty_summary.inserted == 0
+            && dirty_summary.removed == 0
+            && dirty_summary.reordered == 0
+            && dirty_summary.transform == 0
+            && dirty_summary.clip == 0
+            && dirty_summary.opacity == 0
+            && dirty_summary.geometry == 0
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1564,6 +1603,7 @@ fn collect_display_entries(
     offset_x: f32,
     offset_y: f32,
     mut ordered_entries: Option<&mut Vec<(DisplayListKey, DisplayListEntry)>>,
+    selected_node_ids: Option<&HashSet<NodeId>>,
     next: &mut HashMap<DisplayListKey, DisplayListEntry>,
 ) {
     if node_is_explicitly_hidden(node) {
@@ -1576,7 +1616,13 @@ fn collect_display_entries(
     let offset_y = offset_y + transform.translate_y;
 
     if let Some(bounds) = damage_rect_for_node_at(node, offset_x, offset_y) {
+        let selected = selected_node_ids.is_none_or(|node_ids| node_ids.contains(&node.id));
         for_each_primitive_slot(node, |slot| {
+            // Debug batch metrics still need the full ordered stream. Release
+            // builds can avoid constructing signatures for unselected nodes.
+            if !selected && ordered_entries.is_none() {
+                return;
+            }
             let key = DisplayListKey {
                 node_id: node.id,
                 slot,
@@ -1591,7 +1637,9 @@ fn collect_display_entries(
             if let Some(entries) = ordered_entries.as_deref_mut() {
                 entries.push((key, entry));
             }
-            next.insert(key, entry);
+            if selected {
+                next.insert(key, entry);
+            }
         });
     }
 
@@ -1607,6 +1655,7 @@ fn collect_display_entries(
             child_offset_x,
             child_offset_y,
             ordered_entries.as_deref_mut(),
+            selected_node_ids,
             next,
         );
     }
@@ -1774,10 +1823,7 @@ fn build_paint_subtree(
             metrics,
         );
     });
-    #[cfg(test)]
-    {
-        subtree.child_order = child_order;
-    }
+    subtree.child_order = child_order;
 
     if display_node_may_show_scrollbars(&paint_node) {
         subtree.push_command(DisplayPaintCommand {
@@ -1787,7 +1833,7 @@ fn build_paint_subtree(
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
-    let subtree = Arc::new(subtree.into_retained(node.id));
+    let subtree = Arc::new(subtree.into_retained());
     next_subtrees.insert(node.id, Arc::clone(&subtree));
     subtree
 }
@@ -2130,7 +2176,6 @@ fn changed_paint_count(dirty_summary: RenderObjectDirtySummary) -> u64 {
     .sum()
 }
 
-#[cfg(test)]
 fn build_command_spans(
     root: &WidgetNode,
     subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
@@ -2144,7 +2189,6 @@ fn build_command_spans(
     spans
 }
 
-#[cfg(test)]
 fn collect_command_spans(
     node: &WidgetNode,
     subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
@@ -2202,6 +2246,77 @@ fn collect_command_spans(
         next_child_start = collect_command_spans(child, subtrees, next_child_start, spans);
     });
     subtree_end
+}
+
+#[cfg(test)]
+fn build_command_spans_with_ancestor_copying(
+    root: &WidgetNode,
+    subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
+) -> Vec<RetainedCommandSpan> {
+    fn collect(
+        node: &WidgetNode,
+        subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
+        command_start: usize,
+    ) -> (Vec<RetainedCommandSpan>, usize) {
+        let Some(subtree) = subtrees.get(&node.id) else {
+            return (Vec::new(), command_start);
+        };
+        let subtree_end = command_start.saturating_add(subtree.commands.len());
+        let mut spans = Vec::new();
+
+        if let Some(span) = subtree.command_span {
+            let owned = span.command_count;
+            let has_children = subtree_end > command_start.saturating_add(owned);
+            let bounds = span.local_bounds;
+            if !has_children || owned <= 1 {
+                spans.push(RetainedCommandSpan {
+                    owner: node.id,
+                    start: command_start,
+                    end: command_start.saturating_add(owned.min(2)),
+                    bounds,
+                    command_count: owned.min(2),
+                    includes_scrollbars: owned > 1,
+                });
+            } else {
+                spans.push(RetainedCommandSpan {
+                    owner: node.id,
+                    start: command_start,
+                    end: command_start.saturating_add(1),
+                    bounds,
+                    command_count: 1,
+                    includes_scrollbars: false,
+                });
+                if span.includes_scrollbars {
+                    let scrollbar_index = subtree_end.saturating_sub(1);
+                    spans.push(RetainedCommandSpan {
+                        owner: node.id,
+                        start: scrollbar_index,
+                        end: scrollbar_index.saturating_add(1),
+                        bounds,
+                        command_count: 1,
+                        includes_scrollbars: true,
+                    });
+                }
+            }
+        }
+
+        if subtree.commands.is_empty() {
+            return (spans, subtree_end);
+        }
+
+        let mut next_child_start = command_start.saturating_add(1);
+        for_children_in_order(node, subtree.child_order.as_deref(), |child| {
+            let (child_spans, child_end) = collect(child, subtrees, next_child_start);
+            spans.extend(child_spans);
+            next_child_start = child_end;
+        });
+        (spans, subtree_end)
+    }
+
+    if subtrees.is_empty() || !subtrees.contains_key(&root.id) {
+        return Vec::new();
+    }
+    collect(root, subtrees, 0).0
 }
 
 fn insert_selected_command_span(
@@ -3082,12 +3197,47 @@ mod tests {
         let mut out = Vec::new();
         let mut next = HashMap::new();
 
-        collect_display_entries(&text, 0.0, 0.0, Some(&mut out), &mut next);
+        collect_display_entries(&text, 0.0, 0.0, Some(&mut out), None, &mut next);
 
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].0.slot, DisplayPrimitiveSlot::Text);
         assert_eq!(out[0].1.barrier, Some(DisplayBatchBarrier::Text));
         assert_eq!(out[0].1.batch_signature, 0);
+    }
+
+    #[test]
+    fn display_entry_collection_can_patch_only_selected_nodes() {
+        let mut root = node(1, "row", 0.0, 0.0, 100.0, 20.0);
+        let mut first = node(2, "text", 0.0, 0.0, 40.0, 20.0);
+        first.attributes.insert("content".into(), "first".into());
+        let mut second = node(3, "text", 40.0, 0.0, 40.0, 20.0);
+        second.attributes.insert("content".into(), "second".into());
+        root.children.extend([first, second]);
+
+        let mut full = HashMap::new();
+        collect_display_entries(&root, 0.0, 0.0, None, None, &mut full);
+        let mut selected = HashMap::new();
+        collect_display_entries(
+            &root,
+            0.0,
+            0.0,
+            None,
+            Some(&HashSet::from([3])),
+            &mut selected,
+        );
+
+        assert!(!selected.is_empty());
+        assert!(selected.keys().all(|key| key.node_id == 3));
+        assert_eq!(
+            selected.get(&DisplayListKey {
+                node_id: 3,
+                slot: DisplayPrimitiveSlot::Text,
+            }),
+            full.get(&DisplayListKey {
+                node_id: 3,
+                slot: DisplayPrimitiveSlot::Text,
+            })
+        );
     }
 
     // cargo test -p mesh-core-render --release -- display_primitive_hashing_beats_byte_fallback --ignored --nocapture
@@ -3170,7 +3320,6 @@ mod tests {
             }]
             .into(),
             kinds: vec![DisplayPaintCommandKind::Node].into(),
-            command_spans: Vec::new().into(),
             effect_overflow_count: 0,
             pruning: PruningMetrics::default(),
             command_span: Some(RetainedSubtreeSpan {
@@ -3343,6 +3492,160 @@ mod tests {
         assert_ne!(no_op_accumulator, 0);
         assert_ne!(rebuild_accumulator, 0);
         assert!(no_op_time < rebuild_time);
+    }
+
+    // cargo test -p mesh-core-render --release -- retained_generation_shortcut_beats_non_clean_entry_scan --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained-generation display-list microbenchmark"]
+    fn retained_generation_shortcut_beats_non_clean_entry_scan() {
+        let root = display_entry_benchmark_tree(120, 20);
+        let iterations = 2_000;
+        let empty_dirty = HashSet::new();
+
+        let mut scanned = RetainedDisplayList::default();
+        scanned.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary::default(),
+            &empty_dirty,
+            1200,
+            800,
+            false,
+            true,
+        );
+        let scan_started = std::time::Instant::now();
+        let mut scan_total = 0u64;
+        for _ in 0..iterations {
+            let metrics = scanned.update_with_dirty_nodes(
+                &root,
+                RenderObjectDirtySummary::default(),
+                &empty_dirty,
+                1200,
+                800,
+                false,
+                true,
+            );
+            scan_total = scan_total.wrapping_add(std::hint::black_box(metrics.entries_reused));
+        }
+        let scan_time = scan_started.elapsed();
+
+        let mut generation_gated = RetainedDisplayList::default();
+        generation_gated.update_for_retained_generation(
+            &root,
+            1,
+            RenderObjectDirtySummary::default(),
+            &empty_dirty,
+            1200,
+            800,
+            false,
+            true,
+        );
+        let gated_started = std::time::Instant::now();
+        let mut gated_total = 0u64;
+        for _ in 0..iterations {
+            let metrics = generation_gated.update_for_retained_generation(
+                &root,
+                1,
+                RenderObjectDirtySummary::default(),
+                &empty_dirty,
+                1200,
+                800,
+                false,
+                true,
+            );
+            gated_total = gated_total.wrapping_add(std::hint::black_box(metrics.entries_reused));
+        }
+        let gated_time = gated_started.elapsed();
+
+        assert_eq!(scan_total, gated_total);
+        eprintln!(
+            "unchanged non-clean display-list sync: entry scan {scan_time:?}; retained-generation gate {gated_time:?}; ratio {:.1}x",
+            scan_time.as_secs_f64() / gated_time.as_secs_f64()
+        );
+        assert!(gated_time * 2 < scan_time);
+    }
+
+    // cargo test -p mesh-core-render --release -- sparse_display_entry_patch_beats_full_signature_collection --ignored --nocapture
+    #[test]
+    #[ignore = "release-only sparse display-entry collection microbenchmark"]
+    fn sparse_display_entry_patch_beats_full_signature_collection() {
+        let root = display_entry_benchmark_tree(120, 20);
+        let iterations = 2_000;
+        let selected_ids = HashSet::from([1_200_u64]);
+        let mut retained = HashMap::new();
+        collect_display_entries(&root, 0.0, 0.0, None, None, &mut retained);
+
+        let full_started = std::time::Instant::now();
+        let mut full = HashMap::new();
+        let mut full_total = 0usize;
+        for _ in 0..iterations {
+            full.clear();
+            collect_display_entries(&root, 0.0, 0.0, None, None, &mut full);
+            full_total = full_total.wrapping_add(std::hint::black_box(full.len()));
+        }
+        let full_time = full_started.elapsed();
+
+        let copied_started = std::time::Instant::now();
+        let mut copied = HashMap::new();
+        let mut copied_total = 0usize;
+        for _ in 0..iterations {
+            copied.clear();
+            copied.extend(retained.iter().map(|(key, entry)| (*key, *entry)));
+            for node_id in &selected_ids {
+                for slot in DISPLAY_PRIMITIVE_SLOTS {
+                    copied.remove(&DisplayListKey {
+                        node_id: *node_id,
+                        slot,
+                    });
+                }
+            }
+            collect_display_entries(&root, 0.0, 0.0, None, Some(&selected_ids), &mut copied);
+            copied_total = copied_total.wrapping_add(std::hint::black_box(copied.len()));
+        }
+        let copied_time = copied_started.elapsed();
+
+        let in_place_started = std::time::Instant::now();
+        let mut in_place = retained.clone();
+        let mut replacements = HashMap::new();
+        let mut in_place_total = 0usize;
+        for _ in 0..iterations {
+            replacements.clear();
+            collect_display_entries(
+                &root,
+                0.0,
+                0.0,
+                None,
+                Some(&selected_ids),
+                &mut replacements,
+            );
+            for node_id in &selected_ids {
+                for slot in DISPLAY_PRIMITIVE_SLOTS {
+                    let key = DisplayListKey {
+                        node_id: *node_id,
+                        slot,
+                    };
+                    if let Some(entry) = replacements.remove(&key) {
+                        in_place.insert(key, entry);
+                    } else {
+                        in_place.remove(&key);
+                    }
+                }
+            }
+            in_place_total = in_place_total.wrapping_add(std::hint::black_box(in_place.len()));
+        }
+        let in_place_time = in_place_started.elapsed();
+
+        assert_eq!(full_total, copied_total);
+        assert_eq!(copied_total, in_place_total);
+        assert_eq!(full, copied);
+        assert_eq!(copied, in_place);
+        eprintln!(
+            "sparse display entries: full signatures {full_time:?}; copied-map patch {copied_time:?}; in-place patch {in_place_time:?}; copy elimination ratio {:.1}x",
+            copied_time.as_secs_f64() / in_place_time.as_secs_f64()
+        );
+        assert!(
+            in_place_time * 5 < copied_time * 4,
+            "in-place sparse patching should beat copied-map patching by at least 20%"
+        );
     }
 
     // cargo test -p mesh-core-render --release -- tag_aware_payload_signature_skips_irrelevant_attr_hashes --ignored --nocapture
@@ -3957,6 +4260,178 @@ mod tests {
         );
         assert_eq!(rebuilt.entries_rebuilt, 2);
         assert_eq!(list.paint_commands().len(), 4);
+    }
+
+    #[test]
+    fn sparse_entry_patch_matches_full_collection_for_text_updates() {
+        let mut root = node(1, "row", 0.0, 0.0, 120.0, 40.0);
+        let mut unchanged = node(2, "text", 0.0, 0.0, 50.0, 20.0);
+        unchanged
+            .attributes
+            .insert("content".into(), "unchanged".into());
+        let mut changed = node(3, "text", 50.0, 0.0, 50.0, 20.0);
+        changed.attributes.insert("content".into(), "before".into());
+        root.children.extend([unchanged, changed]);
+
+        let mut full = RetainedDisplayList::default();
+        let mut sparse = RetainedDisplayList::default();
+        full.update(&root, 120, 40, false, true);
+        sparse.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                inserted: 3,
+                ..Default::default()
+            },
+            &HashSet::from([1, 2, 3]),
+            120,
+            40,
+            false,
+            true,
+        );
+
+        root.children[1]
+            .attributes
+            .insert("content".into(), "after".into());
+        let full_metrics = full.update(&root, 120, 40, false, true);
+        let sparse_metrics = sparse.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                text: 1,
+                ..Default::default()
+            },
+            &HashSet::from([3]),
+            120,
+            40,
+            false,
+            true,
+        );
+
+        assert_eq!(sparse.entries, full.entries);
+        assert_eq!(sparse.damage_rects(), full.damage_rects());
+        assert_eq!(sparse_metrics.entries_rebuilt, full_metrics.entries_rebuilt);
+        assert_eq!(sparse_metrics.damage_area, full_metrics.damage_area);
+    }
+
+    #[test]
+    fn sparse_entry_patch_matches_full_collection_for_material_updates() {
+        let mut root = node(1, "row", 0.0, 0.0, 120.0, 40.0);
+        let unchanged = node(2, "box", 0.0, 0.0, 50.0, 20.0);
+        let changed = node(3, "box", 50.0, 0.0, 50.0, 20.0);
+        root.children.extend([unchanged, changed]);
+
+        let mut full = RetainedDisplayList::default();
+        let mut sparse = RetainedDisplayList::default();
+        full.update(&root, 120, 40, false, true);
+        sparse.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                inserted: 3,
+                ..Default::default()
+            },
+            &HashSet::from([1, 2, 3]),
+            120,
+            40,
+            false,
+            true,
+        );
+
+        root.children[1].computed_style.background_color = Color {
+            r: 220,
+            g: 40,
+            b: 30,
+            a: 255,
+        };
+        let full_metrics = full.update(&root, 120, 40, false, true);
+        let sparse_metrics = sparse.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                material: 1,
+                ..Default::default()
+            },
+            &HashSet::from([3]),
+            120,
+            40,
+            false,
+            true,
+        );
+
+        assert_eq!(sparse.entries, full.entries);
+        assert_eq!(sparse.damage_rects(), full.damage_rects());
+        assert_eq!(sparse_metrics.entries_rebuilt, full_metrics.entries_rebuilt);
+        assert_eq!(sparse_metrics.damage_area, full_metrics.damage_area);
+        assert_eq!(
+            command_debugs(sparse.paint_commands(), &[1, 2, 3]),
+            command_debugs(full.paint_commands(), &[1, 2, 3])
+        );
+    }
+
+    // cargo test -p mesh-core-render --release -- sparse_material_update_beats_full_display_rebuild --ignored --nocapture
+    #[test]
+    #[ignore = "release-only sparse material-update display-list benchmark"]
+    fn sparse_material_update_beats_full_display_rebuild() {
+        let iterations = 1_000_u64;
+        let changed_row = 60;
+        let changed_col = 10;
+
+        let mut full_root = display_entry_benchmark_tree(120, 20);
+        let changed_id = full_root.children[changed_row].children[changed_col].id;
+        let mut full = RetainedDisplayList::default();
+        full.update(&full_root, 1200, 800, false, true);
+        let full_started = std::time::Instant::now();
+        let mut full_rebuilt = 0u64;
+        for generation in 0..iterations {
+            full_root.children[changed_row].children[changed_col]
+                .computed_style
+                .background_color
+                .r = (generation % 251) as u8;
+            full_rebuilt = full_rebuilt.wrapping_add(std::hint::black_box(
+                full.update(&full_root, 1200, 800, false, true)
+                    .entries_rebuilt,
+            ));
+        }
+        let full_time = full_started.elapsed();
+
+        let mut sparse_root = display_entry_benchmark_tree(120, 20);
+        let mut sparse = RetainedDisplayList::default();
+        sparse.update(&sparse_root, 1200, 800, false, true);
+        let dirty_ids = HashSet::from([changed_id]);
+        let sparse_started = std::time::Instant::now();
+        let mut sparse_rebuilt = 0u64;
+        for generation in 0..iterations {
+            sparse_root.children[changed_row].children[changed_col]
+                .computed_style
+                .background_color
+                .r = (generation % 251) as u8;
+            sparse_rebuilt = sparse_rebuilt.wrapping_add(std::hint::black_box(
+                sparse
+                    .update_with_dirty_nodes(
+                        &sparse_root,
+                        RenderObjectDirtySummary {
+                            material: 1,
+                            ..Default::default()
+                        },
+                        &dirty_ids,
+                        1200,
+                        800,
+                        false,
+                        true,
+                    )
+                    .entries_rebuilt,
+            ));
+        }
+        let sparse_time = sparse_started.elapsed();
+
+        assert_eq!(sparse_rebuilt, full_rebuilt);
+        assert_eq!(sparse.entries, full.entries);
+        assert_eq!(sparse.damage_rects(), full.damage_rects());
+        eprintln!(
+            "one-node material display-list update: full {full_time:?}; sparse {sparse_time:?}; ratio {:.1}x",
+            full_time.as_secs_f64() / sparse_time.as_secs_f64()
+        );
+        assert!(
+            sparse_time * 2 < full_time,
+            "sparse material updates should be at least 2x faster than full display-list rebuilds"
+        );
     }
 
     #[test]
@@ -5001,7 +5476,7 @@ mod tests {
         for _ in 0..iterations {
             let mut ordered_entries = Vec::new();
             let mut next = HashMap::new();
-            collect_display_entries(&tree, 0.0, 0.0, Some(&mut ordered_entries), &mut next);
+            collect_display_entries(&tree, 0.0, 0.0, Some(&mut ordered_entries), None, &mut next);
             old_total = old_total
                 .saturating_add(std::hint::black_box(ordered_entries.len()))
                 .saturating_add(std::hint::black_box(next.len()));
@@ -5015,7 +5490,7 @@ mod tests {
         for _ in 0..iterations {
             ordered_entries.clear();
             next.clear();
-            collect_display_entries(&tree, 0.0, 0.0, Some(&mut ordered_entries), &mut next);
+            collect_display_entries(&tree, 0.0, 0.0, Some(&mut ordered_entries), None, &mut next);
             new_total = new_total
                 .saturating_add(std::hint::black_box(ordered_entries.len()))
                 .saturating_add(std::hint::black_box(next.len()));
@@ -5047,7 +5522,14 @@ mod tests {
         for _ in 0..iterations {
             ordered_entries.clear();
             old_next.clear();
-            collect_display_entries(&tree, 0.0, 0.0, Some(&mut ordered_entries), &mut old_next);
+            collect_display_entries(
+                &tree,
+                0.0,
+                0.0,
+                Some(&mut ordered_entries),
+                None,
+                &mut old_next,
+            );
             old_total = old_total.saturating_add(std::hint::black_box(old_next.len()));
         }
         let old_time = old_started.elapsed();
@@ -5057,7 +5539,7 @@ mod tests {
         let mut new_next = HashMap::new();
         for _ in 0..iterations {
             new_next.clear();
-            collect_display_entries(&tree, 0.0, 0.0, None, &mut new_next);
+            collect_display_entries(&tree, 0.0, 0.0, None, None, &mut new_next);
             new_total = new_total.saturating_add(std::hint::black_box(new_next.len()));
         }
         let new_time = new_started.elapsed();
@@ -5153,5 +5635,52 @@ mod tests {
         );
         assert_eq!(old_total, new_total);
         assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-render --release -- single_root_command_span_assembly_beats_ancestor_copying --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained command-span assembly microbenchmark"]
+    fn single_root_command_span_assembly_beats_ancestor_copying() {
+        let tree = display_entry_benchmark_tree(120, 20);
+        let mut list = RetainedDisplayList::default();
+        list.update(&tree, 4096, 4096, false, false);
+
+        let copied = build_command_spans_with_ancestor_copying(&tree, &list.subtrees);
+        let assembled = build_command_spans(&tree, &list.subtrees);
+        assert_eq!(copied, assembled);
+
+        let iterations = 1_000;
+        let old_started = std::time::Instant::now();
+        let mut old_total = 0_usize;
+        for _ in 0..iterations {
+            old_total = old_total.saturating_add(std::hint::black_box(
+                build_command_spans_with_ancestor_copying(
+                    std::hint::black_box(&tree),
+                    std::hint::black_box(&list.subtrees),
+                )
+                .len(),
+            ));
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_total = 0_usize;
+        for _ in 0..iterations {
+            new_total = new_total.saturating_add(std::hint::black_box(
+                build_command_spans(
+                    std::hint::black_box(&tree),
+                    std::hint::black_box(&list.subtrees),
+                )
+                .len(),
+            ));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "command span construction: ancestor-copying {old_time:?}; single-root {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_total, new_total);
+        assert!(new_time * 10 < old_time * 9);
     }
 }

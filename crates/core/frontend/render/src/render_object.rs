@@ -135,6 +135,49 @@ impl RenderObjectTree {
         self.update_inner(root, Some(retained_tree_generation))
     }
 
+    /// Updates only nodes marked dirty by an authoritative retained-tree diff.
+    ///
+    /// The caller must use this only for non-structural updates, where node
+    /// identity and parent/child relationships are unchanged. We still walk
+    /// the tree to avoid building another node lookup table, but clean nodes
+    /// bypass paint-data construction and its style/attribute hashing.
+    pub fn update_for_retained_dirty_nodes(
+        &mut self,
+        root: &WidgetNode,
+        retained_tree_generation: u64,
+        retained_dirty_node_ids: &HashSet<NodeId>,
+    ) -> RenderObjectDirtySummary {
+        if self.retained_tree_generation == Some(retained_tree_generation) {
+            self.last_dirty = RenderObjectDirtySummary::default();
+            self.dirty_nodes.clear();
+            return self.last_dirty;
+        }
+
+        if self.root != Some(root.id) || self.objects.is_empty() {
+            return self.update_inner(root, Some(retained_tree_generation));
+        }
+
+        let mut dirty = RenderObjectDirtySummary::default();
+        let mut dirty_nodes = std::mem::take(&mut self.dirty_nodes);
+        dirty_nodes.clear();
+        update_dirty_render_objects(
+            root,
+            None,
+            &mut self.objects,
+            retained_dirty_node_ids,
+            &mut dirty,
+            &mut dirty_nodes,
+        );
+
+        if dirty.any() {
+            self.generation = self.generation.saturating_add(1);
+        }
+        self.retained_tree_generation = Some(retained_tree_generation);
+        self.last_dirty = dirty;
+        self.dirty_nodes = dirty_nodes;
+        dirty
+    }
+
     fn update_inner(
         &mut self,
         root: &WidgetNode,
@@ -335,6 +378,51 @@ fn update_retained_render_objects(
         );
     }
     visited
+}
+
+fn update_dirty_render_objects(
+    node: &WidgetNode,
+    parent: Option<NodeId>,
+    objects: &mut HashMap<NodeId, RenderObjectPaintData>,
+    retained_dirty_node_ids: &HashSet<NodeId>,
+    dirty: &mut RenderObjectDirtySummary,
+    dirty_nodes: &mut HashSet<NodeId>,
+) {
+    if retained_dirty_node_ids.contains(&node.id) {
+        let current = objects
+            .get_mut(&node.id)
+            .expect("non-structural retained update must preserve render-object identity");
+        debug_assert_eq!(current.parent, parent);
+        debug_assert!(
+            current
+                .child_ids
+                .iter()
+                .copied()
+                .eq(node.children.iter().map(|child| child.id))
+        );
+        let before = *dirty;
+        let child_ids = std::mem::take(&mut current.child_ids);
+        let next = render_object_paint_data(node, parent, Some(current), child_ids);
+        dirty.add_diff(current, &next);
+        if *dirty != before {
+            dirty_nodes.insert(node.id);
+        }
+        *current = RenderObjectPaintData {
+            last_seen_epoch: current.last_seen_epoch,
+            ..next
+        };
+    }
+
+    for child in &node.children {
+        update_dirty_render_objects(
+            child,
+            Some(node.id),
+            objects,
+            retained_dirty_node_ids,
+            dirty,
+            dirty_nodes,
+        );
+    }
 }
 
 fn render_object_paint_data(
@@ -965,6 +1053,107 @@ mod tests {
         let dirty = tree.update_for_retained_generation(&root, 2);
         assert_eq!(dirty.text, 1);
         assert_eq!(tree.generation(), 2);
+    }
+
+    #[test]
+    fn render_object_tree_rehashes_only_retained_dirty_nodes() {
+        let mut root = WidgetNode::new("row");
+        root.id = 1;
+        for id in 2..=5 {
+            let mut child = WidgetNode::new("text");
+            child.id = id;
+            child
+                .attributes
+                .insert("content".into(), format!("child {id}"));
+            root.children.push(child);
+        }
+
+        let mut tree = RenderObjectTree::default();
+        tree.update_for_retained_generation(&root, 1);
+
+        root.children[2]
+            .attributes
+            .insert("content".into(), "changed".into());
+        let retained_dirty_ids = HashSet::from([4]);
+        let dirty = tree.update_for_retained_dirty_nodes(&root, 2, &retained_dirty_ids);
+
+        assert_eq!(dirty.text, 1);
+        assert_eq!(tree.dirty_node_ids(), &HashSet::from([4]));
+        assert_eq!(tree.generation(), 2);
+
+        let clean = tree.update_for_retained_dirty_nodes(&root, 2, &HashSet::new());
+        assert!(!clean.any());
+        assert!(tree.dirty_node_ids().is_empty());
+    }
+
+    // cargo test -p mesh-core-render --release -- sparse_retained_render_object_update_beats_full_rehash_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only sparse retained render-object microbenchmark"]
+    fn sparse_retained_render_object_update_beats_full_rehash_benchmark() {
+        fn benchmark_tree(children: u64) -> WidgetNode {
+            let mut root = WidgetNode::new("row");
+            root.id = 1;
+            root.children.reserve(children as usize);
+            for id in 2..children + 2 {
+                let mut child = WidgetNode::new("text");
+                child.id = id;
+                child
+                    .attributes
+                    .insert("content".into(), format!("retained child {id}"));
+                child
+                    .attributes
+                    .insert("data-benchmark".into(), "paint fingerprint payload".into());
+                child.computed_style.font_size = 13.0 + (id % 4) as f32;
+                root.children.push(child);
+            }
+            root
+        }
+
+        let iterations = 2_000_u64;
+        let changed_index = 1_024_usize;
+        let changed_id = changed_index as u64 + 2;
+
+        let mut full_root = benchmark_tree(2_048);
+        let mut full_tree = RenderObjectTree::default();
+        full_tree.update(&full_root);
+        let full_started = Instant::now();
+        let mut full_changes = 0usize;
+        for generation in 2..iterations + 2 {
+            full_root.children[changed_index]
+                .attributes
+                .insert("content".into(), format!("generation {generation}"));
+            full_changes += std::hint::black_box(full_tree.update(&full_root).text);
+        }
+        let full_time = full_started.elapsed();
+
+        let mut sparse_root = benchmark_tree(2_048);
+        let mut sparse_tree = RenderObjectTree::default();
+        sparse_tree.update_for_retained_generation(&sparse_root, 1);
+        let retained_dirty_ids = HashSet::from([changed_id]);
+        let sparse_started = Instant::now();
+        let mut sparse_changes = 0usize;
+        for generation in 2..iterations + 2 {
+            sparse_root.children[changed_index]
+                .attributes
+                .insert("content".into(), format!("generation {generation}"));
+            sparse_changes += std::hint::black_box(
+                sparse_tree
+                    .update_for_retained_dirty_nodes(&sparse_root, generation, &retained_dirty_ids)
+                    .text,
+            );
+        }
+        let sparse_time = sparse_started.elapsed();
+
+        assert_eq!(full_changes, iterations as usize);
+        assert_eq!(sparse_changes, full_changes);
+        eprintln!(
+            "sparse retained render-object update: full {full_time:?}; sparse {sparse_time:?}; ratio {:.1}x",
+            full_time.as_secs_f64() / sparse_time.as_secs_f64()
+        );
+        assert!(
+            sparse_time * 2 < full_time,
+            "sparse retained updates should be at least 2x faster than full paint-data rehashing"
+        );
     }
 
     #[test]

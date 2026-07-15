@@ -24,7 +24,7 @@ fn pseudo_state_annotation_uses_stable_keys_after_rebuild() {
         &mut HashMap::new(),
         &mut HashMap::new(),
         &checked_values,
-        &HashMap::new(),
+        &mut HashMap::new(),
     );
 
     let mut rebuilt_tree = root_with(vec![
@@ -47,7 +47,7 @@ fn pseudo_state_annotation_uses_stable_keys_after_rebuild() {
         &mut HashMap::new(),
         &mut HashMap::new(),
         &checked_values,
-        &HashMap::new(),
+        &mut HashMap::new(),
     );
 
     let button = node_by_mesh_key(&rebuilt_tree, "root/0");
@@ -81,7 +81,7 @@ fn pseudo_state_annotation_sets_disabled_and_checked_deterministically() {
         &mut HashMap::new(),
         &mut HashMap::new(),
         &checked_values,
-        &HashMap::new(),
+        &mut HashMap::new(),
     );
 
     assert!(node_by_mesh_key(&tree, "root/0").state.disabled);

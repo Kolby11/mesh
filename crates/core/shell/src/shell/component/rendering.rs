@@ -292,9 +292,9 @@ impl FrontendSurfaceComponent {
             &mut self.slider_values,
             &mut self.slider_script_values,
             &self.checked_values,
-            &self.scroll_offsets,
+            &mut self.scroll_offsets,
         );
-        annotate_runtime_tree(tree, "root".to_string(), &mut annotation_context);
+        annotate_runtime_and_overflow_tree(tree, "root".to_string(), &mut annotation_context);
         if self.surface_exiting {
             append_class_recursive(tree, "mesh-surface-exiting");
             tree.attributes
@@ -320,8 +320,6 @@ impl FrontendSurfaceComponent {
             }
         }
         self.annotate_surface_shortcuts(tree);
-        annotate_overflow_tree(tree, "root", &mut self.scroll_offsets);
-
         if trigger_kind == "rebuild" {
             self.node_service_field_deps = NodeServiceFieldDependencies::build(tree);
         }

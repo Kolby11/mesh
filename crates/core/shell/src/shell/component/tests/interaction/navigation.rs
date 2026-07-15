@@ -605,7 +605,7 @@ end
         &mut HashMap::new(),
         &mut HashMap::new(),
         &HashMap::new(),
-        &HashMap::new(),
+        &mut HashMap::new(),
     );
     component.annotate_surface_shortcuts(&mut tree);
     assert_eq!(
@@ -789,7 +789,7 @@ end
         &mut HashMap::new(),
         &mut HashMap::new(),
         &HashMap::new(),
-        &HashMap::new(),
+        &mut HashMap::new(),
     );
     component.annotate_surface_shortcuts(&mut tree);
     assert_eq!(

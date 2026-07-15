@@ -826,7 +826,9 @@ fn reconcile_retained_taffy_node(
     let retained = node.has_mesh_key();
     let taffy_id = if retained {
         if let Some(existing) = state.node_map.get(&node.id).copied() {
-            state.tree.set_style(existing, style)?;
+            if state.tree.style(existing)? != &style {
+                state.tree.set_style(existing, style)?;
+            }
             existing
         } else {
             let created = state.tree.new_leaf(style)?;
@@ -849,7 +851,9 @@ fn reconcile_retained_taffy_node(
             reconcile_retained_taffy_node(child, state, node_id_to_taffy, text_nodes, report)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    state.tree.set_children(taffy_id, &child_ids)?;
+    if state.tree.children(taffy_id)? != child_ids {
+        state.tree.set_children(taffy_id, &child_ids)?;
+    }
     Ok(taffy_id)
 }
 
@@ -926,8 +930,10 @@ fn update_text_context(
                 nowrap: node.computed_style.white_space == crate::WhiteSpace::Nowrap,
             },
         );
-        tree.set_node_context(taffy_id, Some(node.id))?;
-    } else {
+        if tree.get_node_context(taffy_id) != Some(&node.id) {
+            tree.set_node_context(taffy_id, Some(node.id))?;
+        }
+    } else if tree.get_node_context(taffy_id).is_some() {
         tree.set_node_context(taffy_id, None)?;
     }
     Ok(())
@@ -2235,6 +2241,111 @@ mod tests {
         );
 
         assert_layout_maps_eq(&keyed_layouts(&retained), &keyed_layouts(&fresh));
+    }
+
+    #[test]
+    fn retained_structural_layout_preserves_taffy_node_identity() {
+        let mut retained = retained_fixture();
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            false,
+            &mut cache,
+            None,
+        );
+        let original_ids = state.node_map.clone();
+
+        retained.children.swap(0, 1);
+        retained.children.push(keyed_node(
+            "root/2",
+            "c",
+            Dimension::Px(40.0),
+            Dimension::Px(20.0),
+        ));
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            true,
+            &mut cache,
+            None,
+        );
+
+        for (node_id, taffy_id) in original_ids {
+            assert_eq!(state.node_map.get(&node_id), Some(&taffy_id));
+        }
+        assert_eq!(state.node_map.len(), 4);
+    }
+
+    // cargo test -p mesh-core-elements --release -- retained_structural_layout_beats_fresh_tree_rebuild --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained structural layout benchmark"]
+    fn retained_structural_layout_beats_fresh_tree_rebuild() {
+        use std::time::Instant;
+
+        let iterations = 200;
+        let mut retained = broad_retained_fixture(4, 5);
+        let mut retained_state = PerSurfaceLayoutState::default();
+        let mut retained_cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut retained_state,
+            1200.0,
+            800.0,
+            false,
+            false,
+            &mut retained_cache,
+            None,
+        );
+        let original_ids = retained_state.node_map.clone();
+
+        let retained_started = Instant::now();
+        for _ in 0..iterations {
+            retained.children.swap(0, 1);
+            LayoutEngine::compute_incremental(
+                std::hint::black_box(&mut retained),
+                &mut retained_state,
+                1200.0,
+                800.0,
+                false,
+                true,
+                &mut retained_cache,
+                None,
+            );
+        }
+        let retained_time = retained_started.elapsed();
+
+        let mut fresh = broad_retained_fixture(4, 5);
+        let mut fresh_cache = IntrinsicLayoutCache::default();
+        let fresh_started = Instant::now();
+        for _ in 0..iterations {
+            fresh.children.swap(0, 1);
+            LayoutEngine::compute_with_intrinsic_cache_and_measurer(
+                std::hint::black_box(&mut fresh),
+                1200.0,
+                800.0,
+                &mut fresh_cache,
+                None,
+            );
+        }
+        let fresh_time = fresh_started.elapsed();
+
+        assert_layout_maps_eq(&keyed_layouts(&retained), &keyed_layouts(&fresh));
+        for (node_id, taffy_id) in original_ids {
+            assert_eq!(retained_state.node_map.get(&node_id), Some(&taffy_id));
+        }
+        eprintln!(
+            "structural layout: fresh tree {fresh_time:?}; retained reconcile {retained_time:?}; ratio {:.1}x",
+            fresh_time.as_secs_f64() / retained_time.as_secs_f64()
+        );
+        assert!(retained_time * 5 < fresh_time * 4);
     }
 
     #[test]

@@ -289,29 +289,98 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       slotmap-keyed snapshot reuse (D). `RenderObjectTree` now counts visited
       nodes and skips the full retained-object stale-entry scan on clean
       non-structural updates; a 4,096-entry release benchmark measured 65.3µs
-      retain scanning versus 10.7µs conditional skip (6.1x).
+      retain scanning versus 10.7µs conditional skip (6.1x). Added
+      2026-07-15: non-structural render-object sync now consumes the retained
+      tree's per-node dirty index, walking clean nodes without rebuilding or
+      hashing their paint data; insert/remove/reorder changes retain the full
+      diff fallback. A 2,049-node release benchmark with one changed text node
+      over 2,000 updates measured 511.1ms full rehash versus 44.2ms sparse
+      sync (11.6x faster for render-object synchronization, including dirty-set
+      membership checks). Follow-up 2026-07-15: the retained tree now publishes
+      a reusable sparse `NodeId` set for non-structural downstream sync instead
+      of resolving NodeId→slot and then probing the dirty secondary map for
+      every visited node. Structural insertion frames skip populating the set.
+      Across 13.65M sparse membership probes, release measurements were 95.9ms
+      slot-indirect versus 74.5ms direct (1.3x faster).
 - [ ] Triple full-tree fingerprinting on dirty frames: make
       `RetainedWidgetTree` the single fingerprint pass; render-object tree and
-      display entries consume its per-node dirty flags (N).
+      display entries consume its per-node dirty flags (N). Progress
+      2026-07-15: release display-entry collection now patches retained entries
+      only for dirty nodes when render-object changes are limited to
+      text/primitive/accessibility payloads. Material, opacity, geometry,
+      transform, clip, and structural changes conservatively retain the full
+      collection path. A 2,521-node release benchmark over 2,000 one-node
+      patches measured 2.874s full signature collection versus 385.7ms sparse
+      patching (7.5x faster for entry collection). Follow-up 2026-07-15: sparse
+      updates now patch the retained entry map in place instead of copying and
+      comparing every clean entry. A same-shape release benchmark measured
+      469.6ms for the copied-map path versus 267.2ms in place (1.8x faster for
+      sparse patching), and 2.833s for full signature collection (10.6x slower
+      than the final path). Material-only updates now use the sparse path too;
+      geometry, transform, clip, opacity, and structural changes retain the
+      conservative fallback. A 2,521-node end-to-end display-list benchmark
+      over 1,000 one-node color changes measured 4.325s full rebuild versus
+      459.9ms sparse update (9.4x faster), with retained entries, damage, and
+      paint commands checked against the full path. Remaining: share the
+      retained tree's computed fingerprints directly instead of only its dirty
+      scope, and prove any additional dirty categories before widening them.
 - [ ] Any non-clean frame bypasses all generation shortcuts
       (`use_generation_shortcuts` requires an empty dirty set); widen to
       per-node dirty scoping together with the §N unification (P). Interaction
       changed-key sets now reserve path-derived capacity, and descendant nodes
       of an already-affected interaction subtree skip redundant changed-set
-      hash probes.
-- [ ] Fuse the remaining unconditional `finalize_tree` annotation walks into
-      one traversal → v1.27 (D; conditional walks already presence-gated,
-      naive fusion rejected — see log).
+      hash probes. Progress 2026-07-15: the shell no longer gates downstream
+      generation reuse on an entirely clean component frame. Non-structural
+      render-object updates consume the retained per-node dirty index, and the
+      display list always consumes the authoritative retained generation, so
+      script/service invalidations that produce no visual tree change skip its
+      full entry/signature scan while still honoring surface resize and forced
+      full-damage policy. A 2,521-node release benchmark over 2,000 unchanged
+      non-clean syncs measured 3.202s scanning entries versus 39.2µs through
+      the retained-generation gate (~81,724x for the eliminated scan).
+      Remaining: scope the retained widget tree's own fingerprint traversal and
+      unify changed-node fingerprints across retained/render/display layers.
+- [x] Fuse the remaining unconditional `finalize_tree` annotation walks into
+      one traversal → v1.27 (D). Done 2026-07-15: runtime-state annotation now
+      performs its existing pre-order work and overflow bounds/clamping on
+      node exit, removing the second unconditional key-path traversal while
+      preserving the required post-order overflow semantics. The interaction
+      crate exposes a one-node overflow primitive; its standalone tree API is
+      retained. A 1,365-node release benchmark over 2,000 finalization passes
+      measured 271.5ms separate versus 219.2ms fused (1.2x faster). Full tree
+      debug snapshots, scroll-offset results, interaction tests, and scroll-ref
+      integration tests match the former path. Conditional marker walks remain
+      presence-gated and selection remains a keyed lookup.
 - [ ] Display-list segment/rope command storage → v1.21: stop flattening
       retained subtrees into per-ancestor copies (O(n × depth) storage and
       re-copy, N addendum); dirty parents with layout/clip/transform changes
       still force descendant command rebuilds (N addendum). Dirty-ancestor
       collection now reuses its path and ancestor-set allocations during
       retained subtree rebuilds; a release benchmark measured 6.39ms fresh
-      versus 4.38ms reused over 50,000 sparse walks (1.46x).
-- [ ] Retain Taffy node state across structural layout passes;
-      `build_taffy_tree` still rebuilds a fresh TaffyTree per structural
-      layout → v1.21 (non-structural dirty-node sync landed, T).
+      versus 4.38ms reused over 50,000 sparse walks (1.46x). Progress
+      2026-07-15: command-span metadata is now retained only as local subtree
+      facts and assembled directly into one root index per update, eliminating
+      the previous descendant-span vector copy at every ancestor. Equivalent
+      2,521-span release construction measured 104.9ms with ancestor copying
+      versus 52.1ms with single-root assembly over 1,000 passes (2.0x faster).
+      Command arrays are still flattened and remain the next segment-storage
+      step. Rejected 2026-07-15: retaining only local commands but eagerly
+      reconstructing the compatibility root slice improved isolated flattening
+      2.6x, yet regressed the one-node sparse update from 459.9ms to 603.0ms
+      because it required per-node traversal/lookups. The retained baseline was
+      restored and remeasured at 459.8ms; the next design must let replay consume
+      segments directly instead of eagerly re-flattening them.
+- [x] Retain Taffy node state across structural layout passes → v1.21. Done
+      2026-07-15: production structural passes reconcile keyed nodes in the
+      per-surface `TaffyTree`, preserving their `TaffyNodeId`s across insertion,
+      removal, and reorder. Reconciliation now compares retained style, node
+      context, and child order before calling Taffy's mutators, so unchanged
+      descendants keep their cached layout instead of being dirtied. A
+      1,365-node release benchmark over 200 root reorders measured 148.3ms for
+      fresh `build_taffy_tree` reconstruction versus 67.5ms retained (2.2x
+      faster), with identical geometry and stable existing node IDs. The fresh
+      builder remains only for stateless compatibility calls and invalid-cache
+      initialization.
 - [ ] Child popup surfaces bypass the retained pipeline: full clear + repaint
       through the immediate-mode painter per present, plus per-frame key
       walks (P); child buffers are still repainted eagerly even though sparse

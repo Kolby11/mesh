@@ -15,11 +15,11 @@ pub use hit_test::{
     pointer_press_hit, source_element_tag,
 };
 pub use scroll::{
-    ScrollableHit, annotate_overflow_tree, find_scrollable_at, find_scrollable_at_with_limits,
-    measure_content_size, scroll_into_view_offsets, scroll_limits,
+    ScrollableHit, annotate_overflow_node, annotate_overflow_tree, find_scrollable_at,
+    find_scrollable_at_with_limits, measure_content_size, scroll_into_view_offsets, scroll_limits,
 };
 
-pub(crate) type ContentBounds = (f32, f32, f32, f32);
+pub type ContentBounds = (f32, f32, f32, f32);
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ScrollOffsetState {

@@ -281,6 +281,24 @@ fn annotate_overflow_tree_with_path(
         key_path.truncate(restore_len);
     }
 
+    Some(annotate_overflow_node(
+        node,
+        key_path,
+        scroll_offsets,
+        children_bounds,
+    ))
+}
+
+/// Annotates one node after its children and returns its propagated bounds.
+///
+/// This is exposed so callers that already perform a pre-order annotation can
+/// fold overflow's post-order work into the same traversal.
+pub fn annotate_overflow_node(
+    node: &mut WidgetNode,
+    key: &str,
+    scroll_offsets: &mut HashMap<String, ScrollOffsetState>,
+    children_bounds: Option<ContentBounds>,
+) -> ContentBounds {
     let content_origin_x = node.layout.x + node.computed_style.padding.left;
     let content_origin_y = node.layout.y + node.computed_style.padding.top;
     let viewport_width = (node.layout.width - node.computed_style.padding.horizontal()).max(0.0);
@@ -304,12 +322,12 @@ fn annotate_overflow_tree_with_path(
         0.0
     };
 
-    let offset = if scroll_offsets.contains_key(key_path.as_str()) {
+    let offset = if scroll_offsets.contains_key(key) {
         scroll_offsets
-            .get_mut(key_path.as_str())
+            .get_mut(key)
             .expect("scroll offset key was just checked")
     } else {
-        scroll_offsets.entry(key_path.clone()).or_default()
+        scroll_offsets.entry(key.to_string()).or_default()
     };
     offset.x = offset.x.clamp(0.0, max_x);
     offset.y = offset.y.clamp(0.0, max_y);
@@ -330,12 +348,9 @@ fn annotate_overflow_tree_with_path(
         node.layout.y + node.layout.height.max(0.0),
     );
     if node_clips_children(node) {
-        Some(own_bounds)
+        own_bounds
     } else {
-        Some(union_bounds(
-            Some(own_bounds),
-            children_bounds.unwrap_or(own_bounds),
-        ))
+        union_bounds(Some(own_bounds), children_bounds.unwrap_or(own_bounds))
     }
 }
 
