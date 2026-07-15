@@ -738,11 +738,15 @@ fn union_damage(current: Option<DamageRect>, next: DamageRect) -> DamageRect {
 
 /// Scale a damage rect from logical (CSS) coordinates to physical (device) coordinates.
 fn scale_damage_rect_to_physical(rect: DamageRect, scale: f32) -> DamageRect {
+    let left = (rect.x as f32 * scale).floor() as u32;
+    let top = (rect.y as f32 * scale).floor() as u32;
+    let right = (rect.x.saturating_add(rect.width) as f32 * scale).ceil() as u32;
+    let bottom = (rect.y.saturating_add(rect.height) as f32 * scale).ceil() as u32;
     DamageRect {
-        x: (rect.x as f32 * scale).floor() as u32,
-        y: (rect.y as f32 * scale).floor() as u32,
-        width: ((rect.width as f32 * scale).ceil() as u32).max(1),
-        height: ((rect.height as f32 * scale).ceil() as u32).max(1),
+        x: left,
+        y: top,
+        width: right.saturating_sub(left).max(1),
+        height: bottom.saturating_sub(top).max(1),
     }
 }
 
@@ -1150,7 +1154,11 @@ impl LayerShellBackend {
         std::mem::take(&mut self.state.dismissed_popups)
     }
 
-    fn clamp_surface_config(&self, surface_id: &str, cfg: LayerSurfaceConfig) -> LayerSurfaceConfig {
+    fn clamp_surface_config(
+        &self,
+        surface_id: &str,
+        cfg: LayerSurfaceConfig,
+    ) -> LayerSurfaceConfig {
         clamp_surface_config_to_output(cfg, self.output_logical_size_for_surface(surface_id))
     }
 
@@ -1180,7 +1188,10 @@ impl LayerShellBackend {
         Self::logical_size_of(&self.state.output_state, output)
     }
 
-    fn logical_size_of(output_state: &OutputState, output: &wl_output::WlOutput) -> Option<(u32, u32)> {
+    fn logical_size_of(
+        output_state: &OutputState,
+        output: &wl_output::WlOutput,
+    ) -> Option<(u32, u32)> {
         output_state.info(output).and_then(|info| {
             info.logical_size
                 .or_else(|| {
@@ -2221,7 +2232,10 @@ mod tests {
         cfg.margin_right = 0;
 
         let clamped = clamp_surface_config_to_output(cfg.clone(), None);
-        assert_eq!(clamped.width, 3840, "width must pass through unclamped when the surface's own output isn't known yet");
+        assert_eq!(
+            clamped.width, 3840,
+            "width must pass through unclamped when the surface's own output isn't known yet"
+        );
         assert_eq!(clamped.margin_left, 0);
         assert_eq!(clamped.margin_right, 0);
     }
@@ -2430,6 +2444,28 @@ mod tests {
         assert_eq!(scaled.y, 30); // 20 * 1.5 = 30.0 → 30
         assert_eq!(scaled.width, 150); // 100 * 1.5 = 150.0 → 150
         assert_eq!(scaled.height, 75); // 50 * 1.5 = 75.0 → 75
+    }
+
+    #[test]
+    fn scale_damage_rect_to_physical_rounds_far_edge_not_width() {
+        let scaled = scale_damage_rect_to_physical(
+            DamageRect {
+                x: 1,
+                y: 3,
+                width: 2,
+                height: 2,
+            },
+            1.5,
+        );
+        assert_eq!(
+            scaled,
+            DamageRect {
+                x: 1,
+                y: 4,
+                width: 4,
+                height: 4,
+            }
+        );
     }
 
     #[test]
@@ -2860,5 +2896,56 @@ mod tests {
         eprintln!(
             "SHM copy over {iterations} disjoint frames: bounding union {union_elapsed:?}, rect list {disjoint_elapsed:?}"
         );
+    }
+
+    // cargo test -p mesh-core-presentation --release -- fractional_sparse_damage_copy_beats_full_surface_upload --ignored --nocapture
+    #[test]
+    #[ignore = "release-only fractional-scale SHM upload benchmark"]
+    fn fractional_sparse_damage_copy_beats_full_surface_upload() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let width = 1_920;
+        let height = 1_080;
+        let src = vec![0x7f; width as usize * height as usize * 4];
+        let mut canvas = vec![0; src.len()];
+        let logical_damage = DamageRect {
+            x: 101,
+            y: 73,
+            width: 24,
+            height: 20,
+        };
+        let physical_damage = scale_damage_rect_to_physical(logical_damage, 1.5);
+        let iterations = 100;
+
+        let full_started = Instant::now();
+        for _ in 0..iterations {
+            copy_bgra_damage_to_canvas(
+                black_box(&src),
+                black_box(&mut canvas),
+                width,
+                height,
+                full_damage(width, height),
+            );
+        }
+        let full_time = full_started.elapsed();
+
+        let sparse_started = Instant::now();
+        for _ in 0..iterations {
+            copy_bgra_damage_to_canvas(
+                black_box(&src),
+                black_box(&mut canvas),
+                width,
+                height,
+                physical_damage,
+            );
+        }
+        let sparse_time = sparse_started.elapsed();
+
+        eprintln!(
+            "fractional SHM upload: full {full_time:?}; sparse {sparse_time:?}; ratio {:.1}x; physical_damage={physical_damage:?}",
+            full_time.as_secs_f64() / sparse_time.as_secs_f64()
+        );
+        assert!(sparse_time * 10 < full_time);
     }
 }

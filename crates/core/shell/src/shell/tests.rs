@@ -776,6 +776,7 @@ struct PopoverHarnessState {
     child_inputs: Vec<(String, ComponentInput)>,
     profiling_enabled: Vec<bool>,
     hide_transition_ms: u64,
+    paint_generation: Option<u64>,
 }
 
 impl Default for PopoverHarnessState {
@@ -790,6 +791,7 @@ impl Default for PopoverHarnessState {
             child_inputs: Vec::new(),
             profiling_enabled: Vec::new(),
             hide_transition_ms: 0,
+            paint_generation: None,
         }
     }
 }
@@ -916,6 +918,10 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
             a: 255,
         });
         Ok(true)
+    }
+
+    fn child_surface_paint_generation(&self, _node_key: &str) -> Option<u64> {
+        self.state.lock().unwrap().paint_generation
     }
 
     fn child_hide_transition_ms(&self, _node_key: &str) -> u64 {
@@ -6042,6 +6048,10 @@ fn component_runtime_resolves_parent_and_child_surface_targets() {
             anchor_rect: (12, 0, 40, 56),
             content_padding: (0, 0, 0, 0),
             closing_until: None,
+            last_paint_generation: None,
+            last_paint_exiting: None,
+            last_paint_scale_bits: None,
+            last_paint_content_offset: None,
         });
 
     // Both surface ids now map to the same component, each tagged with its
@@ -6145,6 +6155,53 @@ fn child_surface_presents_full_damage_every_frame() {
             .iter()
             .all(|damage| damage.len() == 1 && damage[0].x == 0 && damage[0].y == 0),
         "every child popup present should carry full-surface damage, got {child_damage:?}"
+    );
+}
+
+#[test]
+fn child_surface_reuses_buffer_for_unchanged_authoritative_generation() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState {
+        paint_generation: Some(7),
+        ..Default::default()
+    }));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(Arc::clone(&state))));
+
+    render_components_until_child_popup(&mut shell);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    let paints_before = state.lock().unwrap().painted_nodes.len();
+    let presents_before = shell
+        .presentation_engine
+        .testing_presented_surfaces()
+        .iter()
+        .filter(|surface| *surface == &child_id)
+        .count();
+
+    shell.render_components().unwrap();
+    assert_eq!(state.lock().unwrap().painted_nodes.len(), paints_before);
+    assert_eq!(
+        shell
+            .presentation_engine
+            .testing_presented_surfaces()
+            .iter()
+            .filter(|surface| *surface == &child_id)
+            .count(),
+        presents_before
+    );
+
+    state.lock().unwrap().paint_generation = Some(8);
+    shell.render_components().unwrap();
+    assert_eq!(state.lock().unwrap().painted_nodes.len(), paints_before + 1);
+    assert_eq!(
+        shell
+            .presentation_engine
+            .testing_presented_surfaces()
+            .iter()
+            .filter(|surface| *surface == &child_id)
+            .count(),
+        presents_before + 1
     );
 }
 

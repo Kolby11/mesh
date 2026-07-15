@@ -617,6 +617,10 @@ impl Shell {
                     anchor_rect: request.anchor_rect,
                     content_padding: request.content_padding,
                     closing_until: None,
+                    last_paint_generation: None,
+                    last_paint_exiting: None,
+                    last_paint_scale_bits: None,
+                    last_paint_content_offset: None,
                 });
                 self.rebuild_component_surface_index();
                 TargetRef::Child(self.components[index].children.len() - 1)
@@ -827,6 +831,10 @@ impl Shell {
                 .unwrap_or(true)
             {
                 child.target.paint_buffer = Some(PixelBuffer::new(physical_w, physical_h));
+                child.last_paint_generation = None;
+                child.last_paint_exiting = None;
+                child.last_paint_scale_bits = None;
+                child.last_paint_content_offset = None;
             }
         }
 
@@ -836,6 +844,21 @@ impl Shell {
         // as `-bounds.0`/`-bounds.1` (the renderer applies `scale` to layout
         // + offset together), so this is unscaled padding, not physical px.
         let content_offset = (pad_left, pad_top);
+        let paint_generation = self.components[index]
+            .component
+            .child_surface_paint_generation(&node_key);
+        if child_surface_paint_cache_matches(
+            paint_generation,
+            self.components[index].children[child_index].last_paint_generation,
+            exiting,
+            self.components[index].children[child_index].last_paint_exiting,
+            scale.to_bits(),
+            self.components[index].children[child_index].last_paint_scale_bits,
+            content_offset,
+            self.components[index].children[child_index].last_paint_content_offset,
+        ) {
+            return Ok(false);
+        }
         let painted = {
             let runtime = &mut self.components[index];
             let buffer = runtime.children[child_index]
@@ -852,6 +875,11 @@ impl Shell {
             self.destroy_child_surface_at(index, child_index);
             return Ok(false);
         }
+        self.components[index].children[child_index].last_paint_generation = paint_generation;
+        self.components[index].children[child_index].last_paint_exiting = Some(exiting);
+        self.components[index].children[child_index].last_paint_scale_bits = Some(scale.to_bits());
+        self.components[index].children[child_index].last_paint_content_offset =
+            Some(content_offset);
         // `paint_child_surface` clears and fully repaints the child buffer
         // every frame, so any pixel may have changed since the last present.
         // The child has no incremental damage tracking of its own; presenting
@@ -1242,13 +1270,92 @@ fn map_popover_gravity(gravity: PopoverGravity) -> PopupGravity {
     }
 }
 
+#[inline]
+fn child_surface_paint_cache_matches(
+    generation: Option<u64>,
+    cached_generation: Option<u64>,
+    exiting: bool,
+    cached_exiting: Option<bool>,
+    scale_bits: u32,
+    cached_scale_bits: Option<u32>,
+    content_offset: (u32, u32),
+    cached_content_offset: Option<(u32, u32)>,
+) -> bool {
+    generation.is_some()
+        && cached_generation == generation
+        && cached_exiting == Some(exiting)
+        && cached_scale_bits == Some(scale_bits)
+        && cached_content_offset == Some(content_offset)
+}
+
 #[cfg(test)]
 mod performance_tests {
-    use super::child_surface_id;
+    use super::{child_surface_id, child_surface_paint_cache_matches};
+    use mesh_core_elements::style::Color;
+    use mesh_core_render::PixelBuffer;
     use smallvec::SmallVec;
     use std::collections::HashSet;
     use std::hint::black_box;
     use std::time::Instant;
+
+    #[test]
+    fn child_paint_cache_requires_every_raster_input_to_match() {
+        let matches = |generation, exiting, scale, offset| {
+            child_surface_paint_cache_matches(
+                generation,
+                Some(7),
+                exiting,
+                Some(false),
+                scale,
+                Some(1.0_f32.to_bits()),
+                offset,
+                Some((4, 4)),
+            )
+        };
+        assert!(matches(Some(7), false, 1.0_f32.to_bits(), (4, 4)));
+        assert!(!matches(None, false, 1.0_f32.to_bits(), (4, 4)));
+        assert!(!matches(Some(8), false, 1.0_f32.to_bits(), (4, 4)));
+        assert!(!matches(Some(7), true, 1.0_f32.to_bits(), (4, 4)));
+        assert!(!matches(Some(7), false, 2.0_f32.to_bits(), (4, 4)));
+        assert!(!matches(Some(7), false, 1.0_f32.to_bits(), (8, 4)));
+    }
+
+    // cargo test -p mesh-core-shell --release -- cached_child_paint_generation_beats_eager_buffer_clear --ignored --nocapture
+    #[test]
+    #[ignore = "release-only stable child-surface paint benchmark"]
+    fn cached_child_paint_generation_beats_eager_buffer_clear() {
+        let iterations = 10_000;
+        let mut buffer = PixelBuffer::new(160, 90);
+
+        let eager_started = Instant::now();
+        for _ in 0..iterations {
+            black_box(&mut buffer).clear(Color::TRANSPARENT);
+        }
+        let eager_time = eager_started.elapsed();
+
+        let cached_started = Instant::now();
+        let mut cache_hits = 0usize;
+        for _ in 0..iterations {
+            cache_hits += usize::from(child_surface_paint_cache_matches(
+                black_box(Some(7)),
+                black_box(Some(7)),
+                black_box(false),
+                black_box(Some(false)),
+                black_box(1.0_f32.to_bits()),
+                black_box(Some(1.0_f32.to_bits())),
+                black_box((4, 4)),
+                black_box(Some((4, 4))),
+            ));
+        }
+        let cached_time = cached_started.elapsed();
+
+        eprintln!(
+            "stable child paint: eager clear {eager_time:?}; generation cache {cached_time:?}; ratio {:.1}x; hits={cache_hits}",
+            eager_time.as_secs_f64() / cached_time.as_secs_f64()
+        );
+        assert_eq!(cache_hits, iterations);
+        assert!(cached_time * 10 < eager_time);
+    }
 
     // cargo test -p mesh-core-shell --release -- cached_child_surface_id_beats_reencoding --ignored --nocapture
     #[test]

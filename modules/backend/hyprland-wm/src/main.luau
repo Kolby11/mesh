@@ -276,7 +276,24 @@ function on_command_focus_workspace(self)
         return { ok = false, error = "missing workspace id" }
     end
     log_info("focus_workspace(" .. tostring(id) .. ")")
-    local result = mesh.exec("hyprctl", { "dispatch", "workspace", tostring(id) })
-    refresh_state(self)
+    local workspace = tostring(id)
+    local dispatcher = 'hl.dsp.focus({ workspace = "' .. workspace .. '" })'
+    local result = mesh.exec("hyprctl", { "dispatch", dispatcher })
+
+    -- Hyprland 0.55 replaced the legacy dispatcher arguments with Lua
+    -- dispatcher expressions. Retain the old form as a compatibility fallback
+    -- for installations that have not moved to the Lua command API yet.
+    if not result.success then
+        result = mesh.exec("hyprctl", { "dispatch", "workspace", workspace })
+    end
+
+    if not result.success then
+        log_warn("workspace dispatch failed: " .. trim(result.stderr))
+    end
+
+    -- Do not synchronously refresh here. The dispatch can return before
+    -- Hyprland exposes the new active workspace, so an immediate query may
+    -- publish the old workspace and make the UI switch back. The event stream
+    -- (with the polling fallback) supplies the authoritative update.
     return { ok = result.success, error = result.stderr }
 end

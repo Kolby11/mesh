@@ -391,12 +391,26 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       paths and checks retained child node keys by borrowed `&str` instead of
       cloning each key before requested-key membership. Release benchmark over
       8M child-key checks measured 64.3ms clone-before-check versus 6.7ms
-      borrowed comparison (~9.6x faster for that subpath).
-- [ ] Fractional HiDPI forces full-surface repaint every frame; fix the
-      logical-vs-physical damage-clip mismatch through the painter. CPU-side
-      experiment showed no win — re-test with compositor/upload damage
-      instrumentation before concluding (D; likely the biggest win on
-      fractional-scale outputs).
+      borrowed comparison (~9.6x faster for that subpath). Progress
+      2026-07-15: promoted child buffers now cache an authoritative component
+      paint generation plus exit mode, scale, and content origin. Stable
+      frontend popups skip both immediate-mode raster and presentation; legacy
+      components without a generation remain conservatively eager, and every
+      cache-key change repaints. A 160x90 release benchmark over 10,000 stable
+      frames measured 4.07ms for the formerly mandatory clear alone versus
+      27.3us for the full cache-key check (~149x faster, before subtree paint and
+      SHM presentation savings). Remaining: give child targets their own
+      retained display list and sparse damage rather than using the parent's
+      broad generation.
+- [x] Fractional HiDPI forces full-surface repaint every frame → v1.21. Done
+      2026-07-15: logical damage is now converted to physical painter-buffer
+      coordinates by flooring near edges and ceiling far edges before clear
+      and clip, so fractional scales no longer require the full-paint fallback.
+      The Wayland SHM/protocol path uses the same edge mapping, fixing missed
+      columns for non-origin fractional rectangles. A 1.5x, 1920x1080 release
+      upload benchmark over 100 frames measured 70.4ms full-buffer copying
+      versus 9.5us sparse copying (7,413x faster), with the physical 37x31
+      damage rect verified at both painter and presentation boundaries.
 
 ### P1 — threading (K)
 

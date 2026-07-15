@@ -86,6 +86,14 @@ pub(super) struct ChildSurface {
     /// child surface is kept alive and repainted with `exiting = true` until
     /// this deadline passes, then torn down.
     pub(super) closing_until: Option<std::time::Instant>,
+    /// Last authoritative component paint generation rasterized into this
+    /// child's buffer. `None` keeps conservative eager repainting.
+    pub(super) last_paint_generation: Option<u64>,
+    /// Entrance/exit mode used for the cached pixels.
+    pub(super) last_paint_exiting: Option<bool>,
+    /// Scale and logical content origin used for the cached raster.
+    pub(super) last_paint_scale_bits: Option<u32>,
+    pub(super) last_paint_content_offset: Option<(u32, u32)>,
 }
 
 pub(super) struct ComponentRuntime {

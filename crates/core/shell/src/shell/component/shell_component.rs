@@ -509,16 +509,6 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.surface_pixels_invalid = true;
         }
         self.last_painted_buffer_size = Some((buffer.width, buffer.height));
-        // Partial-damage clip rects are computed in logical coordinates, but the
-        // painter applies the damage clip in physical buffer space (and scales the
-        // display list by `scale`). At a fractional scale logical != physical, so a
-        // partial clear/clip misaligns with where the scaled content actually paints
-        // and leaves a fixed transparent gap. Full-surface paint uses clip=None and
-        // clears the whole buffer, sidestepping the mismatch. Force it when the scale
-        // is non-integer; the optimized partial path still runs at integer scales.
-        if (scale - scale.round()).abs() > f32::EPSILON {
-            self.surface_pixels_invalid = true;
-        }
         let use_retained_style_path = !requires_tree_rebuild
             && can_use_retained_path
             && self.last_tree.is_some()
@@ -1340,6 +1330,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.retained_display_list.generation()
     }
 
+    fn child_surface_paint_generation(&self, _node_key: &str) -> Option<u64> {
+        Some(self.retained_display_list.generation())
+    }
+
     fn debug_keybinds(&self) -> Vec<mesh_core_debug::DebugKeybindEntry> {
         self.debug_surface_keybinds()
     }
@@ -1592,11 +1586,13 @@ impl FrontendSurfaceComponent {
         tooltip: Option<&(String, f32, f32)>,
         current_tooltip_damage: Option<DamageRect>,
     ) -> mesh_core_render::PaintProfilingMetrics {
+        let physical_damage =
+            scale_damage_rect_to_buffer(damage, scale, buffer.width, buffer.height);
         buffer.clear_rect(
-            damage.x,
-            damage.y,
-            damage.width,
-            damage.height,
+            physical_damage.x,
+            physical_damage.y,
+            physical_damage.width,
+            physical_damage.height,
             mesh_core_elements::style::Color::TRANSPARENT,
         );
         let tooltip_for_damage = tooltip.and_then(|(text, cx, cy)| {
@@ -1608,7 +1604,7 @@ impl FrontendSurfaceComponent {
             buffer,
             scale,
             selected_paint,
-            Some(damage),
+            Some(physical_damage),
             tooltip_for_damage,
         )
     }
@@ -1686,6 +1682,27 @@ impl FrontendSurfaceComponent {
         &self,
     ) -> Option<&mesh_core_render::FocusedProofSnapshot> {
         self.focused_proof_snapshot.as_ref()
+    }
+}
+
+fn scale_damage_rect_to_buffer(
+    rect: DamageRect,
+    scale: f32,
+    buffer_width: u32,
+    buffer_height: u32,
+) -> DamageRect {
+    let scale = scale.max(f32::EPSILON);
+    let left = (rect.x as f32 * scale).floor() as u32;
+    let top = (rect.y as f32 * scale).floor() as u32;
+    let right = (rect.x.saturating_add(rect.width) as f32 * scale).ceil() as u32;
+    let bottom = (rect.y.saturating_add(rect.height) as f32 * scale).ceil() as u32;
+    let x = left.min(buffer_width);
+    let y = top.min(buffer_height);
+    DamageRect {
+        x,
+        y,
+        width: right.min(buffer_width).saturating_sub(x),
+        height: bottom.min(buffer_height).saturating_sub(y),
     }
 }
 
@@ -2394,6 +2411,54 @@ fn clip_damage(rect: DamageRect, surface: DamageRect) -> Option<DamageRect> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fractional_damage_scales_edges_into_physical_buffer_space() {
+        let scaled = scale_damage_rect_to_buffer(
+            DamageRect {
+                x: 1,
+                y: 3,
+                width: 2,
+                height: 2,
+            },
+            1.5,
+            100,
+            100,
+        );
+        assert_eq!(
+            scaled,
+            DamageRect {
+                x: 1,
+                y: 4,
+                width: 4,
+                height: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn physical_damage_is_clipped_to_buffer_bounds() {
+        let scaled = scale_damage_rect_to_buffer(
+            DamageRect {
+                x: 9,
+                y: 9,
+                width: 4,
+                height: 4,
+            },
+            1.5,
+            16,
+            16,
+        );
+        assert_eq!(
+            scaled,
+            DamageRect {
+                x: 13,
+                y: 13,
+                width: 3,
+                height: 3,
+            }
+        );
+    }
 
     #[test]
     fn element_metrics_gate_ignores_paint_and_state_only_diffs() {

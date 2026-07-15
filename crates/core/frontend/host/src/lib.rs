@@ -383,6 +383,11 @@ pub trait ShellComponent: Send {
     fn display_list_generation(&self) -> u64 {
         0
     }
+    /// Authoritative paint generation for a promoted child subtree. Returning
+    /// `None` keeps conservative eager child repainting.
+    fn child_surface_paint_generation(&self, _node_key: &str) -> Option<u64> {
+        None
+    }
     /// The interactive content size, excluding any tooltip-overlay buffer padding.
     /// Used to confine the surface's pointer input region to the real content so
     /// clicks over the padding fall through to the windows beneath. `None` leaves

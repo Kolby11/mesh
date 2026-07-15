@@ -555,6 +555,64 @@ fn bundled_network_provider_exports_state() {
 }
 
 #[test]
+fn hyprland_workspace_command_waits_for_event_state_instead_of_rereading() {
+    let script = bundled_backend_script(
+        "../../../../packages/modules/backend/core/hyprland-wm/src/main.luau",
+    );
+    let mut ctx = BackendScriptContext::new("@mesh/hyprland-wm");
+    ctx.load_script(&script).unwrap();
+    ctx.ensure_lua()
+        .load(
+            r#"
+exec_calls = {}
+mesh.exec = function(program, args)
+    exec_calls[#exec_calls + 1] = { program = program, args = args }
+    return { success = true, stdout = "", stderr = "" }
+end
+"#,
+        )
+        .exec()
+        .unwrap();
+
+    let outcome = ctx
+        .run_command_with_result("focus-workspace", &serde_json::json!({ "id": 2 }))
+        .unwrap();
+
+    assert_eq!(
+        outcome.result,
+        serde_json::json!({ "ok": true, "error": "" })
+    );
+    let calls = ctx
+        .ensure_lua()
+        .globals()
+        .get::<Table>("exec_calls")
+        .unwrap();
+    assert_eq!(
+        calls.raw_len(),
+        1,
+        "workspace dispatch must not synchronously spawn three state queries"
+    );
+    let call = calls.get::<Table>(1).unwrap();
+    assert_eq!(call.get::<String>("program").unwrap(), "hyprctl");
+    let args = call.get::<Table>("args").unwrap();
+    assert_eq!(args.get::<String>(1).unwrap(), "dispatch");
+    assert_eq!(
+        args.get::<String>(2).unwrap(),
+        "hl.dsp.focus({ workspace = \"2\" })"
+    );
+    assert_eq!(args.raw_len(), 2);
+    assert_eq!(
+        outcome
+            .state
+            .as_ref()
+            .and_then(|state| state.get("active_workspace"))
+            .and_then(|workspace| workspace.as_u64()),
+        Some(1),
+        "the event stream remains responsible for publishing confirmed state"
+    );
+}
+
+#[test]
 fn bundled_backend_scripts_expose_required_host_api_surface() {
     for (module_id, path) in [
         (
