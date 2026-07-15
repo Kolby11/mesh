@@ -945,25 +945,18 @@ fn push_box_shadow_command(
 }
 
 fn push_backdrop_filter_command(
-    commands: &mut Vec<PainterCommand>,
-    rect: ClipRect,
-    radius: f32,
+    _commands: &mut Vec<PainterCommand>,
+    _rect: ClipRect,
+    _radius: f32,
     filter: VisualFilter,
-    clip: ClipRect,
+    _clip: ClipRect,
 ) {
-    // In-surface backdrop blur: blurs content already painted beneath this
-    // node within the same surface buffer. Compositor-side blur of content
-    // *behind* the surface stays on the org_kde_kwin_blur protocol
-    // (see crates/core/presentation); the two compose.
+    // The compositor owns backdrop blur. CPU rendering only has this
+    // surface's SHM pixels, so applying Skia's backdrop filter here cannot
+    // blur the desktop and stalls interaction on large frosted surfaces.
     if filter.is_none() {
         return;
     }
-    commands.push(PainterCommand::ApplyFilter {
-        rect,
-        radius,
-        filter: PainterFilter::Backdrop(filter),
-        clip,
-    });
 }
 
 /// Builds the vector-path draw command for a `checkbox` tick or `radio` dot

@@ -622,15 +622,10 @@ fn painter_primitive_box_rounded_shadow_and_filters_emit_effect_classes() {
     let mut buffer = PixelBuffer::new(32, 32);
     engine.render_tree(&root, &mut buffer, 1.0);
 
-    // backdrop_filter emits ApplyFilter::Backdrop for in-surface blur (the
-    // org_kde_kwin_blur protocol additionally blurs behind the surface).
-    // CSS filter (non-backdrop) is encoded in DrawRoundedRect.paint.filter,
-    // so it adds no separate apply_filter command.
+    // backdrop-filter is compositor metadata and emits no CPU command. CSS
+    // filter (non-backdrop) remains encoded in DrawRoundedRect.paint.filter.
     let classes = painter_command_classes(&recorded.recorded_commands());
-    assert_eq!(
-        classes,
-        vec!["draw_shadow", "apply_filter", "draw_rounded_rect"]
-    );
+    assert_eq!(classes, vec!["draw_shadow", "draw_rounded_rect"]);
 }
 
 #[test]
@@ -2120,11 +2115,10 @@ fn painter_helper_lowering_routes_effect_helpers_through_command_backend() {
         clip,
     );
 
-    // Fill, shadow, and in-surface backdrop blur all lower to backend
-    // commands; the org_kde_kwin_blur protocol additionally blurs behind the
-    // surface.
+    // Backdrop blur is compositor-owned: a SHM client cannot sample pixels
+    // behind its surface. Only fill and shadow reach the CPU backend.
     let commands = recorded.recorded_commands();
-    assert_eq!(commands.len(), 3);
+    assert_eq!(commands.len(), 2);
     assert!(matches!(
         commands[0],
         PainterCommand::DrawRoundedRect {
@@ -2136,13 +2130,6 @@ fn painter_helper_lowering_routes_effect_helpers_through_command_backend() {
         }
     ));
     assert!(matches!(commands[1], PainterCommand::DrawShadow { .. }));
-    assert!(matches!(
-        commands[2],
-        PainterCommand::ApplyFilter {
-            filter: PainterFilter::Backdrop(VisualFilter { blur_radius: 3.0 }),
-            ..
-        }
-    ));
 }
 
 #[test]
@@ -2860,7 +2847,7 @@ fn backdrop_blur_scene(left_color: Color) -> WidgetNode {
 }
 
 #[test]
-fn retained_backdrop_filter_blurs_content_beneath() {
+fn retained_backdrop_filter_delegates_to_compositor() {
     let red = Color {
         r: 255,
         g: 0,
@@ -2885,25 +2872,24 @@ fn retained_backdrop_filter_blurs_content_beneath() {
     let mut buffer = PixelBuffer::new(32, 32);
     engine.render_selected_display_list_for_module(&selected, &mut buffer, 1.0, None, None, None);
 
-    // Inside the frosted panel, next to the color boundary: blur mixes red and
-    // blue.
-    let mixed = pixel(&buffer, 15, 16);
+    // The SHM buffer stays flat. The compositor combines this client buffer
+    // with the desktop behind the surface using the exported blur region.
+    let left = pixel(&buffer, 15, 16);
     assert!(
-        mixed.r > 16 && mixed.b > 16,
-        "backdrop blur should mix red and blue inside the panel, got {mixed:?}"
+        left.r > 247 && left.b < 8,
+        "client-side backdrop filtering must not rewrite surface pixels, got {left:?}"
     );
-    // Same column outside the panel: untouched pure red.
-    let pure = pixel(&buffer, 15, 2);
+    let right = pixel(&buffer, 16, 16);
     assert!(
-        pure.r > 247 && pure.b < 8,
-        "pixels outside the frosted panel must stay pure, got {pure:?}"
+        right.b > 247 && right.r < 8,
+        "client-side backdrop filtering must preserve the adjacent color, got {right:?}"
     );
 }
 
 /// Changing content beneath a frosted panel and repainting only the expanded
 /// sparse damage must produce the same pixels as a fresh full repaint.
-/// Without `expand_damage_for_backdrop_filters` the blur would keep stale
-/// pixels from the previous frame on the far side of the panel.
+/// The retained damage expansion remains deterministic for render backends
+/// that can support an in-surface backdrop in the future.
 #[test]
 fn sparse_repaint_with_backdrop_damage_expansion_matches_full_repaint() {
     let red = Color {

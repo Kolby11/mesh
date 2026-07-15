@@ -473,27 +473,18 @@ impl FrontendRenderEngine {
 
     pub(super) fn apply_backdrop_filter(
         &self,
-        buffer: &mut PixelBuffer,
-        rect: ClipRect,
-        radius: f32,
+        _buffer: &mut PixelBuffer,
+        _rect: ClipRect,
+        _radius: f32,
         filter: VisualFilter,
-        clip: ClipRect,
+        _clip: ClipRect,
     ) {
-        // In-surface backdrop blur over content already painted beneath this
-        // node. Compositor blur of content behind the surface stays on the
-        // org_kde_kwin_blur protocol (see crates/core/presentation).
+        // A client-side SHM painter cannot sample pixels behind its Wayland
+        // surface. Keep backdrop-filter as compositor metadata and avoid an
+        // expensive Skia save_layer pass over the surface's own pixels.
         if filter.is_none() {
             return;
         }
-        self.execute_painter_commands(
-            buffer,
-            &[PainterCommand::ApplyFilter {
-                rect,
-                radius,
-                filter: PainterFilter::Backdrop(filter),
-                clip,
-            }],
-        );
     }
 
     pub(super) fn draw_background_paint(

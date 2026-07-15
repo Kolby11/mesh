@@ -36,6 +36,29 @@ The volume control imports `mesh.audio@>=1.0` through `pcall(require, ...)`.
 It never imports a backend provider module ID such as `@mesh/pipewire-audio`;
 the root graph chooses the active provider for the interface contract.
 
+### Compositor blur
+
+`backdrop-filter` exports a surface-local blur region to the compositor. MESH
+does not run a software backdrop blur: a Wayland SHM client cannot sample the
+desktop pixels behind its own surface, and attempting to do so adds substantial
+CPU repaint cost without producing shell background blur.
+
+Hyprland requires a layer rule in addition to its global
+`decoration.blur.enabled` setting. For Hyprland 0.55's Lua configuration, cover
+the MESH layer namespaces and their promoted popups with:
+
+```lua
+hl.layer_rule({
+  match = { namespace = "^@mesh/.*$" },
+  blur = true,
+  blur_popups = true,
+  ignore_alpha = 0,
+})
+```
+
+MESH only publishes the blur region; it never edits compositor configuration.
+Other compositors may honor the `org_kde_kwin_blur` request directly.
+
 ## Syntax patterns used
 
 ### Text interpolation
