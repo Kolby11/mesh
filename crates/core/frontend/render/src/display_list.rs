@@ -185,6 +185,7 @@ pub struct RetainedDisplayList {
     retained_tree_generation: Option<u64>,
     root_id: Option<NodeId>,
     surface_size: Option<(u32, u32)>,
+    paint_origin: (u32, u32),
     entries: HashMap<DisplayListKey, DisplayListEntry>,
     subtrees: HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     #[cfg(debug_assertions)]
@@ -207,6 +208,7 @@ impl Default for RetainedDisplayList {
             retained_tree_generation: None,
             root_id: None,
             surface_size: None,
+            paint_origin: (0.0_f32.to_bits(), 0.0_f32.to_bits()),
             entries: HashMap::new(),
             subtrees: HashMap::new(),
             #[cfg(debug_assertions)]
@@ -538,6 +540,7 @@ impl<'a> SelectedDisplayListPaint<'a> {
 
 #[derive(Debug, Clone)]
 struct RetainedPaintSubtree {
+    generation: u64,
     commands: Arc<[DisplayPaintCommand]>,
     kinds: Arc<[DisplayPaintCommandKind]>,
     effect_overflow_count: u64,
@@ -549,6 +552,7 @@ struct RetainedPaintSubtree {
 impl Default for RetainedPaintSubtree {
     fn default() -> Self {
         Self {
+            generation: 0,
             commands: Vec::new().into(),
             kinds: Vec::new().into(),
             effect_overflow_count: 0,
@@ -641,7 +645,7 @@ impl PaintSubtreeBuilder {
             .saturating_add(child_subtree.pruning.preclipped_descendants);
     }
 
-    fn into_retained(self) -> RetainedPaintSubtree {
+    fn into_retained(self, generation: u64) -> RetainedPaintSubtree {
         let command_count = self.local_command_count;
         let command_span = if command_count == 0 {
             None
@@ -654,6 +658,7 @@ impl PaintSubtreeBuilder {
             })
         };
         RetainedPaintSubtree {
+            generation,
             commands: self.commands.into(),
             kinds: self.kinds.into(),
             effect_overflow_count: self.effect_overflow_count,
@@ -698,6 +703,17 @@ impl RetainedDisplayList {
         self.generation
     }
 
+    /// Generation of one retained paint subtree.
+    ///
+    /// Unlike the display-list generation, this stays stable when paint work
+    /// elsewhere in the surface changes. Promoted child surfaces use it to
+    /// avoid repainting an unchanged popup for unrelated parent updates.
+    pub fn subtree_generation(&self, node_id: NodeId) -> Option<u64> {
+        self.subtrees
+            .get(&node_id)
+            .map(|subtree| subtree.generation)
+    }
+
     pub fn update(
         &mut self,
         root: &WidgetNode,
@@ -711,6 +727,94 @@ impl RetainedDisplayList {
             None,
             None,
             None,
+            0.0,
+            0.0,
+            surface_width,
+            surface_height,
+            force_full_damage,
+            partial_present_supported,
+        )
+    }
+
+    /// Build a display list for `root` translated into a target-local viewport.
+    ///
+    /// Promoted child surfaces use this to retain their own command stream even
+    /// when the authored subtree lies outside (or is clipped by) its parent
+    /// surface. The origin participates in the cache key, so moving the subtree
+    /// cannot accidentally replay commands produced for an older position.
+    pub fn update_at(
+        &mut self,
+        root: &WidgetNode,
+        offset_x: f32,
+        offset_y: f32,
+        surface_width: u32,
+        surface_height: u32,
+        force_full_damage: bool,
+        partial_present_supported: bool,
+    ) -> DisplayListMetrics {
+        self.update_inner(
+            root,
+            None,
+            None,
+            None,
+            offset_x,
+            offset_y,
+            surface_width,
+            surface_height,
+            force_full_damage,
+            partial_present_supported,
+        )
+    }
+
+    /// Generation-gated variant of [`Self::update_at`] for independently
+    /// retained surface targets. An unchanged generation, viewport, and origin
+    /// bypasses both entry collection and subtree command reconstruction.
+    pub fn update_at_for_retained_generation(
+        &mut self,
+        root: &WidgetNode,
+        retained_tree_generation: u64,
+        offset_x: f32,
+        offset_y: f32,
+        surface_width: u32,
+        surface_height: u32,
+        force_full_damage: bool,
+        partial_present_supported: bool,
+    ) -> DisplayListMetrics {
+        self.update_inner(
+            root,
+            Some(retained_tree_generation),
+            None,
+            None,
+            offset_x,
+            offset_y,
+            surface_width,
+            surface_height,
+            force_full_damage,
+            partial_present_supported,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_at_for_retained_generation_with_dirty_nodes(
+        &mut self,
+        root: &WidgetNode,
+        retained_tree_generation: u64,
+        dirty_summary: RenderObjectDirtySummary,
+        dirty_node_ids: &HashSet<NodeId>,
+        offset_x: f32,
+        offset_y: f32,
+        surface_width: u32,
+        surface_height: u32,
+        force_full_damage: bool,
+        partial_present_supported: bool,
+    ) -> DisplayListMetrics {
+        self.update_inner(
+            root,
+            Some(retained_tree_generation),
+            Some(dirty_summary),
+            Some(dirty_node_ids),
+            offset_x,
+            offset_y,
             surface_width,
             surface_height,
             force_full_damage,
@@ -733,6 +837,8 @@ impl RetainedDisplayList {
             None,
             Some(dirty_summary),
             Some(dirty_node_ids),
+            0.0,
+            0.0,
             surface_width,
             surface_height,
             force_full_damage,
@@ -756,6 +862,8 @@ impl RetainedDisplayList {
             Some(retained_tree_generation),
             Some(dirty_summary),
             Some(dirty_node_ids),
+            0.0,
+            0.0,
             surface_width,
             surface_height,
             force_full_damage,
@@ -769,6 +877,8 @@ impl RetainedDisplayList {
         retained_tree_generation: Option<u64>,
         dirty_summary: Option<RenderObjectDirtySummary>,
         dirty_node_ids: Option<&HashSet<NodeId>>,
+        offset_x: f32,
+        offset_y: f32,
         surface_width: u32,
         surface_height: u32,
         force_full_damage: bool,
@@ -780,9 +890,11 @@ impl RetainedDisplayList {
             width: surface_width.max(1),
             height: surface_height.max(1),
         };
+        let paint_origin = (offset_x.to_bits(), offset_y.to_bits());
         if retained_tree_generation.is_some()
             && self.retained_tree_generation == retained_tree_generation
             && self.surface_size == Some((surface.width, surface.height))
+            && self.paint_origin == paint_origin
         {
             return self.update_metrics_without_rebuild(
                 surface,
@@ -811,8 +923,8 @@ impl RetainedDisplayList {
         next.clear();
         collect_display_entries(
             root,
-            0.0,
-            0.0,
+            offset_x,
+            offset_y,
             #[cfg(debug_assertions)]
             Some(&mut ordered_entries),
             #[cfg(not(debug_assertions))]
@@ -822,6 +934,7 @@ impl RetainedDisplayList {
         );
         if self.root_id == Some(root.id)
             && self.surface_size == Some((surface.width, surface.height))
+            && self.paint_origin == paint_origin
             && self.entries == next
             && !dirty_summary.any()
         {
@@ -838,13 +951,18 @@ impl RetainedDisplayList {
                 partial_present_supported,
             );
         }
-        let decision = self.local_reuse_decision(
-            root,
-            dirty_summary,
-            dirty_node_ids,
-            surface.width,
-            surface.height,
-        );
+        let origin_changed = self.paint_origin != paint_origin;
+        let decision = if origin_changed {
+            LocalReuseDecision::FallbackFull { broad_dirty: false }
+        } else {
+            self.local_reuse_decision(
+                root,
+                dirty_summary,
+                dirty_node_ids,
+                surface.width,
+                surface.height,
+            )
+        };
         let (
             paint_commands,
             command_kinds,
@@ -872,8 +990,8 @@ impl RetainedDisplayList {
                 let allow_clean_descendant_reuse = changed_layout_count(dirty_summary) == 0;
                 let subtree = build_paint_subtree(
                     root,
-                    0.0,
-                    0.0,
+                    offset_x,
+                    offset_y,
                     vclip,
                     vclip,
                     false,
@@ -904,8 +1022,8 @@ impl RetainedDisplayList {
                 let vclip = surface_clip(surface);
                 let subtree = build_paint_subtree(
                     root,
-                    0.0,
-                    0.0,
+                    offset_x,
+                    offset_y,
                     vclip,
                     vclip,
                     true,
@@ -1058,6 +1176,7 @@ impl RetainedDisplayList {
         self.root_id = Some(root.id);
         self.retained_tree_generation = retained_tree_generation;
         self.surface_size = Some((surface.width, surface.height));
+        self.paint_origin = paint_origin;
         let (full_fallback_count, broad_dirty_fallback_count) = match decision {
             LocalReuseDecision::FallbackFull { broad_dirty } => (1, u64::from(broad_dirty)),
             _ => (0, 0),
@@ -1751,9 +1870,13 @@ fn build_paint_subtree(
     }
 
     metrics.rebuilt_segments = metrics.rebuilt_segments.saturating_add(1);
+    let generation = previous_subtrees
+        .get(&node.id)
+        .map_or(1, |previous| previous.generation.saturating_add(1));
 
     if node_is_explicitly_hidden(node) {
         let mut subtree = RetainedPaintSubtree::default();
+        subtree.generation = generation;
         subtree
             .pruning
             .record_omitted_subtree(count_pruned_subtree(node, offset_x, offset_y, true), false);
@@ -1772,6 +1895,7 @@ fn build_paint_subtree(
     let node_clip = intersect_display_clip(clip, visual_bounds);
     if node_clip.width <= 0 || node_clip.height <= 0 {
         let mut subtree = RetainedPaintSubtree::default();
+        subtree.generation = generation;
         subtree
             .pruning
             .record_omitted_subtree(count_pruned_subtree(node, offset_x, offset_y, false), true);
@@ -1833,7 +1957,7 @@ fn build_paint_subtree(
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
-    let subtree = Arc::new(subtree.into_retained());
+    let subtree = Arc::new(subtree.into_retained(generation));
     next_subtrees.insert(node.id, Arc::clone(&subtree));
     subtree
 }
@@ -3087,6 +3211,32 @@ mod tests {
         root
     }
 
+    fn child_popup_benchmark_tree(rows: usize, cols: usize) -> WidgetNode {
+        let mut root = node(1, "popover", 300.0, 180.0, 200.0, 120.0);
+        let mut id = 2;
+        for row in 0..rows {
+            for col in 0..cols {
+                let mut child = node(
+                    id,
+                    "box",
+                    4.0 + col as f32 * 19.0,
+                    4.0 + row as f32 * 18.0,
+                    16.0,
+                    14.0,
+                );
+                child.computed_style.background_color = Color {
+                    r: (20 + row * 9) as u8,
+                    g: (30 + col * 7) as u8,
+                    b: 120,
+                    a: 255,
+                };
+                root.children.push(child);
+                id += 1;
+            }
+        }
+        root
+    }
+
     #[test]
     fn checkbox_and_radio_emit_checkmark_content_only_when_checked() {
         let mut checkbox = node(1, "checkbox", 0.0, 0.0, 18.0, 18.0);
@@ -3304,6 +3454,7 @@ mod tests {
     #[ignore = "release-only retained paint-subtree clone microbenchmark"]
     fn retained_subtree_handle_beats_fieldwise_clone() {
         let subtree = RetainedPaintSubtree {
+            generation: 1,
             commands: vec![DisplayPaintCommand {
                 node: Arc::new(build_paint_node(
                     &node(1, "box", 0.0, 0.0, 20.0, 20.0),
@@ -4469,6 +4620,215 @@ mod tests {
         assert!(metrics.subtree_segments_reused > 0);
         assert!(metrics.subtree_segments_rebuilt > 0);
         assert_eq!(metrics.full_fallback_count, 0);
+    }
+
+    #[test]
+    fn subtree_generation_ignores_unrelated_surface_paint_changes() {
+        let mut root = node(1, "row", 0.0, 0.0, 120.0, 40.0);
+        let mut sibling = node(2, "box", 0.0, 0.0, 40.0, 40.0);
+        sibling.children.push(node(3, "text", 4.0, 4.0, 20.0, 12.0));
+        let mut popup = node(4, "popover", 60.0, 0.0, 40.0, 40.0);
+        popup.children.push(node(5, "text", 4.0, 4.0, 20.0, 12.0));
+        root.children.push(sibling);
+        root.children.push(popup);
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 120, 40, false, true);
+        let initial_root = list.generation();
+        let initial_popup = list.subtree_generation(4).expect("popup subtree");
+
+        root.children[0].computed_style.background_color.r = 99;
+        list.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                material: 1,
+                ..Default::default()
+            },
+            &HashSet::from([2]),
+            120,
+            40,
+            false,
+            true,
+        );
+
+        assert!(list.generation() > initial_root);
+        assert_eq!(list.subtree_generation(4), Some(initial_popup));
+
+        root.children[1].children[0]
+            .computed_style
+            .background_color
+            .g = 77;
+        list.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                material: 1,
+                ..Default::default()
+            },
+            &HashSet::from([5]),
+            120,
+            40,
+            false,
+            true,
+        );
+
+        assert!(list.subtree_generation(4).expect("popup subtree") > initial_popup);
+        assert_eq!(list.subtree_generation(999), None);
+    }
+
+    #[test]
+    fn target_local_display_list_matches_immediate_child_popup_pixels() {
+        let popup = child_popup_benchmark_tree(4, 6);
+        let offset_x = -popup.layout.x + 7.0;
+        let offset_y = -popup.layout.y + 5.0;
+        let mut immediate = crate::PixelBuffer::new(214, 132);
+        let mut retained = crate::PixelBuffer::new(214, 132);
+
+        crate::paint_frontend_tree_at_for_module(
+            &popup,
+            &mut immediate,
+            1.0,
+            offset_x,
+            offset_y,
+            None,
+            None,
+        );
+        let mut display_list = RetainedDisplayList::default();
+        display_list.update_at(&popup, offset_x, offset_y, 214, 132, false, false);
+        crate::paint_display_list_for_module_with_profiling_metrics(
+            display_list.paint_commands(),
+            &mut retained,
+            1.0,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        assert_eq!(retained.data, immediate.data);
+    }
+
+    // cargo test -p mesh-core-render --release -- retained_child_popup_replay_beats_immediate_tree_paint --ignored --nocapture
+    #[test]
+    #[ignore = "release-only child popup retained-replay benchmark"]
+    fn retained_child_popup_replay_beats_immediate_tree_paint() {
+        const ITERATIONS: u64 = 400;
+        let offset_x = -300.0 + 6.0;
+        let offset_y = -180.0 + 6.0;
+        let changed_id = 1;
+
+        let mut immediate_tree = child_popup_benchmark_tree(6, 10);
+        let mut immediate_buffer = crate::PixelBuffer::new(212, 132);
+        let immediate_started = std::time::Instant::now();
+        for generation in 1..=ITERATIONS {
+            immediate_tree.computed_style.opacity = 0.25 + (generation % 70) as f32 / 100.0;
+            immediate_buffer.clear(Color::TRANSPARENT);
+            crate::paint_frontend_tree_at_for_module(
+                std::hint::black_box(&immediate_tree),
+                &mut immediate_buffer,
+                1.0,
+                offset_x,
+                offset_y,
+                None,
+                None,
+            );
+        }
+        let immediate_time = immediate_started.elapsed();
+
+        let mut retained_tree = child_popup_benchmark_tree(6, 10);
+        let mut retained_buffer = crate::PixelBuffer::new(212, 132);
+        let mut display_list = RetainedDisplayList::default();
+        display_list.update_at_for_retained_generation(
+            &retained_tree,
+            0,
+            offset_x,
+            offset_y,
+            212,
+            132,
+            false,
+            false,
+        );
+        let dirty_ids = HashSet::from([changed_id]);
+        let retained_started = std::time::Instant::now();
+        for generation in 1..=ITERATIONS {
+            retained_tree.computed_style.opacity = 0.25 + (generation % 70) as f32 / 100.0;
+            display_list.update_at_for_retained_generation_with_dirty_nodes(
+                std::hint::black_box(&retained_tree),
+                generation,
+                RenderObjectDirtySummary {
+                    opacity: 1,
+                    ..Default::default()
+                },
+                &dirty_ids,
+                offset_x,
+                offset_y,
+                212,
+                132,
+                false,
+                false,
+            );
+            retained_buffer.clear(Color::TRANSPARENT);
+            crate::paint_display_list_for_module_with_profiling_metrics(
+                display_list.paint_commands(),
+                &mut retained_buffer,
+                1.0,
+                None,
+                None,
+                None,
+                None,
+            );
+        }
+        let retained_time = retained_started.elapsed();
+
+        assert_eq!(retained_buffer.data, immediate_buffer.data);
+        eprintln!(
+            "animated child popup raster: immediate tree {immediate_time:?}; retained display-list {retained_time:?}; ratio {:.2}x",
+            immediate_time.as_secs_f64() / retained_time.as_secs_f64()
+        );
+        assert!(
+            retained_time * 10 < immediate_time * 9,
+            "retained child replay should improve the production animation path by at least 10%"
+        );
+    }
+
+    // cargo test -p mesh-core-render --release -- popup_subtree_generation_beats_broad_surface_repaint --ignored --nocapture
+    #[test]
+    #[ignore = "release-only child-popup invalidation microbenchmark"]
+    fn popup_subtree_generation_beats_broad_surface_repaint() {
+        const FRAMES: u64 = 10_000;
+        const BUFFER_BYTES: usize = 160 * 90 * 4;
+
+        let mut eager_buffer = vec![255_u8; BUFFER_BYTES];
+        let eager_started = std::time::Instant::now();
+        let mut cached_parent_generation = 0_u64;
+        for parent_generation in 1..=FRAMES {
+            if std::hint::black_box(parent_generation) != cached_parent_generation {
+                std::hint::black_box(&mut eager_buffer).fill(0);
+                cached_parent_generation = parent_generation;
+            }
+        }
+        let eager_time = eager_started.elapsed();
+
+        let mut retained_buffer = vec![255_u8; BUFFER_BYTES];
+        let retained_started = std::time::Instant::now();
+        let popup_generation = 1_u64;
+        let mut cached_popup_generation = 0_u64;
+        let mut repaints = 0_u64;
+        for _ in 0..FRAMES {
+            if std::hint::black_box(popup_generation) != cached_popup_generation {
+                std::hint::black_box(&mut retained_buffer).fill(0);
+                cached_popup_generation = popup_generation;
+                repaints += 1;
+            }
+        }
+        let retained_time = retained_started.elapsed();
+
+        assert_eq!(repaints, 1);
+        assert_eq!(eager_buffer, retained_buffer);
+        eprintln!(
+            "unrelated parent updates: broad generation {eager_time:?}; popup subtree generation {retained_time:?}; ratio {:.1}x; repaints={FRAMES}/{repaints}",
+            eager_time.as_secs_f64() / retained_time.as_secs_f64()
+        );
+        assert!(retained_time * 10 < eager_time);
     }
 
     #[test]

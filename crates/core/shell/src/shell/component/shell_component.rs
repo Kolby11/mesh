@@ -12,11 +12,13 @@ impl FrontendSurfaceComponent {
         self.last_tree = None;
         self.cached_restyle_rules = None;
         self.cached_style_rule_index = None;
+        self.runtime_style_diagnostic_fingerprint = None;
         self.intrinsic_layout_cache = IntrinsicLayoutCache::default();
         self.layout_state = PerSurfaceLayoutState::default();
         self.retained_tree = RetainedWidgetTree::default();
         self.retained_render_objects = RenderObjectTree::default();
         self.retained_display_list = RetainedDisplayList::default();
+        self.child_display_lists.get_mut().clear();
         self.focused_proof_snapshot = None;
         self.last_visual_damage.clear();
     }
@@ -1086,13 +1088,40 @@ impl ShellComponent for FrontendSurfaceComponent {
         // the popover's own CSS transition resolves and advances through the
         // normal per-node transition engine like any other animated style.
         let _ = exiting;
-        buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
-        mesh_core_render::paint_frontend_tree_at_for_module(
+        let logical_width = ((buffer.width as f32) / scale.max(f32::EPSILON)).ceil() as u32;
+        let logical_height = ((buffer.height as f32) / scale.max(f32::EPSILON)).ceil() as u32;
+        let retained_generation = self
+            .retained_display_list
+            .subtree_generation(node.id)
+            .unwrap_or_default();
+        let mut child_display_lists = self.child_display_lists.borrow_mut();
+        const MAX_RETAINED_CHILD_DISPLAY_LISTS: usize = 64;
+        if !child_display_lists.contains_key(&node.id)
+            && child_display_lists.len() >= MAX_RETAINED_CHILD_DISPLAY_LISTS
+        {
+            child_display_lists.clear();
+        }
+        let display_list = child_display_lists.entry(node.id).or_default();
+        display_list.update_at_for_retained_generation_with_dirty_nodes(
             node,
-            buffer,
-            scale,
+            retained_generation,
+            self.retained_render_objects.last_dirty(),
+            self.retained_render_objects.dirty_node_ids(),
             -bounds.0 + content_offset.0 as f32,
             -bounds.1 + content_offset.1 as f32,
+            logical_width,
+            logical_height,
+            false,
+            false,
+        );
+
+        buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
+        mesh_core_render::paint_display_list_for_module_with_profiling_metrics(
+            display_list.paint_commands(),
+            buffer,
+            scale,
+            None,
+            None,
             None,
             Some(self.compiled.manifest.package.id.as_str()),
         );
@@ -1330,8 +1359,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.retained_display_list.generation()
     }
 
-    fn child_surface_paint_generation(&self, _node_key: &str) -> Option<u64> {
-        Some(self.retained_display_list.generation())
+    fn child_surface_paint_generation(&self, node_key: &str) -> Option<u64> {
+        let node_id = find_node_by_key(self.last_tree.as_ref()?, node_key)?.id;
+        self.retained_display_list.subtree_generation(node_id)
     }
 
     fn debug_keybinds(&self) -> Vec<mesh_core_debug::DebugKeybindEntry> {

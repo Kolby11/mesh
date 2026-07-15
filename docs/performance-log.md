@@ -31,6 +31,8 @@ section noted.
 | 2026-07-12 | Scratch `PixelBuffer` reuse for rotation transforms | P | 341.011ms scratch vs 2.586ms fresh alloc+clear over 2M 96x64 buffers; fresh zeroed allocation is much cheaper |
 | 2026-07-12 | Hand-rolled inline clip/layer stacks in the Skia backend | P | 350.183ms inline vs 31.812ms `Vec` over 8M batches; later solved with `SmallVec` (2026-07-13) |
 | 2026-07-12 | `tree.style(id) == new_style` equality guard before Taffy `set_style` | T | Slower than unconditional `set_style` (51.642ms vs 46.115ms); needed the retained dirty-bit feed, which landed 2026-07-12 |
+| 2026-07-15 | Rust recursive detached-Lua-table cache for nested storage reads | I | Regressed 1.221s current to 1.815s cached over 100k reads (0.67x); deep-copy construction outweighed saved conversion/locking |
+| 2026-07-15 | Luau `table.clone` plus recursive array replacement for nested storage reads | I | Regressed 1.237s current to 1.611s cached over 100k reads (0.77x); exact detached-value semantics still require too much table reconstruction |
 
 ## 2026-07-14 follow-up — five measured hot-path changes
 
@@ -90,6 +92,48 @@ section noted.
   scenario parsing use the same IDs; existing interaction scenarios remain for
   compatibility. Profile guidance requires a fresh profiling session per
   workload so accumulated summaries remain comparable.
+
+## 2026-07-15 — cached runtime diagnostic class tokens
+
+- Runtime style diagnostics now resolve live `WidgetNode`s directly through
+  their restyle-populated class-token cache instead of splitting the `class`
+  attribute into a fresh `Vec<String>` for every rebuilt node. The indexed
+  allocating and cached paths have parity coverage. A release benchmark over
+  200,000 diagnostic resolutions measured 79.0ms for per-node splitting versus
+  55.0ms for cached node tokens (1.44x faster for the diagnostic-resolution
+  subpath).
+
+## 2026-07-15 — parallel diagnostic, handler, and popup invalidation wave
+
+- Unchanged rebuilds now fingerprint runtime style-diagnostic inputs (rule
+  generation, selector-facing tree, surface props, and container dimensions)
+  and skip the second full style-resolution traversal when they match. A
+  156-node release benchmark over 2,000 unchanged rebuilds measured 172.7ms
+  full re-resolution versus 19.8ms for the fingerprint gate (8.7x; repeat runs
+  ranged from 8.7x to 9.2x).
+- Ordinary handler graph namespacing now constructs the embedded-instance
+  prefix once per traversal and appends raw handler names with exact capacity.
+  A 1,000-node release benchmark over 200 traversals measured 79.6ms formatting
+  each complete handler versus 31.8ms with the shared prefix (2.50x; repeat
+  2.53x).
+- Retained paint subtrees now expose independent generations, allowing promoted
+  child surfaces to remain cached across unrelated parent/sibling updates. A
+  160x90 release lower-bound benchmark across 10,000 parent frames measured
+  4.290ms and 10,000 clears using the broad generation versus 3.562us and one
+  clear using the popup subtree generation (~1,204x for the gate plus avoided
+  clear). Popup-descendant changes still advance the child generation.
+
+## 2026-07-15 — retained popup replay and root dispatch borrowing
+
+- Promoted child targets now own bounded, origin-aware retained display lists
+  and replay their command stream instead of using the immediate tree painter.
+  Pixel parity is covered. A 61-node popup across 400 root-opacity transition
+  frames measured 38.0ms immediate versus 30.9ms retained (1.23x); a sparse
+  one-descendant material workload measured 17.5ms versus 4.83ms (3.61x).
+- Plain root handler dispatch now borrows the surface instance ID for runtime
+  lookup and allocates it only when published events or live-binding neighbors
+  need post-dispatch processing. Two 2M-lookup release runs measured
+  41.4ms/41.0ms owned versus 30.9ms/31.4ms borrowed (1.34x/1.30x).
 
 ---
 

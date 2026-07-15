@@ -7,32 +7,32 @@ use std::sync::{Arc, Mutex};
 #[derive(Debug, Clone)]
 pub enum DevWindowEvent {
     PointerMove {
-        surface_id: String,
+        surface_id: Arc<str>,
         x: f32,
         y: f32,
     },
     PointerLeave {
-        surface_id: String,
+        surface_id: Arc<str>,
     },
     PointerButton {
-        surface_id: String,
+        surface_id: Arc<str>,
         x: f32,
         y: f32,
         pressed: bool,
     },
     Scroll {
-        surface_id: String,
+        surface_id: Arc<str>,
         x: f32,
         y: f32,
         dx: f32,
         dy: f32,
     },
     Key {
-        surface_id: String,
+        surface_id: Arc<str>,
         event: DevWindowKeyEvent,
     },
     Char {
-        surface_id: String,
+        surface_id: Arc<str>,
         ch: char,
     },
 }
@@ -52,7 +52,7 @@ pub enum DevWindowKeyEvent {
 
 #[derive(Default)]
 pub struct DevWindowBackend {
-    windows: HashMap<String, WindowSurface>,
+    windows: HashMap<Arc<str>, WindowSurface>,
 }
 
 struct WindowSurface {
@@ -93,7 +93,7 @@ impl DevWindowBackend {
         if needs_new_window {
             let surface = create_window_surface(title, width, height)
                 .map_err(PresentationError::SurfaceCreate)?;
-            self.windows.insert(surface_id.to_string(), surface);
+            self.windows.insert(Arc::from(surface_id), surface);
         }
 
         let surface = self.windows.get_mut(surface_id).ok_or_else(|| {
@@ -271,4 +271,38 @@ fn normalized_mouse_pos(surface: &WindowSurface) -> Option<(f32, f32)> {
         (raw_x * scale_x).clamp(0.0, surface.width.saturating_sub(1) as f32),
         (raw_y * scale_y).clamp(0.0, surface.height.saturating_sub(1) as f32),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "release-only event surface-id clone microbenchmark"]
+    fn arc_surface_id_clone_beats_owned_string_clone_benchmark() {
+        const ITERATIONS: usize = 2_000_000;
+        let owned = String::from("@mesh/benchmark-panel/with/a/long/child-surface-id");
+        let shared: Arc<str> = Arc::from(owned.as_str());
+
+        let old_started = std::time::Instant::now();
+        for _ in 0..ITERATIONS {
+            std::hint::black_box(owned.clone());
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        for _ in 0..ITERATIONS {
+            std::hint::black_box(Arc::clone(&shared));
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "event surface-id clone over {ITERATIONS} events: String {old_time:?}, Arc<str> {new_time:?}, ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(
+            new_time < old_time,
+            "shared surface IDs should beat owned String clones"
+        );
+    }
 }

@@ -13,7 +13,7 @@ use std::path::Path;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::SystemTime;
 
 static IMAGE_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedImage>>> = OnceLock::new();
 static RASTER_CACHE: OnceLock<Mutex<LruCache<RasterCacheKey, RasterVariant>>> = OnceLock::new();
@@ -21,14 +21,10 @@ static SOURCE_IDENTITY_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedSourceIde
     OnceLock::new();
 static SVG_CACHEABILITY_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedSvgCacheability>>> =
     OnceLock::new();
-static FILE_FRESHNESS_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedFileFreshness>>> =
-    OnceLock::new();
 const RASTER_CACHE_CAPACITY: usize = 256;
 const IMAGE_CACHE_CAPACITY: usize = 256;
 const SOURCE_IDENTITY_CACHE_CAPACITY: usize = 1024;
 const SVG_CACHEABILITY_CACHE_CAPACITY: usize = 1024;
-const FILE_FRESHNESS_CACHE_CAPACITY: usize = 2048;
-const FILE_FRESHNESS_TTL: Duration = Duration::from_secs(1);
 #[cfg(test)]
 static FILE_FRESHNESS_STAT_PROBES: AtomicUsize = AtomicUsize::new(0);
 
@@ -43,6 +39,26 @@ pub(crate) enum CachedResourceOpacity {
 enum RasterSourceKind {
     File,
     MissingIcon,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IconFileKind {
+    Svg,
+    Bitmap,
+}
+
+fn icon_file_kind(path: &Path) -> Option<IconFileKind> {
+    let extension = path.extension()?.to_str()?;
+    if extension.eq_ignore_ascii_case("svg") {
+        Some(IconFileKind::Svg)
+    } else if ["png", "jpg", "jpeg", "bmp"]
+        .iter()
+        .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+    {
+        Some(IconFileKind::Bitmap)
+    } else {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -63,16 +79,10 @@ struct CachedSourceIdentity {
     identity: Arc<Path>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct CachedSvgCacheability {
     freshness: FileFreshness,
     cacheable: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct CachedFileFreshness {
-    freshness: FileFreshness,
-    checked_at: Instant,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -112,10 +122,6 @@ fn svg_cacheability_cache() -> &'static Mutex<LruCache<Arc<Path>, CachedSvgCache
         .get_or_init(|| Mutex::new(LruCache::new(SVG_CACHEABILITY_CACHE_CAPACITY)))
 }
 
-fn file_freshness_cache() -> &'static Mutex<LruCache<Arc<Path>, CachedFileFreshness>> {
-    FILE_FRESHNESS_CACHE.get_or_init(|| Mutex::new(LruCache::new(FILE_FRESHNESS_CACHE_CAPACITY)))
-}
-
 fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
     let Some(freshness) = file_freshness(path) else {
         return image::open(path)
@@ -150,14 +156,6 @@ fn encode_tint(color: Color) -> u32 {
 }
 
 fn file_freshness(path: &Path) -> Option<FileFreshness> {
-    let now = Instant::now();
-    if let Ok(mut guard) = file_freshness_cache().lock()
-        && let Some(cached) = guard.get(path)
-        && now.duration_since(cached.checked_at) < FILE_FRESHNESS_TTL
-    {
-        return Some(cached.freshness);
-    }
-
     #[cfg(test)]
     FILE_FRESHNESS_STAT_PROBES.fetch_add(1, Ordering::Relaxed);
 
@@ -170,17 +168,6 @@ fn file_freshness(path: &Path) -> Option<FileFreshness> {
     Some(FileFreshness {
         len: metadata.len(),
         modified_nanos,
-    })
-    .inspect(|freshness| {
-        if let Ok(mut guard) = file_freshness_cache().lock() {
-            guard.insert(
-                Arc::from(path),
-                CachedFileFreshness {
-                    freshness: *freshness,
-                    checked_at: now,
-                },
-            );
-        }
     })
 }
 
@@ -341,24 +328,22 @@ pub(crate) fn cached_file_resource_opacity(
     tint: Color,
     multicolor: bool,
 ) -> CachedResourceOpacity {
-    let Some(ext) = path.extension().and_then(|value| value.to_str()) else {
+    let Some(kind) = icon_file_kind(path) else {
         return CachedResourceOpacity::Unknown;
     };
-    let ext = ext.to_ascii_lowercase();
-    let key = match ext.as_str() {
-        "svg" => {
+    let key = match kind {
+        IconFileKind::Svg => {
             let Some((true, freshness)) = svg_file_cacheability(path) else {
                 return CachedResourceOpacity::Unknown;
             };
             raster_file_key_with_freshness(path, width, height, tint, multicolor, freshness)
         }
-        "png" | "jpg" | "jpeg" | "bmp" => {
+        IconFileKind::Bitmap => {
             let Some(freshness) = file_freshness(path) else {
                 return CachedResourceOpacity::Unknown;
             };
             raster_file_key_with_freshness(path, width, height, tint, multicolor, freshness)
         }
-        _ => return CachedResourceOpacity::Unknown,
     };
     let Some(variant) = cached_variant(&key) else {
         return CachedResourceOpacity::Unknown;
@@ -667,12 +652,11 @@ fn resolve_file_variant(
     tint: Color,
     multicolor: bool,
 ) -> Option<RasterVariant> {
-    let ext = path.extension().and_then(|e| e.to_str())?;
+    let kind = icon_file_kind(path)?;
     let width = dest_w.max(1) as u32;
     let height = dest_h.max(1) as u32;
-    let ext = ext.to_ascii_lowercase();
-    let key = match ext.as_str() {
-        "svg" => {
+    let key = match kind {
+        IconFileKind::Svg => {
             let (cacheable, freshness) = svg_file_cacheability(path)?;
             if cacheable {
                 Some(raster_file_key_with_freshness(
@@ -682,8 +666,7 @@ fn resolve_file_variant(
                 None
             }
         }
-        "png" | "jpg" | "jpeg" | "bmp" => raster_file_key(path, width, height, tint, multicolor),
-        _ => None,
+        IconFileKind::Bitmap => raster_file_key(path, width, height, tint, multicolor),
     };
     if let Some(key) = key.as_ref()
         && let Some(variant) = cached_variant(key)
@@ -692,8 +675,8 @@ fn resolve_file_variant(
         return Some(variant);
     }
 
-    let variant = match ext.as_str() {
-        "png" | "jpg" | "jpeg" | "bmp" => {
+    let variant = match kind {
+        IconFileKind::Bitmap => {
             if key.is_some() {
                 profiling::record_raster_cache_miss();
             } else {
@@ -704,7 +687,7 @@ fn resolve_file_variant(
             profiling::record_icon_image_raster(raster_started.elapsed());
             variant
         }
-        "svg" => {
+        IconFileKind::Svg => {
             if key.is_some() {
                 profiling::record_raster_cache_miss();
             } else {
@@ -715,7 +698,6 @@ fn resolve_file_variant(
             profiling::record_icon_image_raster(raster_started.elapsed());
             variant
         }
-        _ => None,
     }?;
 
     if let Some(key) = key {
@@ -1088,22 +1070,8 @@ mod tests {
         if let Some(cache) = SVG_CACHEABILITY_CACHE.get() {
             cache.lock().unwrap().clear();
         }
-        if let Some(cache) = FILE_FRESHNESS_CACHE.get() {
-            cache.lock().unwrap().clear();
-        }
         FILE_FRESHNESS_STAT_PROBES.store(0, Ordering::Relaxed);
         profiling::reset_raster_metrics();
-    }
-
-    fn expire_file_freshness(path: &Path) {
-        let Some(cache) = FILE_FRESHNESS_CACHE.get() else {
-            return;
-        };
-        let mut guard = cache.lock().unwrap();
-        if let Some(mut cached) = guard.remove(path) {
-            cached.checked_at = Instant::now() - FILE_FRESHNESS_TTL - Duration::from_millis(1);
-            guard.insert(Arc::from(path), cached);
-        }
     }
 
     fn file_freshness_stat_probes() -> usize {
@@ -1158,7 +1126,7 @@ mod tests {
     }
 
     #[test]
-    fn raster_file_key_reuses_freshness_probe_inside_ttl() {
+    fn raster_file_key_checks_freshness_each_time() {
         let _guard = icon_test_lock();
         clear_icon_caches();
         let td = tempfile::tempdir().unwrap();
@@ -1171,18 +1139,70 @@ mod tests {
         let second_key = raster_file_key(&path, 8, 8, tint(), true).unwrap();
 
         assert_eq!(first_key, second_key);
-        assert_eq!(file_freshness_stat_probes(), 1);
-
-        expire_file_freshness(&path);
-        let third_key = raster_file_key(&path, 8, 8, tint(), true).unwrap();
-
-        assert_eq!(first_key, third_key);
         assert_eq!(file_freshness_stat_probes(), 2);
     }
 
     #[test]
-    #[ignore = "release-only file freshness TTL microbenchmark"]
-    fn file_freshness_ttl_beats_per_draw_stat_benchmark() {
+    fn icon_file_kind_is_case_insensitive() {
+        assert_eq!(
+            icon_file_kind(Path::new("symbol.SvG")),
+            Some(IconFileKind::Svg)
+        );
+        assert_eq!(
+            icon_file_kind(Path::new("photo.JPEG")),
+            Some(IconFileKind::Bitmap)
+        );
+        assert_eq!(icon_file_kind(Path::new("notes.txt")), None);
+    }
+
+    #[test]
+    #[ignore = "release-only icon extension classification microbenchmark"]
+    fn borrowed_icon_file_kind_beats_lowercase_allocation_benchmark() {
+        let paths = [
+            Path::new("symbol.SVG"),
+            Path::new("photo.PNG"),
+            Path::new("cover.JPEG"),
+            Path::new("tile.BMP"),
+        ];
+        let iterations = 500_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_matches = 0usize;
+        for _ in 0..iterations {
+            for path in paths {
+                let extension = path.extension().and_then(|value| value.to_str()).unwrap();
+                let extension = extension.to_ascii_lowercase();
+                old_matches += usize::from(matches!(
+                    extension.as_str(),
+                    "svg" | "png" | "jpg" | "jpeg" | "bmp"
+                ));
+            }
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_matches = 0usize;
+        for _ in 0..iterations {
+            for path in paths {
+                new_matches += usize::from(icon_file_kind(path).is_some());
+            }
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_matches, new_matches);
+        println!(
+            "icon extension classification: lowercase allocation {old_time:?}; borrowed comparison {new_time:?}; ratio {:.1}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(
+            new_time < old_time,
+            "borrowed extension classification should beat lowercase allocation"
+        );
+    }
+
+    #[test]
+    #[ignore = "release-only file freshness lookup microbenchmark"]
+    fn direct_file_freshness_beats_ttl_lru_benchmark() {
         let _guard = icon_test_lock();
         clear_icon_caches();
         let td = tempfile::tempdir().unwrap();
@@ -1191,18 +1211,30 @@ mod tests {
             .save(&path)
             .unwrap();
         let iterations = 50_000;
+        let identity = source_identity(&path, None);
+        let initial_freshness = file_freshness_uncached_for_benchmark(&path).unwrap();
+        let mut former_cache = LruCache::new(2048);
+        former_cache.insert(
+            Arc::from(path.as_path()),
+            (initial_freshness, std::time::Instant::now()),
+        );
 
         let old_started = std::time::Instant::now();
         for _ in 0..iterations {
-            let freshness = file_freshness_uncached_for_benchmark(&path).unwrap();
-            std::hint::black_box(raster_file_key_with_freshness(
-                &path,
-                16,
-                16,
-                tint(),
-                true,
-                freshness,
-            ));
+            let now = std::time::Instant::now();
+            let (freshness, checked_at) = former_cache.get(path.as_path()).copied().unwrap();
+            std::hint::black_box(
+                now.duration_since(checked_at) < std::time::Duration::from_secs(1),
+            );
+            std::hint::black_box(RasterCacheKey {
+                source_kind: RasterSourceKind::File,
+                source_identity: Arc::clone(&identity),
+                width: 16,
+                height: 16,
+                tint: encode_tint(tint()),
+                multicolor: true,
+                freshness: Some(freshness),
+            });
         }
         let old_time = old_started.elapsed();
 
@@ -1214,13 +1246,13 @@ mod tests {
         let new_time = new_started.elapsed();
 
         println!(
-            "file freshness TTL: per-draw stat {old_time:?}; ttl cached {new_time:?}; ratio {:.1}x; probes={}",
+            "file freshness lookup: ttl LRU {old_time:?}; direct stat {new_time:?}; ratio {:.1}x; probes={}",
             old_time.as_secs_f64() / new_time.as_secs_f64(),
             file_freshness_stat_probes()
         );
         assert!(
             new_time < old_time,
-            "ttl cached path should beat per-draw metadata probes"
+            "direct metadata probes should beat the former TTL/LRU path"
         );
     }
 
@@ -1405,7 +1437,6 @@ mod tests {
 
         let replacement = ImageBuffer::from_fn(5, 4, |_, _| Rgba([0u8, 255, 0, 255]));
         replacement.save(&path).unwrap();
-        expire_file_freshness(&path);
 
         profiling::reset_raster_metrics();
         draw_icon_from_path_with_options(&mut buffer, &path, 2, 2, 12, 12, tint(), true);

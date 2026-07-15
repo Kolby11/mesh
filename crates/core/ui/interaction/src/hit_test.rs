@@ -508,20 +508,47 @@ pub fn find_event_handler(tree: &WidgetNode, key: &str, event_name: &str) -> Opt
 }
 
 pub fn namespace_event_handlers(node: &mut WidgetNode, instance_key: &str) {
+    let mut namespace_prefix = None;
+    namespace_event_handlers_with_prefix(node, instance_key, &mut namespace_prefix);
+}
+
+fn namespace_event_handlers_with_prefix(
+    node: &mut WidgetNode,
+    instance_key: &str,
+    namespace_prefix: &mut Option<String>,
+) {
     for handler in node.event_handlers.values_mut() {
         if !handler.starts_with("__mesh_embed__::") {
-            *handler = format!("__mesh_embed__::{instance_key}::{handler}");
+            namespace_handler(handler, instance_key, namespace_prefix);
         }
     }
     for call in node.event_handler_calls.values_mut() {
         if !call.handler.starts_with("__mesh_embed__::") {
-            call.handler = format!("__mesh_embed__::{instance_key}::{}", call.handler);
+            namespace_handler(&mut call.handler, instance_key, namespace_prefix);
         }
     }
 
     for child in &mut node.children {
-        namespace_event_handlers(child, instance_key);
+        namespace_event_handlers_with_prefix(child, instance_key, namespace_prefix);
     }
+}
+
+fn namespace_handler(
+    handler: &mut String,
+    instance_key: &str,
+    namespace_prefix: &mut Option<String>,
+) {
+    let prefix = namespace_prefix.get_or_insert_with(|| {
+        let mut prefix = String::with_capacity("__mesh_embed__::".len() + instance_key.len() + 2);
+        prefix.push_str("__mesh_embed__::");
+        prefix.push_str(instance_key);
+        prefix.push_str("::");
+        prefix
+    });
+    let mut namespaced = String::with_capacity(prefix.len() + handler.len());
+    namespaced.push_str(prefix);
+    namespaced.push_str(handler);
+    *handler = namespaced;
 }
 
 pub fn parse_namespaced_handler(handler: &str) -> Option<(&str, &str)> {
@@ -532,7 +559,7 @@ pub fn parse_namespaced_handler(handler: &str) -> Option<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mesh_core_elements::{LayoutRect, WidgetNode};
+    use mesh_core_elements::{EventHandlerCall, LayoutRect, WidgetNode};
 
     fn indexed_tree(rows: usize, columns: usize) -> WidgetNode {
         let mut root = WidgetNode::new("surface");
@@ -570,6 +597,116 @@ mod tests {
             root.children.push(row);
         }
         root
+    }
+
+    fn legacy_namespace_event_handlers(node: &mut WidgetNode, instance_key: &str) {
+        for handler in node.event_handlers.values_mut() {
+            if !handler.starts_with("__mesh_embed__::") {
+                *handler = format!("__mesh_embed__::{instance_key}::{handler}");
+            }
+        }
+        for call in node.event_handler_calls.values_mut() {
+            if !call.handler.starts_with("__mesh_embed__::") {
+                call.handler = format!("__mesh_embed__::{instance_key}::{}", call.handler);
+            }
+        }
+        for child in &mut node.children {
+            legacy_namespace_event_handlers(child, instance_key);
+        }
+    }
+
+    fn assert_handler_graph_eq(left: &WidgetNode, right: &WidgetNode) {
+        assert_eq!(left.event_handlers, right.event_handlers);
+        assert_eq!(left.event_handler_calls, right.event_handler_calls);
+        assert_eq!(left.children.len(), right.children.len());
+        for (left_child, right_child) in left.children.iter().zip(&right.children) {
+            assert_handler_graph_eq(left_child, right_child);
+        }
+    }
+
+    fn representative_handler_tree(rows: usize, columns: usize) -> WidgetNode {
+        let mut tree = indexed_tree(rows, columns);
+        for row in &mut tree.children {
+            for cell in &mut row.children {
+                cell.event_handlers
+                    .insert("click".into(), "handlePrimaryAction".into());
+                cell.event_handlers
+                    .insert("pointerenter".into(), "handlePointerEnter".into());
+                cell.event_handlers.insert(
+                    "focus".into(),
+                    "__mesh_embed__::@mesh/shared::alreadyNamespaced".into(),
+                );
+                cell.event_handler_calls.insert(
+                    "change".into(),
+                    EventHandlerCall {
+                        handler: "handleValueChange".into(),
+                        args: Vec::new(),
+                    },
+                );
+            }
+        }
+        tree
+    }
+
+    #[test]
+    fn namespace_event_handlers_matches_legacy_graph_output() {
+        let instance_key = "@mesh/settings/local:appearance/import:ThemeControls";
+        let tree = representative_handler_tree(3, 4);
+        let mut legacy = tree.clone();
+        let mut prefixed = tree;
+
+        legacy_namespace_event_handlers(&mut legacy, instance_key);
+        namespace_event_handlers(&mut prefixed, instance_key);
+
+        assert_handler_graph_eq(&legacy, &prefixed);
+    }
+
+    // cargo test -p mesh-core-interaction --release -- shared_handler_namespace_prefix_beats_per_handler_format --ignored --nocapture
+    #[test]
+    #[ignore = "release-only handler namespace allocation microbenchmark"]
+    fn shared_handler_namespace_prefix_beats_per_handler_format() {
+        use std::hint::black_box;
+        use std::time::{Duration, Instant};
+
+        let instance_key = "@mesh/settings/local:appearance/import:ThemeControls";
+        let template = representative_handler_tree(40, 25);
+        let iterations = 200usize;
+        let mut legacy_time = Duration::ZERO;
+        let mut prefixed_time = Duration::ZERO;
+        let mut legacy_total = 0usize;
+        let mut prefixed_total = 0usize;
+
+        for iteration in 0..iterations {
+            let mut legacy = template.clone();
+            let mut prefixed = template.clone();
+            if iteration % 2 == 0 {
+                let started = Instant::now();
+                legacy_namespace_event_handlers(black_box(&mut legacy), black_box(instance_key));
+                legacy_time += started.elapsed();
+                let started = Instant::now();
+                namespace_event_handlers(black_box(&mut prefixed), black_box(instance_key));
+                prefixed_time += started.elapsed();
+            } else {
+                let started = Instant::now();
+                namespace_event_handlers(black_box(&mut prefixed), black_box(instance_key));
+                prefixed_time += started.elapsed();
+                let started = Instant::now();
+                legacy_namespace_event_handlers(black_box(&mut legacy), black_box(instance_key));
+                legacy_time += started.elapsed();
+            }
+            assert_handler_graph_eq(&legacy, &prefixed);
+            legacy_total = legacy_total
+                .wrapping_add(legacy.children[0].children[0].event_handlers["click"].len());
+            prefixed_total = prefixed_total
+                .wrapping_add(prefixed.children[0].children[0].event_handlers["click"].len());
+        }
+
+        eprintln!(
+            "ordinary handler graph namespacing: per-handler format {legacy_time:?}; shared prefix {prefixed_time:?}; ratio {:.2}x",
+            legacy_time.as_secs_f64() / prefixed_time.as_secs_f64()
+        );
+        assert_eq!(legacy_total, prefixed_total);
+        assert!(prefixed_time < legacy_time);
     }
 
     #[test]

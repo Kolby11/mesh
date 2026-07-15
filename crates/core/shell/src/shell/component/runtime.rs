@@ -31,6 +31,35 @@ fn local_component_runtime_id(host_module_id: &str, alias: &str) -> String {
     component_id
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HandlerDispatchTarget<'a> {
+    Root {
+        handler: &'a str,
+    },
+    Embedded {
+        instance_key: &'a str,
+        handler: &'a str,
+    },
+}
+
+impl<'a> HandlerDispatchTarget<'a> {
+    fn resolve(handler: &'a str) -> Self {
+        match parse_namespaced_handler(handler) {
+            Some((instance_key, handler)) => Self::Embedded {
+                instance_key,
+                handler,
+            },
+            None => Self::Root { handler },
+        }
+    }
+
+    fn handler(self) -> &'a str {
+        match self {
+            Self::Root { handler } | Self::Embedded { handler, .. } => handler,
+        }
+    }
+}
+
 fn apply_runtime_props(
     runtime: &mut EmbeddedFrontendRuntime,
     props: &HashMap<String, serde_json::Value>,
@@ -574,18 +603,14 @@ impl FrontendSurfaceComponent {
         args: &[serde_json::Value],
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let _span = tracing::debug_span!("call_handler", surface = %self.id(), handler).entered();
-        let root_instance_key;
-        let (instance_key, raw_handler_name) =
-            if let Some((instance_key, handler_name)) = parse_namespaced_handler(handler) {
-                (instance_key, handler_name)
-            } else {
-                root_instance_key = self.id().to_string();
-                (root_instance_key.as_str(), handler)
-            };
-
-        let (handler_name, merged_args) = unpack_handler_args(raw_handler_name, args);
+        let target = HandlerDispatchTarget::resolve(handler);
+        let (handler_name, merged_args) = unpack_handler_args(target.handler(), args);
 
         let mut runtimes = self.runtimes.lock().unwrap();
+        let instance_key = match target {
+            HandlerDispatchTarget::Root { .. } => self.id(),
+            HandlerDispatchTarget::Embedded { instance_key, .. } => instance_key,
+        };
         let Some(runtime) = runtimes.get_mut(instance_key) else {
             return Ok(Vec::new());
         };
@@ -615,13 +640,37 @@ impl FrontendSurfaceComponent {
         let state_dirty = runtime.script_ctx.state().is_dirty();
         let published = runtime.script_ctx.drain_published_events();
         drop(runtimes);
-        let mut events = self.drain_local_script_events(instance_key, published);
-        // A live `bind:this` cross-call mutated another instance's `_ENV` directly
-        // during this handler — a parent calling `child.fn()` (parent→child) or a
-        // child firing `self.Event` to a subscribed parent (child→parent). Re-sync
-        // every instance linked to this one so its reactive state catches up.
-        let (neighbors_dirty, mut neighbor_events) = self.resync_binding_neighbors(instance_key);
-        events.append(&mut neighbor_events);
+
+        let (mut events, neighbors_dirty) = match target {
+            HandlerDispatchTarget::Embedded { instance_key, .. } => {
+                let mut events = self.drain_local_script_events(instance_key, published);
+                let (neighbors_dirty, mut neighbor_events) =
+                    self.resync_binding_neighbors(instance_key);
+                events.append(&mut neighbor_events);
+                (events, neighbors_dirty)
+            }
+            HandlerDispatchTarget::Root { .. } => {
+                // The root ID is borrowed from `self` for the runtime lookup above.
+                // Most ordinary handlers neither publish scheduling events nor
+                // participate in live bindings, so avoid cloning that ID before
+                // every dispatch. The uncommon post-dispatch paths still receive
+                // an owned key, preserving their existing behavior.
+                let needs_neighbor_sync = self.has_binding_neighbors(self.id());
+                if published.is_empty() && !needs_neighbor_sync {
+                    (Vec::new(), false)
+                } else {
+                    let instance_key = self.id().to_string();
+                    let mut events = self.drain_local_script_events(&instance_key, published);
+                    let (neighbors_dirty, mut neighbor_events) = if needs_neighbor_sync {
+                        self.resync_binding_neighbors(&instance_key)
+                    } else {
+                        (false, Vec::new())
+                    };
+                    events.append(&mut neighbor_events);
+                    (events, neighbors_dirty)
+                }
+            }
+        };
         if state_dirty || neighbors_dirty {
             self.invalidate_script_state();
         }
@@ -632,6 +681,16 @@ impl FrontendSurfaceComponent {
         events.append(&mut element_requests);
 
         Ok(events)
+    }
+
+    fn has_binding_neighbors(&self, instance_key: &str) -> bool {
+        let bound_children = self.bound_children.borrow();
+        bound_children
+            .get(instance_key)
+            .is_some_and(|links| !links.is_empty())
+            || bound_children.iter().any(|(parent_key, links)| {
+                parent_key != instance_key && links.iter().any(|(_, child)| child == instance_key)
+            })
     }
 
     /// Re-sync every instance linked to `instance_key` by a live `bind:this`
@@ -755,6 +814,91 @@ mod handler_call_tests {
         assert!(matches!(handler, std::borrow::Cow::Borrowed(_)));
         assert_eq!(args.as_ref(), event_args.as_slice());
         assert!(matches!(args, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn handler_dispatch_target_preserves_root_and_embedded_identity() {
+        assert_eq!(
+            HandlerDispatchTarget::resolve("onClick"),
+            HandlerDispatchTarget::Root { handler: "onClick" }
+        );
+        assert_eq!(
+            HandlerDispatchTarget::resolve("__mesh_embed__::@mesh/panel/local:Clock::open"),
+            HandlerDispatchTarget::Embedded {
+                instance_key: "@mesh/panel/local:Clock",
+                handler: "open",
+            }
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- root_handler_runtime_lookup_borrows_instance_key --ignored --nocapture
+    #[test]
+    #[ignore = "release-only root handler runtime lookup microbenchmark"]
+    fn root_handler_runtime_lookup_borrows_instance_key() {
+        fn old_lookup(
+            runtimes: &HashMap<String, usize>,
+            root_instance_key: &str,
+            handler: &str,
+        ) -> Option<usize> {
+            let owned_root_instance_key;
+            let instance_key = if let Some((instance_key, _)) = parse_namespaced_handler(handler) {
+                instance_key
+            } else {
+                owned_root_instance_key = root_instance_key.to_string();
+                owned_root_instance_key.as_str()
+            };
+            runtimes.get(instance_key).copied()
+        }
+
+        fn borrowed_lookup(
+            runtimes: &HashMap<String, usize>,
+            root_instance_key: &str,
+            handler: &str,
+        ) -> Option<usize> {
+            let target = HandlerDispatchTarget::resolve(handler);
+            let instance_key = match target {
+                HandlerDispatchTarget::Root { .. } => root_instance_key,
+                HandlerDispatchTarget::Embedded { instance_key, .. } => instance_key,
+            };
+            runtimes.get(instance_key).copied()
+        }
+
+        let root_instance_key = "@mesh/navigation-bar";
+        let runtimes = HashMap::from([
+            (root_instance_key.to_string(), 7usize),
+            ("@mesh/navigation-bar/local:Clock".to_string(), 11),
+        ]);
+        let iterations = 2_000_000usize;
+        let mut old_total = 0usize;
+        let old_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            old_total ^= std::hint::black_box(old_lookup(
+                &runtimes,
+                root_instance_key,
+                std::hint::black_box("onPointerMove"),
+            ))
+            .unwrap();
+        }
+        let old_time = old_started.elapsed();
+
+        let mut new_total = 0usize;
+        let new_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            new_total ^= std::hint::black_box(borrowed_lookup(
+                &runtimes,
+                root_instance_key,
+                std::hint::black_box("onPointerMove"),
+            ))
+            .unwrap();
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_total, new_total);
+        eprintln!(
+            "root handler runtime lookup: owned ID {old_time:?}; borrowed ID {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
     }
 
     // cargo test -p mesh-core-shell --release -- plain_handler_syntax_gate_beats_failed_json_parse --ignored --nocapture

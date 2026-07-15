@@ -999,6 +999,25 @@ impl<'a> StyleResolver<'a> {
         self.resolve_node_style_with_attrs_indexed(rules, index, &attrs, context)
     }
 
+    /// Resolve a live widget node through an existing rule index while reusing
+    /// the node's cached class tokens.
+    ///
+    /// Runtime diagnostic passes run immediately after the ordinary restyle,
+    /// which has already refreshed this cache. Taking the node directly avoids
+    /// rebuilding an owned `Vec<String>` from its `class` attribute for every
+    /// node in the tree.
+    pub fn resolve_node_style_with_diagnostics_for_node_indexed(
+        &self,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
+        node: &mut crate::tree::WidgetNode,
+        context: StyleContext,
+    ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
+        debug_assert!(index.is_for(rules));
+        let attrs = StyleNodeAttrs::from_node(node);
+        self.resolve_node_style_with_attrs_indexed(rules, index, &attrs, context)
+    }
+
     fn resolve_node_style_with_attrs(
         &self,
         rules: &[StyleRule],
@@ -2595,6 +2614,118 @@ mod tests {
         let index = StyleRuleIndex::new(&rules);
 
         assert_eq!(index.rules_for_state_bit(STATE_HOVERED), &[0]);
+    }
+
+    #[test]
+    fn node_indexed_diagnostics_match_allocating_class_path() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("primary".into()),
+            declarations: vec![Declaration {
+                property: "unsupported-proof-property".into(),
+                value: StyleValue::Literal("proof".into()),
+            }],
+            container_query: None,
+        }];
+        let index = StyleRuleIndex::new(&rules);
+        let context = StyleContext::default();
+        let mut node = crate::tree::WidgetNode::new("button");
+        node.attributes
+            .insert("class".into(), "primary compact".into());
+
+        let classes = vec!["primary".to_string(), "compact".to_string()];
+        let allocating = resolver.resolve_node_style_with_diagnostics_for_module_indexed(
+            &rules,
+            &index,
+            "button",
+            &classes,
+            None,
+            context,
+            ElementState::default(),
+            None,
+        );
+        let cached = resolver.resolve_node_style_with_diagnostics_for_node_indexed(
+            &rules, &index, &mut node, context,
+        );
+
+        assert_eq!(cached.0.background_color, allocating.0.background_color);
+        assert_eq!(cached.1, allocating.1);
+        assert!(!cached.1.is_empty());
+    }
+
+    // cargo test -p mesh-core-elements --release -- cached_node_classes_beat_diagnostic_resplit --ignored --nocapture
+    #[test]
+    #[ignore = "release-only diagnostic class-token cache microbenchmark"]
+    fn cached_node_classes_beat_diagnostic_resplit() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("selected".into()),
+            declarations: vec![Declaration {
+                property: "background-color".into(),
+                value: StyleValue::Literal("#336699".into()),
+            }],
+            container_query: None,
+        }];
+        let index = StyleRuleIndex::new(&rules);
+        let context = StyleContext::default();
+        let mut node = crate::tree::WidgetNode::new("button");
+        node.attributes.insert(
+            "class".into(),
+            "button selected interactive compact elevated".into(),
+        );
+        node.refresh_class_tokens_cache();
+        let iterations = 200_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_accumulator = 0_u32;
+        for _ in 0..iterations {
+            let classes = node.attributes["class"]
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let (style, diagnostics) = resolver
+                .resolve_node_style_with_diagnostics_for_module_indexed(
+                    &rules,
+                    &index,
+                    std::hint::black_box("button"),
+                    std::hint::black_box(&classes),
+                    None,
+                    context,
+                    ElementState::default(),
+                    None,
+                );
+            old_accumulator = old_accumulator.wrapping_add(
+                std::hint::black_box(style.background_color.b as u32)
+                    .wrapping_add(diagnostics.len() as u32),
+            );
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_accumulator = 0_u32;
+        for _ in 0..iterations {
+            let (style, diagnostics) = resolver
+                .resolve_node_style_with_diagnostics_for_node_indexed(
+                    &rules,
+                    &index,
+                    std::hint::black_box(&mut node),
+                    context,
+                );
+            new_accumulator = new_accumulator.wrapping_add(
+                std::hint::black_box(style.background_color.b as u32)
+                    .wrapping_add(diagnostics.len() as u32),
+            );
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "diagnostic class tokens: resplit {old_time:?}; cached node {new_time:?}; ratio {:.2}x; accumulators={old_accumulator}/{new_accumulator}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_accumulator, new_accumulator);
+        assert!(new_time < old_time);
     }
 
     #[test]

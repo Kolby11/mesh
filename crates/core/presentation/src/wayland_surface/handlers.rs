@@ -266,7 +266,7 @@ impl PointerHandler for State {
                 }
                 PointerEventKind::Leave { .. } => {
                     tracing::debug!("[hover] layer_shell: pointer leave surface_id={surface_id}");
-                    if self.focus_grab_surface_id.as_deref() == Some(surface_id.as_str()) {
+                    if self.focus_grab_surface_id.as_deref() == Some(surface_id.as_ref()) {
                         tracing::debug!(
                             "[focus] layer_shell: pointer left grabbed surface_id={surface_id}; releasing focus grab"
                         );
@@ -462,7 +462,7 @@ impl KeyboardHandler for State {
         }
         self.keyboard_focus = focused.clone();
         if let Some(surface_id) = focused
-            && self.focus_grab_surface_id.as_deref() == Some(surface_id.as_str())
+            && self.focus_grab_surface_id.as_deref() == Some(surface_id.as_ref())
         {
             tracing::debug!(
                 "[focus] layer_shell: keyboard focus entered grabbed surface_id={surface_id}; releasing focus grab"
@@ -480,7 +480,7 @@ impl KeyboardHandler for State {
         _serial: u32,
     ) {
         if let Some(surface_id) = self.surface_id_for_wl_surface(surface)
-            && self.focus_grab_surface_id.as_deref() == Some(surface_id.as_str())
+            && self.focus_grab_surface_id.as_deref() == Some(surface_id.as_ref())
         {
             tracing::debug!(
                 "[focus] layer_shell: keyboard focus left grabbed surface_id={surface_id}; releasing focus grab"
@@ -499,7 +499,7 @@ impl KeyboardHandler for State {
         _serial: u32,
         event: KeyEvent,
     ) {
-        let Some(mut surface_id) = self.keyboard_focus.clone() else {
+        let Some(surface_id) = self.keyboard_focus.clone() else {
             return;
         };
         let name = keysym_name(event.keysym);
@@ -520,11 +520,7 @@ impl KeyboardHandler for State {
             ch,
             Instant::now(),
         );
-        let key_surface_id = if ch.is_some() || self.keyboard_repeat.is_some() {
-            surface_id.clone()
-        } else {
-            std::mem::take(&mut surface_id)
-        };
+        let key_surface_id = surface_id.clone();
         self.events.push(DevWindowEvent::Key {
             surface_id: key_surface_id,
             event: DevWindowKeyEvent::Pressed(name.into_owned(), mods),
@@ -647,7 +643,7 @@ impl PopupHandler for State {
         if let Some(id) = dismissed {
             tracing::debug!("[popover] layer_shell: compositor dismissed popup surface_id={id}");
             self.remove_surface(&id);
-            self.dismissed_popups.push(id);
+            self.dismissed_popups.push(id.to_string());
         }
     }
 }

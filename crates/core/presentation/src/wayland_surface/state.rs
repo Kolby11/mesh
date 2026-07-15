@@ -1,11 +1,12 @@
 use super::backend::{SurfaceEntry, apply_config, surface_config_fingerprint};
 use super::*;
+use std::sync::Arc;
 
 const MAX_REPEAT_EVENTS_PER_POLL: usize = 64;
 const SURFACE_FOCUS_GRAB_TIMEOUT: Duration = Duration::from_millis(750);
 
 pub(super) struct KeyboardRepeatState {
-    pub(super) surface_id: String,
+    pub(super) surface_id: Arc<str>,
     pub(super) key: String,
     pub(super) mods: KeyMods,
     pub(super) ch: Option<char>,
@@ -47,17 +48,17 @@ pub(super) struct State {
     pub(super) seat_state: SeatState,
     pub(super) activation_seat: Option<wl_seat::WlSeat>,
     pub(super) focus_grab: Option<HyprlandFocusGrabV1>,
-    pub(super) focus_grab_surface_id: Option<String>,
+    pub(super) focus_grab_surface_id: Option<Arc<str>>,
     pub(super) focus_grab_requested_at: Option<Instant>,
     pub(super) qh: QueueHandle<State>,
     pub(super) pool: Option<SlotPool>,
     pub(super) surfaces: HashMap<String, SurfaceEntry>,
-    pub(super) surface_ids_by_wl_id: HashMap<ObjectId, String>,
+    pub(super) surface_ids_by_wl_id: HashMap<ObjectId, Arc<str>>,
     pub(super) pointer: Option<ThemedPointer>,
     pub(super) pointer_interactive: bool,
     pub(super) keyboard: Option<wl_keyboard::WlKeyboard>,
-    pub(super) pointer_focus: Option<String>,
-    pub(super) keyboard_focus: Option<String>,
+    pub(super) pointer_focus: Option<Arc<str>>,
+    pub(super) keyboard_focus: Option<Arc<str>>,
     pub(super) keyboard_mods: Modifiers,
     pub(super) keyboard_repeat_info: RepeatInfo,
     pub(super) keyboard_repeat: Option<KeyboardRepeatState>,
@@ -185,7 +186,7 @@ impl State {
             tracing::debug!("[focus] layer_shell: starting focus grab for surface_id={surface_id}");
             grab.add_surface(entry.wl_surface());
             grab.commit();
-            self.focus_grab_surface_id = Some(surface_id.to_string());
+            self.focus_grab_surface_id = Some(Arc::from(surface_id));
             self.focus_grab_requested_at = Some(Instant::now());
             if let Some(previous_surface_id) = previous_surface_id.as_deref()
                 && previous_surface_id != surface_id
@@ -210,7 +211,7 @@ impl State {
             return true;
         };
         if let Some(keyboard_focus) = self.keyboard_focus.as_deref() {
-            if keyboard_focus != surface_id {
+            if keyboard_focus != surface_id.as_ref() {
                 tracing::debug!(
                     "[focus] layer_shell: focus moved off grabbed surface from={keyboard_focus} to={surface_id}; releasing focus grab"
                 );
@@ -302,7 +303,8 @@ impl State {
             self.surface_ids_by_wl_id
                 .remove(&previous.wl_surface().id());
         }
-        self.surface_ids_by_wl_id.insert(wl_id, surface_id);
+        self.surface_ids_by_wl_id
+            .insert(wl_id, Arc::from(surface_id));
     }
 
     pub(super) fn remove_surface(&mut self, surface_id: &str) -> Option<SurfaceEntry> {
@@ -314,7 +316,7 @@ impl State {
     pub(super) fn surface_id_for_wl_surface(
         &self,
         surface: &wl_surface::WlSurface,
-    ) -> Option<String> {
+    ) -> Option<Arc<str>> {
         self.surface_ids_by_wl_id.get(&surface.id()).cloned()
     }
 
@@ -346,7 +348,7 @@ fn keyboard_repeat_state_for(
     }
     let interval = Duration::from_micros((1_000_000 / rate.get() as u64).max(1));
     Some(KeyboardRepeatState {
-        surface_id: surface_id.to_string(),
+        surface_id: Arc::from(surface_id),
         key: key.to_string(),
         mods,
         ch,
@@ -450,7 +452,7 @@ mod performance_tests {
 
         let repeat =
             keyboard_repeat_state_for(repeat_info, "panel", "a", mods, Some('a'), now).unwrap();
-        assert_eq!(repeat.surface_id, "panel");
+        assert_eq!(repeat.surface_id.as_ref(), "panel");
         assert_eq!(repeat.key, "a");
         assert_eq!(repeat.ch, Some('a'));
         assert_eq!(repeat.next_at, now + Duration::from_millis(250));
@@ -544,7 +546,7 @@ mod performance_tests {
             let surface_id = String::from("@mesh/keyboard/benchmark/surface");
             let name = String::from("Shift_L");
             let key_event = DevWindowEvent::Key {
-                surface_id: surface_id.clone(),
+                surface_id: surface_id.clone().into(),
                 event: DevWindowKeyEvent::Pressed(name.clone(), mods.clone()),
             };
             let repeat = old_schedule_keyboard_repeat(
@@ -571,7 +573,7 @@ mod performance_tests {
                 std::mem::take(&mut surface_id)
             };
             let key_event = DevWindowEvent::Key {
-                surface_id: key_surface_id,
+                surface_id: key_surface_id.into(),
                 event: DevWindowKeyEvent::Pressed(name, mods.clone()),
             };
             std::hint::black_box((key_event, repeat, surface_id));
@@ -605,7 +607,7 @@ mod performance_tests {
             };
             let interval = Duration::from_micros((1_000_000 / rate.get() as u64).max(1));
             Some(KeyboardRepeatState {
-                surface_id: surface_id.to_string(),
+                surface_id: Arc::from(surface_id),
                 key: key.to_string(),
                 mods,
                 ch,

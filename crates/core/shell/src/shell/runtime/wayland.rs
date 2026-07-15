@@ -281,7 +281,7 @@ impl RoutedWindowEvent {
     }
 }
 
-fn split_window_event(event: WindowEvent) -> (String, RoutedWindowEvent) {
+fn split_window_event(event: WindowEvent) -> (std::sync::Arc<str>, RoutedWindowEvent) {
     match event {
         WindowEvent::PointerMove { surface_id, x, y } => {
             (surface_id, RoutedWindowEvent::PointerMove { x, y })
@@ -333,12 +333,12 @@ mod tests {
     #[test]
     fn split_window_event_preserves_surface_and_payload() {
         let (surface_id, event) = split_window_event(WindowEvent::PointerButton {
-            surface_id: "panel".to_string(),
+            surface_id: "panel".into(),
             x: 12.0,
             y: 24.0,
             pressed: true,
         });
-        assert_eq!(surface_id, "panel");
+        assert_eq!(surface_id.as_ref(), "panel");
         assert!(matches!(
             event,
             RoutedWindowEvent::PointerButton {
@@ -349,7 +349,7 @@ mod tests {
         ));
 
         let (surface_id, event) = split_window_event(WindowEvent::Key {
-            surface_id: "launcher".to_string(),
+            surface_id: "launcher".into(),
             event: WindowKeyEvent::Pressed(
                 "Enter".to_string(),
                 mesh_core_presentation::KeyMods {
@@ -359,7 +359,7 @@ mod tests {
                 },
             ),
         });
-        assert_eq!(surface_id, "launcher");
+        assert_eq!(surface_id.as_ref(), "launcher");
         assert!(event.is_keyboard());
         assert!(matches!(
             event,
@@ -374,7 +374,8 @@ mod tests {
     #[ignore = "release-only dispatch surface-id split microbenchmark"]
     fn dispatch_surface_id_split_benchmark() {
         const ITERATIONS: usize = 500_000;
-        let surface_id = "@mesh/benchmark-panel/with/a/long/child-surface-id".to_string();
+        let surface_id: std::sync::Arc<str> =
+            "@mesh/benchmark-panel/with/a/long/child-surface-id".into();
         let old_events: Vec<_> = (0..ITERATIONS)
             .map(|index| WindowEvent::PointerMove {
                 surface_id: surface_id.clone(),

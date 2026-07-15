@@ -499,12 +499,12 @@ pub fn coalesce_pointer_moves(events: Vec<WindowEvent>) -> Vec<WindowEvent> {
 #[derive(Debug)]
 enum PendingInputEvent {
     PointerMove {
-        surface_id: String,
+        surface_id: std::sync::Arc<str>,
         x: f32,
         y: f32,
     },
     Scroll {
-        surface_id: String,
+        surface_id: std::sync::Arc<str>,
         x: f32,
         y: f32,
         dx: f32,
@@ -659,7 +659,7 @@ mod tests {
 
     fn pointer_move(surface_id: &str, x: f32, y: f32) -> WindowEvent {
         WindowEvent::PointerMove {
-            surface_id: surface_id.to_string(),
+            surface_id: surface_id.into(),
             x,
             y,
         }
@@ -667,7 +667,7 @@ mod tests {
 
     fn scroll(surface_id: &str, x: f32, y: f32, dx: f32, dy: f32) -> WindowEvent {
         WindowEvent::Scroll {
-            surface_id: surface_id.to_string(),
+            surface_id: surface_id.into(),
             x,
             y,
             dx,
@@ -681,7 +681,7 @@ mod tests {
             pointer_move("panel", 1.0, 2.0),
             pointer_move("panel", 3.0, 4.0),
             WindowEvent::PointerButton {
-                surface_id: "panel".to_string(),
+                surface_id: "panel".into(),
                 x: 3.0,
                 y: 4.0,
                 pressed: true,
@@ -691,7 +691,7 @@ mod tests {
         assert_eq!(events.len(), 2);
         match &events[0] {
             WindowEvent::PointerMove { surface_id, x, y } => {
-                assert_eq!(surface_id, "panel");
+                assert_eq!(surface_id.as_ref(), "panel");
                 assert_eq!((*x, *y), (3.0, 4.0));
             }
             event => panic!("expected pointer move, got {event:?}"),
@@ -710,7 +710,7 @@ mod tests {
         assert_eq!(events.len(), 3);
         match &events[0] {
             WindowEvent::PointerMove { surface_id, x, y } => {
-                assert_eq!(surface_id, "panel");
+                assert_eq!(surface_id.as_ref(), "panel");
                 assert_eq!((*x, *y), (3.0, 3.0));
             }
             event => panic!("expected panel pointer move, got {event:?}"),
@@ -718,7 +718,7 @@ mod tests {
         assert!(
             events
                 .iter()
-                .any(|event| matches!(event, WindowEvent::PointerMove { surface_id, x, y } if surface_id == "popover" && (*x, *y) == (2.0, 2.0)))
+                .any(|event| matches!(event, WindowEvent::PointerMove { surface_id, x, y } if surface_id.as_ref() == "popover" && (*x, *y) == (2.0, 2.0)))
         );
         assert!(matches!(events[2], WindowEvent::Scroll { .. }));
     }
@@ -740,7 +740,7 @@ mod tests {
                 dx,
                 dy,
             } => {
-                assert_eq!(surface_id, "panel");
+                assert_eq!(surface_id.as_ref(), "panel");
                 assert_eq!((*x, *y), (12.0, 22.0));
                 assert_eq!((*dx, *dy), (1.5, 6.0));
             }
@@ -762,17 +762,17 @@ mod tests {
         assert!(matches!(
             events[0],
             WindowEvent::PointerMove { ref surface_id, x, y }
-                if surface_id == "panel" && (x, y) == (2.0, 2.0)
+                if surface_id.as_ref() == "panel" && (x, y) == (2.0, 2.0)
         ));
         assert!(matches!(
             events[1],
             WindowEvent::Scroll { ref surface_id, dx, dy, .. }
-                if surface_id == "panel" && (dx, dy) == (0.0, 3.0)
+                if surface_id.as_ref() == "panel" && (dx, dy) == (0.0, 3.0)
         ));
         assert!(matches!(
             events[2],
             WindowEvent::PointerMove { ref surface_id, x, y }
-                if surface_id == "panel" && (x, y) == (3.0, 3.0)
+                if surface_id.as_ref() == "panel" && (x, y) == (3.0, 3.0)
         ));
     }
 }

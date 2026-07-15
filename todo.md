@@ -399,9 +399,23 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       cache-key change repaints. A 160x90 release benchmark over 10,000 stable
       frames measured 4.07ms for the formerly mandatory clear alone versus
       27.3us for the full cache-key check (~149x faster, before subtree paint and
-      SHM presentation savings). Remaining: give child targets their own
-      retained display list and sparse damage rather than using the parent's
-      broad generation.
+      SHM presentation savings). Follow-up 2026-07-15: retained paint subtrees
+      now carry independent generations, and promoted child surfaces key their
+      paint cache from the popup subtree instead of the parent's broad display-
+      list generation. Unrelated sibling/parent paint no longer repaints a
+      stable popup, while popup-descendant changes still advance its generation.
+      A 160x90 release lower-bound benchmark across 10,000 unrelated parent
+      frames measured 4.290ms / 10,000 clears with the broad generation versus
+      3.562us / 1 clear with the subtree generation (~1,204x for the gate plus
+      avoided clear). Follow-up 2026-07-15: child targets now own bounded,
+      origin-aware retained display lists and replay retained commands instead
+      of calling the immediate tree painter. Pixel parity is covered. A
+      61-node popup over 400 root-opacity transition frames measured 38.0ms
+      immediate versus 30.9ms retained (1.23x); a one-descendant sparse
+      material workload measured 17.5ms versus 4.83ms (3.61x). Remaining:
+      consume child-local damage for partial buffer clear/raster/present rather
+      than replaying the full retained command stream on every changed child
+      generation.
 - [x] Fractional HiDPI forces full-surface repaint every frame → v1.21. Done
       2026-07-15: logical damage is now converted to physical painter-buffer
       coordinates by flooring near edges and ceiling far edges before clear
@@ -422,7 +436,16 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       repaints; only above a damage threshold, measure with v1.21 profiles).
 - [ ] Move blocking file IO off the shell thread (i18n catalog mounts,
       settings/theme reloads, icon/SVG cache-miss rasterization on the paint
-      path) via `spawn_blocking` + completion events.
+      path) via `spawn_blocking` + completion events. Progress 2026-07-15:
+      file-backed icon freshness checks dropped the one-second global
+      `Instant`/LRU layer after its release benchmark exposed a regression:
+      50,000 direct metadata/key probes measured 51.3ms versus 76.7ms through
+      the former TTL cache (1.5x faster), while also making file changes visible
+      immediately. File-extension dispatch in the same paint/opacity path now
+      uses borrowed case-insensitive comparisons instead of allocating a
+      lowercase `String`; 2M mixed classifications measured 56.7ms allocating
+      versus 35.9ms borrowed (1.6x faster). Remaining: move cache-miss reads and
+      rasterization off-thread rather than doing either on the paint path.
 
 ### P1 — boundary & dispatch
 
@@ -480,7 +503,16 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       borrowed cached `Arc` (~1.4x faster). Rejected: preallocating the script
       request vector was not stable in a fresh release run (363.0ms
       filter-collect versus 365.5ms preallocated loop), so that change was
-      dropped.
+      dropped. Follow-up 2026-07-15: ordinary graph namespacing now builds the
+      `__mesh_embed__::{instance_key}::` prefix once per traversal and appends
+      each raw handler with exact capacity instead of formatting the complete
+      namespace per handler. A 1,000-node release benchmark over 200 traversals
+      measured 79.6ms per-handler formatting versus 31.8ms shared-prefix
+      construction (2.50x; repeat 2.53x). Follow-up 2026-07-15: plain root
+      dispatch borrows the surface instance ID through runtime lookup and only
+      materializes it for published-event or live-binding post-processing.
+      Across 2M release lookups, owned-ID dispatch measured 41.4ms/41.0ms
+      versus 30.9ms/31.4ms borrowed (1.34x/1.30x).
       Remaining: full graph-wide instance-key interning for ordinary handler
       dispatch.
 - [x] Shell-side subscription index (service → component indices) so event
@@ -537,8 +569,13 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       tracking now uses an atomic boolean instead of locking a mutex for every
       read when render dependency tracking is off; release benchmark over 1M
       false checks measured 4.5ms mutex versus 0.44ms atomic (~10.2x faster
-      for that check). Remaining: broader shared immutable storage values or
-      lock avoidance for larger wins.
+      for that check). Rejected 2026-07-15: exact-semantics nested-value caches
+      both regressed 100,000 realistic reads — Rust recursive deep-copy cache
+      measured 1.221s current versus 1.815s cached (0.67x), and Luau
+      `table.clone` plus recursive arrays measured 1.237s versus 1.611s
+      (0.77x). Both prototypes were reverted. Remaining: broader shared
+      immutable storage values or lock avoidance needs a design that avoids
+      rebuilding detached Lua tables per access.
 
 ### P2 — typing & interning (→ v1.23)
 
@@ -612,8 +649,8 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       keeping `PixelBuffer` as the retained/compare copy (H).
 - [ ] SHM pool size classes (round up, viewport crop) so animated
       content-measured resizes stop reallocating the whole buffer set (H).
-- [ ] Input normalization: public `WindowEvent`/`DevWindowEvent` surface-id
-      payloads are still owned `String`s; move to `Arc<str>`/numeric ids
+- [x] Input normalization: public `WindowEvent`/`DevWindowEvent` surface-id
+      payloads moved from owned `String`s to shared `Arc<str>` IDs
       (U; lookup index and key-name borrowing landed). Progress 2026-07-13:
       disabled keyboard-repeat setup now returns before classifying
       non-repeating key names; release benchmark over 500,000 key batches
@@ -625,6 +662,13 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       now caches the needle byte slice outside the haystack window loop; release
       benchmark over 300,000 key batches measured 60.40ms per-window
       `as_bytes()` versus 59.93ms cached needle bytes (small ~0.8% win).
+      Completed 2026-07-15: presentation event surface IDs, dev-window keys,
+      Wayland wl-surface reverse IDs, pointer/keyboard focus, keyboard repeat,
+      input-coalescing state, and the shell routing boundary now share
+      `Arc<str>` IDs. Cloning 2M representative event IDs measured 10.74ms for
+      owned `String` versus 6.57ms shared (1.6x faster); the 500,000-event shell
+      split/route benchmark measured 10.18ms for allocating a target ID versus
+      8.89ms for moving the shared ID (~1.15x faster).
 - [ ] Startup: parallelize module discovery + manifest parsing (frontend
       compilation already runs through Rayon) (H/V). Progress 2026-07-13:
       installed-graph auto-discovery now loads sorted module manifests through

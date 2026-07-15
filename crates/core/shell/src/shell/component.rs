@@ -210,6 +210,15 @@ struct EffectiveDamage {
     policy: DisplayListRepaintPolicy,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuntimeStyleDiagnosticFingerprint {
+    rules_generation: u64,
+    tree: u64,
+    props: u64,
+    container_width: u32,
+    container_height: u32,
+}
+
 impl EffectiveDamage {
     fn none() -> Self {
         Self {
@@ -463,6 +472,11 @@ pub(super) struct FrontendSurfaceComponent {
     node_service_field_deps: NodeServiceFieldDependencies,
     retained_render_objects: RenderObjectTree,
     retained_display_list: RetainedDisplayList,
+    /// Popup-local display lists keyed by the promoted subtree's stable node id.
+    /// These retain the expensive tree-to-paint-command lowering between child
+    /// rasters; the shell's per-child generation cache decides when raster is
+    /// needed, while this cache makes that raster a command replay.
+    child_display_lists: RefCell<HashMap<NodeId, RetainedDisplayList>>,
     diagnostics: Option<Diagnostics>,
     /// Desired visibility for surface portals (`<ImportedSurface hidden={...} />`).
     /// Updated during build_tree; compared to last_surface_states in tick().
@@ -550,6 +564,14 @@ pub(super) struct FrontendSurfaceComponent {
     /// across restyle passes; `is_for()` verifies identity against the rules
     /// slice before each restyle so a rules rebuild forces a rebuild here too.
     cached_style_rule_index: Option<mesh_core_elements::style::StyleRuleIndex>,
+    /// Incremented whenever the flattened rule cache is rebuilt. Runtime
+    /// diagnostic fingerprints include this generation so source/rule reloads
+    /// can never reuse a result produced from the previous rule set.
+    style_rules_generation: u64,
+    /// Inputs from the last full runtime style-diagnostic pass. Script/text
+    /// rebuilds often reproduce an identical selector-facing tree; retaining
+    /// this lets them skip a second full style resolution per node.
+    runtime_style_diagnostic_fingerprint: Option<RuntimeStyleDiagnosticFingerprint>,
     /// Which per-element host metric tables this module can observe. When both
     /// flags are false, `publish_element_metrics` is skipped: building the JSON
     /// snapshots costs meaningful interaction-frame time and is wasted on
@@ -692,6 +714,7 @@ impl FrontendSurfaceComponent {
             node_service_field_deps: NodeServiceFieldDependencies::default(),
             retained_render_objects: RenderObjectTree::default(),
             retained_display_list: RetainedDisplayList::default(),
+            child_display_lists: RefCell::new(HashMap::new()),
             diagnostics: None,
             pending_surface_states: RefCell::new(HashMap::new()),
             last_surface_states: HashMap::new(),
@@ -730,6 +753,8 @@ impl FrontendSurfaceComponent {
             effective_damage_scratch: Vec::new(),
             cached_restyle_rules: None,
             cached_style_rule_index: None,
+            style_rules_generation: 0,
+            runtime_style_diagnostic_fingerprint: None,
             element_metric_usage,
             keyboard_settings_cache: RefCell::new(None),
             resolved_surface_shortcuts_cache: RefCell::new(None),

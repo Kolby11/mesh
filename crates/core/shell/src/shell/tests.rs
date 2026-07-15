@@ -6360,7 +6360,7 @@ fn parent_pointer_leave_defers_child_popover_close() {
 
     shell.presentation_engine.testing_push_event(
         mesh_core_presentation::WindowEvent::PointerMove {
-            surface_id: child_id.clone(),
+            surface_id: child_id.clone().into(),
             x: 4.0,
             y: 4.0,
         },
@@ -6461,7 +6461,7 @@ fn child_surface_input_routes_to_local_child_handler_and_profiles() {
     shell
         .presentation_engine
         .testing_push_event(mesh_core_presentation::WindowEvent::Scroll {
-            surface_id: child_id.clone(),
+            surface_id: child_id.clone().into(),
             x: 6.0,
             y: 7.0,
             dx: 0.0,
@@ -6469,7 +6469,7 @@ fn child_surface_input_routes_to_local_child_handler_and_profiles() {
         });
     shell.presentation_engine.testing_push_event(
         mesh_core_presentation::WindowEvent::PointerButton {
-            surface_id: child_id.clone(),
+            surface_id: child_id.clone().into(),
             x: 10.0,
             y: 12.0,
             pressed: true,
