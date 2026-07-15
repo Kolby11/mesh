@@ -1,23 +1,13 @@
 <template>
-  <row class="brightness-row {brightness_row_class}" title={t('nav.brightness') .. ' ' .. brightness_label}>
-    <button
-      class="brightness-ctrl"
-      onclick={onBrightnessDown}
-      title={t('nav.brightness_down')}
-      aria-label={t('nav.brightness_down')}
-    >
-      <icon class="ctrl-icon-sm" name="weather-few-clouds" size="12" />
-    </button>
-    <icon class="brightness-icon" name="weather-clear" size="16" />
-    <button
-      class="brightness-ctrl"
-      onclick={onBrightnessUp}
-      title={t('nav.brightness_up')}
-      aria-label={t('nav.brightness_up')}
-    >
-      <icon class="ctrl-icon-lg" name="weather-clear" size="18" />
-    </button>
-  </row>
+  <button
+    class="brightness-button {brightness_button_class}"
+    onscroll={onBrightnessScroll}
+    ontwofingerscroll={onBrightnessScroll}
+    title={t('nav.brightness') .. ' ' .. brightness_label}
+    aria-label={t('nav.brightness') .. ' ' .. brightness_label}
+  >
+    <icon class="brightness-icon" name="{brightness_icon}" size="18" />
+  </button>
 </template>
 
 <script lang="luau">
@@ -28,90 +18,87 @@ local brightness = require("mesh.brightness")
 
 brightness_level = 100
 brightness_label = "100%"
-brightness_row_class = brightness and "" or "brightness-unavailable"
+brightness_icon = "display-brightness-high"
+brightness_button_class = brightness and "" or "brightness-unavailable"
+
+local function update_brightness_copy(level)
+    brightness_level = math.max(0, math.min(100, math.floor(tonumber(level) or 100)))
+    brightness_label = string.format("%d%%", brightness_level)
+
+    if brightness_level == 0 then
+        brightness_icon = "display-brightness-off"
+    elseif brightness_level < 34 then
+        brightness_icon = "display-brightness-low"
+    elseif brightness_level < 67 then
+        brightness_icon = "display-brightness-medium"
+    else
+        brightness_icon = "display-brightness-high"
+    end
+end
 
 function render(self)
     if brightness and brightness.level ~= nil then
-        brightness_level = math.max(0, math.min(100, math.floor(tonumber(brightness.level) or 100)))
-        brightness_label = string.format("%d%%", brightness_level)
+        update_brightness_copy(brightness.level)
     end
 end
 
-function onBrightnessDown()
+function onBrightnessScroll(event)
     if not brightness then
         return
     end
-    brightness_level = math.max(0, brightness_level - 10)
-    brightness_label = string.format("%d%%", brightness_level)
-    brightness.decrease(10)
-end
 
-function onBrightnessUp()
-    if not brightness then
+    local delta = event and event.delta or {}
+    local dy = tonumber(delta.y) or 0
+    if dy == 0 then
         return
     end
-    brightness_level = math.min(100, brightness_level + 10)
-    brightness_label = string.format("%d%%", brightness_level)
-    brightness.increase(10)
+
+    -- Wheel deltas describe scroll direction, while touchpad deltas describe
+    -- physical finger movement. Normalize both so positive means "up".
+    if event.type == "twofingerscroll" then
+        dy = -dy
+    end
+
+    if dy > 0 then
+        update_brightness_copy(brightness_level + 5)
+        brightness.increase(5)
+    else
+        update_brightness_copy(brightness_level - 5)
+        brightness.decrease(5)
+    end
 end
 </script>
 
 <style>
-.brightness-row {
+.brightness-button {
+    width: 40px;
     height: 40px;
+    justify-content: center;
     align-items: center;
-    gap: 1px;
     flex-shrink: 0;
-    padding-inline: var(--spacing-xs);
+    padding: 0;
     border-radius: var(--radius-full);
     background: var(--color-surface-container);
     color: var(--color-on-surface);
-    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard);
-}
-
-.brightness-ctrl {
-    width: 28px;
-    height: 28px;
-    justify-content: center;
-    align-items: center;
-    border-radius: var(--radius-full);
-    background: transparent;
-    color: var(--color-on-surface);
     border-width: 0;
-    flex-shrink: 0;
     transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
                 color var(--animation-duration-short) var(--animation-curves-bezier-standard);
 }
 
-.brightness-ctrl:hover {
+.brightness-button:hover {
     background: var(--color-surface-container-high);
 }
 
-.brightness-ctrl:active {
+.brightness-button:active {
     background: var(--color-primary);
     color: var(--color-on-primary);
 }
 
 .brightness-icon {
-    width: 16px;
-    height: 16px;
-    flex-shrink: 0;
-    color: var(--color-on-surface-variant);
-}
-
-.ctrl-icon-sm {
-    width: 12px;
-    height: 12px;
-    color: inherit;
-    flex-shrink: 0;
-    opacity: 0.6;
-}
-
-.ctrl-icon-lg {
     width: 18px;
     height: 18px;
-    color: inherit;
     flex-shrink: 0;
+    color: inherit;
 }
 
 .brightness-unavailable {
@@ -119,7 +106,7 @@ end
 }
 
 @container (max-width: 720px) {
-    .brightness-row {
+    .brightness-button {
         display: none;
     }
 }

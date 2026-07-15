@@ -509,6 +509,36 @@ mod tests {
     }
 
     #[test]
+    fn bundled_material_symbols_font_rasterizes_with_variable_axes() {
+        let font_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../../../modules/icon-packs/material-symbols/assets/MaterialSymbolsRounded.ttf",
+        );
+        assert!(font_path.is_file());
+
+        let glyph = rasterize(
+            &font_path,
+            0xe8b8,
+            24,
+            GlyphAxes {
+                fill: Some(1.0),
+                weight: Some(500.0),
+                grade: Some(0.0),
+                optical_size: Some(24.0),
+            },
+            SupportedAxes {
+                fill: true,
+                weight: true,
+                grade: true,
+                optical_size: true,
+            },
+        )
+        .expect("settings glyph should rasterize");
+
+        assert!(glyph.width > 0 && glyph.height > 0);
+        assert!(glyph.pixels.iter().any(|alpha| *alpha > 0));
+    }
+
+    #[test]
     fn glyph_cache_key_separates_tint_size_and_axes() {
         let _guard = glyph_test_lock();
         clear_glyph_cache();

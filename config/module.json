@@ -7,8 +7,7 @@
     "modulesDir": "../modules",
     "disabled": [
       "@mesh/text-selection-proof",
-      "@mesh/debug-inspector",
-      "@mesh/icons-material-symbols"
+      "@mesh/debug-inspector"
     ],
     "providers": {
       "mesh.audio": "@mesh/pipewire-audio"

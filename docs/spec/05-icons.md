@@ -96,7 +96,12 @@ spellings are deleted.
     "id": "material",
     "kind": "font",
     "covers": { "@mesh/audio-interface": ">=1.0", "mesh.shell": ">=1.0" },
-    "requires": { "fonts": [{ "family": "Material Symbols Rounded", "version": ">=4.0" }] },
+    "requires": { "fonts": [{
+      "alias": "material-symbols",
+      "family": "Material Symbols Rounded",
+      "file": "assets/MaterialSymbolsRounded.ttf",
+      "version": ">=4.0"
+    }] },
     "axes": { "fill": true, "weight": true, "grade": true, "optical_size": true },
     "mappings": {
       "settings":           "material-symbols/settings_rounded",

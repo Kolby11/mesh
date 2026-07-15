@@ -694,6 +694,13 @@ fn material_symbols_module_parses_with_font_requirement() {
     assert_eq!(ip.requires.fonts.len(), 1);
     assert_eq!(ip.requires.fonts[0].family, "Material Symbols Rounded");
     assert_eq!(ip.requires.fonts[0].alias, "ms");
+    assert_eq!(
+        ip.requires.fonts[0].file.as_deref(),
+        Some("assets/MaterialSymbolsRounded.ttf")
+    );
+    assert!(dir.join("assets/MaterialSymbolsRounded.ttf").is_file());
+    assert!(dir.join("codepoints.json").is_file());
+    assert!(dir.join("LICENSE.google-material-icons").is_file());
     assert!(ip.axes.fill);
     assert_eq!(
         ip.mappings.get("audio-volume-high").map(String::as_str),

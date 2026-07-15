@@ -213,11 +213,35 @@ pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
             "MPRIS",
         ),
     ] {
+        let (state_fields, methods) = if interface == "mesh.brightness" {
+            (
+                vec![ContractStateField {
+                    name: "level".into(),
+                    field_type: "number".into(),
+                    description: None,
+                }],
+                vec!["increase", "decrease"]
+                    .into_iter()
+                    .map(|name| InterfaceMethod {
+                        name: name.into(),
+                        args: vec![InterfaceArgument {
+                            name: "amount".into(),
+                            arg_type: "number".into(),
+                        }],
+                        returns: None,
+                        coalesce: false,
+                        optimistic: None,
+                    })
+                    .collect(),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
         catalog.register_contract(InterfaceContract {
             interface: interface.into(),
             version: parse_contract_version("1.0").unwrap(),
-            state_fields: Vec::new(),
-            methods: Vec::new(),
+            state_fields,
+            methods,
             events: Vec::new(),
             types: HashMap::new(),
             capabilities: ContractCapabilities::default(),

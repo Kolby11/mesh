@@ -900,14 +900,15 @@ pub struct IconPackRequires {
 
 /// One entry in an icon-pack's `requires.fonts` list. `alias` is the
 /// short name used in mapping targets (`<alias>/<glyph-name>`); `family`
-/// is the actual fontconfig family name to match against; `glyph_map`
-/// is a path inside the pack module pointing at a JSON codepoints file
-/// (or Google's `name codepoint` text format), used to translate glyph
-/// names to codepoints at render time.
+/// is the fontconfig fallback family; `file` optionally points at a bundled
+/// font inside the module; and `glyph_map` translates glyph names to
+/// codepoints at render time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IconPackFontRequirement {
     pub alias: String,
     pub family: String,
+    #[serde(default)]
+    pub file: Option<String>,
     #[serde(default)]
     pub version: Option<String>,
     #[serde(default)]

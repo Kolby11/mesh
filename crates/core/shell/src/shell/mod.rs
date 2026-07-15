@@ -247,11 +247,25 @@ fn register_icon_pack_module(
                 req.alias
             );
         }
-        let resolved_font_path = resolve_font_family_path(&req.family);
+        let bundled_font_path = req
+            .file
+            .as_deref()
+            .map(|path| module_dir.join(path))
+            .filter(|path| path.is_file());
+        if req.file.is_some() && bundled_font_path.is_none() {
+            tracing::warn!(
+                "icon-pack '{}' declares bundled font for alias '{}' but the file is missing",
+                module_id,
+                req.alias
+            );
+        }
+        let resolved_font_path =
+            bundled_font_path.or_else(|| resolve_font_family_path(&req.family));
         if resolved_font_path.is_none() {
             tracing::warn!(
-                "icon-pack '{}' requires font family '{}' but it is not installed",
+                "icon-pack '{}' has no bundled font for alias '{}' and font family '{}' is not installed",
                 module_id,
+                req.alias,
                 req.family
             );
         }

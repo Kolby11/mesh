@@ -487,6 +487,70 @@ nothing = ["system:nothing"]
     }
 
     #[test]
+    fn bundled_material_symbols_resolves_to_a_variable_font_glyph() {
+        let pack_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../modules/icon-packs/material-symbols");
+        let font_path = pack_dir.join("assets/MaterialSymbolsRounded.ttf");
+        let glyph_map_path = pack_dir.join("codepoints.json");
+        assert!(font_path.is_file());
+        assert!(glyph_map_path.is_file());
+        assert_eq!(
+            crate::xdg::lookup_glyph_codepoint(&glyph_map_path, "2d_2"),
+            Some(0xfff0e),
+            "supplementary-plane glyphs must survive JSON conversion"
+        );
+
+        let mut reg = registry();
+        reg.set_icon_pack(IconPackBindings {
+            pack_id: "material-rounded".into(),
+            module_id: "@mesh/icons-material-symbols".into(),
+            mappings: HashMap::from([("settings".into(), "ms/settings".into())]),
+            axes: SupportedAxes {
+                fill: true,
+                weight: true,
+                grade: true,
+                optical_size: true,
+            },
+            font_aliases: HashMap::from([(
+                "ms".into(),
+                FontAsset {
+                    family: "Material Symbols Rounded".into(),
+                    glyph_map_path: Some(glyph_map_path),
+                    resolved_font_path: Some(font_path.clone()),
+                },
+            )]),
+        });
+        reg.set_shell_default_pack(Some("@mesh/icons-material-symbols".into()));
+        reg.set_frontend_bindings("frontend", FrontendIconBindings::default());
+
+        let result = reg.resolve_for_module("frontend", "settings", 24);
+        match result {
+            IconResolution::Found {
+                target:
+                    ResolvedTarget::Glyph {
+                        font_path: resolved_path,
+                        codepoint,
+                        supported_axes,
+                    },
+                ..
+            } => {
+                assert_eq!(resolved_path, font_path);
+                assert_eq!(codepoint, 0xe8b8);
+                assert_eq!(
+                    supported_axes,
+                    SupportedAxes {
+                        fill: true,
+                        weight: true,
+                        grade: true,
+                        optical_size: true,
+                    }
+                );
+            }
+            other => panic!("expected bundled Material Symbols glyph, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn pack_qualified_template_name_resolves_through_named_pack() {
         let td = tempdir().unwrap();
         let icon = td.path().join("home.svg");

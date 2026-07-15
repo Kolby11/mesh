@@ -5,7 +5,7 @@ use std::path::PathBuf;
 /// One loaded icon-pack module's bindings, registered with the icon
 /// registry. Pure mapping — no assets shipped here. The mapping target
 /// strings (`<asset-pack>/<asset-name>`) are resolved at icon-render time
-/// against fonts declared in `font_aliases` (looked up via fontconfig)
+/// against fonts declared in `font_aliases` (bundled or found via fontconfig)
 /// or against installed XDG icon themes by name.
 #[derive(Debug, Clone)]
 pub struct IconPackBindings {
@@ -19,7 +19,7 @@ pub struct IconPackBindings {
     pub axes: SupportedAxes,
     /// Font aliases declared in `mesh.icon_pack.requires.fonts`.
     /// Keyed by alias; the right-hand `FontAsset` carries fontconfig
-    /// family name and an optional codepoints map path.
+    /// family name, resolved font path, and an optional codepoints map path.
     pub font_aliases: HashMap<String, FontAsset>,
 }
 
