@@ -10,7 +10,8 @@
       "@mesh/debug-inspector"
     ],
     "providers": {
-      "mesh.audio": "@mesh/pipewire-audio"
+      "mesh.audio": "@mesh/pipewire-audio",
+      "mesh.brightness": "@mesh/backlight-brightness"
     },
     "layout": {
       "entrypoint": "@mesh/navigation-bar:main"

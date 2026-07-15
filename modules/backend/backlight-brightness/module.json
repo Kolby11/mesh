@@ -1,0 +1,97 @@
+{
+  "name": "@mesh/backlight-brightness",
+  "version": "0.1.0",
+  "description": "Display backlight backend using brightnessctl.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.brightnessctl"
+      ],
+      "binaries": [
+        {
+          "name": "brightnessctl",
+          "reason": "Read and control the active display backlight.",
+          "packages": {
+            "debian": "brightnessctl",
+            "arch": "brightnessctl",
+            "fedora": "brightnessctl",
+            "nixos": "brightnessctl"
+          }
+        }
+      ]
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": ["en"]
+    },
+    "entry": "src/main.luau",
+    "interfaces": [
+      {
+        "name": "mesh.brightness",
+        "version": "1.0",
+        "domain": "brightness",
+        "relationship": "base",
+        "contract": {
+          "state": [
+            {
+              "name": "available",
+              "type": "boolean",
+              "description": "Whether a controllable display backlight is available"
+            },
+            {
+              "name": "level",
+              "type": "float",
+              "description": "Current display brightness as a percentage (0.0-100.0)"
+            },
+            {
+              "name": "source_module",
+              "type": "string",
+              "description": "Backend module ID that emitted this state (runtime-additive)"
+            }
+          ],
+          "methods": [
+            {
+              "name": "set",
+              "args": [{ "name": "level", "type": "float" }],
+              "returns": "Result",
+              "coalesce": true,
+              "optimistic": { "field": "level", "fromArg": "level" }
+            },
+            {
+              "name": "increase",
+              "args": [{ "name": "amount", "type": "float" }],
+              "returns": "Result"
+            },
+            {
+              "name": "decrease",
+              "args": [{ "name": "amount", "type": "float" }],
+              "returns": "Result"
+            }
+          ],
+          "events": [
+            {
+              "name": "BrightnessChanged",
+              "payload": [{ "name": "level", "type": "float" }]
+            }
+          ],
+          "capabilities": {
+            "required": ["service.brightness.read"],
+            "optional": ["service.brightness.control"]
+          }
+        }
+      }
+    ],
+    "implements": [
+      {
+        "interface": "mesh.brightness",
+        "version": "1.0",
+        "provider": "brightnessctl",
+        "label": "Display backlight",
+        "priority": 100
+      }
+    ]
+  }
+}

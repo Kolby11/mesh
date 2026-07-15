@@ -555,6 +555,62 @@ fn bundled_network_provider_exports_state() {
 }
 
 #[test]
+fn bundled_brightness_provider_reads_and_controls_the_backlight() {
+    let script = bundled_backend_script(
+        "../../../../packages/modules/backend/core/backlight-brightness/src/main.luau",
+    );
+    let mut ctx = BackendScriptContext::new("@mesh/backlight-brightness");
+    ctx.load_script(&script).unwrap();
+    ctx.ensure_lua()
+        .load(
+            r#"
+exec_calls = {}
+mesh.exec = function(program, args)
+    exec_calls[#exec_calls + 1] = { program = program, args = args }
+    if args[1] == "-m" then
+        return {
+            success = true,
+            stdout = "amdgpu_bl2,backlight,128,50%,255\n",
+            stderr = "",
+            code = 0,
+        }
+    end
+    return { success = true, stdout = "", stderr = "", code = 0 }
+end
+"#,
+        )
+        .exec()
+        .unwrap();
+
+    let initial = ctx.call_init().unwrap().unwrap();
+    assert_eq!(
+        initial.get("available").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+    assert_eq!(initial.get("level").and_then(|v| v.as_f64()), Some(50.0));
+
+    let outcome = ctx
+        .run_command_with_result("increase", &serde_json::json!({ "amount": 5 }))
+        .unwrap();
+    assert_eq!(
+        outcome.result,
+        serde_json::json!({ "ok": true, "error": "" })
+    );
+
+    let calls = ctx
+        .ensure_lua()
+        .globals()
+        .get::<Table>("exec_calls")
+        .unwrap();
+    assert_eq!(calls.raw_len(), 3);
+    let set_call = calls.get::<Table>(2).unwrap();
+    assert_eq!(set_call.get::<String>("program").unwrap(), "brightnessctl");
+    let args = set_call.get::<Table>("args").unwrap();
+    assert_eq!(args.get::<String>(1).unwrap(), "set");
+    assert_eq!(args.get::<String>(2).unwrap(), "5.0%+");
+}
+
+#[test]
 fn hyprland_workspace_command_waits_for_event_state_instead_of_rereading() {
     let script = bundled_backend_script(
         "../../../../packages/modules/backend/core/hyprland-wm/src/main.luau",
@@ -634,6 +690,10 @@ fn bundled_backend_scripts_expose_required_host_api_surface() {
                 "upo",
                 "wer-power/src/main.luau"
             ),
+        ),
+        (
+            "@mesh/backlight-brightness",
+            "../../../../packages/modules/backend/core/backlight-brightness/src/main.luau",
         ),
         (
             "@mesh/shell-theme",

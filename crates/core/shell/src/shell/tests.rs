@@ -7253,10 +7253,20 @@ fn installed_module_graph_exposes_shell_package_choices() {
         "@mesh/upower-power"
     );
     assert_eq!(
+        graph.active_provider("mesh.brightness").unwrap().module_id,
+        "@mesh/backlight-brightness"
+    );
+    assert_eq!(
         graph.backend_providers_for_interface("mesh.network").len(),
         0
     );
     assert_eq!(graph.backend_providers_for_interface("mesh.power").len(), 1);
+    assert_eq!(
+        graph
+            .backend_providers_for_interface("mesh.brightness")
+            .len(),
+        1
+    );
     assert!(
         graph
             .frontend_modules()
@@ -7328,11 +7338,14 @@ fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
     let (_pipewire_dir, pipewire) = module_instance("@mesh/pipewire-audio", Some("src/main.luau"));
     let (_pulse_dir, pulse) = module_instance("@mesh/pulseaudio-audio", Some("src/main.luau"));
     let (_upower_dir, upower) = module_instance("@mesh/upower-power", Some("src/main.luau"));
+    let (_brightness_dir, brightness) =
+        module_instance("@mesh/backlight-brightness", Some("src/main.luau"));
     let (_hyprland_dir, hyprland) = module_instance("@mesh/hyprland-wm", Some("src/main.luau"));
     let modules = HashMap::from([
         ("@mesh/pipewire-audio".to_string(), pipewire),
         ("@mesh/pulseaudio-audio".to_string(), pulse),
         ("@mesh/upower-power".to_string(), upower),
+        ("@mesh/backlight-brightness".to_string(), brightness),
         ("@mesh/hyprland-wm".to_string(), hyprland),
     ]);
 
@@ -7348,7 +7361,7 @@ fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
             .iter()
             .all(|status| status.status != "invalid_manifest")
     );
-    assert_eq!(candidates.len(), 3);
+    assert_eq!(candidates.len(), 4);
     let audio = candidates
         .iter()
         .find(|candidate| candidate.interface == "mesh.audio")
@@ -7367,6 +7380,12 @@ fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
             .iter()
             .any(|candidate| candidate.interface == "mesh.wm"
                 && candidate.module_id == "@mesh/hyprland-wm")
+    );
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.interface == "mesh.brightness"
+                && candidate.module_id == "@mesh/backlight-brightness")
     );
     assert!(
         !candidates
