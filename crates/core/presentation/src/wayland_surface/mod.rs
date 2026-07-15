@@ -21,7 +21,8 @@ use smithay_client_toolkit::{
     activation::{ActivationHandler, ActivationState, RequestData},
     compositor::{CompositorHandler, CompositorState, Region, Surface},
     delegate_activation, delegate_compositor, delegate_keyboard, delegate_layer, delegate_output,
-    delegate_pointer, delegate_registry, delegate_seat, delegate_shm, delegate_xdg_popup,
+    delegate_pointer, delegate_registry, delegate_seat, delegate_shm, delegate_touch,
+    delegate_xdg_popup,
     globals::GlobalData,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
@@ -32,6 +33,7 @@ use smithay_client_toolkit::{
         pointer::{
             CursorIcon, PointerEvent, PointerEventKind, PointerHandler, ThemeSpec, ThemedPointer,
         },
+        touch::TouchHandler,
     },
     shell::{
         WaylandSurface,
@@ -57,11 +59,17 @@ use wayland_client::{
     Connection, Dispatch, EventQueue, Proxy, QueueHandle,
     backend::{ObjectId, WaylandError},
     globals::registry_queue_init,
-    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
+    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface, wl_touch},
 };
 use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1, wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
     wp_fractional_scale_v1, wp_fractional_scale_v1::WpFractionalScaleV1,
+};
+use wayland_protocols::wp::pointer_gestures::zv1::client::{
+    zwp_pointer_gesture_hold_v1, zwp_pointer_gesture_hold_v1::ZwpPointerGestureHoldV1,
+    zwp_pointer_gesture_pinch_v1, zwp_pointer_gesture_pinch_v1::ZwpPointerGesturePinchV1,
+    zwp_pointer_gesture_swipe_v1, zwp_pointer_gesture_swipe_v1::ZwpPointerGestureSwipeV1,
+    zwp_pointer_gestures_v1, zwp_pointer_gestures_v1::ZwpPointerGesturesV1,
 };
 use wayland_protocols::wp::viewporter::client::{
     wp_viewport::WpViewport, wp_viewporter, wp_viewporter::WpViewporter,

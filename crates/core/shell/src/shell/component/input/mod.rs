@@ -5,9 +5,9 @@ mod keyboard;
 mod widgets;
 
 use focus::selectable_text_target_key;
-pub(in crate::shell::component) use widgets::PressedTargetSnapshot;
 #[cfg(test)]
 use widgets::pointer_event_target_with_focus;
+pub(in crate::shell::component) use widgets::{LONG_PRESS_DELAY, PressedTargetSnapshot};
 
 #[cfg(test)]
 pub(crate) use keyboard::KeybindResolutionSource;
@@ -378,6 +378,69 @@ impl FrontendSurfaceComponent {
                         self.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
                     }
                 }
+            }
+            ComponentInput::TwoFingerScroll { x, y, dx, dy } => {
+                if let Some(requests) =
+                    self.dispatch_two_finger_scroll_handler(tree, x, y, dx, dy)?
+                {
+                    return Ok(requests);
+                }
+
+                // A surface that does not opt into `ontwofingerscroll` keeps
+                // the existing continuous-scroll behavior.
+                if let Some(scroll_hit) = find_scrollable_at_with_limits(tree, x, y) {
+                    let current = self.scroll_offsets.entry(scroll_hit.key).or_default();
+                    let next_x = (current.x - dx * 28.0).clamp(0.0, scroll_hit.max_x);
+                    let next_y = (current.y - dy * 28.0).clamp(0.0, scroll_hit.max_y);
+                    if (next_x - current.x).abs() > f32::EPSILON
+                        || (next_y - current.y).abs() > f32::EPSILON
+                    {
+                        current.x = next_x;
+                        current.y = next_y;
+                        self.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
+                    }
+                }
+            }
+            ComponentInput::GestureSwipeBegin { fingers } => {
+                return self.dispatch_swipe_begin(tree, fingers);
+            }
+            ComponentInput::GestureSwipeUpdate { dx, dy } => {
+                return self.dispatch_swipe_update(tree, dx, dy);
+            }
+            ComponentInput::GestureSwipeEnd { cancelled } => {
+                return self.dispatch_swipe_end(tree, cancelled);
+            }
+            ComponentInput::GesturePinchBegin { fingers } => {
+                return self.dispatch_pinch_begin(tree, fingers);
+            }
+            ComponentInput::GesturePinchUpdate {
+                dx,
+                dy,
+                scale,
+                rotation,
+            } => {
+                return self.dispatch_pinch_update(tree, dx, dy, scale, rotation);
+            }
+            ComponentInput::GesturePinchEnd { cancelled } => {
+                return self.dispatch_pinch_end(tree, cancelled);
+            }
+            ComponentInput::GestureHoldBegin { fingers } => {
+                return self.dispatch_hold_begin(tree, fingers);
+            }
+            ComponentInput::GestureHoldEnd { cancelled } => {
+                return self.dispatch_hold_end(tree, cancelled);
+            }
+            ComponentInput::TouchDown { id, x, y } => {
+                return self.dispatch_touch_down(tree, id, x, y);
+            }
+            ComponentInput::TouchMove { id, x, y } => {
+                return self.dispatch_touch_move(tree, id, x, y);
+            }
+            ComponentInput::TouchUp { id } => {
+                return self.dispatch_touch_up(tree, id);
+            }
+            ComponentInput::TouchCancel => {
+                return self.dispatch_touch_cancel(tree);
             }
             ComponentInput::Char { ch } => {
                 if let Some(focused_key) = self.focused_key.clone() {

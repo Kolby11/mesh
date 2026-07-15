@@ -185,6 +185,21 @@ fn hover_script(doc: &Document, content: &str, offset: usize) -> Option<String> 
     None
 }
 
+#[cfg(test)]
+mod tests {
+    use super::hover_template;
+
+    #[test]
+    fn gesture_and_touch_hover_uses_event_documentation() {
+        for handler in ["onswipe", "onpinch", "ontouchstart", "ontap", "onlongpress"] {
+            let markdown = hover_template(handler, handler.len() / 2)
+                .unwrap_or_else(|| panic!("missing hover for {handler}"));
+            assert!(markdown.contains(handler));
+            assert!(markdown.contains("InteractiveElement"));
+        }
+    }
+}
+
 fn prop_markdown(doc: &Document, prop_name: &str) -> Option<String> {
     let prop = doc
         .parsed

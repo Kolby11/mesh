@@ -820,6 +820,11 @@ impl LayerShellBackend {
         let fractional_scale_manager: Option<WpFractionalScaleManagerV1> =
             globals.bind(&qh, 1..=1, GlobalData).ok();
         let blur_manager: Option<OrgKdeKwinBlurManager> = globals.bind(&qh, 1..=1, GlobalData).ok();
+        // Trackpad gesture support (two-finger scroll is plain wl_pointer axis
+        // events, already handled elsewhere; this covers swipe/pinch/hold).
+        // Optional: compositors without it just never emit gesture events.
+        let pointer_gestures: Option<ZwpPointerGesturesV1> =
+            globals.bind(&qh, 1..=3, GlobalData).ok();
         let seat_state = SeatState::new(&globals, &qh);
 
         let pool = SlotPool::new(256 * 256 * 4, &shm).ok();
@@ -835,6 +840,7 @@ impl LayerShellBackend {
             viewporter,
             fractional_scale_manager,
             blur_manager,
+            pointer_gestures,
             seat_state,
             activation_seat: None,
             focus_grab: None,
@@ -846,6 +852,12 @@ impl LayerShellBackend {
             surface_ids_by_wl_id: HashMap::new(),
             pointer: None,
             pointer_interactive: false,
+            gesture_swipe: None,
+            gesture_pinch: None,
+            gesture_hold: None,
+            touch: None,
+            touch_surfaces: HashMap::new(),
+            gesture_surface: None,
             keyboard: None,
             pointer_focus: None,
             keyboard_focus: None,

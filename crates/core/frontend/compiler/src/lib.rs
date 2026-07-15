@@ -351,6 +351,49 @@ mod tests {
     }
 
     #[test]
+    fn touch_gesture_proof_fixture_compiles_with_authoring_handlers() {
+        fn gesture_pad(node: &WidgetNode) -> Option<&WidgetNode> {
+            if node.attributes.get("class").is_some_and(|classes| {
+                classes
+                    .split_whitespace()
+                    .any(|class| class == "gesture-pad")
+            }) {
+                return Some(node);
+            }
+            node.children.iter().find_map(gesture_pad)
+        }
+
+        let module_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../modules/frontend/touch-gesture-proof");
+        let loaded = mesh_core_module::manifest::load_manifest(&module_dir)
+            .expect("touch gesture proof manifest should load");
+        let compiled = compile_frontend_module(&loaded.manifest, &module_dir)
+            .expect("touch gesture proof module should compile");
+        let theme = mesh_core_theme::default_theme();
+        let tree = compiled.build_preview_tree(&theme, 380, 220);
+        let pad = gesture_pad(&tree).expect("gesture proof pad");
+
+        for handler in [
+            "click",
+            "swipe",
+            "pinch",
+            "hold",
+            "touchstart",
+            "touchmove",
+            "touchend",
+            "touchcancel",
+            "tap",
+            "doubletap",
+            "longpress",
+        ] {
+            assert!(
+                pad.event_handlers.contains_key(handler),
+                "missing {handler}"
+            );
+        }
+    }
+
+    #[test]
     fn normalizes_on_prefixed_event_handler_names() {
         let attrs = vec![
             Attribute {

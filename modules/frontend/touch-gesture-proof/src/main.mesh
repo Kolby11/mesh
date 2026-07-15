@@ -1,0 +1,103 @@
+<template>
+  <box class="proof-shell">
+    <column class="proof-card">
+      <text class="proof-eyebrow">Gesture + touch proof</text>
+      <button
+        class="gesture-pad"
+        onclick={onClick}
+        onswipe={onSwipe}
+        onpinch={onPinch}
+        onhold={onHold}
+        ontouchstart={onTouch}
+        ontouchmove={onTouch}
+        ontouchend={onTouch}
+        ontouchcancel={onTouch}
+        ontap={onTap}
+        ondoubletap={onDoubleTap}
+        onlongpress={onLongPress}>
+        <text>{status}</text>
+      </button>
+      <text class="proof-note">Swipe or pinch here; tap, double-tap, or hold on a touchscreen.</text>
+    </column>
+  </box>
+</template>
+
+<script lang="luau">
+status = "Waiting for input"
+
+function onSwipe(event)
+  status = "swipe " .. event.phase .. " · " .. event.fingers .. " fingers"
+  if event.phase == "end" then
+    status = status .. " · " .. (event.direction or "stationary")
+  end
+end
+
+function onPinch(event)
+  status = "pinch " .. event.phase .. " · scale " .. tostring(event.scale)
+end
+
+function onHold(event)
+  status = "trackpad hold " .. event.phase .. " · " .. event.fingers .. " fingers"
+end
+
+function onTouch(event)
+  status = event.type .. " · " .. tostring(#event.touches) .. " active"
+end
+
+function onTap(event)
+  status = "tap · " .. tostring(event.duration) .. "s"
+end
+
+function onDoubleTap(event)
+  status = "double tap · count " .. event.tap_count
+end
+
+function onLongPress(event)
+  status = "long press · " .. tostring(event.duration) .. "s"
+end
+
+function onClick(event)
+  if event.synthesized_from == "touch" then
+    status = "touch synthesized onclick"
+  end
+end
+</script>
+
+<style>
+.proof-shell {
+    width: 380px;
+    height: 220px;
+    padding: var(--spacing-md);
+    background: transparent;
+}
+
+.proof-card {
+    width: 100%;
+    height: 100%;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface-container);
+    color: var(--color-on-surface);
+    border-width: 1px;
+    border-style: solid;
+    border-color: var(--color-outline-variant);
+}
+
+.proof-eyebrow {
+    font-size: var(--typography-size-xs);
+    font-weight: 700;
+    color: var(--color-on-surface-variant);
+}
+
+.gesture-pad {
+    width: 100%;
+    height: 112px;
+    border-radius: var(--radius-md);
+}
+
+.proof-note {
+    font-size: var(--typography-size-sm);
+    color: var(--color-on-surface-variant);
+}
+</style>

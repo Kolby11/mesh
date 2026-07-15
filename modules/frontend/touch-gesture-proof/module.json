@@ -1,0 +1,28 @@
+{
+  "name": "@mesh/touch-gesture-proof",
+  "version": "0.1.0",
+  "description": "Interactive proof surface for trackpad gestures and touchscreen handlers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "uses": {
+      "capabilities": [
+        "shell.surface",
+        "theme.read"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "right",
+      "layer": "top",
+      "exclusive_zone": 0,
+      "keyboard_mode": "none",
+      "visible_on_start": true
+    },
+    "accessibility": {
+      "role": "status",
+      "label": "Touch and gesture proof",
+      "description": "Live payload proof for swipe, pinch, and touchscreen events"
+    }
+  }
+}

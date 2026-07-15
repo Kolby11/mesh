@@ -152,6 +152,11 @@ impl ShellComponent for FrontendSurfaceComponent {
                     self.return_focus = None;
                     self.close_on_focus_leave = false;
                     self.keyboard_mode_override = None;
+                    self.gesture_capture = None;
+                    self.touch_targets.clear();
+                    self.active_touches.clear();
+                    self.touch_gestures.clear();
+                    self.last_tap = None;
                 } else if !was_visible {
                     self.surface_exiting = false;
                     self.surface_pixels_invalid = true;
@@ -319,6 +324,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         tooltip_delay_pending
             || tooltip_fade_pending
             || !self.scheduled_handlers.is_empty()
+            || self
+                .touch_gestures
+                .values()
+                .any(|touch| touch.eligible && touch.long_press_enabled && !touch.long_press_fired)
             || !self.pending_surface_states.borrow().is_empty()
     }
 
@@ -331,6 +340,16 @@ impl ShellComponent for FrontendSurfaceComponent {
             .scheduled_handlers
             .values()
             .map(|scheduled| scheduled.deadline)
+            .min()
+        {
+            return Some(deadline);
+        }
+
+        if let Some(deadline) = self
+            .touch_gestures
+            .values()
+            .filter(|touch| touch.eligible && touch.long_press_enabled && !touch.long_press_fired)
+            .map(|touch| touch.started_at + input::LONG_PRESS_DELAY)
             .min()
         {
             return Some(deadline);
@@ -369,6 +388,15 @@ impl ShellComponent for FrontendSurfaceComponent {
         for (key, namespaced_handler) in due_handlers {
             self.scheduled_handlers.remove(&key);
             requests.extend(self.call_namespaced_handler(&namespaced_handler, &[])?);
+        }
+
+        let due_long_presses = self.due_long_presses(now);
+        if !due_long_presses.is_empty()
+            && let Some(tree) = self.last_tree.take()
+        {
+            let result = self.dispatch_due_long_presses(&tree, due_long_presses);
+            self.last_tree = Some(tree);
+            requests.extend(result?);
         }
 
         if self.hover_start.is_some() {

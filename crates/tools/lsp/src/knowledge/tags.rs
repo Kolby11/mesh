@@ -154,6 +154,61 @@ const INTERACTIVE_ELEMENT_ATTRS: &[AttrDef] = &[
         description: "Key press handler function",
         values: &[],
     },
+    AttrDef {
+        name: "ontwofingerscroll",
+        description: "Continuous two-finger trackpad scroll handler; event.delta contains x/y motion and event.pointer contains the surface position",
+        values: &[],
+    },
+    AttrDef {
+        name: "onswipe",
+        description: "Trackpad swipe handler; event.phase is start/move/end with fingers, delta, total_delta, and terminal direction/velocity/duration/cancelled fields",
+        values: &[],
+    },
+    AttrDef {
+        name: "onpinch",
+        description: "Trackpad pinch handler; event.phase is start/move/end with fingers, scale, rotation, delta, total_delta, and cancelled fields",
+        values: &[],
+    },
+    AttrDef {
+        name: "onhold",
+        description: "Trackpad hold handler; event.phase is start/end with fingers, duration, and cancelled fields",
+        values: &[],
+    },
+    AttrDef {
+        name: "ontouchstart",
+        description: "Raw touchscreen contact start handler; event.touch is the changed point and event.touches lists active contacts",
+        values: &[],
+    },
+    AttrDef {
+        name: "ontouchmove",
+        description: "Raw touchscreen contact motion handler; event.touch is the changed point and event.touches lists active contacts",
+        values: &[],
+    },
+    AttrDef {
+        name: "ontouchend",
+        description: "Raw touchscreen contact end handler; event.changed_touches contains the released point and event.touches lists remaining contacts",
+        values: &[],
+    },
+    AttrDef {
+        name: "ontouchcancel",
+        description: "Raw touchscreen cancellation handler; event.cancelled is true and event.changed_touches lists the cancelled contacts",
+        values: &[],
+    },
+    AttrDef {
+        name: "ontap",
+        description: "Single-touch tap handler; event.touch, duration, tap_count, pointer, and current_target describe the synthesized activation",
+        values: &[],
+    },
+    AttrDef {
+        name: "ondoubletap",
+        description: "Second nearby tap handler; event.tap_count is 2 and event.touch/current_target identify the captured target",
+        values: &[],
+    },
+    AttrDef {
+        name: "onlongpress",
+        description: "Single-touch press held for 500 ms without moving beyond 12 px; event.duration and event.touch describe the press",
+        values: &[],
+    },
 ];
 
 const VALUE_ELEMENT_ATTRS: &[AttrDef] = &[
@@ -1318,6 +1373,32 @@ mod tests {
             .into_iter()
             .map(|attr| attr.name)
             .collect()
+    }
+
+    #[test]
+    fn gesture_and_touch_handlers_are_available_to_completion_and_hover() {
+        for name in [
+            "ontwofingerscroll",
+            "onswipe",
+            "onpinch",
+            "onhold",
+            "ontouchstart",
+            "ontouchmove",
+            "ontouchend",
+            "ontouchcancel",
+            "ontap",
+            "ondoubletap",
+            "onlongpress",
+        ] {
+            let attr = EVENT_ATTRS
+                .iter()
+                .find(|attr| attr.name == name)
+                .unwrap_or_else(|| panic!("missing LSP event metadata for {name}"));
+            assert!(
+                !attr.description.is_empty(),
+                "missing hover docs for {name}"
+            );
+        }
     }
 
     #[test]

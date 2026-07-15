@@ -71,6 +71,54 @@ pub enum ComponentInput {
         dx: f32,
         dy: f32,
     },
+    TwoFingerScroll {
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    },
+    GestureSwipeBegin {
+        fingers: u32,
+    },
+    GestureSwipeUpdate {
+        dx: f32,
+        dy: f32,
+    },
+    GestureSwipeEnd {
+        cancelled: bool,
+    },
+    GesturePinchBegin {
+        fingers: u32,
+    },
+    GesturePinchUpdate {
+        dx: f32,
+        dy: f32,
+        scale: f32,
+        rotation: f32,
+    },
+    GesturePinchEnd {
+        cancelled: bool,
+    },
+    GestureHoldBegin {
+        fingers: u32,
+    },
+    GestureHoldEnd {
+        cancelled: bool,
+    },
+    TouchDown {
+        id: i32,
+        x: f32,
+        y: f32,
+    },
+    TouchMove {
+        id: i32,
+        x: f32,
+        y: f32,
+    },
+    TouchUp {
+        id: i32,
+    },
+    TouchCancel,
     KeyPressed {
         key: String,
         modifiers: KeyModifiers,
@@ -386,6 +434,14 @@ pub trait ShellComponent: Send {
     /// Authoritative paint generation for a promoted child subtree. Returning
     /// `None` keeps conservative eager child repainting.
     fn child_surface_paint_generation(&self, _node_key: &str) -> Option<u64> {
+        None
+    }
+    /// Union rect of the child subtree's nodes with an active
+    /// `backdrop-filter`, in child-local logical coordinates (including the
+    /// content padding offset passed to `paint_child_surface`). Drives the
+    /// compositor blur region (org_kde_kwin_blur) for promoted popups, the
+    /// same way the parent surface's display list drives its blur region.
+    fn child_surface_blur_region(&self, _node_key: &str) -> Option<DamageRect> {
         None
     }
     /// The interactive content size, excluding any tooltip-overlay buffer padding.

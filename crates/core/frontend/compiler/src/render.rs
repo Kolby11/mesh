@@ -1243,6 +1243,17 @@ fn is_event_handler_attribute(name: &str) -> bool {
             | "focus"
             | "blur"
             | "scroll"
+            | "twofingerscroll"
+            | "swipe"
+            | "pinch"
+            | "hold"
+            | "touchstart"
+            | "touchmove"
+            | "touchend"
+            | "touchcancel"
+            | "tap"
+            | "doubletap"
+            | "longpress"
             | "keydown"
             | "keyup"
             | "keybind"
@@ -2607,6 +2618,25 @@ mod tests {
             ),
             "__mesh_embed__::@mesh/other::already_namespaced"
         );
+    }
+
+    #[test]
+    fn gesture_and_touch_attributes_are_runtime_event_handlers() {
+        for name in [
+            "ontwofingerscroll",
+            "onswipe",
+            "onpinch",
+            "onhold",
+            "ontouchstart",
+            "ontouchmove",
+            "ontouchend",
+            "ontouchcancel",
+            "ontap",
+            "ondoubletap",
+            "onlongpress",
+        ] {
+            assert!(is_event_handler_attribute(name), "{name}");
+        }
     }
 
     // cargo test -p mesh-core-frontend --release -- compiler_handler_namespace_presizing_beats_format_benchmark --ignored --nocapture

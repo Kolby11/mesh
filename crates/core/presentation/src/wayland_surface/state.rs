@@ -56,6 +56,24 @@ pub(super) struct State {
     pub(super) surface_ids_by_wl_id: HashMap<ObjectId, Arc<str>>,
     pub(super) pointer: Option<ThemedPointer>,
     pub(super) pointer_interactive: bool,
+    /// `zwp_pointer_gestures_v1` global, bound when the compositor advertises
+    /// it. `None` on compositors without the protocol — gesture events simply
+    /// never fire, matching the graceful-degradation pattern used for the
+    /// other optional globals (`blur_manager`, `focus_grab_manager`, etc).
+    pub(super) pointer_gestures: Option<ZwpPointerGesturesV1>,
+    pub(super) gesture_swipe: Option<ZwpPointerGestureSwipeV1>,
+    pub(super) gesture_pinch: Option<ZwpPointerGesturePinchV1>,
+    pub(super) gesture_hold: Option<ZwpPointerGestureHoldV1>,
+    pub(super) touch: Option<wl_touch::WlTouch>,
+    /// Surface each active touch id last landed on, so `TouchUp`/`Shape`/
+    /// `Orientation` (which carry no surface of their own past `Down`) and the
+    /// protocol-wide `Cancel` event can still be attributed to a surface id.
+    pub(super) touch_surfaces: HashMap<i32, Arc<str>>,
+    /// Surface the in-progress trackpad gesture (swipe/pinch/hold) began on.
+    /// `begin` carries the surface; `update`/`end` don't, so this threads it
+    /// through. Compositors recognize at most one gesture at a time, so a
+    /// single field is sufficient.
+    pub(super) gesture_surface: Option<Arc<str>>,
     pub(super) keyboard: Option<wl_keyboard::WlKeyboard>,
     pub(super) pointer_focus: Option<Arc<str>>,
     pub(super) keyboard_focus: Option<Arc<str>>,

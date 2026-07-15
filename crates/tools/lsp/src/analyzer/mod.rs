@@ -454,6 +454,34 @@ audio.$0
     }
 
     #[test]
+    fn template_attr_completion_offers_gesture_and_touch_handlers() {
+        let (source, position) = fixture_with_cursor(
+            r#"<template>
+  <button $0 />
+</template>
+"#,
+        );
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+        let labels = completion_labels(&doc, position);
+
+        for handler in [
+            "ontwofingerscroll",
+            "onswipe",
+            "onpinch",
+            "onhold",
+            "ontouchstart",
+            "ontouchmove",
+            "ontouchend",
+            "ontouchcancel",
+            "ontap",
+            "ondoubletap",
+            "onlongpress",
+        ] {
+            assert!(labels.contains(&handler.to_string()), "missing {handler}");
+        }
+    }
+
+    #[test]
     fn template_attr_completion_offers_custom_component_public_members() {
         // Attribute-name completion on a custom PascalCase component tag
         // should offer the imported component's own public script members

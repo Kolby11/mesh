@@ -80,6 +80,77 @@ impl PressedTargetSnapshot {
     }
 }
 
+fn add_event_fields(mut event: serde_json::Value, fields: serde_json::Value) -> serde_json::Value {
+    let Some(object) = event.as_object_mut() else {
+        return event;
+    };
+    if let serde_json::Value::Object(fields) = fields {
+        object.extend(fields);
+    }
+    event
+}
+
+fn dominant_direction(dx: f32, dy: f32) -> Option<&'static str> {
+    if dx.abs() <= f32::EPSILON && dy.abs() <= f32::EPSILON {
+        return None;
+    }
+    if dx.abs() >= dy.abs() {
+        Some(if dx < 0.0 { "left" } else { "right" })
+    } else if dy < 0.0 {
+        Some("up")
+    } else {
+        Some("down")
+    }
+}
+
+pub(in crate::shell::component) const LONG_PRESS_DELAY: Duration = Duration::from_millis(500);
+const TAP_MAX_DURATION: Duration = LONG_PRESS_DELAY;
+const DOUBLE_TAP_DELAY: Duration = Duration::from_millis(350);
+const TOUCH_SLOP: f32 = 12.0;
+
+fn touch_target_key(tree: &WidgetNode, x: f32, y: f32) -> Option<String> {
+    const TOUCH_EVENTS: [&str; 9] = [
+        "touchstart",
+        "touchmove",
+        "touchend",
+        "touchcancel",
+        "tap",
+        "doubletap",
+        "longpress",
+        "click",
+        "activate",
+    ];
+    find_node_path_at(tree, x, y)?
+        .into_iter()
+        .rev()
+        .find(|key| {
+            find_node_by_key(tree, key).is_some_and(|node| {
+                TOUCH_EVENTS
+                    .iter()
+                    .any(|event| node_has_handler(node, event))
+                    || node_is_source(
+                        node,
+                        &[
+                            "menu-item",
+                            "command-item",
+                            "preference-row",
+                            "tab",
+                            "list-item",
+                        ],
+                    )
+            })
+        })
+}
+
+fn touch_distance(a: (f32, f32), b: (f32, f32)) -> f32 {
+    (a.0 - b.0).hypot(a.1 - b.1)
+}
+
+fn node_has_handler(node: &WidgetNode, event_name: &str) -> bool {
+    node.event_handlers.contains_key(event_name)
+        || node.event_handler_calls.contains_key(event_name)
+}
+
 impl FrontendSurfaceComponent {
     pub(super) fn dispatch_text_input_value_handlers(
         &mut self,
@@ -304,13 +375,7 @@ impl FrontendSurfaceComponent {
         click_event: serde_json::Value,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let mut requests = Vec::new();
-        if node.event_handlers.contains_key("click") {
-            requests.extend(self.call_resolved_node_handler(
-                node,
-                "click",
-                &[click_event.clone()],
-            )?);
-        }
+        requests.extend(self.call_resolved_node_handler(node, "click", &[click_event.clone()])?);
         requests.extend(self.call_resolved_node_handler(node, "activate", &[click_event])?);
         Ok(requests)
     }
@@ -724,6 +789,630 @@ impl FrontendSurfaceComponent {
         });
         self.call_resolved_node_handler(hit.node, "scroll", &[event])
             .map(Some)
+    }
+
+    pub(super) fn dispatch_two_finger_scroll_handler(
+        &mut self,
+        tree: &WidgetNode,
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    ) -> Result<Option<Vec<CoreRequest>>, ComponentError> {
+        let Some(hit) = pointer_event_handler_hit(tree, x, y, "twofingerscroll") else {
+            return Ok(None);
+        };
+        let event = add_event_fields(
+            self.build_click_event_for(tree, hit.key, Some(hit.node), hit.bounds, x, y),
+            serde_json::json!({
+                "type": "twofingerscroll",
+                "delta": { "x": dx, "y": dy },
+            }),
+        );
+        self.call_resolved_node_handler(hit.node, "twofingerscroll", &[event])
+            .map(Some)
+    }
+
+    pub(super) fn dispatch_swipe_begin(
+        &mut self,
+        tree: &WidgetNode,
+        fingers: u32,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(target) = self.capture_gesture_target(tree, "swipe", fingers) else {
+            self.gesture_capture = None;
+            return Ok(Vec::new());
+        };
+        let Some((node, event)) = self.gesture_event(tree, &target, "swipe") else {
+            return Ok(Vec::new());
+        };
+        let event = add_event_fields(
+            event,
+            serde_json::json!({
+                "phase": "start",
+                "fingers": fingers,
+                "delta": { "x": 0.0, "y": 0.0 },
+                "total_delta": { "x": 0.0, "y": 0.0 },
+                "cancelled": false,
+            }),
+        );
+        let requests = self.call_resolved_node_handler(node, "swipe", &[event])?;
+        self.gesture_capture = Some(GestureCapture::Swipe {
+            target,
+            dx: 0.0,
+            dy: 0.0,
+        });
+        Ok(requests)
+    }
+
+    pub(super) fn dispatch_swipe_update(
+        &mut self,
+        tree: &WidgetNode,
+        dx: f32,
+        dy: f32,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(mut capture) = self.gesture_capture.take() else {
+            return Ok(Vec::new());
+        };
+        let result = match &mut capture {
+            GestureCapture::Swipe {
+                target,
+                dx: total_dx,
+                dy: total_dy,
+            } => {
+                *total_dx += dx;
+                *total_dy += dy;
+                let Some((node, event)) = self.gesture_event(tree, target, "swipe") else {
+                    return Ok(Vec::new());
+                };
+                let event = add_event_fields(
+                    event,
+                    serde_json::json!({
+                        "phase": "move",
+                        "fingers": target.fingers,
+                        "delta": { "x": dx, "y": dy },
+                        "total_delta": { "x": *total_dx, "y": *total_dy },
+                        "cancelled": false,
+                    }),
+                );
+                self.call_resolved_node_handler(node, "swipe", &[event])
+            }
+            _ => Ok(Vec::new()),
+        };
+        self.gesture_capture = Some(capture);
+        result
+    }
+
+    pub(super) fn dispatch_swipe_end(
+        &mut self,
+        tree: &WidgetNode,
+        cancelled: bool,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(GestureCapture::Swipe { target, dx, dy }) = self.gesture_capture.take() else {
+            return Ok(Vec::new());
+        };
+        let Some((node, event)) = self.gesture_event(tree, &target, "swipe") else {
+            return Ok(Vec::new());
+        };
+        let elapsed = target.started_at.elapsed().as_secs_f32().max(0.001);
+        let event = add_event_fields(
+            event,
+            serde_json::json!({
+                "phase": "end",
+                "fingers": target.fingers,
+                "delta": { "x": 0.0, "y": 0.0 },
+                "total_delta": { "x": dx, "y": dy },
+                "direction": dominant_direction(dx, dy),
+                "velocity": { "x": dx / elapsed, "y": dy / elapsed },
+                "duration": elapsed,
+                "cancelled": cancelled,
+            }),
+        );
+        self.call_resolved_node_handler(node, "swipe", &[event])
+    }
+
+    pub(super) fn dispatch_pinch_begin(
+        &mut self,
+        tree: &WidgetNode,
+        fingers: u32,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(target) = self.capture_gesture_target(tree, "pinch", fingers) else {
+            self.gesture_capture = None;
+            return Ok(Vec::new());
+        };
+        let Some((node, event)) = self.gesture_event(tree, &target, "pinch") else {
+            return Ok(Vec::new());
+        };
+        let event = add_event_fields(
+            event,
+            serde_json::json!({
+                "phase": "start",
+                "fingers": fingers,
+                "delta": { "x": 0.0, "y": 0.0 },
+                "scale": 1.0,
+                "rotation": 0.0,
+                "cancelled": false,
+            }),
+        );
+        let requests = self.call_resolved_node_handler(node, "pinch", &[event])?;
+        self.gesture_capture = Some(GestureCapture::Pinch {
+            target,
+            dx: 0.0,
+            dy: 0.0,
+            scale: 1.0,
+            rotation: 0.0,
+        });
+        Ok(requests)
+    }
+
+    pub(super) fn dispatch_pinch_update(
+        &mut self,
+        tree: &WidgetNode,
+        dx: f32,
+        dy: f32,
+        scale: f32,
+        rotation: f32,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(mut capture) = self.gesture_capture.take() else {
+            return Ok(Vec::new());
+        };
+        let result = match &mut capture {
+            GestureCapture::Pinch {
+                target,
+                dx: total_dx,
+                dy: total_dy,
+                scale: current_scale,
+                rotation: current_rotation,
+            } => {
+                *total_dx += dx;
+                *total_dy += dy;
+                *current_scale = scale;
+                *current_rotation = rotation;
+                let Some((node, event)) = self.gesture_event(tree, target, "pinch") else {
+                    return Ok(Vec::new());
+                };
+                let event = add_event_fields(
+                    event,
+                    serde_json::json!({
+                        "phase": "move",
+                        "fingers": target.fingers,
+                        "delta": { "x": dx, "y": dy },
+                        "total_delta": { "x": *total_dx, "y": *total_dy },
+                        "scale": scale,
+                        "rotation": rotation,
+                        "cancelled": false,
+                    }),
+                );
+                self.call_resolved_node_handler(node, "pinch", &[event])
+            }
+            _ => Ok(Vec::new()),
+        };
+        self.gesture_capture = Some(capture);
+        result
+    }
+
+    pub(super) fn dispatch_pinch_end(
+        &mut self,
+        tree: &WidgetNode,
+        cancelled: bool,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(GestureCapture::Pinch {
+            target,
+            dx,
+            dy,
+            scale,
+            rotation,
+        }) = self.gesture_capture.take()
+        else {
+            return Ok(Vec::new());
+        };
+        let Some((node, event)) = self.gesture_event(tree, &target, "pinch") else {
+            return Ok(Vec::new());
+        };
+        let event = add_event_fields(
+            event,
+            serde_json::json!({
+                "phase": "end",
+                "fingers": target.fingers,
+                "delta": { "x": 0.0, "y": 0.0 },
+                "total_delta": { "x": dx, "y": dy },
+                "scale": scale,
+                "rotation": rotation,
+                "cancelled": cancelled,
+            }),
+        );
+        self.call_resolved_node_handler(node, "pinch", &[event])
+    }
+
+    pub(super) fn dispatch_hold_begin(
+        &mut self,
+        tree: &WidgetNode,
+        fingers: u32,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(target) = self.capture_gesture_target(tree, "hold", fingers) else {
+            self.gesture_capture = None;
+            return Ok(Vec::new());
+        };
+        let Some((node, event)) = self.gesture_event(tree, &target, "hold") else {
+            return Ok(Vec::new());
+        };
+        let event = add_event_fields(
+            event,
+            serde_json::json!({
+                "phase": "start",
+                "fingers": fingers,
+                "duration": 0.0,
+                "cancelled": false,
+            }),
+        );
+        let requests = self.call_resolved_node_handler(node, "hold", &[event])?;
+        self.gesture_capture = Some(GestureCapture::Hold { target });
+        Ok(requests)
+    }
+
+    pub(super) fn dispatch_hold_end(
+        &mut self,
+        tree: &WidgetNode,
+        cancelled: bool,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(GestureCapture::Hold { target }) = self.gesture_capture.take() else {
+            return Ok(Vec::new());
+        };
+        let Some((node, event)) = self.gesture_event(tree, &target, "hold") else {
+            return Ok(Vec::new());
+        };
+        let event = add_event_fields(
+            event,
+            serde_json::json!({
+                "phase": "end",
+                "fingers": target.fingers,
+                "duration": target.started_at.elapsed().as_secs_f32(),
+                "cancelled": cancelled,
+            }),
+        );
+        self.call_resolved_node_handler(node, "hold", &[event])
+    }
+
+    fn capture_gesture_target(
+        &self,
+        tree: &WidgetNode,
+        event_name: &str,
+        fingers: u32,
+    ) -> Option<GestureTargetCapture> {
+        let (x, y) = self.hovered_pos;
+        let hit = pointer_event_handler_hit(tree, x, y, event_name)?;
+        Some(GestureTargetCapture {
+            node_key: hit.key.to_string(),
+            fingers,
+            started_at: Instant::now(),
+            pointer: (x, y),
+        })
+    }
+
+    fn gesture_event<'a>(
+        &self,
+        tree: &'a WidgetNode,
+        target: &GestureTargetCapture,
+        event_name: &str,
+    ) -> Option<(&'a WidgetNode, serde_json::Value)> {
+        let (node, bounds) = find_node_with_bounds_by_key(tree, &target.node_key)?;
+        if !node_has_handler(node, event_name) {
+            return None;
+        }
+        let event = self.build_click_event_for(
+            tree,
+            &target.node_key,
+            Some(node),
+            bounds,
+            target.pointer.0,
+            target.pointer.1,
+        );
+        Some((
+            node,
+            add_event_fields(event, serde_json::json!({ "type": event_name })),
+        ))
+    }
+
+    pub(super) fn dispatch_touch_down(
+        &mut self,
+        tree: &WidgetNode,
+        id: i32,
+        x: f32,
+        y: f32,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let single_touch = self.active_touches.is_empty();
+        if !single_touch {
+            for touch in self.touch_gestures.values_mut() {
+                touch.eligible = false;
+            }
+        }
+        self.active_touches.insert(id, (x, y));
+        let Some(node_key) = touch_target_key(tree, x, y) else {
+            return Ok(Vec::new());
+        };
+        self.touch_targets.insert(id, node_key.clone());
+        let long_press_enabled = find_node_by_key(tree, &node_key)
+            .is_some_and(|node| node_has_handler(node, "longpress"));
+        self.touch_gestures.insert(
+            id,
+            TouchGestureCapture {
+                node_key,
+                started_at: Instant::now(),
+                origin: (x, y),
+                point: (x, y),
+                eligible: single_touch,
+                long_press_enabled,
+                long_press_fired: false,
+            },
+        );
+        self.dispatch_touch_to_captured(tree, "touchstart", id, (x, y), false)
+    }
+
+    pub(super) fn dispatch_touch_move(
+        &mut self,
+        tree: &WidgetNode,
+        id: i32,
+        x: f32,
+        y: f32,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        self.active_touches.insert(id, (x, y));
+        if let Some(touch) = self.touch_gestures.get_mut(&id) {
+            touch.point = (x, y);
+            if touch_distance(touch.origin, touch.point) > TOUCH_SLOP {
+                touch.eligible = false;
+            }
+        }
+        self.dispatch_touch_to_captured(tree, "touchmove", id, (x, y), false)
+    }
+
+    pub(super) fn dispatch_touch_up(
+        &mut self,
+        tree: &WidgetNode,
+        id: i32,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let point = self.active_touches.remove(&id).unwrap_or(self.hovered_pos);
+        let mut requests = self.dispatch_touch_to_captured(tree, "touchend", id, point, false)?;
+        if let Some(touch) = self.touch_gestures.remove(&id) {
+            let duration = touch.started_at.elapsed();
+            if touch.eligible
+                && touch.long_press_enabled
+                && !touch.long_press_fired
+                && duration >= LONG_PRESS_DELAY
+            {
+                requests.extend(self.dispatch_touch_convenience_event(
+                    tree,
+                    &touch.node_key,
+                    "longpress",
+                    id,
+                    point,
+                    duration,
+                    1,
+                )?);
+            } else if touch.eligible && !touch.long_press_fired && duration <= TAP_MAX_DURATION {
+                let is_double = self.last_tap.as_ref().is_some_and(|previous| {
+                    previous.node_key == touch.node_key
+                        && previous.at.elapsed() <= DOUBLE_TAP_DELAY
+                        && touch_distance(previous.point, point) <= TOUCH_SLOP
+                });
+                requests.extend(self.dispatch_touch_convenience_event(
+                    tree,
+                    &touch.node_key,
+                    "tap",
+                    id,
+                    point,
+                    duration,
+                    if is_double { 2 } else { 1 },
+                )?);
+                requests.extend(self.dispatch_synthesized_touch_click(
+                    tree,
+                    &touch.node_key,
+                    point,
+                )?);
+                if is_double {
+                    requests.extend(self.dispatch_touch_convenience_event(
+                        tree,
+                        &touch.node_key,
+                        "doubletap",
+                        id,
+                        point,
+                        duration,
+                        2,
+                    )?);
+                    self.last_tap = None;
+                } else {
+                    self.last_tap = Some(TapRecord {
+                        node_key: touch.node_key,
+                        at: Instant::now(),
+                        point,
+                    });
+                }
+            }
+        }
+        self.touch_targets.remove(&id);
+        Ok(requests)
+    }
+
+    pub(super) fn dispatch_touch_cancel(
+        &mut self,
+        tree: &WidgetNode,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let changed = self.touch_points_json();
+        let mut keys: Vec<String> = self.touch_targets.values().cloned().collect();
+        keys.sort();
+        keys.dedup();
+        self.active_touches.clear();
+        self.touch_targets.clear();
+        self.touch_gestures.clear();
+        self.last_tap = None;
+
+        let mut requests = Vec::new();
+        for key in keys {
+            let Some((node, bounds)) = find_node_with_bounds_by_key(tree, &key) else {
+                continue;
+            };
+            if !node_has_handler(node, "touchcancel") {
+                continue;
+            }
+            let event = add_event_fields(
+                self.build_click_event_for(
+                    tree,
+                    &key,
+                    Some(node),
+                    bounds,
+                    self.hovered_pos.0,
+                    self.hovered_pos.1,
+                ),
+                serde_json::json!({
+                    "type": "touchcancel",
+                    "touches": [],
+                    "changed_touches": changed,
+                    "cancelled": true,
+                }),
+            );
+            requests.extend(self.call_resolved_node_handler(node, "touchcancel", &[event])?);
+        }
+        Ok(requests)
+    }
+
+    pub(in crate::shell::component) fn due_long_presses(
+        &mut self,
+        now: Instant,
+    ) -> Vec<(i32, String, (f32, f32), Duration)> {
+        let mut due = Vec::new();
+        for (id, touch) in &mut self.touch_gestures {
+            let duration = now.saturating_duration_since(touch.started_at);
+            if touch.eligible
+                && touch.long_press_enabled
+                && !touch.long_press_fired
+                && duration >= LONG_PRESS_DELAY
+            {
+                touch.long_press_fired = true;
+                due.push((*id, touch.node_key.clone(), touch.point, duration));
+            }
+        }
+        due
+    }
+
+    pub(in crate::shell::component) fn dispatch_due_long_presses(
+        &mut self,
+        tree: &WidgetNode,
+        due: Vec<(i32, String, (f32, f32), Duration)>,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let mut requests = Vec::new();
+        for (id, node_key, point, duration) in due {
+            requests.extend(self.dispatch_touch_convenience_event(
+                tree,
+                &node_key,
+                "longpress",
+                id,
+                point,
+                duration,
+                1,
+            )?);
+        }
+        Ok(requests)
+    }
+
+    fn dispatch_touch_convenience_event(
+        &mut self,
+        tree: &WidgetNode,
+        node_key: &str,
+        event_name: &str,
+        id: i32,
+        point: (f32, f32),
+        duration: Duration,
+        tap_count: u8,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some((node, bounds)) = find_node_with_bounds_by_key(tree, node_key) else {
+            return Ok(Vec::new());
+        };
+        if !node_has_handler(node, event_name) {
+            return Ok(Vec::new());
+        }
+        let event = add_event_fields(
+            self.build_click_event_for(tree, node_key, Some(node), bounds, point.0, point.1),
+            serde_json::json!({
+                "type": event_name,
+                "touch": { "id": id, "x": point.0, "y": point.1 },
+                "duration": duration.as_secs_f32(),
+                "tap_count": tap_count,
+                "synthesized": true,
+            }),
+        );
+        self.call_resolved_node_handler(node, event_name, &[event])
+    }
+
+    fn dispatch_synthesized_touch_click(
+        &mut self,
+        tree: &WidgetNode,
+        node_key: &str,
+        point: (f32, f32),
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some((node, bounds)) = find_node_with_bounds_by_key(tree, node_key) else {
+            return Ok(Vec::new());
+        };
+        let event = add_event_fields(
+            self.build_click_event_for(tree, node_key, Some(node), bounds, point.0, point.1),
+            serde_json::json!({ "synthesized_from": "touch" }),
+        );
+        if node_is_source(
+            node,
+            &[
+                "menu-item",
+                "command-item",
+                "preference-row",
+                "tab",
+                "list-item",
+            ],
+        ) {
+            self.dispatch_resolved_activation_handlers(node, event)
+        } else if node_has_handler(node, "click") {
+            self.call_resolved_node_handler(node, "click", &[event])
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    fn dispatch_touch_to_captured(
+        &mut self,
+        tree: &WidgetNode,
+        event_name: &str,
+        id: i32,
+        point: (f32, f32),
+        cancelled: bool,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(key) = self.touch_targets.get(&id).cloned() else {
+            return Ok(Vec::new());
+        };
+        let Some((node, bounds)) = find_node_with_bounds_by_key(tree, &key) else {
+            return Ok(Vec::new());
+        };
+        if !node_has_handler(node, event_name) {
+            return Ok(Vec::new());
+        }
+        let event = add_event_fields(
+            self.build_click_event_for(tree, &key, Some(node), bounds, point.0, point.1),
+            serde_json::json!({
+                "type": event_name,
+                "touch": { "id": id, "x": point.0, "y": point.1 },
+                "touches": self.touch_points_json(),
+                "changed_touches": [{ "id": id, "x": point.0, "y": point.1 }],
+                "cancelled": cancelled,
+            }),
+        );
+        self.call_resolved_node_handler(node, event_name, &[event])
+    }
+
+    fn touch_points_json(&self) -> Vec<serde_json::Value> {
+        let mut touches: Vec<(i32, (f32, f32))> = self
+            .active_touches
+            .iter()
+            .map(|(id, point)| (*id, *point))
+            .collect();
+        touches.sort_by_key(|(id, _)| *id);
+        touches
+            .into_iter()
+            .map(|(id, (x, y))| serde_json::json!({ "id": id, "x": x, "y": y }))
+            .collect()
     }
 
     pub(super) fn slider_step_value(

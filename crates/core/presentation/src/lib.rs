@@ -461,9 +461,30 @@ pub fn coalesce_input_events(events: Vec<WindowEvent>) -> Vec<WindowEvent> {
                 dy,
             } => {
                 flush_pending_pointer_move_for_surface(&surface_id, &mut pending, &mut output);
+                flush_pending_two_finger_scroll_for_surface(&surface_id, &mut pending, &mut output);
                 push_or_replace_pending(
                     &mut pending,
                     PendingInputEvent::Scroll {
+                        surface_id,
+                        x,
+                        y,
+                        dx,
+                        dy,
+                    },
+                );
+            }
+            WindowEvent::TwoFingerScroll {
+                surface_id,
+                x,
+                y,
+                dx,
+                dy,
+            } => {
+                flush_pending_pointer_move_for_surface(&surface_id, &mut pending, &mut output);
+                flush_pending_wheel_scroll_for_surface(&surface_id, &mut pending, &mut output);
+                push_or_replace_pending(
+                    &mut pending,
+                    PendingInputEvent::TwoFingerScroll {
                         surface_id,
                         x,
                         y,
@@ -510,12 +531,21 @@ enum PendingInputEvent {
         dx: f32,
         dy: f32,
     },
+    TwoFingerScroll {
+        surface_id: std::sync::Arc<str>,
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    },
 }
 
 impl PendingInputEvent {
     fn surface_id(&self) -> &str {
         match self {
-            Self::PointerMove { surface_id, .. } | Self::Scroll { surface_id, .. } => surface_id,
+            Self::PointerMove { surface_id, .. }
+            | Self::Scroll { surface_id, .. }
+            | Self::TwoFingerScroll { surface_id, .. } => surface_id,
         }
     }
 
@@ -535,6 +565,19 @@ impl PendingInputEvent {
                 dx,
                 dy,
             },
+            Self::TwoFingerScroll {
+                surface_id,
+                x,
+                y,
+                dx,
+                dy,
+            } => WindowEvent::TwoFingerScroll {
+                surface_id,
+                x,
+                y,
+                dx,
+                dy,
+            },
         }
     }
 
@@ -548,6 +591,12 @@ impl PendingInputEvent {
         ) || matches!(
             (self, other),
             (Self::Scroll { surface_id: a, .. }, Self::Scroll { surface_id: b, .. }) if a == b
+        ) || matches!(
+            (self, other),
+            (
+                Self::TwoFingerScroll { surface_id: a, .. },
+                Self::TwoFingerScroll { surface_id: b, .. }
+            ) if a == b
         )
     }
 
@@ -567,6 +616,21 @@ impl PendingInputEvent {
             (
                 Self::Scroll { x, y, dx, dy, .. },
                 Self::Scroll {
+                    x: next_x,
+                    y: next_y,
+                    dx: next_dx,
+                    dy: next_dy,
+                    ..
+                },
+            ) => {
+                *x = next_x;
+                *y = next_y;
+                *dx += next_dx;
+                *dy += next_dy;
+            }
+            (
+                Self::TwoFingerScroll { x, y, dx, dy, .. },
+                Self::TwoFingerScroll {
                     x: next_x,
                     y: next_y,
                     dx: next_dx,
@@ -619,7 +683,31 @@ fn flush_pending_scroll_for_surface(
     output: &mut Vec<WindowEvent>,
 ) {
     drain_pending_where(pending, output, |event| {
+        matches!(
+            event,
+            PendingInputEvent::Scroll { .. } | PendingInputEvent::TwoFingerScroll { .. }
+        ) && event.surface_id() == surface_id
+    });
+}
+
+fn flush_pending_wheel_scroll_for_surface(
+    surface_id: &str,
+    pending: &mut Vec<PendingInputEvent>,
+    output: &mut Vec<WindowEvent>,
+) {
+    drain_pending_where(pending, output, |event| {
         matches!(event, PendingInputEvent::Scroll { .. }) && event.surface_id() == surface_id
+    });
+}
+
+fn flush_pending_two_finger_scroll_for_surface(
+    surface_id: &str,
+    pending: &mut Vec<PendingInputEvent>,
+    output: &mut Vec<WindowEvent>,
+) {
+    drain_pending_where(pending, output, |event| {
+        matches!(event, PendingInputEvent::TwoFingerScroll { .. })
+            && event.surface_id() == surface_id
     });
 }
 
@@ -648,8 +736,21 @@ pub fn event_surface_id(event: &WindowEvent) -> &str {
         | WindowEvent::PointerLeave { surface_id }
         | WindowEvent::PointerButton { surface_id, .. }
         | WindowEvent::Scroll { surface_id, .. }
+        | WindowEvent::TwoFingerScroll { surface_id, .. }
         | WindowEvent::Key { surface_id, .. }
-        | WindowEvent::Char { surface_id, .. } => surface_id,
+        | WindowEvent::Char { surface_id, .. }
+        | WindowEvent::GestureSwipeBegin { surface_id, .. }
+        | WindowEvent::GestureSwipeUpdate { surface_id, .. }
+        | WindowEvent::GestureSwipeEnd { surface_id, .. }
+        | WindowEvent::GesturePinchBegin { surface_id, .. }
+        | WindowEvent::GesturePinchUpdate { surface_id, .. }
+        | WindowEvent::GesturePinchEnd { surface_id, .. }
+        | WindowEvent::GestureHoldBegin { surface_id, .. }
+        | WindowEvent::GestureHoldEnd { surface_id, .. }
+        | WindowEvent::TouchDown { surface_id, .. }
+        | WindowEvent::TouchMove { surface_id, .. }
+        | WindowEvent::TouchUp { surface_id, .. }
+        | WindowEvent::TouchCancel { surface_id } => surface_id,
     }
 }
 
@@ -667,6 +768,16 @@ mod tests {
 
     fn scroll(surface_id: &str, x: f32, y: f32, dx: f32, dy: f32) -> WindowEvent {
         WindowEvent::Scroll {
+            surface_id: surface_id.into(),
+            x,
+            y,
+            dx,
+            dy,
+        }
+    }
+
+    fn two_finger_scroll(surface_id: &str, x: f32, y: f32, dx: f32, dy: f32) -> WindowEvent {
+        WindowEvent::TwoFingerScroll {
             surface_id: surface_id.into(),
             x,
             y,
@@ -746,6 +857,20 @@ mod tests {
             }
             event => panic!("expected scroll, got {event:?}"),
         }
+    }
+
+    #[test]
+    fn coalesces_two_finger_scroll_deltas_for_same_surface() {
+        let events = coalesce_input_events(vec![
+            two_finger_scroll("panel", 10.0, 20.0, 1.0, 2.0),
+            two_finger_scroll("panel", 12.0, 22.0, 3.0, 4.0),
+        ]);
+
+        assert!(matches!(
+            events.as_slice(),
+            [WindowEvent::TwoFingerScroll { x, y, dx, dy, .. }]
+                if (*x, *y, *dx, *dy) == (12.0, 22.0, 4.0, 6.0)
+        ));
     }
 
     #[test]

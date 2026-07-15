@@ -341,6 +341,51 @@ pub(super) struct TextSelectionState {
     pub(super) dragging: bool,
 }
 
+#[derive(Debug)]
+pub(super) struct GestureTargetCapture {
+    pub(super) node_key: String,
+    pub(super) fingers: u32,
+    pub(super) started_at: Instant,
+    pub(super) pointer: (f32, f32),
+}
+
+#[derive(Debug)]
+pub(super) enum GestureCapture {
+    Swipe {
+        target: GestureTargetCapture,
+        dx: f32,
+        dy: f32,
+    },
+    Pinch {
+        target: GestureTargetCapture,
+        dx: f32,
+        dy: f32,
+        scale: f32,
+        rotation: f32,
+    },
+    Hold {
+        target: GestureTargetCapture,
+    },
+}
+
+#[derive(Debug)]
+pub(super) struct TouchGestureCapture {
+    pub(super) node_key: String,
+    pub(super) started_at: Instant,
+    pub(super) origin: (f32, f32),
+    pub(super) point: (f32, f32),
+    pub(super) eligible: bool,
+    pub(super) long_press_enabled: bool,
+    pub(super) long_press_fired: bool,
+}
+
+#[derive(Debug)]
+pub(super) struct TapRecord {
+    pub(super) node_key: String,
+    pub(super) at: Instant,
+    pub(super) point: (f32, f32),
+}
+
 pub(super) struct FrontendSurfaceComponent {
     pub(super) compiled: CompiledFrontendModule,
     pub(super) module_dir: PathBuf,
@@ -391,6 +436,11 @@ pub(super) struct FrontendSurfaceComponent {
     pointer_down_bounds: Option<(f32, f32, f32, f32)>,
     pointer_down_target: Option<input::PressedTargetSnapshot>,
     active_slider_key: Option<String>,
+    gesture_capture: Option<GestureCapture>,
+    touch_targets: HashMap<i32, String>,
+    active_touches: HashMap<i32, (f32, f32)>,
+    touch_gestures: HashMap<i32, TouchGestureCapture>,
+    last_tap: Option<TapRecord>,
     keyboard_button_press_activations: HashSet<(String, String)>,
     /// When a surface with keyboard interactivity transitions visible→true,
     /// this flag tells the next paint to seed focus on the first tabbable
@@ -669,6 +719,11 @@ impl FrontendSurfaceComponent {
             pointer_down_bounds: None,
             pointer_down_target: None,
             active_slider_key: None,
+            gesture_capture: None,
+            touch_targets: HashMap::new(),
+            active_touches: HashMap::new(),
+            touch_gestures: HashMap::new(),
+            last_tap: None,
             keyboard_button_press_activations: HashSet::new(),
             pending_auto_focus: settings_state.layout.visible_on_start
                 && settings_state.layout.keyboard_mode != KeyboardMode::None,

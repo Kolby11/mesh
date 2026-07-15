@@ -1,5 +1,6 @@
 use super::*;
 use std::borrow::Cow;
+use std::sync::Arc;
 
 impl CompositorHandler for State {
     fn scale_factor_changed(
@@ -191,8 +192,20 @@ impl SeatHandler for State {
                 ThemeSpec::default(),
             ) {
                 tracing::debug!("[hover] layer_shell: pointer capability acquired");
+                if let Some(gestures) = self.pointer_gestures.as_ref() {
+                    let wl_ptr = ptr.pointer();
+                    self.gesture_swipe = Some(gestures.get_swipe_gesture(wl_ptr, qh, GlobalData));
+                    self.gesture_pinch = Some(gestures.get_pinch_gesture(wl_ptr, qh, GlobalData));
+                    self.gesture_hold = Some(gestures.get_hold_gesture(wl_ptr, qh, GlobalData));
+                }
                 self.pointer = Some(ptr);
             }
+        }
+        if capability == SeatCapability::Touch
+            && self.touch.is_none()
+            && let Ok(touch) = self.seat_state.get_touch(qh, &seat)
+        {
+            self.touch = Some(touch);
         }
         if capability == SeatCapability::Keyboard
             && self.keyboard.is_none()
@@ -210,7 +223,16 @@ impl SeatHandler for State {
         capability: SeatCapability,
     ) {
         if capability == SeatCapability::Pointer {
+            self.gesture_swipe.take().map(|g| g.destroy());
+            self.gesture_pinch.take().map(|g| g.destroy());
+            self.gesture_hold.take().map(|g| g.destroy());
             let _ = self.pointer.take();
+        }
+        if capability == SeatCapability::Touch
+            && let Some(touch) = self.touch.take()
+        {
+            touch.release();
+            self.touch_surfaces.clear();
         }
         if capability == SeatCapability::Keyboard
             && let Some(keyboard) = self.keyboard.take()
@@ -318,19 +340,30 @@ impl PointerHandler for State {
                 PointerEventKind::Axis {
                     horizontal,
                     vertical,
+                    source,
                     ..
                 } => {
                     let (x, y) = (event.position.0 as f32, event.position.1 as f32);
                     let dx = -horizontal.absolute as f32;
                     let dy = -vertical.absolute as f32;
                     if dx.abs() > f32::EPSILON || dy.abs() > f32::EPSILON {
-                        self.events.push(DevWindowEvent::Scroll {
-                            surface_id,
-                            x,
-                            y,
-                            dx,
-                            dy,
-                        });
+                        if source == Some(wl_pointer::AxisSource::Finger) {
+                            self.events.push(DevWindowEvent::TwoFingerScroll {
+                                surface_id,
+                                x,
+                                y,
+                                dx,
+                                dy,
+                            });
+                        } else {
+                            self.events.push(DevWindowEvent::Scroll {
+                                surface_id,
+                                x,
+                                y,
+                                dx,
+                                dy,
+                            });
+                        }
                     }
                 }
             }
@@ -728,6 +761,253 @@ impl Dispatch<OrgKdeKwinBlur, ()> for State {
         unreachable!("org_kde_kwin_blur has no events");
     }
 }
+
+// zwp_pointer_gestures_v1 has no events — it is a factory for the swipe/
+// pinch/hold gesture objects.
+impl Dispatch<ZwpPointerGesturesV1, GlobalData> for State {
+    fn event(
+        _: &mut State,
+        _: &ZwpPointerGesturesV1,
+        _: zwp_pointer_gestures_v1::Event,
+        _: &GlobalData,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        unreachable!("zwp_pointer_gestures_v1 has no events");
+    }
+}
+
+impl Dispatch<ZwpPointerGestureSwipeV1, GlobalData> for State {
+    fn event(
+        state: &mut State,
+        _: &ZwpPointerGestureSwipeV1,
+        event: zwp_pointer_gesture_swipe_v1::Event,
+        _: &GlobalData,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        match event {
+            zwp_pointer_gesture_swipe_v1::Event::Begin {
+                surface, fingers, ..
+            } => {
+                let Some(surface_id) = state.surface_id_for_wl_surface(&surface) else {
+                    return;
+                };
+                state.gesture_surface = Some(surface_id.clone());
+                state.events.push(DevWindowEvent::GestureSwipeBegin {
+                    surface_id,
+                    fingers,
+                });
+            }
+            zwp_pointer_gesture_swipe_v1::Event::Update { dx, dy, .. } => {
+                let Some(surface_id) = state.gesture_surface.clone() else {
+                    return;
+                };
+                state.events.push(DevWindowEvent::GestureSwipeUpdate {
+                    surface_id,
+                    dx: dx as f32,
+                    dy: dy as f32,
+                });
+            }
+            zwp_pointer_gesture_swipe_v1::Event::End { cancelled, .. } => {
+                let Some(surface_id) = state.gesture_surface.take() else {
+                    return;
+                };
+                state.events.push(DevWindowEvent::GestureSwipeEnd {
+                    surface_id,
+                    cancelled: cancelled != 0,
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ZwpPointerGesturePinchV1, GlobalData> for State {
+    fn event(
+        state: &mut State,
+        _: &ZwpPointerGesturePinchV1,
+        event: zwp_pointer_gesture_pinch_v1::Event,
+        _: &GlobalData,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        match event {
+            zwp_pointer_gesture_pinch_v1::Event::Begin {
+                surface, fingers, ..
+            } => {
+                let Some(surface_id) = state.surface_id_for_wl_surface(&surface) else {
+                    return;
+                };
+                state.gesture_surface = Some(surface_id.clone());
+                state.events.push(DevWindowEvent::GesturePinchBegin {
+                    surface_id,
+                    fingers,
+                });
+            }
+            zwp_pointer_gesture_pinch_v1::Event::Update {
+                dx,
+                dy,
+                scale,
+                rotation,
+                ..
+            } => {
+                let Some(surface_id) = state.gesture_surface.clone() else {
+                    return;
+                };
+                state.events.push(DevWindowEvent::GesturePinchUpdate {
+                    surface_id,
+                    dx: dx as f32,
+                    dy: dy as f32,
+                    scale: scale as f32,
+                    rotation: rotation as f32,
+                });
+            }
+            zwp_pointer_gesture_pinch_v1::Event::End { cancelled, .. } => {
+                let Some(surface_id) = state.gesture_surface.take() else {
+                    return;
+                };
+                state.events.push(DevWindowEvent::GesturePinchEnd {
+                    surface_id,
+                    cancelled: cancelled != 0,
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ZwpPointerGestureHoldV1, GlobalData> for State {
+    fn event(
+        state: &mut State,
+        _: &ZwpPointerGestureHoldV1,
+        event: zwp_pointer_gesture_hold_v1::Event,
+        _: &GlobalData,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        match event {
+            zwp_pointer_gesture_hold_v1::Event::Begin {
+                surface, fingers, ..
+            } => {
+                let Some(surface_id) = state.surface_id_for_wl_surface(&surface) else {
+                    return;
+                };
+                state.gesture_surface = Some(surface_id.clone());
+                state.events.push(DevWindowEvent::GestureHoldBegin {
+                    surface_id,
+                    fingers,
+                });
+            }
+            zwp_pointer_gesture_hold_v1::Event::End { cancelled, .. } => {
+                let Some(surface_id) = state.gesture_surface.take() else {
+                    return;
+                };
+                state.events.push(DevWindowEvent::GestureHoldEnd {
+                    surface_id,
+                    cancelled: cancelled != 0,
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
+impl TouchHandler for State {
+    fn down(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _touch: &wl_touch::WlTouch,
+        _serial: u32,
+        _time: u32,
+        surface: wl_surface::WlSurface,
+        id: i32,
+        position: (f64, f64),
+    ) {
+        let Some(surface_id) = self.surface_id_for_wl_surface(&surface) else {
+            return;
+        };
+        self.touch_surfaces.insert(id, surface_id.clone());
+        self.events.push(DevWindowEvent::TouchDown {
+            surface_id,
+            id,
+            x: position.0 as f32,
+            y: position.1 as f32,
+        });
+    }
+
+    fn up(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _touch: &wl_touch::WlTouch,
+        _serial: u32,
+        _time: u32,
+        id: i32,
+    ) {
+        let Some(surface_id) = self.touch_surfaces.remove(&id) else {
+            return;
+        };
+        self.events.push(DevWindowEvent::TouchUp { surface_id, id });
+    }
+
+    fn motion(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _touch: &wl_touch::WlTouch,
+        _time: u32,
+        id: i32,
+        position: (f64, f64),
+    ) {
+        let Some(surface_id) = self.touch_surfaces.get(&id).cloned() else {
+            return;
+        };
+        self.events.push(DevWindowEvent::TouchMove {
+            surface_id,
+            id,
+            x: position.0 as f32,
+            y: position.1 as f32,
+        });
+    }
+
+    fn shape(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _touch: &wl_touch::WlTouch,
+        _id: i32,
+        _major: f64,
+        _minor: f64,
+    ) {
+        // Touch ellipse shape is not surfaced as a MESH event; no builtin
+        // gesture currently needs contact-area precision.
+    }
+
+    fn orientation(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _touch: &wl_touch::WlTouch,
+        _id: i32,
+        _orientation: f64,
+    ) {
+        // Not surfaced; see `shape` above.
+    }
+
+    fn cancel(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _touch: &wl_touch::WlTouch) {
+        let mut surfaces: Vec<Arc<str>> = self.touch_surfaces.values().cloned().collect();
+        surfaces.sort();
+        surfaces.dedup();
+        for surface_id in surfaces {
+            self.events.push(DevWindowEvent::TouchCancel { surface_id });
+        }
+        self.touch_surfaces.clear();
+    }
+}
+
+delegate_touch!(State);
 
 #[cfg(test)]
 mod tests {

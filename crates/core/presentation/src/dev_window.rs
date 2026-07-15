@@ -27,6 +27,16 @@ pub enum DevWindowEvent {
         dx: f32,
         dy: f32,
     },
+    /// Continuous two-finger trackpad pan reported by `wl_pointer` with the
+    /// `finger` axis source. Kept distinct from discrete wheel scrolling while
+    /// allowing the shell to fall back to normal scrolling when unhandled.
+    TwoFingerScroll {
+        surface_id: Arc<str>,
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    },
     Key {
         surface_id: Arc<str>,
         event: DevWindowKeyEvent,
@@ -34,6 +44,74 @@ pub enum DevWindowEvent {
     Char {
         surface_id: Arc<str>,
         ch: char,
+    },
+    /// `zwp_pointer_gesture_swipe_v1` begin — a 3+ finger trackpad swipe started.
+    GestureSwipeBegin {
+        surface_id: Arc<str>,
+        fingers: u32,
+    },
+    /// Incremental swipe motion since the last update, in surface-local units.
+    GestureSwipeUpdate {
+        surface_id: Arc<str>,
+        dx: f32,
+        dy: f32,
+    },
+    GestureSwipeEnd {
+        surface_id: Arc<str>,
+        cancelled: bool,
+    },
+    /// `zwp_pointer_gesture_pinch_v1` begin — a 2+ finger pinch/rotate gesture started.
+    GesturePinchBegin {
+        surface_id: Arc<str>,
+        fingers: u32,
+    },
+    /// `scale` is relative to the gesture's starting finger separation (1.0 = no
+    /// change); `rotation` is the cumulative clockwise angle in degrees.
+    GesturePinchUpdate {
+        surface_id: Arc<str>,
+        dx: f32,
+        dy: f32,
+        scale: f32,
+        rotation: f32,
+    },
+    GesturePinchEnd {
+        surface_id: Arc<str>,
+        cancelled: bool,
+    },
+    /// `zwp_pointer_gesture_hold_v1` begin — a press-and-hold with no motion.
+    GestureHoldBegin {
+        surface_id: Arc<str>,
+        fingers: u32,
+    },
+    GestureHoldEnd {
+        surface_id: Arc<str>,
+        cancelled: bool,
+    },
+    /// `wl_touch` down — a new touch point appeared. `id` identifies this touch
+    /// point for the rest of its sequence (reused after the matching `TouchUp`).
+    TouchDown {
+        surface_id: Arc<str>,
+        id: i32,
+        x: f32,
+        y: f32,
+    },
+    TouchMove {
+        surface_id: Arc<str>,
+        id: i32,
+        x: f32,
+        y: f32,
+    },
+    /// `wl_touch` up has no surface-local position; the shell must track the
+    /// last known position per touch id if it needs one.
+    TouchUp {
+        surface_id: Arc<str>,
+        id: i32,
+    },
+    /// The compositor cancelled the whole touch sequence (e.g. it recognized a
+    /// compositor-level gesture). Not per-surface in the protocol, but carries
+    /// the last-focused surface so it composes with the rest of this enum.
+    TouchCancel {
+        surface_id: Arc<str>,
     },
 }
 

@@ -441,8 +441,78 @@ Common event attributes:
 | `onmouseenter` | pointer enters element     |
 | `onmouseleave` | pointer leaves element     |
 | `onscroll`     | wheel/scroll over element  |
+| `ontwofingerscroll` | two-finger trackpad pan |
+| `onswipe`      | trackpad swipe lifecycle   |
+| `onpinch`      | trackpad pinch lifecycle   |
+| `onhold`       | trackpad hold lifecycle    |
+| `ontouchstart` | touchscreen contact begins |
+| `ontouchmove`  | touchscreen contact moves  |
+| `ontouchend`   | touchscreen contact ends   |
+| `ontouchcancel`| compositor cancels contacts |
+| `ontap`        | short single-touch tap     |
+| `ondoubletap`  | second nearby tap          |
+| `onlongpress`  | touch held for 500 ms      |
 
 Do not use `@click=` or `:on*=` — those are not valid MESH syntax.
+
+#### Gesture and touch payloads
+
+Gesture handlers use the same `event.pointer`, `event.surface`, `event.current`,
+and `event.current_target` geometry as pointer handlers. Trackpad gestures keep
+the node hit at gesture start as their target until the gesture ends.
+
+```luau
+function onSwipe(event)
+  if event.phase == "end" and event.fingers == 3 then
+    mesh.log.info(event.direction .. " at " .. event.velocity.x)
+  end
+end
+
+function onPinch(event)
+  if event.phase == "move" then
+    zoom = event.scale       -- relative to gesture start; 1.0 is unchanged
+    angle = event.rotation   -- degrees
+  end
+end
+```
+
+| Handler | Additional payload fields |
+| ------- | ------------------------- |
+| `ontwofingerscroll` | `type`, `delta = { x, y }` |
+| `onswipe` | `phase` (`start`, `move`, `end`), `fingers`, `delta`, `total_delta`, and on end `direction`, `velocity`, `duration`, `cancelled` |
+| `onpinch` | `phase`, `fingers`, `delta`, `total_delta`, `scale`, `rotation`, `cancelled` |
+| `onhold` | `phase`, `fingers`, `duration`, `cancelled` |
+
+Raw touchscreen handlers capture the deepest opted-in node at touch-down and
+keep that target for the contact lifetime. `event.touch` is the changed
+`{ id, x, y }` point; `event.touches` is the sorted array of contacts still
+active after the event; `event.changed_touches` contains changed points; and
+`event.cancelled` distinguishes cancellation. Coordinates are logical surface
+pixels.
+
+```xml
+<button
+  onclick={openItem}
+  ontap={showTouchFeedback}
+  ondoubletap={openDetails}
+  onlongpress={openContextMenu}>
+  Open
+</button>
+```
+
+`ontap`, `ondoubletap`, and `onlongpress` add `duration` (seconds),
+`tap_count`, `synthesized = true`, and `touch = { id, x, y }`. A tap is one
+contact released before the 500 ms long-press threshold without moving more
+than 12 logical pixels. Two
+taps on the same target within 350 ms and 12 pixels also fire `ondoubletap` on
+the second tap. A stationary contact fires `onlongpress` after 500 ms and does
+not subsequently fire a tap.
+
+Every recognized tap also synthesizes the normal `onclick`/activation path
+with `event.synthesized_from == "touch"`. Existing buttons therefore work on
+touchscreens without adding `ontap`; declaring `ontap` is only needed for
+touch-specific behavior. If no gesture handler is registered, two-finger input
+keeps native scrolling and other gesture events are ignored.
 
 ### Keyboard focus and traversal
 

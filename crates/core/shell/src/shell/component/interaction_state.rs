@@ -398,6 +398,29 @@ impl FrontendSurfaceComponent {
             }
         }
 
+        let gesture_target_missing = self.gesture_capture.as_ref().is_some_and(|capture| {
+            let key = match capture {
+                GestureCapture::Swipe { target, .. }
+                | GestureCapture::Pinch { target, .. }
+                | GestureCapture::Hold { target } => &target.node_key,
+            };
+            find_node_by_key(tree, key).is_none()
+        });
+        if gesture_target_missing {
+            self.gesture_capture = None;
+        }
+        self.touch_targets
+            .retain(|_, key| find_node_by_key(tree, key).is_some());
+        self.touch_gestures
+            .retain(|_, touch| find_node_by_key(tree, &touch.node_key).is_some());
+        if self
+            .last_tap
+            .as_ref()
+            .is_some_and(|tap| find_node_by_key(tree, &tap.node_key).is_none())
+        {
+            self.last_tap = None;
+        }
+
         let should_clear_selection = self
             .selection
             .as_ref()

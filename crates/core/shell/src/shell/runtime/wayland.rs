@@ -60,6 +60,19 @@ impl Shell {
                 RoutedWindowEvent::PointerMove { .. }
                     | RoutedWindowEvent::PointerButton { .. }
                     | RoutedWindowEvent::Scroll { .. }
+                    | RoutedWindowEvent::TwoFingerScroll { .. }
+                    | RoutedWindowEvent::GestureSwipeBegin { .. }
+                    | RoutedWindowEvent::GestureSwipeUpdate { .. }
+                    | RoutedWindowEvent::GestureSwipeEnd { .. }
+                    | RoutedWindowEvent::GesturePinchBegin { .. }
+                    | RoutedWindowEvent::GesturePinchUpdate { .. }
+                    | RoutedWindowEvent::GesturePinchEnd { .. }
+                    | RoutedWindowEvent::GestureHoldBegin { .. }
+                    | RoutedWindowEvent::GestureHoldEnd { .. }
+                    | RoutedWindowEvent::TouchDown { .. }
+                    | RoutedWindowEvent::TouchMove { .. }
+                    | RoutedWindowEvent::TouchUp { .. }
+                    | RoutedWindowEvent::TouchCancel
             ) {
                 self.cancel_pending_popover_hide(target_surface_id);
                 if let RoutedWindowEvent::PointerMove { x, y } = &event {
@@ -151,6 +164,45 @@ impl Shell {
                 RoutedWindowEvent::Scroll { x, y, dx, dy } => {
                     ComponentInput::Scroll { x, y, dx, dy }
                 }
+                RoutedWindowEvent::TwoFingerScroll { x, y, dx, dy } => {
+                    ComponentInput::TwoFingerScroll { x, y, dx, dy }
+                }
+                RoutedWindowEvent::GestureSwipeBegin { fingers } => {
+                    ComponentInput::GestureSwipeBegin { fingers }
+                }
+                RoutedWindowEvent::GestureSwipeUpdate { dx, dy } => {
+                    ComponentInput::GestureSwipeUpdate { dx, dy }
+                }
+                RoutedWindowEvent::GestureSwipeEnd { cancelled } => {
+                    ComponentInput::GestureSwipeEnd { cancelled }
+                }
+                RoutedWindowEvent::GesturePinchBegin { fingers } => {
+                    ComponentInput::GesturePinchBegin { fingers }
+                }
+                RoutedWindowEvent::GesturePinchUpdate {
+                    dx,
+                    dy,
+                    scale,
+                    rotation,
+                } => ComponentInput::GesturePinchUpdate {
+                    dx,
+                    dy,
+                    scale,
+                    rotation,
+                },
+                RoutedWindowEvent::GesturePinchEnd { cancelled } => {
+                    ComponentInput::GesturePinchEnd { cancelled }
+                }
+                RoutedWindowEvent::GestureHoldBegin { fingers } => {
+                    ComponentInput::GestureHoldBegin { fingers }
+                }
+                RoutedWindowEvent::GestureHoldEnd { cancelled } => {
+                    ComponentInput::GestureHoldEnd { cancelled }
+                }
+                RoutedWindowEvent::TouchDown { id, x, y } => ComponentInput::TouchDown { id, x, y },
+                RoutedWindowEvent::TouchMove { id, x, y } => ComponentInput::TouchMove { id, x, y },
+                RoutedWindowEvent::TouchUp { id } => ComponentInput::TouchUp { id },
+                RoutedWindowEvent::TouchCancel => ComponentInput::TouchCancel,
                 RoutedWindowEvent::KeyPressed { key, mods } => {
                     self.active_key_modifiers = KeyModifiers {
                         ctrl: mods.ctrl,
@@ -260,6 +312,54 @@ enum RoutedWindowEvent {
         dx: f32,
         dy: f32,
     },
+    TwoFingerScroll {
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    },
+    GestureSwipeBegin {
+        fingers: u32,
+    },
+    GestureSwipeUpdate {
+        dx: f32,
+        dy: f32,
+    },
+    GestureSwipeEnd {
+        cancelled: bool,
+    },
+    GesturePinchBegin {
+        fingers: u32,
+    },
+    GesturePinchUpdate {
+        dx: f32,
+        dy: f32,
+        scale: f32,
+        rotation: f32,
+    },
+    GesturePinchEnd {
+        cancelled: bool,
+    },
+    GestureHoldBegin {
+        fingers: u32,
+    },
+    GestureHoldEnd {
+        cancelled: bool,
+    },
+    TouchDown {
+        id: i32,
+        x: f32,
+        y: f32,
+    },
+    TouchMove {
+        id: i32,
+        x: f32,
+        y: f32,
+    },
+    TouchUp {
+        id: i32,
+    },
+    TouchCancel,
     KeyPressed {
         key: String,
         mods: mesh_core_presentation::KeyMods,
@@ -303,6 +403,16 @@ fn split_window_event(event: WindowEvent) -> (std::sync::Arc<str>, RoutedWindowE
             dx,
             dy,
         } => (surface_id, RoutedWindowEvent::Scroll { x, y, dx, dy }),
+        WindowEvent::TwoFingerScroll {
+            surface_id,
+            x,
+            y,
+            dx,
+            dy,
+        } => (
+            surface_id,
+            RoutedWindowEvent::TwoFingerScroll { x, y, dx, dy },
+        ),
         WindowEvent::Key { surface_id, event } => match event {
             WindowKeyEvent::Pressed(key, mods) => {
                 (surface_id, RoutedWindowEvent::KeyPressed { key, mods })
@@ -310,6 +420,62 @@ fn split_window_event(event: WindowEvent) -> (std::sync::Arc<str>, RoutedWindowE
             WindowKeyEvent::Released(key) => (surface_id, RoutedWindowEvent::KeyReleased { key }),
         },
         WindowEvent::Char { surface_id, ch } => (surface_id, RoutedWindowEvent::Char { ch }),
+        WindowEvent::GestureSwipeBegin {
+            surface_id,
+            fingers,
+        } => (surface_id, RoutedWindowEvent::GestureSwipeBegin { fingers }),
+        WindowEvent::GestureSwipeUpdate { surface_id, dx, dy } => {
+            (surface_id, RoutedWindowEvent::GestureSwipeUpdate { dx, dy })
+        }
+        WindowEvent::GestureSwipeEnd {
+            surface_id,
+            cancelled,
+        } => (surface_id, RoutedWindowEvent::GestureSwipeEnd { cancelled }),
+        WindowEvent::GesturePinchBegin {
+            surface_id,
+            fingers,
+        } => (surface_id, RoutedWindowEvent::GesturePinchBegin { fingers }),
+        WindowEvent::GesturePinchUpdate {
+            surface_id,
+            dx,
+            dy,
+            scale,
+            rotation,
+        } => (
+            surface_id,
+            RoutedWindowEvent::GesturePinchUpdate {
+                dx,
+                dy,
+                scale,
+                rotation,
+            },
+        ),
+        WindowEvent::GesturePinchEnd {
+            surface_id,
+            cancelled,
+        } => (surface_id, RoutedWindowEvent::GesturePinchEnd { cancelled }),
+        WindowEvent::GestureHoldBegin {
+            surface_id,
+            fingers,
+        } => (surface_id, RoutedWindowEvent::GestureHoldBegin { fingers }),
+        WindowEvent::GestureHoldEnd {
+            surface_id,
+            cancelled,
+        } => (surface_id, RoutedWindowEvent::GestureHoldEnd { cancelled }),
+        WindowEvent::TouchDown {
+            surface_id,
+            id,
+            x,
+            y,
+        } => (surface_id, RoutedWindowEvent::TouchDown { id, x, y }),
+        WindowEvent::TouchMove {
+            surface_id,
+            id,
+            x,
+            y,
+        } => (surface_id, RoutedWindowEvent::TouchMove { id, x, y }),
+        WindowEvent::TouchUp { surface_id, id } => (surface_id, RoutedWindowEvent::TouchUp { id }),
+        WindowEvent::TouchCancel { surface_id } => (surface_id, RoutedWindowEvent::TouchCancel),
     }
 }
 
@@ -319,8 +485,21 @@ fn profiling_trigger_for_event(event: &WindowEvent) -> &'static str {
         WindowEvent::PointerLeave { .. } => "pointer_leave",
         WindowEvent::PointerButton { .. } => "pointer_button",
         WindowEvent::Scroll { .. } => "scroll",
+        WindowEvent::TwoFingerScroll { .. } => "two_finger_scroll",
         WindowEvent::Key { .. } => "key",
         WindowEvent::Char { .. } => "char",
+        WindowEvent::GestureSwipeBegin { .. } => "gesture_swipe_begin",
+        WindowEvent::GestureSwipeUpdate { .. } => "gesture_swipe_update",
+        WindowEvent::GestureSwipeEnd { .. } => "gesture_swipe_end",
+        WindowEvent::GesturePinchBegin { .. } => "gesture_pinch_begin",
+        WindowEvent::GesturePinchUpdate { .. } => "gesture_pinch_update",
+        WindowEvent::GesturePinchEnd { .. } => "gesture_pinch_end",
+        WindowEvent::GestureHoldBegin { .. } => "gesture_hold_begin",
+        WindowEvent::GestureHoldEnd { .. } => "gesture_hold_end",
+        WindowEvent::TouchDown { .. } => "touch_down",
+        WindowEvent::TouchMove { .. } => "touch_move",
+        WindowEvent::TouchUp { .. } => "touch_up",
+        WindowEvent::TouchCancel { .. } => "touch_cancel",
     }
 }
 
@@ -367,6 +546,43 @@ mod tests {
                 ref key,
                 ref mods
             } if key == "Enter" && mods.ctrl && !mods.shift && mods.alt
+        ));
+    }
+
+    #[test]
+    fn split_window_event_routes_gesture_and_touch_payloads() {
+        let (surface_id, event) = split_window_event(WindowEvent::GesturePinchUpdate {
+            surface_id: "panel".into(),
+            dx: 1.0,
+            dy: -2.0,
+            scale: 1.25,
+            rotation: 18.0,
+        });
+        assert_eq!(surface_id.as_ref(), "panel");
+        assert!(matches!(
+            event,
+            RoutedWindowEvent::GesturePinchUpdate {
+                dx: 1.0,
+                dy: -2.0,
+                scale: 1.25,
+                rotation: 18.0,
+            }
+        ));
+
+        let (surface_id, event) = split_window_event(WindowEvent::TouchDown {
+            surface_id: "popover".into(),
+            id: 7,
+            x: 14.0,
+            y: 22.0,
+        });
+        assert_eq!(surface_id.as_ref(), "popover");
+        assert!(matches!(
+            event,
+            RoutedWindowEvent::TouchDown {
+                id: 7,
+                x: 14.0,
+                y: 22.0,
+            }
         ));
     }
 
