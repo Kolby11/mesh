@@ -986,6 +986,197 @@ box.card { padding: 3px; }
     }
 
     #[test]
+    fn targeted_restyle_skips_descendant_rule_resolution_for_non_inherited_change() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::State("row".into(), "hover".into()),
+            declarations: vec![Declaration {
+                property: "background-color".into(),
+                value: StyleValue::Literal("#ff0000".into()),
+            }],
+            container_query: None,
+        }];
+        let mut root = crate::tree::WidgetNode::new("row");
+        root.id = 1;
+        let mut child = crate::tree::WidgetNode::new("text");
+        child.id = 2;
+        root.children.push(child);
+        resolver.restyle_subtree_cached(&mut root, &rules, StyleContext::default(), &mut None);
+        root.children[0].computed_style.background_color = Color::from_hex("#123456").unwrap();
+        root.state.hovered = true;
+
+        resolver.restyle_subtree_for_ids(
+            &mut root,
+            &rules,
+            StyleContext::default(),
+            &std::collections::HashSet::from([1]),
+        );
+
+        assert_eq!(
+            root.children[0].computed_style.background_color,
+            Color::from_hex("#123456").unwrap(),
+            "a non-inherited parent change must not re-resolve clean descendants"
+        );
+    }
+
+    #[test]
+    fn targeted_restyle_propagates_changed_inherited_fields() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::State("row".into(), "hover".into()),
+            declarations: vec![Declaration {
+                property: "color".into(),
+                value: StyleValue::Literal("#ff0000".into()),
+            }],
+            container_query: None,
+        }];
+        let mut root = crate::tree::WidgetNode::new("row");
+        root.id = 1;
+        let mut child = crate::tree::WidgetNode::new("box");
+        child.id = 2;
+        root.children.push(child);
+        resolver.restyle_subtree_cached(&mut root, &rules, StyleContext::default(), &mut None);
+        let mut full_tree = root.clone();
+        full_tree.children[0].computed_style.background_color = Color::from_hex("#123456").unwrap();
+        root.children[0].computed_style.background_color = Color::from_hex("#123456").unwrap();
+        full_tree.state.hovered = true;
+        root.state.hovered = true;
+
+        resolver.restyle_subtree_cached(&mut full_tree, &rules, StyleContext::default(), &mut None);
+
+        resolver.restyle_subtree_for_ids(
+            &mut root,
+            &rules,
+            StyleContext::default(),
+            &std::collections::HashSet::from([1]),
+        );
+
+        assert_eq!(
+            (
+                root.children[0].computed_style.color,
+                root.children[0].computed_style.font_family.clone(),
+                root.children[0].computed_style.font_size,
+                root.children[0].computed_style.font_weight,
+                root.children[0].computed_style.line_height,
+                root.children[0].computed_style.background_color,
+            ),
+            (
+                full_tree.children[0].computed_style.color,
+                full_tree.children[0].computed_style.font_family.clone(),
+                full_tree.children[0].computed_style.font_size,
+                full_tree.children[0].computed_style.font_weight,
+                full_tree.children[0].computed_style.line_height,
+                full_tree.children[0].computed_style.background_color,
+            ),
+            "targeted inherited-field propagation must match a full restyle"
+        );
+        assert_eq!(
+            root.children[0].computed_style.background_color,
+            Color::TRANSPARENT,
+            "changed inherited fields must still restyle descendants"
+        );
+    }
+
+    // cargo test -p mesh-core-elements --release -- non_inherited_targeted_restyle_beats_full_descendant_restyle_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only targeted interaction restyle microbenchmark"]
+    fn non_inherited_targeted_restyle_beats_full_descendant_restyle_benchmark() {
+        use std::time::Instant;
+
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![
+            StyleRule {
+                selector: Selector::Class("plain".into()),
+                declarations: vec![Declaration {
+                    property: "background-color".into(),
+                    value: StyleValue::Literal("#222222".into()),
+                }],
+                container_query: None,
+            },
+            StyleRule {
+                selector: Selector::State("row".into(), "hover".into()),
+                declarations: vec![Declaration {
+                    property: "background-color".into(),
+                    value: StyleValue::Literal("#444444".into()),
+                }],
+                container_query: None,
+            },
+        ];
+        let mut root = crate::tree::WidgetNode::new("row");
+        root.id = 1;
+        root.children = (0..2_048)
+            .map(|index| {
+                let mut child = crate::tree::WidgetNode::new("box");
+                child.id = index + 2;
+                child.attributes.insert("class".into(), "plain".into());
+                child
+            })
+            .collect();
+        let mut initial_index = None;
+        resolver.restyle_subtree_cached(
+            &mut root,
+            &rules,
+            StyleContext::default(),
+            &mut initial_index,
+        );
+
+        let mut full_tree = root.clone();
+        let mut targeted_tree = root;
+        let target_ids = std::collections::HashSet::from([1]);
+        let iterations = 1_000;
+
+        let mut full_index = None;
+        let full_started = Instant::now();
+        for iteration in 0..iterations {
+            full_tree.state.hovered = iteration % 2 == 0;
+            resolver.restyle_subtree_cached(
+                &mut full_tree,
+                &rules,
+                StyleContext::default(),
+                &mut full_index,
+            );
+        }
+        let full_elapsed = full_started.elapsed();
+
+        let mut targeted_index = None;
+        let targeted_started = Instant::now();
+        for iteration in 0..iterations {
+            targeted_tree.state.hovered = iteration % 2 == 0;
+            resolver.restyle_subtree_for_ids_cached(
+                &mut targeted_tree,
+                &rules,
+                StyleContext::default(),
+                &mut targeted_index,
+                &target_ids,
+            );
+        }
+        let targeted_elapsed = targeted_started.elapsed();
+
+        assert_eq!(
+            full_tree.computed_style.background_color,
+            targeted_tree.computed_style.background_color
+        );
+        assert_eq!(
+            full_tree.children[1_024].computed_style.background_color,
+            targeted_tree.children[1_024]
+                .computed_style
+                .background_color
+        );
+        assert_eq!(
+            full_tree.children[1_024].computed_style.color,
+            targeted_tree.children[1_024].computed_style.color
+        );
+        eprintln!(
+            "non-inherited targeted restyle over {iterations} passes and 2,049 nodes: full {full_elapsed:?}; targeted {targeted_elapsed:?}; ratio {:.1}x",
+            full_elapsed.as_secs_f64() / targeted_elapsed.as_secs_f64()
+        );
+        assert!(targeted_elapsed * 2 < full_elapsed);
+    }
+
+    #[test]
     fn style_rule_index_matches_full_scan_for_selector_mix() {
         use mesh_core_component::style::{Declaration, Selector};
 

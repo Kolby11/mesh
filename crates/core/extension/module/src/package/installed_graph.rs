@@ -2419,6 +2419,13 @@ pub struct ContributedIconPack {
 pub fn load_installed_module_graph(
     root_module_graph_path: &Path,
 ) -> Result<InstalledModuleGraph, ModuleManifestError> {
+    load_installed_module_graph_with(root_module_graph_path, load_module_manifests)
+}
+
+fn load_installed_module_graph_with(
+    root_module_graph_path: &Path,
+    load_manifests: impl Fn(&[PathBuf]) -> Result<Vec<LoadedModuleManifest>, ModuleManifestError>,
+) -> Result<InstalledModuleGraph, ModuleManifestError> {
     let mut root = RootModuleGraphManifest::from_path(root_module_graph_path)?;
     let root_dir = root_module_graph_path.parent().ok_or_else(|| {
         ModuleManifestError::Validation(format!(
@@ -2436,7 +2443,8 @@ pub fn load_installed_module_graph(
         // then only holds decisions — `disabled`, `providers`, `layout`,
         // `theme`. A discovered module is enabled unless named in `disabled`.
         let module_dirs = discover_module_dirs(&modules_dir);
-        for (module_dir, loaded) in load_discovered_module_manifests(&module_dirs)? {
+        let loaded_manifests = load_manifests(&module_dirs)?;
+        for (module_dir, loaded) in module_dirs.iter().cloned().zip(loaded_manifests) {
             let name = loaded.manifest.name.clone();
             let kind = loaded.manifest.mesh.kind;
             let relative = module_dir
@@ -2456,22 +2464,41 @@ pub fn load_installed_module_graph(
             modules.push(loaded);
         }
     } else {
-        for entry in root.modules.values() {
-            modules.push(load_module_manifest(&modules_dir.join(&entry.path))?);
-        }
+        let module_dirs = root
+            .modules
+            .values()
+            .map(|entry| modules_dir.join(&entry.path))
+            .collect::<Vec<_>>();
+        modules = load_manifests(&module_dirs)?;
     }
 
     InstalledModuleGraph::from_parts(root, modules)
 }
 
+#[cfg(test)]
+pub(super) fn load_installed_module_graph_serial(
+    root_module_graph_path: &Path,
+) -> Result<InstalledModuleGraph, ModuleManifestError> {
+    load_installed_module_graph_with(root_module_graph_path, load_module_manifests_serial)
+}
+
+#[cfg(test)]
 pub(super) fn load_discovered_module_manifests(
     module_dirs: &[PathBuf],
 ) -> Result<Vec<(PathBuf, LoadedModuleManifest)>, ModuleManifestError> {
+    let manifests = load_module_manifests(module_dirs)?;
+    Ok(module_dirs.iter().cloned().zip(manifests).collect())
+}
+
+/// Load an already ordered set of module directories without serializing file
+/// IO and JSON parsing on the caller. Indexed parallel iteration preserves the
+/// input order, so callers retain their existing deterministic assembly order.
+pub(super) fn load_module_manifests(
+    module_dirs: &[PathBuf],
+) -> Result<Vec<LoadedModuleManifest>, ModuleManifestError> {
     let loaded = module_dirs
         .par_iter()
-        .map(|module_dir| {
-            load_module_manifest(module_dir).map(|loaded| (module_dir.clone(), loaded))
-        })
+        .map(|module_dir| load_module_manifest(module_dir))
         .collect::<Vec<_>>();
     loaded.into_iter().collect()
 }
@@ -2480,11 +2507,17 @@ pub(super) fn load_discovered_module_manifests(
 pub(super) fn load_discovered_module_manifests_serial(
     module_dirs: &[PathBuf],
 ) -> Result<Vec<(PathBuf, LoadedModuleManifest)>, ModuleManifestError> {
+    let manifests = load_module_manifests_serial(module_dirs)?;
+    Ok(module_dirs.iter().cloned().zip(manifests).collect())
+}
+
+#[cfg(test)]
+pub(super) fn load_module_manifests_serial(
+    module_dirs: &[PathBuf],
+) -> Result<Vec<LoadedModuleManifest>, ModuleManifestError> {
     module_dirs
         .iter()
-        .map(|module_dir| {
-            load_module_manifest(module_dir).map(|loaded| (module_dir.clone(), loaded))
-        })
+        .map(|module_dir| load_module_manifest(module_dir))
         .collect()
 }
 

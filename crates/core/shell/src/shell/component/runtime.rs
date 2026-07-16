@@ -343,14 +343,19 @@ impl FrontendSurfaceComponent {
             let interface = format!("mesh.{service_name}");
             // Always seed the Lua-level service payload so interface proxies
             // can read state fields regardless of read capability.
-            script_ctx.apply_service_payload(service_name, payload);
+            script_ctx.apply_service_payload_with_fingerprint(
+                service_name,
+                payload.value.as_ref(),
+                payload.fingerprint,
+            );
             if script_has_service_read(&script_ctx, &interface, service_name) {
-                apply_service_update_with_name(
+                apply_service_update_with_name_and_fingerprint(
                     script_ctx.state_mut(),
                     true,
                     service_name,
                     "<cached>",
-                    payload.clone(),
+                    payload.value.as_ref(),
+                    payload.fingerprint,
                 );
             }
         }

@@ -216,6 +216,7 @@ pub struct ScriptContext {
     /// Shell paints commonly publish identical geometry across many frames.
     last_element_metrics_fingerprint: Option<u64>,
     cached_self_table: Option<Table>,
+    cached_service_payload_fingerprints: Option<Table>,
 }
 
 impl Drop for ScriptContext {
@@ -369,6 +370,7 @@ impl ScriptContext {
             live_binding_external_accessed: Arc::new(AtomicBool::new(false)),
             last_element_metrics_fingerprint: None,
             cached_self_table: None,
+            cached_service_payload_fingerprints: None,
         })
     }
 
@@ -437,6 +439,7 @@ impl ScriptContext {
     pub fn uninit(&mut self) {
         self.env_table = None;
         self.cached_self_table = None;
+        self.cached_service_payload_fingerprints = None;
         self.builtin_globals.clear();
         self.user_global_keys.clear();
         self.user_global_key_set.clear();
@@ -568,26 +571,42 @@ impl ScriptContext {
     /// Called by core after each service update so interface proxies can read
     /// state fields directly without explicit callback or binding APIs.
     pub fn apply_service_payload(&mut self, service: &str, payload: &Value) {
+        let fingerprint = Self::service_payload_fingerprint(payload);
+        self.apply_service_payload_with_fingerprint(service, payload, fingerprint);
+    }
+
+    /// Hash a service payload once for reuse across a multi-context fan-out.
+    pub fn service_payload_fingerprint(payload: &Value) -> u64 {
+        json_value_fingerprint(payload)
+    }
+
+    /// Apply a service payload using a fingerprint already computed by the
+    /// event dispatcher. This avoids re-hashing the same JSON in every
+    /// component context attached to a surface.
+    pub fn apply_service_payload_with_fingerprint(
+        &mut self,
+        service: &str,
+        payload: &Value,
+        payload_fingerprint: u64,
+    ) {
         let _ = self.ensure_initialized();
-        let payload_marker = payload as *const Value as usize;
-        let payload_fingerprint = json_value_fingerprint(payload);
-        let marker = format!("{payload_marker}:{payload_fingerprint}");
-        let globals = self.lua().globals();
-        let marker_table = match globals.get::<Table>("__mesh_service_payload_ptrs") {
-            Ok(table) => table,
-            Err(_) => match self.lua().create_table() {
-                Ok(table) => {
-                    let _ = globals.set("__mesh_service_payload_ptrs", table.clone());
-                    table
-                }
-                Err(_) => return,
-            },
-        };
+        // Luau numbers cannot preserve every bit of a u64. Compare the raw
+        // bytes against the borrowed Lua string instead: unchanged fan-out
+        // probes allocate nothing, while changed payloads create one compact
+        // eight-byte marker.
+        let marker = payload_fingerprint.to_ne_bytes();
+        if !self.ensure_service_payload_fingerprint_table() {
+            return;
+        }
+        let marker_table = self
+            .cached_service_payload_fingerprints
+            .as_ref()
+            .expect("service payload fingerprint table initialized");
         if marker_table
-            .get::<Option<String>>(service)
+            .get::<Option<mlua::String>>(service)
             .ok()
             .flatten()
-            .is_some_and(|previous| previous == marker)
+            .is_some_and(|previous| previous.as_bytes().as_ref() == marker)
         {
             return;
         }
@@ -597,7 +616,9 @@ impl ScriptContext {
             // The env table __index falls through to globals, so scripts accessing
             // __mesh_svc_* directly from the env also work.
             let _ = self.lua().globals().set(service_key.as_str(), lua_value);
-            let _ = marker_table.set(service, marker);
+            if let Ok(marker) = self.lua().create_string(marker) {
+                let _ = marker_table.set(service, marker);
+            }
         }
         if service == "locale"
             && let Some(locale) = payload
@@ -609,14 +630,146 @@ impl ScriptContext {
         }
     }
 
+    fn ensure_service_payload_fingerprint_table(&mut self) -> bool {
+        if self.cached_service_payload_fingerprints.is_some() {
+            return true;
+        }
+        let globals = self.lua().globals();
+        let Some(table) = globals
+            .get::<Table>("__mesh_service_payload_fingerprints")
+            .or_else(|_| {
+                let table = self.lua().create_table()?;
+                globals.set("__mesh_service_payload_fingerprints", table.clone())?;
+                Ok::<_, mlua::Error>(table)
+            })
+            .ok()
+        else {
+            return false;
+        };
+        self.cached_service_payload_fingerprints = Some(table);
+        true
+    }
+
     #[cfg(test)]
-    pub fn service_payload_marker_for_test(&mut self, service: &str) -> Option<String> {
+    pub fn service_payload_marker_for_test(&mut self, service: &str) -> Option<Vec<u8>> {
         let _ = self.ensure_initialized();
         self.lua()
             .globals()
-            .get::<Table>("__mesh_service_payload_ptrs")
+            .get::<Table>("__mesh_service_payload_fingerprints")
             .ok()
-            .and_then(|table| table.get::<Option<String>>(service).ok().flatten())
+            .and_then(|table| table.get::<Option<mlua::String>>(service).ok().flatten())
+            .map(|marker| marker.as_bytes().to_vec())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn benchmark_service_payload_marker_probes(
+        &mut self,
+        iterations: usize,
+    ) -> (std::time::Duration, std::time::Duration, usize, usize) {
+        let _ = self.ensure_initialized();
+        let fingerprint = json_value_fingerprint(&serde_json::json!({
+            "percent": 64,
+            "muted": false,
+        }));
+        let pointer = 0x1234usize;
+        let formatted_marker = format!("{pointer}:{fingerprint}");
+        let formatted = self.lua().create_table().expect("formatted marker table");
+        formatted
+            .set("audio", formatted_marker.as_str())
+            .expect("seed formatted marker");
+        let binary = self.lua().create_table().expect("binary marker table");
+        binary
+            .set(
+                "audio",
+                self.lua()
+                    .create_string(fingerprint.to_ne_bytes())
+                    .expect("create binary marker"),
+            )
+            .expect("seed binary marker");
+
+        let formatted_started = std::time::Instant::now();
+        let mut formatted_hits = 0usize;
+        for _ in 0..iterations {
+            let marker = format!("{pointer}:{fingerprint}");
+            let previous = formatted
+                .get::<Option<String>>("audio")
+                .expect("read formatted marker");
+            formatted_hits +=
+                std::hint::black_box(previous.as_deref() == Some(marker.as_str())) as usize;
+        }
+        let formatted_time = formatted_started.elapsed();
+
+        let binary_started = std::time::Instant::now();
+        let mut binary_hits = 0usize;
+        let marker = fingerprint.to_ne_bytes();
+        for _ in 0..iterations {
+            let previous = binary
+                .get::<Option<mlua::String>>("audio")
+                .expect("read binary marker");
+            binary_hits += std::hint::black_box(
+                previous.is_some_and(|previous| previous.as_bytes().as_ref() == marker),
+            ) as usize;
+        }
+        let binary_time = binary_started.elapsed();
+
+        (formatted_time, binary_time, formatted_hits, binary_hits)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn benchmark_service_payload_table_access(
+        &mut self,
+        iterations: usize,
+    ) -> (std::time::Duration, std::time::Duration, usize, usize) {
+        let _ = self.ensure_initialized();
+        let marker = 42u64.to_ne_bytes();
+        let table = self.lua().create_table().expect("marker table");
+        table
+            .set(
+                "audio",
+                self.lua()
+                    .create_string(marker)
+                    .expect("create marker string"),
+            )
+            .expect("seed marker");
+        self.lua()
+            .globals()
+            .set("__mesh_service_payload_fingerprints", table.clone())
+            .expect("install marker table");
+        self.cached_service_payload_fingerprints = Some(table);
+
+        let globals = self.lua().globals();
+        let global_started = std::time::Instant::now();
+        let mut global_hits = 0usize;
+        for _ in 0..iterations {
+            let table = globals
+                .get::<Table>("__mesh_service_payload_fingerprints")
+                .expect("resolve global marker table");
+            let previous = table
+                .get::<Option<mlua::String>>("audio")
+                .expect("read global marker");
+            global_hits += std::hint::black_box(
+                previous.is_some_and(|previous| previous.as_bytes().as_ref() == marker),
+            ) as usize;
+        }
+        let global_time = global_started.elapsed();
+
+        let cached_started = std::time::Instant::now();
+        let mut cached_hits = 0usize;
+        for _ in 0..iterations {
+            let table = self
+                .cached_service_payload_fingerprints
+                .as_ref()
+                .expect("cached marker table");
+            let previous = table
+                .get::<Option<mlua::String>>("audio")
+                .expect("read cached marker");
+            cached_hits += std::hint::black_box(
+                previous.is_some_and(|previous| previous.as_bytes().as_ref() == marker),
+            ) as usize;
+        }
+        let cached_time = cached_started.elapsed();
+
+        (global_time, cached_time, global_hits, cached_hits)
     }
 
     #[cfg(test)]

@@ -5,6 +5,8 @@ pub(super) use mesh_core_service::service_name_from_interface;
 pub(super) use mesh_core_service::service_name_from_interface_cow;
 use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, OnceLock, RwLock};
 
 /// Bundle of interned capability values derived from an interface name.
@@ -100,6 +102,32 @@ pub(super) fn apply_service_update_with_name(
         );
         state.set(service_name, payload.borrow().clone());
     }
+}
+
+pub(super) fn apply_service_update_with_name_and_fingerprint(
+    state: &mut ScriptState,
+    has_read: bool,
+    service_name: &str,
+    source_module: &str,
+    payload: &serde_json::Value,
+    fingerprint: u64,
+) {
+    if has_read {
+        let metadata_fingerprint = service_update_metadata_fingerprint(service_name, source_module);
+        state.set_with_fingerprint_lazy(
+            "last_service_update",
+            metadata_fingerprint,
+            || serde_json::json!({ "name": service_name, "source_module": source_module }),
+        );
+        state.set_with_fingerprint(service_name, payload, fingerprint);
+    }
+}
+
+fn service_update_metadata_fingerprint(service_name: &str, source_module: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    service_name.hash(&mut hasher);
+    source_module.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[cfg(test)]
@@ -567,6 +595,87 @@ mod tests {
         assert_eq!(caps.service_name, "audio");
         assert_eq!(caps.read.id(), "service.audio.read");
         assert_eq!(caps.control.id(), "service.audio.control");
+    }
+
+    #[test]
+    fn fingerprinted_service_metadata_preserves_update_shape() {
+        let payload = serde_json::json!({ "available": true });
+        let fingerprint = mesh_core_scripting::ScriptContext::service_payload_fingerprint(&payload);
+        let mut state = ScriptState::new();
+
+        apply_service_update_with_name_and_fingerprint(
+            &mut state,
+            true,
+            "audio",
+            "@mesh/pipewire",
+            &payload,
+            fingerprint,
+        );
+
+        assert_eq!(state.get("audio"), Some(payload));
+        assert_eq!(
+            state.get("last_service_update"),
+            Some(serde_json::json!({
+                "name": "audio",
+                "source_module": "@mesh/pipewire"
+            }))
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- lazy_service_update_metadata_beats_json_rebuild --ignored --nocapture
+    #[test]
+    #[ignore = "release-only service update metadata microbenchmark"]
+    fn lazy_service_update_metadata_beats_json_rebuild() {
+        let payload = serde_json::json!({ "available": true });
+        let fingerprint = mesh_core_scripting::ScriptContext::service_payload_fingerprint(&payload);
+        let iterations = 200_000usize;
+
+        let mut rebuilt = ScriptState::new();
+        apply_service_update_with_name(&mut rebuilt, true, "audio", "@mesh/pipewire", &payload);
+        rebuilt.clear_dirty();
+        let rebuilt_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            apply_service_update_with_name(
+                &mut rebuilt,
+                true,
+                "audio",
+                "@mesh/pipewire",
+                std::hint::black_box(&payload),
+            );
+        }
+        let rebuilt_time = rebuilt_started.elapsed();
+
+        let mut lazy = ScriptState::new();
+        apply_service_update_with_name_and_fingerprint(
+            &mut lazy,
+            true,
+            "audio",
+            "@mesh/pipewire",
+            &payload,
+            fingerprint,
+        );
+        lazy.clear_dirty();
+        let lazy_started = std::time::Instant::now();
+        for _ in 0..iterations {
+            apply_service_update_with_name_and_fingerprint(
+                &mut lazy,
+                true,
+                "audio",
+                "@mesh/pipewire",
+                std::hint::black_box(&payload),
+                fingerprint,
+            );
+        }
+        let lazy_time = lazy_started.elapsed();
+
+        eprintln!(
+            "unchanged service update over {iterations} writes: rebuild metadata {rebuilt_time:?}; lazy fingerprint {lazy_time:?}; ratio {:.2}x",
+            rebuilt_time.as_secs_f64() / lazy_time.as_secs_f64()
+        );
+        assert_eq!(rebuilt.snapshot(), lazy.snapshot());
+        assert!(!rebuilt.is_dirty());
+        assert!(!lazy.is_dirty());
+        assert!(lazy_time < rebuilt_time);
     }
 
     // cargo test -p mesh-core-shell --release -- cached_service_control_capability_avoids_formatting --ignored --nocapture

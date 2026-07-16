@@ -185,6 +185,98 @@ input:checked {
 }
 
 #[test]
+fn targeted_restyle_tracks_active_checked_and_focus_visible_changes() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <row>
+    <button class="pressable" />
+    <checkbox class="checkable" />
+    <button class="focusable" />
+  </row>
+</template>
+<style>
+.pressable { font-weight: 400; }
+.pressable:active { font-weight: 700; }
+.checkable { z-index: 1; }
+.checkable:checked { z-index: 7; }
+.focusable { text-align: left; }
+.focusable:focus-visible { text-align: right; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 80);
+    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    if component.wants_render() {
+        component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    }
+
+    component.pointer_down_key = Some("root/0/0".into());
+    component.checked_values.insert("root/0/1".into(), true);
+    component.focused_key = Some("root/0/2".into());
+    component.focus_visible_key = Some("root/0/2".into());
+    assert!(component.cached_restyle_state_dependencies.active);
+    assert!(component.cached_restyle_state_dependencies.checked);
+    assert!(component.cached_restyle_state_dependencies.focus_visible);
+    let changed = component.collect_interaction_changed_node_ids();
+    assert!(
+        changed
+            .affected
+            .contains(&runtime_node_id_for_key("root/0/0"))
+    );
+    assert!(
+        changed
+            .affected
+            .contains(&runtime_node_id_for_key("root/0/1"))
+    );
+    assert!(
+        changed
+            .affected
+            .contains(&runtime_node_id_for_key("root/0/2"))
+    );
+    component.invalidate_interaction_restyle();
+    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+
+    let tree = component.last_tree.as_ref().unwrap();
+    let active_node = node_by_mesh_key(tree, "root/0/0");
+    assert_eq!(active_node.id, runtime_node_id_for_key("root/0/0"));
+    assert!(active_node.state.active);
+    assert!(node_by_mesh_key(tree, "root/0/1").state.checked);
+    assert!(node_by_mesh_key(tree, "root/0/2").state.focus_visible);
+    assert_eq!(
+        node_by_mesh_key(tree, "root/0/0")
+            .computed_style
+            .font_weight,
+        700
+    );
+    assert_eq!(node_by_mesh_key(tree, "root/0/1").computed_style.z_index, 7);
+    assert_eq!(
+        node_by_mesh_key(tree, "root/0/2").computed_style.text_align,
+        mesh_core_elements::style::TextAlign::Right
+    );
+
+    component.pointer_down_key = None;
+    component.checked_values.insert("root/0/1".into(), false);
+    component.focus_visible_key = None;
+    component.invalidate_interaction_restyle();
+    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+
+    let tree = component.last_tree.as_ref().unwrap();
+    assert_eq!(
+        node_by_mesh_key(tree, "root/0/0")
+            .computed_style
+            .font_weight,
+        400
+    );
+    assert_eq!(node_by_mesh_key(tree, "root/0/1").computed_style.z_index, 1);
+    assert_eq!(
+        node_by_mesh_key(tree, "root/0/2").computed_style.text_align,
+        mesh_core_elements::style::TextAlign::Left
+    );
+}
+
+#[test]
 fn keyboard_navigation_pointer_focus_visible_tracks_input_modality() {
     let mut component = test_frontend_component("<template><box /></template>");
     component.last_tree = Some(root_with(vec![

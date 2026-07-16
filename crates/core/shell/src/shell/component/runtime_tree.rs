@@ -447,6 +447,24 @@ fn child_runtime_node_id(parent_id: NodeId, child_index: usize) -> NodeId {
     if hash == 0 { 1 } else { hash }
 }
 
+/// Reproduce the parent-chain identity assigned by runtime annotation for a
+/// structural key such as `root/2/5`. Interaction state stores these readable
+/// keys, while retained style/layout indexes use the chained `NodeId`.
+pub(super) fn runtime_node_id_for_key(key: &str) -> NodeId {
+    let mut segments = key.split('/');
+    let root = segments.next().unwrap_or(key);
+    let mut node_id = stable_runtime_node_id(root);
+    for segment in segments {
+        let Ok(child_index) = segment.parse::<usize>() else {
+            // Runtime annotation always emits numeric structural segments.
+            // Keep malformed/test-only keys deterministic and non-zero.
+            return stable_runtime_node_id(key);
+        };
+        node_id = child_runtime_node_id(node_id, child_index);
+    }
+    node_id
+}
+
 fn collect_retained_snapshots(
     node: &WidgetNode,
     snapshots: &mut HashMap<NodeId, RetainedNodeSnapshot>,
@@ -775,29 +793,45 @@ pub(super) fn collect_element_metrics(
     let publishes_element = collect_elements && node_key.is_some();
     let publishes_ref = id.is_some() || reference.is_some() || binding.is_some();
 
-    let metrics = (publishes_element || publishes_ref)
+    let mut metrics = (publishes_element || publishes_ref)
         .then(|| element_snapshot_json(node, offset_x, offset_y));
+    let mut remaining_publications = usize::from(publishes_element)
+        + usize::from(id.is_some())
+        + usize::from(reference.is_some())
+        + usize::from(binding.is_some());
 
-    if collect_elements && let (Some(key), Some(metrics)) = (node_key, metrics.as_ref()) {
-        elements.insert(key.to_owned(), metrics.clone());
+    if collect_elements && let (Some(key), Some(_)) = (node_key, metrics.as_ref()) {
+        elements.insert(
+            key.to_owned(),
+            clone_or_take_last_metric(&mut metrics, &mut remaining_publications),
+        );
     }
     // Map each `refs.<name>` to the node's runtime key so imperative element
     // actions (focus/blur/…) can resolve a name back to the live widget node.
-    if collect_refs && let Some(metrics) = metrics.as_ref() {
+    if collect_refs && metrics.is_some() {
         if let Some(id) = id {
-            refs.insert(id.clone(), metrics.clone());
+            refs.insert(
+                id.clone(),
+                clone_or_take_last_metric(&mut metrics, &mut remaining_publications),
+            );
             if let Some(key) = node_key {
                 ref_keys.insert(id.clone(), key.to_owned());
             }
         }
         if let Some(reference) = reference {
-            refs.insert(reference.clone(), metrics.clone());
+            refs.insert(
+                reference.clone(),
+                clone_or_take_last_metric(&mut metrics, &mut remaining_publications),
+            );
             if let Some(key) = node_key {
                 ref_keys.insert(reference.clone(), key.to_owned());
             }
         }
         if let Some(binding) = binding {
-            refs.insert(binding.clone(), metrics.clone());
+            refs.insert(
+                binding.clone(),
+                clone_or_take_last_metric(&mut metrics, &mut remaining_publications),
+            );
             if let Some(key) = node_key {
                 ref_keys.insert(binding.clone(), key.to_owned());
             }
@@ -820,6 +854,22 @@ pub(super) fn collect_element_metrics(
             refs,
             ref_keys,
         );
+    }
+}
+
+fn clone_or_take_last_metric(
+    metrics: &mut Option<serde_json::Value>,
+    remaining_publications: &mut usize,
+) -> serde_json::Value {
+    debug_assert!(*remaining_publications > 0);
+    *remaining_publications -= 1;
+    if *remaining_publications == 0 {
+        metrics.take().expect("metric exists for final publication")
+    } else {
+        metrics
+            .as_ref()
+            .expect("metric exists for shared publication")
+            .clone()
     }
 }
 
@@ -1309,6 +1359,75 @@ mod tests {
         assert_ne!(first, 0);
         assert_eq!(first, second);
         assert_ne!(first, stable_runtime_node_id("root/0/3"));
+    }
+
+    #[test]
+    fn structural_key_conversion_matches_annotation_parent_chain() {
+        let root = stable_runtime_node_id("root");
+        let child = child_runtime_node_id(root, 2);
+        let grandchild = child_runtime_node_id(child, 5);
+
+        assert_eq!(runtime_node_id_for_key("root"), root);
+        assert_eq!(runtime_node_id_for_key("root/2"), child);
+        assert_eq!(runtime_node_id_for_key("root/2/5"), grandchild);
+    }
+
+    // cargo test -p mesh-core-shell --release -- structural_key_id_beats_tree_rediscovery --ignored --nocapture
+    #[test]
+    #[ignore = "release-only structural interaction ID microbenchmark"]
+    fn structural_key_id_beats_tree_rediscovery() {
+        fn build(key: String, node_id: NodeId, width: usize, depth: usize) -> WidgetNode {
+            let mut node = WidgetNode::new("box");
+            node.id = node_id;
+            node.set_mesh_key(key.clone());
+            if depth > 0 {
+                node.children = (0..width)
+                    .map(|index| {
+                        build(
+                            format!("{key}/{index}"),
+                            child_runtime_node_id(node_id, index),
+                            width,
+                            depth - 1,
+                        )
+                    })
+                    .collect();
+            }
+            node
+        }
+
+        fn find_id(node: &WidgetNode, key: &str) -> Option<NodeId> {
+            if node.mesh_key() == Some(key) {
+                return Some(node.id);
+            }
+            node.children.iter().find_map(|child| find_id(child, key))
+        }
+
+        let root_id = stable_runtime_node_id("root");
+        let tree = build("root".into(), root_id, 4, 5);
+        let key = "root/3/3/3/3/3";
+        let iterations = 2_000usize;
+        assert_eq!(find_id(&tree, key), Some(runtime_node_id_for_key(key)));
+
+        let walk_started = std::time::Instant::now();
+        let mut walk_total = 0u64;
+        for _ in 0..iterations {
+            walk_total ^= find_id(std::hint::black_box(&tree), std::hint::black_box(key)).unwrap();
+        }
+        let walk_time = walk_started.elapsed();
+
+        let direct_started = std::time::Instant::now();
+        let mut direct_total = 0u64;
+        for _ in 0..iterations {
+            direct_total ^= runtime_node_id_for_key(std::hint::black_box(key));
+        }
+        let direct_time = direct_started.elapsed();
+
+        eprintln!(
+            "interaction ID lookup over {iterations} passes of a 1,365-node tree: walk {walk_time:?}; structural key {direct_time:?}; ratio {:.1}x",
+            walk_time.as_secs_f64() / direct_time.as_secs_f64()
+        );
+        assert_eq!(walk_total, direct_total);
+        assert!(direct_time < walk_time);
     }
 
     #[test]

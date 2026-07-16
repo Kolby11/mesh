@@ -152,7 +152,10 @@ impl TypeExpr {
             "object" => BaseType::Object,
             "any" => BaseType::Any,
             named => {
-                if !named.chars().next().is_some_and(|ch| ch.is_ascii_uppercase())
+                if !named
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch.is_ascii_uppercase())
                     || !named.chars().all(|ch| ch.is_ascii_alphanumeric())
                 {
                     return Err(format!(
@@ -207,12 +210,11 @@ pub fn parse_interface_contract(
             message: source.to_string(),
         })?;
 
-    let version = parse_contract_version(interface_version).ok_or_else(|| {
-        ContractError::InvalidVersion {
+    let version =
+        parse_contract_version(interface_version).ok_or_else(|| ContractError::InvalidVersion {
             interface: interface_name.to_string(),
             value: interface_version.to_string(),
-        }
-    })?;
+        })?;
 
     let contract = InterfaceContract {
         interface: interface_name.to_string(),
@@ -231,7 +233,11 @@ pub fn parse_interface_contract(
             .into_iter()
             .map(|method| InterfaceMethod {
                 name: method.name,
-                args: method.args.into_iter().map(ContractFieldJson::into_argument).collect(),
+                args: method
+                    .args
+                    .into_iter()
+                    .map(ContractFieldJson::into_argument)
+                    .collect(),
                 returns: method.returns,
                 coalesce: method.coalesce,
                 optimistic: method.optimistic.map(|value| OptimisticUpdate {

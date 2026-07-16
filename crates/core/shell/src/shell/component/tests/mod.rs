@@ -121,6 +121,198 @@ fn element_metric_usage_splits_refs_from_elements() {
 }
 
 #[test]
+fn service_payload_cache_reuses_equal_payload_and_replaces_changed_payload() {
+    let first = serde_json::json!({ "available": true, "percent": 42 });
+    let changed = serde_json::json!({ "available": true, "percent": 73 });
+    let first_fingerprint = ScriptContext::service_payload_fingerprint(&first);
+    let changed_fingerprint = ScriptContext::service_payload_fingerprint(&changed);
+    let mut cache = HashMap::new();
+
+    assert!(
+        update_cached_service_payload(&mut cache, "audio", &first, first_fingerprint).is_none()
+    );
+    let retained = Arc::clone(&cache["audio"].value);
+    let previous =
+        update_cached_service_payload(&mut cache, "audio", &first, first_fingerprint).unwrap();
+    assert!(Arc::ptr_eq(&retained, &previous));
+    assert!(Arc::ptr_eq(&retained, &cache["audio"].value));
+
+    let previous =
+        update_cached_service_payload(&mut cache, "audio", &changed, changed_fingerprint).unwrap();
+    assert!(Arc::ptr_eq(&retained, &previous));
+    assert!(!Arc::ptr_eq(&retained, &cache["audio"].value));
+    assert_eq!(cache["audio"].value.as_ref(), &changed);
+}
+
+#[test]
+fn service_capabilities_cache_reuses_the_global_entry() {
+    let mut cache = HashMap::new();
+    let first = cached_service_capabilities(&mut cache, "mesh.audio");
+    let second = cached_service_capabilities(&mut cache, "mesh.audio");
+
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(cache.len(), 1);
+    assert_eq!(second.service_name, "audio");
+}
+
+// cargo test -p mesh-core-shell --release -- local_service_capability_cache_beats_global_lookup --ignored --nocapture
+#[test]
+#[ignore = "release-only service capability lookup microbenchmark"]
+fn local_service_capability_cache_beats_global_lookup() {
+    let iterations = 1_000_000usize;
+    let interface = "mesh.audio";
+    let _ = service_capabilities(interface);
+
+    let global_started = std::time::Instant::now();
+    let mut global_total = 0usize;
+    for _ in 0..iterations {
+        let capabilities = service_capabilities(std::hint::black_box(interface));
+        global_total += std::hint::black_box(capabilities.service_name.len());
+    }
+    let global_time = global_started.elapsed();
+
+    let mut cache = HashMap::new();
+    let _ = cached_service_capabilities(&mut cache, interface);
+    let local_started = std::time::Instant::now();
+    let mut local_total = 0usize;
+    for _ in 0..iterations {
+        let capabilities = cached_service_capabilities(&mut cache, std::hint::black_box(interface));
+        local_total += std::hint::black_box(capabilities.service_name.len());
+    }
+    let local_time = local_started.elapsed();
+
+    eprintln!(
+        "service capability lookup over {iterations} events: global {global_time:?}; component-local {local_time:?}; ratio {:.2}x",
+        global_time.as_secs_f64() / local_time.as_secs_f64()
+    );
+    assert_eq!(global_total, local_total);
+    assert!(local_time < global_time);
+}
+
+#[test]
+fn last_service_trace_is_retained_only_for_debug_logging() {
+    let mut summary = None;
+    update_last_service_trace(&mut summary, "mesh.audio", "@mesh/pipewire", true);
+    assert_eq!(summary.as_deref(), Some("mesh.audio:@mesh/pipewire"));
+
+    update_last_service_trace(&mut summary, "mesh.audio", "@mesh/pipewire", false);
+    assert!(summary.is_none());
+}
+
+// cargo test -p mesh-core-shell --release -- disabled_service_trace_gate_beats_unconditional_formatting --ignored --nocapture
+#[test]
+#[ignore = "release-only service trace formatting microbenchmark"]
+fn disabled_service_trace_gate_beats_unconditional_formatting() {
+    assert!(
+        !tracing::enabled!(tracing::Level::DEBUG),
+        "benchmark requires debug tracing to be disabled"
+    );
+    let iterations = 1_000_000usize;
+    let service = "mesh.audio";
+    let source_module = "@mesh/pipewire-audio";
+
+    let formatted_started = std::time::Instant::now();
+    let mut formatted_total = 0usize;
+    for _ in 0..iterations {
+        let formatted = format!(
+            "{}:{}",
+            std::hint::black_box(service),
+            std::hint::black_box(source_module)
+        );
+        formatted_total += std::hint::black_box(formatted.len());
+    }
+    let formatted_time = formatted_started.elapsed();
+
+    let gated_started = std::time::Instant::now();
+    let mut gated = None;
+    let mut gated_total = 0usize;
+    for _ in 0..iterations {
+        update_last_service_trace(
+            &mut gated,
+            std::hint::black_box(service),
+            std::hint::black_box(source_module),
+            tracing::enabled!(tracing::Level::DEBUG),
+        );
+        gated_total += std::hint::black_box(gated.as_ref().map_or(0, String::len));
+    }
+    let gated_time = gated_started.elapsed();
+
+    eprintln!(
+        "disabled service trace over {iterations} updates: format {formatted_time:?}; gated {gated_time:?}; ratio {:.1}x",
+        formatted_time.as_secs_f64() / gated_time.as_secs_f64()
+    );
+    assert!(formatted_total > gated_total);
+    assert!(gated_time < formatted_time);
+}
+
+// cargo test -p mesh-core-shell --release -- unchanged_service_payload_cache_beats_replacement --ignored --nocapture
+#[test]
+#[ignore = "release-only service payload cache microbenchmark"]
+fn unchanged_service_payload_cache_beats_replacement() {
+    let payload = serde_json::json!({
+        "available": true,
+        "devices": (0..32)
+            .map(|index| serde_json::json!({
+                "id": format!("sink-{index}"),
+                "name": format!("Audio device {index}"),
+                "volume": 64
+            }))
+            .collect::<Vec<_>>()
+    });
+    let fingerprint = ScriptContext::service_payload_fingerprint(&payload);
+    let iterations = 50_000usize;
+
+    let mut replaced = HashMap::from([(
+        "audio".to_owned(),
+        CachedServicePayload {
+            value: Arc::new(payload.clone()),
+            fingerprint,
+        },
+    )]);
+    let replaced_started = std::time::Instant::now();
+    let mut replaced_total = 0usize;
+    for _ in 0..iterations {
+        let previous = replaced.get("audio").cloned();
+        replaced.insert(
+            "audio".to_owned(),
+            CachedServicePayload {
+                value: Arc::new(std::hint::black_box(&payload).clone()),
+                fingerprint,
+            },
+        );
+        replaced_total += std::hint::black_box(previous.is_some()) as usize;
+    }
+    let replaced_time = replaced_started.elapsed();
+
+    let mut reused = HashMap::from([(
+        "audio".to_owned(),
+        CachedServicePayload {
+            value: Arc::new(payload.clone()),
+            fingerprint,
+        },
+    )]);
+    let reused_started = std::time::Instant::now();
+    let mut reused_total = 0usize;
+    for _ in 0..iterations {
+        let previous = update_cached_service_payload(
+            &mut reused,
+            "audio",
+            std::hint::black_box(&payload),
+            fingerprint,
+        );
+        reused_total += std::hint::black_box(previous.is_some()) as usize;
+    }
+    let reused_time = reused_started.elapsed();
+
+    eprintln!(
+        "unchanged service cache over {iterations} updates: replace {replaced_time:?}; reuse {reused_time:?}; ratio {:.2}x",
+        replaced_time.as_secs_f64() / reused_time.as_secs_f64()
+    );
+    assert_eq!(replaced_total, reused_total);
+    assert!(reused_time < replaced_time);
+}
+
+#[test]
 fn ref_metrics_keep_scroll_offsets_from_unpublished_ancestors() {
     let mut root = WidgetNode::new("box");
     root.attributes.insert("_mesh_scroll_y".into(), "12".into());
@@ -343,6 +535,111 @@ fn sparse_ref_metrics_skip_unpublished_snapshots() {
 
     eprintln!(
         "sparse ref element metrics: eager {old_time:?}; lazy {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+        old_time.as_secs_f64() / new_time.as_secs_f64()
+    );
+    assert_eq!(old_total, new_total);
+    assert!(new_time < old_time);
+}
+
+#[test]
+fn element_metrics_move_last_preserves_all_publications() {
+    let mut node = WidgetNode::new("box");
+    node.set_mesh_key("root/0");
+    node.attributes.insert("id".into(), "by_id".into());
+    node.attributes.insert("ref".into(), "by_ref".into());
+    node.attributes
+        .insert("_mesh_bind_this".into(), "by_binding".into());
+    node.layout.width = 120.0;
+    node.layout.height = 32.0;
+
+    let mut elements = serde_json::Map::new();
+    let mut refs = serde_json::Map::new();
+    let mut ref_keys = HashMap::new();
+    collect_element_metrics(
+        &node,
+        0.0,
+        0.0,
+        true,
+        true,
+        &mut elements,
+        &mut refs,
+        &mut ref_keys,
+    );
+
+    let expected = elements.get("root/0").expect("element publication");
+    assert_eq!(refs.get("by_id"), Some(expected));
+    assert_eq!(refs.get("by_ref"), Some(expected));
+    assert_eq!(refs.get("by_binding"), Some(expected));
+    assert_eq!(ref_keys.len(), 3);
+}
+
+// cargo test -p mesh-core-shell --release -- moving_final_element_metric_beats_clone_then_drop --ignored --nocapture
+#[test]
+#[ignore = "release-only element-metric ownership microbenchmark"]
+fn moving_final_element_metric_beats_clone_then_drop() {
+    fn old_collect(
+        node: &WidgetNode,
+        refs: &mut serde_json::Map<String, serde_json::Value>,
+        ref_keys: &mut HashMap<String, String>,
+    ) {
+        if let Some(id) = node.attributes.get("id") {
+            let metrics = mesh_core_elements::element_snapshot_json(node, 0.0, 0.0);
+            refs.insert(id.clone(), metrics.clone());
+            if let Some(key) = node.mesh_key() {
+                ref_keys.insert(id.clone(), key.to_owned());
+            }
+        }
+        for child in &node.children {
+            old_collect(child, refs, ref_keys);
+        }
+    }
+
+    let mut root = WidgetNode::new("row");
+    root.children = (0..256)
+        .map(|index| {
+            let mut node = WidgetNode::new("box");
+            node.set_mesh_key(format!("root/{index}"));
+            node.attributes.insert("id".into(), format!("item_{index}"));
+            node.layout.x = index as f32;
+            node.layout.width = 24.0;
+            node.layout.height = 24.0;
+            node
+        })
+        .collect();
+    let iterations = 2_000usize;
+
+    let old_started = std::time::Instant::now();
+    let mut old_total = 0usize;
+    for _ in 0..iterations {
+        let mut refs = serde_json::Map::new();
+        let mut ref_keys = HashMap::new();
+        old_collect(std::hint::black_box(&root), &mut refs, &mut ref_keys);
+        old_total += std::hint::black_box(refs.len() + ref_keys.len());
+    }
+    let old_time = old_started.elapsed();
+
+    let new_started = std::time::Instant::now();
+    let mut new_total = 0usize;
+    for _ in 0..iterations {
+        let mut elements = serde_json::Map::new();
+        let mut refs = serde_json::Map::new();
+        let mut ref_keys = HashMap::new();
+        collect_element_metrics(
+            std::hint::black_box(&root),
+            0.0,
+            0.0,
+            false,
+            true,
+            &mut elements,
+            &mut refs,
+            &mut ref_keys,
+        );
+        new_total += std::hint::black_box(refs.len() + ref_keys.len());
+    }
+    let new_time = new_started.elapsed();
+
+    eprintln!(
+        "single-name metrics over {iterations}x256 nodes: clone/drop {old_time:?}; move-final {new_time:?}; ratio {:.2}x",
         old_time.as_secs_f64() / new_time.as_secs_f64()
     );
     assert_eq!(old_total, new_total);

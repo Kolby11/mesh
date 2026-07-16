@@ -5,7 +5,7 @@
 
 use crate::{AccessibilityRole, ElementState, WidgetNode};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -1651,7 +1651,7 @@ fn element_rect_json(
 }
 
 fn insert_f32(object: &mut Map<String, Value>, key: &'static str, value: f32) {
-    object.insert(key.into(), json!(value));
+    object.insert(key.into(), Value::from(value));
 }
 
 fn expose_tag_specific_fields(object: &mut Map<String, Value>, node: &WidgetNode) {
@@ -1688,8 +1688,49 @@ fn coerce_field_value(raw: &str, field_type: ElementFieldType) -> Value {
 mod tests {
     use super::*;
     use crate::{Dimension, Edges, WidgetScrollMetrics};
+    use serde_json::json;
     use std::collections::BTreeMap;
     use std::time::Instant;
+
+    #[test]
+    fn direct_f32_json_conversion_matches_serialization() {
+        for value in [0.0, -0.0, 1.25, f32::MIN, f32::MAX, f32::NAN, f32::INFINITY] {
+            let mut object = Map::new();
+            insert_f32(&mut object, "value", value);
+            assert_eq!(object["value"], json!(value));
+        }
+    }
+
+    // cargo test -p mesh-core-elements --release -- direct_f32_json_conversion_beats_json_macro --ignored --nocapture
+    #[test]
+    #[ignore = "release-only element snapshot number-conversion microbenchmark"]
+    fn direct_f32_json_conversion_beats_json_macro() {
+        const ITERATIONS: usize = 5_000_000;
+        let values = [0.0f32, -0.0, 1.25, 1920.5, f32::MAX];
+
+        let old_started = Instant::now();
+        let mut old_total = 0usize;
+        for index in 0..ITERATIONS {
+            let value = json!(std::hint::black_box(values[index % values.len()]));
+            old_total += std::hint::black_box(value.as_f64().is_some()) as usize;
+        }
+        let old_time = old_started.elapsed();
+
+        let direct_started = Instant::now();
+        let mut direct_total = 0usize;
+        for index in 0..ITERATIONS {
+            let value = Value::from(std::hint::black_box(values[index % values.len()]));
+            direct_total += std::hint::black_box(value.as_f64().is_some()) as usize;
+        }
+        let direct_time = direct_started.elapsed();
+
+        eprintln!(
+            "f32 JSON conversion over {ITERATIONS} values: json macro {old_time:?}; direct {direct_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / direct_time.as_secs_f64()
+        );
+        assert_eq!(old_total, direct_total);
+        assert!(direct_time < old_time);
+    }
 
     #[test]
     fn icon_snapshot_exposes_base_and_icon_fields() {

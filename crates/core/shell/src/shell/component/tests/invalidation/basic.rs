@@ -246,6 +246,146 @@ button:hover { background: #444444; }
 }
 
 #[test]
+fn hover_change_with_focus_only_rules_skips_interaction_restyle() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="target" /></template>
+<style>
+.target { width: 80px; height: 32px; background: #222222; }
+.target:focus { background: #444444; }
+</style>
+"#,
+    );
+
+    assert!(component.module_styles_have_state_rules());
+    assert!(!component.module_styles_have_hover_rules());
+    component.dirty = false;
+    component.style_only_dirty = false;
+    component.dirty_types = ComponentDirtyFlags::empty();
+
+    component.invalidate_hover_change(false);
+
+    assert!(
+        !component.wants_render(),
+        "focus-only selectors cannot change on a hover transition"
+    );
+}
+
+#[test]
+fn selector_dependency_cache_covers_every_supported_pseudo_state() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<style>
+box:hover { opacity: 0.9; }
+box:focus { opacity: 0.8; }
+box:focus-visible { opacity: 0.7; }
+box:active { opacity: 0.6; }
+box:disabled { opacity: 0.5; }
+box:checked { opacity: 0.4; }
+</style>
+"#,
+    );
+    assert!(component.module_styles_have_state_rules());
+
+    assert_eq!(
+        component.cached_restyle_state_dependencies,
+        StyleStateDependencies {
+            any: true,
+            hover: true,
+            focus: true,
+            focus_visible: true,
+            active: true,
+            disabled: true,
+            checked: true,
+        }
+    );
+}
+
+#[test]
+fn selector_dependencies_filter_unrelated_interaction_changes() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<style>box:hover { opacity: 0.5; }</style>
+"#,
+    );
+    assert!(component.module_styles_have_state_rules());
+    component.interaction_snapshot_valid = true;
+    component.previous_focused_key = Some("root/old".into());
+    component.focused_key = Some("root/new".into());
+    component.previous_active_key = Some("root/pressed".into());
+    component.pointer_down_key = None;
+    component
+        .previous_checked_values
+        .insert("root/check".into(), false);
+    component.checked_values.insert("root/check".into(), true);
+
+    assert!(
+        component
+            .collect_interaction_changed_node_ids()
+            .affected
+            .is_empty(),
+        "focus, active, and checked changes cannot affect hover-only rules"
+    );
+}
+
+// cargo test -p mesh-core-shell --release -- state_dependency_filter_skips_unrelated_targeted_restyle --ignored --nocapture
+#[test]
+#[ignore = "release-only selector dependency microbenchmark"]
+fn state_dependency_filter_skips_unrelated_targeted_restyle() {
+    use std::time::Instant;
+
+    let mut source = String::from(r#"<template><row>"#);
+    for _ in 0..250 {
+        source.push_str(r#"<box class="plain" />"#);
+    }
+    source.push_str(
+        r#"</row></template>
+<style>
+surface { width: 1000px; height: 80px; }
+.plain { width: 4px; height: 40px; background: #222222; }
+.plain:hover { background: #444444; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let iterations = 1_000;
+
+    let run = |force_state_agnostic_focus: bool| {
+        let mut component = test_frontend_component(&source);
+        let mut buffer = PixelBuffer::new(1000, 80);
+        component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+        if component.wants_render() {
+            component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+        }
+        if force_state_agnostic_focus {
+            component.cached_restyle_state_dependencies.focus = true;
+        }
+
+        let started = Instant::now();
+        for iteration in 0..iterations {
+            component.focused_key = Some(if iteration % 2 == 0 {
+                "root/0/0".into()
+            } else {
+                "root/0/249".into()
+            });
+            component.invalidate_interaction_restyle();
+            component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+        }
+        started.elapsed()
+    };
+
+    let state_agnostic = run(true);
+    let dependency_filtered = run(false);
+    eprintln!(
+        "hover-only rules across {iterations} focus moves: state-agnostic {state_agnostic:?}; dependency-filtered {dependency_filtered:?}; ratio {:.2}x",
+        state_agnostic.as_secs_f64() / dependency_filtered.as_secs_f64()
+    );
+    assert!(dependency_filtered < state_agnostic);
+}
+
+#[test]
 fn hover_gate_sees_state_rules_from_imported_component_modules() {
     use crate::shell::component::catalog::FrontendCatalogEntry;
     use mesh_core_component::parse_component;
@@ -360,6 +500,60 @@ surface { width: 1000px; height: 80px; }
     let gated_time = run(false);
     eprintln!(
         "plain hover forced restyle: {old_time:?}; gated: {gated_time:?}; ratio: {:.1}x",
+        old_time.as_secs_f64() / gated_time.as_secs_f64()
+    );
+    assert!(gated_time * 2 < old_time);
+}
+
+// cargo test -p mesh-core-shell --release -- hover_with_focus_only_rules_skips_repaint_benchmark --ignored --nocapture
+#[test]
+#[ignore = "release-only state-specific hover invalidation microbenchmark"]
+fn hover_with_focus_only_rules_skips_repaint_benchmark() {
+    use std::time::Instant;
+
+    let mut source = String::from(r#"<template><row>"#);
+    for _ in 0..250 {
+        source.push_str(r#"<box class="plain" />"#);
+    }
+    source.push_str(
+        r#"</row></template>
+<style>
+surface { width: 1000px; height: 80px; }
+.plain { width: 4px; height: 40px; background: #222222; }
+.plain:focus { background: #444444; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let iterations = 1_000;
+
+    let run = |force_state_agnostic_restyle: bool| {
+        let mut component = test_frontend_component(&source);
+        let mut buffer = PixelBuffer::new(1000, 80);
+        component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+        if component.wants_render() {
+            component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+        }
+        let started = Instant::now();
+        for iteration in 0..iterations {
+            let x = if iteration % 2 == 0 { 2.0 } else { 998.0 };
+            component
+                .handle_input(&theme, 1000, 80, ComponentInput::PointerMove { x, y: 10.0 })
+                .unwrap();
+            if force_state_agnostic_restyle {
+                component.invalidate_interaction_restyle();
+            }
+            if component.wants_render() {
+                component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+            }
+        }
+        started.elapsed()
+    };
+
+    let old_time = run(true);
+    let gated_time = run(false);
+    eprintln!(
+        "focus-only rules across {iterations} hover moves: state-agnostic {old_time:?}; hover-gated {gated_time:?}; ratio: {:.1}x",
         old_time.as_secs_f64() / gated_time.as_secs_f64()
     );
     assert!(gated_time * 2 < old_time);

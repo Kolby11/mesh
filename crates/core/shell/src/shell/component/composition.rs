@@ -16,6 +16,27 @@ fn slot_id(module_id: &str, slot_name: &str) -> String {
     id
 }
 
+impl FrontendSurfaceComponent {
+    fn next_loop_occurrence(
+        &self,
+        host_instance_key: &str,
+        source_ordinal: usize,
+        repeated_by_loop: bool,
+    ) -> Option<usize> {
+        if !repeated_by_loop {
+            return None;
+        }
+        let host_instance_key = self.instance_keys.borrow_mut().intern(host_instance_key);
+        let mut occurrences = self.composition_occurrences.borrow_mut();
+        let next = occurrences
+            .entry((host_instance_key, source_ordinal))
+            .or_default();
+        let ordinal = *next;
+        *next += 1;
+        Some(ordinal)
+    }
+}
+
 impl FrontendCompositionResolver for FrontendSurfaceComponent {
     fn evaluate_template_expression(
         &self,
@@ -48,17 +69,24 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         host: &mesh_core_module::Manifest,
         host_instance_key: &str,
         alias: &str,
+        source_ordinal: usize,
+        duplicate_ordinal: Option<usize>,
+        repeated_by_loop: bool,
         props: &BTreeMap<String, String>,
         prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
         container_width: f32,
         container_height: f32,
     ) -> Option<WidgetNode> {
+        let loop_ordinal =
+            self.next_loop_occurrence(host_instance_key, source_ordinal, repeated_by_loop);
         if let Some(entry) = self.frontend_catalog.modules.get(&host.package.id) {
             if let Some(component) = entry.compiled.local_components.get(alias) {
-                let instance_key = self.instance_keys.borrow_mut().intern_embedded(
+                let instance_key = self.instance_keys.borrow_mut().intern_embedded_occurrence(
                     host_instance_key,
                     "local",
                     alias,
+                    duplicate_ordinal,
+                    loop_ordinal,
                 );
                 let props_fingerprint =
                     memo::component_props_fingerprint(props, prop_handler_calls);
@@ -156,10 +184,13 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             return Some(placeholder);
         }
 
-        let instance_key =
-            self.instance_keys
-                .borrow_mut()
-                .intern_embedded(host_instance_key, "import", alias);
+        let instance_key = self.instance_keys.borrow_mut().intern_embedded_occurrence(
+            host_instance_key,
+            "import",
+            alias,
+            duplicate_ordinal,
+            loop_ordinal,
+        );
         let props_fingerprint = memo::component_props_fingerprint(props, prop_handler_calls);
         if let Some(node) = self.lookup_component_memo(
             &instance_key,

@@ -41,15 +41,25 @@ pub(in crate::shell) struct BackendRespawnContext {
 impl Shell {
     /// Record a healthy runtime start for supervision bookkeeping.
     pub(in crate::shell) fn note_backend_running(&mut self, interface: &str) {
-        let state = self.backend_supervision.entry(interface.to_string()).or_default();
+        let state = self
+            .backend_supervision
+            .entry(interface.to_string())
+            .or_default();
         state.running_since = Some(Instant::now());
     }
 
     /// React to a terminal failure of the interface's current provider:
     /// schedule a supervised restart with exponential backoff, or quarantine
     /// the provider and fail over once its restart budget is exhausted.
-    pub(in crate::shell) fn supervise_backend_failure(&mut self, interface: &str, provider_id: &str) {
-        let state = self.backend_supervision.entry(interface.to_string()).or_default();
+    pub(in crate::shell) fn supervise_backend_failure(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+    ) {
+        let state = self
+            .backend_supervision
+            .entry(interface.to_string())
+            .or_default();
         if state.restart_pending {
             return;
         }
@@ -128,7 +138,10 @@ impl Shell {
         let graph = match self.load_installed_module_graph_cached() {
             Ok(graph) => graph.clone(),
             Err(err) => {
-                tracing::warn!(interface, "supervised restart aborted; module graph unavailable: {err}");
+                tracing::warn!(
+                    interface,
+                    "supervised restart aborted; module graph unavailable: {err}"
+                );
                 return;
             }
         };
@@ -175,7 +188,12 @@ impl Shell {
                     "supervised backend restart"
                 );
                 self.apply_shell_runtime_settings(&mut candidate);
-                self.spawn_backend_candidate(&ctx.handle, ctx.tx.clone(), candidate, ctx.eventfd_fd);
+                self.spawn_backend_candidate(
+                    &ctx.handle,
+                    ctx.tx.clone(),
+                    candidate,
+                    ctx.eventfd_fd,
+                );
             }
             Err(status) => {
                 self.record_backend_runtime_status(

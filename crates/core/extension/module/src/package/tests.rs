@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -1022,6 +1022,49 @@ fn load_installed_module_graph_auto_discovers_modules() {
 }
 
 #[test]
+fn load_installed_module_graph_loads_explicit_inventory() {
+    let root = temp_dir("explicit-installed-graph");
+    let config_dir = root.join("config");
+    let modules_dir = root.join("modules");
+    fs::create_dir_all(&config_dir).unwrap();
+
+    for (path, id) in [("panel", "@me/panel"), ("settings", "@me/settings")] {
+        let module_dir = modules_dir.join(path);
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(
+            module_dir.join("module.json"),
+            format!(
+                r#"{{ "name": "{id}", "version": "0.1.0", "mesh": {{ "apiVersion": "0.1", "kind": "frontend", "entry": "src/main.mesh" }} }}"#
+            ),
+        )
+        .unwrap();
+    }
+
+    fs::write(
+        config_dir.join("module.json"),
+        r#"{
+  "name": "@me/config",
+  "version": "0.1.0",
+  "mesh": {
+    "schemaVersion": 1,
+    "modulesDir": "../modules",
+    "modules": {
+      "@me/panel": { "kind": "frontend", "path": "panel", "enabled": true },
+      "@me/settings": { "kind": "frontend", "path": "settings", "enabled": false }
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let graph = load_installed_module_graph(&config_dir.join("module.json")).unwrap();
+    assert!(graph.module("@me/panel").unwrap().enabled);
+    assert!(!graph.module("@me/settings").unwrap().enabled);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn parallel_discovered_manifest_loading_preserves_directory_order() {
     let root = temp_dir("parallel-manifest-order");
     let modules_dir = root.join("modules");
@@ -1121,31 +1164,147 @@ fn parallel_discovered_manifest_loading_beats_serial_benchmark() {
     let warmup = load_discovered_module_manifests(&module_dirs).unwrap();
     assert_eq!(warmup.len(), module_count);
 
-    let iterations = 12;
-    let serial_start = Instant::now();
-    for _ in 0..iterations {
-        let loaded = load_discovered_module_manifests_serial(&module_dirs).unwrap();
-        assert_eq!(loaded.len(), module_count);
-    }
-    let serial_elapsed = serial_start.elapsed();
+    for (count, iterations) in [(8, 48), (24, 24), (module_count, 12)] {
+        let dirs = &module_dirs[..count];
+        let serial_start = Instant::now();
+        for _ in 0..iterations {
+            let loaded = load_discovered_module_manifests_serial(dirs).unwrap();
+            assert_eq!(loaded.len(), count);
+        }
+        let serial_elapsed = serial_start.elapsed();
 
-    let parallel_start = Instant::now();
-    for _ in 0..iterations {
-        let loaded = load_discovered_module_manifests(&module_dirs).unwrap();
-        assert_eq!(loaded.len(), module_count);
+        let parallel_start = Instant::now();
+        for _ in 0..iterations {
+            let loaded = load_discovered_module_manifests(dirs).unwrap();
+            assert_eq!(loaded.len(), count);
+        }
+        let parallel_elapsed = parallel_start.elapsed();
+
+        eprintln!(
+            "manifest load over {iterations} iterations and {count} modules: serial {serial_elapsed:?}; parallel {parallel_elapsed:?}; ratio {:.1}x",
+            serial_elapsed.as_secs_f64() / parallel_elapsed.as_secs_f64()
+        );
+        assert!(
+            parallel_elapsed < serial_elapsed,
+            "parallel manifest loading should beat serial loading for {count} modules"
+        );
     }
-    let parallel_elapsed = parallel_start.elapsed();
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+#[ignore = "release-only canonical startup manifest loading benchmark"]
+fn canonical_module_manifest_loading_beats_serial_benchmark() {
+    if rayon::current_num_threads() <= 1 {
+        eprintln!("skipping benchmark: rayon has one worker thread");
+        return;
+    }
+
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let module_dirs = discover_module_dirs(&workspace_root.join("modules"));
+    assert!(
+        module_dirs.len() >= 8,
+        "canonical workload should contain enough modules to exercise parallel loading"
+    );
+
+    let serial = load_module_manifests_serial(&module_dirs).unwrap();
+    let parallel = load_module_manifests(&module_dirs).unwrap();
+    assert_eq!(serial.len(), parallel.len());
+    for (serial, parallel) in serial.iter().zip(&parallel) {
+        assert_eq!(serial.manifest.name, parallel.manifest.name);
+        assert_eq!(serial.path, parallel.path);
+        assert_eq!(serial.source, parallel.source);
+        assert_eq!(serial.diagnostics, parallel.diagnostics);
+    }
+
+    // Re-read the exact shipped manifests enough times to make the sub-millisecond
+    // startup stage measurable while retaining the per-startup parallelization cost.
+    let iterations = 500;
+    let mut serial_elapsed = Duration::ZERO;
+    let mut parallel_elapsed = Duration::ZERO;
+    for iteration in 0..iterations {
+        let mut measure_serial = || {
+            let start = Instant::now();
+            let loaded = load_module_manifests_serial(std::hint::black_box(&module_dirs)).unwrap();
+            std::hint::black_box(loaded);
+            serial_elapsed += start.elapsed();
+        };
+        let mut measure_parallel = || {
+            let start = Instant::now();
+            let loaded = load_module_manifests(std::hint::black_box(&module_dirs)).unwrap();
+            std::hint::black_box(loaded);
+            parallel_elapsed += start.elapsed();
+        };
+        if iteration % 2 == 0 {
+            measure_serial();
+            measure_parallel();
+        } else {
+            measure_parallel();
+            measure_serial();
+        }
+    }
 
     eprintln!(
-        "manifest load over {iterations} iterations and {module_count} modules: serial {serial_elapsed:?}; parallel {parallel_elapsed:?}; ratio {:.1}x",
+        "canonical manifest load over {iterations} iterations and {} shipped modules: serial {serial_elapsed:?}; parallel {parallel_elapsed:?}; ratio {:.2}x",
+        module_dirs.len(),
         serial_elapsed.as_secs_f64() / parallel_elapsed.as_secs_f64()
     );
     assert!(
         parallel_elapsed < serial_elapsed,
-        "parallel manifest loading should beat serial loading"
+        "parallel manifest loading should improve the canonical startup workload"
     );
 
-    fs::remove_dir_all(root).unwrap();
+    let graph_path = workspace_root.join("config/module.json");
+    let serial_graph = load_installed_module_graph_serial(&graph_path).unwrap();
+    let parallel_graph = load_installed_module_graph(&graph_path).unwrap();
+    let serial_modules = serial_graph
+        .modules()
+        .into_iter()
+        .map(|module| (&module.id, module.kind, &module.path, module.enabled))
+        .collect::<Vec<_>>();
+    let parallel_modules = parallel_graph
+        .modules()
+        .into_iter()
+        .map(|module| (&module.id, module.kind, &module.path, module.enabled))
+        .collect::<Vec<_>>();
+    assert_eq!(serial_modules, parallel_modules);
+    assert_eq!(serial_graph.diagnostics(), parallel_graph.diagnostics());
+    assert_eq!(serial_graph.health(), parallel_graph.health());
+
+    let mut serial_graph_elapsed = Duration::ZERO;
+    let mut parallel_graph_elapsed = Duration::ZERO;
+    for iteration in 0..iterations {
+        let mut measure_serial = || {
+            let start = Instant::now();
+            let graph =
+                load_installed_module_graph_serial(std::hint::black_box(&graph_path)).unwrap();
+            std::hint::black_box(graph);
+            serial_graph_elapsed += start.elapsed();
+        };
+        let mut measure_parallel = || {
+            let start = Instant::now();
+            let graph = load_installed_module_graph(std::hint::black_box(&graph_path)).unwrap();
+            std::hint::black_box(graph);
+            parallel_graph_elapsed += start.elapsed();
+        };
+        if iteration % 2 == 0 {
+            measure_serial();
+            measure_parallel();
+        } else {
+            measure_parallel();
+            measure_serial();
+        }
+    }
+
+    eprintln!(
+        "canonical installed-graph startup over {iterations} iterations: serial {serial_graph_elapsed:?}; parallel {parallel_graph_elapsed:?}; ratio {:.2}x",
+        serial_graph_elapsed.as_secs_f64() / parallel_graph_elapsed.as_secs_f64()
+    );
+    assert!(
+        parallel_graph_elapsed < serial_graph_elapsed,
+        "parallel manifest loading should improve the complete canonical graph startup"
+    );
 }
 
 #[test]

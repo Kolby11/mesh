@@ -129,6 +129,151 @@ label = ""
     );
 }
 
+#[test]
+fn repeated_local_aliases_have_independent_runtimes_and_memo_entries() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    <row>
+        <Child label="first" />
+        <Child label="second" />
+    </row>
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+</script>
+"#,
+        &[((
+            "Child",
+            r#"
+<template><text content="{label}" /></template>
+<script lang="luau">label = ""</script>
+"#,
+        ))],
+    );
+
+    let theme = default_theme();
+    let mut initial = PixelBuffer::new(240, 60);
+    component.paint(&theme, 240, 60, &mut initial, 1.0).unwrap();
+    rebuild(&mut component, 240, 60);
+
+    assert_eq!(
+        runtime_value(&component, "@test/memo-surface/local:Child#0", "label"),
+        Some(serde_json::json!("first"))
+    );
+    assert_eq!(
+        runtime_value(&component, "@test/memo-surface/local:Child#1", "label"),
+        Some(serde_json::json!("second"))
+    );
+
+    let hits_before = component.component_memo_hit_count();
+    rebuild(&mut component, 240, 60);
+    assert_eq!(component.component_memo_hit_count(), hits_before + 2);
+    let tree = component.last_tree.as_ref().unwrap();
+    assert!(node_with_content(tree, "first").is_some());
+    assert!(node_with_content(tree, "second").is_some());
+}
+
+#[test]
+fn loop_rendered_local_aliases_have_independent_positional_instances() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    {#for item in items}
+        <Child label={item.label} />
+    {/for}
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+items = { { label = "first" }, { label = "second" } }
+</script>
+"#,
+        &[((
+            "Child",
+            r#"
+<template><text content="{label}" /></template>
+<script lang="luau">label = ""</script>
+"#,
+        ))],
+    );
+
+    let theme = default_theme();
+    let mut initial = PixelBuffer::new(240, 60);
+    component.paint(&theme, 240, 60, &mut initial, 1.0).unwrap();
+    rebuild(&mut component, 240, 60);
+
+    assert_eq!(
+        runtime_value(&component, "@test/memo-surface/local:Child@0", "label"),
+        Some(serde_json::json!("first"))
+    );
+    assert_eq!(
+        runtime_value(&component, "@test/memo-surface/local:Child@1", "label"),
+        Some(serde_json::json!("second"))
+    );
+
+    let hits_before = component.component_memo_hit_count();
+    rebuild(&mut component, 240, 60);
+    assert_eq!(component.component_memo_hit_count(), hits_before + 2);
+}
+
+// cargo test -p mesh-core-shell --release -- repeated_alias_memoization_beats_forced_misses --ignored --nocapture
+#[test]
+#[ignore = "release-only repeated-alias component memoization benchmark"]
+fn repeated_alias_memoization_beats_forced_misses() {
+    let children = (0..12)
+        .map(|index| format!("        <Child label=\"item {index}\" />\n"))
+        .collect::<String>();
+    let parent_src = format!(
+        r#"
+<template>
+    <column>
+{children}    </column>
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+</script>
+"#
+    );
+    let mut component = memo_surface(
+        &parent_src,
+        &[((
+            "Child",
+            r#"
+<template><text content="{label}" /></template>
+<script lang="luau">label = ""</script>
+"#,
+        ))],
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(400, 300);
+    component.paint(&theme, 400, 300, &mut buffer, 1.0).unwrap();
+    rebuild(&mut component, 400, 300);
+
+    let iterations = 200;
+    let miss_started = std::time::Instant::now();
+    for _ in 0..iterations {
+        component.clear_component_memo();
+        rebuild(&mut component, 400, 300);
+    }
+    let miss_time = miss_started.elapsed();
+
+    rebuild(&mut component, 400, 300);
+    let hits_before = component.component_memo_hit_count();
+    let hit_started = std::time::Instant::now();
+    for _ in 0..iterations {
+        rebuild(&mut component, 400, 300);
+    }
+    let hit_time = hit_started.elapsed();
+    let hits = component.component_memo_hit_count() - hits_before;
+
+    eprintln!(
+        "repeated-alias memoization: forced misses {miss_time:?}; memoized {hit_time:?}; ratio {:.2}x; hits={hits}",
+        miss_time.as_secs_f64() / hit_time.as_secs_f64()
+    );
+    assert_eq!(hits, iterations * 12);
+    assert!(hit_time < miss_time);
+}
+
 fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
     let mut parent_manifest = minimal_test_manifest(PARENT_ID);
     parent_manifest

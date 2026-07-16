@@ -271,6 +271,13 @@ pub struct SlotNode {
 #[derive(Debug, Clone)]
 pub struct ComponentRef {
     pub name: String,
+    /// Source-order identity within this parsed template.
+    pub source_ordinal: usize,
+    /// Zero-based source-order identity when this alias occurs more than once
+    /// in the same template. Unique aliases keep `None` for stable legacy keys.
+    pub duplicate_ordinal: Option<usize>,
+    /// This reference is nested under a `for` and may render more than once.
+    pub repeated_by_loop: bool,
     pub props: Vec<Attribute>,
     pub children: Vec<TemplateNode>,
 }

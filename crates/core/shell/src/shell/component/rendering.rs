@@ -78,6 +78,11 @@ impl FrontendSurfaceComponent {
                     }
                 }
             }
+            let mut state_dependencies = StyleStateDependencies::default();
+            for rule in &rules {
+                collect_selector_state_dependencies(&rule.selector, &mut state_dependencies);
+            }
+            self.cached_restyle_state_dependencies = state_dependencies;
             rules.sort_by_key(|rule| selector_contains_state(&rule.selector));
 
             self.cached_restyle_rules = Some(rules);
@@ -92,9 +97,15 @@ impl FrontendSurfaceComponent {
     /// `module_restyle_rules` (which sorts state rules last), so it stays in
     /// sync with imported modules and hot source reloads.
     pub(super) fn module_styles_have_state_rules(&mut self) -> bool {
-        self.module_restyle_rules()
-            .last()
-            .is_some_and(|rule| selector_contains_state(&rule.selector))
+        self.module_restyle_rules();
+        self.cached_restyle_state_dependencies.any
+    }
+
+    /// Whether a pointer hover transition can change any rule in this surface,
+    /// including rules contributed by imported component modules.
+    pub(super) fn module_styles_have_hover_rules(&mut self) -> bool {
+        self.module_restyle_rules();
+        self.cached_restyle_state_dependencies.hover
     }
 
     pub(super) fn requested_layout_size(&self) -> (u32, u32) {
@@ -181,6 +192,7 @@ impl FrontendSurfaceComponent {
             stack.clear();
             stack.push(self.id().to_string());
         }
+        self.composition_occurrences.borrow_mut().clear();
         self.has_promoted_popover_wrappers.set(false);
         self.has_error_placeholders.set(false);
         let measurer = SharedTextMeasurer;
@@ -345,7 +357,7 @@ impl FrontendSurfaceComponent {
         // Compute affected keys before borrowing index_cache to satisfy the borrow checker.
         // Collect affected IDs before borrowing index_cache to satisfy the borrow checker.
         let affected_keys = if targeted_interaction_restyle {
-            self.collect_interaction_changed_node_ids(tree)
+            self.collect_interaction_changed_node_ids()
         } else {
             InteractionChangedNodeIds::default()
         };
@@ -397,7 +409,7 @@ impl FrontendSurfaceComponent {
                         &affected_keys.affected,
                     );
                 }
-                apply_runtime_attribute_state_for_ids(tree, &affected_keys.roots);
+                apply_runtime_attribute_state_for_ids(tree, &affected_keys.affected);
             }
             reused_retained_layout = !dirty_types.contains(ComponentDirtyFlags::LAYOUT);
         } else {
@@ -498,46 +510,97 @@ impl FrontendSurfaceComponent {
         // Interaction paths typically have the same depth across pointer moves.
         self.previous_hovered_path.clone_from(&self.hovered_path);
         self.previous_focused_key.clone_from(&self.focused_key);
+        self.previous_focus_visible_key
+            .clone_from(&self.focus_visible_key);
+        self.previous_active_key.clone_from(&self.pointer_down_key);
+        if self.cached_restyle_state_dependencies.checked {
+            self.previous_checked_values
+                .clone_from(&self.checked_values);
+        } else {
+            self.previous_checked_values.clear();
+        }
         self.interaction_snapshot_valid = true;
     }
 
-    /// Collects stable IDs for all nodes whose interaction
-    /// state changed this frame plus all their descendants.
+    /// Collects stable IDs for nodes whose interaction state changed this frame.
     ///
-    /// Compares current hover/focus state against previous frame's state to
-    /// identify which nodes changed.
-    fn collect_interaction_changed_node_ids(&self, tree: &WidgetNode) -> InteractionChangedNodeIds {
+    /// Compares every interaction-driven pseudo-state against the previous
+    /// frame and returns only nodes whose changed state is referenced by this
+    /// surface's selectors.
+    pub(super) fn collect_interaction_changed_node_ids(&self) -> InteractionChangedNodeIds {
+        let dependencies = self.cached_restyle_state_dependencies;
         let mut changed_ids =
-            HashSet::with_capacity(self.previous_hovered_path.len() + self.hovered_path.len() + 2);
+            HashSet::with_capacity(self.previous_hovered_path.len() + self.hovered_path.len() + 6);
 
-        // Collect keys that had hover change: union of old and new hovered paths.
-        for key in &self.previous_hovered_path {
-            changed_ids.insert(stable_runtime_node_id(key));
-        }
-        for key in &self.hovered_path {
-            changed_ids.insert(stable_runtime_node_id(key));
+        // Hover paths are ordered root-to-leaf chains. Only the tails after
+        // their common prefix changed hover state; walking those tails avoids
+        // the quadratic pair of `Vec::contains` scans on deep trees.
+        if dependencies.hover {
+            collect_hover_changed_ids(
+                &self.previous_hovered_path,
+                &self.hovered_path,
+                &mut changed_ids,
+            );
         }
 
         // Collect keys that had focus change.
-        if let Some(ref prev) = self.previous_focused_key {
-            changed_ids.insert(stable_runtime_node_id(prev));
+        if dependencies.focus && self.previous_focused_key != self.focused_key {
+            if let Some(ref prev) = self.previous_focused_key {
+                changed_ids.insert(runtime_node_id_for_key(prev));
+            }
+            if let Some(ref curr) = self.focused_key {
+                changed_ids.insert(runtime_node_id_for_key(curr));
+            }
         }
-        if let Some(ref curr) = self.focused_key {
-            changed_ids.insert(stable_runtime_node_id(curr));
+
+        if dependencies.focus_visible
+            && (self.previous_focus_visible_key != self.focus_visible_key
+                || self.previous_focused_key != self.focused_key)
+        {
+            if let Some(ref prev) = self.previous_focus_visible_key {
+                changed_ids.insert(runtime_node_id_for_key(prev));
+            }
+            if let Some(ref curr) = self.focus_visible_key {
+                changed_ids.insert(runtime_node_id_for_key(curr));
+            }
+            // Inputs implicitly expose focus-visible while focused even when
+            // no explicit focus-visible key is stored, so logical focus is
+            // part of the dependency for this pseudo-state too.
+            if let Some(ref prev) = self.previous_focused_key {
+                changed_ids.insert(runtime_node_id_for_key(prev));
+            }
+            if let Some(ref curr) = self.focused_key {
+                changed_ids.insert(runtime_node_id_for_key(curr));
+            }
+        }
+
+        if dependencies.active && self.previous_active_key != self.pointer_down_key {
+            if let Some(ref prev) = self.previous_active_key {
+                changed_ids.insert(runtime_node_id_for_key(prev));
+            }
+            if let Some(ref curr) = self.pointer_down_key {
+                changed_ids.insert(runtime_node_id_for_key(curr));
+            }
+        }
+
+        if dependencies.checked {
+            for (key, value) in &self.previous_checked_values {
+                if self.checked_values.get(key) != Some(value) {
+                    changed_ids.insert(runtime_node_id_for_key(key));
+                }
+            }
+            for (key, value) in &self.checked_values {
+                if self.previous_checked_values.get(key) != Some(value) {
+                    changed_ids.insert(runtime_node_id_for_key(key));
+                }
+            }
         }
 
         if changed_ids.is_empty() {
             return InteractionChangedNodeIds::default(); // first frame: no previous state
         }
 
-        // At least the directly changed keys become affected roots. Reserve
-        // that known lower bound only after the empty (common) case above.
-        let mut ids = InteractionChangedNodeIds {
-            affected: HashSet::with_capacity(changed_ids.len()),
-            roots: HashSet::with_capacity(changed_ids.len()),
-        };
-        collect_changed_subtree_node_ids(tree, &changed_ids, false, &mut ids);
-        ids
+        direct_interaction_changed_node_ids(changed_ids)
     }
 
     pub(super) fn observe_surface_size(&mut self, width: u32, height: u32) -> bool {
@@ -656,6 +719,24 @@ impl FrontendSurfaceComponent {
             self.record_runtime_style_diagnostics_for_node(child, rules, index, resolver, context);
         }
     }
+}
+
+fn collect_hover_changed_ids(
+    previous: &[String],
+    current: &[String],
+    changed_ids: &mut HashSet<NodeId>,
+) {
+    let shared_prefix_len = previous
+        .iter()
+        .zip(current)
+        .take_while(|(previous, current)| previous == current)
+        .count();
+    changed_ids.extend(
+        previous[shared_prefix_len..]
+            .iter()
+            .chain(&current[shared_prefix_len..])
+            .map(|key| runtime_node_id_for_key(key)),
+    );
 }
 
 fn runtime_style_diagnostic_inputs_changed(
@@ -836,30 +917,17 @@ pub(super) fn constrain_error_placeholders(node: &mut WidgetNode) {
 }
 
 #[derive(Default)]
-struct InteractionChangedNodeIds {
-    affected: HashSet<NodeId>,
-    roots: HashSet<NodeId>,
+pub(super) struct InteractionChangedNodeIds {
+    pub(super) affected: HashSet<NodeId>,
 }
 
-fn collect_changed_subtree_node_ids(
-    node: &WidgetNode,
-    changed_ids: &HashSet<NodeId>,
-    parent_affected: bool,
-    out: &mut InteractionChangedNodeIds,
-) {
-    // Once an ancestor is affected, every descendant belongs to the same
-    // targeted restyle subtree. Avoid a hash lookup per descendant.
-    let directly_affected = !parent_affected && changed_ids.contains(&node.id);
-    let node_affected = parent_affected || directly_affected;
-    if node_affected {
-        out.affected.insert(node.id);
-    }
-    if directly_affected && !parent_affected {
-        out.roots.insert(node.id);
-    }
-
-    for child in &node.children {
-        collect_changed_subtree_node_ids(child, changed_ids, node_affected, out);
+fn direct_interaction_changed_node_ids(changed_ids: HashSet<NodeId>) -> InteractionChangedNodeIds {
+    // `changed_ids` already contains exactly the nodes whose state toggled and
+    // can serve directly as both targeted-restyle IDs and runtime-state roots.
+    // When targets are nested, the ancestor runtime-state application consumes
+    // its whole subtree and returns before the redundant descendant probe.
+    InteractionChangedNodeIds {
+        affected: changed_ids,
     }
 }
 
@@ -1232,39 +1300,106 @@ mod interaction_changed_key_tests {
     }
 
     #[test]
-    fn collect_changed_subtree_node_ids_collects_descendants_in_one_walk() {
-        let tree = keyed_node(
-            "root",
-            vec![
-                keyed_node(
-                    "root/0",
-                    vec![
-                        keyed_node("root/0/0", vec![]),
-                        keyed_node("root/0/1", vec![]),
-                    ],
-                ),
-                keyed_node("root/1", vec![keyed_node("root/1/0", vec![])]),
-            ],
-        );
+    fn direct_interaction_scope_keeps_only_changed_targets() {
         let changed = HashSet::from([stable_runtime_node_id("root/0")]);
-        let mut affected = InteractionChangedNodeIds::default();
-
-        collect_changed_subtree_node_ids(&tree, &changed, false, &mut affected);
+        let affected = direct_interaction_changed_node_ids(changed);
 
         assert_eq!(
             affected.affected,
             HashSet::from([
-                crate::shell::component::runtime_tree::stable_runtime_node_id("root/0"),
-                crate::shell::component::runtime_tree::stable_runtime_node_id("root/0/0"),
-                crate::shell::component::runtime_tree::stable_runtime_node_id("root/0/1"),
-            ])
-        );
-        assert_eq!(
-            affected.roots,
-            HashSet::from([
                 crate::shell::component::runtime_tree::stable_runtime_node_id("root/0")
             ])
         );
+    }
+
+    #[test]
+    fn direct_interaction_scope_keeps_nested_targets() {
+        let parent = stable_runtime_node_id("root/0");
+        let child = stable_runtime_node_id("root/0/0");
+        let changed = HashSet::from([parent, child]);
+        let affected = direct_interaction_changed_node_ids(changed);
+
+        assert_eq!(affected.affected, HashSet::from([parent, child]));
+    }
+
+    #[test]
+    fn hover_changed_ids_only_collects_tails_after_common_ancestor() {
+        let previous = ["root", "root/menu", "root/menu/left"]
+            .map(str::to_string)
+            .to_vec();
+        let current = [
+            "root",
+            "root/menu",
+            "root/menu/right",
+            "root/menu/right/icon",
+        ]
+        .map(str::to_string)
+        .to_vec();
+        let mut changed = HashSet::new();
+
+        collect_hover_changed_ids(&previous, &current, &mut changed);
+
+        assert_eq!(
+            changed,
+            HashSet::from([
+                stable_runtime_node_id("root/menu/left"),
+                stable_runtime_node_id("root/menu/right"),
+                stable_runtime_node_id("root/menu/right/icon"),
+            ])
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- hover_common_prefix_beats_symmetric_contains_scans --ignored --nocapture
+    #[test]
+    #[ignore = "release-only hover-path diff microbenchmark"]
+    fn hover_common_prefix_beats_symmetric_contains_scans() {
+        use std::time::Instant;
+
+        let previous = (0..64)
+            .map(|depth| {
+                format!(
+                    "root/{}",
+                    (0..=depth).map(|_| "left").collect::<Vec<_>>().join("/")
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut current = previous[..63].to_vec();
+        current.push(format!("{}/right", current.last().unwrap()));
+        let iterations = 100_000usize;
+
+        let mut old_changed = HashSet::with_capacity(previous.len() + current.len());
+        let old_started = Instant::now();
+        for _ in 0..iterations {
+            old_changed.clear();
+            for key in &previous {
+                if !current.contains(key) {
+                    old_changed.insert(stable_runtime_node_id(key));
+                }
+            }
+            for key in &current {
+                if !previous.contains(key) {
+                    old_changed.insert(stable_runtime_node_id(key));
+                }
+            }
+            std::hint::black_box(&old_changed);
+        }
+        let old_elapsed = old_started.elapsed();
+
+        let mut prefix_changed = HashSet::with_capacity(previous.len() + current.len());
+        let prefix_started = Instant::now();
+        for _ in 0..iterations {
+            prefix_changed.clear();
+            collect_hover_changed_ids(&previous, &current, &mut prefix_changed);
+            std::hint::black_box(&prefix_changed);
+        }
+        let prefix_elapsed = prefix_started.elapsed();
+
+        assert_eq!(prefix_changed, old_changed);
+        eprintln!(
+            "hover path diff over {iterations} 64-level transitions: contains {old_elapsed:?}; common-prefix {prefix_elapsed:?}; ratio {:.1}x",
+            old_elapsed.as_secs_f64() / prefix_elapsed.as_secs_f64()
+        );
+        assert!(prefix_elapsed * 2 < old_elapsed);
     }
 
     // cargo test -p mesh-core-shell --release -- narrow_ancestor_stack_beats_parent_map_benchmark --ignored --nocapture
@@ -1375,10 +1510,10 @@ mod interaction_changed_key_tests {
         assert_eq!(tree.children[1].children[0].computed_style.color.a, 0);
     }
 
-    // cargo test -p mesh-core-shell --release -- interaction_changed_node_ids_beat_runtime_key_clones --ignored --nocapture
+    // cargo test -p mesh-core-shell --release -- direct_interaction_scope_beats_full_tree_walk --ignored --nocapture
     #[test]
-    #[ignore = "release-only interaction changed-set microbenchmark"]
-    fn interaction_changed_node_ids_beat_runtime_key_clones() {
+    #[ignore = "release-only direct interaction-scope microbenchmark"]
+    fn direct_interaction_scope_beats_full_tree_walk() {
         fn build(key: String, width: usize, depth: usize) -> WidgetNode {
             let mut node = WidgetNode::new("box");
             node.id = stable_runtime_node_id(&key);
@@ -1390,49 +1525,43 @@ mod interaction_changed_key_tests {
             }
             node
         }
-        fn old_collect(
+        fn tree_walk_collect(
             node: &WidgetNode,
-            changed: &HashSet<String>,
-            parent_affected: bool,
-            out: &mut HashSet<String>,
+            changed: &HashSet<NodeId>,
+            out: &mut InteractionChangedNodeIds,
         ) {
-            let key = node.mesh_key();
-            let affected = parent_affected || key.is_some_and(|key| changed.contains(key));
-            if affected && let Some(key) = key {
-                out.insert(key.to_owned());
+            let directly_affected = changed.contains(&node.id);
+            if directly_affected {
+                out.affected.insert(node.id);
             }
             for child in &node.children {
-                old_collect(child, changed, affected, out);
+                tree_walk_collect(child, changed, out);
             }
         }
 
         let tree = build("root".into(), 4, 5);
         let iterations = 2_000;
-        let old_changed = HashSet::from(["root/0".to_string()]);
-        let new_changed = HashSet::from([stable_runtime_node_id("root/0")]);
+        let changed = HashSet::from([stable_runtime_node_id("root/0")]);
 
         let old_started = Instant::now();
         let mut old_count = 0;
         for _ in 0..iterations {
-            let mut affected = HashSet::new();
-            old_collect(&tree, &old_changed, false, &mut affected);
-            old_count += std::hint::black_box(affected.len());
+            let mut affected = InteractionChangedNodeIds::default();
+            tree_walk_collect(&tree, &changed, &mut affected);
+            old_count += std::hint::black_box(affected.affected.len());
         }
         let old_time = old_started.elapsed();
 
         let new_started = Instant::now();
         let mut new_count = 0;
         for _ in 0..iterations {
-            let mut affected = HashSet::new();
-            let mut ids = InteractionChangedNodeIds::default();
-            collect_changed_subtree_node_ids(&tree, &new_changed, false, &mut ids);
-            affected.extend(ids.affected);
-            new_count += std::hint::black_box(affected.len());
+            let affected = direct_interaction_changed_node_ids(changed.clone());
+            new_count += std::hint::black_box(affected.affected.len());
         }
         let new_time = new_started.elapsed();
 
         eprintln!(
-            "interaction changed set: String keys {old_time:?}; NodeId keys {new_time:?}; ratio {:.1}x; counts={old_count}/{new_count}",
+            "interaction changed scope: full tree walk {old_time:?}; direct IDs {new_time:?}; ratio {:.1}x; counts={old_count}/{new_count}",
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_count, new_count);
@@ -1456,13 +1585,10 @@ mod interaction_changed_key_tests {
         }
 
         let tree = build("root".into(), 4, 5);
-        let mut affected = InteractionChangedNodeIds::default();
-        collect_changed_subtree_node_ids(
-            &tree,
-            &HashSet::from([stable_runtime_node_id("root/0/0")]),
-            false,
-            &mut affected,
-        );
+        let affected =
+            direct_interaction_changed_node_ids(HashSet::from([stable_runtime_node_id(
+                "root/0/0",
+            )]));
         let iterations = 5_000;
 
         let old_started = Instant::now();
@@ -1480,7 +1606,7 @@ mod interaction_changed_key_tests {
             let mut tree = tree.clone();
             apply_runtime_attribute_state_for_ids(
                 std::hint::black_box(&mut tree),
-                std::hint::black_box(&affected.roots),
+                std::hint::black_box(&affected.affected),
             );
             new_total += std::hint::black_box(tree.children[0].computed_style.gap);
         }
@@ -1617,6 +1743,34 @@ fn selector_contains_state(selector: &mesh_core_component::style::Selector) -> b
         Selector::State(_, _) => true,
         Selector::Compound(parts) => parts.iter().any(selector_contains_state),
         Selector::Tag(_) | Selector::Class(_) | Selector::Id(_) | Selector::Universal => false,
+    }
+}
+
+fn collect_selector_state_dependencies(
+    selector: &mesh_core_component::style::Selector,
+    dependencies: &mut StyleStateDependencies,
+) {
+    use mesh_core_component::style::Selector;
+
+    match selector {
+        Selector::State(_, state) => {
+            dependencies.any = true;
+            match state.as_str() {
+                "hover" | "hovered" => dependencies.hover = true,
+                "focus" | "focused" => dependencies.focus = true,
+                "focus-visible" => dependencies.focus_visible = true,
+                "active" => dependencies.active = true,
+                "disabled" => dependencies.disabled = true,
+                "checked" => dependencies.checked = true,
+                _ => {}
+            }
+        }
+        Selector::Compound(parts) => {
+            for part in parts {
+                collect_selector_state_dependencies(part, dependencies);
+            }
+        }
+        Selector::Tag(_) | Selector::Class(_) | Selector::Id(_) | Selector::Universal => {}
     }
 }
 

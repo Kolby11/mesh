@@ -359,7 +359,89 @@ pub(super) fn parse_markup(
         });
     }
 
+    assign_duplicate_component_ordinals(&mut root);
     Ok(TemplateBlock { root })
+}
+
+fn visit_component_refs(nodes: &[TemplateNode], visit: &mut impl FnMut(&ComponentRef)) {
+    for node in nodes {
+        match node {
+            TemplateNode::Component(component) => {
+                visit(component);
+                visit_component_refs(&component.children, visit);
+            }
+            TemplateNode::Element(element) => visit_component_refs(&element.children, visit),
+            TemplateNode::If(if_node) => {
+                visit_component_refs(&if_node.then_children, visit);
+                visit_component_refs(&if_node.else_children, visit);
+            }
+            TemplateNode::For(for_node) => visit_component_refs(&for_node.children, visit),
+            TemplateNode::Text(_) | TemplateNode::Expr(_) | TemplateNode::Slot(_) => {}
+        }
+    }
+}
+
+fn visit_component_refs_mut(nodes: &mut [TemplateNode], visit: &mut impl FnMut(&mut ComponentRef)) {
+    for node in nodes {
+        match node {
+            TemplateNode::Component(component) => {
+                visit(component);
+                visit_component_refs_mut(&mut component.children, visit);
+            }
+            TemplateNode::Element(element) => {
+                visit_component_refs_mut(&mut element.children, visit);
+            }
+            TemplateNode::If(if_node) => {
+                visit_component_refs_mut(&mut if_node.then_children, visit);
+                visit_component_refs_mut(&mut if_node.else_children, visit);
+            }
+            TemplateNode::For(for_node) => {
+                visit_component_refs_mut(&mut for_node.children, visit);
+            }
+            TemplateNode::Text(_) | TemplateNode::Expr(_) | TemplateNode::Slot(_) => {}
+        }
+    }
+}
+
+fn assign_duplicate_component_ordinals(nodes: &mut [TemplateNode]) {
+    let mut counts = HashMap::<String, usize>::new();
+    visit_component_refs(nodes, &mut |component| {
+        *counts.entry(component.name.clone()).or_default() += 1;
+    });
+
+    let mut seen = HashMap::<String, usize>::new();
+    let mut source_ordinal = 0usize;
+    visit_component_refs_mut(nodes, &mut |component| {
+        component.source_ordinal = source_ordinal;
+        source_ordinal += 1;
+        if counts.get(&component.name).copied().unwrap_or_default() <= 1 {
+            return;
+        }
+        let ordinal = seen.entry(component.name.clone()).or_default();
+        component.duplicate_ordinal = Some(*ordinal);
+        *ordinal += 1;
+    });
+    mark_loop_component_refs(nodes, false);
+}
+
+fn mark_loop_component_refs(nodes: &mut [TemplateNode], inside_loop: bool) {
+    for node in nodes {
+        match node {
+            TemplateNode::Component(component) => {
+                component.repeated_by_loop = inside_loop;
+                mark_loop_component_refs(&mut component.children, inside_loop);
+            }
+            TemplateNode::Element(element) => {
+                mark_loop_component_refs(&mut element.children, inside_loop);
+            }
+            TemplateNode::If(if_node) => {
+                mark_loop_component_refs(&mut if_node.then_children, inside_loop);
+                mark_loop_component_refs(&mut if_node.else_children, inside_loop);
+            }
+            TemplateNode::For(for_node) => mark_loop_component_refs(&mut for_node.children, true),
+            TemplateNode::Text(_) | TemplateNode::Expr(_) | TemplateNode::Slot(_) => {}
+        }
+    }
 }
 
 fn parse_xml_attributes(
@@ -665,6 +747,9 @@ fn build_template_node(
         }
         return Ok(TemplateNode::Component(ComponentRef {
             name: tag,
+            source_ordinal: 0,
+            duplicate_ordinal: None,
+            repeated_by_loop: false,
             props: attributes,
             children,
         }));

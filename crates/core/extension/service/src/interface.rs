@@ -325,7 +325,9 @@ fn version_matches_provider(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contract::{ContractCapabilities, InterfaceArgument, InterfaceEvent, InterfaceMethod};
+    use crate::contract::{
+        ContractCapabilities, InterfaceArgument, InterfaceEvent, InterfaceMethod,
+    };
 
     fn test_contract(interface: &str, method_count: usize) -> InterfaceContract {
         InterfaceContract {

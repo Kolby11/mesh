@@ -11,6 +11,7 @@ impl FrontendSurfaceComponent {
         self.clear_component_memo();
         self.last_tree = None;
         self.cached_restyle_rules = None;
+        self.cached_restyle_state_dependencies = StyleStateDependencies::default();
         self.cached_style_rule_index = None;
         self.runtime_style_diagnostic_fingerprint = None;
         self.intrinsic_layout_cache = IntrinsicLayoutCache::default();
@@ -191,12 +192,21 @@ impl ShellComponent for FrontendSurfaceComponent {
         else {
             return self.handle_interface_event(event);
         };
-        self.last_service_update = Some(format!("{service}:{source_module}"));
-        let caps = crate::shell::service::service_capabilities(service);
+        update_last_service_trace(
+            &mut self.last_service_update,
+            service,
+            source_module,
+            tracing::enabled!(tracing::Level::DEBUG),
+        );
+        let caps = cached_service_capabilities(&mut self.cached_service_capabilities, service);
         let service_name = &caps.service_name;
-        let previous_payload = self.cached_service_payloads.get(service_name).cloned();
-        self.cached_service_payloads
-            .insert(service_name.clone(), payload.clone().into());
+        let payload_fingerprint = ScriptContext::service_payload_fingerprint(payload);
+        let previous_payload = update_cached_service_payload(
+            &mut self.cached_service_payloads,
+            service_name,
+            payload,
+            payload_fingerprint,
+        );
         let mut needs_rebuild = false;
         let mut runtimes = {
             let mut runtimes = self.runtimes.lock().unwrap();
@@ -220,27 +230,31 @@ impl ShellComponent for FrontendSurfaceComponent {
             // Always apply the Lua-level service payload so interface
             // proxies can read state fields even when the runtime lacks
             // the canonical SERVICE_NAME.read capability.
-            runtime
-                .script_ctx
-                .apply_service_payload(service_name, payload);
+            runtime.script_ctx.apply_service_payload_with_fingerprint(
+                service_name,
+                payload,
+                payload_fingerprint,
+            );
             if !has_read {
                 continue;
             }
-            let previous = runtime.script_ctx.state().get(service_name);
-            apply_service_update_with_name(
+            apply_service_update_with_name_and_fingerprint(
                 runtime.script_ctx.state_mut(),
                 true,
                 service_name,
                 source_module,
                 payload,
+                payload_fingerprint,
             );
             let state_changed = runtime.script_ctx.state().is_dirty();
-            let tracked_fields_changed = runtime.script_ctx.tracked_service_fields_changed(
-                service_name,
-                previous.as_ref(),
-                payload,
-            );
-            if state_changed || tracked_fields_changed {
+            if state_changed || {
+                let previous = runtime.script_ctx.state().get(service_name);
+                runtime.script_ctx.tracked_service_fields_changed(
+                    service_name,
+                    previous.as_ref(),
+                    payload,
+                )
+            } {
                 needs_rebuild = true;
             }
         }

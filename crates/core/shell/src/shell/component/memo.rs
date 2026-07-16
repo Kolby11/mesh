@@ -32,8 +32,9 @@
 //! only public script members are reactive. A template expression reading a
 //! private `local` mutated by a handler was never guaranteed to re-render —
 //! without memoization it merely re-evaluated opportunistically on unrelated
-//! rebuilds. Repeated instances of the same alias share one runtime and one
-//! cache slot; alternating props simply miss the cache (never reused wrongly).
+//! rebuilds. Repeated source occurrences and loop-rendered instances have
+//! distinct runtime/cache identities; loop identity remains positional until
+//! keyed list diffing ships.
 
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};

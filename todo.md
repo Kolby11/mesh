@@ -218,15 +218,99 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
 - [ ] Narrow script/service invalidation below tree-rebuild + pixel repaint;
       add typed state dependencies → v1.18. Extend to handler/`bind:this`
       writes: record which public members templates bind and skip rebuilds for
-      writes nothing binds to (B).
-- [ ] Avoid full-tree restyle for safe interaction changes; use
-      selector-dependency analysis → v1.18
+      writes nothing binds to (B). Progress 2026-07-16: shared-VM service
+      payload deduplication now stores the full content fingerprint as an
+      eight-byte Lua string and compares its borrowed bytes, instead of
+      formatting `pointer:fingerprint` and allocating a Rust/Lua string on
+      every fan-out probe. One million release Lua-table probes measured
+      119.83ms formatted versus 96.92ms binary (1.24x faster); equal-content
+      payload clones now also reuse the installed Lua value. The stable
+      fingerprint table handle is now cached per initialized context and
+      borrowed directly, with the cache cleared before its VM is released;
+      one million release probes measured 321.36ms resolving the Lua global
+      each time versus 102.78ms cached (3.13x faster). Service event fan-out
+      now also hashes each JSON payload once in the component dispatcher and
+      passes the fingerprint to every runtime instead of recursively hashing
+      it per context; 5,000 changing nested payloads across eight contexts
+      measured 25.45ms repeated hashing versus 22.34ms shared (1.14x faster).
+      The component's retained service cache now stores that fingerprint with
+      its shared payload, so runtimes created after an event seed from the
+      cached hash rather than walking the JSON again; 50,000 cached seeds
+      across eight contexts measured 103.12ms rehashing versus 47.21ms cached
+      (2.18x faster). Unchanged service updates now retain the cache entry's
+      existing key and shared JSON allocation instead of allocating a new key,
+      cloning the full payload, and replacing the entry; 50,000 updates with
+      a 32-device payload measured 149.82ms replacement versus 0.72ms reuse
+      (~208x faster for cache maintenance). Reactive service-state writes now
+      consume the same producer fingerprint and reject unchanged values before
+      allocating the variable name, cloning JSON, or recursively comparing it;
+      50,000 unchanged 32-device writes measured 185.73ms clone/deep-compare
+      versus 0.61ms fingerprint-gated (~304x faster), while real changes retain
+      normal dirty and generation semantics. Stable `last_service_update`
+      metadata now uses a lazy fingerprinted constructor too, avoiding its
+      two-field JSON allocation on repeated events; 200,000 complete unchanged
+      service-state updates measured 28.52ms rebuilding metadata versus 9.28ms
+      lazy (3.07x faster). Non-debug service events now also skip constructing
+      the trace-only `service:provider` summary; one million updates through
+      the production tracing gate measured 63.95ms formatting unconditionally
+      versus 2.87ms gated (22.3x faster). Each component now caches immutable
+      service capability bundles after its first event for an interface,
+      avoiding the shared capability cache's lock and hash on steady-state
+      fan-out. Three repeated one-million-lookup release runs improved by
+      1.31-1.38x; median timings were 19.55ms global versus 14.63ms local
+      (1.34x faster). Changed reactive service state now short-circuits the
+      tracked-field comparison once a rebuild is already required, avoiding
+      the dependency mutex and JSON field probes while retaining the exact
+      comparison fallback for fingerprint-equal updates. Across 500,000
+      changed updates with 32 tracked fields, the release invalidation
+      decision measured 528.67ms eager versus 1.01ms short-circuited
+      (522.6x faster). The previous reactive payload is now retrieved only
+      inside that fallback as well, eliminating a full JSON clone before
+      ordinary changed writes; 50,000 dirty updates with a 32-device payload
+      measured 149.87ms eager cloning versus 90.24us lazy fallback
+      (1,660.8x faster for the invalidation decision).
+- [x] Avoid full-tree restyle for safe interaction changes; use
+      selector-dependency analysis → v1.18. Progress 2026-07-16: interaction
+      diffs now use the symmetric difference of old/new hover paths and skip
+      unchanged focus identities, so shared hovered ancestors are not treated
+      as dirty. The targeted style path retains only directly changed node IDs
+      instead of eagerly marking every descendant, and re-resolves descendants
+      only when one of the five inherited text fields actually changes. A
+      2,049-node release benchmark over 1,000 background-only state changes
+      measured 550.6ms for full descendant resolution versus 24.9ms targeted
+      (22.1x faster), with inherited-field propagation covered separately.
+      Follow-up 2026-07-16: the aggregated surface rule cache now retains a
+      hover-specific dependency bit, so modules with only `:focus`, `:active`,
+      `:checked`, or other state rules skip restyle/layout/paint on pointer
+      transitions. An end-to-end 250-node release benchmark over 1,000 hover
+      moves with focus-only rules measured 471.4ms through the former
+      state-agnostic path versus 1.29ms dependency-gated (365x faster).
+      Hover-path diffs now exploit their root-to-leaf ordering and inspect
+      only tails after the shared prefix instead of running two quadratic
+      membership scans; 100,000 64-level transitions measured 199.1ms versus
+      74.8ms (2.7x faster). Direct interaction IDs are now used as the
+      targeted-restyle and runtime-state scopes without walking the widget
+      tree to rediscover them. Completion validation corrected the direct-ID
+      conversion to reproduce the retained tree's parent-chain identity;
+      2,000 deep lookups in a 1,365-node tree measured 9.93ms walking versus
+      94.99us structural conversion (104.6x faster).
+      The direct scope owns a single ID set shared by restyle and runtime-state
+      application, avoiding a second allocation and rehash of every changed ID.
+      Completed 2026-07-16: the aggregate selector cache now records every
+      supported pseudo-state dependency (`:hover`, `:focus`, `:focus-visible`,
+      `:active`, `:disabled`, and `:checked`), while retained snapshots cover
+      every interaction-driven state. Active, checked, and focus-visible
+      changes now target the correct deep retained nodes; unrelated state
+      changes skip CSS resolution. Across 1,000 focus moves on a 250-node
+      hover-only surface, four release runs measured 1.06-1.07x faster
+      end-to-end with dependency filtering. First-frame and structural changes
+      retain the safe full-restyle fallback.
 - [ ] One `mlua::Lua` VM per ScriptContext; move to per-thread VM with `_ENV`
       isolation → v1.17. Pairs with the handler-sync fast path below (R).
 
 ### P1 — structural render pipeline
 
-- [ ] **Component-level render memoization (I) — largest structural win.**
+- [x] **Component-level render memoization (I) — largest structural win.**
       Cache each embedded/local instance's built subtree keyed by (props
       fingerprint, `ScriptState::mutation_generation`, locale/theme
       generation) and reuse it wholesale on rebuild.
@@ -265,12 +349,19 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       benchmark measured 74.2ms formatting/full scan versus 1.3ms for the
       helpers (~57.1x combined). The compiler's handler namespace construction
       now uses the pre-sized path too (83.6ms versus 13.5ms for 1M names,
-      ~6.2x). Remaining:
-      repeated same-alias instances share one
-      runtime and always miss (needs per-occurrence instance identity — see the
-      "multiple instances" module-system item); the M `BuildEffects`
-      formalization still applies to future build side effects (new effects must
-      add a mark counter or veto).
+      ~6.2x). Completed 2026-07-16: repeated local/import aliases now receive
+      source-stable occurrence identities, and aliases rendered by `{#for}`
+      receive per-pass positional identities. Each occurrence therefore owns
+      an independent runtime, handler namespace, mutation generation, and memo
+      entry; unique aliases retain their legacy keys. Correctness tests cover
+      distinct props/state and memo hits for both static duplicates and loop
+      instances. Four release runs of 200 rebuild-and-paint cycles over 12
+      repeated instances measured forced misses at 148.75-153.72ms versus
+      90.35-92.46ms memoized (1.63-1.66x end-to-end), with all 2,400 expected
+      hits per run. Loop identity intentionally remains positional until the
+      separately tracked keyed-list work lands. Existing build side effects
+      remain covered by replay marks or a cache veto; future effects must join
+      that contract.
 - [ ] Affected-subtree template re-evaluation via
       `NodeServiceFieldDependencies`; `narrow_script_update` still rebuilds
       the full tree before diffing → v1.27. Added 2026-07-14: narrow ancestor
@@ -477,6 +568,16 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       Ref-name → node-key publication now reuses its `HashMap` backing storage
       between paints; a release benchmark measured 1.368s fresh versus 719ms
       reused over 20,000 512-entry maps (1.9x).
+      Metrics snapshots now move into their final `elements`/`refs`
+      destination and clone only for additional aliases, instead of cloning
+      every publication and dropping the original. Across 512,000 single-name
+      snapshots, release measurements were 2.585s clone-and-drop versus 1.832s
+      move-final (1.41x faster), with multi-alias parity covered.
+      Snapshot `f32` fields now use serde_json's direct numeric conversion
+      instead of the general-purpose `json!` serialization path. Five million
+      release conversions measured 25.81ms through the macro versus 22.56ms
+      direct (1.14x), with finite, signed-zero, NaN, and infinity parity
+      covered.
       Added 2026-07-14: runtime annotation now indexes the active hover path
       once per tree pass rather than scanning it for every node; the release
       lookup benchmark measured 137.7ms path scans versus 56.8ms hash-set
@@ -693,7 +794,7 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       owned `String` versus 6.57ms shared (1.6x faster); the 500,000-event shell
       split/route benchmark measured 10.18ms for allocating a target ID versus
       8.89ms for moving the shared ID (~1.15x faster).
-- [ ] Startup: parallelize module discovery + manifest parsing (frontend
+- [x] Startup: parallelize module discovery + manifest parsing (frontend
       compilation already runs through Rayon) (H/V). Progress 2026-07-13:
       installed-graph auto-discovery now loads sorted module manifests through
       an ordered Rayon pipeline, preserving deterministic graph assembly while
@@ -703,8 +804,24 @@ subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
       shell legacy discovery now separates deterministic recursive manifest-dir
       discovery from serial registration and loads manifests in parallel; release
       benchmark over 12 iterations of 192 synthetic modules measured 24.2ms
-      serial versus 5.4ms parallel (~4.5x faster). Remaining: measure real
-      startup profile impact with canonical v1.21 workloads.
+      serial versus 5.4ms parallel (~4.5x faster). Added 2026-07-16: installed
+      graphs with an explicit `modules` inventory now use the same ordered Rayon
+      loader instead of parsing each configured manifest serially; the shared
+      production-loader release benchmark measured 23.45ms serial versus 8.43ms
+      parallel for 48 loads of 8 manifests (2.8x), 35.06ms versus 9.75ms for 24
+      loads of 24 (3.6x), and 146.05ms versus 16.26ms for 12 loads of 192
+      (9.0x). Completed 2026-07-16: the release benchmark now loads the exact
+      17 shipped module manifests and verifies ordered parity of module IDs,
+      paths, sources, and diagnostics before timing. Three 500-pair alternating
+      runs measured the manifest stage at 294.39ms versus 113.05ms (2.60x),
+      295.46ms versus 109.68ms (2.69x), and 298.41ms versus 104.22ms (2.86x).
+      The same benchmark measures the complete canonical installed-graph
+      startup—including discovery, root parsing, validation, and graph
+      assembly—and measured 1.603s versus 1.582s (1.01x), 1.597s versus 1.559s
+      (1.02x), and 1.611s versus 1.582s (1.02x), with identical module,
+      diagnostic, and health outputs. This closes both the scaled-load and
+      real-workload verification requirements without claiming that the much
+      larger graph-assembly stage shares the parser's speedup.
 - [ ] Rotation transforms allocate a temp `PixelBuffer` + full subtree
       repaint per frame; low priority until rotation ships in surfaces
       (P; scratch-buffer reuse rejected — see log).

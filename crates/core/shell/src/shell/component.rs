@@ -1,5 +1,7 @@
 use super::service::{
-    apply_service_update_with_name, script_events_to_requests, seed_service_state,
+    ServiceCapabilities, apply_service_update_with_name,
+    apply_service_update_with_name_and_fingerprint, script_events_to_requests, seed_service_state,
+    service_capabilities,
 };
 use super::surface_layout::{SurfaceLayoutSettings, load_frontend_module_settings};
 use super::types::{
@@ -34,10 +36,12 @@ pub(crate) use input::KeybindResolutionSource;
 use input::ResolvedSurfaceShortcut;
 use mesh_core_animation::transition::TransitionAnimator;
 pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
+#[cfg(test)]
+use runtime_tree::stable_runtime_node_id;
 use runtime_tree::{
     NodeServiceFieldDependencies, RetainedWidgetTree, RuntimeAnnotationContext,
     annotate_runtime_and_overflow_tree, collect_element_metrics, input_accepts_char,
-    stable_runtime_node_id,
+    runtime_node_id_for_key,
 };
 
 use mesh_core_capability::{Capability, CapabilitySet};
@@ -65,6 +69,79 @@ use std::time::{Duration, Instant};
 
 pub(super) type SurfaceCssProps = HashMap<String, mesh_core_component::style::StyleValue>;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct StyleStateDependencies {
+    any: bool,
+    hover: bool,
+    focus: bool,
+    focus_visible: bool,
+    active: bool,
+    disabled: bool,
+    checked: bool,
+}
+
+#[derive(Clone)]
+struct CachedServicePayload {
+    value: Arc<serde_json::Value>,
+    fingerprint: u64,
+}
+
+fn update_cached_service_payload(
+    cache: &mut HashMap<String, CachedServicePayload>,
+    service_name: &str,
+    payload: &serde_json::Value,
+    fingerprint: u64,
+) -> Option<Arc<serde_json::Value>> {
+    if let Some(cached) = cache.get_mut(service_name) {
+        let previous = Arc::clone(&cached.value);
+        if cached.fingerprint != fingerprint {
+            cached.value = Arc::new(payload.clone());
+            cached.fingerprint = fingerprint;
+        }
+        return Some(previous);
+    }
+
+    cache.insert(
+        service_name.to_owned(),
+        CachedServicePayload {
+            value: Arc::new(payload.clone()),
+            fingerprint,
+        },
+    );
+    None
+}
+
+fn cached_service_capabilities(
+    cache: &mut HashMap<String, Arc<ServiceCapabilities>>,
+    interface: &str,
+) -> Arc<ServiceCapabilities> {
+    if let Some(capabilities) = cache.get(interface) {
+        return Arc::clone(capabilities);
+    }
+
+    let capabilities = service_capabilities(interface);
+    cache.insert(interface.to_owned(), Arc::clone(&capabilities));
+    capabilities
+}
+
+fn update_last_service_trace(
+    summary: &mut Option<String>,
+    service: &str,
+    source_module: &str,
+    debug_enabled: bool,
+) {
+    if !debug_enabled {
+        summary.take();
+        return;
+    }
+
+    let mut value = String::with_capacity(service.len() + source_module.len() + 1);
+    value.push_str(service);
+    value.push(':');
+    value.push_str(source_module);
+    *summary = Some(value);
+}
+
 #[derive(Default)]
 struct InstanceKeyInterner {
     keys: HashSet<Arc<str>>,
@@ -82,14 +159,33 @@ impl InstanceKeyInterner {
     }
 
     fn intern_embedded(&mut self, host: &str, kind: &str, identifier: &str) -> Arc<str> {
+        self.intern_embedded_occurrence(host, kind, identifier, None, None)
+    }
+
+    fn intern_embedded_occurrence(
+        &mut self,
+        host: &str,
+        kind: &str,
+        identifier: &str,
+        duplicate_ordinal: Option<usize>,
+        loop_ordinal: Option<usize>,
+    ) -> Arc<str> {
         self.scratch.clear();
         self.scratch
-            .reserve(host.len() + 1 + kind.len() + 1 + identifier.len());
+            .reserve(host.len() + 1 + kind.len() + 1 + identifier.len() + 4);
         self.scratch.push_str(host);
         self.scratch.push('/');
         self.scratch.push_str(kind);
         self.scratch.push(':');
         self.scratch.push_str(identifier);
+        if let Some(ordinal) = duplicate_ordinal {
+            use std::fmt::Write;
+            write!(&mut self.scratch, "#{ordinal}").expect("writing to a String cannot fail");
+        }
+        if let Some(ordinal) = loop_ordinal {
+            use std::fmt::Write;
+            write!(&mut self.scratch, "@{ordinal}").expect("writing to a String cannot fail");
+        }
         if let Some(key) = self.keys.get(self.scratch.as_str()) {
             return Arc::clone(key);
         }
@@ -480,7 +576,8 @@ pub(super) struct FrontendSurfaceComponent {
     dirty_types: ComponentDirtyFlags,
     last_dirty_types: ComponentDirtyFlags,
     last_service_update: Option<String>,
-    cached_service_payloads: HashMap<String, std::sync::Arc<serde_json::Value>>,
+    cached_service_capabilities: HashMap<String, Arc<ServiceCapabilities>>,
+    cached_service_payloads: HashMap<String, CachedServicePayload>,
     focused_key: Option<String>,
     focus_visible_key: Option<String>,
     pointer_down_key: Option<String>,
@@ -536,6 +633,12 @@ pub(super) struct FrontendSurfaceComponent {
     /// Previous frame's focused key — used to detect which node's focus state
     /// changed between frames for targeted interaction restyle.
     previous_focused_key: Option<String>,
+    /// Previous interaction states whose pseudo-classes can change without a
+    /// template rebuild. Together with hover/focus these make targeted
+    /// interaction restyle complete for every supported dynamic pseudo-state.
+    previous_focus_visible_key: Option<String>,
+    previous_active_key: Option<String>,
+    previous_checked_values: HashMap<String, bool>,
     interaction_snapshot_valid: bool,
     hovered_pos: (f32, f32),
     hover_start: Option<std::time::Instant>,
@@ -547,6 +650,7 @@ pub(super) struct FrontendSurfaceComponent {
     last_tooltip_damage: Option<DamageRect>,
     runtimes: Arc<Mutex<HashMap<Arc<str>, EmbeddedFrontendRuntime>>>,
     instance_keys: RefCell<InstanceKeyInterner>,
+    composition_occurrences: RefCell<HashMap<(Arc<str>, usize), usize>>,
     /// The single Lua realm shared by every component instance in this surface.
     /// Each runtime's `ScriptContext` attaches a clone, so sibling/child
     /// components can hold live `bind:this` references to one another.
@@ -662,6 +766,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// first restyle and invalidated whenever the compiled module is replaced
     /// (source reload). Avoids allocating + cloning every StyleRule per paint.
     cached_restyle_rules: Option<Vec<mesh_core_component::style::StyleRule>>,
+    /// Pseudo-state dependencies in the cached aggregate. Interaction diffs
+    /// use this to target only states that can change CSS for this surface.
+    cached_restyle_state_dependencies: StyleStateDependencies,
     /// Cached `StyleRuleIndex` built from `cached_restyle_rules`. Reused
     /// across restyle passes; `is_for()` verifies identity against the rules
     /// slice before each restyle so a rules rebuild forces a rebuild here too.
@@ -764,6 +871,7 @@ impl FrontendSurfaceComponent {
             dirty_types: ComponentDirtyFlags::TREE_REBUILD | ComponentDirtyFlags::SURFACE_CONFIG,
             last_dirty_types: ComponentDirtyFlags::empty(),
             last_service_update: None,
+            cached_service_capabilities: HashMap::with_capacity(service_payload_capacity),
             cached_service_payloads: HashMap::with_capacity(service_payload_capacity),
             focused_key: None,
             focus_visible_key: None,
@@ -796,6 +904,9 @@ impl FrontendSurfaceComponent {
             hovered_tooltip: None,
             previous_hovered_path: Vec::new(),
             previous_focused_key: None,
+            previous_focus_visible_key: None,
+            previous_active_key: None,
+            previous_checked_values: HashMap::new(),
             interaction_snapshot_valid: false,
             hovered_pos: (0.0, 0.0),
             hover_start: None,
@@ -805,6 +916,7 @@ impl FrontendSurfaceComponent {
             last_tooltip_damage: None,
             runtimes: Arc::new(Mutex::new(HashMap::new())),
             instance_keys: RefCell::new(InstanceKeyInterner::default()),
+            composition_occurrences: RefCell::new(HashMap::new()),
             surface_vm: SurfaceVm::new(),
             render_stack: RefCell::new(Vec::new()),
             active_theme: RefCell::new(Arc::new(default_theme())),
@@ -860,6 +972,7 @@ impl FrontendSurfaceComponent {
             visual_damage_scratch: Vec::new(),
             effective_damage_scratch: Vec::new(),
             cached_restyle_rules: None,
+            cached_restyle_state_dependencies: StyleStateDependencies::default(),
             cached_style_rule_index: None,
             style_rules_generation: 0,
             runtime_style_diagnostic_fingerprint: None,
@@ -919,7 +1032,7 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn invalidate_hover_change(&mut self, tooltip_may_change: bool) {
-        if self.module_styles_have_state_rules() {
+        if self.module_styles_have_hover_rules() {
             self.invalidate_interaction_restyle();
         } else if tooltip_may_change {
             self.invalidate_paint();

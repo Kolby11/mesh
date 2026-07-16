@@ -96,6 +96,71 @@ impl ScriptState {
             .take();
     }
 
+    /// Set a host-produced reactive value using its precomputed fingerprint.
+    /// Unchanged values are rejected before cloning large JSON payloads or
+    /// running a recursive equality comparison.
+    pub fn set_with_fingerprint(&mut self, name: &str, value: &Value, fingerprint: u64) {
+        if let Some(proxy) = self.proxies.get(name)
+            && let Some(setter) = &proxy.setter
+        {
+            (setter)(value.clone());
+            return;
+        }
+        if self
+            .host_value_fingerprints
+            .get(name)
+            .is_some_and(|previous| *previous == fingerprint)
+        {
+            return;
+        }
+
+        self.variables
+            .insert(name.to_owned(), Arc::new(value.clone()));
+        self.host_value_fingerprints
+            .insert(name.to_owned(), fingerprint);
+        self.dirty = true;
+        self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
+        self.mutation_generation = self.mutation_generation.wrapping_add(1);
+        self.cached_snapshot
+            .get_mut()
+            .expect("snapshot cache poisoned")
+            .take();
+    }
+
+    /// Lazily construct a host-produced reactive value only when its
+    /// fingerprint differs from the installed value.
+    pub fn set_with_fingerprint_lazy(
+        &mut self,
+        name: &str,
+        fingerprint: u64,
+        value: impl FnOnce() -> Value,
+    ) {
+        if let Some(proxy) = self.proxies.get(name)
+            && let Some(setter) = &proxy.setter
+        {
+            (setter)(value());
+            return;
+        }
+        if self
+            .host_value_fingerprints
+            .get(name)
+            .is_some_and(|previous| *previous == fingerprint)
+        {
+            return;
+        }
+
+        self.variables.insert(name.to_owned(), Arc::new(value()));
+        self.host_value_fingerprints
+            .insert(name.to_owned(), fingerprint);
+        self.dirty = true;
+        self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
+        self.mutation_generation = self.mutation_generation.wrapping_add(1);
+        self.cached_snapshot
+            .get_mut()
+            .expect("snapshot cache poisoned")
+            .take();
+    }
+
     /// Set a host-maintained variable without requesting a component rebuild.
     ///
     /// Used for render-derived values, such as element layout metrics, that

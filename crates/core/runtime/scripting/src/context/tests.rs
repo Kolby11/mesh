@@ -1406,6 +1406,92 @@ fn host_value_fingerprint_skips_unchanged_large_snapshot() {
     assert_eq!(state.get("elements"), Some(changed));
 }
 
+#[test]
+fn reactive_fingerprint_setter_preserves_dirty_semantics() {
+    let mut state = ScriptState::new();
+    let initial = serde_json::json!({ "available": true, "percent": 42 });
+    let changed = serde_json::json!({ "available": true, "percent": 73 });
+
+    state.set_with_fingerprint("audio", &initial, 11);
+    assert!(state.is_dirty());
+    assert_eq!(state.get("audio"), Some(initial.clone()));
+    state.clear_dirty();
+    let generation = state.mutation_generation();
+
+    state.set_with_fingerprint("audio", &initial, 11);
+    assert!(!state.is_dirty());
+    assert_eq!(state.mutation_generation(), generation);
+
+    state.set_with_fingerprint("audio", &changed, 12);
+    assert!(state.is_dirty());
+    assert!(state.mutation_generation() > generation);
+    assert_eq!(state.get("audio"), Some(changed));
+}
+
+#[test]
+fn lazy_reactive_fingerprint_skips_value_construction() {
+    let mut state = ScriptState::new();
+    let constructions = std::cell::Cell::new(0usize);
+
+    state.set_with_fingerprint_lazy("last_service_update", 41, || {
+        constructions.set(constructions.get() + 1);
+        serde_json::json!({ "name": "audio", "source_module": "@mesh/pipewire" })
+    });
+    state.clear_dirty();
+    state.set_with_fingerprint_lazy("last_service_update", 41, || {
+        constructions.set(constructions.get() + 1);
+        serde_json::json!({ "name": "audio", "source_module": "@mesh/pipewire" })
+    });
+
+    assert_eq!(constructions.get(), 1);
+    assert!(!state.is_dirty());
+}
+
+// cargo test -p mesh-core-scripting --release -- reactive_fingerprint_setter_beats_clone_and_deep_compare --ignored --nocapture
+#[test]
+#[ignore = "release-only reactive service-state fingerprint microbenchmark"]
+fn reactive_fingerprint_setter_beats_clone_and_deep_compare() {
+    let payload = serde_json::json!({
+        "available": true,
+        "devices": (0..32)
+            .map(|index| serde_json::json!({
+                "id": format!("sink-{index}"),
+                "name": format!("Audio device {index}"),
+                "volume": 64
+            }))
+            .collect::<Vec<_>>()
+    });
+    let fingerprint = ScriptContext::service_payload_fingerprint(&payload);
+    let iterations = 50_000usize;
+
+    let mut compared = ScriptState::new();
+    compared.set("audio", payload.clone());
+    compared.clear_dirty();
+    let compared_started = std::time::Instant::now();
+    for _ in 0..iterations {
+        compared.set("audio", std::hint::black_box(&payload).clone());
+    }
+    let compared_time = compared_started.elapsed();
+
+    let mut fingerprinted = ScriptState::new();
+    fingerprinted.set_with_fingerprint("audio", &payload, fingerprint);
+    fingerprinted.clear_dirty();
+    let fingerprinted_started = std::time::Instant::now();
+    for _ in 0..iterations {
+        fingerprinted.set_with_fingerprint("audio", std::hint::black_box(&payload), fingerprint);
+    }
+    let fingerprinted_time = fingerprinted_started.elapsed();
+
+    eprintln!(
+        "unchanged reactive payload over {iterations} writes: clone/deep-compare {compared_time:?}; fingerprint {fingerprinted_time:?}; ratio {:.2}x",
+        compared_time.as_secs_f64() / fingerprinted_time.as_secs_f64()
+    );
+    assert_eq!(compared.get("audio"), fingerprinted.get("audio"));
+    assert!(!compared.is_dirty());
+    assert!(!fingerprinted.is_dirty());
+    assert!(fingerprinted_time < compared_time);
+}
+
 // Run with:
 // cargo test -p mesh-core-scripting --release -- host_value_fingerprint_beats_repeated_deep_compare --ignored --nocapture
 #[test]
@@ -2322,12 +2408,11 @@ end
 }
 
 #[test]
-fn shared_vm_reuses_service_payload_conversion_marker() {
+fn shared_vm_reuses_equal_service_payload_conversion_marker() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("service.audio.read"));
     let vm = SurfaceVm::new();
     let payload = serde_json::json!({ "percent": 64, "muted": false });
-    let payload_marker_prefix = format!("{}:", &payload as *const serde_json::Value as usize);
 
     let mut first = ScriptContext::new("@mesh/first", caps.clone()).unwrap();
     first.attach_shared_vm(&vm);
@@ -2345,7 +2430,7 @@ end
         .unwrap();
     first.apply_service_payload("audio", &payload);
     let first_marker = first.service_payload_marker_for_test("audio").unwrap();
-    assert!(first_marker.starts_with(&payload_marker_prefix));
+    assert_eq!(first_marker.len(), std::mem::size_of::<u64>());
 
     let mut second = ScriptContext::new("@mesh/second", caps).unwrap();
     second.attach_shared_vm(&vm);
@@ -2361,7 +2446,7 @@ end
 "#,
         )
         .unwrap();
-    second.apply_service_payload("audio", &payload);
+    second.apply_service_payload("audio", &payload.clone());
     assert_eq!(
         second.service_payload_marker_for_test("audio"),
         Some(first_marker)
@@ -2379,65 +2464,167 @@ end
     );
 }
 
-// Run with:
-// cargo test -p mesh-core-scripting --release -- shared_vm_service_payload_marker_reduces_fanout_cost --ignored --nocapture
+// cargo test -p mesh-core-scripting --release -- binary_service_payload_markers_beat_formatted_strings --ignored --nocapture
 #[test]
-#[ignore]
-fn shared_vm_service_payload_marker_reduces_fanout_cost() {
-    use std::time::Instant;
+#[ignore = "release-only service payload marker microbenchmark"]
+fn binary_service_payload_markers_beat_formatted_strings() {
+    let mut ctx = ScriptContext::new("@mesh/marker-bench", CapabilitySet::new()).unwrap();
+    let iterations = 1_000_000usize;
+    let (formatted, binary, formatted_hits, binary_hits) =
+        ctx.benchmark_service_payload_marker_probes(iterations);
 
+    eprintln!(
+        "service payload marker over {iterations} probes: formatted {formatted:?}; binary {binary:?}; ratio {:.2}x",
+        formatted.as_secs_f64() / binary.as_secs_f64()
+    );
+    assert_eq!(formatted_hits, iterations);
+    assert_eq!(binary_hits, iterations);
+    assert!(binary < formatted);
+}
+
+// cargo test -p mesh-core-scripting --release -- cached_service_payload_marker_table_beats_global_lookup --ignored --nocapture
+#[test]
+#[ignore = "release-only service payload marker-table microbenchmark"]
+fn cached_service_payload_marker_table_beats_global_lookup() {
+    let mut ctx = ScriptContext::new("@mesh/marker-table-bench", CapabilitySet::new()).unwrap();
+    let iterations = 1_000_000usize;
+    let (global, cached, global_hits, cached_hits) =
+        ctx.benchmark_service_payload_table_access(iterations);
+
+    eprintln!(
+        "service payload marker table over {iterations} probes: global {global:?}; cached {cached:?}; ratio {:.2}x",
+        global.as_secs_f64() / cached.as_secs_f64()
+    );
+    assert_eq!(global_hits, iterations);
+    assert_eq!(cached_hits, iterations);
+    assert!(cached < global);
+}
+
+// cargo test -p mesh-core-scripting --release -- shared_service_payload_fingerprint_beats_per_context_hashing --ignored --nocapture
+#[test]
+#[ignore = "release-only service payload fan-out fingerprint microbenchmark"]
+fn shared_service_payload_fingerprint_beats_per_context_hashing() {
     fn make_contexts(count: usize) -> Vec<ScriptContext> {
         let vm = SurfaceVm::new();
-        let mut contexts = Vec::with_capacity(count);
-        for index in 0..count {
-            let mut ctx =
-                ScriptContext::new(format!("@mesh/bench-{index}"), CapabilitySet::new()).unwrap();
-            ctx.attach_shared_vm(&vm);
-            ctx.load_script("function init() end").unwrap();
-            contexts.push(ctx);
-        }
-        contexts
+        (0..count)
+            .map(|index| {
+                let mut ctx = ScriptContext::new(
+                    format!("@mesh/fingerprint-bench-{index}"),
+                    CapabilitySet::new(),
+                )
+                .unwrap();
+                ctx.attach_shared_vm(&vm);
+                ctx
+            })
+            .collect()
     }
 
     let context_count = 8usize;
-    let iterations = 2_000usize;
-    let mut shared_contexts = make_contexts(context_count);
-    let mut distinct_contexts = make_contexts(context_count);
+    let iterations = 5_000usize;
+    let payloads = (0..iterations)
+        .map(|index| {
+            serde_json::json!({
+                "percent": index % 100,
+                "muted": index % 2 == 0,
+                "devices": [
+                    { "id": "sink-0", "name": "Speakers", "volume": index % 100 },
+                    { "id": "sink-1", "name": "Headphones", "volume": (index + 7) % 100 }
+                ]
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut repeated_hash_contexts = make_contexts(context_count);
+    let mut shared_hash_contexts = make_contexts(context_count);
 
-    let mut payloads = Vec::with_capacity(iterations);
-    for index in 0..iterations {
-        payloads.push(serde_json::json!({
-            "percent": index % 100,
-            "muted": index % 2 == 0,
-            "devices": [
-                { "id": "sink-0", "name": "Speakers", "volume": index % 100 },
-                { "id": "sink-1", "name": "Headphones", "volume": (index + 7) % 100 }
-            ]
-        }));
-    }
-
-    let shared_start = Instant::now();
+    let repeated_started = std::time::Instant::now();
     for payload in &payloads {
-        for ctx in &mut shared_contexts {
+        for ctx in &mut repeated_hash_contexts {
             ctx.apply_service_payload("audio", payload);
         }
     }
-    let shared_ns = shared_start.elapsed().as_nanos().max(1);
+    let repeated_time = repeated_started.elapsed();
 
-    let distinct_start = Instant::now();
+    let shared_started = std::time::Instant::now();
     for payload in &payloads {
-        for ctx in &mut distinct_contexts {
-            let distinct_payload = payload.clone();
-            ctx.apply_service_payload("audio", &distinct_payload);
+        let fingerprint = ScriptContext::service_payload_fingerprint(payload);
+        for ctx in &mut shared_hash_contexts {
+            ctx.apply_service_payload_with_fingerprint("audio", payload, fingerprint);
         }
     }
-    let distinct_ns = distinct_start.elapsed().as_nanos();
+    let shared_time = shared_started.elapsed();
 
-    eprintln!("shared_payload_fanout={shared_ns}ns distinct_payload_fanout={distinct_ns}ns");
-    assert!(
-        shared_ns < distinct_ns,
-        "shared payload marker should reduce service fanout cost"
+    eprintln!(
+        "service payload fan-out over {iterations}x{context_count}: per-context hash {repeated_time:?}; shared hash {shared_time:?}; ratio {:.2}x",
+        repeated_time.as_secs_f64() / shared_time.as_secs_f64()
     );
+    assert_eq!(
+        repeated_hash_contexts[0].service_payload_marker_for_test("audio"),
+        shared_hash_contexts[0].service_payload_marker_for_test("audio")
+    );
+    assert!(shared_time < repeated_time);
+}
+
+// cargo test -p mesh-core-scripting --release -- cached_service_payload_fingerprint_beats_runtime_seed_rehashing --ignored --nocapture
+#[test]
+#[ignore = "release-only cached service payload seed microbenchmark"]
+fn cached_service_payload_fingerprint_beats_runtime_seed_rehashing() {
+    fn make_contexts(count: usize) -> Vec<ScriptContext> {
+        let vm = SurfaceVm::new();
+        (0..count)
+            .map(|index| {
+                let mut ctx = ScriptContext::new(
+                    format!("@mesh/cached-seed-bench-{index}"),
+                    CapabilitySet::new(),
+                )
+                .unwrap();
+                ctx.attach_shared_vm(&vm);
+                ctx
+            })
+            .collect()
+    }
+
+    let payload = serde_json::json!({
+        "available": true,
+        "devices": [
+            { "id": "sink-0", "name": "Speakers", "volume": 64 },
+            { "id": "sink-1", "name": "Headphones", "volume": 57 }
+        ]
+    });
+    let fingerprint = ScriptContext::service_payload_fingerprint(&payload);
+    let context_count = 8usize;
+    let iterations = 50_000usize;
+    let mut rehash_contexts = make_contexts(context_count);
+    let mut cached_contexts = make_contexts(context_count);
+
+    let rehash_started = std::time::Instant::now();
+    for _ in 0..iterations {
+        for ctx in &mut rehash_contexts {
+            ctx.apply_service_payload("audio", std::hint::black_box(&payload));
+        }
+    }
+    let rehash_time = rehash_started.elapsed();
+
+    let cached_started = std::time::Instant::now();
+    for _ in 0..iterations {
+        for ctx in &mut cached_contexts {
+            ctx.apply_service_payload_with_fingerprint(
+                "audio",
+                std::hint::black_box(&payload),
+                fingerprint,
+            );
+        }
+    }
+    let cached_time = cached_started.elapsed();
+
+    eprintln!(
+        "cached service seed over {iterations}x{context_count}: rehash {rehash_time:?}; cached fingerprint {cached_time:?}; ratio {:.2}x",
+        rehash_time.as_secs_f64() / cached_time.as_secs_f64()
+    );
+    assert_eq!(
+        rehash_contexts[0].service_payload_marker_for_test("audio"),
+        cached_contexts[0].service_payload_marker_for_test("audio")
+    );
+    assert!(cached_time < rehash_time);
 }
 
 #[test]

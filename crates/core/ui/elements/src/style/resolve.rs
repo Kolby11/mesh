@@ -24,6 +24,7 @@ thread_local! {
 /// The five CSS-inherited fields from a parent node. Used instead of cloning
 /// the full `ComputedStyle` (~60 fields) when passing parent context into
 /// recursive restyle calls.
+#[derive(PartialEq)]
 struct ParentInheritedStyle {
     color: Color,
     font_family: Arc<str>,
@@ -1359,7 +1360,7 @@ impl<'a> StyleResolver<'a> {
         target_ids: &std::collections::HashSet<crate::tree::NodeId>,
     ) {
         self.restyle_subtree_for_ids_with_index_and_inheritance(
-            node, rules, index, context, target_ids, None,
+            node, rules, index, context, target_ids, None, false,
         );
     }
 
@@ -1371,14 +1372,17 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
         target_ids: &std::collections::HashSet<crate::tree::NodeId>,
         parent_style: Option<&ParentInheritedStyle>,
+        inherited_dirty: bool,
     ) {
         let is_target = target_ids.contains(&node.id);
-        // A node should have its style recomputed if it is a direct target, or
-        // if it is a descendant of a restyled node (parent_style.is_some()),
-        // in which case it must inherit updated values from its restyled parent.
-        let should_restyle = is_target || parent_style.is_some();
+        // A node should have its style recomputed if it is a direct target or
+        // an inherited field changed on its parent. Parent context itself is
+        // carried independently so a deep direct target retains inherited
+        // values without forcing clean ancestors through style resolution.
+        let should_restyle = is_target || inherited_dirty;
 
         if should_restyle {
+            let previous_inherited = ParentInheritedStyle::from(&node.computed_style);
             // Recompute this node's style.
             // For target nodes: apply new pseudo-class rules.
             // For descendants of targets: inherit updated values from the
@@ -1391,7 +1395,27 @@ impl<'a> StyleResolver<'a> {
                 inherit_retained_text_style(&mut node.computed_style, parent);
             }
 
-            // Pass this node's style down so children inherit from it.
+            // Descendants only need their rules re-resolved when an inherited
+            // field actually changed. For the common background/border/opacity
+            // interaction change, continue searching for other direct targets
+            // without re-applying every descendant's declarations.
+            let child_parent = ParentInheritedStyle::from(&node.computed_style);
+            let inheritance_changed = previous_inherited != child_parent;
+            for child in &mut node.children {
+                self.restyle_subtree_for_ids_with_index_and_inheritance(
+                    child,
+                    rules,
+                    index,
+                    context,
+                    target_ids,
+                    Some(&child_parent),
+                    inheritance_changed,
+                );
+            }
+        } else {
+            // This node is not a target and is not in an affected subtree.
+            // Don't restyle it, but keep recursing — target nodes may be
+            // deeper in the tree.
             let child_parent = ParentInheritedStyle::from(&node.computed_style);
             for child in &mut node.children {
                 self.restyle_subtree_for_ids_with_index_and_inheritance(
@@ -1401,15 +1425,7 @@ impl<'a> StyleResolver<'a> {
                     context,
                     target_ids,
                     Some(&child_parent),
-                );
-            }
-        } else {
-            // This node is not a target and is not in an affected subtree.
-            // Don't restyle it, but keep recursing — target nodes may be
-            // deeper in the tree.
-            for child in &mut node.children {
-                self.restyle_subtree_for_ids_with_index_and_inheritance(
-                    child, rules, index, context, target_ids, None,
+                    false,
                 );
             }
         }
