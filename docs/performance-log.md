@@ -34,6 +34,121 @@ section noted.
 | 2026-07-15 | Rust recursive detached-Lua-table cache for nested storage reads | I | Regressed 1.221s current to 1.815s cached over 100k reads (0.67x); deep-copy construction outweighed saved conversion/locking |
 | 2026-07-15 | Luau `table.clone` plus recursive array replacement for nested storage reads | I | Regressed 1.237s current to 1.611s cached over 100k reads (0.77x); exact detached-value semantics still require too much table reconstruction |
 
+## 2026-07-16 — completed performance checkpoints archived from `todo.md`
+
+The active backlog was cleaned after the following checkpoints passed their
+correctness suites and release performance gates. This section preserves the
+completion evidence that was removed from `todo.md`.
+
+### L — measurement, live diagnostics, and regression gates
+
+- The canonical profiling catalog now includes idle, pointer move, text
+  update, scroll, icon grid, animation, theme reload, and resize workloads.
+- The native per-surface HUD paints the last 16 frame samples, redraw and dirty
+  counters, retained-entry rebuilds, damage area, full-damage warnings, and
+  HiDPI-aware paint flashing without perturbing text/glyph caches. Its release
+  gate measured 201.31us per observed 640x80 frame, including save/restore.
+- Profiling snapshots expose a deterministic cumulative top-10 attribution
+  list for component-instance builds, matched style rules, and primitive,
+  text, icon, control, and scrollbar paint classes. The profiling-off paint
+  path retains its original clock-free loop; style resolution performs no
+  clock reads and only one profiling option check per node.
+- `wasted_work_avoided` counts memoized component builds and empty interaction
+  restyles. Existing retained-paint metrics report skipped pixels and filtered
+  commands.
+- `mesh.debug.profiling_stream` remains bounded and order-stable, exports
+  Chrome-trace/Perfetto complete events, and deduplicates surface samples from
+  shell roll-ups.
+- CI now runs `tools/check-performance` in Nix against
+  `config/performance-baseline.tsv`. The completion run passed all gates:
+  template dependency lookup 20.263x, unbound handler dispatch 105.844x,
+  sparse versus full handler repaint 2.180x, handler expression reuse 1.371x,
+  and native HUD 201.31us/frame.
+
+### B/E/I — narrow invalidation, restyle, and component reuse
+
+- Handler-driven public-member writes retain the members read by evaluated
+  full-Luau template expressions. Unobserved writes update script state without
+  rebuilding or painting; visible writes enter the retained narrow-script path
+  and preserve sparse display-list damage. Structural changes still promote to
+  the authoritative full-tree fallback. The final 200-update release gate
+  measured zero paints for the unbound member and a 105.844x speedup over the
+  rendered-member path.
+- Template dependency probes moved from a Lua aggregate table to the Rust
+  expression cache. One million probes measured 254.8ms through Lua versus
+  12.57ms through Rust (20.263x).
+- Interaction restyles use selector dependency bits for every supported pseudo
+  state, root-to-leaf hover-path tail diffs, and direct retained node IDs.
+  Background-only targeted changes avoid descendant rule resolution unless an
+  inherited text field changes. A 2,049-node benchmark measured 550.6ms full
+  descendant resolution versus 24.9ms targeted (22.1x); direct deep-node scope
+  conversion measured 94.99us versus 9.93ms walking (104.6x).
+- Component memoization now assigns source-stable occurrence identities to
+  repeated local/import aliases and positional identities to loop instances.
+  Each occurrence owns an independent runtime, handler namespace, generation,
+  and memo entry. Four 200-frame runs over 12 repeated instances measured
+  1.63-1.66x end-to-end with all 2,400 expected hits per run.
+
+### D/N/P/T/U — retained render, layout, popup, and damage work
+
+- Runtime-state annotation and post-order overflow processing were fused into
+  one finalization traversal. A 1,365-node, 2,000-pass release benchmark
+  measured 271.5ms separate versus 219.2ms fused (1.2x).
+- Structural layout reconciles keyed nodes in the per-surface `TaffyTree`,
+  preserving IDs and cached layout across insertion, removal, and reorder. A
+  1,365-node, 200-reorder benchmark measured 148.3ms rebuilding versus 67.5ms
+  retained (2.2x), with identical geometry.
+- Promoted child surfaces own origin-aware retained display lists, consume
+  local damage for clipped clears/replay, expand backdrop-filter damage, and
+  forward the same rectangles to presentation. A 61-node popup measured
+  38.0ms immediate versus 30.9ms retained (1.23x); sparse one-descendant paint
+  measured 17.5ms versus 4.83ms (3.61x). Independent subtree generations also
+  reduced 10,000 unrelated parent-frame cache checks from 4.290ms and 10,000
+  clears to 3.562us and one clear.
+- Fractional-scale logical damage now maps to physical edges with floor/ceil
+  rules shared by painting and Wayland presentation. At 1.5x on 1920x1080,
+  100 release uploads measured 70.4ms full-buffer copying versus 9.5us sparse
+  copying (7,413x), with the physical 37x31 damage rectangle verified at both
+  boundaries.
+
+### B/C/S/U/V — dispatch, contracts, input identity, and startup
+
+- Local, imported, and slot instance paths are interned as shared `Arc<str>`
+  values and reused by runtime lookup, bindings, portals, memo generations, and
+  handler dispatch. Scheduled handlers precompute their full target; 5.12M
+  due-handler preparations measured 351.4ms formatted versus 207.8ms cached
+  (1.7x), while borrowed root dispatch measured about 1.3x faster.
+- Shell service delivery uses a dirty-refresh subscription index rather than
+  acquiring every component mutex. The 20,000-event/256-component workload
+  measured 202.8ms scanning versus 20.3ms indexed (about 10x); a later fresh
+  validation measured 204.4ms versus 15.3ms (13.4x).
+- Contract validation caches compiled field types and event-name maps by
+  resolved contract identity. Validating 100,000 payloads against a 64-event
+  contract measured 23.5ms scanning versus 10.7ms cached (2.2x).
+- Presentation and shell input routing share `Arc<str>` surface IDs. Cloning
+  two million representative IDs measured 10.74ms owned versus 6.57ms shared
+  (1.6x); moving the shared ID through 500,000 split/route events measured
+  8.89ms versus 10.18ms allocating (1.15x).
+- Installed-graph and legacy discovery parse ordered manifests in parallel.
+  The exact 17 shipped manifests measured 2.60-2.86x faster for the manifest
+  stage with identical IDs, paths, sources, and diagnostics. The complete
+  installed-graph startup improved only 1.01-1.02x because validation and graph
+  assembly dominate, which is the recorded whole-system result.
+
+### M — composition correctness and allocation cleanup
+
+- Template `and`/`or` now follows Lua: operators short-circuit, return operand
+  values, only `false` and `nil` are falsy, and `and` binds tighter than `or`.
+- Runtime prop publication borrows unchanged host JSON, local component style
+  cascades and selector indexes are cached, validation/CSS projection borrow
+  source values, and matched-call/slot buffers reserve known capacities.
+  Representative subpath measurements were 3.6x for the unchanged prop gate,
+  1.7x for borrowed nested-value conversion, and complete elimination of
+  repeated 64-rule cascade preparation.
+- Duplicate service-field reads check the observed set by borrowed `&str`
+  before allocating. One million duplicate reads measured 31.5ms
+  allocate-before-insert versus 16.5ms borrowed (1.9x).
+
 ## 2026-07-14 follow-up — five measured hot-path changes
 
 - Retained narrow/layout analysis caps its initial result-set capacity at 256;
