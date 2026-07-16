@@ -17,6 +17,39 @@ fn slot_id(module_id: &str, slot_name: &str) -> String {
 }
 
 impl FrontendSurfaceComponent {
+    fn record_component_instance_build(
+        &self,
+        instance_key: &str,
+        module_id: &str,
+        started: Option<std::time::Instant>,
+    ) {
+        let Some(started) = started else {
+            return;
+        };
+        self.profiling_records.borrow_mut().push(
+            mesh_core_frontend_host::ComponentProfilingRecord {
+                stage: mesh_core_debug::ProfilingStage::TreeBuild,
+                duration: started.elapsed(),
+                module_id: Some(module_id.to_owned()),
+                trigger_kind: Some(format!("attribution:component_instance:{instance_key}")),
+            },
+        );
+    }
+
+    fn record_avoided_component_build(&self) {
+        if !self.profiling_enabled {
+            return;
+        }
+        self.profiling_records.borrow_mut().push(
+            mesh_core_frontend_host::ComponentProfilingRecord {
+                stage: mesh_core_debug::ProfilingStage::TreeBuild,
+                duration: std::time::Duration::ZERO,
+                module_id: Some(self.compiled.manifest.package.id.clone()),
+                trigger_kind: Some("waste:component_build_avoided".to_owned()),
+            },
+        );
+    }
+
     fn next_loop_occurrence(
         &self,
         host_instance_key: &str,
@@ -96,9 +129,11 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                     container_width,
                     container_height,
                 ) {
+                    self.record_avoided_component_build();
                     return Some(node);
                 }
                 let marks_before = self.memo_effect_marks();
+                let build_started = self.profiling_enabled.then(std::time::Instant::now);
                 let bind_this = props.get("__mesh_bind_this").cloned();
                 let props_json = runtime_props_json(props);
                 let mut node = self.render_local_component(
@@ -130,6 +165,11 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                     container_height,
                     marks_before,
                     &node,
+                );
+                self.record_component_instance_build(
+                    &instance_key,
+                    &entry.compiled.manifest.package.id,
+                    build_started,
                 );
                 return Some(node);
             }
@@ -198,9 +238,11 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             container_width,
             container_height,
         ) {
+            self.record_avoided_component_build();
             return Some(node);
         }
         let marks_before = self.memo_effect_marks();
+        let build_started = self.profiling_enabled.then(std::time::Instant::now);
         let props_json = runtime_props_json(props);
         let bind_this = props.get("__mesh_bind_this").cloned();
         let mut node = self.render_embedded_instance(
@@ -244,6 +286,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             marks_before,
             &node,
         );
+        self.record_component_instance_build(&instance_key, &module_id, build_started);
         Some(node)
     }
 
@@ -299,9 +342,11 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 container_width,
                 container_height,
             ) {
+                self.record_avoided_component_build();
                 node
             } else {
                 let marks_before = self.memo_effect_marks();
+                let build_started = self.profiling_enabled.then(std::time::Instant::now);
                 let props_json: HashMap<String, serde_json::Value> = contribution
                     .props
                     .iter()
@@ -321,6 +366,11 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                     container_height,
                     marks_before,
                     &node,
+                );
+                self.record_component_instance_build(
+                    &instance_key,
+                    &contribution.widget_id,
+                    build_started,
                 );
                 node
             };

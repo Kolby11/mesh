@@ -32,30 +32,41 @@ struct SharedInterfaceBindings {
     generation: u64,
 }
 
+#[derive(Debug, Default)]
+struct TemplateExpressionCache {
+    template_member_reads: HashSet<String>,
+    member_reads: HashMap<String, Vec<String>>,
+    values: HashMap<String, Value>,
+    hits: u64,
+}
+
 fn component_source_with_template_expressions(source: &str, expressions: &[String]) -> String {
-    if expressions.is_empty() {
-        return source.to_owned();
-    }
     let mut combined = String::with_capacity(source.len() + expressions.len() * 192);
     combined.push_str(source);
     combined.push_str(
-        "\nlocal __mesh_component_env = getfenv(1)\nlocal __mesh_setfenv = setfenv\nlocal __mesh_setmetatable = setmetatable\n__mesh_template_expressions = {}\n",
+        "\nlocal __mesh_component_env = getfenv(1)\nlocal __mesh_setfenv = setfenv\nlocal __mesh_setmetatable = setmetatable\n__mesh_template_expressions = {}\n__mesh_template_expression_member_reads = {}\n",
     );
     for expression in expressions {
         let key = serde_json::to_string(expression).expect("template expression string");
         combined.push_str("__mesh_template_expressions[");
         combined.push_str(&key);
-        combined.push_str("] = function(__mesh_locals)\n");
+        combined.push_str("] = (function()\n");
+        combined.push_str("  local __mesh_expression_member_reads = {}\n");
+        combined.push_str("  __mesh_template_expression_member_reads[");
+        combined.push_str(&key);
+        combined.push_str("] = __mesh_expression_member_reads\n");
+        combined.push_str("  return function(__mesh_locals)\n");
         combined.push_str("  __mesh_locals = __mesh_locals or {}\n");
         combined.push_str("  local __mesh_expression_env = __mesh_setmetatable({}, { __index = function(_, name)\n");
         combined.push_str("    local value = __mesh_locals[name]\n");
         combined.push_str("    if value ~= nil then return value end\n");
+        combined.push_str("    if __mesh_expression_member_reads[name] == nil then __mesh_expression_member_reads[name] = true end\n");
         combined.push_str("    return __mesh_component_env[name]\n");
         combined.push_str("  end })\n");
         combined.push_str("  __mesh_setfenv(1, __mesh_expression_env)\n");
         combined.push_str("  return (");
         combined.push_str(expression);
-        combined.push_str(")\nend\n");
+        combined.push_str(")\n  end\nend)()\n");
     }
     combined
 }
@@ -194,6 +205,14 @@ pub struct ScriptContext {
     user_global_key_set: HashSet<String>,
     assigned_global_keys: Arc<Mutex<HashSet<String>>>,
     pending_assigned_global_keys: Arc<AtomicBool>,
+    /// Public members whose values changed during the most recent Lua sync.
+    /// Reuses its allocation across handler calls.
+    changed_public_members: Vec<String>,
+    /// Set after the owning component completes its first template evaluation.
+    /// Before that point an empty dependency table means "unknown", not
+    /// "expression-free", so handler writes must remain conservative.
+    template_dependencies_ready: bool,
+    template_expression_cache: Mutex<TemplateExpressionCache>,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
     published_events: Vec<PublishedEvent>,
@@ -353,6 +372,9 @@ impl ScriptContext {
             user_global_key_set: HashSet::new(),
             assigned_global_keys: Arc::new(Mutex::new(HashSet::new())),
             pending_assigned_global_keys: Arc::new(AtomicBool::new(false)),
+            changed_public_members: Vec::new(),
+            template_dependencies_ready: false,
+            template_expression_cache: Mutex::new(TemplateExpressionCache::default()),
             tracked_service_fields: Arc::new(Mutex::new(HashMap::new())),
             subscribed_interface_events: Arc::new(Mutex::new(HashMap::new())),
             published_events: Vec::new(),
@@ -430,6 +452,8 @@ impl ScriptContext {
         self.assigned_global_keys.lock().unwrap().clear();
         self.pending_assigned_global_keys
             .store(false, Ordering::Release);
+        self.template_dependencies_ready = false;
+        *self.template_expression_cache.lock().unwrap() = TemplateExpressionCache::default();
 
         Ok(())
     }
@@ -447,6 +471,8 @@ impl ScriptContext {
         self.assigned_global_keys.lock().unwrap().clear();
         self.pending_assigned_global_keys
             .store(false, Ordering::Release);
+        self.template_dependencies_ready = false;
+        *self.template_expression_cache.lock().unwrap() = TemplateExpressionCache::default();
         self.subscribed_interface_events.lock().unwrap().clear();
         self.vm = None;
     }
@@ -470,6 +496,8 @@ impl ScriptContext {
         self.assigned_global_keys.lock().unwrap().clear();
         self.pending_assigned_global_keys
             .store(false, Ordering::Release);
+        self.template_dependencies_ready = false;
+        *self.template_expression_cache.lock().unwrap() = TemplateExpressionCache::default();
         {
             let mut shared_interface_bindings = self.shared_interface_bindings.lock().unwrap();
             shared_interface_bindings.bindings.clear();
@@ -529,6 +557,26 @@ impl ScriptContext {
         expression: &str,
         locals: &serde_json::Map<String, Value>,
     ) -> Result<(Value, Vec<(String, String)>), ScriptError> {
+        let empty_locals = locals.is_empty();
+        if empty_locals && !self.changed_public_members.is_empty() {
+            let mut cache = self.template_expression_cache.lock().unwrap();
+            let cached = cache
+                .member_reads
+                .get(expression)
+                .zip(cache.values.get(expression))
+                .filter(|(member_reads, _)| {
+                    !member_reads.iter().any(|name| {
+                        self.changed_public_members
+                            .iter()
+                            .any(|changed| changed == name)
+                    })
+                })
+                .map(|(_, value)| value.clone());
+            if let Some(value) = cached {
+                cache.hits = cache.hits.saturating_add(1);
+                return Ok((value, Vec::new()));
+            }
+        }
         let closures: Table = self
             .env()
             .get("__mesh_template_expressions")
@@ -554,8 +602,8 @@ impl ScriptContext {
             }
             expression_reads
         };
-        let value = self.lua().from_value(evaluated?).map_err(lua_err)?;
-        let reads = expression_reads
+        let value: Value = self.lua().from_value(evaluated?).map_err(lua_err)?;
+        let reads: Vec<_> = expression_reads
             .into_iter()
             .flat_map(|(service, fields)| {
                 fields
@@ -563,7 +611,134 @@ impl ScriptContext {
                     .map(move |field| (service.clone(), field))
             })
             .collect();
+        if empty_locals {
+            let member_reads = self
+                .env()
+                .get::<Table>("__mesh_template_expression_member_reads")
+                .ok()
+                .and_then(|all_reads| all_reads.get::<Table>(expression).ok())
+                .map(|expression_reads| {
+                    let mut names: Vec<_> = expression_reads
+                        .pairs::<String, bool>()
+                        .filter_map(|entry| {
+                            entry.ok().and_then(|(name, read)| read.then_some(name))
+                        })
+                        .collect();
+                    names.sort_unstable();
+                    names
+                });
+            if let Some(member_reads) = member_reads {
+                let cacheable = reads.is_empty()
+                    && member_reads
+                        .iter()
+                        .all(|name| self.user_global_key_set.contains(name));
+                let mut cache = self.template_expression_cache.lock().unwrap();
+                cache
+                    .template_member_reads
+                    .extend(member_reads.iter().cloned());
+                cache
+                    .member_reads
+                    .insert(expression.to_string(), member_reads);
+                if cacheable {
+                    cache.values.insert(expression.to_string(), value.clone());
+                } else {
+                    cache.values.remove(expression);
+                }
+            }
+        }
         Ok((value, reads))
+    }
+
+    /// Whether dirty public script members can affect an evaluated template
+    /// expression. An empty dirty-name set is treated conservatively because
+    /// explicit redraw requests and side channels dirty state without a name.
+    pub fn dirty_state_affects_template(&self) -> bool {
+        if !self.state.is_dirty() {
+            return false;
+        }
+        if !self.template_dependencies_ready {
+            return true;
+        }
+        if self.changed_public_members.is_empty() {
+            return true;
+        }
+        let cache = self.template_expression_cache.lock().unwrap();
+        self.changed_public_members
+            .iter()
+            .any(|name| cache.template_member_reads.contains(name))
+    }
+
+    /// Mark the dependency set as authoritative after a complete component
+    /// template evaluation, including the valid empty-set case.
+    pub fn mark_template_dependencies_ready(&mut self) {
+        self.template_dependencies_ready = true;
+        self.changed_public_members.clear();
+    }
+
+    /// Drop memoized pure public-member expression values. Normal script and
+    /// source lifecycle paths do this automatically; the explicit hook is
+    /// useful when an owning runtime broadens an invalidation for reasons not
+    /// represented in public script state.
+    pub fn clear_template_expression_cache(&self) {
+        *self.template_expression_cache.lock().unwrap() = TemplateExpressionCache::default();
+    }
+
+    #[cfg(test)]
+    pub(super) fn template_expression_cache_contains(&self, expression: &str) -> bool {
+        self.template_expression_cache
+            .lock()
+            .unwrap()
+            .values
+            .contains_key(expression)
+    }
+
+    #[cfg(test)]
+    pub(super) fn template_expression_cache_hits(&self) -> u64 {
+        self.template_expression_cache.lock().unwrap().hits
+    }
+
+    #[cfg(test)]
+    pub(crate) fn benchmark_template_dependency_gate(
+        &mut self,
+        iterations: usize,
+    ) -> (std::time::Duration, std::time::Duration, usize, usize) {
+        let _ = self.ensure_initialized();
+        let reads = self.lua().create_table().expect("template member reads");
+        reads.set("label", true).expect("seed Lua dependency");
+        self.env()
+            .set("__mesh_template_member_reads_benchmark", reads)
+            .expect("install Lua dependency table");
+        self.template_expression_cache
+            .lock()
+            .unwrap()
+            .template_member_reads
+            .insert("label".to_string());
+
+        let changed = std::hint::black_box("telemetry");
+        let lua_started = std::time::Instant::now();
+        let mut lua_hits = 0usize;
+        for _ in 0..iterations {
+            let reads = self
+                .env()
+                .get::<Table>("__mesh_template_member_reads_benchmark")
+                .expect("resolve Lua dependency table");
+            lua_hits += usize::from(reads.get::<bool>(changed).unwrap_or(false));
+        }
+        let lua_time = lua_started.elapsed();
+
+        let rust_started = std::time::Instant::now();
+        let mut rust_hits = 0usize;
+        for _ in 0..iterations {
+            rust_hits += usize::from(
+                self.template_expression_cache
+                    .lock()
+                    .unwrap()
+                    .template_member_reads
+                    .contains(changed),
+            );
+        }
+        let rust_time = rust_started.elapsed();
+        (lua_time, rust_time, lua_hits, rust_hits)
     }
 
     /// Copy the latest service payload into the Lua runtime for proxy reads.
@@ -1936,6 +2111,7 @@ impl ScriptContext {
     /// synced to the template. Local variables are never synced.
     pub(super) fn sync_state_from_lua(&mut self) {
         let _span = tracing::debug_span!("sync_state_from_lua", module = %self.module_id).entered();
+        self.changed_public_members.clear();
         if self.user_global_keys.is_empty() {
             // Full scan: discover all user globals (runs once per load_script).
             let user_globals: Vec<(String, LuaValue)> = self
@@ -1972,6 +2148,7 @@ impl ScriptContext {
                         }
                         if let Ok(value) = self.lua().from_value::<Value>(lua_value) {
                             self.state.set(key.clone(), value);
+                            self.changed_public_members.push(key.clone());
                         }
                     }
                 }
@@ -1997,7 +2174,8 @@ impl ScriptContext {
                         && !matches!(lua_value, LuaValue::Nil | LuaValue::Function(_))
                         && let Ok(value) = self.lua().from_value::<Value>(lua_value)
                     {
-                        self.state.set(name, value);
+                        self.state.set(name.clone(), value);
+                        self.changed_public_members.push(name);
                     }
                 }
             }

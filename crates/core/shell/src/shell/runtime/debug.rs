@@ -1393,6 +1393,17 @@ fn profiling_scope_snapshot_json(
 ) -> serde_json::Value {
     serde_json::json!({
         "stages": snapshot.stages.iter().map(profiling_stage_summary_json).collect::<Vec<_>>(),
+        "attribution": snapshot.attribution.iter().map(|entry| serde_json::json!({
+            "stage": entry.stage.label(),
+            "key": entry.key,
+            "sample_count": entry.sample_count,
+            "total_micros": entry.total_micros,
+            "max_micros": entry.max_micros,
+        })).collect::<Vec<_>>(),
+        "wasted_work_avoided": snapshot.wasted_work_avoided.iter().map(|entry| serde_json::json!({
+            "kind": entry.kind,
+            "count": entry.count,
+        })).collect::<Vec<_>>(),
         "redraw_count": snapshot.redraw_count,
         "total_surface_render_time_micros": snapshot.total_surface_render_time_micros,
     })
@@ -1405,6 +1416,17 @@ fn profiling_surface_snapshot_json(
         "surface_id": snapshot.surface_id,
         "module_id": snapshot.module_id,
         "stages": snapshot.stages.iter().map(profiling_stage_summary_json).collect::<Vec<_>>(),
+        "attribution": snapshot.attribution.iter().map(|entry| serde_json::json!({
+            "stage": entry.stage.label(),
+            "key": entry.key,
+            "sample_count": entry.sample_count,
+            "total_micros": entry.total_micros,
+            "max_micros": entry.max_micros,
+        })).collect::<Vec<_>>(),
+        "wasted_work_avoided": snapshot.wasted_work_avoided.iter().map(|entry| serde_json::json!({
+            "kind": entry.kind,
+            "count": entry.count,
+        })).collect::<Vec<_>>(),
         "redraw_count": snapshot.redraw_count,
         "total_surface_render_time_micros": snapshot.total_surface_render_time_micros,
         "invalidation": snapshot.invalidation.as_ref().map(profiling_invalidation_json),

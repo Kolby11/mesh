@@ -1021,6 +1021,47 @@ box.card { padding: 3px; }
     }
 
     #[test]
+    fn profiled_restyle_matches_normal_style_and_attributes_matching_rules() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = parse_fixture_style(
+            r#"
+<style>
+.tracked { background-color: #123456; }
+.unmatched { color: #ff0000; }
+</style>
+"#,
+        );
+        let mut normal = crate::tree::WidgetNode::new("box");
+        normal.attributes.insert("class".into(), "tracked".into());
+        let mut profiled = normal.clone();
+        resolver.restyle_subtree_cached(&mut normal, &rules, StyleContext::default(), &mut None);
+        let mut attribution = StyleRuleAttribution::new(&rules);
+        resolver.restyle_subtree_cached_profiled(
+            &mut profiled,
+            &rules,
+            StyleContext::default(),
+            &mut None,
+            &mut attribution,
+        );
+
+        assert_eq!(
+            profiled.computed_style.background_color,
+            normal.computed_style.background_color
+        );
+        assert_eq!(profiled.computed_style.color, normal.computed_style.color);
+        assert_eq!(profiled.computed_style.width, normal.computed_style.width);
+        assert_eq!(
+            profiled.computed_style.font_family,
+            normal.computed_style.font_family
+        );
+        let entries: Vec<_> = attribution.entries().collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].selector, ".tracked");
+        assert_eq!(entries[0].match_count, 1);
+    }
+
+    #[test]
     fn targeted_restyle_propagates_changed_inherited_fields() {
         let theme = mesh_core_theme::default_theme();
         let resolver = StyleResolver::new(&theme);

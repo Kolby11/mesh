@@ -233,6 +233,46 @@ pub struct StyleRuleIndex {
     selector_diagnostics: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StyleRuleAttribution {
+    entries: Vec<StyleRuleAttributionEntry>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StyleRuleAttributionEntry {
+    pub selector: String,
+    pub match_count: u64,
+    pub elapsed_micros: u64,
+}
+
+impl StyleRuleAttribution {
+    pub fn new(rules: &[StyleRule]) -> Self {
+        Self {
+            entries: rules
+                .iter()
+                .map(|rule| StyleRuleAttributionEntry {
+                    selector: selector_to_diagnostic_string(&rule.selector),
+                    ..StyleRuleAttributionEntry::default()
+                })
+                .collect(),
+        }
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = &StyleRuleAttributionEntry> {
+        self.entries.iter().filter(|entry| entry.match_count > 0)
+    }
+
+    fn record(&mut self, rule_idx: usize, elapsed: std::time::Duration) {
+        let Some(entry) = self.entries.get_mut(rule_idx) else {
+            return;
+        };
+        entry.match_count = entry.match_count.saturating_add(1);
+        entry.elapsed_micros = entry
+            .elapsed_micros
+            .saturating_add(elapsed.as_micros().min(u128::from(u64::MAX)) as u64);
+    }
+}
+
 impl StyleRuleIndex {
     pub fn new(rules: &[StyleRule]) -> Self {
         let mut index = Self {
@@ -1067,7 +1107,7 @@ impl<'a> StyleResolver<'a> {
         attrs: &StyleNodeAttrs,
         context: StyleContext,
     ) -> ComputedStyle {
-        self.resolve_node_style_with_attrs_indexed_inner(rules, index, attrs, context, None)
+        self.resolve_node_style_with_attrs_indexed_inner(rules, index, attrs, context, None, None)
     }
 
     fn cached_theme_component_defaults_no_diagnostics(
@@ -1158,6 +1198,7 @@ impl<'a> StyleResolver<'a> {
             attrs,
             context,
             Some(&mut diagnostics),
+            None,
         );
         (style, diagnostics)
     }
@@ -1169,6 +1210,7 @@ impl<'a> StyleResolver<'a> {
         attrs: &StyleNodeAttrs,
         context: StyleContext,
         mut diagnostics: Option<&mut Vec<StyleDiagnostic>>,
+        mut attribution: Option<&mut StyleRuleAttribution>,
     ) -> ComputedStyle {
         let (mut style, default_variables) = if let Some(diagnostics) = diagnostics.as_mut() {
             let (style, variables, default_diagnostics) =
@@ -1184,25 +1226,51 @@ impl<'a> StyleResolver<'a> {
             scratch_variables.clear();
             scratch_variables.extend(default_variables);
 
-            index.for_each_candidate_rule_index(attrs, |rule_idx| {
-                let Some(rule) = rules.get(rule_idx) else {
-                    return;
-                };
-                if rule_matches_attrs(rule, attrs, context) {
-                    let selector = index.selector_diagnostic(rule_idx);
-                    for decl in index.no_diagnostics_declarations(rule_idx) {
-                        let diagnostic_sink = diagnostics
-                            .as_mut()
-                            .map(|diagnostics| (selector, &mut **diagnostics));
-                        self.apply_indexed_declaration(
-                            &mut style,
-                            decl,
-                            diagnostic_sink,
-                            &mut scratch_variables,
-                        );
+            if let Some(attribution) = attribution.as_deref_mut() {
+                index.for_each_candidate_rule_index(attrs, |rule_idx| {
+                    let Some(rule) = rules.get(rule_idx) else {
+                        return;
+                    };
+                    let started = std::time::Instant::now();
+                    if rule_matches_attrs(rule, attrs, context) {
+                        let selector = index.selector_diagnostic(rule_idx);
+                        for decl in index.no_diagnostics_declarations(rule_idx) {
+                            let diagnostic_sink = diagnostics
+                                .as_mut()
+                                .map(|diagnostics| (selector, &mut **diagnostics));
+                            self.apply_indexed_declaration(
+                                &mut style,
+                                decl,
+                                diagnostic_sink,
+                                &mut scratch_variables,
+                            );
+                        }
+                        attribution.record(rule_idx, started.elapsed());
                     }
-                }
-            });
+                });
+            } else {
+                // Keep the production path clock-free and free of per-rule
+                // profiling branches. The single option branch is per node.
+                index.for_each_candidate_rule_index(attrs, |rule_idx| {
+                    let Some(rule) = rules.get(rule_idx) else {
+                        return;
+                    };
+                    if rule_matches_attrs(rule, attrs, context) {
+                        let selector = index.selector_diagnostic(rule_idx);
+                        for decl in index.no_diagnostics_declarations(rule_idx) {
+                            let diagnostic_sink = diagnostics
+                                .as_mut()
+                                .map(|diagnostics| (selector, &mut **diagnostics));
+                            self.apply_indexed_declaration(
+                                &mut style,
+                                decl,
+                                diagnostic_sink,
+                                &mut scratch_variables,
+                            );
+                        }
+                    }
+                });
+            }
         });
 
         style
@@ -1291,6 +1359,18 @@ impl<'a> StyleResolver<'a> {
         self.restyle_subtree_with_index(node, rules, index, context, None);
     }
 
+    pub fn restyle_subtree_cached_profiled(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        rules: &[StyleRule],
+        context: StyleContext,
+        index_cache: &mut Option<StyleRuleIndex>,
+        attribution: &mut StyleRuleAttribution,
+    ) {
+        let index = ensure_index(rules, index_cache);
+        self.restyle_subtree_with_index_profiled(node, rules, index, context, None, attribution);
+    }
+
     /// Re-resolves the computed style of every child of `node` (but not `node`
     /// itself), reusing a caller-provided index.
     pub fn restyle_subtree_children_cached(
@@ -1304,6 +1384,28 @@ impl<'a> StyleResolver<'a> {
         let parent = ParentInheritedStyle::from(&node.computed_style);
         for child in &mut node.children {
             self.restyle_subtree_with_index(child, rules, index, context, Some(&parent));
+        }
+    }
+
+    pub fn restyle_subtree_children_cached_profiled(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        rules: &[StyleRule],
+        context: StyleContext,
+        index_cache: &mut Option<StyleRuleIndex>,
+        attribution: &mut StyleRuleAttribution,
+    ) {
+        let index = ensure_index(rules, index_cache);
+        let parent = ParentInheritedStyle::from(&node.computed_style);
+        for child in &mut node.children {
+            self.restyle_subtree_with_index_profiled(
+                child,
+                rules,
+                index,
+                context,
+                Some(&parent),
+                attribution,
+            );
         }
     }
 
@@ -1328,6 +1430,40 @@ impl<'a> StyleResolver<'a> {
         }
     }
 
+    fn restyle_subtree_with_index_profiled(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
+        context: StyleContext,
+        parent_style: Option<&ParentInheritedStyle>,
+        attribution: &mut StyleRuleAttribution,
+    ) {
+        let attrs = StyleNodeAttrs::from_node(node);
+        node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
+            rules,
+            index,
+            &attrs,
+            context,
+            None,
+            Some(attribution),
+        );
+        if let Some(parent) = parent_style {
+            inherit_retained_text_style(&mut node.computed_style, parent);
+        }
+        let parent = ParentInheritedStyle::from(&node.computed_style);
+        for child in &mut node.children {
+            self.restyle_subtree_with_index_profiled(
+                child,
+                rules,
+                index,
+                context,
+                Some(&parent),
+                attribution,
+            );
+        }
+    }
+
     pub fn restyle_subtree_for_ids(
         &self,
         node: &mut crate::tree::WidgetNode,
@@ -1349,6 +1485,28 @@ impl<'a> StyleResolver<'a> {
     ) {
         let idx = ensure_index(rules, index);
         self.restyle_subtree_for_ids_with_index(node, rules, idx, context, target_ids);
+    }
+
+    pub fn restyle_subtree_for_ids_cached_profiled(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        rules: &[StyleRule],
+        context: StyleContext,
+        index: &mut Option<StyleRuleIndex>,
+        target_ids: &std::collections::HashSet<crate::tree::NodeId>,
+        attribution: &mut StyleRuleAttribution,
+    ) {
+        let idx = ensure_index(rules, index);
+        self.restyle_subtree_for_ids_with_index_and_inheritance_profiled(
+            node,
+            rules,
+            idx,
+            context,
+            target_ids,
+            None,
+            false,
+            attribution,
+        );
     }
 
     fn restyle_subtree_for_ids_with_index(
@@ -1426,6 +1584,64 @@ impl<'a> StyleResolver<'a> {
                     target_ids,
                     Some(&child_parent),
                     false,
+                );
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn restyle_subtree_for_ids_with_index_and_inheritance_profiled(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
+        context: StyleContext,
+        target_ids: &std::collections::HashSet<crate::tree::NodeId>,
+        parent_style: Option<&ParentInheritedStyle>,
+        inherited_dirty: bool,
+        attribution: &mut StyleRuleAttribution,
+    ) {
+        let should_restyle = target_ids.contains(&node.id) || inherited_dirty;
+        if should_restyle {
+            let previous_inherited = ParentInheritedStyle::from(&node.computed_style);
+            let attrs = StyleNodeAttrs::from_node(node);
+            node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
+                rules,
+                index,
+                &attrs,
+                context,
+                None,
+                Some(attribution),
+            );
+            if let Some(parent) = parent_style {
+                inherit_retained_text_style(&mut node.computed_style, parent);
+            }
+            let child_parent = ParentInheritedStyle::from(&node.computed_style);
+            let inheritance_changed = previous_inherited != child_parent;
+            for child in &mut node.children {
+                self.restyle_subtree_for_ids_with_index_and_inheritance_profiled(
+                    child,
+                    rules,
+                    index,
+                    context,
+                    target_ids,
+                    Some(&child_parent),
+                    inheritance_changed,
+                    attribution,
+                );
+            }
+        } else {
+            let child_parent = ParentInheritedStyle::from(&node.computed_style);
+            for child in &mut node.children {
+                self.restyle_subtree_for_ids_with_index_and_inheritance_profiled(
+                    child,
+                    rules,
+                    index,
+                    context,
+                    target_ids,
+                    Some(&child_parent),
+                    false,
+                    attribution,
                 );
             }
         }

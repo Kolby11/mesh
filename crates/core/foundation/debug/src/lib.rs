@@ -180,6 +180,11 @@ pub struct ProfilingSnapshot {
 #[derive(Debug, Clone, Default)]
 pub struct ProfilingScopeSnapshot {
     pub stages: Vec<ProfilingStageSummary>,
+    /// Top cumulative attributed costs, sorted by total time descending.
+    /// Entries are bounded by core so IPC snapshots do not grow with uptime.
+    pub attribution: Vec<ProfilingAttributionSummary>,
+    /// Cumulative counts of work the runtime recognized and avoided.
+    pub wasted_work_avoided: Vec<ProfilingWasteSummary>,
     pub redraw_count: u64,
     pub total_surface_render_time_micros: u64,
 }
@@ -189,9 +194,17 @@ pub struct ProfilingSurfaceSnapshot {
     pub surface_id: String,
     pub module_id: Option<String>,
     pub stages: Vec<ProfilingStageSummary>,
+    pub attribution: Vec<ProfilingAttributionSummary>,
+    pub wasted_work_avoided: Vec<ProfilingWasteSummary>,
     pub redraw_count: u64,
     pub total_surface_render_time_micros: u64,
     pub invalidation: Option<ProfilingInvalidationSnapshot>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProfilingWasteSummary {
+    pub kind: String,
+    pub count: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -334,6 +347,15 @@ pub struct ProfilingStageSummary {
     pub total_micros: u64,
     pub max_micros: u64,
     pub recent_samples: Vec<ProfilingSample>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProfilingAttributionSummary {
+    pub stage: ProfilingStage,
+    pub key: String,
+    pub sample_count: u64,
+    pub total_micros: u64,
+    pub max_micros: u64,
 }
 
 #[derive(Debug, Clone, Default)]

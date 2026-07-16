@@ -266,10 +266,10 @@ bitflags::bitflags! {
         const ACCESSIBILITY = 1 << 6;
         const METRICS = 1 << 7;
         const SURFACE_CONFIG = 1 << 8;
-        /// Leaf-only script change; bypasses TREE_REBUILD.
-        /// Does NOT trigger a full Luau re-evaluation of the tree structure;
-        /// instead, `narrow_script_update()` diffs the freshly rebuilt tree
-        /// against the retained tree and marks only changed leaf nodes dirty.
+        /// Script change eligible for retained diffing and damage tracking.
+        /// The template is still evaluated so structural changes remain safe,
+        /// but the authoritative retained diff avoids forcing a full-surface
+        /// repaint for ordinary bound-value changes.
         const SCRIPT_NARROW = 1 << 9;
     }
 }
@@ -746,7 +746,7 @@ pub(super) struct FrontendSurfaceComponent {
     narrow_path_active: bool,
     affected_node_count: u64,
     profiling_enabled: bool,
-    profiling_records: Vec<ComponentProfilingRecord>,
+    profiling_records: RefCell<Vec<ComponentProfilingRecord>>,
     invalidation_snapshot: Option<mesh_core_debug::ProfilingInvalidationSnapshot>,
     focused_proof_snapshot: Option<mesh_core_render::FocusedProofSnapshot>,
     last_present_damage_rects: Vec<DamageRect>,
@@ -960,7 +960,7 @@ impl FrontendSurfaceComponent {
             narrow_path_active: false,
             affected_node_count: 0,
             profiling_enabled: false,
-            profiling_records: Vec::new(),
+            profiling_records: RefCell::new(Vec::new()),
             invalidation_snapshot: None,
             focused_proof_snapshot: None,
             last_present_damage_rects: Vec::new(),
@@ -1016,14 +1016,11 @@ impl FrontendSurfaceComponent {
         self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
     }
 
-    /// Narrow script invalidation — signals that only leaf-level values may
-    /// have changed (no structural changes: no added/removed nodes, no
-    /// conditional-branch flips). The paint path will call `narrow_script_update()`,
-    /// which rebuilds the tree, diffs against the prior retained snapshot, and
-    /// falls back to a full TREE_REBUILD if any structural change is detected or
-    /// if more than 50% of nodes are affected.
+    /// Narrow script invalidation. The template is evaluated normally, then
+    /// the retained tree and display list determine whether the change is
+    /// sparse or structural. Unlike a forced script rebuild, this deliberately
+    /// preserves the existing pixel buffer so sparse damage can be repainted.
     pub(super) fn invalidate_script_state_narrow(&mut self) {
-        self.surface_pixels_invalid = true;
         self.invalidate(ComponentDirtyFlags::SCRIPT_NARROW);
     }
 

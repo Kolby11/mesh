@@ -14,7 +14,7 @@ use mesh_core_elements::NodeId;
 use crate::display_list::{DisplayPaintCommand, SelectedDisplayListPaint};
 
 pub use buffer::{PixelBuffer, PixelCanvasSession};
-pub use debug_overlay::DebugOverlay;
+pub use debug_overlay::{DebugOverlay, DebugOverlayRestore, DebugPerfHudSnapshot};
 pub use glyph::GlyphAxes;
 pub use painter::{
     FrontendRenderEngine, PainterBackendSnapshot, PainterCapabilitySnapshot,
@@ -23,9 +23,79 @@ pub use painter::{
 pub use profiling::RasterMetrics;
 pub use text::{SharedTextMeasurer, TextCacheMetrics, TextRenderer};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PaintCommandClass {
+    Primitive,
+    Text,
+    Icon,
+    Control,
+    Scrollbar,
+}
+
+impl PaintCommandClass {
+    pub const ALL: [Self; 5] = [
+        Self::Primitive,
+        Self::Text,
+        Self::Icon,
+        Self::Control,
+        Self::Scrollbar,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Primitive => "primitive",
+            Self::Text => "text",
+            Self::Icon => "icon",
+            Self::Control => "control",
+            Self::Scrollbar => "scrollbar",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PaintCommandClassMetrics {
+    pub command_count: u64,
+    pub elapsed_micros: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PaintCommandAttribution {
+    classes: [PaintCommandClassMetrics; 5],
+}
+
+impl PaintCommandAttribution {
+    pub fn get(&self, class: PaintCommandClass) -> PaintCommandClassMetrics {
+        self.classes[class as usize]
+    }
+
+    pub(crate) fn record(
+        &mut self,
+        class: PaintCommandClass,
+        command_count: u64,
+        elapsed: std::time::Duration,
+    ) {
+        let metrics = &mut self.classes[class as usize];
+        metrics.command_count = metrics.command_count.saturating_add(command_count);
+        metrics.elapsed_micros = metrics
+            .elapsed_micros
+            .saturating_add(elapsed.as_micros().min(u128::from(u64::MAX)) as u64);
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        for class in PaintCommandClass::ALL {
+            let current = &mut self.classes[class as usize];
+            let next = other.classes[class as usize];
+            current.command_count = current.command_count.saturating_add(next.command_count);
+            current.elapsed_micros = current.elapsed_micros.saturating_add(next.elapsed_micros);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PaintProfilingMetrics {
     pub text: TextCacheMetrics,
+    pub command_attribution: PaintCommandAttribution,
     pub traversal_micros: u64,
     pub icon_image_raster_micros: u64,
     pub glyph_cache_hits: u64,
@@ -253,6 +323,7 @@ pub fn paint_display_list_for_module_with_profiling_metrics(
         let raster = profiling::raster_metrics();
         PaintProfilingMetrics {
             text: engine.text_cache_metrics(),
+            command_attribution: PaintCommandAttribution::default(),
             traversal_micros,
             icon_image_raster_micros: raster.icon_image_raster_micros,
             glyph_cache_hits: raster.glyph_cache_hits,
@@ -285,19 +356,54 @@ pub fn paint_selected_display_list_for_module_with_profiling_metrics(
     tooltip: Option<(&str, f32, f32)>,
     module_id: Option<&str>,
 ) -> PaintProfilingMetrics {
+    paint_selected_display_list_for_module_with_profiling_metrics_and_attribution(
+        commands,
+        buffer,
+        scale,
+        clip,
+        paint_nodes,
+        tooltip,
+        module_id,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn paint_selected_display_list_for_module_with_profiling_metrics_and_attribution(
+    commands: &SelectedDisplayListPaint<'_>,
+    buffer: &mut PixelBuffer,
+    scale: f32,
+    clip: Option<(u32, u32, u32, u32)>,
+    paint_nodes: Option<&HashSet<NodeId>>,
+    tooltip: Option<(&str, f32, f32)>,
+    module_id: Option<&str>,
+    collect_command_attribution: bool,
+) -> PaintProfilingMetrics {
     FRONTEND_RENDERER.with(|engine| {
         let engine = engine.borrow();
         profiling::reset_raster_metrics();
         engine.reset_text_cache_metrics();
         let traversal_started = std::time::Instant::now();
-        engine.render_selected_display_list_for_module(
-            commands,
-            buffer,
-            scale,
-            clip,
-            paint_nodes,
-            module_id,
-        );
+        let command_attribution = if collect_command_attribution {
+            engine.render_selected_display_list_for_module_with_attribution(
+                commands,
+                buffer,
+                scale,
+                clip,
+                paint_nodes,
+                module_id,
+            )
+        } else {
+            engine.render_selected_display_list_for_module(
+                commands,
+                buffer,
+                scale,
+                clip,
+                paint_nodes,
+                module_id,
+            );
+            PaintCommandAttribution::default()
+        };
         let traversal_micros = traversal_started
             .elapsed()
             .as_micros()
@@ -308,6 +414,7 @@ pub fn paint_selected_display_list_for_module_with_profiling_metrics(
         let raster = profiling::raster_metrics();
         PaintProfilingMetrics {
             text: engine.text_cache_metrics(),
+            command_attribution,
             traversal_micros,
             icon_image_raster_micros: raster.icon_image_raster_micros,
             glyph_cache_hits: raster.glyph_cache_hits,

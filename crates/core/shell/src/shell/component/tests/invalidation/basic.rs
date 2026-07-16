@@ -81,6 +81,336 @@ fn service_update_marks_component_dirty_only_when_tracked_fields_change() {
 }
 
 #[test]
+fn handler_write_to_unbound_public_member_skips_component_rebuild() {
+    let mut component = test_frontend_component(
+        r#"
+<script lang="luau">
+label = "ready"
+telemetry = 0
+function recordTelemetry() telemetry = telemetry + 1 end
+function changeLabel() label = "done" end
+</script>
+<template>
+  <button onclick={recordTelemetry}>{label}</button>
+</template>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(200, 60);
+    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+    let dirty_types_before = component.dirty_types;
+
+    component
+        .call_namespaced_handler("recordTelemetry", &[])
+        .unwrap();
+    assert_eq!(
+        component
+            .runtimes
+            .lock()
+            .unwrap()
+            .get(component.id())
+            .unwrap()
+            .script_ctx
+            .state()
+            .get("telemetry"),
+        Some(serde_json::json!(1))
+    );
+    assert!(
+        !component.dirty,
+        "unbound write must not schedule render work"
+    );
+    assert_eq!(component.dirty_types, dirty_types_before);
+
+    component
+        .call_namespaced_handler("changeLabel", &[])
+        .unwrap();
+    assert!(
+        component.dirty,
+        "bound write must still rebuild the template"
+    );
+    assert!(
+        component
+            .dirty_types
+            .contains(ComponentDirtyFlags::SCRIPT_NARROW)
+    );
+    assert!(!component.dirty_types.contains(ComponentDirtyFlags::SCRIPT));
+}
+
+#[test]
+fn bound_handler_write_uses_sparse_pixel_damage() {
+    let mut component = test_frontend_component(
+        r#"
+<script lang="luau">
+label = "before"
+function update() label = "after" end
+</script>
+<template>
+  <column>
+    <text>{label}</text>
+    <text>unchanged row one</text>
+    <text>unchanged row two</text>
+    <text>unchanged row three</text>
+  </column>
+</template>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(640, 160);
+    component.paint(&theme, 640, 160, &mut buffer, 1.0).unwrap();
+    while component.wants_render() {
+        component.paint(&theme, 640, 160, &mut buffer, 1.0).unwrap();
+    }
+
+    component.call_namespaced_handler("update", &[]).unwrap();
+    component.paint(&theme, 640, 160, &mut buffer, 1.0).unwrap();
+    let snapshot = component
+        .take_invalidation_snapshot()
+        .expect("handler paint records invalidation");
+
+    assert_eq!(snapshot.component.script_narrow, 1);
+    assert!(!snapshot.full_rebuild);
+    assert!(!snapshot.paint.full_surface_damage);
+    assert!(snapshot.paint.damage_area < snapshot.paint.surface_area);
+    assert!(snapshot.paint.skipped_paint_pixels > 0);
+}
+
+#[test]
+fn structural_handler_write_on_narrow_path_matches_full_rebuild_pixels() {
+    let source = r#"
+<script lang="luau">
+expanded = false
+function toggle() expanded = not expanded end
+</script>
+<template>
+  <column>
+    <text>always</text>
+    {#if expanded}<text>conditional</text>{/if}
+  </column>
+</template>
+"#;
+    let theme = default_theme();
+    let mut narrow = test_frontend_component(source);
+    let mut full = test_frontend_component(source);
+    let mut narrow_buffer = PixelBuffer::new(320, 100);
+    let mut full_buffer = PixelBuffer::new(320, 100);
+    narrow
+        .paint(&theme, 320, 100, &mut narrow_buffer, 1.0)
+        .unwrap();
+    full.paint(&theme, 320, 100, &mut full_buffer, 1.0).unwrap();
+
+    narrow.call_namespaced_handler("toggle", &[]).unwrap();
+    full.call_namespaced_handler("toggle", &[]).unwrap();
+    full.invalidate_script_state();
+    narrow
+        .paint(&theme, 320, 100, &mut narrow_buffer, 1.0)
+        .unwrap();
+    full.paint(&theme, 320, 100, &mut full_buffer, 1.0).unwrap();
+
+    assert_eq!(narrow_buffer.data, full_buffer.data);
+    let snapshot = narrow
+        .take_invalidation_snapshot()
+        .expect("structural handler paint records invalidation");
+    assert_eq!(snapshot.component.script_narrow, 1);
+    assert!(snapshot.retained.inserted > 0 || snapshot.retained.removed > 0);
+}
+
+// cargo test -p mesh-core-shell --release -- narrow_handler_damage_beats_forced_full_repaint --ignored --nocapture
+#[test]
+#[ignore = "release-only end-to-end handler damage benchmark"]
+fn narrow_handler_damage_beats_forced_full_repaint() {
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    let declarations = (0..49)
+        .map(|index| format!("label{index} = 'row {index:02}'\n"))
+        .collect::<String>();
+    let expression_rows = (0..49)
+        .map(|index| format!("<text>{{label{index}}}</text>"))
+        .collect::<String>();
+    let source = format!(
+        r#"
+<script lang="luau">
+{declarations}
+function update() label0 = label0 == "row 00" and "changed" or "row 00" end
+</script>
+<template><column>{expression_rows}</column></template>
+"#
+    );
+    let theme = default_theme();
+    let mut narrow = test_frontend_component(&source);
+    let mut uncached_sparse = test_frontend_component(&source);
+    let mut full = test_frontend_component(&source);
+    let mut narrow_buffer = PixelBuffer::new(800, 1000);
+    let mut uncached_sparse_buffer = PixelBuffer::new(800, 1000);
+    let mut full_buffer = PixelBuffer::new(800, 1000);
+    narrow
+        .paint(&theme, 800, 1000, &mut narrow_buffer, 1.0)
+        .unwrap();
+    uncached_sparse
+        .paint(&theme, 800, 1000, &mut uncached_sparse_buffer, 1.0)
+        .unwrap();
+    full.paint(&theme, 800, 1000, &mut full_buffer, 1.0)
+        .unwrap();
+
+    let iterations = 200;
+    let started = Instant::now();
+    for _ in 0..iterations {
+        narrow.call_namespaced_handler("update", &[]).unwrap();
+        narrow
+            .paint(&theme, 800, 1000, &mut narrow_buffer, 1.0)
+            .unwrap();
+        black_box(&narrow_buffer);
+    }
+    let narrow_time = started.elapsed();
+
+    let uncached_sparse_id = uncached_sparse.id().to_string();
+    let started = Instant::now();
+    for _ in 0..iterations {
+        uncached_sparse
+            .call_namespaced_handler("update", &[])
+            .unwrap();
+        uncached_sparse
+            .runtimes
+            .lock()
+            .unwrap()
+            .get(uncached_sparse_id.as_str())
+            .unwrap()
+            .script_ctx
+            .clear_template_expression_cache();
+        uncached_sparse
+            .paint(&theme, 800, 1000, &mut uncached_sparse_buffer, 1.0)
+            .unwrap();
+        black_box(&uncached_sparse_buffer);
+    }
+    let uncached_sparse_time = started.elapsed();
+
+    let full_id = full.id().to_string();
+    let started = Instant::now();
+    for _ in 0..iterations {
+        full.call_namespaced_handler("update", &[]).unwrap();
+        full.runtimes
+            .lock()
+            .unwrap()
+            .get(full_id.as_str())
+            .unwrap()
+            .script_ctx
+            .clear_template_expression_cache();
+        full.invalidate_script_state();
+        full.paint(&theme, 800, 1000, &mut full_buffer, 1.0)
+            .unwrap();
+        black_box(&full_buffer);
+    }
+    let full_time = started.elapsed();
+
+    eprintln!(
+        "{iterations} bound handler paints: cached+sparse {narrow_time:?}; uncached+sparse {uncached_sparse_time:?}; uncached+full repaint {full_time:?}; expression ratio {:.2}x; total ratio {:.2}x",
+        uncached_sparse_time.as_secs_f64() / narrow_time.as_secs_f64(),
+        full_time.as_secs_f64() / narrow_time.as_secs_f64(),
+    );
+    eprintln!(
+        "MESH_PERF metric=handler_expression_cache_speedup value={:.6}",
+        uncached_sparse_time.as_secs_f64() / narrow_time.as_secs_f64()
+    );
+    eprintln!(
+        "MESH_PERF metric=handler_sparse_vs_full_speedup value={:.6}",
+        full_time.as_secs_f64() / narrow_time.as_secs_f64()
+    );
+    assert_eq!(narrow_buffer.data, full_buffer.data);
+    assert_eq!(narrow_buffer.data, uncached_sparse_buffer.data);
+    assert!(narrow_time < uncached_sparse_time);
+    assert!(narrow_time < full_time);
+}
+
+// cargo test -p mesh-core-shell --release -- unbound_handler_write_eliminates_render_pipeline_benchmark --ignored --nocapture
+#[test]
+#[ignore]
+fn unbound_handler_write_eliminates_render_pipeline_benchmark() {
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    fn benchmark_component(handler_body: &str) -> FrontendSurfaceComponent {
+        test_frontend_component(&format!(
+            r#"
+<script lang="luau">
+label = "a"
+telemetry = 0
+function update() {handler_body} end
+</script>
+<template><button>{{label}}</button></template>
+"#
+        ))
+    }
+
+    let theme = default_theme();
+    let mut unbound = benchmark_component("telemetry = telemetry + 1");
+    let mut bound = benchmark_component("label = label == 'a' and 'b' or 'a'");
+    let mut unbound_buffer = PixelBuffer::new(200, 60);
+    let mut bound_buffer = PixelBuffer::new(200, 60);
+    unbound
+        .paint(&theme, 200, 60, &mut unbound_buffer, 1.0)
+        .unwrap();
+    bound
+        .paint(&theme, 200, 60, &mut bound_buffer, 1.0)
+        .unwrap();
+    for _ in 0..4 {
+        if !unbound.wants_render() && !bound.wants_render() {
+            break;
+        }
+        if unbound.wants_render() {
+            unbound
+                .paint(&theme, 200, 60, &mut unbound_buffer, 1.0)
+                .unwrap();
+        }
+        if bound.wants_render() {
+            bound
+                .paint(&theme, 200, 60, &mut bound_buffer, 1.0)
+                .unwrap();
+        }
+    }
+    assert!(!unbound.wants_render() && !bound.wants_render());
+
+    let started = Instant::now();
+    let mut unbound_paints = 0;
+    for _ in 0..200 {
+        unbound.call_namespaced_handler("update", &[]).unwrap();
+        if unbound.wants_render() {
+            unbound
+                .paint(&theme, 200, 60, &mut unbound_buffer, 1.0)
+                .unwrap();
+            unbound_paints += 1;
+        }
+        black_box(&unbound_buffer);
+    }
+    let unbound_time = started.elapsed();
+
+    let started = Instant::now();
+    let mut bound_paints = 0;
+    for _ in 0..200 {
+        bound.call_namespaced_handler("update", &[]).unwrap();
+        if bound.wants_render() {
+            bound
+                .paint(&theme, 200, 60, &mut bound_buffer, 1.0)
+                .unwrap();
+            bound_paints += 1;
+        }
+        black_box(&bound_buffer);
+    }
+    let bound_time = started.elapsed();
+
+    eprintln!(
+        "200 handler writes: unbound={unbound_time:?}/{unbound_paints} paints, bound={bound_time:?}/{bound_paints} paints, ratio={:.1}x",
+        bound_time.as_secs_f64() / unbound_time.as_secs_f64()
+    );
+    eprintln!(
+        "MESH_PERF metric=unbound_handler_speedup value={:.6}",
+        bound_time.as_secs_f64() / unbound_time.as_secs_f64()
+    );
+    assert_eq!(unbound_paints, 0);
+    assert_eq!(bound_paints, 200);
+    assert!(unbound_time < bound_time);
+}
+
+#[test]
 fn typed_invalidations_distinguish_restyle_from_script_rebuild() {
     let mut component = test_frontend_component("<template><button /></template>");
 

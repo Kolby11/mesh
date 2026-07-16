@@ -34,14 +34,17 @@ pub use proof::{
 };
 pub use render_object::{RenderObjectDirtySummary, RenderObjectTree};
 pub use surface::{
-    DebugOverlay, FrontendRenderEngine, GlyphAxes, PaintProfilingMetrics, PainterBackendSnapshot,
-    PainterCapabilitySnapshot, PainterDiagnosticSnapshot, PixelBuffer, RasterMetrics,
-    SharedTextMeasurer, TextCacheMetrics, TextRenderer, TooltipPaintColors,
+    DebugOverlay, DebugOverlayRestore, DebugPerfHudSnapshot, FrontendRenderEngine, GlyphAxes,
+    PaintCommandAttribution, PaintCommandClass, PaintCommandClassMetrics, PaintProfilingMetrics,
+    PainterBackendSnapshot, PainterCapabilitySnapshot, PainterDiagnosticSnapshot, PixelBuffer,
+    RasterMetrics, SharedTextMeasurer, TextCacheMetrics, TextRenderer, TooltipPaintColors,
     paint_display_list_for_module_with_profiling_metrics, paint_frontend_tree,
     paint_frontend_tree_at, paint_frontend_tree_at_for_module,
     paint_frontend_tree_at_for_module_with_text_metrics,
     paint_frontend_tree_at_for_module_with_text_metrics_clipped,
     paint_frontend_tree_at_for_module_with_text_metrics_clipped_filtered,
-    paint_selected_display_list_for_module_with_profiling_metrics, set_tooltip_center_x,
-    set_tooltip_paint_colors, set_tooltip_paint_opacity, set_tooltip_paint_scale,
+    paint_selected_display_list_for_module_with_profiling_metrics,
+    paint_selected_display_list_for_module_with_profiling_metrics_and_attribution,
+    set_tooltip_center_x, set_tooltip_paint_colors, set_tooltip_paint_opacity,
+    set_tooltip_paint_scale,
 };

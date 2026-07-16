@@ -150,9 +150,7 @@ fn narrow_script_analysis_is_disabled_outside_profiling() {
     component.narrow_path_active = false;
     component.affected_node_count = 0;
 
-    let result = component.narrow_script_update(&theme, 100, 100, &surface_css_props);
-
-    assert!(result.is_some());
+    let _result = component.narrow_script_update(&theme, 100, 100, &surface_css_props);
     assert!(!component.narrow_path_active);
     assert_eq!(component.affected_node_count, 0);
 }

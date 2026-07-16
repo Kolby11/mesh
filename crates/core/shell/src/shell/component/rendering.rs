@@ -10,12 +10,14 @@ impl FrontendSurfaceComponent {
         if !self.profiling_enabled {
             return;
         }
-        self.profiling_records.push(ComponentProfilingRecord {
-            stage,
-            duration: started_at.elapsed(),
-            module_id: Some(self.compiled.manifest.package.id.clone()),
-            trigger_kind: trigger_kind.map(str::to_string),
-        });
+        self.profiling_records
+            .borrow_mut()
+            .push(ComponentProfilingRecord {
+                stage,
+                duration: started_at.elapsed(),
+                module_id: Some(self.compiled.manifest.package.id.clone()),
+                trigger_kind: trigger_kind.map(str::to_string),
+            });
     }
 
     pub(super) fn record_profiling_stage_with_elapsed(
@@ -27,12 +29,14 @@ impl FrontendSurfaceComponent {
         if !self.profiling_enabled {
             return;
         }
-        self.profiling_records.push(ComponentProfilingRecord {
-            stage,
-            duration: elapsed,
-            module_id: Some(self.compiled.manifest.package.id.clone()),
-            trigger_kind: trigger_kind.map(str::to_string),
-        });
+        self.profiling_records
+            .borrow_mut()
+            .push(ComponentProfilingRecord {
+                stage,
+                duration: elapsed,
+                module_id: Some(self.compiled.manifest.package.id.clone()),
+                trigger_kind: trigger_kind.map(str::to_string),
+            });
     }
 
     fn module_restyle_rules(&mut self) -> &[mesh_core_component::style::StyleRule] {
@@ -212,6 +216,12 @@ impl FrontendSurfaceComponent {
             tree_build_started,
             Some("rebuild"),
         );
+        // Every runtime reachable during this build has now had its active
+        // template expressions evaluated. This distinguishes a genuinely
+        // empty dependency set from the pre-first-paint unknown state.
+        for runtime in self.runtimes.lock().unwrap().values_mut() {
+            runtime.script_ctx.mark_template_dependencies_ready();
+        }
         self.render_stack.borrow_mut().clear();
         self.finalize_tree(
             &mut tree,
@@ -231,7 +241,7 @@ impl FrontendSurfaceComponent {
         width: u32,
         height: u32,
         surface_css_props: &SurfaceCssProps,
-    ) -> Option<WidgetNode> {
+    ) -> WidgetNode {
         let tree = self.build_tree_with_surface_css_props(theme, width, height, surface_css_props);
         // Narrow-script analysis currently feeds profiling telemetry only; the
         // finalized tree still takes the same full restyle/layout path. Avoid
@@ -239,17 +249,20 @@ impl FrontendSurfaceComponent {
         // measurements. Once affected subtrees drive rendering behavior this
         // gate can be removed alongside that implementation.
         if !self.profiling_enabled {
-            return Some(tree);
+            return tree;
         }
-        let (affected, total) = self.retained_tree.narrow_script_diff(&tree)?;
-        if affected.len() * 2 > total {
-            return None;
+        if let Some((affected, total)) = self.retained_tree.narrow_script_diff(&tree)
+            && affected.len() * 2 <= total
+        {
+            let mut full_affected = affected.clone();
+            narrow_expand_ancestors(&tree, &affected, &mut full_affected);
+            self.affected_node_count = full_affected.len() as u64;
+            self.narrow_path_active = true;
         }
-        let mut full_affected = affected.clone();
-        narrow_expand_ancestors(&tree, &affected, &mut full_affected);
-        self.affected_node_count = full_affected.len() as u64;
-        self.narrow_path_active = true;
-        Some(tree)
+        // Structural/broad changes are already present in `tree`; do not
+        // rebuild it a second time merely to label the profiling path as full.
+        // The retained-tree update below is the authoritative fallback.
+        tree
     }
 
     /// Retained fast path used when only appearance changed (e.g. hover)
@@ -347,10 +360,13 @@ impl FrontendSurfaceComponent {
             container_height: height as f32,
         };
         let restyle_started = std::time::Instant::now();
+        let collect_style_attribution = self.profiling_enabled;
         let restyle_rules = self
             .cached_restyle_rules
             .as_deref()
             .expect("cache populated above");
+        let mut style_attribution = collect_style_attribution
+            .then(|| mesh_core_elements::style::StyleRuleAttribution::new(restyle_rules));
         let targeted_interaction_restyle = trigger_kind == "restyle"
             && dirty_types.contains(ComponentDirtyFlags::STATE)
             && !dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
@@ -364,6 +380,7 @@ impl FrontendSurfaceComponent {
         let interaction_snapshot_valid = self.interaction_snapshot_valid;
         let index_cache = &mut self.cached_style_rule_index;
         let mut reused_retained_layout = false;
+        let mut empty_restyle_avoided = false;
         let preserve_surface_root = tree.tag == "surface";
         if targeted_interaction_restyle {
             if affected_keys.affected.is_empty() {
@@ -371,16 +388,43 @@ impl FrontendSurfaceComponent {
                     // First frame or no previous interaction state — fall back
                     // to full-tree restyle.
                     if preserve_surface_root {
-                        resolver.restyle_subtree_children_cached(
-                            tree,
-                            restyle_rules,
-                            context,
-                            index_cache,
-                        );
+                        if let Some(attribution) = style_attribution.as_mut() {
+                            resolver.restyle_subtree_children_cached_profiled(
+                                tree,
+                                restyle_rules,
+                                context,
+                                index_cache,
+                                attribution,
+                            );
+                        } else {
+                            resolver.restyle_subtree_children_cached(
+                                tree,
+                                restyle_rules,
+                                context,
+                                index_cache,
+                            );
+                        }
                     } else {
-                        resolver.restyle_subtree_cached(tree, restyle_rules, context, index_cache);
+                        if let Some(attribution) = style_attribution.as_mut() {
+                            resolver.restyle_subtree_cached_profiled(
+                                tree,
+                                restyle_rules,
+                                context,
+                                index_cache,
+                                attribution,
+                            );
+                        } else {
+                            resolver.restyle_subtree_cached(
+                                tree,
+                                restyle_rules,
+                                context,
+                                index_cache,
+                            );
+                        }
                     }
                     apply_runtime_attribute_state(tree);
+                } else {
+                    empty_restyle_avoided = true;
                 }
             } else {
                 // Narrow restyle: only restyle state-changed nodes and their
@@ -390,33 +434,80 @@ impl FrontendSurfaceComponent {
                     // For surface root, restyle only children that are in
                     // the affected set. Use targeted restyle on each child.
                     for child in &mut tree.children {
+                        if let Some(attribution) = style_attribution.as_mut() {
+                            resolver.restyle_subtree_for_ids_cached_profiled(
+                                child,
+                                restyle_rules,
+                                context,
+                                index_cache,
+                                &affected_keys.affected,
+                                attribution,
+                            );
+                        } else {
+                            resolver.restyle_subtree_for_ids_cached(
+                                child,
+                                restyle_rules,
+                                context,
+                                index_cache,
+                                &affected_keys.affected,
+                            );
+                        }
+                    }
+                } else {
+                    // For non-surface trees, restyle the entire tree but only
+                    // nodes in affected_keys will be touched.
+                    if let Some(attribution) = style_attribution.as_mut() {
+                        resolver.restyle_subtree_for_ids_cached_profiled(
+                            tree,
+                            restyle_rules,
+                            context,
+                            index_cache,
+                            &affected_keys.affected,
+                            attribution,
+                        );
+                    } else {
                         resolver.restyle_subtree_for_ids_cached(
-                            child,
+                            tree,
                             restyle_rules,
                             context,
                             index_cache,
                             &affected_keys.affected,
                         );
                     }
-                } else {
-                    // For non-surface trees, restyle the entire tree but only
-                    // nodes in affected_keys will be touched.
-                    resolver.restyle_subtree_for_ids_cached(
-                        tree,
-                        restyle_rules,
-                        context,
-                        index_cache,
-                        &affected_keys.affected,
-                    );
                 }
                 apply_runtime_attribute_state_for_ids(tree, &affected_keys.affected);
             }
             reused_retained_layout = !dirty_types.contains(ComponentDirtyFlags::LAYOUT);
         } else {
             if preserve_surface_root {
-                resolver.restyle_subtree_children_cached(tree, restyle_rules, context, index_cache);
+                if let Some(attribution) = style_attribution.as_mut() {
+                    resolver.restyle_subtree_children_cached_profiled(
+                        tree,
+                        restyle_rules,
+                        context,
+                        index_cache,
+                        attribution,
+                    );
+                } else {
+                    resolver.restyle_subtree_children_cached(
+                        tree,
+                        restyle_rules,
+                        context,
+                        index_cache,
+                    );
+                }
             } else {
-                resolver.restyle_subtree_cached(tree, restyle_rules, context, index_cache);
+                if let Some(attribution) = style_attribution.as_mut() {
+                    resolver.restyle_subtree_cached_profiled(
+                        tree,
+                        restyle_rules,
+                        context,
+                        index_cache,
+                        attribution,
+                    );
+                } else {
+                    resolver.restyle_subtree_cached(tree, restyle_rules, context, index_cache);
+                }
             }
             apply_runtime_attribute_state(tree);
         }
@@ -426,6 +517,22 @@ impl FrontendSurfaceComponent {
             restyle_elapsed,
             Some(trigger_kind),
         );
+        if let Some(attribution) = style_attribution {
+            for entry in attribution.entries() {
+                self.record_profiling_stage_with_elapsed(
+                    mesh_core_debug::ProfilingStage::StyleRestyle,
+                    std::time::Duration::from_micros(entry.elapsed_micros),
+                    Some(&format!("attribution:style_rule:{}", entry.selector)),
+                );
+            }
+        }
+        if empty_restyle_avoided {
+            self.record_profiling_stage_with_elapsed(
+                mesh_core_debug::ProfilingStage::StyleRestyle,
+                std::time::Duration::ZERO,
+                Some("waste:empty_restyle_avoided"),
+            );
+        }
         // The diagnostic pass re-resolves every node's style a second time to
         // surface rule errors (bad animation references etc.). Those are
         // properties of the rules and selector-facing tree inputs. Rebuilds

@@ -3,7 +3,7 @@ use crate::display_list::{
     DamageRect, DisplayIconPaint, DisplayListRepaintPolicy, DisplayPaintCommandKind,
     DisplayPaintContent, RetainedDisplayList,
 };
-use crate::{RenderObjectDirtySummary, build_focused_proof_snapshot};
+use crate::{PaintCommandClass, RenderObjectDirtySummary, build_focused_proof_snapshot};
 use mesh_core_elements::layout::LayoutRect;
 use mesh_core_elements::style::{
     BackgroundPaint, Dimension, Edges, StyleImageSource, StyleLinearGradient,
@@ -52,15 +52,74 @@ fn pixel(buffer: &PixelBuffer, x: u32, y: u32) -> Color {
     }
 }
 
-fn write_effect_test_image(name: &str) -> String {
-    let dir = PathBuf::from("target/phase55-effects");
-    std::fs::create_dir_all(&dir).expect("create effect image fixture dir");
-    let path = dir.join(name);
+#[test]
+fn attributed_selected_paint_preserves_pixels_and_classifies_commands() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 96.0,
+            height: 32.0,
+        },
+        Color {
+            r: 20,
+            g: 30,
+            b: 40,
+            a: 255,
+        },
+    );
+    root.children
+        .push(text_node("profile me", 4.0, 4.0, 80.0, 20.0, Color::WHITE));
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 96, 32, true, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 96,
+            height: 32,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+    let engine = FrontendRenderEngine::new();
+    let mut normal = PixelBuffer::new(96, 32);
+    engine.render_selected_display_list_for_module(&selected, &mut normal, 1.0, None, None, None);
+    let mut attributed = PixelBuffer::new(96, 32);
+    let metrics = engine.render_selected_display_list_for_module_with_attribution(
+        &selected,
+        &mut attributed,
+        1.0,
+        None,
+        None,
+        None,
+    );
+
+    assert_eq!(attributed.data, normal.data);
+    assert!(
+        metrics.get(PaintCommandClass::Primitive).command_count > 0,
+        "the root's batched self paint must be attributed as a primitive"
+    );
+    assert!(
+        metrics.get(PaintCommandClass::Text).command_count > 0,
+        "the text node must be attributed as text"
+    );
+}
+
+fn write_effect_test_image(name: &str) -> (tempfile::TempDir, String) {
+    // The aggregate effect-suite test calls the individual image tests while
+    // the harness may run those same tests on other threads. A private tempdir
+    // prevents one save from truncating another test's fixture between the
+    // metadata lookup and image decode, and cleans the fixture after the test.
+    let dir = tempfile::tempdir().expect("create effect image fixture dir");
+    let path = dir.path().join(name);
     let mut image = image::RgbaImage::new(2, 1);
     image.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
     image.put_pixel(1, 0, image::Rgba([0, 255, 0, 255]));
     image.save(&path).expect("write effect image fixture");
-    path.to_string_lossy().into_owned()
+    let path = path.to_string_lossy().into_owned();
+    (dir, path)
 }
 
 fn full_clip(width: i32, height: i32) -> ClipRect {
@@ -1641,7 +1700,7 @@ fn moving_gradient_shader_size_key_beats_position_churn_benchmark() {
 
 #[test]
 fn skia_effect_image_draws_source_pixels() {
-    let path = write_effect_test_image("phase55-image-source.png");
+    let (_fixture, path) = write_effect_test_image("phase55-image-source.png");
     let mut buffer = PixelBuffer::new(20, 10);
     let mut diagnostics = Vec::new();
 
@@ -1670,7 +1729,7 @@ fn skia_effect_image_draws_source_pixels() {
 
 #[test]
 fn skia_effect_image_respects_command_clip() {
-    let path = write_effect_test_image("phase55-image-clip.png");
+    let (_fixture, path) = write_effect_test_image("phase55-image-clip.png");
     let mut buffer = PixelBuffer::new(20, 10);
     let mut diagnostics = Vec::new();
 

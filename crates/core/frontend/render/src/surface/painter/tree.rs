@@ -7,6 +7,7 @@ use crate::display_list::{
 use mesh_core_elements::style::Edges;
 
 use super::*;
+use crate::surface::{PaintCommandAttribution, PaintCommandClass};
 
 impl FrontendRenderEngine {
     pub fn render_tree(&self, root: &WidgetNode, buffer: &mut PixelBuffer, scale: f32) {
@@ -237,6 +238,92 @@ impl FrontendRenderEngine {
         if !scratch.batched_commands.is_empty() {
             self.execute_painter_commands_in_session(&mut session, &scratch.batched_commands);
         }
+    }
+
+    /// Paint a selected display list while attributing raster time to a small,
+    /// fixed set of command classes. Kept as a separate hot loop so normal
+    /// painting pays no per-command clock or profiling branch cost.
+    pub fn render_selected_display_list_for_module_with_attribution(
+        &self,
+        commands: &SelectedDisplayListPaint<'_>,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        clip: Option<(u32, u32, u32, u32)>,
+        paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
+        module_id: Option<&str>,
+    ) -> PaintCommandAttribution {
+        let surface_clip = ClipRect {
+            x: 0,
+            y: 0,
+            width: buffer.width as i32,
+            height: buffer.height as i32,
+        };
+        let paint_clip = clip
+            .map(|clip| {
+                intersect_clip(
+                    surface_clip,
+                    ClipRect {
+                        x: clip.0 as i32,
+                        y: clip.1 as i32,
+                        width: clip.2 as i32,
+                        height: clip.3 as i32,
+                    },
+                )
+            })
+            .unwrap_or(surface_clip);
+
+        let mut attribution = PaintCommandAttribution::default();
+        let mut scratch = self.render_scratch.borrow_mut();
+        scratch.prepare(commands.len());
+        let mut session = PixelCanvasSession::new(buffer);
+        let mut batched_command_count = 0_u64;
+        for (command, kind) in commands.iter_with_kinds() {
+            if self.try_append_display_self_paint_batch(
+                command,
+                kind,
+                scale,
+                paint_clip,
+                paint_nodes,
+                &mut scratch.batched_commands,
+            ) {
+                batched_command_count = batched_command_count.saturating_add(1);
+                continue;
+            }
+            if !scratch.batched_commands.is_empty() {
+                let started = std::time::Instant::now();
+                self.execute_painter_commands_in_session(&mut session, &scratch.batched_commands);
+                attribution.record(
+                    PaintCommandClass::Primitive,
+                    batched_command_count,
+                    started.elapsed(),
+                );
+                scratch.batched_commands.clear();
+                batched_command_count = 0;
+            }
+            let class = paint_command_class(command, kind);
+            let started = std::time::Instant::now();
+            self.render_display_command(
+                command,
+                kind,
+                &mut session,
+                scale,
+                paint_clip,
+                paint_nodes,
+                module_id,
+                &mut scratch.node_commands,
+            );
+            attribution.record(class, 1, started.elapsed());
+        }
+        if !scratch.batched_commands.is_empty() {
+            let started = std::time::Instant::now();
+            self.execute_painter_commands_in_session(&mut session, &scratch.batched_commands);
+            attribution.record(
+                PaintCommandClass::Primitive,
+                batched_command_count,
+                started.elapsed(),
+            );
+        }
+        attribution
     }
 
     fn try_append_display_self_paint_batch(
@@ -857,6 +944,23 @@ impl FrontendRenderEngine {
             color,
             clip,
         );
+    }
+}
+
+fn paint_command_class(
+    command: &DisplayPaintCommand,
+    kind: DisplayPaintCommandKind,
+) -> PaintCommandClass {
+    if kind == DisplayPaintCommandKind::Scrollbars {
+        return PaintCommandClass::Scrollbar;
+    }
+    match command.node.content {
+        DisplayPaintContent::None => PaintCommandClass::Primitive,
+        DisplayPaintContent::Text(_) => PaintCommandClass::Text,
+        DisplayPaintContent::Icon(_) => PaintCommandClass::Icon,
+        DisplayPaintContent::Input(_)
+        | DisplayPaintContent::Slider(_)
+        | DisplayPaintContent::Checkmark(_) => PaintCommandClass::Control,
     }
 }
 

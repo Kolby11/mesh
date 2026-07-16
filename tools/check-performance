@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly BASELINE="${MESH_PERF_BASELINE:-$ROOT/config/performance-baseline.tsv}"
+readonly RESULTS="$(mktemp)"
+trap 'rm -f "$RESULTS"' EXIT
+
+run_benchmark() {
+  local package="$1"
+  local test_name="$2"
+  local output
+
+  if ! output="$(cargo test -p "$package" --release -- "$test_name" --ignored --nocapture 2>&1)"; then
+    printf '%s\n' "$output"
+    return 1
+  fi
+  printf '%s\n' "$output"
+  printf '%s\n' "$output" | awk '/^MESH_PERF metric=/ { print }' >> "$RESULTS"
+}
+
+cd "$ROOT"
+run_benchmark mesh-core-shell narrow_handler_damage_beats_forced_full_repaint
+run_benchmark mesh-core-shell unbound_handler_write_eliminates_render_pipeline_benchmark
+run_benchmark mesh-core-scripting template_dependency_rust_gate_beats_lua_table_lookup
+run_benchmark mesh-core-render performance_hud_native_paint_cost
+
+awk '
+  BEGIN { failed = 0 }
+  FNR == NR {
+    if ($0 ~ /^#/ || NF == 0) next
+    direction[$1] = $2
+    baseline[$1] = $3 + 0
+    tolerance[$1] = $4 + 0
+    expected[$1] = 1
+    next
+  }
+  /^MESH_PERF metric=/ {
+    split($2, metric_part, "=")
+    split($3, value_part, "=")
+    metric = metric_part[2]
+    value[metric] = value_part[2] + 0
+    seen[metric]++
+  }
+  END {
+    for (metric in expected) {
+      if (seen[metric] != 1) {
+        printf "performance gate: expected one result for %s, saw %d\n", metric, seen[metric] > "/dev/stderr"
+        failed = 1
+        continue
+      }
+      if (direction[metric] == "lower") {
+        threshold = baseline[metric] * (1 - tolerance[metric] / 100)
+        pass = value[metric] >= threshold
+        comparator = ">="
+      } else if (direction[metric] == "upper") {
+        threshold = baseline[metric] * (1 + tolerance[metric] / 100)
+        pass = value[metric] <= threshold
+        comparator = "<="
+      } else {
+        printf "performance gate: invalid direction %s for %s\n", direction[metric], metric > "/dev/stderr"
+        failed = 1
+        continue
+      }
+      printf "performance gate: %-40s %.3f %s %.3f (baseline %.3f, tolerance %.0f%%) %s\n", metric, value[metric], comparator, threshold, baseline[metric], tolerance[metric], pass ? "PASS" : "FAIL"
+      if (!pass) failed = 1
+    }
+    exit failed
+  }
+' "$BASELINE" "$RESULTS"

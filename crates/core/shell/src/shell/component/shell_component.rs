@@ -565,20 +565,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         };
         let surface_css_props = self.surface_css_props();
         let mut tree = if dirty_types.contains(ComponentDirtyFlags::SCRIPT_NARROW) {
-            match self.narrow_script_update(
-                theme,
-                content_width,
-                content_height,
-                &surface_css_props,
-            ) {
-                Some(t) => t,
-                None => self.build_tree_with_surface_css_props(
-                    theme,
-                    content_width,
-                    content_height,
-                    &surface_css_props,
-                ),
-            }
+            self.narrow_script_update(theme, content_width, content_height, &surface_css_props)
         } else if use_retained_style_path {
             match self.restyle_retained_tree(
                 theme,
@@ -846,6 +833,17 @@ impl ShellComponent for FrontendSurfaceComponent {
             std::time::Duration::from_micros(paint_metrics.icon_image_raster_micros),
             Some("rebuild"),
         );
+        for class in mesh_core_render::PaintCommandClass::ALL {
+            let metrics = paint_metrics.command_attribution.get(class);
+            if metrics.command_count == 0 {
+                continue;
+            }
+            self.record_profiling_stage_with_elapsed(
+                mesh_core_debug::ProfilingStage::PaintTraversal,
+                std::time::Duration::from_micros(metrics.elapsed_micros),
+                Some(&format!("attribution:paint_command:{}", class.label())),
+            );
+        }
         if let Some(snapshot) = self.invalidation_snapshot.as_mut() {
             snapshot.text = text_cache_snapshot(paint_metrics.text);
             snapshot.paint.raster_cache_hits = paint_metrics.raster_cache_hits;
@@ -868,12 +866,14 @@ impl ShellComponent for FrontendSurfaceComponent {
             snapshot.paint.skia_glyph_cache_capacity = paint_metrics.skia_glyph_cache_capacity;
         }
         if self.profiling_enabled {
-            self.profiling_records.push(ComponentProfilingRecord {
-                stage: mesh_core_debug::ProfilingStage::Paint,
-                duration: paint_started.elapsed(),
-                module_id: Some(self.compiled.manifest.package.id.clone()),
-                trigger_kind: Some("rebuild".to_string()),
-            });
+            self.profiling_records
+                .borrow_mut()
+                .push(ComponentProfilingRecord {
+                    stage: mesh_core_debug::ProfilingStage::Paint,
+                    duration: paint_started.elapsed(),
+                    module_id: Some(self.compiled.manifest.package.id.clone()),
+                    trigger_kind: Some("rebuild".to_string()),
+                });
         }
         self.tooltip_damage_scratch = tooltip_damage_rects;
         self.dirty_node_visual_damage_scratch = dirty_node_visual_damage_rects;
@@ -1394,12 +1394,12 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn set_profiling_enabled(&mut self, enabled: bool) {
         self.profiling_enabled = enabled;
         if !enabled {
-            self.profiling_records.clear();
+            self.profiling_records.get_mut().clear();
         }
     }
 
     fn take_profiling_records(&mut self) -> Vec<ComponentProfilingRecord> {
-        std::mem::take(&mut self.profiling_records)
+        std::mem::take(self.profiling_records.get_mut())
     }
 
     fn take_invalidation_snapshot(
@@ -1765,7 +1765,7 @@ impl FrontendSurfaceComponent {
         damage: Option<DamageRect>,
         tooltip: Option<(&str, f32, f32)>,
     ) -> mesh_core_render::PaintProfilingMetrics {
-        mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
+        mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics_and_attribution(
             selected_paint,
             buffer,
             scale,
@@ -1773,6 +1773,7 @@ impl FrontendSurfaceComponent {
             None,
             tooltip,
             Some(self.compiled.manifest.package.id.as_str()),
+            self.profiling_enabled,
         )
     }
 
@@ -2478,6 +2479,7 @@ fn merge_paint_metrics(
     total: &mut mesh_core_render::PaintProfilingMetrics,
     next: mesh_core_render::PaintProfilingMetrics,
 ) {
+    total.command_attribution.merge(next.command_attribution);
     total.text.layout_hits = total.text.layout_hits.saturating_add(next.text.layout_hits);
     total.text.layout_misses = total
         .text

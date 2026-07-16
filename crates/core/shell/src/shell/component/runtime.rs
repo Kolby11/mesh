@@ -647,6 +647,10 @@ impl FrontendSurfaceComponent {
         }
         Self::drain_script_diagnostics(&self.diagnostics, runtime);
         let state_dirty = runtime.script_ctx.state().is_dirty();
+        let state_affects_template = runtime.script_ctx.dirty_state_affects_template();
+        if state_dirty && !state_affects_template {
+            runtime.script_ctx.state_mut().clear_dirty();
+        }
         let published = runtime.script_ctx.drain_published_events();
         drop(runtimes);
 
@@ -680,8 +684,13 @@ impl FrontendSurfaceComponent {
                 }
             }
         };
-        if state_dirty || neighbors_dirty {
-            self.invalidate_script_state();
+        if state_affects_template || neighbors_dirty {
+            // The retained-tree/display-list diff is authoritative for both
+            // structural fallback and pixel damage. Handler writes therefore
+            // start on the narrow path: ordinary bound-value changes repaint
+            // only their actual damage, while conditional/list changes still
+            // promote naturally when the retained diff is structural.
+            self.invalidate_script_state_narrow();
         }
 
         // Execute imperative element actions the handler queued via live

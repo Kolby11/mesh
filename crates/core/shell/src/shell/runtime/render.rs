@@ -1051,6 +1051,7 @@ impl Shell {
         };
         // Scale change or explicit force-full triggers full-buffer present (per HDPI-04)
         let mut force_full = false;
+        let mut hud_restore = None;
         if visible
             && self
                 .presentation_engine
@@ -1076,6 +1077,33 @@ impl Shell {
                 width: width.max(1),
                 height: height.max(1),
             }];
+        }
+        if visible
+            && is_parent
+            && self.debug.enabled
+            && self.debug.profiling_enabled
+            && surface_id != DEBUG_INSPECTOR_SURFACE_ID
+        {
+            let hud_snapshot = self.profiling.perf_hud_snapshot(&surface_id);
+            let flashed_damage = present_damage.clone();
+            let buffer = self.components[index]
+                .target_mut(target)
+                .paint_buffer
+                .as_mut()
+                .expect("paint buffer initialised");
+            hud_restore = Some(self.debug_overlay.paint_performance_hud(
+                buffer,
+                scale,
+                &hud_snapshot,
+                &flashed_damage,
+            ));
+            let hud_unit = scale.round().max(1.0);
+            present_damage.push(DamageRect {
+                x: 0,
+                y: 0,
+                width: ((184.0 * hud_unit) / scale.max(f32::EPSILON)).ceil() as u32,
+                height: ((70.0 * hud_unit) / scale.max(f32::EPSILON)).ceil() as u32,
+            });
         }
         if visible && self.debug.show_layout_bounds {
             let debug_tree = match target {
@@ -1142,19 +1170,27 @@ impl Shell {
         // so skip the present entirely. This mirrors the old `is_some()` gate
         // (None -> skip) but works with the multi-rect type.
         if !visible || !present_damage.is_empty() {
-            self.presentation_engine
-                .present_with_damage(
-                    &surface_id,
-                    self.components[index].component.id(),
-                    visible,
+            let present_result = self.presentation_engine.present_with_damage(
+                &surface_id,
+                self.components[index].component.id(),
+                visible,
+                self.components[index]
+                    .target(target)
+                    .paint_buffer
+                    .as_ref()
+                    .expect("paint buffer initialised"),
+                &present_damage,
+            );
+            if let Some(restore) = hud_restore.take() {
+                restore.restore(
                     self.components[index]
-                        .target(target)
+                        .target_mut(target)
                         .paint_buffer
-                        .as_ref()
+                        .as_mut()
                         .expect("paint buffer initialised"),
-                    &present_damage,
-                )
-                .map_err(ShellRunError::Presentation)?;
+                );
+            }
+            present_result.map_err(ShellRunError::Presentation)?;
             presented = true;
         }
         if let Some(started) = present_started
