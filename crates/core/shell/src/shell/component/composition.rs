@@ -1041,7 +1041,7 @@ impl FrontendSurfaceComponent {
         binding: &str,
         child_instance_key: &str,
     ) {
-        // Live `bind:this`: parent and child share one surface VM, so the parent
+        // Live `bind:this`: parent and child share one thread VM, so the parent
         // env holds a proxy table forwarding straight to the child's live `_ENV`.
         // Reads see current values; calls run the child's real function and return
         // its real value synchronously — no snapshot, no queued call stubs.

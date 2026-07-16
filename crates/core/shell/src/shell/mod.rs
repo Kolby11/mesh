@@ -34,6 +34,7 @@ mod component;
 mod discovery;
 mod file_watch;
 mod ipc;
+mod module_config;
 mod runtime;
 mod service;
 mod sounds;

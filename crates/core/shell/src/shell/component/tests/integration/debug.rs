@@ -1,4 +1,8 @@
 use super::*;
+use mesh_core_service::{
+    ContractCapabilities, InterfaceContract, InterfaceProvider, parse_contract_version,
+};
+use std::collections::HashMap;
 
 #[test]
 fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_stages() {
@@ -389,9 +393,36 @@ fn debug_inspector_modules_view_renders_uses_provides_graph() {
     );
 }
 
+fn settings_catalog() -> InterfaceCatalog {
+    let mut catalog = debug_catalog();
+    for (interface, base_module) in [
+        ("mesh.theme", "@mesh/theme-interface"),
+        ("mesh.locale", "@mesh/locale-interface"),
+    ] {
+        catalog.register_contract(InterfaceContract {
+            interface: interface.into(),
+            version: parse_contract_version("1.0").unwrap(),
+            state_fields: Vec::new(),
+            methods: Vec::new(),
+            events: Vec::new(),
+            types: HashMap::new(),
+            capabilities: ContractCapabilities::default(),
+        });
+        catalog.register_provider(InterfaceProvider {
+            interface: interface.into(),
+            version: Some("1.0".into()),
+            base_module: Some(base_module.into()),
+            provider_module: "@mesh/core-settings".into(),
+            backend_name: "Shell".into(),
+            priority: 100,
+        });
+    }
+    catalog
+}
+
 #[test]
 fn settings_surface_renders_modules_providers_theme_and_locale() {
-    let mut component = real_frontend_module_component("@mesh/settings", debug_catalog());
+    let mut component = real_frontend_module_component("@mesh/settings", settings_catalog());
     {
         let theme = default_theme();
         let mut buffer = PixelBuffer::new(420, 720);
@@ -463,6 +494,33 @@ fn settings_surface_renders_modules_providers_theme_and_locale() {
                         },
                         "diagnostics": [],
                         "health": []
+                    },
+                    {
+                        "module_id": "@mesh/pulseaudio-audio",
+                        "kind": "backend",
+                        "enabled": true,
+                        "path": "modules/backend/pulseaudio-audio/module.json",
+                        "uses": {
+                            "modules": [],
+                            "interfaces": [],
+                            "optional_interfaces": [],
+                            "icon_packs": [],
+                            "i18n_packs": [],
+                            "theme_packs": [],
+                            "font_packs": [],
+                            "active_providers": []
+                        },
+                        "capabilities": ["service.audio.read"],
+                        "optional_capabilities": [],
+                        "provides": {
+                            "interfaces": [{ "interface": "mesh.audio", "label": "Audio" }],
+                            "settings": [],
+                            "i18n": [],
+                            "required_icons": [],
+                            "optional_icons": []
+                        },
+                        "diagnostics": [],
+                        "health": []
                     }
                 ],
                 "interfaces": [],
@@ -494,6 +552,15 @@ fn settings_surface_renders_modules_providers_theme_and_locale() {
         [CoreRequest::SetTheme { theme_id }] => assert_eq!(theme_id, "mesh-default-light"),
         other => panic!("expected theme change request, got {other:?}"),
     }
+
+    let requests = component
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::onProvider1Next", &[])
+        .unwrap();
+    assert!(matches!(
+        requests.as_slice(),
+        [CoreRequest::SetProvider { interface, provider_id }]
+            if interface == "mesh.audio" && provider_id == "@mesh/pulseaudio-audio"
+    ));
 
     let requests = component
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::onClose", &[])

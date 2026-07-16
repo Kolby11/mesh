@@ -16,7 +16,7 @@ Section letters (A–V) in the performance items below refer to that log.
 
 ## Shell features
 
-- [ ] Settings module — surface for managing installed modules, active providers, theme, i18n → v1.22. Progress 2026-07-02: added shipped `@mesh/settings` frontend surface (`modules/frontend/settings`) with a right-overlay dialog, graph-backed installed-module list/filter, active-provider binding summary, and live theme/locale controls wired through existing `shell.set-theme` and `mesh.locale.set` paths. `@mesh/quick-settings` now exposes an Open settings action that publishes `shell.show-surface` for `@mesh/settings` and hides the quick-settings popover. The installed graph now auto-discovers the settings module and the fixture test asserts it. Remaining: write-through controls for enabling/disabling modules and switching active providers, plus full-shell render verification once the environment has the `xkbcommon` development package required by `smithay-client-toolkit`.
+- [ ] Settings module — surface for managing installed modules, active providers, theme, i18n → v1.22. Progress 2026-07-02: added shipped `@mesh/settings` frontend surface (`modules/frontend/settings`) with a right-overlay dialog, graph-backed installed-module list/filter, active-provider binding summary, and live theme/locale controls wired through existing `shell.set-theme` and `mesh.locale.set` paths. `@mesh/quick-settings` now exposes an Open settings action that publishes `shell.show-surface` for `@mesh/settings` and hides the quick-settings popover. The installed graph now auto-discovers the settings module and the fixture test asserts it. Added 2026-07-16: provider rows enumerate enabled alternatives and persist a settings-only `shell.set-provider` selection into the root graph with validation and atomic replacement; the UI explicitly reports that restart is required because transactional live switching remains separate work. Remaining: write-through controls for enabling/disabling modules, transactional live application of provider changes, and full-shell render verification once the environment has the `xkbcommon` development package required by `smithay-client-toolkit`.
 - [ ] Popups / overlays — transient surfaces with custom content and dismiss behavior → v1.22
 
 ### Module architecture friction redesign — 2026-06-19
@@ -176,18 +176,19 @@ already landed: **confirmed dead-code deletions** (commit `afc9a0d`) and
 
 ### Migration tech-debt (flagged by project rules; verify before removing)
 
-- [ ] Four remaining hand-written `.mesh`/`.luau` source mini-parsers in
+- [ ] Three remaining hand-written `.mesh`/`.luau` source mini-parsers in
       `installed_graph.rs:~908-1051` (`extract_t_keys_from_mesh_source`,
-      `extract_mesh_event_publish_channels`, `extract_backend_emit_event_names`,
-      `extract_keybind_subscriptions_from_mesh_source`). Progress 2026-07-02:
+      `extract_mesh_event_publish_channels`, `extract_backend_emit_event_names`).
+      Progress 2026-07-02:
       `extract_icon_names_from_mesh_source` now uses the existing `.mesh`
       template AST (`parse_component` + `TemplateNode`) and walks elements,
       conditionals, loops, and component children instead of scanning strings.
       Project policy calls hand-rolled script string-parsing temporary migration
       code; migrate to AST-based analysis when the parser matures. Note:
-      fixed 2026-07-01: `extract_keybind_subscriptions_from_mesh_source` now scans
+      fixed 2026-07-01: `extract_keybind_subscriptions_from_mesh_source` scanned
       tag boundaries quote-aware, so `<`/`>` inside other attributes no longer
-      hide `onkeybind`; AST-based migration remains open.
+      hid `onkeybind`. Replaced 2026-07-16 with template-AST traversal across
+      elements, components, conditionals, and loops.
 
 ---
 
@@ -195,9 +196,9 @@ already landed: **confirmed dead-code deletions** (commit `afc9a0d`) and
 
 ### Text rendering follow-ups
 
-- [ ] Improve first-miss ellipsis truncation by using shaped glyph advances
+- [x] Improve first-miss ellipsis truncation by using shaped glyph advances
       instead of binary-search substring measurement.
-- [ ] Add profiling visibility for text and glyph cache pressure: entry counts,
+- [x] Add profiling visibility for text and glyph cache pressure: entry counts,
       hits, misses, invalidations, and shaping time.
 - [ ] Add locale-, script-, and direction-sensitive text cases to canonical
       performance workloads before changing shaping behavior further.

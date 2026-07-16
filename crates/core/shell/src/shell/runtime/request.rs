@@ -28,6 +28,63 @@ fn service_unavailable_response() -> serde_json::Value {
 }
 
 impl Shell {
+    fn apply_set_provider(&mut self, interface: &str, provider_id: &str) {
+        let graph_path = self.installed_module_graph_path();
+        let selection_is_valid = match self.load_installed_module_graph_cached() {
+            Ok(graph) => graph
+                .backend_providers_for_interface(interface)
+                .iter()
+                .any(|provider| provider.module_id == provider_id),
+            Err(error) => {
+                let message = format!(
+                    "cannot select provider {provider_id} for {interface}: failed to load {}: {error}",
+                    graph_path.display()
+                );
+                tracing::warn!(interface, provider_id, "{message}");
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/settings".to_string(),
+                    "provider_selection_graph_load_failed",
+                    message,
+                );
+                return;
+            }
+        };
+        if !selection_is_valid {
+            let message = format!(
+                "cannot select provider {provider_id}: it is not an enabled provider for {interface}"
+            );
+            tracing::warn!(interface, provider_id, "{message}");
+            self.diagnostics.record_lifecycle_error(
+                "@mesh/settings".to_string(),
+                "invalid_provider_selection",
+                message,
+            );
+            return;
+        }
+
+        match crate::shell::module_config::write_active_provider_selection(
+            &graph_path,
+            interface,
+            provider_id,
+        ) {
+            Ok(()) => tracing::info!(
+                interface,
+                provider_id,
+                "saved active provider selection; restart MESH to apply it"
+            ),
+            Err(error) => {
+                let message =
+                    format!("failed to save provider {provider_id} for {interface}: {error}");
+                tracing::warn!(interface, provider_id, "{message}");
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/settings".to_string(),
+                    "provider_selection_write_failed",
+                    message,
+                );
+            }
+        }
+    }
+
     pub(in crate::shell) fn invalidate_debug_layout_bounds_targets(&mut self) {
         for runtime in &mut self.components {
             runtime.component.request_paint();
@@ -432,6 +489,13 @@ impl Shell {
             ),
             CoreRequest::SetTheme { theme_id } => self.apply_set_theme(&theme_id),
             CoreRequest::SetLocale { locale } => self.apply_set_locale(&locale),
+            CoreRequest::SetProvider {
+                interface,
+                provider_id,
+            } => {
+                self.apply_set_provider(&interface, &provider_id);
+                Ok(VecDeque::new())
+            }
             CoreRequest::ToggleDebugOverlay => {
                 self.debug.toggle();
                 tracing::debug!(
@@ -1276,6 +1340,7 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::WriteClipboard { .. } => "write_clipboard",
         CoreRequest::SetTheme { .. } => "set_theme",
         CoreRequest::SetLocale { .. } => "set_locale",
+        CoreRequest::SetProvider { .. } => "set_provider",
         CoreRequest::ActivatePopover { .. } => "activate_popover",
         CoreRequest::TransferTabFocus { .. } => "transfer_tab_focus",
         CoreRequest::ToggleDebugOverlay => "toggle_debug_overlay",

@@ -23,6 +23,7 @@ cd "$ROOT"
 run_benchmark mesh-core-shell narrow_handler_damage_beats_forced_full_repaint
 run_benchmark mesh-core-shell unbound_handler_write_eliminates_render_pipeline_benchmark
 run_benchmark mesh-core-scripting template_dependency_rust_gate_beats_lua_table_lookup
+run_benchmark mesh-core-scripting thread_vm_handle_beats_fresh_vm_creation
 run_benchmark mesh-core-render performance_hud_native_paint_cost
 
 awk '

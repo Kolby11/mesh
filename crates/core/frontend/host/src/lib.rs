@@ -204,6 +204,10 @@ pub enum CoreRequest {
     SetLocale {
         locale: String,
     },
+    SetProvider {
+        interface: String,
+        provider_id: String,
+    },
     /// Show a surface as a popover triggered by a specific element.
     ///
     /// The shell records `(trigger_surface, trigger_key)` on the trigger's

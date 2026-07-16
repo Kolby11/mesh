@@ -220,6 +220,20 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
             .map(|locale| CoreRequest::SetLocale {
                 locale: locale.to_string(),
             }),
+        "shell.set-provider" if event.source_module_id == "@mesh/settings" => {
+            let interface = event
+                .payload
+                .get("interface")
+                .and_then(|value| value.as_str())?;
+            let provider_id = event
+                .payload
+                .get("provider_id")
+                .and_then(|value| value.as_str())?;
+            Some(CoreRequest::SetProvider {
+                interface: interface.to_string(),
+                provider_id: provider_id.to_string(),
+            })
+        }
         "shell.toggle-debug-overlay" => Some(CoreRequest::ToggleDebugOverlay),
         "shell.toggle-debug-layout-bounds" => Some(CoreRequest::ToggleDebugLayoutBounds),
         "shell.toggle-debug-element-picker" => Some(CoreRequest::ToggleDebugElementPicker),
@@ -380,6 +394,44 @@ mod tests {
             }
             other => panic!("expected network ServiceCommand, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn settings_provider_event_maps_to_provider_selection_request() {
+        let requests = script_events_to_requests(vec![PublishedEvent {
+            channel: "shell.set-provider".into(),
+            payload: serde_json::json!({
+                "interface": "mesh.audio",
+                "provider_id": "@mesh/pulseaudio-audio",
+            }),
+            source_module_id: "@mesh/settings".into(),
+            source_capabilities: Default::default(),
+        }]);
+
+        assert!(matches!(
+            requests.as_slice(),
+            [CoreRequest::SetProvider { interface, provider_id }]
+                if interface == "mesh.audio" && provider_id == "@mesh/pulseaudio-audio"
+        ));
+    }
+
+    #[test]
+    fn non_settings_module_cannot_select_provider() {
+        let requests = script_events_to_requests(vec![PublishedEvent {
+            channel: "shell.set-provider".into(),
+            payload: serde_json::json!({
+                "interface": "mesh.audio",
+                "provider_id": "@mesh/pulseaudio-audio",
+            }),
+            source_module_id: "@mesh/navigation-bar".into(),
+            source_capabilities: Default::default(),
+        }]);
+
+        assert!(matches!(
+            requests.as_slice(),
+            [CoreRequest::PublishDiagnostics { message }]
+                if message.contains("shell.set-provider")
+        ));
     }
 
     #[test]

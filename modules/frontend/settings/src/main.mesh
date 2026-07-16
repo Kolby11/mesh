@@ -39,17 +39,26 @@
         <text class="section-title">Active Providers</text>
         <text class="section-copy">{providers_summary}</text>
         <list class="compact-list" label="Active providers">
-          <list-item class="compact-row" hidden={provider_row_1_hidden}>
-            <text class="row-title">{provider_row_1_interface}</text>
-            <text class="row-meta">{provider_row_1_provider}</text>
+          <list-item class="compact-row provider-row" hidden={provider_row_1_hidden}>
+            <column class="provider-copy">
+              <text class="row-title">{provider_row_1_interface}</text>
+              <text class="row-meta">{provider_row_1_provider}</text>
+            </column>
+            <button class="provider-action" hidden={provider_row_1_action_hidden} onclick={onProvider1Next}>Next</button>
           </list-item>
-          <list-item class="compact-row" hidden={provider_row_2_hidden}>
-            <text class="row-title">{provider_row_2_interface}</text>
-            <text class="row-meta">{provider_row_2_provider}</text>
+          <list-item class="compact-row provider-row" hidden={provider_row_2_hidden}>
+            <column class="provider-copy">
+              <text class="row-title">{provider_row_2_interface}</text>
+              <text class="row-meta">{provider_row_2_provider}</text>
+            </column>
+            <button class="provider-action" hidden={provider_row_2_action_hidden} onclick={onProvider2Next}>Next</button>
           </list-item>
-          <list-item class="compact-row" hidden={provider_row_3_hidden}>
-            <text class="row-title">{provider_row_3_interface}</text>
-            <text class="row-meta">{provider_row_3_provider}</text>
+          <list-item class="compact-row provider-row" hidden={provider_row_3_hidden}>
+            <column class="provider-copy">
+              <text class="row-title">{provider_row_3_interface}</text>
+              <text class="row-meta">{provider_row_3_provider}</text>
+            </column>
+            <button class="provider-action" hidden={provider_row_3_action_hidden} onclick={onProvider3Next}>Next</button>
           </list-item>
         </list>
       </column>
@@ -130,6 +139,9 @@ locale_sk_class = "segment"
 provider_row_1_hidden = true
 provider_row_2_hidden = true
 provider_row_3_hidden = true
+provider_row_1_action_hidden = true
+provider_row_2_action_hidden = true
+provider_row_3_action_hidden = true
 provider_row_1_interface = ""
 provider_row_2_interface = ""
 provider_row_3_interface = ""
@@ -157,6 +169,10 @@ module_row_1_resources = ""
 module_row_2_resources = ""
 module_row_3_resources = ""
 module_row_4_resources = ""
+provider_notice = ""
+
+local provider_candidates = {}
+local pending_providers = {}
 
 local function list_count(values)
     if type(values) ~= "table" then return 0 end
@@ -207,17 +223,20 @@ local function module_matches(entry, query)
     return false
 end
 
-local function assign_provider_row(index, interface, provider)
+local function assign_provider_row(index, interface, provider, candidate_count)
     if index == 1 then
         provider_row_1_hidden = false
+        provider_row_1_action_hidden = candidate_count < 2
         provider_row_1_interface = interface
         provider_row_1_provider = provider
     elseif index == 2 then
         provider_row_2_hidden = false
+        provider_row_2_action_hidden = candidate_count < 2
         provider_row_2_interface = interface
         provider_row_2_provider = provider
     elseif index == 3 then
         provider_row_3_hidden = false
+        provider_row_3_action_hidden = candidate_count < 2
         provider_row_3_interface = interface
         provider_row_3_provider = provider
     end
@@ -270,6 +289,9 @@ local function reset_rows()
     provider_row_1_hidden = true
     provider_row_2_hidden = true
     provider_row_3_hidden = true
+    provider_row_1_action_hidden = true
+    provider_row_2_action_hidden = true
+    provider_row_3_action_hidden = true
     module_row_1_hidden = true
     module_row_2_hidden = true
     module_row_3_hidden = true
@@ -307,11 +329,36 @@ function render(self)
     local query = lower(module_filter)
     local matched = {}
     local providers = {}
+    local active_providers = {}
+    local seen_provider_bindings = {}
+    provider_candidates = {}
     for _, entry in ipairs(graph) do
         local uses = entry.uses or {}
         if type(uses.active_providers) == "table" then
             for _, pair in ipairs(uses.active_providers) do
-                providers[#providers + 1] = pair
+                local interface = tostring(pair.interface or "")
+                local provider = tostring(pair.provider or "")
+                if interface ~= "" and provider ~= "" then
+                    active_providers[interface] = provider
+                    local binding_key = interface .. "=" .. provider
+                    if not seen_provider_bindings[binding_key] then
+                        providers[#providers + 1] = { interface = interface, provider = provider }
+                        seen_provider_bindings[binding_key] = true
+                    end
+                end
+            end
+        end
+        if entry.enabled ~= false and entry.kind == "backend" then
+            local provides = entry.provides or {}
+            if type(provides.interfaces) == "table" then
+                for _, provided in ipairs(provides.interfaces) do
+                    local interface = type(provided) == "table" and provided.interface or provided
+                    interface = tostring(interface or "")
+                    if interface ~= "" then
+                        provider_candidates[interface] = provider_candidates[interface] or {}
+                        provider_candidates[interface][#provider_candidates[interface] + 1] = tostring(entry.module_id or "")
+                    end
+                end
             end
         end
         if module_matches(entry, query) then
@@ -328,9 +375,15 @@ function render(self)
     if #providers == 0 then
         providers_summary = "No active providers published yet"
     end
+    if provider_notice ~= "" then
+        providers_summary = providers_summary .. "; " .. provider_notice
+    end
     for i = 1, math.min(#providers, 3) do
         local pair = providers[i]
-        assign_provider_row(i, tostring(pair.interface or ""), tostring(pair.provider or ""))
+        local interface = tostring(pair.interface or "")
+        local provider = pending_providers[interface] or active_providers[interface] or tostring(pair.provider or "")
+        local candidates = provider_candidates[interface] or {}
+        assign_provider_row(i, interface, provider, #candidates)
     end
 
     modules_summary = tostring(#matched) .. " of " .. tostring(#graph) .. " installed modules match"
@@ -374,6 +427,35 @@ function onLocaleSk()
     locale_sk_class = "segment segment-active"
 end
 
+local function select_next_provider(interface, current)
+    local candidates = provider_candidates[interface] or {}
+    if interface == "" or #candidates < 2 then return end
+    local current_index = 0
+    for i, provider in ipairs(candidates) do
+        if provider == current then current_index = i end
+    end
+    local next_index = (current_index % #candidates) + 1
+    local provider_id = candidates[next_index]
+    pending_providers[interface] = provider_id
+    provider_notice = "saved; restart MESH to apply"
+    mesh.events.publish("shell.set-provider", {
+        interface = interface,
+        provider_id = provider_id,
+    })
+end
+
+function onProvider1Next()
+    select_next_provider(provider_row_1_interface, provider_row_1_provider)
+end
+
+function onProvider2Next()
+    select_next_provider(provider_row_2_interface, provider_row_2_provider)
+end
+
+function onProvider3Next()
+    select_next_provider(provider_row_3_interface, provider_row_3_provider)
+end
+
 function onClose()
     mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/settings" })
 end
@@ -409,8 +491,23 @@ end
 .header-copy,
 .control-copy,
 .section,
-.module-copy {
+.module-copy,
+.provider-copy {
     gap: var(--spacing-xs);
+}
+
+.provider-row {
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+}
+
+.provider-action {
+    min-width: 52px;
+    min-height: 28px;
+    padding-left: var(--spacing-sm);
+    padding-right: var(--spacing-sm);
 }
 
 .settings-title {

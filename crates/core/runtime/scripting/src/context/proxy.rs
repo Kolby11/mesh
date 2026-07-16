@@ -215,7 +215,7 @@ pub(super) fn create_events_proxy(
 /// Resolve (or lazily create) the interface-event channel for `(service, event)`.
 ///
 /// The channel registry lives on the per-instance `_ENV` table (`scope`), not on
-/// `lua.globals()`, so that components sharing a single surface VM keep
+/// `lua.globals()`, so that components sharing a single thread VM keep
 /// independent channels and per-context subscription tracking.
 pub(super) fn interface_event_channel(
     lua: &Lua,

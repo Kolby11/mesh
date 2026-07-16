@@ -6,4 +6,5 @@ handler_expression_cache_speedup          lower      1.38      15
 handler_sparse_vs_full_speedup            lower      2.00      25
 unbound_handler_speedup                   lower      50.00     75
 template_dependency_gate_speedup          lower      20.00     50
+thread_vm_checkout_speedup                 lower      30.00     40
 perf_hud_micros_per_frame                 upper      205.00    100

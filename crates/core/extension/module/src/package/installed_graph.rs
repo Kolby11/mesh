@@ -4,7 +4,7 @@ use super::{
     dependency_spec_to_string, parse_module_entrypoint, validate_relative_path,
 };
 use crate::manifest;
-use mesh_core_component::{AttributeValue, SourceTag, TemplateNode, parse_component};
+use mesh_core_component::{Attribute, AttributeValue, SourceTag, TemplateNode, parse_component};
 use mesh_core_service::{ContractCapabilities, InterfaceContract, parse_interface_contract};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -1131,119 +1131,84 @@ pub(crate) fn extract_frontend_interface_event_subscriptions(
 
 pub(crate) fn extract_keybind_subscriptions_from_mesh_source(content: &str) -> Vec<(String, bool)> {
     let mut subscriptions = Vec::new();
-    let mut remaining = content;
-    while let Some(start) = remaining.find("keybind=") {
-        if start > 0 {
-            let previous = remaining[..start].chars().next_back().unwrap_or(' ');
-            if previous.is_ascii_alphanumeric() || previous == '_' || previous == '-' {
-                remaining = &remaining[start + "keybind=".len()..];
-                continue;
-            }
-        }
-        let tag_start = find_tag_start_before_attr(remaining, start).unwrap_or(0);
-        let tag_end = find_tag_end_after_attr(remaining, start).unwrap_or(remaining.len());
-        let tag = &remaining[tag_start..tag_end];
-        let after = &remaining[start + "keybind=".len()..];
-        let (value, advance) = if after.starts_with('"') || after.starts_with('\'') {
-            let quote = after.chars().next().unwrap();
-            let inner = &after[1..];
-            match inner.find(quote) {
-                Some(end) => (&inner[..end], end + 2),
-                None => {
-                    remaining = &after[1..];
-                    continue;
-                }
-            }
-        } else if let Some(inner) = after.strip_prefix('{') {
-            match inner.find('}') {
-                Some(end) => (&inner[..end], end + 2),
-                None => {
-                    remaining = inner;
-                    continue;
-                }
-            }
-        } else {
-            remaining = after;
-            continue;
-        };
+    let Ok(component) = parse_component(content) else {
+        return subscriptions;
+    };
+    let Some(template) = component.template else {
+        return subscriptions;
+    };
 
-        let expression = value
-            .strip_prefix('{')
-            .and_then(|inner| inner.strip_suffix('}'));
-        let is_expression = expression.is_some();
-        let normalized = expression.unwrap_or(value).trim();
-        let action_id = if let Some(start) = normalized.find("this.keybinds.") {
-            let rest = &normalized[start + "this.keybinds.".len()..];
-            rest.strip_suffix(".id").unwrap_or(rest)
-        } else if !is_expression
-            && !normalized.contains('{')
-            && !normalized.contains('}')
-            && !normalized.contains('.')
-        {
-            normalized
-        } else {
-            remaining = &after[advance.min(after.len())..];
-            continue;
-        };
-        if !action_id.trim().is_empty() {
-            subscriptions.push((action_id.trim().to_string(), tag.contains("onkeybind=")));
-        }
-        remaining = &after[advance.min(after.len())..];
+    for node in &template.root {
+        collect_keybind_subscriptions_from_template_node(node, &mut subscriptions);
     }
     subscriptions.sort();
     subscriptions.dedup();
     subscriptions
 }
 
-fn find_tag_start_before_attr(source: &str, attr_start: usize) -> Option<usize> {
-    let bytes = source.as_bytes();
-    let mut in_string = false;
-    let mut quote = b'"';
-    let mut last_tag_start = None;
-    let mut i = 0usize;
-
-    while i < attr_start.min(bytes.len()) {
-        let b = bytes[i];
-        if in_string {
-            if b == quote && (i == 0 || bytes[i - 1] != b'\\') {
-                in_string = false;
+fn collect_keybind_subscriptions_from_template_node(
+    node: &TemplateNode,
+    subscriptions: &mut Vec<(String, bool)>,
+) {
+    match node {
+        TemplateNode::Element(element) => {
+            collect_keybind_subscription_from_attributes(&element.attributes, subscriptions);
+            for child in &element.children {
+                collect_keybind_subscriptions_from_template_node(child, subscriptions);
             }
-        } else if b == b'"' || b == b'\'' {
-            in_string = true;
-            quote = b;
-        } else if b == b'<' {
-            last_tag_start = Some(i);
-        } else if b == b'>' {
-            last_tag_start = None;
         }
-        i += 1;
+        TemplateNode::If(node) => {
+            for child in &node.then_children {
+                collect_keybind_subscriptions_from_template_node(child, subscriptions);
+            }
+            for child in &node.else_children {
+                collect_keybind_subscriptions_from_template_node(child, subscriptions);
+            }
+        }
+        TemplateNode::For(node) => {
+            for child in &node.children {
+                collect_keybind_subscriptions_from_template_node(child, subscriptions);
+            }
+        }
+        TemplateNode::Component(component) => {
+            collect_keybind_subscription_from_attributes(&component.props, subscriptions);
+            for child in &component.children {
+                collect_keybind_subscriptions_from_template_node(child, subscriptions);
+            }
+        }
+        TemplateNode::Text(_) | TemplateNode::Expr(_) | TemplateNode::Slot(_) => {}
     }
-
-    last_tag_start
 }
 
-fn find_tag_end_after_attr(source: &str, attr_start: usize) -> Option<usize> {
-    let bytes = source.as_bytes();
-    let mut in_string = false;
-    let mut quote = b'"';
-    let mut i = attr_start.min(bytes.len());
+fn collect_keybind_subscription_from_attributes(
+    attributes: &[Attribute],
+    subscriptions: &mut Vec<(String, bool)>,
+) {
+    let has_handler = attributes
+        .iter()
+        .any(|attribute| attribute.name == "onkeybind");
+    let Some(attribute) = attributes
+        .iter()
+        .find(|attribute| attribute.name == "keybind")
+    else {
+        return;
+    };
 
-    while i < bytes.len() {
-        let b = bytes[i];
-        if in_string {
-            if b == quote && (i == 0 || bytes[i - 1] != b'\\') {
-                in_string = false;
-            }
-        } else if b == b'"' || b == b'\'' {
-            in_string = true;
-            quote = b;
-        } else if b == b'>' {
-            return Some(i);
+    let action_id = match &attribute.value {
+        AttributeValue::Static(value) => {
+            let value = value.trim();
+            (!value.is_empty() && !value.contains(['{', '}', '.'])).then_some(value)
         }
-        i += 1;
+        AttributeValue::Binding(expression) => expression
+            .trim()
+            .strip_prefix("this.keybinds.")
+            .and_then(|action| action.strip_suffix(".id"))
+            .filter(|action| !action.is_empty() && !action.contains('.')),
+        _ => None,
+    };
+    if let Some(action_id) = action_id {
+        subscriptions.push((action_id.to_string(), has_handler));
     }
-
-    None
 }
 
 fn is_declared_shell_event_channel(channel: &str) -> bool {
@@ -1257,6 +1222,7 @@ fn is_declared_shell_event_channel(channel: &str) -> bool {
             | "shell.activate-popover"
             | "shell.set-theme"
             | "shell.set-locale"
+            | "shell.set-provider"
             | "shell.toggle-debug-overlay"
             | "shell.toggle-debug-layout-bounds"
             | "shell.toggle-debug-profiling"

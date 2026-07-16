@@ -2887,7 +2887,7 @@ end
 
 #[test]
 fn components_sharing_one_vm_keep_isolated_public_members() {
-    // Two component instances on a single shared surface VM must keep their
+    // Two component instances on a single shared thread VM must keep their
     // public members private to their own _ENV — sharing the VM does not share
     // bare globals (that only happens through an explicit bind:this reference).
     let vm = SurfaceVm::new();
@@ -2914,6 +2914,106 @@ fn components_sharing_one_vm_keep_isolated_public_members() {
         ctx_b.state.get("secret"),
         Some(serde_json::json!("b-value"))
     );
+}
+
+#[test]
+fn separate_surface_handles_share_thread_vm_without_state_bleed() {
+    // SurfaceVm::new is intentionally cheap: both handles refer to the current
+    // thread's realm, while each ScriptContext still owns a distinct _ENV.
+    let first_surface = SurfaceVm::new();
+    let second_surface = SurfaceVm::new();
+
+    let mut first = ScriptContext::new("@mesh/first-surface", CapabilitySet::new()).unwrap();
+    first.attach_shared_vm(&first_surface);
+    first
+        .load_script("surface_value = 'first'\nfunction read() return surface_value end")
+        .unwrap();
+
+    let mut second = ScriptContext::new("@mesh/second-surface", CapabilitySet::new()).unwrap();
+    second.attach_shared_vm(&second_surface);
+    second
+        .load_script("surface_value = 'second'\nfunction read() return surface_value end")
+        .unwrap();
+
+    assert_eq!(
+        first.state.get("surface_value"),
+        Some(serde_json::json!("first"))
+    );
+    assert_eq!(
+        second.state.get("surface_value"),
+        Some(serde_json::json!("second"))
+    );
+}
+
+#[test]
+fn standalone_contexts_share_thread_vm_without_state_bleed() {
+    // Backend/test contexts that do not attach a SurfaceVm use the same
+    // thread-owned realm and the same _ENV isolation contract.
+    let mut first = ScriptContext::new("@mesh/standalone-a", CapabilitySet::new()).unwrap();
+    first.load_script("value = 1").unwrap();
+    let mut second = ScriptContext::new("@mesh/standalone-b", CapabilitySet::new()).unwrap();
+    second.load_script("value = 2").unwrap();
+
+    assert_eq!(first.state.get("value"), Some(serde_json::json!(1)));
+    assert_eq!(second.state.get("value"), Some(serde_json::json!(2)));
+}
+
+#[test]
+fn thread_vm_reclaims_dropped_context_environments() {
+    std::thread::spawn(|| {
+        let lua = crate::pool::thread_vm();
+        lua.gc_collect().unwrap();
+        let baseline = lua.used_memory();
+
+        let contexts: Vec<_> = (0..64)
+            .map(|index| {
+                let mut context = ScriptContext::new(
+                    format!("@mesh/gc-{index}"),
+                    CapabilitySet::new(),
+                )
+                .unwrap();
+                context
+                    .load_script(&format!(
+                        "payload = {{ name = 'context-{index}', values = table.create(128, {index}) }}"
+                    ))
+                    .unwrap();
+                context
+            })
+            .collect();
+        let live = lua.used_memory();
+        assert!(live > baseline);
+
+        drop(contexts);
+        lua.gc_collect().unwrap();
+        lua.gc_collect().unwrap();
+        let reclaimed = lua.used_memory();
+        assert!(
+            reclaimed < live,
+            "dropping contexts must make their _ENV graphs collectible"
+        );
+        let second_wave: Vec<_> = (0..64)
+            .map(|index| {
+                let mut context =
+                    ScriptContext::new(format!("@mesh/gc-{index}"), CapabilitySet::new()).unwrap();
+                context
+                    .load_script(&format!(
+                        "payload = {{ name = 'context-{index}', values = table.create(128, {index}) }}"
+                    ))
+                    .unwrap();
+                context
+            })
+            .collect();
+        drop(second_wave);
+        lua.gc_collect().unwrap();
+        lua.gc_collect().unwrap();
+        let second_reclaimed = lua.used_memory();
+        assert!(
+            second_reclaimed <= reclaimed.saturating_add(64 * 1024),
+            "repeated create/drop waves must not retain another set of _ENV graphs: first={reclaimed}, second={second_reclaimed}"
+        );
+    })
+    .join()
+    .unwrap();
 }
 
 #[test]

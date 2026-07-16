@@ -73,42 +73,31 @@ fn component_source_with_template_expressions(source: &str, expressions: &[Strin
 
 /// Backing VM for a [`ScriptContext`].
 ///
-/// A standalone context (backend modules, tests) owns a private pool VM. A
-/// frontend component that belongs to a surface instead borrows a clone of the
-/// surface's shared `Lua` so that every component in the surface lives in one
-/// realm — the prerequisite for live `bind:this` cross-component references.
-/// `mlua`'s `Lua` is a cheap reference-counted handle; clones share one VM.
+/// Cheap handle to a thread-owned Luau realm. Per-context `_ENV` tables are the
+/// isolation boundary; all contexts initialized on one thread share the VM and
+/// its standard-library heap.
 #[derive(Debug)]
-enum ScriptVm {
-    Pooled(pool::PooledVm),
-    Shared(Lua),
-}
+struct ScriptVm(Lua);
 
 impl ScriptVm {
     fn lua(&self) -> &Lua {
-        match self {
-            ScriptVm::Pooled(vm) => vm.lua(),
-            ScriptVm::Shared(lua) => lua,
-        }
+        &self.0
     }
 }
 
-/// An opaque, shareable Lua realm owned by a single frontend surface.
+/// An opaque handle to the current thread's shared frontend Lua realm.
 ///
-/// Every component instance in the surface attaches a clone of the same
-/// `SurfaceVm` (via [`ScriptContext::attach_shared_vm`]) so they all live in one
-/// realm — the prerequisite for live `bind:this` cross-component references.
-/// Clones are cheap handles to the same VM. Holding this type lets the shell own
-/// the realm without depending on `mlua` directly.
+/// Every frontend surface created on the thread receives a clone of the same
+/// sandboxed VM. Component `_ENV` tables keep globals, host channels, and
+/// subscriptions isolated; sharing the realm enables live `bind:this` calls
+/// without per-surface standard-library allocation.
 #[derive(Clone, Debug)]
 pub struct SurfaceVm(Lua);
 
 impl SurfaceVm {
-    /// Create a fresh sandboxed realm for one surface.
+    /// Clone the current thread's sandboxed realm for a frontend surface.
     pub fn new() -> Self {
-        let lua = Lua::new();
-        lua.sandbox(true).expect("surface vm sandbox init failed");
-        Self(lua)
+        Self(pool::thread_vm())
     }
 
     pub(crate) fn handle(&self) -> Lua {
@@ -186,9 +175,8 @@ pub struct ScriptContext {
     pub state: ScriptState,
     optional_interfaces: Arc<HashSet<String>>,
     vm: Option<ScriptVm>,
-    /// When set, [`ensure_initialized`] runs on this shared VM (a clone of the
-    /// owning surface's `Lua`) instead of checking out a private pool VM. Must
-    /// be attached before the script is loaded.
+    /// Optional surface-owned handle to the thread realm. Must be attached
+    /// before the script is loaded so live bindings use the surface's handle.
     shared_vm: Option<Lua>,
     env_table: Option<Table>,
     interface_catalog: Arc<InterfaceCatalog>,
@@ -253,11 +241,11 @@ impl ScriptContext {
             .lua()
     }
 
-    /// Attach a shared surface VM to run on instead of a private pool checkout.
+    /// Attach the surface's handle to the current thread VM.
     ///
     /// Used by a frontend surface so all of its component instances share one
-    /// Lua realm. Must be called before the script is loaded/initialized; it has
-    /// no effect once the context is already initialized.
+    /// thread realm. Must be called before the script is loaded/initialized; it
+    /// has no effect once the context is already initialized.
     pub fn attach_shared_vm(&mut self, vm: &SurfaceVm) {
         self.shared_vm = Some(vm.handle());
     }
@@ -404,17 +392,13 @@ impl ScriptContext {
         self.optional_interfaces = Arc::new(interfaces);
     }
 
-    /// Check out a pooled VM, create a per-component _ENV table, install host API,
-    /// sandbox the thread, and populate builtin_globals. Idempotent — does nothing
-    /// if already initialized.
+    /// Clone the thread VM, create a per-component `_ENV`, install host APIs,
+    /// and populate `builtin_globals`. Idempotent.
     fn ensure_initialized(&mut self) -> Result<(), ScriptError> {
         if self.vm.is_some() {
             return Ok(());
         }
-        let vm = match self.shared_vm.clone() {
-            Some(lua) => ScriptVm::Shared(lua),
-            None => ScriptVm::Pooled(pool::checkout()),
-        };
+        let vm = ScriptVm(self.shared_vm.clone().unwrap_or_else(pool::thread_vm));
         let lua = vm.lua();
 
         // ISO-01: create per-component _ENV with __index = globals() fallthrough
@@ -458,12 +442,20 @@ impl ScriptContext {
         Ok(())
     }
 
-    /// Drop the env_table and return the pooled VM. ScriptContext methods
-    /// must not be called after this without a subsequent ensure_initialized().
+    /// Tear down this context's `_ENV` graph. ScriptContext methods must not be
+    /// called afterward without a subsequent `ensure_initialized()`.
     pub fn uninit(&mut self) {
-        self.env_table = None;
         self.cached_self_table = None;
         self.cached_service_payload_fingerprints = None;
+        if let Some(env) = self.env_table.take() {
+            // A per-context VM used to make the entire Lua heap disposable.
+            // With one realm per thread, explicitly sever the _ENV graph so
+            // host callbacks and script closures become collectible when a
+            // surface/context is removed. Ignore teardown errors: uninit is
+            // also called from Drop and cannot report them.
+            let _ = env.clear();
+            let _ = env.set_metatable(None);
+        }
         self.builtin_globals.clear();
         self.user_global_keys.clear();
         self.user_global_key_set.clear();
@@ -1210,7 +1202,7 @@ impl ScriptContext {
     ///
     /// Builds a proxy table whose metatable forwards `__index`/`__newindex`
     /// straight to the child's live `_ENV`. Because parent and child share one
-    /// surface VM (see [`SurfaceVm`]), the forwarded `Table` handle is valid in
+    /// thread VM (see [`SurfaceVm`]), the forwarded `Table` handle is valid in
     /// the parent — reads see the child's current value, calls run the child's
     /// real function synchronously and return its real value, all with no copy.
     ///
@@ -1435,7 +1427,7 @@ impl ScriptContext {
         current_self.set("storage", storage).map_err(lua_err)?;
         // Self event channels (`self.Changed`) are registered on the per-instance
         // _ENV so two instances of the same component keep independent channels
-        // when they share one surface VM.
+        // when they share one thread VM.
         let self_events_scope = self.env().clone();
         let self_events_meta = self.lua().create_table().map_err(lua_err)?;
         self_events_meta
@@ -1857,7 +1849,7 @@ impl ScriptContext {
         let pending_diagnostics_for_require = Arc::clone(&self.pending_side_channels);
         let optional_interfaces_for_require = Arc::clone(&self.optional_interfaces);
         // The per-instance _ENV is the channel-registry scope so interface event
-        // channels stay private when components share one surface VM.
+        // channels stay private when components share one thread VM.
         let scope_for_require = globals.clone();
         let mesh_for_require = mesh_for_require.clone();
         let require = self
@@ -2431,7 +2423,7 @@ fn is_denied_binding_key(key: &str, denylist: &HashSet<String>) -> bool {
 ///
 /// The registry lives on the per-instance `_ENV` table (`scope`) so two
 /// instances of the same component keep independent `self` channels when they
-/// share one surface VM.
+/// share one thread VM.
 fn self_event_channel(lua: &Lua, scope: &Table, event_name: &str) -> mlua::Result<Table> {
     let registry = match scope.raw_get::<LuaValue>("__mesh_self_event_channels")? {
         LuaValue::Table(table) => table,

@@ -3873,6 +3873,54 @@ fn extract_keybind_subscriptions_handles_quoted_angle_brackets_in_tag() {
 }
 
 #[test]
+fn extract_keybind_subscriptions_walks_nested_control_flow_and_deduplicates() {
+    use super::installed_graph::extract_keybind_subscriptions_from_mesh_source;
+
+    let src = r#"
+<template>
+  <column>
+    @if muted
+      <button keybind="{this.keybinds.mute.id}" onkeybind={onMute}></button>
+    @else
+      <button keybind="open"></button>
+    @endif
+    @for item in items
+      <row><button keybind="open" onkeybind={onOpen}></button></row>
+    @endfor
+    <ActionButton keybind="component" onkeybind={onComponent}></ActionButton>
+  </column>
+</template>
+<script lang="luau">
+local ActionButton = require("./action-button.mesh")
+</script>
+"#;
+
+    assert_eq!(
+        extract_keybind_subscriptions_from_mesh_source(src),
+        vec![
+            ("component".to_string(), true),
+            ("mute".to_string(), true),
+            ("open".to_string(), false),
+            ("open".to_string(), true),
+        ]
+    );
+}
+
+#[test]
+fn extract_keybind_subscriptions_ignores_dynamic_and_malformed_sources() {
+    use super::installed_graph::extract_keybind_subscriptions_from_mesh_source;
+
+    let dynamic = r#"
+<template>
+  <button keybind="{dynamic_id}" onkeybind={onDynamic}></button>
+  <button keybind="invalid.action" onkeybind={onInvalid}></button>
+</template>
+"#;
+    assert!(extract_keybind_subscriptions_from_mesh_source(dynamic).is_empty());
+    assert!(extract_keybind_subscriptions_from_mesh_source("<template><button").is_empty());
+}
+
+#[test]
 fn graph_diagnostics_report_undeclared_i18n_key() {
     let dir = temp_dir("i18n-key-test");
     let src_dir = dir.join("src");
