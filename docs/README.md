@@ -1,46 +1,56 @@
 # MESH Documentation
 
-Docs for the MESH shell framework. For a high-level project description see
-[`../README.md`](../README.md).
+This directory contains current public contracts and verified author or
+maintainer guidance. Start with the [project README](../README.md), then use
+the sections below according to the question being answered.
 
-## The specification
+## Document authority
 
-**[`spec/`](./spec/README.md)** is the unified, authoritative specification —
-module system, installation & health, components & props, styling & theming,
-icons, fonts, localization, settings, accessibility, keyboard, automation
-IPC, and MCP. Start there for any design or contract question.
+MESH uses four explicit document classes:
 
-## Codebase orientation
+1. **`docs/spec/` — public contract.** Each section says whether behavior is
+   `Shipped` or `Target`. When implementation and target differ, both must be
+   stated explicitly.
+2. **`docs/` — current guidance.** Architecture, configuration, authoring,
+   testing, module indexes, and implementation references verified against the
+   source tree.
+3. **`.planning/` — history and evidence.** Milestone plans, experiments,
+   performance logs, migrations, and superseded design discussions. These may
+   explain why a decision was made but do not override the specification.
+4. **[`BACKLOG.md`](BACKLOG.md) — unfinished work.** The only active backlog;
+   other documents may link to it but must not maintain competing TODO lists.
 
-- **[`llm-context.md`](./llm-context.md)** — crate map, module layout, key
-  data flows, common task entry points. The primary orientation guide for
-  working on this codebase.
-- **[`crate-boundaries.md`](./crate-boundaries.md)** — crate responsibility
-  boundaries.
+`CLAUDE.md` remains at the repository root as tool-specific project guidance,
+not product documentation.
 
-## Frontend reference
+## Core guides
 
-- [`frontend/mesh-syntax.md`](./frontend/mesh-syntax.md) — `.mesh` component
-  syntax: tags, interpolation, bindings, event handlers, accessibility.
-- [`frontend/elements.md`](./frontend/elements.md) — native element taxonomy.
-- [`frontend/slots.md`](./frontend/slots.md) — slot points for extending
-  surfaces without forking them.
-- [`frontend/renderer-contract.md`](./frontend/renderer-contract.md) —
-  renderer expectations for module authors.
-- [`frontend/html-css-transition.md`](./frontend/html-css-transition.md) —
-  UI XML vocabulary and bounded CSS profile transition sketch.
-- [`css-coverage.md`](./css-coverage.md) — supported CSS property coverage.
+- [Architecture](architecture/overview.md)
+- [Getting started](guides/getting-started.md)
+- [Development](guides/development.md)
+- [Testing](testing/overview.md)
+- [Configuration](configuration/overview.md)
+- [Active backlog](BACKLOG.md)
 
-## Shipped modules
+## Specification
 
-- [`modules/README.md`](./modules/README.md) — core-module index
-  (frontends, backends, interface packages, examples).
+[The unified specification](spec/README.md) defines the module system,
+installation, components, styling, resources, settings, accessibility,
+keyboard behavior, automation, and MCP direction.
 
-## Performance & rendering internals
+## Author reference
 
-- [`performance-roadmap.md`](./performance-roadmap.md) — retained rendering,
-  invalidation, damage tracking, GPU sequencing.
-- [`performance-profiling.md`](./performance-profiling.md) — capture CPU
-  flamegraphs and Heaptrack allocation profiles from the running shell.
-- [`renderer-migration.md`](./renderer-migration.md) /
-  [`renderer-ownership.md`](./renderer-ownership.md) — renderer internals.
+- [`.mesh` syntax](frontend/mesh-syntax.md)
+- [Elements](frontend/elements.md)
+- [Renderer contract](frontend/renderer-contract.md)
+- [CSS coverage](css-coverage.md)
+- [Shipped module index](modules/README.md)
+
+## Maintainer reference
+
+- [Crate boundaries](crate-boundaries.md)
+- [Renderer ownership](renderer-ownership.md)
+- [Performance profiling](performance-profiling.md)
+
+Historical renderer migration, UI transition, performance-roadmap, benchmark,
+and iteration narratives live under `.planning/`.

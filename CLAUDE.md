@@ -1,6 +1,7 @@
 # MESH
 
-@docs/llm-context.md
+@docs/architecture/overview.md
+@docs/spec/README.md
 
 MESH is a Wayland-only shell framework built in Rust.
 
@@ -15,7 +16,7 @@ MESH is a platform for building desktop shell experiences with:
 - single-file UI components
 - XHTML-like markup
 - CSS-like styling
-- package-based ecosystem
+- editable module ecosystem
 - system-wide theme inheritance
 - accessibility-first component model
 - localization support
@@ -25,7 +26,7 @@ MESH is a platform for building desktop shell experiences with:
 
 Use these terms precisely in code, documentation, and architecture discussions:
 
-- **Module**: the installable package unit for MESH. Modules use a canonical
+- **Module**: the installable unit for MESH. Modules use a canonical
   `module.json` with all MESH behavior under the `mesh` key. `mesh.kind`
   describes the role (`frontend`, `backend`, `interface`, `theme`,
   `icon-pack`, `font-pack`, `language-pack`, or `library`). Old manifest
@@ -43,25 +44,22 @@ Use these terms precisely in code, documentation, and architecture discussions:
   and, optionally, other components. Components encapsulate markup, Luau state
   and handlers, styles, schema, translations, and metadata. A component is not
   a core primitive.
-- **Frontend module**: a complete frontend implementation for a specific shell
-  capability or feature. A frontend module has a `module.json`, an entrypoint
-  `.mesh` file, capabilities, settings, and may contain multiple reusable
-  components. For example, an audio controls frontend module can contain
-  separate components for a volume mixer, output selector, mute button, and
-  device list.
+- **Frontend/component module**: an installable UI unit with one primary public
+  `.mesh` component. It may contain private internal components. A shell profile
+  can mount the public component as a surface or another component can embed it.
 - **Interface**: a named, versioned contract distributed as an `interface`
   module. Backends implement interfaces; frontends consume interfaces; the
   core validates and routes calls without knowing service-specific behavior.
-- **Luau library module**: a package that contributes importable Luau helpers
+- **Luau library module**: a module that contributes importable Luau helpers
   for backend and frontend scripts. Libraries reduce repeated parsing,
   polling, formatting, and result-shaping code, but they do not grant
   capabilities by themselves.
 
-When modeling Lua or LSP APIs, prefer this hierarchy: core **elements** expose
-the base typed API; user **components** compose elements; **frontend modules**
-package one or more components into a complete shell feature.
+When modeling Luau or LSP APIs, prefer this hierarchy: core **elements** expose
+the base typed API; user **components** compose elements; a module exports one
+primary public component or service.
 
-For the target module/package direction, see `docs/spec/01-module-system.md`.
+For the target module direction, see `docs/spec/01-module-system.md`.
 
 ## Main goals
 
@@ -86,7 +84,7 @@ For the target module/package direction, see `docs/spec/01-module-system.md`.
 Responsible for:
 
 - lifecycle
-- package loading
+- module loading and contract validation
 - settings
 - theming
 - localization
@@ -234,10 +232,10 @@ The semantic tree should also support automation and AI interaction.
 
 ## Localization
 
-System-wide and package-aware:
+System-wide and module-aware:
 
 - language packs
-- package translations
+- module translations
 - locale switching
 - fallback chains
 - pluralization / formatting
@@ -257,7 +255,7 @@ Every component should expose typed public settings so the shell can generate se
 ## Security strategy
 
 - sandbox Luau runtime
-- signed packages
+- signed modules
 - capability-based permissions
 - limited host APIs
 - trust levels and install-time review
@@ -271,7 +269,7 @@ Target:
 - notification center
 - quick settings
 - theme engine
-- package manager
+- module installer/package-service experience
 - widget SDK
 - service SDK
 - localization support
@@ -279,4 +277,5 @@ Target:
 
 ## One-line definition
 
-MESH is a Rust-based, Wayland-native shell framework with packaged, theme-inheriting, accessibility-first components and Luau-powered extensions.
+MESH is a Rust-based, Wayland-native shell-building platform with editable,
+theme-inheriting, accessibility-first modules and Luau-powered services.

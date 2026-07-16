@@ -176,9 +176,11 @@ Per the props model ([03](03-components.md)) and settings model
 
 ## 4. Interfaces
 
-**Status: shipped** (registry, contracts, event validation, relationship
-metadata). Contracts are JSON objects inside `module.json` — no separate
-contract file format — with a validated type grammar.
+**Status: shipped** for the registry, inline JSON contracts, event validation,
+and relationship metadata. **Target:** substantial interface modules move the
+same JSON contract object to a separate `contract.json` referenced by
+`module.json`; tiny contracts may remain inline. This reduces manifest noise
+without adding another language or execution model.
 
 An interface is a named, versioned declaration of:
 
@@ -190,7 +192,8 @@ An interface is a named, versioned declaration of:
 - **Shared props** — user preferences that survive provider swaps
   ([08 §4](08-settings.md)).
 
-Interface modules are data-only packages carrying the contract inline:
+Interface modules are data-only packages. The shipped representation carries
+the contract inline:
 
 ```json
 {
@@ -244,6 +247,30 @@ Interface modules are data-only packages carrying the contract inline:
   }
 }
 ```
+
+The target external form keeps `module.json` canonical:
+
+```json
+{
+  "name": "@mesh/audio-interface",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.audio",
+      "version": "1.0",
+      "contract": "contract.json"
+    }
+  }
+}
+```
+
+`contract.json` uses keyed `state`, `methods`, `events`, and `types` objects.
+It declares descriptions, units, ranges, errors, capabilities, and optional
+feature groups. Tooling compiles inline and external forms into the same
+canonical `InterfaceContract` representation and generates strict Luau types,
+provider stubs, mocks, documentation, and compatibility reports.
 
 - **Type grammar.** Every `type`/`returns` expression is validated at graph
   build: primitives (`string`, `int`, `float`, `boolean`, `object`, `any`),
@@ -318,6 +345,9 @@ declared payload schemas and drops invalid events with a
 
 **Status: shipped.**
 
+This section describes the current repository graph. Named shell profiles in
+§5.2 are the accepted target composition model.
+
 Backends declare provider records:
 
 ```json
@@ -376,6 +406,27 @@ A bare module reference means the implicit `#default` instance. The instance
 key scopes surface bookkeeping, the settings namespace (per-instance props,
 [08 §3](08-settings.md)), and `self.storage`. No new mechanism — the existing
 per-instance scoping keys on.
+
+### 5.2 Shell profiles and live switching
+
+**Status: target.**
+
+A profile is a declarative starting point for one shell composition. It lists
+root component instances and their surface placement, explicit provider choices
+where several compatible providers exist, resource selections, root background
+services, and profile-scoped overrides. It is not a systemd-like unit graph:
+there are no process users, privilege levels, restart policies, or general
+ordering language.
+
+Required services are inferred from component interface dependencies. A sole
+compatible provider may be selected automatically; ambiguity requires an
+explicit profile binding. Components with missing optional services degrade
+locally; missing required contracts reject the candidate before activation.
+
+Live profile switching is transactional: validate the candidate, diff it
+against the active graph, retain identical service instances, initialize new
+services and hidden surfaces, reveal the new roots, then remove orphaned
+objects. Failure before commit leaves the active profile untouched.
 
 ## 6. Scripting model
 

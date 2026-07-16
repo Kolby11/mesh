@@ -5,10 +5,11 @@
 > [`../frontend/elements.md`](../frontend/elements.md).
 
 A **component** is a user-authored reusable `.mesh` unit composed from core
-elements and other components. A **frontend module** packages one or more
-components into a complete shell feature. Configuration belongs to the
-component's source as a typed `<props>` public API; packaging stays in the
-manifest.
+elements and other components. A component module exports one primary public
+component and may contain private internal components. A shell profile may
+mount that component as a top-level surface or another component may embed it.
+Configuration belongs to the component's source as a typed `<props>` public
+API; packaging stays in the manifest.
 
 ## 1. The `.mesh` file
 

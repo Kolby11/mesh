@@ -10,7 +10,7 @@ Unsupported properties produce style diagnostics or parser errors instead of hid
 |---|---|
 | implemented | Parsed/resolved by the current MESH style path and represented in backend-neutral style/render data where applicable. |
 | diagnostic-only | Recognized as an author-facing compatibility case, but not accepted as supported shell CSS. Authors should get diagnostics or no support claim. |
-| deferred | In the bounded painter roadmap, but not promised by Phase 52. Later phases must add lowering, diagnostics, and proof before promoting it. |
+| deferred | Represented or under consideration, but not part of the current author contract. |
 | out-of-scope | Browser/Web platform behavior that MESH does not intend to implement for shell CSS. |
 
 ## Support Matrix
@@ -29,8 +29,8 @@ Unsupported properties produce style diagnostics or parser errors instead of hid
 | shadow | implemented | `box-shadow` parses and resolves into backend-neutral shadow data. Skia-backed shadow execution belongs to a later painter phase. |
 | filter | implemented | `filter` and `backdrop-filter` parse and resolve into backend-neutral filter data. Skia-backed layer/filter execution belongs to a later painter phase. |
 | compositing | implemented | `mix-blend-mode` (`normal`, `multiply`, `screen`) resolves into `ComputedStyle` and is applied by the Skia painter when compositing an element's background fill with the backdrop. |
-| image | deferred | CSS image sources such as `background-image` are future painter-profile work and are not accepted as current supported shell CSS. |
-| gradient | deferred | CSS gradient syntax such as `linear-gradient(...)` is future painter-profile work and is not accepted as current supported shell CSS. |
+| image | implemented | `background-image: url(...)` resolves module-relative image paths and lowers them to painter image commands; unsupported forms diagnose. |
+| gradient | implemented | Compact two-color `linear-gradient(...)` values resolve into backend-neutral gradient data and painter commands. |
 | animation | implemented | `animation` and its longhands store constrained animation metadata. Keyframes are percentage-only and limited to transition-safe visual properties. |
 | transition | implemented | `transition` and its longhands store constrained transition metadata for supported visual properties. |
 | layout | implemented | `display`, `visibility`, flex properties, `gap`, `row-gap`, `column-gap`, `gap-x`, positioning, `inset`, and `z-index` feed retained layout/render state. |
@@ -119,8 +119,6 @@ These examples are out-of-scope browser CSS and must not be documented or tested
 
 Unsupported at-rules are rejected by the component parser where possible. Unsupported declaration names flow through style diagnostics.
 
-## Phase 52 Boundary
-
-Phase 52 locks the profile contract and executable support matrix. It does not migrate widget/control painting, Skia primitive execution, effects/layers/images/gradients, animation invalidation, damage policy, or backend observability. Those remain later v1.10 painter phases.
+## Backend boundary
 
 Style profile data must stay backend-neutral. Skia belongs behind the painter backend boundary, not in style/profile structs, retained display-list data, or public author-facing style APIs.

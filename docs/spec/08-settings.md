@@ -2,7 +2,8 @@
 
 > Part of the [MESH Specification](README.md).
 
-One store, sparse, namespaced. **Defaults never live in the settings store**
+One logical settings service, sparse and namespaced. **Defaults never live in
+stored overrides**
 — they come from `<props>` declarations, in-script backend props, interface
 props, manifest surface placement, and shell prop declarations. The store
 holds *only values the user changed*.
@@ -15,8 +16,11 @@ deletion targets. Schemas no longer come from `mesh.provides.settings`
 
 ## 1. The store
 
-`~/.config/mesh/settings.json` (dev workspace: `config/settings.json`). One
-JSON object; every top-level key is a namespace:
+**Target storage representation.** The default settings-service provider may
+store JSON under the MESH dotfiles/state layout, but consumers use the
+`mesh.settings` service contract rather than depending on that file. Alternate
+providers may use another persistence implementation while preserving the same
+typed behavior. Every logical top-level key is a namespace:
 
 ```json
 {
@@ -61,13 +65,23 @@ Rules:
 - **Validated.** Every write is validated against the owning props
   declaration / core schema. Invalid values are rejected with a diagnostic
   and the stored value is ignored (falls through to default).
-- **Core-written.** Modules read effective values and subscribe to changes;
-  they never write their own settings. The generated UI, CLI, and automation
-  IPC write through the core. (Durable module-*internal* state is
+- **Service-written.** Modules read effective values and subscribe to changes;
+  they never mutate another module's settings directly. Settings components,
+  CLI adapters, and automation clients write through the selected
+  `mesh.settings` service provider. The core exposes generic validated storage
+  and transport primitives rather than settings policy. (Durable
+  module-*internal* state is
   `self.storage`, which is a different, module-writable surface.)
-- Root-graph decisions (enabled/disabled, providers, layout) stay in
-  `config/module.json` ([01 §5](01-module-system.md)) — the store holds
-  preference *values*, not module-graph topology.
+- Profile composition owns root instances and ambiguous provider choices
+  ([01 §5.2](01-module-system.md)); the settings service holds preference
+  *values*, not module-graph topology.
+
+### 1.1 Profile scope
+
+Configuration overrides are profile-scoped by default. Resolution layers a
+shared user default beneath the active profile and instance override. Durable
+service-owned data such as histories or indexes is shared across profiles unless
+the service contract explicitly declares another scope.
 
 ## 2. Where defaults come from
 
@@ -77,7 +91,7 @@ Rules:
 | Backend config | in-script `props {}` in `main.luau` | `<provider-module>.props.global` |
 | Interface shared config | `props` in the contract JSON (`module.json`) | `mesh.<interface>.props.global` |
 | Surface placement | `mesh.surface` in the manifest | `<module>.surface.*` |
-| Shell knobs | core prop declarations | `shell.*` |
+| Host/runtime knobs | host prop declarations | `shell.*` |
 | Keybinds | `mesh.keybinds` triggers | `shell.keyboard.surface_shortcuts` |
 
 ## 3. Precedence
@@ -111,8 +125,8 @@ code:
 - **Resource chains** — icon/font pack pickers and per-name override pickers
   writing the §1 shapes; the icon picker writes the user icon-pack module
   ([05 §4.2](05-icons.md)).
-- **Module graph info** — uses/provides, active provider selection (writes
-  the root graph), capabilities, health, diagnostics
+- **Module graph info** — uses/provides, active provider selection (writes the
+  active profile through the appropriate service), capabilities, health, diagnostics
   ([01 §9](01-module-system.md)).
 
 Modules needing a custom layout may ship a `settings_ui` entrypoint rendering

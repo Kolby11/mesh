@@ -7,9 +7,12 @@ makes every gap after that visible and fixable. Both read the **same
 declarations** in `module.json` — there is no duplication between "what the
 installer checks" and "what the runtime verifies".
 
-## 1. Installer v1 — path + git, decisions-only
+## 1. Installer v1 — path + Git, editable source
 
-**Status: target** (the CLI is currently a bare shell launcher).
+**Status: target** (the CLI is currently a shell launcher and inspection
+adapter). Installation behavior is exposed through a package service; a CLI or
+package component is a replaceable client of that service, not a privileged
+management layer.
 
 v1 deliberately ships without a registry, package archives, or signing. The
 design must not block them (§6), but the first installer is:
@@ -18,11 +21,11 @@ design must not block them (§6), but the first installer is:
 mesh install <path>              # copy a local module directory into the modules dir
 mesh install <git-url>[#ref]     # clone a module repo into the modules dir
 mesh uninstall <module-id>
-mesh enable <module-id>          # remove from root-graph "disabled"
-mesh disable <module-id>         # add to root-graph "disabled"
+mesh profile add <profile> <module-id>     # add a root or provider choice
+mesh profile remove <profile> <module-id>  # unwire it from that profile
 mesh list                        # installed modules, kinds, versions, health
 mesh providers [<interface>]     # implementers + active provider; set with:
-mesh providers <interface> <module-id>
+mesh providers <profile> <interface> <module-id>
 mesh doctor                      # full health + dependency report (§5)
 mesh new <kind> <name>           # scaffold a module from a kind template
 ```
@@ -30,13 +33,18 @@ mesh new <kind> <name>           # scaffold a module from a kind template
 Semantics:
 
 - **Install = copy/clone + validate.** The module directory is placed under
-  the user modules dir, its manifest is validated (closed-core schema,
+  the active dotfiles modules directory, its manifest is validated (closed-core schema,
   dependency buckets, kind-scoped sections), and graph diagnostics run once.
-  Nothing else is written inside the module.
-- **All state = root-graph edits.** Enabled/disabled, provider selection, and
-  layout entrypoints are edits to `config/module.json`
-  ([01 §5](01-module-system.md)). There is no lockfile in v1 — the modules
-  dir *is* the state, and the root graph holds the decisions.
+  Nothing else is written inside the module. Installed source remains directly
+  editable.
+- **Profiles hold composition decisions.** Root components, provider choices,
+  resources, and scoped overrides belong to named profiles
+  ([01 §5.2](01-module-system.md)). The modules directory is available source,
+  not a list of running units.
+- **Updates preserve edits.** `mesh.lock` records source provenance and the
+  resolved revision. An update never silently discards local changes; it must
+  keep the local tree, merge/rebase explicitly, or replace only after the user
+  chooses that action.
 - **Dependencies are reported, not fetched.** v1 does not resolve transitive
   module dependencies from a registry; it validates that `mesh.uses.modules`
   and `mesh.uses.interfaces` are satisfiable by what is installed and prints
@@ -61,26 +69,31 @@ $ mesh install ~/src/pulseaudio-audio
 → @mesh/pulseaudio-audio provides mesh.audio.
   mesh.audio is already provided by @mesh/pipewire-audio (active).
   @mesh/pulseaudio-audio is installed and inactive.
-  Switch with: mesh providers mesh.audio @mesh/pulseaudio-audio
+  Bind in a profile with:
+  mesh providers desktop mesh.audio @mesh/pulseaudio-audio
 ```
 
-The sole implementer of an interface is auto-selected; an explicit `providers`
-entry exists only where several modules implement one interface.
+The sole compatible implementer of an interface may be auto-selected; an
+explicit profile binding is required where several modules implement one
+interface.
 
 ## 2. Directories
 
 ```
-/usr/share/mesh/modules/        system-installed modules (distro / core)
-~/.local/share/mesh/modules/    user-installed modules (installer target)
-~/.local/share/mesh/user-icons/ auto-managed user icon-pack module (05 §6)
-~/.config/mesh/module.json      root graph (decisions)
-~/.config/mesh/settings.json    the single sparse settings store (08)
-~/.config/mesh/themes/          user-authored theme packs (04)
+~/.config/mesh/modules/         directly editable installed module source
+~/.config/mesh/profiles/        saved shell compositions
+~/.config/mesh/active-profile   selected profile id
+~/.config/mesh/mesh.lock        source provenance and resolved revisions
+~/.config/mesh/overrides/       optional user-owned cross-module overrides
+~/.local/state/mesh/            durable service state, logs, and health
+~/.cache/mesh/                  compiled components and rebuildable indexes
 ```
 
-The development workspace uses `config/` + `modules/` in-repo with the same
-shapes. User modules override system modules with the same id; system modules
-cannot be uninstalled, only disabled or shadowed.
+The development workspace currently uses `config/` plus `modules/` in-repo;
+the profile directory shape is target behavior. Default MESH modules are copied
+or cloned into the same editable module tree as third-party modules. They are
+preinstalled defaults, not privileged system units, and can be removed from a
+profile or replaced.
 
 ## 3. Validation at install and load
 
@@ -114,7 +127,7 @@ best-effort.
 availability states, and the debug inspector exist; the three-state record and
 periodic re-probe are the contract to implement against).
 
-Every module has a health state — a first-class runtime primitive frontends
+Every active module has a health state — a first-class runtime primitive frontends
 can subscribe to, so a missing daemon becomes "Audio unavailable: install
 playerctl", not a silently broken widget.
 
@@ -142,10 +155,12 @@ How health is set:
    consuming `mesh.audio` from an `unavailable` backend sees the *interface*
    as unavailable; "no provider" and "broken provider" are one case.
 
-An `unavailable` backend **does not register** its implementation; the
-next-priority provider (if any) takes over. Providers advertise supported
-optional contract features at registration; unsupported calls raise
-`unsupported_operation` and report `degraded` with the feature name.
+An unavailable selected backend does not silently switch the shell to another
+provider. The active profile remains deterministic and exposes the failure;
+the user, distribution, or an explicitly configured policy service may choose
+another provider. Providers advertise supported optional contract features at
+registration; unsupported calls raise `unsupported_operation` and report
+`degraded` with the feature name.
 
 Health flows on the normal event bus:
 
@@ -176,7 +191,7 @@ unavailable interface render the same fallback path.
   over the tree); trust tiers ([01 §7](01-module-system.md)) already define
   the policy that signatures will enforce. Unsigned = `local`/`community`
   tier behavior.
-- A lockfile becomes meaningful only with registry fetching; v1's "modules
-  dir is the state" rule is forward-compatible with adding one.
+- The existing source-provenance lock can grow registry integrity and signature
+  metadata without changing the editable module layout.
 - Update flows must re-show capability diffs and require re-approval when a
   new version adds `elevated`/`high` capabilities.

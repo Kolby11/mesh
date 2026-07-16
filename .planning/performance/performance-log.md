@@ -149,6 +149,25 @@ completion evidence that was removed from `todo.md`.
   before allocating. One million duplicate reads measured 31.5ms
   allocate-before-insert versus 16.5ms borrowed (1.9x).
 
+### R — one Luau VM per execution thread
+
+- The four-slot VM pool and per-surface VM construction were replaced by one
+  lazily initialized sandboxed Luau realm per execution thread. Frontend
+  surfaces, embedded component instances, standalone contexts, and backend
+  contexts clone a cheap handle to that realm; each `ScriptContext` retains a
+  distinct `_ENV`, so globals, host channels, interface subscriptions, and
+  live bindings preserve their existing isolation semantics.
+- Context teardown explicitly clears the `_ENV` and its metatable before
+  releasing handles. A two-wave, 64-context regression test forces full Lua
+  collection and verifies that dead environment graphs do not accumulate in
+  the long-lived thread realm.
+- The release benchmark includes the first real VM initialization for a fresh
+  thread, not only steady-state clones. Creating 256 fresh sandboxed realms
+  measured 14.45ms versus 454.7us for one thread realm plus 255 clones (31.8x).
+  Thirty-two fresh realms used 10,903,040 bytes of Lua heap versus 340,720 bytes
+  for the shared realm (32.0x less aggregate heap). The checked CI baseline now
+  includes `thread_vm_checkout_speedup`.
+
 ## 2026-07-14 follow-up — five measured hot-path changes
 
 - Retained narrow/layout analysis caps its initial result-set capacity at 256;
@@ -296,7 +315,8 @@ Items owned by a milestone are listed with their milestone reference.
 
 ### P0 — scripting (→ v1.17)
 
-- [ ] One `mlua::Lua` VM per ScriptContext (`runtime.rs:92`); move to per-thread VM with `_ENV` isolation → v1.17
+- [x] One `mlua::Lua` VM per ScriptContext; moved to a per-thread VM with `_ENV`
+      isolation and explicit environment teardown (completed 2026-07-16; see R).
 ### P1 — renderer hot paths
 
 - [ ] Interaction frames still re-apply string style declarations per node (`apply_declaration_no_diagnostics` + theme defaults maps dominate the post-2026-06-10 toggle profile); folds into the typed/compiled declaration work → v1.23 and narrower invalidation → v1.18. Progress 2026-07-05: `StyleRuleIndex` now precomputes no-diagnostics declaration metadata for cached restyle paths, so interaction/restyle frames reuse support/profile/deprecated-token classification instead of repeating it per matched declaration. Added parity coverage for cached vs uncached declaration application and a release-only microbenchmark showing indexed declaration application at ~1.4x faster (156.3ms → 109.1ms for 200k iterations on the local profile run).

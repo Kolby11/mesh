@@ -1,321 +1,157 @@
+<!-- generated-by: gsd-doc-writer -->
 # MESH
 
-MESH is a Wayland-native shell framework built in Rust. It runs on top of an existing Wayland compositor and provides the shell layer of the desktop: panels, launchers, notifications, quick settings, overlays, widgets, and settings surfaces.
+MESH is a Wayland-native shell-building platform written in Rust: its core
+provides rendering, module execution, service contracts, and compositor
+integration, while editable modules define the desktop experience.
 
-MESH is not a compositor and not a window manager. The goal is to build a polished, extensible shell platform rather than replace the full compositor stack.
+MESH runs above an existing Wayland compositor. It is not a compositor, window
+manager, process supervisor, or fixed desktop environment.
 
-## What MESH is
+## Project status
 
-MESH is designed as a desktop shell platform with a strong extension model.
+MESH is under active development. The repository contains a working shell,
+module graph, `.mesh` component compiler, Luau runtimes, service interfaces,
+software renderer, Wayland presentation layer, language server, and shipped
+example modules. Some parts of the public specification are explicitly marked
+as targets and are not implemented yet.
 
-It combines:
+The canonical status sources are:
 
-- a Rust core for performance, safety, and system integration
-- Luau for scripting extensions and package logic
-- single-file UI components
-- package-based distribution for widgets, services, themes, and translations
-- a shared theme system with Material 3 inspired design tokens
-- built-in accessibility and localization support
-- external customization through typed settings and controlled style hooks
+- [Specification](docs/spec/README.md) for shipped and target contracts.
+- [Architecture](docs/architecture/overview.md) for current code ownership and
+  the agreed platform direction.
+- [Backlog](docs/BACKLOG.md) for unfinished implementation work.
 
-The project aims to make third-party components feel native to the shell rather than visually or architecturally disconnected.
-
-## What MESH is not
-
-MESH does not try to:
-
-- implement its own compositor
-- implement its own window manager
-- own core compositor policy such as window focus or workspace rules
-- guarantee identical behavior on every Wayland compositor
-
-Instead, it acts as a Wayland shell client and system UX layer.
-
-## Main goals
-
-The goals of MESH are:
-
-- create a modular shell platform instead of a hardcoded widget set
-- make widgets, services, and shell surfaces installable through packages
-- ensure all components inherit a shared shell-wide theme
-- make components configurable from outside through typed settings
-- provide a clean API for custom services and custom UI
-- enforce accessibility and localization from the beginning
-- support semantic metadata that can be used by screen readers, tooling, and AI systems
-
-## Core architecture
-
-MESH is split into four main parts.
-
-### Rust core
-
-The Rust core is the host and bridge for the module system. It is responsible
-for the generic shell machinery:
-
-- lifecycle and runtime coordination
-- module discovery, loading, and dependency validation
-- `.mesh` compilation and Luau runtime hosting
-- settings storage and validation
-- theme and localization plumbing
-- permission and capability enforcement
-- IPC, event routing, diagnostics, and logging
-- moving raw service payloads between backend and frontend modules
-
-It should not own service-specific or UI-specific business logic. Battery,
-audio, network, media, and similar behavior belong in modules.
-
-### Wayland frontend layer
-
-This layer is responsible for displaying shell UI on Wayland. It includes surfaces such as:
-
-- top panel
-- app launcher
-- notification center
-- quick settings
-- overlays and popups
-- settings windows
-- optional lock screen support later, where available
-
-MESH should treat these as shell surfaces hosted on Wayland, not as compositor-owned primitives.
-
-### Extension runtime
-
-MESH embeds Luau as a sandboxed runtime for extensions.
-
-Extensions can provide:
-
-- widgets
-- shell surfaces
-- services
-- themes
-- language packs
-
-The extension runtime exposes stable host APIs instead of raw unrestricted
-access to the system. Modules implement behavior on top of those APIs; the
-core does not ship privileged widget logic or built-in service code paths.
-
-### UI component layer
-
-UI should use a single-file component model inspired by Svelte.
-
-A component can contain:
-
-- markup
-- Luau logic
-- styles
-- public settings schema
-- translations
-- metadata
-
-Conceptually, component files may use blocks like:
-
-- `<template>`
-- `<script lang="luau">`
-- `<style>`
-
-This keeps structure, logic, and styling close together while still supporting validation and compilation.
+Historical plans and milestone evidence live under `.planning/` and are not
+current product documentation.
 
 ## Core model
 
-MESH should clearly separate three concepts.
+MESH separates four public concepts:
 
-### Shell surface
+- A **module** is one installable unit with a canonical `module.json` manifest.
+- A **component** is reusable UI authored in a `.mesh` file with Luau behavior.
+- A **service** owns domain state and behavior behind a typed interface.
+- A **profile** is the target composition document for root components,
+  surfaces, provider choices, and profile-scoped configuration.
 
-A shell surface is a top-level piece of UI shown independently on screen.
+The Rust core supplies mechanisms: loading, validation, capability enforcement,
+service transport, component execution, rendering, input, accessibility,
+Wayland integration, and diagnostics. Panels, settings, developer tools,
+package tooling, themes, and system integrations are replaceable modules.
 
-Examples:
+```text
+shell profile (target)
+        │
+        ▼
+root component instances ──uses──► service interfaces
+        │                              │
+        ▼                              ▼
+ .mesh + Luau                    service providers
+        │                              │
+        └──────────► MESH core ◄───────┘
+                         │
+                         ▼
+                 Wayland surfaces
+```
 
-- panel
-- launcher
-- notification drawer
-- control center
-- overlay
+Today, the repository starts from `config/module.json`. The profile model and
+live distribution switching are accepted target architecture, not shipped
+behavior.
 
-### Widget
+## Installation
 
-A widget is an embeddable component placed inside a shell surface.
+The repository provides a Nix development shell with Rust and the required
+Wayland/font libraries:
 
-Examples:
+```bash
+git clone git@github.com:Kolby11/mesh.git
+cd mesh
+nix develop
+```
 
-- clock
-- battery indicator
-- weather card
-- media controls
-- network row
+Without Nix, use Rust `1.85` or newer and install development packages for
+Wayland, `libxkbcommon`, Fontconfig, FreeType, and `pkg-config` through the host
+distribution.
 
-### Service
+MESH does not yet ship the planned module/package installer.
 
-A service is a structured provider of state and actions.
+## Quick start
 
-Examples:
+From the repository root:
 
-- battery
-- media
-- network
-- notifications
-- theme
-- locale
-- AI assistant
+```bash
+nix develop -c cargo run -p mesh-tools-cli --bin mesh-shell -- start
+```
 
-This separation keeps the ecosystem understandable and easier to maintain.
+Useful inspection commands are:
 
-## Package system
+```bash
+nix develop -c cargo run -p mesh-tools-cli --bin mesh-shell -- list
+nix develop -c cargo run -p mesh-tools-cli --bin mesh-shell -- services
+nix develop -c cargo run -p mesh-tools-cli --bin mesh-shell -- help
+```
 
-Packages are the main delivery format for MESH.
+The shell expects a compatible Wayland session. Its current development module
+graph is [config/module.json](config/module.json).
 
-New modules should use an npm-compatible `package.json` as the manifest. Keep
-standard package metadata (`name`, `version`, `description`, `private`,
-`repository`, etc.) at the top level, and put all MESH-specific declarations
-under the `mesh` key. Do not use top-level npm-reserved fields such as `type`
-or `dependencies` for MESH concepts; editors and package managers apply the
-standard npm schema to those fields.
+## Creating a module
 
-MESH may use npm-compatible tooling and workspaces for local development or
-distribution transport, but npm is not the MESH module resolver. The shell
-still reads the `mesh` section of `package.json`, validates capabilities,
-resolves providers, checks native binaries, and manages enabled modules through
-the MESH package graph.
+Every module has one `module.json` at its root. All MESH-specific declarations
+live under its `mesh` key:
 
-Supported package types should include:
+```json
+{
+  "name": "@alice/example",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "entry": "src/main.mesh",
+    "uses": {
+      "interfaces": {
+        "mesh.audio": ">=1.0"
+      }
+    }
+  }
+}
+```
 
-- widgets
-- surfaces
-- services
-- themes
-- language packs
-- icon packs
+`package.json`, `mesh.toml`, and `plugin.json` are legacy inputs and are not
+public manifest alternatives.
 
-Each package should declare:
+See [Getting started](docs/guides/getting-started.md), the
+[module-system specification](docs/spec/01-module-system.md), and the
+[`.mesh` syntax reference](docs/frontend/mesh-syntax.md).
 
-- package id
-- version
-- compatibility range
-- dependencies
-- requested capabilities
-- entrypoints
-- settings schema
-- translations
-- theme token usage
+## Workspace
 
-This gives the shell enough information to install, validate, configure, and secure packages consistently.
+The Cargo workspace is organized under `crates/`:
 
-## Extension model
+- `crates/core/foundation/` contains capabilities, configuration, events,
+  localization, theming, diagnostics, and debug data.
+- `crates/core/extension/` contains module and service contracts.
+- `crates/core/ui/` contains components, elements, animation, icons, and input.
+- `crates/core/frontend/` contains compilation, hosting, and rendering.
+- `crates/core/runtime/` contains sandbox, scripting, and backend execution.
+- `crates/core/platform/wayland/` owns Wayland integration.
+- `crates/core/shell/` assembles the running development shell.
+- `crates/tools/` contains the CLI and language server.
 
-The extension model should be capability-based.
+## Development
 
-A package must explicitly request what it wants to do. The host can then allow, deny, or review these permissions.
+```bash
+nix develop -c cargo check --workspace
+nix develop -c cargo test --workspace
+nix develop -c cargo fmt --all --check
+```
 
-Examples include:
+See [Development](docs/guides/development.md) and
+[Testing](docs/testing/overview.md) for focused commands and repository
+conventions.
 
-- `shell.surface`
-- `shell.widget`
-- `service.network.read`
-- `service.network.control`
-- `service.media.read`
-- `service.notifications.post`
-- `theme.read`
-- `locale.read`
-- `exec.launch-app`
+## License
 
-This keeps third-party extensions powerful but bounded.
-
-## Theming
-
-Theming is one of the key selling points of MESH.
-
-The shell should use a token-based theme system inspired by Material 3 style ideas. Components should inherit system-wide tokens by default so the shell feels visually unified.
-
-Recommended token groups include:
-
-- colors
-- typography
-- spacing
-- corner radius
-- elevation
-- borders
-- motion
-- shadows
-
-Components may expose extra style hooks, but they should still align with the shared token system.
-
-## Accessibility
-
-Accessibility should be required by design, not added later.
-
-Components should expose:
-
-- accessible name
-- description
-- role
-- state
-- focus metadata
-- keyboard interaction
-- tooltip or help text
-- localizable strings
-
-The same semantic layer can also support automation and AI integrations in a structured way.
-
-## Localization
-
-Localization should be system-wide and package-aware.
-
-MESH should support:
-
-- global language selection
-- package translations
-- language packs
-- locale fallback chains
-- pluralization and formatting
-- runtime locale switching where practical
-
-No user-facing package should be forced to hardcode strings.
-
-## Configuration
-
-Each component should expose a typed settings schema so that MESH can validate configuration and generate settings UIs automatically.
-
-This should make it easy for users to customize packages without editing internal implementation details.
-
-## Performance and security
-
-Because shell UI is always present, performance matters.
-
-MESH should:
-
-- compile components instead of interpreting everything dynamically
-- keep rendering and animation host-driven
-- minimize redraw and idle overhead
-- isolate or limit misbehaving extensions
-
-Security matters as soon as third-party packages exist.
-
-MESH should support:
-
-- sandboxed Luau execution
-- signed packages
-- capability-based permissions
-- restricted host APIs
-- install-time review and trust levels
-
-## First version
-
-A realistic first version of MESH should focus on:
-
-- top panel
-- app launcher
-- notification center
-- quick settings
-- theme engine
-- package manager
-- widget SDK
-- service SDK
-- localization support
-- accessibility-aware component model
-
-This is enough to prove the platform without expanding into compositor-level scope.
-
-## Summary
-
-MESH is a Rust-based shell platform for Wayland. It is focused on extensibility, theme consistency, accessibility, and package-driven customization.
-
-Its main idea is simple: build a shell platform with clear architecture and strong extension contracts, so surfaces, widgets, services, themes, and translations all work together as one coherent system.
+Workspace crates currently declare the MIT license in their Cargo metadata.
+The repository does not currently contain a root license file.

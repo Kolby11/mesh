@@ -1,93 +1,58 @@
-# MESH Core Modules
+# Shipped Modules
 
-This directory contains the modules shipped with MESH under the `@mesh`
-scope. They provide the default shell experience, reference implementations
-for system service integrations, and example compositions for module authors.
-The canonical vocabulary for these docs is
-[`docs/spec/01-module-system.md`](../spec/01-module-system.md).
+This index is generated from canonical `module.json` manifests currently under
+`modules/`. Directories without a manifest are source fragments or unfinished
+modules and are not listed as installable modules.
 
-Modules are split into two kinds, enforced by the architecture described in
-[`docs/spec/01-module-system.md`](../spec/01-module-system.md):
+All shipped defaults are ordinary modules. They receive no hidden privilege
+from their `@mesh` scope and may be replaced by compatible third-party modules.
 
-- **[Frontend modules](./frontend/core/README.md)** — shell surfaces and widgets
-  that render the UI. They consume services through named **interface
-  contracts** and never reference a specific backend.
-- **[Backend modules](./backend/core/README.md)** — implementations of interface
-  contracts (`mesh.audio`, `mesh.network`, `mesh.power`, `mesh.media`, …). They
-  register with the interface registry and are looked up by interface name, not
-  by module ID.
+## Frontend and component modules
 
-Core interface modules live alongside the default backends under the
-backend tree as ordinary `kind = "interface"` modules. The shell core does
-not define service behavior; it only discovers contracts, validates them, and
-bridges providers to consumers.
+| Module | Kind | Entrypoint | Purpose |
+| --- | --- | --- | --- |
+| `@mesh/navigation-bar` | frontend | `src/main.mesh` | Main navigation surface |
+| `@mesh/audio-popover` | frontend | `src/main.mesh` | Audio control surface |
+| `@mesh/quick-settings` | frontend | `src/main.mesh` | Quick settings surface |
+| `@mesh/settings` | frontend | `src/main.mesh` | Current settings surface |
+| `@mesh/debug-inspector` | frontend | `src/main.mesh` | Runtime inspection surface |
+| `@mesh/text-selection-proof` | frontend | `src/main.mesh` | Text-selection proof surface |
+| `@mesh/touch-gesture-proof` | frontend | `src/main.mesh` | Touch and gesture proof surface |
+| `@mesh/language-popover` | component | `src/main.mesh` | Embeddable language chooser |
+| `@mesh/theme-selector` | component | `src/main.mesh` | Embeddable theme chooser |
 
-The interface registry is the only bridge between the two.
+## Service providers
 
-> **Full extensibility is a first-class goal.** The defaults below are
-> ordinary modules with no privileged status. Anyone can ship a backend, a
-> frontend, or an entirely new interface domain by declaring an interface
-> module. See [`docs/spec/01-module-system.md`](../spec/01-module-system.md) for the
-> dynamic, D-Bus-style interface registry that powers this.
+| Module | Kind | Entrypoint | Interface/integration |
+| --- | --- | --- | --- |
+| `@mesh/pipewire-audio` | backend | `src/main.luau` | `mesh.audio` through PipeWire tools |
+| `@mesh/pulseaudio-audio` | backend | `src/main.luau` | `mesh.audio` through PulseAudio tools |
+| `@mesh/backlight-brightness` | backend | `src/main.luau` | `mesh.brightness` through `brightnessctl` |
+| `@mesh/upower-power` | backend | `src/main.luau` | Power state through UPower tooling |
+| `@mesh/hyprland-wm` | backend | `src/main.luau` | Hyprland shell/window-manager integration |
 
-## Layout
+## Interfaces and resource packs
 
-The shell discovers modules by scanning the `modules/` tree recursively.
-Folders like `core/` and `examples/` are organizational only; they do not
-change whether a module is discoverable.
-
-```
-modules/
-├── frontend/
-│   ├── core/
-│   │   ├── panel/               — top panel surface
-│   │   ├── launcher/            — application launcher
-│   │   ├── notification-center/ — notification drawer
-│   │   └── quick-settings/      — toggles + sliders surface
-│   ├── text-selection-proof/    — passive selectable-text proof surface
-│   └── examples/                — larger composition examples for module authors
-└── backend/
-    └── core/
-        ├── audio-interface/         — contract for mesh.audio
-        ├── network-interface/       — contract for mesh.network
-        ├── power-interface/         — contract for mesh.power
-        ├── media-interface/         — contract for mesh.media
-        ├── notifications-interface/ — contract for mesh.notifications
-        ├── brightness-interface/    — contract for mesh.brightness
-        ├── pipewire-audio/          — mesh.audio via PipeWire
-        ├── pulseaudio-audio/        — mesh.audio via PulseAudio
-        ├── networkmanager-network/  — mesh.network via NetworkManager
-        ├── upower-power/            — mesh.power via UPower
-        ├── mpris-media/             — mesh.media via MPRIS D-Bus
-        └── mock-notifications/      — mesh.notifications default provider
-```
-
-## Standalone frontend proof surfaces
-
-Some shipped frontends live outside `core/` and `examples/` because they are
-small proof modules rather than part of the default daily shell chrome.
-
-- [`frontend/text-selection-proof`](./frontend/text-selection-proof/README.md)
-  — selectable-text proof surface used to exercise passive text selection and
-  clipboard-copy behavior without implying full document editing semantics.
+| Module | Kind | Contribution |
+| --- | --- | --- |
+| `@mesh/audio-interface` | interface | `mesh.audio` contract |
+| `@mesh/icons-default` | icon-pack | Default semantic icon mappings |
+| `@mesh/icons-material-symbols` | icon-pack | Material Symbols font and codepoint mappings |
 
 ## Module anatomy
 
-New modules should use `module.json` with MESH-specific declarations under
-the `mesh` key. Use `mesh.kind`, `mesh.dependencies`, `mesh.capabilities`,
-`mesh.entrypoints`, and `mesh.contributes` for shell behavior. Old manifest
-names are listed in the vocabulary inventory as replacement/internal migration
-debt; new examples should prefer `module.json`.
+An installable module contains one canonical manifest and one primary public
+unit:
 
-Frontend surfaces have a
-`src/main.mesh` single-file component (`<template>`, `<script lang="luau">`,
-`<style>`). Backends have a `src/main.luau` entrypoint
-that registers an interface implementation with the interface registry.
-Interface modules ship an `interface.toml` declaration instead of an
-executable entrypoint.
+```text
+module-name/
+├── module.json
+├── src/
+│   └── main.mesh or main.luau
+├── config/            optional catalogs/settings data
+└── assets/            optional module-owned assets
+```
 
-See [`docs/spec/01-module-system.md`](../spec/01-module-system.md) for the
-authoritative module model, lifecycle, capabilities, and distribution rules.
-
-The example frontend module set is documented in
-[`frontend/examples/README.md`](./frontend/examples/README.md).
+Frontend and component modules use `.mesh`; backend providers use Luau;
+interfaces are declarative data; and resource packs map semantic names to
+assets. See the [module-system specification](../spec/01-module-system.md).

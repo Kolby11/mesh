@@ -1,9 +1,15 @@
 # MESH — Active Backlog
 
+This is the single active backlog for MESH. Specifications describe contracts;
+guides describe current behavior; historical evidence belongs in `.planning/`.
+Before implementing an older item, verify it against the source because later
+work may have landed without updating its checkbox.
+
 Items marked `→ vX.Y` are tracked as GSD milestones in `.planning/ROADMAP.md`.
 
 Completed performance work, progress narratives, benchmark numbers, and
-rejected experiments were archived to `docs/performance-log.md` on 2026-07-13.
+rejected experiments were archived to
+`.planning/performance/performance-log.md` on 2026-07-13.
 Section letters (A–V) in the performance items below refer to that log.
 
 ---
@@ -15,7 +21,8 @@ Section letters (A–V) in the performance items below refer to that log.
 
 ### Module architecture friction redesign — 2026-06-19
 
-Brainstorm + decision record in `docs/design-architecture.md` (folded into `docs/spec/01-module-system.md`).
+The brainstorm and decision record were folded into
+`docs/spec/01-module-system.md`.
 Attacks authoring friction on top of the shipped interface/provider/frontend spine
 (easy / unified / configurable). Selected path: **A+B headline, C/D reframed, F follow-on, E deferred.**
 
@@ -31,6 +38,15 @@ resource packs). Remaining open work:
 
 - [ ] Eliminate service-specific Rust branches where possible. Progress 2026-07-13: audio optimistic mute is now generic — contract methods declare `optimistic: { field, fromArg }` and core applies the patch for any interface (`pending_optimistic_state`); the `mesh.theme` settings-injection branch became a generic `__shell` context (`{ theme, locale }`) injected into every backend's settings. Remaining: startup-sound path calls the mesh.audio handler directly; debug/profiling paths.
 - [ ] Support multiple instances of the same frontend module. Module identity should not be the only surface identity; root graph should support configured instances like two panels or repeated widgets with separate settings/storage scopes.
+- [ ] Implement named shell profiles as the starting point for root component
+      instances, surface placement, provider bindings, resources, and
+      profile-scoped overrides.
+- [ ] Implement transactional live profile switching that retains identical
+      service instances and leaves the active profile untouched when candidate
+      initialization fails.
+- [ ] Add external `contract.json` support with keyed state, method, event, and
+      type objects; compile it into the existing `InterfaceContract` model and
+      generate strict Luau/LSP types.
 - [ ] Settings UI generated from contributed schemas by default, with optional custom `settings_ui` entrypoint for advanced modules.
 - [ ] Settings/diagnostics UI should show each module's uses/provides graph: required interfaces, active provider, optional interfaces, required icons, native binaries, capabilities, settings namespace, i18n catalogs, keybinds, health. Progress: `mesh.debug.module_graph` payload exists and the debug-inspector Modules tab renders the first entries. Added 2026-07-02: typed graph entries and JSON include required/optional native binaries, keybind action IDs, resolved `interface=provider` pairs, and structured native-binary availability states; the Modules view renders them, correctly handles structured provided-interface records, and filters across IDs, kinds, interfaces, providers, binaries, keybinds, and diagnostics. Binary resolution is shared with installed-graph diagnostics and supports explicit executable paths as well as PATH lookup. Added later 2026-07-02: shipped `@mesh/settings` consumes the same debug graph for end-user module/provider visibility and theme/locale controls. Remaining: per-module customization controls in the full settings UI.
 
@@ -156,7 +172,7 @@ surface.
 Findings from a four-agent scan of the largest production files. Two batches
 already landed: **confirmed dead-code deletions** (commit `afc9a0d`) and
 **cross-crate/intra-crate dedup** (commit `a4125d7`). Completed items moved to
-`docs/performance-log.md`.
+`.planning/performance/performance-log.md`.
 
 ### Migration tech-debt (flagged by project rules; verify before removing)
 
@@ -177,14 +193,19 @@ already landed: **confirmed dead-code deletions** (commit `afc9a0d`) and
 
 ## Performance — open items
 
+### Text rendering follow-ups
+
+- [ ] Improve first-miss ellipsis truncation by using shaped glyph advances
+      instead of binary-search substring measurement.
+- [ ] Add profiling visibility for text and glyph cache pressure: entry counts,
+      hits, misses, invalidations, and shaping time.
+- [ ] Add locale-, script-, and direction-sensitive text cases to canonical
+      performance workloads before changing shaping behavior further.
+
 Full history, benchmark baselines, and rejected experiments live in
-`docs/performance-log.md`; section letters (A–V) below reference it. The
-subsystem map is `PERFORMANCE_SECTIONS.md`. Milestone refs unchanged.
-
-### P0 — scheduling & invalidation
-
-- [ ] One `mlua::Lua` VM per ScriptContext; move to per-thread VM with `_ENV`
-      isolation → v1.17. Pairs with the handler-sync fast path below (R).
+`.planning/performance/performance-log.md`; section letters (A–V) below
+reference it. The historical subsystem map is
+`.planning/performance/sections.md`. Milestone refs unchanged.
 
 ### P1 — structural render pipeline
 

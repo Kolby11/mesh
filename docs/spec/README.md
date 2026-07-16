@@ -13,16 +13,23 @@ Each part is marked with an implementation status per section:
 - **Shipped** — implemented and tested in the current tree.
 - **Target** — decided design, not yet (fully) implemented.
 
-The confirmed direction record (2026-07-01) that these specs encode:
-one sparse settings store, user icon-pack module + pack chains, props
-everywhere, closed core + open provides manifest, path+git installer,
-load-time theme cascade, minimal font packs, automation IPC + thin MCP.
+The confirmed direction records (2026-07-01 and 2026-07-16) encode one sparse
+settings model, user icon-pack modules and pack chains, props everywhere,
+closed core plus open contribution namespaces, path and Git installation,
+load-time theme cascade, minimal font packs, automation IPC, and thin MCP.
+
+The 2026-07-16 platform direction further establishes MESH as a shell-building
+platform: directly editable modules provide components and services; one module
+exports one primary public unit; named profiles compose root components and
+service choices; configuration is profile-scoped while durable service data is
+shared; and settings, developer tools, and package experiences are replaceable
+modules rather than privileged core UI.
 
 ## Parts
 
 | Part | Covers |
 | ---- | ------ |
-| [01 — Module System](01-module-system.md) | Vocabulary, `module.json`, kinds, `uses`/`provides`/`implements`, interfaces, providers, root graph, capabilities, lifecycle, trust |
+| [01 — Module System](01-module-system.md) | Vocabulary, `module.json`, kinds, contracts, providers, profiles, capabilities, lifecycle, trust |
 | [02 — Installation & Health](02-installation.md) | Installer v1 (path + git), directories, doctor, health states, diagnostics |
 | [03 — Components & Props](03-components.md) | `.mesh` component model, the `<props>` block, projections, precedence |
 | [04 — Styling & Theming](04-styling.md) | Theme packs, tokens, load-time cascade, module theme contributions, modes |
@@ -38,6 +45,9 @@ load-time theme cascade, minimal font packs, automation IPC + thin MCP.
 ## How the parts compose
 
 ```
+                 shell profile (01, target)
+                              │
+                              ▼
                        module.json  (01)
         identity · kind · uses · provides · implements
                               │
@@ -72,11 +82,15 @@ One mental model repeats everywhere:
 4. **More specific wins.** Author default → user global → author instance →
    user per-instance, everywhere a value can be layered.
 5. **The core wires, modules work.** Rust routes generic records; behavior
-   lives in Luau modules and declarative contracts.
+   lives in Luau modules and declarative JSON contracts.
+6. **Profiles compose; they do not supervise.** A profile selects roots,
+   providers, resources, and scoped configuration without becoming a process
+   manager or privilege system.
 
 ## Related reference docs (not part of this spec)
 
-- [`../llm-context.md`](../llm-context.md) — codebase orientation (crates, data flows).
+- [`../architecture/overview.md`](../architecture/overview.md) — codebase and
+  runtime orientation.
 - [`../frontend/mesh-syntax.md`](../frontend/mesh-syntax.md) — `.mesh` syntax reference.
 - [`../frontend/elements.md`](../frontend/elements.md) — native element taxonomy.
 - [`../modules/README.md`](../modules/README.md) — shipped module index.

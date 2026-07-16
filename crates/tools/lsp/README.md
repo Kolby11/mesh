@@ -16,12 +16,13 @@ Inside `<template>`, `<script lang="luau">`, and `<style>` blocks:
 Element knowledge comes from the shared `mesh-core-elements` model, and service
 shapes are inferred by scanning backend `main.luau` scripts in the workspace.
 
-## `module.json` / `package.json` manifests
+## `module.json` manifests
 
 Two manifest flavors are recognized automatically:
 
 - **Per-module manifests** — the `name` / `version` / `mesh` envelope with
-  `mesh.kind`, `mesh.apiVersion`, `mesh.uses`, `mesh.contributes`, etc.
+  `mesh.kind`, `mesh.apiVersion`, `mesh.uses`, `mesh.provides`, and
+  `mesh.implements`.
 - **The workspace root config** (`config/module.json`) — `mesh.schemaVersion`,
   `mesh.modulesDir`, `mesh.providers`, `mesh.layout`, `mesh.theme`.
 
@@ -44,6 +45,7 @@ validating cleanly.
 ## Editor setup
 
 The server is a generic stdio LSP. Point your editor's language client at the
-`mesh-tools-lsp` binary for `*.mesh` files and for `module.json` / `package.json`
-files in a MESH workspace. The workspace root URI sent at `initialize` is used to
-discover modules and infer interface shapes.
+`mesh-tools-lsp` binary for `*.mesh` files and canonical `module.json` files in
+a MESH workspace. Legacy manifest filenames may receive migration diagnostics
+but are not public alternatives. The workspace root URI sent at `initialize`
+is used to discover modules and infer interface shapes.

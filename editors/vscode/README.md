@@ -5,8 +5,8 @@ it to:
 
 - `.mesh` single-file components (template / script / style highlighting plus
   completion, hover, and diagnostics from the server).
-- `module.json` and `package.json` manifests (schema completion, hover, and
-  diagnostics).
+- canonical `module.json` manifests (schema completion, hover, and
+  diagnostics); legacy filenames are handled only for migration diagnostics.
 
 ## Setup
 
