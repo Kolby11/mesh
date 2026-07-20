@@ -139,7 +139,7 @@ pub(super) struct SurfaceEntry {
     pub(super) fractional_scale: Option<WpFractionalScaleV1>,
     pub(super) viewport: Option<WpViewport>,
     pub(super) kde_blur: Option<OrgKdeKwinBlur>,
-    pub(super) blur_region: Option<DamageRect>,
+    pub(super) blur_regions: Vec<DamageRect>,
     pub(super) blur_committed: bool,
     pub(super) blur_region_dirty: bool,
     /// Desired input region in surface-local logical coordinates. `None`
@@ -215,7 +215,7 @@ impl SurfaceEntry {
             fractional_scale: None,
             viewport: None,
             kde_blur: None,
-            blur_region: None,
+            blur_regions: Vec::new(),
             blur_committed: false,
             blur_region_dirty: false,
             input_region_rect: None,
@@ -957,7 +957,7 @@ impl LayerShellBackend {
                     }
                 }
                 // Create kde_blur object lazily (BLUR-01): will be used when
-                // update_blur_region is called with a non-None region.
+                // update_blur_regions is called with at least one region.
                 if let Some(ref manager) = self.state.blur_manager {
                     if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
                         let wl_surface = entry.wl_surface().clone();
@@ -1271,7 +1271,7 @@ impl LayerShellBackend {
                         entry.blur_region_dirty = false;
                     }
                 }
-                entry.blur_region = None;
+                entry.blur_regions.clear();
                 entry.hide();
             }
             self.dispatch_pending()?;
@@ -1346,29 +1346,29 @@ impl LayerShellBackend {
         if entry.blur_region_dirty
             && let Some(ref kde_blur) = entry.kde_blur
         {
-            match entry.blur_region {
-                Some(region_rect) => {
-                    if let Ok(region) = Region::new(&state.compositor_state) {
+            if !entry.blur_regions.is_empty() {
+                if let Ok(region) = Region::new(&state.compositor_state) {
+                    for region_rect in &entry.blur_regions {
                         region.add(
                             region_rect.x as i32,
                             region_rect.y as i32,
                             region_rect.width as i32,
                             region_rect.height as i32,
                         );
-                        kde_blur.set_region(Some(region.wl_region()));
-                        kde_blur.commit();
-                        entry.blur_committed = true;
-                        entry.blur_region_dirty = false;
                     }
-                }
-                None if entry.blur_committed => {
-                    // Clear the compositor's blur region when backdrop-filter is removed (CR-01).
-                    kde_blur.set_region(None);
+                    kde_blur.set_region(Some(region.wl_region()));
                     kde_blur.commit();
-                    entry.blur_committed = false;
+                    entry.blur_committed = true;
                     entry.blur_region_dirty = false;
                 }
-                None => entry.blur_region_dirty = false,
+            } else if entry.blur_committed {
+                // Clear the compositor's blur region when backdrop-filter is removed (CR-01).
+                kde_blur.set_region(None);
+                kde_blur.commit();
+                entry.blur_committed = false;
+                entry.blur_region_dirty = false;
+            } else {
+                entry.blur_region_dirty = false;
             }
         }
         // Apply the persisted input region as pending state so the present
@@ -1466,18 +1466,18 @@ impl LayerShellBackend {
         entry.input_region_dirty = true;
     }
 
-    /// Set the logical-coordinate blur region for a surface.
-    /// The region is sent as kde_blur protocol calls before the next
-    /// wl_surface.commit(). If `blur_region` is `None`, no kde_blur
+    /// Set the logical-coordinate blur regions for a surface.
+    /// The regions are sent as kde_blur protocol calls before the next
+    /// wl_surface.commit(). If `blur_regions` is empty, no kde_blur
     /// calls are emitted — the compositor gets no blur hint.
-    pub(crate) fn update_blur_region(&mut self, surface_id: &str, blur_region: Option<DamageRect>) {
+    pub(crate) fn update_blur_regions(&mut self, surface_id: &str, blur_regions: Vec<DamageRect>) {
         let Some(entry) = self.state.surfaces.get_mut(surface_id) else {
             return;
         };
-        set_pending_blur_region(
-            &mut entry.blur_region,
+        set_pending_blur_regions(
+            &mut entry.blur_regions,
             &mut entry.blur_region_dirty,
-            blur_region,
+            blur_regions,
         );
     }
 
@@ -1812,10 +1812,10 @@ impl LayerShellBackend {
     }
 }
 
-fn set_pending_blur_region(
-    current: &mut Option<DamageRect>,
+fn set_pending_blur_regions(
+    current: &mut Vec<DamageRect>,
     dirty: &mut bool,
-    next: Option<DamageRect>,
+    next: Vec<DamageRect>,
 ) {
     if *current == next && !*dirty {
         return;
@@ -2586,19 +2586,19 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_blur_region_is_committed_only_once() {
-        let region = Some(DamageRect {
+    fn unchanged_blur_regions_are_committed_only_once() {
+        let regions = vec![DamageRect {
             x: 0,
             y: 0,
             width: 800,
             height: 48,
-        });
-        let mut current = None;
+        }];
+        let mut current = Vec::new();
         let mut dirty = false;
         let mut commits = 0;
 
         for _ in 0..1_000 {
-            set_pending_blur_region(&mut current, &mut dirty, region);
+            set_pending_blur_regions(&mut current, &mut dirty, regions.clone());
             if dirty {
                 commits += 1;
                 dirty = false;
@@ -2606,7 +2606,7 @@ mod tests {
         }
         assert_eq!(commits, 1);
 
-        set_pending_blur_region(&mut current, &mut dirty, None);
+        set_pending_blur_regions(&mut current, &mut dirty, Vec::new());
         assert!(dirty, "removing blur must produce a clearing commit");
     }
 

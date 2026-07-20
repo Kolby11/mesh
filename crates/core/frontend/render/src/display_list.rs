@@ -2349,32 +2349,116 @@ fn command_bounds(command: &DisplayPaintCommand) -> DamageRect {
     }
 }
 
-/// Logical-coordinate union rect of all display commands whose node has an
-/// active `backdrop-filter: blur(...)`. Drives compositor-side blur region
-/// declarations (org_kde_kwin_blur); `None` means no blur protocol calls
-/// should be emitted. Negative origins are clamped to 0 with the clipped
-/// leading edge subtracted from the dimensions, so partially off-screen
-/// nodes don't silently snap to (0,0).
-pub fn backdrop_blur_region_union(commands: &[DisplayPaintCommand]) -> Option<DamageRect> {
-    let mut union: Option<DamageRect> = None;
+/// Logical-coordinate regions for display commands whose node has an active
+/// `backdrop-filter: blur(...)`. Keeping disjoint nodes separate avoids
+/// asking the compositor to blur transparent gaps between popup items.
+/// Negative origins are clamped to 0 with the clipped leading edge subtracted
+/// from the dimensions, so partially off-screen nodes don't snap to (0,0).
+pub fn backdrop_blur_regions(commands: &[DisplayPaintCommand]) -> Vec<DamageRect> {
+    let mut regions = Vec::new();
     for cmd in commands {
         if cmd.node.style.backdrop_filter.blur_radius <= 0.0 {
             continue;
         }
-        let raw_x = cmd.node.layout.x;
-        let raw_y = cmd.node.layout.y;
-        let rect = DamageRect {
-            x: raw_x.max(0.0) as u32,
-            y: raw_y.max(0.0) as u32,
-            width: ((cmd.node.layout.width + raw_x.min(0.0)).max(0.0) as u32).max(1),
-            height: ((cmd.node.layout.height + raw_y.min(0.0)).max(0.0) as u32).max(1),
-        };
-        union = Some(match union {
-            None => rect,
-            Some(current) => current.union(rect),
-        });
+        for rect in rounded_blur_regions(cmd) {
+            if !regions.contains(&rect) {
+                regions.push(rect);
+            }
+        }
     }
-    union
+    regions
+}
+
+/// Approximate the node's actual rounded painted shape with horizontal
+/// rectangles accepted by `wl_region`. A fully rounded 36×36 option therefore
+/// produces a circular mask instead of a 36×36 square. Rectangular surfaces
+/// remain a single protocol rectangle.
+fn rounded_blur_regions(command: &DisplayPaintCommand) -> Vec<DamageRect> {
+    let layout = command.node.layout;
+    let left = layout.x.max(0.0).ceil() as u32;
+    let top = layout.y.max(0.0).ceil() as u32;
+    let right = (layout.x + layout.width).max(0.0).floor() as u32;
+    let bottom = (layout.y + layout.height).max(0.0).floor() as u32;
+    if right <= left || bottom <= top {
+        return Vec::new();
+    }
+    let bounds = DamageRect {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    };
+    let clip = DamageRect {
+        x: command.clip.x.max(0) as u32,
+        y: command.clip.y.max(0) as u32,
+        width: command.clip.width.max(0) as u32,
+        height: command.clip.height.max(0) as u32,
+    };
+    let radius = command
+        .node
+        .style
+        .border_radius
+        .max(0.0)
+        .min(bounds.width.min(bounds.height) as f32 * 0.5);
+    if radius < 0.5 {
+        return intersect_damage_rect(bounds, clip).into_iter().collect();
+    }
+
+    let mut bands: Vec<DamageRect> = Vec::new();
+    for row in 0..bounds.height {
+        let center_y = row as f32 + 0.5;
+        let edge_y = center_y.min(bounds.height as f32 - center_y);
+        let inset = if edge_y >= radius {
+            0
+        } else {
+            let circle_y = radius - edge_y;
+            (radius - (radius * radius - circle_y * circle_y).max(0.0).sqrt()).ceil() as u32
+        };
+        if inset.saturating_mul(2) >= bounds.width {
+            continue;
+        }
+        let row_rect = DamageRect {
+            x: bounds.x + inset,
+            y: bounds.y + row,
+            width: bounds.width - inset * 2,
+            height: 1,
+        };
+        let Some(row_rect) = intersect_damage_rect(row_rect, clip) else {
+            continue;
+        };
+        if let Some(previous) = bands.last_mut()
+            && previous.x == row_rect.x
+            && previous.width == row_rect.width
+            && previous.y + previous.height == row_rect.y
+        {
+            previous.height += 1;
+        } else {
+            bands.push(row_rect);
+        }
+    }
+    bands
+}
+
+fn intersect_damage_rect(left: DamageRect, right: DamageRect) -> Option<DamageRect> {
+    let x = left.x.max(right.x);
+    let y = left.y.max(right.y);
+    let right_edge = left
+        .x
+        .saturating_add(left.width)
+        .min(right.x.saturating_add(right.width));
+    let bottom_edge = left
+        .y
+        .saturating_add(left.height)
+        .min(right.y.saturating_add(right.height));
+    if right_edge <= x || bottom_edge <= y {
+        return None;
+    }
+    Some(DamageRect {
+        x,
+        y,
+        width: right_edge - x,
+        height: bottom_edge - y,
+    })
 }
 
 /// Screen-space region an in-surface `backdrop-filter` node reads and

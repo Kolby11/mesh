@@ -862,7 +862,7 @@ impl<'a> StyleResolver<'a> {
         self.resolve_color_with_variables_inner(value, variables, 0)
             .unwrap_or_else(|| {
                 let resolved = self.resolve_value_with_variables(value, variables);
-                Color::from_hex(&resolved).unwrap_or(Color::TRANSPARENT)
+                Color::from_css(&resolved).unwrap_or(Color::TRANSPARENT)
             })
     }
 
@@ -880,7 +880,7 @@ impl<'a> StyleResolver<'a> {
                 if value.contains("var(") || value.contains("prop(") {
                     None
                 } else {
-                    Some(Color::from_hex(value).unwrap_or(Color::TRANSPARENT))
+                    Some(Color::from_css(value).unwrap_or(Color::TRANSPARENT))
                 }
             }
             StyleValue::Var(name) => {
@@ -893,7 +893,7 @@ impl<'a> StyleResolver<'a> {
                 }
                 match self.cached_theme_token_value(name) {
                     CachedThemeTokenValue::String(value) => {
-                        Some(Color::from_hex(&value).unwrap_or(Color::TRANSPARENT))
+                        Some(Color::from_css(&value).unwrap_or(Color::TRANSPARENT))
                     }
                     CachedThemeTokenValue::Number(_) | CachedThemeTokenValue::Bool(_) => {
                         Some(Color::TRANSPARENT)
@@ -3483,7 +3483,7 @@ mod tests {
             StyleValue::Prop("accent".into()),
         ] {
             let resolved = resolver.resolve_value_with_variables(&value, &variables);
-            let string_resolved = Color::from_hex(&resolved).unwrap_or(Color::TRANSPARENT);
+            let string_resolved = Color::from_css(&resolved).unwrap_or(Color::TRANSPARENT);
             let color_resolved = resolver.resolve_color_with_variables(&value, &variables);
             assert_eq!(color_resolved, string_resolved);
         }
@@ -4889,7 +4889,7 @@ mod tests {
         for _ in 0..iterations {
             let resolved =
                 resolver.resolve_value_with_variables(std::hint::black_box(&value), &variables);
-            let color = Color::from_hex(&resolved).unwrap_or(Color::TRANSPARENT);
+            let color = Color::from_css(&resolved).unwrap_or(Color::TRANSPARENT);
             old_accumulator = old_accumulator.wrapping_add(std::hint::black_box(color.r as u32));
         }
         let old_time = old_started.elapsed();

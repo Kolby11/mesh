@@ -32,6 +32,36 @@ The running development shell currently resolves its installed graph from the
 repository `config/module.json`, so the complete dotfiles/profile design is not
 yet wired through the shell entrypoint.
 
+## Frontend visual-effect settings
+
+Frontend modules declare editable visual knobs in their root `<props>` block.
+Author defaults may reference theme tokens; user overrides are stored in that
+module's `config/settings.json` under `props.global`, or under
+`props.instances` for one component instance. For example:
+
+```json
+{
+  "props": {
+    "global": {
+      "blur_enabled": true,
+      "blur_radius": "18px",
+      "blur_background": "rgba(24, 26, 34, 0.28)"
+    },
+    "instances": {
+      "@mesh/navigation-bar/import:audio": {
+        "blur_radius": "24px"
+      }
+    }
+  }
+}
+```
+
+The shipped themes provide `--effect-backdrop-blur-*-radius` and
+`--effect-backdrop-blur-*-background` defaults. Component CSS decides which
+elements emit compositor blur regions. Compositor-wide kernel quality (for
+example Hyprland's blur size and pass count) remains compositor configuration;
+the Wayland blur protocol carries regions but no per-surface kernel settings.
+
 ## Environment variables
 
 | Variable | Current use |

@@ -163,6 +163,28 @@ box.card { padding: 3px; }
     }
 
     #[test]
+    fn parse_css_rgb_colors_used_by_runtime_props() {
+        assert_eq!(
+            Color::from_css("rgba(1, 2, 3, 0.5)"),
+            Some(Color {
+                r: 1,
+                g: 2,
+                b: 3,
+                a: 128,
+            })
+        );
+        assert_eq!(
+            Color::from_css("rgb(100%, 0%, 50%)"),
+            Some(Color {
+                r: 255,
+                g: 0,
+                b: 128,
+                a: 255,
+            })
+        );
+    }
+
+    #[test]
     fn resolve_theme_var() {
         let theme = mesh_core_theme::default_theme();
         let resolver = StyleResolver::new(&theme);

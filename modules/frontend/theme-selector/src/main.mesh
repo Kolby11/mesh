@@ -1,3 +1,9 @@
+<props>
+    blur_enabled:    { type: "bool", default: true, label: "Backdrop blur" }
+    blur_radius:     { type: "size", default: "var(--effect-backdrop-blur-popup-radius)", label: "Blur radius" }
+    blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-background)", label: "Frosted background" }
+</props>
+
 <template>
     <popover
         open={open}

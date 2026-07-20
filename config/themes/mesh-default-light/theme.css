@@ -15,6 +15,10 @@
   --animation-opacity-disabled: 0.38;
   --animation-scale-hover: 1.02;
   --animation-scale-press: 0.98;
+  --effect-backdrop-blur-surface-radius: 20px;
+  --effect-backdrop-blur-popup-radius: 14px;
+  --effect-backdrop-blur-surface-background: rgba(10, 10, 14, 0.36);
+  --effect-backdrop-blur-popup-background: rgba(24, 26, 34, 0.28);
   --base16-base00: #FFFBFE;
   --base16-base01: #F3EDF7;
   --base16-base02: #E6E0E9;

@@ -1238,12 +1238,18 @@ impl ShellComponent for FrontendSurfaceComponent {
         Some(damage)
     }
 
-    fn child_surface_blur_region(&self, node_key: &str) -> Option<DamageRect> {
-        let tree = self.last_tree.as_ref()?;
-        let node = find_node_by_key(tree, node_key)?;
+    fn child_surface_blur_regions(&self, node_key: &str) -> Vec<DamageRect> {
+        let Some(tree) = self.last_tree.as_ref() else {
+            return Vec::new();
+        };
+        let Some(node) = find_node_by_key(tree, node_key) else {
+            return Vec::new();
+        };
         let child_display_lists = self.child_display_lists.borrow();
-        let display_list = child_display_lists.get(&node.id)?;
-        mesh_core_render::display_list::backdrop_blur_region_union(display_list.paint_commands())
+        let Some(display_list) = child_display_lists.get(&node.id) else {
+            return Vec::new();
+        };
+        mesh_core_render::display_list::backdrop_blur_regions(display_list.paint_commands())
     }
 
     fn child_hide_transition_ms(&self, node_key: &str) -> u64 {

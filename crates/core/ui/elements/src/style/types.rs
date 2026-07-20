@@ -1441,9 +1441,66 @@ impl Color {
         }
     }
 
+    /// Parse the CSS color forms accepted by component color props. Theme
+    /// colors historically arrived as normalized hex values, while runtime
+    /// `prop()` overrides retain their authored `rgb()`/`rgba()` spelling.
+    pub fn from_css(value: &str) -> Option<Self> {
+        let value = value.trim();
+        if let Some(color) = Self::from_hex(value) {
+            return Some(color);
+        }
+        match value {
+            "transparent" => return Some(Self::TRANSPARENT),
+            "black" => return Some(Self::BLACK),
+            "white" => return Some(Self::WHITE),
+            _ => {}
+        }
+
+        let (body, has_alpha) = if let Some(body) = value
+            .strip_prefix("rgba(")
+            .and_then(|value| value.strip_suffix(')'))
+        {
+            (body, true)
+        } else if let Some(body) = value
+            .strip_prefix("rgb(")
+            .and_then(|value| value.strip_suffix(')'))
+        {
+            (body, false)
+        } else {
+            return None;
+        };
+        let parts = body.split(',').map(str::trim).collect::<Vec<_>>();
+        if parts.len() != if has_alpha { 4 } else { 3 } {
+            return None;
+        }
+        let channel = |value: &str| -> Option<u8> {
+            if let Some(percent) = value.strip_suffix('%') {
+                return Some((percent.parse::<f32>().ok()?.clamp(0.0, 100.0) * 2.55).round() as u8);
+            }
+            Some(value.parse::<f32>().ok()?.clamp(0.0, 255.0).round() as u8)
+        };
+        let alpha = if has_alpha {
+            let value = parts[3];
+            let unit = if let Some(percent) = value.strip_suffix('%') {
+                percent.parse::<f32>().ok()? / 100.0
+            } else {
+                value.parse::<f32>().ok()?
+            };
+            (unit.clamp(0.0, 1.0) * 255.0).round() as u8
+        } else {
+            255
+        };
+        Some(Self {
+            r: channel(parts[0])?,
+            g: channel(parts[1])?,
+            b: channel(parts[2])?,
+            a: alpha,
+        })
+    }
+
     pub fn from_token(value: &TokenValue) -> Option<Self> {
         match value {
-            TokenValue::String(s) => Self::from_hex(s),
+            TokenValue::String(s) => Self::from_css(s),
             _ => None,
         }
     }

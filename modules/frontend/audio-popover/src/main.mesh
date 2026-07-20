@@ -1,31 +1,34 @@
 <props>
-  track_width:  { type: "size", default: "32px", label: t("var.track_width") }
-  track_height: { type: "size", default: "100px", label: t("var.track_height") }
-  anim_ms:      { type: "duration", default: 120, min: 0, max: 600, label: t("var.anim_ms") }
+track_width:  { type: "size", default: "32px", label: t("var.track_width") }
+track_height: { type: "size", default: "100px", label: t("var.track_height") }
+anim_ms:      { type: "duration", default: 120, min: 0, max: 600, label: t("var.anim_ms") }
+blur_enabled:    { type: "bool", default: true, label: "Backdrop blur" }
+blur_radius:     { type: "size", default: "var(--effect-backdrop-blur-surface-radius)", label: "Blur radius" }
+blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-background)", label: "Frosted background" }
 </props>
 
 <template>
-  <popover
-    bind:this={popover}
-    class="audio-popover-shell"
-    onpointerenter={onPopoverEnter}
-    onpointerleave={onPopoverLeave}
-    aria-label="Audio controls"
-  >
-    <column class="audio-popover">
-      <slider
-        class="audio-slider"
-        min="0"
-        max="100"
-        value="{slider_value}"
-        orient="vertical"
-        onchange={onVolumeChange}
-        onrelease={onVolumeRelease
-        }
-      />
-      <text class="audio-percent">{audio_percent_label}</text>
-    </column>
-  </popover>
+    <popover
+        bind:this={popover}
+        class="audio-popover-shell"
+        onpointerenter={onPopoverEnter}
+        onpointerleave={onPopoverLeave}
+        aria-label="Audio controls"
+    >
+        <column class={props.blur_enabled and "audio-popover audio-popover-blur" or "audio-popover"}>
+            <slider
+                class="audio-slider"
+                min="0"
+                max="100"
+                value={slider_value}
+                orient="vertical"
+                onchange={onVolumeChange}
+                onrelease={onVolumeRelease
+                }
+            />
+            <text class="audio-percent">{audio_percent_label}</text>
+        </column>
+    </popover>
 </template>
 
 <script lang="luau">
@@ -39,8 +42,12 @@ last_sent_slider_value = nil
 
 local function clamp_percent(value)
     local numeric = tonumber(value) or 0
-    if numeric < 0 then return 0 end
-    if numeric > 100 then return 100 end
+    if numeric < 0 then
+        return 0
+    end
+    if numeric > 100 then
+        return 100
+    end
     return math.floor(numeric + 0.5)
 end
 
@@ -129,50 +136,53 @@ end
 </script>
 
 <style>
-.audio-popover-shell {
-    width: fit-content;
-    height: fit-content;
-    min-width: 56px;
-    max-width: 72px;
-    min-height: 180px;
-    max-height: 260px;
-    padding: 0 var(--spacing-sm) var(--spacing-sm) var(--spacing-sm);
-    background: transparent;
-    overflow: visible;
-    opacity: 1;
-    transition: opacity prop(anim_ms) var(--animation-curves-bezier-standard);
-}
+    .audio-popover-shell {
+        width: fit-content;
+        height: fit-content;
+        min-width: 56px;
+        max-width: 72px;
+        min-height: 180px;
+        max-height: 260px;
+        padding: 0 var(--spacing-sm) var(--spacing-sm) var(--spacing-sm);
+        background: transparent;
+        overflow: visible;
+        opacity: 1;
+        transition: opacity prop(anim_ms) var(--animation-curves-bezier-standard);
+    }
 
-.audio-popover-shell.mesh-surface-exiting {
-    opacity: 0;
-}
+    .audio-popover-shell.mesh-surface-exiting {
+        opacity: 0;
+    }
 
-.audio-popover {
-    gap: var(--spacing-xs);
-    padding: var(--spacing-sm);
-    align-items: center;
-    overflow: visible;
-    border-radius: var(--radius-lg);
-    /* Frosted glass matching the navigation bar: translucent card over the
-    compositor-blurred backdrop (org_kde_kwin_blur). */
-    background: rgba(24, 26, 34, 0.68);
-    backdrop-filter: blur(20px);
-    color: var(--color-on-surface);
-}
+    .audio-popover {
+        gap: var(--spacing-xs);
+        padding: var(--spacing-sm);
+        align-items: center;
+        overflow: visible;
+        border-radius: var(--radius-lg);
+        /* Frosted glass matching the navigation bar: translucent card over the
+        compositor-blurred backdrop (org_kde_kwin_blur). */
+    background-color: prop(blur_background);
+        color: var(--color-on-surface);
+    }
 
-.audio-slider {
-    width: prop(track_width);
-    height: prop(track_height);
-}
+    .audio-popover-blur {
+        backdrop-filter: blur(prop(blur_radius));
+    }
 
-.audio-slider:focus-visible {
-    border-radius: var(--radius-lg);
-}
+    .audio-slider {
+        width: prop(track_width);
+        height: prop(track_height);
+    }
 
-.audio-percent {
-    font-size: var(--typography-size-xs);
-    font-weight: 700;
-    color: var(--color-on-surface);
-    text-align: center;
-}
+    .audio-slider:focus-visible {
+        border-radius: var(--radius-lg);
+    }
+
+    .audio-percent {
+        font-size: var(--typography-size-xs);
+        font-weight: 700;
+        color: var(--color-on-surface);
+        text-align: center;
+    }
 </style>

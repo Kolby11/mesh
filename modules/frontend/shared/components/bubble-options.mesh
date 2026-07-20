@@ -1,9 +1,15 @@
+<props>
+blur_enabled:    { type: "bool", default: true, label: "Backdrop blur" }
+blur_radius:     { type: "size", default: "var(--effect-backdrop-blur-popup-radius)", label: "Blur radius" }
+blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-background)", label: "Frosted background" }
+</props>
+
 <template>
     <box class="bubble-options-stage" onscroll={onscroll} aria-label={label}>
         {#for item in items}
             <button class={item.button_class} onclick={onselect(item.id)} data-tooltip-disabled="true" title={item.title} aria-label={item.title}>
                 <box class={item.motion_class}>
-                    <box class={item.core_class}>
+                    <box class={blurCoreClass(item.core_class)}>
                         <icon class={item.icon_class} name={item.icon} size="14" />
                         <text class={item.text_class}>{item.text}</text>
                     </box>
@@ -25,6 +31,13 @@ items = {}
 -- Called with the selected item's `id` (onselect(item.id)).
 onselect = nil
 onscroll = nil
+
+function blurCoreClass(core_class)
+    if props.blur_enabled then
+        return core_class .. " bubble-option-core-blur"
+    end
+    return core_class
+end
 </script>
 
 <style>
@@ -136,13 +149,16 @@ onscroll = nil
         /* Frosted glass: translucent core over compositor-blurred backdrop
         (org_kde_kwin_blur on the promoted popup surface); also blurs any
         in-surface content painted beneath the bubble. */
-        backdrop-filter: blur(14px);
         opacity: 1;
         /* Overrides the theme's global background-color-first transition default. */
         transition: border-color var(--animation-duration-short) var(--animation-curves-bezier-standard);
         animation-duration: 2800ms;
         animation-timing-function: ease-in-out;
         animation-iteration-count: infinite;
+    }
+
+    .bubble-option-core-blur {
+        backdrop-filter: blur(prop(blur_radius));
     }
 
     .bubble-option-core.mesh-surface-exiting {
@@ -158,28 +174,28 @@ onscroll = nil
     }
 
     .bubble-option-core-dark {
-        background: rgba(24, 26, 34, 0.62);
+        background-color: prop(blur_background);
         color: #8394aa;
         animation-name: bubble-option-float-left;
         animation-delay: 360ms;
     }
 
     .bubble-option-core-light {
-        background: rgba(24, 26, 34, 0.62);
+        background-color: prop(blur_background);
         color: #e9c46a;
         animation-name: bubble-option-float-center;
         animation-delay: 430ms;
     }
 
     .bubble-option-core-gruvbox {
-        background: rgba(24, 26, 34, 0.62);
+        background-color: prop(blur_background);
         color: #d79921;
         animation-name: bubble-option-float-right;
         animation-delay: 500ms;
     }
 
     .bubble-option-core-language {
-        background: rgba(24, 26, 34, 0.62);
+        background-color: prop(blur_background);
         color: var(--color-on-surface);
     }
 

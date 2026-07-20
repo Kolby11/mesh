@@ -1639,6 +1639,46 @@ fn shipped_navigation_icon_rasterizes_pixels_on_real_surface() {
 }
 
 #[test]
+fn shipped_navigation_blur_props_control_radius_background_and_enablement() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    component.visible = true;
+    component.settings_json = serde_json::json!({
+        "props": {
+            "global": {
+                "blur_enabled": true,
+                "blur_radius": "7px",
+                "blur_background": "rgba(1, 2, 3, 0.5)"
+            }
+        }
+    });
+    component.runtimes.lock().unwrap().clear();
+    component.init_root_runtime().unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(1280, 80);
+    component.paint(&theme, 1280, 80, &mut buffer, 1.0).unwrap();
+    let nav = first_node_by_class(component.last_tree.as_ref().unwrap(), "nav-shell").unwrap();
+    assert_eq!(nav.computed_style.backdrop_filter.blur_radius, 7.0);
+    assert_eq!(nav.computed_style.background_color.r, 1);
+    assert_eq!(nav.computed_style.background_color.g, 2);
+    assert_eq!(nav.computed_style.background_color.b, 3);
+    assert!((i16::from(nav.computed_style.background_color.a) - 128).abs() <= 1);
+
+    let mut disabled =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    disabled.visible = true;
+    disabled.settings_json = serde_json::json!({
+        "props": { "global": { "blur_enabled": false } }
+    });
+    disabled.runtimes.lock().unwrap().clear();
+    disabled.init_root_runtime().unwrap();
+    disabled.paint(&theme, 1280, 80, &mut buffer, 1.0).unwrap();
+    let nav = first_node_by_class(disabled.last_tree.as_ref().unwrap(), "nav-shell").unwrap();
+    assert_eq!(nav.computed_style.backdrop_filter.blur_radius, 0.0);
+}
+
+#[test]
 fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());

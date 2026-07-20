@@ -1,5 +1,11 @@
+<props>
+blur_enabled:    { type: "bool", default: true, label: "Backdrop blur" }
+blur_radius:     { type: "size", default: "var(--effect-backdrop-blur-surface-radius)", label: "Blur radius" }
+blur_background: { type: "color", default: "var(--effect-backdrop-blur-surface-background)", label: "Frosted background" }
+</props>
+
 <template>
-    <row class="nav-shell">
+    <row class={props.blur_enabled and "nav-shell nav-shell-blur" or "nav-shell"}>
         <row class="status-cluster">
             <WorkspaceList />
             <WindowTitle />
@@ -54,12 +60,15 @@ end
         padding-inline: var(--spacing-lg);
         overflow-x: hidden;
         overflow-y: hidden;
-        background: rgba(10, 10, 14, 0.75);
-        backdrop-filter: blur(20px);
+        background-color: prop(blur_background);
         color: var(--color-on-surface);
         transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
         color var(--animation-duration-short) var(--animation-curves-bezier-standard),
         gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    .nav-shell-blur {
+        backdrop-filter: blur(prop(blur_radius));
     }
 
     .status-cluster {

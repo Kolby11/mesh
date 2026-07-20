@@ -906,16 +906,16 @@ impl Shell {
                 height: height.saturating_sub(pad_top + pad_bottom),
             }),
         );
-        // Frosted popover content declares `backdrop-filter`; hand the region
+        // Frosted popover content declares `backdrop-filter`; hand the regions
         // to the compositor blur protocol like the parent surface path does.
-        let child_blur_region = self.components[index]
+        let child_blur_regions = self.components[index]
             .component
-            .child_surface_blur_region(&node_key);
-        self.presentation_engine.update_blur_region(
+            .child_surface_blur_regions(&node_key);
+        self.presentation_engine.update_blur_regions(
             &self.components[index].children[child_index]
                 .target
                 .surface_id,
-            child_blur_region,
+            child_blur_regions,
         );
         match self.present_surface_target(
             index,
@@ -1036,9 +1036,9 @@ impl Shell {
                 self.presentation_engine
                     .update_input_region(&surface_id, input_rect);
 
-                let blur_region = compute_blur_region(commands);
+                let blur_regions = compute_blur_regions(commands);
                 self.presentation_engine
-                    .update_blur_region(&surface_id, blur_region);
+                    .update_blur_regions(&surface_id, blur_regions);
                 self.components[index].target_mut(target).last_region_state = Some(region_state);
             }
         }
@@ -1645,13 +1645,13 @@ fn map_popover_constraint(adjustment: PopoverConstraintAdjustment) -> PopupConst
     }
 }
 
-/// Compute the logical-coordinate union rect of all display list nodes
+/// Compute the logical-coordinate regions of all display list nodes
 /// that have an active `backdrop-filter: blur(...)`.
 ///
-/// Returns `None` when no nodes have `backdrop_filter.blur_radius > 0.0`,
+/// Returns an empty vector when no nodes have `backdrop_filter.blur_radius > 0.0`,
 /// which means no `kde_blur` protocol calls are emitted (BLUR-04).
-fn compute_blur_region(commands: &[DisplayPaintCommand]) -> Option<DamageRect> {
-    mesh_core_render::display_list::backdrop_blur_region_union(commands)
+fn compute_blur_regions(commands: &[DisplayPaintCommand]) -> Vec<DamageRect> {
+    mesh_core_render::display_list::backdrop_blur_regions(commands)
 }
 
 #[cfg(test)]
@@ -1728,64 +1728,97 @@ mod tests {
             clip: DisplayListClip {
                 x: 0,
                 y: 0,
-                width: width as i32,
-                height: height as i32,
+                width: (x.max(0.0) + width).ceil() as i32,
+                height: (y.max(0.0) + height).ceil() as i32,
             },
             kind: DisplayPaintCommandKind::Node,
         }
     }
 
     #[test]
-    fn test_compute_blur_region_single_node() {
+    fn test_compute_blur_regions_single_node() {
         let cmds = vec![make_cmd(10.0, 20.0, 100.0, 50.0, 4.0)];
         assert_eq!(
-            compute_blur_region(&cmds),
-            Some(DamageRect {
+            compute_blur_regions(&cmds),
+            vec![DamageRect {
                 x: 10,
                 y: 20,
                 width: 100,
                 height: 50
-            })
+            }]
         );
     }
 
     #[test]
-    fn test_compute_blur_region_no_blur_nodes() {
+    fn test_compute_blur_regions_no_blur_nodes() {
         let cmds = vec![make_cmd(0.0, 0.0, 100.0, 100.0, 0.0)];
-        assert_eq!(compute_blur_region(&cmds), None);
+        assert!(compute_blur_regions(&cmds).is_empty());
     }
 
     #[test]
-    fn test_compute_blur_region_negative_coords() {
+    fn test_compute_blur_regions_negative_coords() {
         // x=-10, y=-5, w=100, h=80 → x=0, y=0, width=90, height=75
         let cmds = vec![make_cmd(-10.0, -5.0, 100.0, 80.0, 4.0)];
         assert_eq!(
-            compute_blur_region(&cmds),
-            Some(DamageRect {
+            compute_blur_regions(&cmds),
+            vec![DamageRect {
                 x: 0,
                 y: 0,
                 width: 90,
                 height: 75
-            })
+            }]
         );
     }
 
     #[test]
-    fn test_compute_blur_region_two_disjoint_nodes() {
-        // (0,0,50,50) union (100,100,50,50) → (0,0,150,150)
+    fn test_compute_blur_regions_keep_disjoint_nodes_separate() {
         let cmds = vec![
             make_cmd(0.0, 0.0, 50.0, 50.0, 4.0),
             make_cmd(100.0, 100.0, 50.0, 50.0, 4.0),
         ];
         assert_eq!(
-            compute_blur_region(&cmds),
-            Some(DamageRect {
-                x: 0,
-                y: 0,
-                width: 150,
-                height: 150
-            })
+            compute_blur_regions(&cmds),
+            vec![
+                DamageRect {
+                    x: 0,
+                    y: 0,
+                    width: 50,
+                    height: 50
+                },
+                DamageRect {
+                    x: 100,
+                    y: 100,
+                    width: 50,
+                    height: 50
+                },
+            ]
         );
+    }
+
+    #[test]
+    fn test_compute_blur_regions_follow_rounded_element_shape() {
+        let mut command = make_cmd(10.0, 20.0, 36.0, 36.0, 14.0);
+        Arc::make_mut(&mut command.node).style.border_radius = 18.0;
+        command.clip = DisplayListClip {
+            x: 10,
+            y: 20,
+            width: 36,
+            height: 36,
+        };
+
+        let regions = compute_blur_regions(&[command]);
+        let area: u64 = regions.iter().copied().map(DamageRect::area).sum();
+        assert!(regions.len() > 1, "a circle needs multiple wl_region bands");
+        assert!(
+            area > 900 && area < 1_200,
+            "36px circular mask should track its painted area, got {area}px"
+        );
+        assert!(regions.iter().all(|region| {
+            region.x >= 10
+                && region.y >= 20
+                && region.x + region.width <= 46
+                && region.y + region.height <= 56
+        }));
     }
 
     // cargo test -p mesh-core-shell --release -- cached_region_state_beats_command_scan --ignored --nocapture
@@ -1811,7 +1844,7 @@ mod tests {
 
         let scan_started = Instant::now();
         for _ in 0..iterations {
-            black_box(compute_blur_region(black_box(&commands)));
+            black_box(compute_blur_regions(black_box(&commands)));
         }
         let scan = scan_started.elapsed();
 
