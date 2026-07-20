@@ -634,7 +634,7 @@ impl TooltipAnchor {
 }
 
 /// Fully resolved style for a widget node.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ComputedStyle {
     pub width: Dimension,
     pub height: Dimension,

@@ -227,9 +227,8 @@ reference it. The historical subsystem map is
       use a nested service→field index, removing two temporary String
       allocations per queried field; 1M release lookups measured 33.7ms
       tuple-key allocation versus 27.7ms borrowed lookup (1.2x).
-- [ ] Generation-aware retained-tree diff: skip clean subtrees using dirty
-      bits → v1.27. Remaining after landed progress: clean-subtree skipping,
-      slotmap-keyed snapshot reuse (D). `RenderObjectTree` now counts visited
+- [x] Generation-aware retained-tree diff: skip clean subtrees using dirty
+      bits → v1.27. `RenderObjectTree` now counts visited
       nodes and skips the full retained-object stale-entry scan on clean
       non-structural updates; a 4,096-entry release benchmark measured 65.3µs
       retain scanning versus 10.7µs conditional skip (6.1x). Added
@@ -244,7 +243,66 @@ reference it. The historical subsystem map is
       of resolving NodeId→slot and then probing the dirty secondary map for
       every visited node. Structural insertion frames skip populating the set.
       Across 13.65M sparse membership probes, release measurements were 95.9ms
-      slot-indirect versus 74.5ms direct (1.3x faster).
+      slot-indirect versus 74.5ms direct (1.3x faster). Added 2026-07-20: the
+      authoritative retained-tree pass now fingerprints each fresh node
+      directly against its stable slot instead of staging a second full-tree
+      `NodeId`→snapshot map and draining it afterward. Per-slot traversal epochs
+      also skip the stale-entry scan when the frame is non-structural, while
+      insertion/removal/reorder frames retain the checked pruning fallback.
+      Across three runs of 2,000 one-node-dirty 1,365-node release updates,
+      snapshot-map staging took 544.4–551.8ms versus 445.1–448.5ms for direct
+      retained slots (1.218–1.230x faster); the
+      relative speedup is now part of the checked performance gate. Added later
+      2026-07-20: targeted interaction restyles carry their authoritative dirty
+      roots into the retained-tree pass. Dirty roots and descendants receive
+      full fingerprints; clean nodes check only child identity and the cheap
+      layout tuple so layout propagation from a changed leaf is still detected.
+      Structural mismatches fall back before retained state is mutated, while
+      CSS/scroll/surface animation frames stay on the full path. Across three
+      runs of 2,000 one-leaf-dirty 1,365-node release updates, full direct-slot
+      fingerprinting took 455.6–470.4ms versus 78.6–83.0ms scoped
+      (5.667–5.793x faster); this relative speedup is also checked in CI.
+      Animation ticks now publish the exact nodes whose displayed animatable
+      style changed while walking the existing animation pass. Frames requested
+      exclusively by animations, plus targeted interaction restyles that also
+      advance animations, merge those roots into the scoped retained update.
+      Any unrelated invalidation, scroll animation, surface transition, or
+      structural mismatch retains the full fallback. Across three runs of 2,000
+      four-node-animated 1,365-node release updates, full fingerprinting took
+      469.1–477.9ms versus 80.5–83.7ms scoped (5.689–5.829x faster), now checked
+      in the performance gate. An end-to-end benchmark including animation
+      tracking, restyle, layout, display-list work, and raster measured 250
+      one-node-animated 1,026-node frames at 558.9–563.6ms with full retained
+      fingerprints versus 423.7–433.4ms scoped across three runs (1.301–1.324x
+      faster overall); this result is gated too. Narrow script builds now
+      compare the fresh tree directly with the previous painted tree, using
+      cheap field equality to identify changed roots without hashing clean
+      nodes. Stable non-structural results feed the same scoped retained update;
+      structural, scrolling, surface-transition, root-wide, and at-least-half-
+      tree changes promote to the full path before retained state is mutated.
+      Across three runs of 2,000 one-leaf-dirty 1,365-node updates, full retained
+      fingerprinting took 473.8–483.5ms versus 280.4–303.4ms for direct diff plus
+      scoped fingerprints (1.562–1.704x faster). End-to-end handler-to-pixel
+      measurements over 100 one-node-dirty 1,026-node frames improved from
+      563.4–621.3ms to 509.8–573.5ms (1.083–1.167x overall). Both relative
+      results are performance-gated. Scoped retained updates now also pass
+      direct references to their changed nodes into render-object sync instead
+      of discarding that locality and walking the full tree again. Across three
+      runs of 5,000 one-node-dirty 2,049-node updates, direct synchronization
+      took 0.76–0.78ms versus 102.2–104.7ms for the tree walk (130.2–135.9x);
+      combined retained diff plus render sync improved from 131.9–133.9ms to
+      98.7–100.6ms over 2,000 1,365-node frames (1.327–1.341x). Both are now
+      performance-gated. Paint-only frames and scroll animation ticks now enter
+      the same scoped path with no style roots: child identity and cheap layout
+      tuples are still checked across the tree, so changed typed scroll metrics
+      are found without rehashing clean style and attributes. Across three runs
+      of 2,000 one-node-scrolled 1,365-node updates, full fingerprinting took
+      451.4–467.3ms versus 55.8–57.3ms scoped (7.984–8.349x). End-to-end
+      paint-only measurements over 150 clean 2,050-node frames improved from
+      544.7–577.2ms to 387.8–428.4ms (1.330–1.488x). Both are performance-gated.
+      Structural changes, broad/root style changes, surface transitions, and
+      external rebuilds deliberately retain the full checked fallback, completing
+      clean-subtree skipping for the authoritative non-structural mutation paths.
 - [ ] Triple full-tree fingerprinting on dirty frames: make
       `RetainedWidgetTree` the single fingerprint pass; render-object tree and
       display entries consume its per-node dirty flags (N). Progress
@@ -264,9 +322,12 @@ reference it. The historical subsystem map is
       conservative fallback. A 2,521-node end-to-end display-list benchmark
       over 1,000 one-node color changes measured 4.325s full rebuild versus
       459.9ms sparse update (9.4x faster), with retained entries, damage, and
-      paint commands checked against the full path. Remaining: share the
-      retained tree's computed fingerprints directly instead of only its dirty
-      scope, and prove any additional dirty categories before widening them.
+      paint commands checked against the full path. The retained-to-render handoff
+      now carries direct changed-node references for scoped updates, eliminating
+      render sync's redundant clean-node traversal while preserving the existing
+      structural/broad fallback. Remaining: share the retained tree's computed
+      fingerprint payloads directly, and prove any additional dirty categories
+      before widening them.
 - [ ] Any non-clean frame bypasses all generation shortcuts
       (`use_generation_shortcuts` requires an empty dirty set); widen to
       per-node dirty scoping together with the §N unification (P). Interaction

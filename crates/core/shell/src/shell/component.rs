@@ -675,6 +675,14 @@ pub(super) struct FrontendSurfaceComponent {
     intrinsic_layout_cache: IntrinsicLayoutCache,
     layout_state: PerSurfaceLayoutState,
     pub(super) retained_tree: RetainedWidgetTree,
+    /// Authoritative roots touched by the latest targeted retained restyle.
+    /// Consumed by the retained-tree fingerprint pass in the same paint.
+    retained_update_dirty_roots: Option<HashSet<NodeId>>,
+    #[cfg(test)]
+    force_full_retained_update: bool,
+    /// True only when the pending style frame was requested exclusively by
+    /// the animation pass. Any unrelated invalidation clears this marker.
+    animation_only_dirty: bool,
     node_service_field_deps: NodeServiceFieldDependencies,
     retained_render_objects: RenderObjectTree,
     retained_display_list: RetainedDisplayList,
@@ -717,6 +725,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// ticks because the same surface is usually traversed every frame.
     animation_live_keys_scratch: HashSet<String>,
     animation_live_keyframe_keys_scratch: HashSet<String>,
+    animation_dirty_node_ids_scratch: HashSet<NodeId>,
     has_animatable_style_rules: bool,
     has_active_keyframe_animation: bool,
     has_promoted_popover_wrappers: Cell<bool>,
@@ -931,6 +940,10 @@ impl FrontendSurfaceComponent {
             intrinsic_layout_cache: IntrinsicLayoutCache::default(),
             layout_state: PerSurfaceLayoutState::default(),
             retained_tree: RetainedWidgetTree::default(),
+            retained_update_dirty_roots: None,
+            #[cfg(test)]
+            force_full_retained_update: false,
+            animation_only_dirty: false,
             node_service_field_deps: NodeServiceFieldDependencies::default(),
             retained_render_objects: RenderObjectTree::default(),
             retained_display_list: RetainedDisplayList::default(),
@@ -947,6 +960,7 @@ impl FrontendSurfaceComponent {
             previous_visual_styles_scratch: HashMap::new(),
             animation_live_keys_scratch: HashSet::new(),
             animation_live_keyframe_keys_scratch: HashSet::new(),
+            animation_dirty_node_ids_scratch: HashSet::new(),
             has_animatable_style_rules,
             has_active_keyframe_animation: false,
             has_promoted_popover_wrappers: Cell::new(false),
@@ -991,6 +1005,7 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn invalidate(&mut self, flags: ComponentDirtyFlags) {
+        self.animation_only_dirty = false;
         self.dirty_types |= flags;
         self.dirty = true;
         if invalidation_requires_pixel_repaint(flags) {
@@ -999,8 +1014,19 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn invalidate_style_path(&mut self, flags: ComponentDirtyFlags) {
+        self.animation_only_dirty = false;
         self.dirty_types |= flags;
         self.style_only_dirty = true;
+        if invalidation_requires_pixel_repaint(flags) {
+            self.surface_pixels_invalid = true;
+        }
+    }
+
+    pub(super) fn invalidate_animation_style_path(&mut self, flags: ComponentDirtyFlags) {
+        let exclusively_animation = self.dirty_types.is_empty() || self.animation_only_dirty;
+        self.dirty_types |= flags;
+        self.style_only_dirty = true;
+        self.animation_only_dirty = exclusively_animation;
         if invalidation_requires_pixel_repaint(flags) {
             self.surface_pixels_invalid = true;
         }

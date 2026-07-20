@@ -230,6 +230,7 @@ impl FrontendSurfaceComponent {
             height,
             "rebuild",
             ComponentDirtyFlags::TREE_REBUILD,
+            false,
             surface_css_props,
         );
         tree
@@ -243,21 +244,23 @@ impl FrontendSurfaceComponent {
         surface_css_props: &SurfaceCssProps,
     ) -> WidgetNode {
         let tree = self.build_tree_with_surface_css_props(theme, width, height, surface_css_props);
-        // Narrow-script analysis currently feeds profiling telemetry only; the
-        // finalized tree still takes the same full restyle/layout path. Avoid
-        // snapshotting and hashing every node when nobody will consume those
-        // measurements. Once affected subtrees drive rendering behavior this
-        // gate can be removed alongside that implementation.
-        if !self.profiling_enabled {
-            return tree;
-        }
-        if let Some((affected, total)) = self.retained_tree.narrow_script_diff(&tree)
-            && affected.len() * 2 <= total
+        let scope_is_safe = !self.surface_exiting
+            && !self.surface_entering
+            && self.closing_child_keys.is_empty()
+            && self.entering_child_keys.is_empty();
+        if scope_is_safe
+            && let Some(affected) = self
+                .last_tree
+                .as_ref()
+                .and_then(|previous| runtime_tree::narrow_script_dirty_roots(previous, &tree))
         {
-            let mut full_affected = affected.clone();
-            narrow_expand_ancestors(&tree, &affected, &mut full_affected);
-            self.affected_node_count = full_affected.len() as u64;
-            self.narrow_path_active = true;
+            if self.profiling_enabled {
+                let mut full_affected = affected.clone();
+                narrow_expand_ancestors(&tree, &affected, &mut full_affected);
+                self.affected_node_count = full_affected.len() as u64;
+                self.narrow_path_active = true;
+            }
+            self.retained_update_dirty_roots = Some(affected);
         }
         // Structural/broad changes are already present in `tree`; do not
         // rebuild it a second time merely to label the profiling path as full.
@@ -276,6 +279,7 @@ impl FrontendSurfaceComponent {
         width: u32,
         height: u32,
         dirty_types: ComponentDirtyFlags,
+        animation_only_frame: bool,
         surface_css_props: &SurfaceCssProps,
     ) -> Option<WidgetNode> {
         let _span = tracing::debug_span!("restyle", surface = %self.id()).entered();
@@ -288,6 +292,7 @@ impl FrontendSurfaceComponent {
             height,
             "restyle",
             dirty_types,
+            animation_only_frame,
             surface_css_props,
         );
         Some(tree)
@@ -301,10 +306,12 @@ impl FrontendSurfaceComponent {
         height: u32,
         trigger_kind: &'static str,
         dirty_types: ComponentDirtyFlags,
+        animation_only_frame: bool,
         surface_css_props: &SurfaceCssProps,
     ) {
         let _span =
             tracing::debug_span!("finalize_tree", surface = %self.id(), trigger_kind).entered();
+        self.retained_update_dirty_roots = None;
         // Advance smooth-scroll animations before annotation reads scroll_offsets,
         // so the eased offset lands in this frame's `_mesh_scroll_*` attributes.
         self.advance_scroll_animations(std::time::Instant::now());
@@ -370,6 +377,11 @@ impl FrontendSurfaceComponent {
         let targeted_interaction_restyle = trigger_kind == "restyle"
             && dirty_types.contains(ComponentDirtyFlags::STATE)
             && !dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
+        let paint_only_restyle = trigger_kind == "restyle"
+            && !dirty_types.is_empty()
+            && dirty_types
+                .difference(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS)
+                .is_empty();
         // Compute affected keys before borrowing index_cache to satisfy the borrow checker.
         // Collect affected IDs before borrowing index_cache to satisfy the borrow checker.
         let affected_keys = if targeted_interaction_restyle {
@@ -627,6 +639,20 @@ impl FrontendSurfaceComponent {
             self.previous_checked_values.clear();
         }
         self.interaction_snapshot_valid = true;
+        if ((targeted_interaction_restyle && interaction_snapshot_valid)
+            || animation_only_frame
+            || paint_only_restyle)
+            && !self.surface_exiting
+            && !self.surface_entering
+            && self.closing_child_keys.is_empty()
+            && self.entering_child_keys.is_empty()
+        {
+            self.retained_update_dirty_roots = Some(if targeted_interaction_restyle {
+                affected_keys.affected
+            } else {
+                HashSet::new()
+            });
+        }
     }
 
     /// Collects stable IDs for nodes whose interaction state changed this frame.

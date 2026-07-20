@@ -11,7 +11,7 @@ use mesh_core_animation::{
 };
 use mesh_core_component::style as component_style;
 use mesh_core_elements::{
-    StyleResolver, TransitionStyle, WidgetNode,
+    NodeId, StyleResolver, TransitionStyle, WidgetNode,
     style::{AnimationPlayState, AnimationPropertyBucket},
 };
 
@@ -122,12 +122,14 @@ impl FrontendSurfaceComponent {
         tree: &mut WidgetNode,
         previous_styles: &HashMap<String, AnimatableStyle>,
         surface_css_props: &SurfaceCssProps,
-    ) {
+    ) -> HashSet<NodeId> {
         let now = Instant::now();
         let mut live_keys = std::mem::take(&mut self.animation_live_keys_scratch);
         live_keys.clear();
         let mut live_keyframe_keys = std::mem::take(&mut self.animation_live_keyframe_keys_scratch);
         live_keyframe_keys.clear();
+        let mut dirty_node_ids = std::mem::take(&mut self.animation_dirty_node_ids_scratch);
+        dirty_node_ids.clear();
         let mut has_active_animation = false;
         let mut active_animation_bucket = AnimationPropertyBucket::None;
         let mut has_active_keyframe_animation = false;
@@ -147,6 +149,7 @@ impl FrontendSurfaceComponent {
             &mut active_animation_bucket,
             &mut has_active_keyframe_animation,
             &mut active_keyframe_bucket,
+            &mut dirty_node_ids,
         );
 
         self.transitions.retain_live(&live_keys, now);
@@ -174,8 +177,9 @@ impl FrontendSurfaceComponent {
             } else {
                 ComponentDirtyFlags::VISUAL_REPAINT
             };
-            self.invalidate_style_path(flags);
+            self.invalidate_animation_style_path(flags);
         }
+        dirty_node_ids
     }
 
     fn apply_style_animations_to_node(
@@ -191,6 +195,7 @@ impl FrontendSurfaceComponent {
         active_animation_bucket: &mut AnimationPropertyBucket,
         has_active_keyframe_animation: &mut bool,
         active_keyframe_bucket: &mut AnimationPropertyBucket,
+        dirty_node_ids: &mut HashSet<NodeId>,
     ) {
         let entering = ancestor_entering
             || node
@@ -199,12 +204,13 @@ impl FrontendSurfaceComponent {
                 .is_some_and(|value| value == "true");
         if let Some(key) = node.mesh_key().map(str::to_owned) {
             live_keys.insert(key.clone());
-            if entering {
+            let previous_style = if entering {
                 // A promoted child is mapped from this exact paint. Snap its
                 // first buffer to the authored entrance state; on the next
                 // paint the marker disappears and the normal transition pass
                 // animates from this snapshot to the resting style.
                 self.transitions.remove(&key);
+                previous_styles.get(&key).copied()
             } else {
                 self.apply_node_style_animation(
                     &key,
@@ -212,8 +218,8 @@ impl FrontendSurfaceComponent {
                     previous_styles,
                     now,
                     has_active_animation,
-                );
-            }
+                )
+            };
             if let Some(transition) = self.transitions.active_unfinished(&key, now) {
                 *active_animation_bucket = merge_animation_bucket(
                     *active_animation_bucket,
@@ -229,6 +235,9 @@ impl FrontendSurfaceComponent {
                 has_active_keyframe_animation,
                 active_keyframe_bucket,
             );
+            if previous_style.is_some_and(|previous| previous != AnimatableStyle::from_node(node)) {
+                dirty_node_ids.insert(node.id);
+            }
         }
 
         for child in &mut node.children {
@@ -244,6 +253,7 @@ impl FrontendSurfaceComponent {
                 active_animation_bucket,
                 has_active_keyframe_animation,
                 active_keyframe_bucket,
+                dirty_node_ids,
             );
         }
     }
@@ -255,7 +265,7 @@ impl FrontendSurfaceComponent {
         previous_styles: &HashMap<String, AnimatableStyle>,
         now: Instant,
         has_active_animation: &mut bool,
-    ) {
+    ) -> Option<AnimatableStyle> {
         if node
             .computed_style
             .animations
@@ -265,7 +275,7 @@ impl FrontendSurfaceComponent {
             // CSS animations own their animated properties; do not layer
             // transition playback on top of the same node.
             self.transitions.remove(key);
-            return;
+            return previous_styles.get(key).copied();
         }
 
         // The value shown for this node last frame: the in-flight transition's
@@ -284,6 +294,7 @@ impl FrontendSurfaceComponent {
         {
             *has_active_animation = true;
         }
+        Some(previous_displayed)
     }
 
     fn apply_node_keyframe_animation(

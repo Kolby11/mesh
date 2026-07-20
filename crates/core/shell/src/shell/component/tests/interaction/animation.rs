@@ -460,6 +460,186 @@ fn keyframe_animation_infinite_keeps_render_requests_active() {
 }
 
 #[test]
+fn animation_only_tick_uses_scoped_retained_fingerprinting() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <row>
+    <box class="animated" />
+    <box />
+  </row>
+</template>
+<style>
+.animated { animation: pulse 1000ms linear infinite; }
+@keyframes pulse {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+
+    assert!(component.animation_only_dirty);
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+
+    assert!(component.retained_tree.last_update_was_scoped());
+}
+
+#[test]
+fn smooth_scroll_animation_uses_scoped_retained_fingerprinting() {
+    let mut component = test_frontend_component(
+        r#"
+<template><scroll><box /></scroll></template>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(80, 40);
+    component.paint(&theme, 80, 40, &mut buffer, 1.0).unwrap();
+
+    component.scroll_animations.insert(
+        "root/0".into(),
+        ScrollAnimation {
+            start: ScrollOffsetState::default(),
+            target: ScrollOffsetState { x: 0.0, y: 80.0 },
+            start_time: Instant::now()
+                .checked_sub(Duration::from_millis(50))
+                .unwrap(),
+            duration: Duration::from_millis(200),
+        },
+    );
+    component.invalidate_animation_style_path(ComponentDirtyFlags::VISUAL_REPAINT);
+    component.paint(&theme, 80, 40, &mut buffer, 1.0).unwrap();
+
+    assert!(component.retained_tree.last_update_was_scoped());
+}
+
+#[test]
+fn external_invalidation_cancels_animation_only_retained_scope() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="animated" /></template>
+<style>
+.animated { animation: pulse 1000ms linear infinite; }
+@keyframes pulse { 0% { opacity: 0; } 100% { opacity: 1; } }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    assert!(component.animation_only_dirty);
+
+    component.invalidate_surface_config();
+    assert!(!component.animation_only_dirty);
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+
+    assert!(!component.retained_tree.last_update_was_scoped());
+}
+
+#[test]
+fn animation_scoped_retained_diff_matches_full_pipeline() {
+    let source = r#"
+<template><row><box class="animated" /><box /></row></template>
+<style>
+.animated { animation: pulse 1000ms linear infinite; }
+@keyframes pulse { 0% { opacity: 0; } 100% { opacity: 1; } }
+</style>
+"#;
+    let mut scoped = test_frontend_component(source);
+    let mut full = test_frontend_component(source);
+    let theme = default_theme();
+    let mut scoped_buffer = PixelBuffer::new(120, 40);
+    let mut full_buffer = PixelBuffer::new(120, 40);
+    scoped
+        .paint(&theme, 120, 40, &mut scoped_buffer, 1.0)
+        .unwrap();
+    full.paint(&theme, 120, 40, &mut full_buffer, 1.0).unwrap();
+
+    full.animation_only_dirty = false;
+    scoped
+        .paint(&theme, 120, 40, &mut scoped_buffer, 1.0)
+        .unwrap();
+    full.paint(&theme, 120, 40, &mut full_buffer, 1.0).unwrap();
+
+    assert!(scoped.retained_tree.last_update_was_scoped());
+    assert!(!full.retained_tree.last_update_was_scoped());
+    assert_eq!(
+        scoped.retained_tree.last_dirty(),
+        full.retained_tree.last_dirty()
+    );
+    assert_eq!(
+        scoped.retained_tree.dirty_node_ids(),
+        full.retained_tree.dirty_node_ids()
+    );
+}
+
+// cargo test -p mesh-core-shell --release -- animation_scoped_retained_end_to_end_benchmark --ignored --nocapture
+#[test]
+#[ignore = "release-only end-to-end animation retained-scope benchmark"]
+fn animation_scoped_retained_end_to_end_benchmark() {
+    let mut source = String::from("<template><row><box class=\"animated\" />");
+    for _ in 0..1_024 {
+        source.push_str("<box />");
+    }
+    source.push_str(
+        r#"</row></template>
+<style>
+.animated { animation: pulse 1000ms linear infinite; }
+@keyframes pulse { 0% { opacity: 0; } 100% { opacity: 1; } }
+</style>"#,
+    );
+
+    let mut scoped = test_frontend_component(&source);
+    let mut full = test_frontend_component(&source);
+    let theme = default_theme();
+    let mut scoped_buffer = PixelBuffer::new(64, 16);
+    let mut full_buffer = PixelBuffer::new(64, 16);
+    scoped
+        .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+        .unwrap();
+    full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+
+    let iterations = 250;
+    let mut scoped_time = Duration::ZERO;
+    let mut full_time = Duration::ZERO;
+    for iteration in 0..iterations {
+        if iteration % 2 == 0 {
+            let started = Instant::now();
+            scoped
+                .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+                .unwrap();
+            scoped_time += started.elapsed();
+
+            full.animation_only_dirty = false;
+            let started = Instant::now();
+            full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+            full_time += started.elapsed();
+        } else {
+            full.animation_only_dirty = false;
+            let started = Instant::now();
+            full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+            full_time += started.elapsed();
+
+            let started = Instant::now();
+            scoped
+                .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+                .unwrap();
+            scoped_time += started.elapsed();
+        }
+    }
+
+    let speedup = full_time.as_secs_f64() / scoped_time.as_secs_f64();
+    eprintln!(
+        "end-to-end animation paints over {iterations} one-node-animated 1,026-node frames: full retained fingerprints {full_time:?}; scoped {scoped_time:?}; ratio {speedup:.3}x"
+    );
+    eprintln!("MESH_PERF metric=animation_frame_speedup value={speedup:.6}");
+    assert!(scoped_time < full_time);
+}
+
+#[test]
 fn keyframe_animation_missing_name_records_diagnostic() {
     let mut component = test_frontend_component(
         r#"

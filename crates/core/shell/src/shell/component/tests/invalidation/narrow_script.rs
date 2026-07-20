@@ -138,7 +138,7 @@ fn threshold_narrow_below_half() {
 }
 
 #[test]
-fn narrow_script_analysis_is_disabled_outside_profiling() {
+fn narrow_script_scope_is_published_outside_profiling() {
     let mut component = test_frontend_component(
         "<template><box><text>a</text><text>b</text><text>c</text></box></template>",
     );
@@ -147,12 +147,151 @@ fn narrow_script_analysis_is_disabled_outside_profiling() {
 
     let tree = component.build_tree(&theme, 100, 100);
     let _ = component.retained_tree.update(&tree);
+    component.last_tree = Some(tree);
     component.narrow_path_active = false;
     component.affected_node_count = 0;
 
     let _result = component.narrow_script_update(&theme, 100, 100, &surface_css_props);
     assert!(!component.narrow_path_active);
     assert_eq!(component.affected_node_count, 0);
+    assert!(component.retained_update_dirty_roots.is_some());
+}
+
+#[test]
+fn narrow_script_handler_uses_scoped_retained_fingerprinting() {
+    let source = format!(
+        r#"
+<template><row><text>{{label}}</text>{}</row></template>
+<script lang="luau">
+label = "aaaaaa"
+function updateLabel()
+  label = "bbbbbb"
+end
+</script>
+"#,
+        "<box />".repeat(32)
+    );
+    let mut component = test_frontend_component(&source);
+    let theme = themed_primary("test", "#000000");
+    let mut buffer = PixelBuffer::new(160, 40);
+    component.paint(&theme, 160, 40, &mut buffer, 1.0).unwrap();
+    if component.wants_render() {
+        component.paint(&theme, 160, 40, &mut buffer, 1.0).unwrap();
+    }
+
+    component
+        .call_namespaced_handler("updateLabel", &[])
+        .unwrap();
+    component.paint(&theme, 160, 40, &mut buffer, 1.0).unwrap();
+
+    assert!(component.retained_tree.last_update_was_scoped());
+}
+
+#[test]
+fn narrow_script_structural_change_keeps_full_retained_fallback() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <column>
+    {#if visible}<text>visible</text>{/if}
+  </column>
+</template>
+<script lang="luau">
+visible = true
+function hide()
+  visible = false
+end
+</script>
+"#,
+    );
+    let theme = themed_primary("test", "#000000");
+    let mut buffer = PixelBuffer::new(160, 40);
+    component.paint(&theme, 160, 40, &mut buffer, 1.0).unwrap();
+
+    component.call_namespaced_handler("hide", &[]).unwrap();
+    component.paint(&theme, 160, 40, &mut buffer, 1.0).unwrap();
+
+    assert!(!component.retained_tree.last_update_was_scoped());
+}
+
+// cargo test -p mesh-core-shell --release -- narrow_script_scoped_end_to_end_benchmark --ignored --nocapture
+#[test]
+#[ignore = "release-only end-to-end narrow-script retained-scope benchmark"]
+fn narrow_script_scoped_end_to_end_benchmark() {
+    use std::hint::black_box;
+    use std::time::{Duration, Instant};
+
+    let mut source = String::from("<template><column><text>{label}</text>");
+    for _ in 0..1_024 {
+        source.push_str("<box />");
+    }
+    source.push_str(
+        r#"</column></template>
+<script lang="luau">
+label = "a"
+function toggleLabel()
+  if label == "a" then label = "b" else label = "a" end
+end
+</script>"#,
+    );
+
+    let mut scoped = test_frontend_component(&source);
+    let mut full = test_frontend_component(&source);
+    full.force_full_retained_update = true;
+    let theme = themed_primary("test", "#000000");
+    let mut scoped_buffer = PixelBuffer::new(64, 16);
+    let mut full_buffer = PixelBuffer::new(64, 16);
+    scoped
+        .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+        .unwrap();
+    full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+    if scoped.wants_render() {
+        scoped
+            .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+            .unwrap();
+    }
+    if full.wants_render() {
+        full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+    }
+
+    let iterations = 100;
+    let mut scoped_time = Duration::ZERO;
+    let mut full_time = Duration::ZERO;
+    for iteration in 0..iterations {
+        if iteration % 2 == 0 {
+            let started = Instant::now();
+            scoped.call_namespaced_handler("toggleLabel", &[]).unwrap();
+            scoped
+                .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+                .unwrap();
+            scoped_time += started.elapsed();
+
+            let started = Instant::now();
+            full.call_namespaced_handler("toggleLabel", &[]).unwrap();
+            full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+            full_time += started.elapsed();
+        } else {
+            let started = Instant::now();
+            full.call_namespaced_handler("toggleLabel", &[]).unwrap();
+            full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+            full_time += started.elapsed();
+
+            let started = Instant::now();
+            scoped.call_namespaced_handler("toggleLabel", &[]).unwrap();
+            scoped
+                .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+                .unwrap();
+            scoped_time += started.elapsed();
+        }
+    }
+    black_box((&scoped_buffer, &full_buffer));
+
+    let speedup = full_time.as_secs_f64() / scoped_time.as_secs_f64();
+    eprintln!(
+        "end-to-end narrow-script paints over {iterations} one-node-dirty 1,026-node frames: full retained fingerprints {full_time:?}; scoped {scoped_time:?}; ratio {speedup:.3}x"
+    );
+    eprintln!("MESH_PERF metric=narrow_script_frame_speedup value={speedup:.6}");
+    assert!(scoped_time < full_time);
 }
 
 // cargo test -p mesh-core-shell --release -- narrow_script_analysis_cost --ignored --nocapture

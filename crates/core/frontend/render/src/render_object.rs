@@ -178,6 +178,42 @@ impl RenderObjectTree {
         dirty
     }
 
+    /// Updates retained render objects from direct references produced by the
+    /// authoritative widget-tree diff. This is the sparse counterpart to
+    /// `update_for_retained_dirty_nodes`: it avoids another full-tree walk and
+    /// one hash-set membership probe per clean node.
+    pub fn update_for_retained_dirty_node_refs(
+        &mut self,
+        root: &WidgetNode,
+        retained_tree_generation: u64,
+        retained_dirty_nodes: &[&WidgetNode],
+    ) -> RenderObjectDirtySummary {
+        if self.retained_tree_generation == Some(retained_tree_generation) {
+            self.last_dirty = RenderObjectDirtySummary::default();
+            self.dirty_nodes.clear();
+            return self.last_dirty;
+        }
+
+        if self.root != Some(root.id) || self.objects.is_empty() {
+            return self.update_inner(root, Some(retained_tree_generation));
+        }
+
+        let mut dirty = RenderObjectDirtySummary::default();
+        let mut dirty_nodes = std::mem::take(&mut self.dirty_nodes);
+        dirty_nodes.clear();
+        for node in retained_dirty_nodes {
+            update_dirty_render_object(node, &mut self.objects, &mut dirty, &mut dirty_nodes);
+        }
+
+        if dirty.any() {
+            self.generation = self.generation.saturating_add(1);
+        }
+        self.retained_tree_generation = Some(retained_tree_generation);
+        self.last_dirty = dirty;
+        self.dirty_nodes = dirty_nodes;
+        dirty
+    }
+
     fn update_inner(
         &mut self,
         root: &WidgetNode,
@@ -389,28 +425,8 @@ fn update_dirty_render_objects(
     dirty_nodes: &mut HashSet<NodeId>,
 ) {
     if retained_dirty_node_ids.contains(&node.id) {
-        let current = objects
-            .get_mut(&node.id)
-            .expect("non-structural retained update must preserve render-object identity");
-        debug_assert_eq!(current.parent, parent);
-        debug_assert!(
-            current
-                .child_ids
-                .iter()
-                .copied()
-                .eq(node.children.iter().map(|child| child.id))
-        );
-        let before = *dirty;
-        let child_ids = std::mem::take(&mut current.child_ids);
-        let next = render_object_paint_data(node, parent, Some(current), child_ids);
-        dirty.add_diff(current, &next);
-        if *dirty != before {
-            dirty_nodes.insert(node.id);
-        }
-        *current = RenderObjectPaintData {
-            last_seen_epoch: current.last_seen_epoch,
-            ..next
-        };
+        update_dirty_render_object(node, objects, dirty, dirty_nodes);
+        debug_assert_eq!(objects[&node.id].parent, parent);
     }
 
     for child in &node.children {
@@ -423,6 +439,36 @@ fn update_dirty_render_objects(
             dirty_nodes,
         );
     }
+}
+
+fn update_dirty_render_object(
+    node: &WidgetNode,
+    objects: &mut HashMap<NodeId, RenderObjectPaintData>,
+    dirty: &mut RenderObjectDirtySummary,
+    dirty_nodes: &mut HashSet<NodeId>,
+) {
+    let current = objects
+        .get_mut(&node.id)
+        .expect("non-structural retained update must preserve render-object identity");
+    debug_assert!(
+        current
+            .child_ids
+            .iter()
+            .copied()
+            .eq(node.children.iter().map(|child| child.id))
+    );
+    let before = *dirty;
+    let parent = current.parent;
+    let child_ids = std::mem::take(&mut current.child_ids);
+    let next = render_object_paint_data(node, parent, Some(current), child_ids);
+    dirty.add_diff(current, &next);
+    if *dirty != before {
+        dirty_nodes.insert(node.id);
+    }
+    *current = RenderObjectPaintData {
+        last_seen_epoch: current.last_seen_epoch,
+        ..next
+    };
 }
 
 fn render_object_paint_data(
@@ -1084,6 +1130,120 @@ mod tests {
         let clean = tree.update_for_retained_dirty_nodes(&root, 2, &HashSet::new());
         assert!(!clean.any());
         assert!(tree.dirty_node_ids().is_empty());
+    }
+
+    #[test]
+    fn render_object_tree_accepts_direct_retained_dirty_node_refs() {
+        let mut root = WidgetNode::new("row");
+        root.id = 1;
+        for id in 2..=5 {
+            let mut child = WidgetNode::new("text");
+            child.id = id;
+            child
+                .attributes
+                .insert("content".into(), format!("child {id}"));
+            root.children.push(child);
+        }
+
+        let mut direct = RenderObjectTree::default();
+        let mut traversed = RenderObjectTree::default();
+        direct.update_for_retained_generation(&root, 1);
+        traversed.update_for_retained_generation(&root, 1);
+
+        root.children[2]
+            .attributes
+            .insert("content".into(), "changed".into());
+        let direct_dirty =
+            direct.update_for_retained_dirty_node_refs(&root, 2, &[&root.children[2]]);
+        let traversed_dirty =
+            traversed.update_for_retained_dirty_nodes(&root, 2, &HashSet::from([4]));
+
+        assert_eq!(direct_dirty, traversed_dirty);
+        assert_eq!(direct.dirty_node_ids(), traversed.dirty_node_ids());
+        assert_eq!(direct.generation(), traversed.generation());
+    }
+
+    // cargo test -p mesh-core-render --release -- direct_retained_render_object_refs_beat_tree_walk_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only direct retained render-object reference benchmark"]
+    fn direct_retained_render_object_refs_beat_tree_walk_benchmark() {
+        fn benchmark_tree(children: u64) -> WidgetNode {
+            let mut root = WidgetNode::new("row");
+            root.id = 1;
+            root.children.reserve(children as usize);
+            for id in 2..children + 2 {
+                let mut child = WidgetNode::new("text");
+                child.id = id;
+                child
+                    .attributes
+                    .insert("content".into(), "generation a".into());
+                root.children.push(child);
+            }
+            root
+        }
+
+        let iterations = 5_000_u64;
+        let changed_index = 1_024_usize;
+        let changed_id = changed_index as u64 + 2;
+
+        let mut traversed_root = benchmark_tree(2_048);
+        let mut traversed_tree = RenderObjectTree::default();
+        traversed_tree.update_for_retained_generation(&traversed_root, 1);
+        let retained_dirty_ids = HashSet::from([changed_id]);
+        let traversed_started = Instant::now();
+        let mut traversed_changes = 0usize;
+        for generation in 2..iterations + 2 {
+            let content = traversed_root.children[changed_index]
+                .attributes
+                .get_mut("content")
+                .unwrap();
+            content.replace_range(11.., if generation % 2 == 0 { "b" } else { "a" });
+            traversed_changes += std::hint::black_box(
+                traversed_tree
+                    .update_for_retained_dirty_nodes(
+                        &traversed_root,
+                        generation,
+                        &retained_dirty_ids,
+                    )
+                    .text,
+            );
+        }
+        let traversed_time = traversed_started.elapsed();
+
+        let mut direct_root = benchmark_tree(2_048);
+        let mut direct_tree = RenderObjectTree::default();
+        direct_tree.update_for_retained_generation(&direct_root, 1);
+        let direct_started = Instant::now();
+        let mut direct_changes = 0usize;
+        for generation in 2..iterations + 2 {
+            let content = direct_root.children[changed_index]
+                .attributes
+                .get_mut("content")
+                .unwrap();
+            content.replace_range(11.., if generation % 2 == 0 { "b" } else { "a" });
+            direct_changes += std::hint::black_box(
+                direct_tree
+                    .update_for_retained_dirty_node_refs(
+                        &direct_root,
+                        generation,
+                        &[&direct_root.children[changed_index]],
+                    )
+                    .text,
+            );
+        }
+        let direct_time = direct_started.elapsed();
+        let speedup = traversed_time.as_secs_f64() / direct_time.as_secs_f64();
+
+        assert_eq!(direct_changes, iterations as usize);
+        assert_eq!(direct_changes, traversed_changes);
+        eprintln!(
+            "direct retained render-object refs over {iterations} one-node-dirty 2,049-node frames: traversed {traversed_time:?}; direct {direct_time:?}; ratio {speedup:.2}x"
+        );
+        eprintln!("MESH_PERF metric=render_object_direct_scope_speedup value={speedup:.3}");
+        assert!(
+            direct_time * 2 < traversed_time,
+            "direct retained node references should be at least 2x faster"
+        );
     }
 
     // cargo test -p mesh-core-render --release -- sparse_retained_render_object_update_beats_full_rehash_benchmark --ignored --nocapture

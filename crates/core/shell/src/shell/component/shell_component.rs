@@ -536,6 +536,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // one that rebuilds at the new size — snapshotting first would leave
         // those flags pending and burn one extra full frame per resize.
         self.observe_surface_size(content_width, content_height);
+        let animation_only_frame = std::mem::take(&mut self.animation_only_dirty);
         let (requires_tree_rebuild, can_use_retained_path, dirty_types, _) =
             self.take_dirty_for_paint();
         let paint_width = width.max(content_width).max(1);
@@ -572,6 +573,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 content_width,
                 content_height,
                 dirty_types,
+                animation_only_frame,
                 &surface_css_props,
             ) {
                 Some(t) => t,
@@ -592,19 +594,41 @@ impl ShellComponent for FrontendSurfaceComponent {
         };
         self.prune_stale_interaction_targets(&tree);
         self.apply_pending_auto_focus(&tree);
-        if run_style_animation_pass {
+        let mut animation_dirty_roots = if run_style_animation_pass {
             self.apply_style_animations_with_previous(
                 &mut tree,
                 &previous_visual_styles,
                 &surface_css_props,
-            );
+            )
+        } else {
+            HashSet::new()
+        };
+        if run_style_animation_pass {
             self.restore_previous_visual_styles(previous_visual_styles);
         }
-        let retained_dirty = self.retained_tree.update(&tree);
+        let mut retained_update_dirty_roots = self.retained_update_dirty_roots.take();
+        #[cfg(test)]
+        if self.force_full_retained_update {
+            retained_update_dirty_roots = None;
+        }
+        if let Some(dirty_roots) = retained_update_dirty_roots.as_mut() {
+            dirty_roots.extend(animation_dirty_roots.drain());
+        }
+        self.animation_dirty_node_ids_scratch = animation_dirty_roots;
+        let (retained_dirty, retained_dirty_node_refs) =
+            if let Some(dirty_roots) = retained_update_dirty_roots.as_ref() {
+                self.retained_tree
+                    .update_for_dirty_roots_collect(&tree, dirty_roots)
+            } else {
+                (self.retained_tree.update(&tree), None)
+            };
         let retained_tree_generation = self.retained_tree.generation();
         let render_object_started = std::time::Instant::now();
         let render_object_dirty = if retained_dirty.is_structural() {
             self.retained_render_objects.update(&tree)
+        } else if let Some(dirty_nodes) = retained_dirty_node_refs.as_deref() {
+            self.retained_render_objects
+                .update_for_retained_dirty_node_refs(&tree, retained_tree_generation, dirty_nodes)
         } else {
             self.retained_render_objects
                 .update_for_retained_dirty_nodes(
@@ -613,6 +637,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                     self.retained_tree.dirty_node_ids(),
                 )
         };
+        drop(retained_dirty_node_refs);
         self.record_profiling_stage_with_elapsed(
             mesh_core_debug::ProfilingStage::RenderObjectSync,
             render_object_started.elapsed(),

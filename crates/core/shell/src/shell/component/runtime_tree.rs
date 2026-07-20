@@ -4,7 +4,9 @@ use std::hash::{Hash, Hasher};
 use bitflags::bitflags;
 use mesh_core_elements::style::{Color, ComputedStyle, Corners, Dimension, Edges, Transform2D};
 use mesh_core_elements::{ElementState, NodeId, WidgetNode, element_snapshot_json};
-use mesh_core_interaction::{ScrollOffsetState, node_is_source, source_element_tag};
+#[cfg(test)]
+use mesh_core_interaction::node_is_source;
+use mesh_core_interaction::{ScrollOffsetState, source_element_tag};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
 use smallvec::SmallVec;
 
@@ -91,80 +93,161 @@ bitflags! {
 #[derive(Debug, Default)]
 pub(super) struct RetainedWidgetTree {
     generation: u64,
+    update_epoch: u64,
     nodes: SlotMap<RetainedNodeKey, RetainedNodeSnapshot>,
     node_keys: HashMap<NodeId, RetainedNodeKey>,
     dirty: SecondaryMap<RetainedNodeKey, RetainedNodeDirtyFlags>,
     dirty_node_ids: HashSet<NodeId>,
     last_dirty: RetainedTreeDirtySummary,
-    // Scratch map reused each frame to avoid per-frame allocation.
-    next_nodes_scratch: HashMap<NodeId, RetainedNodeSnapshot>,
     // Dirty slots are transient but interaction frames repopulate them often.
     // Swap the previous map into scratch so its slot allocation is retained.
     next_dirty_scratch: SecondaryMap<RetainedNodeKey, RetainedNodeDirtyFlags>,
     next_dirty_node_ids_scratch: HashSet<NodeId>,
+    #[cfg(test)]
+    last_update_was_scoped: bool,
 }
 
 impl RetainedWidgetTree {
     pub(super) fn update(&mut self, root: &WidgetNode) -> RetainedTreeDirtySummary {
         let _span = tracing::debug_span!("retained_tree_update").entered();
-        // Take the scratch map out so we can freely mutate other fields while holding it.
-        let mut next_nodes = std::mem::take(&mut self.next_nodes_scratch);
-        next_nodes.clear();
-        collect_retained_snapshots(root, &mut next_nodes);
+        #[cfg(test)]
+        {
+            self.last_update_was_scoped = false;
+        }
+        let mut dirty = RetainedTreeDirtySummary::default();
+        let mut next_dirty = std::mem::take(&mut self.next_dirty_scratch);
+        next_dirty.clear();
+        let mut next_dirty_node_ids = std::mem::take(&mut self.next_dirty_node_ids_scratch);
+        next_dirty_node_ids.clear();
+        let retained_len = self.nodes.len();
+        if self.update_epoch == u64::MAX {
+            self.update_epoch = 0;
+            for snapshot in self.nodes.values_mut() {
+                snapshot.last_seen_epoch = 0;
+            }
+        }
+        self.update_epoch += 1;
+        let update_epoch = self.update_epoch;
+
+        let visited = update_retained_snapshots(
+            root,
+            &mut self.nodes,
+            &mut self.node_keys,
+            update_epoch,
+            &mut next_dirty,
+            &mut next_dirty_node_ids,
+            &mut dirty,
+        );
+
+        // A non-structural pass visits exactly the retained slot count and
+        // cannot leave stale nodes. Only structural changes pay for the map
+        // scan; live slots carry the current traversal epoch.
+        if self.nodes.len() != retained_len || visited != retained_len {
+            self.node_keys.retain(|_, key| {
+                if self
+                    .nodes
+                    .get(*key)
+                    .is_some_and(|snapshot| snapshot.last_seen_epoch == update_epoch)
+                {
+                    return true;
+                }
+                self.nodes.remove(*key);
+                dirty.removed += 1;
+                false
+            });
+        }
+
+        if dirty.any() {
+            self.generation = self.generation.saturating_add(1);
+        }
+        let previous_dirty = std::mem::replace(&mut self.dirty, next_dirty);
+        self.next_dirty_scratch = previous_dirty;
+        let previous_dirty_node_ids =
+            std::mem::replace(&mut self.dirty_node_ids, next_dirty_node_ids);
+        self.next_dirty_node_ids_scratch = previous_dirty_node_ids;
+        self.last_dirty = dirty;
+        dirty
+    }
+
+    /// Updates authoritative dirty subtrees while checking clean-node layout.
+    ///
+    /// `dirty_roots` is valid only when the caller retained the existing tree
+    /// structure and changed style/attributes/state exclusively at those roots
+    /// or below them. Clean nodes still compare their cheap layout fingerprint,
+    /// because layout changes can propagate from a dirty leaf to ancestors and
+    /// siblings. A structural mismatch falls back to the full update before any
+    /// retained snapshot is mutated.
+    pub(super) fn update_for_dirty_roots(
+        &mut self,
+        root: &WidgetNode,
+        dirty_roots: &HashSet<NodeId>,
+    ) -> RetainedTreeDirtySummary {
+        self.update_for_dirty_roots_collect(root, dirty_roots).0
+    }
+
+    /// Scoped update variant that also returns direct references to nodes whose
+    /// retained fingerprints changed. Downstream retained layers can consume
+    /// these references without walking the entire widget tree again.
+    ///
+    /// The second tuple field is `None` when the scope was promoted to the full
+    /// update path, since structural and broad updates require downstream full
+    /// synchronization as well.
+    pub(super) fn update_for_dirty_roots_collect<'a>(
+        &mut self,
+        root: &'a WidgetNode,
+        dirty_roots: &HashSet<NodeId>,
+    ) -> (
+        RetainedTreeDirtySummary,
+        Option<SmallVec<[&'a WidgetNode; 8]>>,
+    ) {
+        if self.nodes.is_empty() || (self.nodes.len() >= 64 && dirty_roots.contains(&root.id)) {
+            return (self.update(root), None);
+        }
+
+        let mut update_nodes = Vec::new();
+        if !collect_scoped_update_nodes(
+            root,
+            false,
+            dirty_roots,
+            &self.nodes,
+            &self.node_keys,
+            &mut update_nodes,
+        ) {
+            return (self.update(root), None);
+        }
+        // Once half the retained tree needs full fingerprints, the scoped
+        // bookkeeping no longer repays its extra traversal. Promote broad
+        // updates before mutating retained state.
+        if self.nodes.len() >= 64 && update_nodes.len().saturating_mul(2) >= self.nodes.len() {
+            return (self.update(root), None);
+        }
 
         let mut dirty = RetainedTreeDirtySummary::default();
         let mut next_dirty = std::mem::take(&mut self.next_dirty_scratch);
         next_dirty.clear();
         let mut next_dirty_node_ids = std::mem::take(&mut self.next_dirty_node_ids_scratch);
         next_dirty_node_ids.clear();
-
-        // Remove stale nodes before draining the scratch map. This lets the
-        // update loop move changed snapshots into retained storage instead of
-        // cloning them while still reusing the scratch map allocation.
-        {
-            let RetainedWidgetTree {
-                ref mut nodes,
-                ref mut node_keys,
-                ..
-            } = *self;
-            node_keys.retain(|id, key| {
-                if next_nodes.contains_key(id) {
-                    return true;
-                }
-                nodes.remove(*key);
-                dirty.removed += 1;
-                false
-            });
+        if self.update_epoch == u64::MAX {
+            self.update_epoch = 0;
+            for snapshot in self.nodes.values_mut() {
+                snapshot.last_seen_epoch = 0;
+            }
         }
+        self.update_epoch += 1;
+        let update_epoch = self.update_epoch;
 
-        for (node_id, next) in next_nodes.drain() {
-            match self.node_keys.get(&node_id).copied() {
-                Some(previous) => {
-                    if let Some(previous_snapshot) = self.nodes.get(previous) {
-                        let (flags, node_state_bits) = previous_snapshot.diff_flags(&next);
-                        if flags.is_empty() {
-                            continue;
-                        }
-                        dirty.add_flags(flags);
-                        dirty.changed_state_bits |= node_state_bits;
-                        next_dirty.insert(previous, flags);
-                        next_dirty_node_ids.insert(node_id);
-                        if let Some(slot) = self.nodes.get_mut(previous) {
-                            *slot = next;
-                        }
-                    } else {
-                        let key = self.nodes.insert(next);
-                        self.node_keys.insert(node_id, key);
-                        next_dirty.insert(key, RetainedNodeDirtyFlags::INSERTED);
-                        dirty.inserted += 1;
-                    }
-                }
-                None => {
-                    let key = self.nodes.insert(next);
-                    self.node_keys.insert(node_id, key);
-                    next_dirty.insert(key, RetainedNodeDirtyFlags::INSERTED);
-                    dirty.inserted += 1;
-                }
+        let mut dirty_nodes = SmallVec::new();
+        for node in update_nodes {
+            if update_retained_node(
+                node,
+                &mut self.nodes,
+                &mut self.node_keys,
+                update_epoch,
+                &mut next_dirty,
+                &mut next_dirty_node_ids,
+                &mut dirty,
+            ) {
+                dirty_nodes.push(node);
             }
         }
 
@@ -177,10 +260,11 @@ impl RetainedWidgetTree {
             std::mem::replace(&mut self.dirty_node_ids, next_dirty_node_ids);
         self.next_dirty_node_ids_scratch = previous_dirty_node_ids;
         self.last_dirty = dirty;
-
-        // Return the scratch map, preserving its backing allocation for the next frame.
-        self.next_nodes_scratch = next_nodes;
-        dirty
+        #[cfg(test)]
+        {
+            self.last_update_was_scoped = true;
+        }
+        (dirty, Some(dirty_nodes))
     }
 
     pub(super) fn generation(&self) -> u64 {
@@ -197,6 +281,11 @@ impl RetainedWidgetTree {
     /// downstream synchronization path and do not consume this sparse set.
     pub(super) fn dirty_node_ids(&self) -> &HashSet<NodeId> {
         &self.dirty_node_ids
+    }
+
+    #[cfg(test)]
+    pub(super) fn last_update_was_scoped(&self) -> bool {
+        self.last_update_was_scoped
     }
 
     #[cfg(test)]
@@ -246,6 +335,7 @@ impl RetainedWidgetTree {
         self.node_keys.get(&node_id).copied()
     }
 
+    #[cfg(test)]
     pub(super) fn narrow_script_diff(&self, root: &WidgetNode) -> Option<(HashSet<NodeId>, usize)> {
         let mut affected = HashSet::with_capacity(self.node_keys.len().min(256));
         let total = self.visit_fresh_snapshots(root, &mut |node_id, previous, fresh| {
@@ -307,6 +397,57 @@ impl RetainedWidgetTree {
     }
 }
 
+/// Finds non-structural changes without hashing clean nodes.
+///
+/// Narrow script builds already produce a fresh tree while retaining the last
+/// painted tree. Direct equality checks are substantially cheaper than building
+/// retained fingerprints for every clean node. The retained scoped update will
+/// still validate child identity and compare layout across the whole tree.
+pub(super) fn narrow_script_dirty_roots(
+    previous: &WidgetNode,
+    fresh: &WidgetNode,
+) -> Option<HashSet<NodeId>> {
+    fn collect(
+        previous: &WidgetNode,
+        fresh: &WidgetNode,
+        dirty_roots: &mut HashSet<NodeId>,
+    ) -> bool {
+        if previous.id != fresh.id
+            || previous.children.len() != fresh.children.len()
+            || previous
+                .children
+                .iter()
+                .zip(&fresh.children)
+                .any(|(previous_child, fresh_child)| previous_child.id != fresh_child.id)
+        {
+            return false;
+        }
+
+        if previous.tag != fresh.tag
+            || previous.computed_style != fresh.computed_style
+            || previous.attributes != fresh.attributes
+            || previous.event_handlers != fresh.event_handlers
+            || previous.event_handler_calls != fresh.event_handler_calls
+            || previous.state != fresh.state
+        {
+            dirty_roots.insert(fresh.id);
+            // The scoped retained pass fingerprints this complete subtree and
+            // independently validates its structure, so descendants need no
+            // further comparison here.
+            return true;
+        }
+
+        previous
+            .children
+            .iter()
+            .zip(&fresh.children)
+            .all(|(previous_child, fresh_child)| collect(previous_child, fresh_child, dirty_roots))
+    }
+
+    let mut dirty_roots = HashSet::with_capacity(8);
+    collect(previous, fresh, &mut dirty_roots).then_some(dirty_roots)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RetainedNodeSnapshot {
     layout: LayoutFingerprint,
@@ -314,6 +455,7 @@ struct RetainedNodeSnapshot {
     attributes_hash: u64,
     child_ids: SmallVec<[NodeId; 8]>,
     state: ElementState,
+    last_seen_epoch: u64,
 }
 
 type LayoutFingerprint = (u32, u32, u32, u32, u32, u32, u32, u32, u32, u32);
@@ -465,6 +607,132 @@ pub(super) fn runtime_node_id_for_key(key: &str) -> NodeId {
     node_id
 }
 
+#[allow(clippy::too_many_arguments)]
+fn update_retained_snapshots(
+    node: &WidgetNode,
+    nodes: &mut SlotMap<RetainedNodeKey, RetainedNodeSnapshot>,
+    node_keys: &mut HashMap<NodeId, RetainedNodeKey>,
+    update_epoch: u64,
+    dirty_slots: &mut SecondaryMap<RetainedNodeKey, RetainedNodeDirtyFlags>,
+    dirty_node_ids: &mut HashSet<NodeId>,
+    dirty: &mut RetainedTreeDirtySummary,
+) -> usize {
+    update_retained_node(
+        node,
+        nodes,
+        node_keys,
+        update_epoch,
+        dirty_slots,
+        dirty_node_ids,
+        dirty,
+    );
+
+    let mut visited = 1;
+    for child in &node.children {
+        visited += update_retained_snapshots(
+            child,
+            nodes,
+            node_keys,
+            update_epoch,
+            dirty_slots,
+            dirty_node_ids,
+            dirty,
+        );
+    }
+    visited
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_retained_node(
+    node: &WidgetNode,
+    nodes: &mut SlotMap<RetainedNodeKey, RetainedNodeSnapshot>,
+    node_keys: &mut HashMap<NodeId, RetainedNodeKey>,
+    update_epoch: u64,
+    dirty_slots: &mut SecondaryMap<RetainedNodeKey, RetainedNodeDirtyFlags>,
+    dirty_node_ids: &mut HashSet<NodeId>,
+    dirty: &mut RetainedTreeDirtySummary,
+) -> bool {
+    let mut next = retained_snapshot(node);
+    next.last_seen_epoch = update_epoch;
+    match node_keys.get(&node.id).copied() {
+        Some(previous_key) => match nodes.get_mut(previous_key) {
+            Some(previous) => {
+                debug_assert_ne!(
+                    previous.last_seen_epoch,
+                    update_epoch,
+                    "runtime NodeId collision while updating retained snapshots: id={} key={:?}",
+                    node.id,
+                    node.mesh_key()
+                );
+                let (flags, node_state_bits) = previous.diff_flags(&next);
+                if !flags.is_empty() {
+                    dirty.add_flags(flags);
+                    dirty.changed_state_bits |= node_state_bits;
+                    dirty_slots.insert(previous_key, flags);
+                    dirty_node_ids.insert(node.id);
+                    *previous = next;
+                    true
+                } else {
+                    previous.last_seen_epoch = update_epoch;
+                    false
+                }
+            }
+            None => {
+                let key = nodes.insert(next);
+                node_keys.insert(node.id, key);
+                dirty_slots.insert(key, RetainedNodeDirtyFlags::INSERTED);
+                dirty.inserted += 1;
+                true
+            }
+        },
+        None => {
+            let key = nodes.insert(next);
+            node_keys.insert(node.id, key);
+            dirty_slots.insert(key, RetainedNodeDirtyFlags::INSERTED);
+            dirty.inserted += 1;
+            true
+        }
+    }
+}
+
+fn collect_scoped_update_nodes<'a>(
+    node: &'a WidgetNode,
+    ancestor_is_dirty: bool,
+    dirty_roots: &HashSet<NodeId>,
+    nodes: &SlotMap<RetainedNodeKey, RetainedNodeSnapshot>,
+    node_keys: &HashMap<NodeId, RetainedNodeKey>,
+    update_nodes: &mut Vec<&'a WidgetNode>,
+) -> bool {
+    let Some(previous) = node_keys.get(&node.id).and_then(|key| nodes.get(*key)) else {
+        return false;
+    };
+    if previous.child_ids.len() != node.children.len()
+        || previous
+            .child_ids
+            .iter()
+            .zip(&node.children)
+            .any(|(previous_id, child)| *previous_id != child.id)
+    {
+        return false;
+    }
+
+    let node_is_dirty = ancestor_is_dirty || dirty_roots.contains(&node.id);
+    if node_is_dirty || previous.layout != layout_fingerprint(node) {
+        update_nodes.push(node);
+    }
+    node.children.iter().all(|child| {
+        collect_scoped_update_nodes(
+            child,
+            node_is_dirty,
+            dirty_roots,
+            nodes,
+            node_keys,
+            update_nodes,
+        )
+    })
+}
+
+#[cfg(test)]
 fn collect_retained_snapshots(
     node: &WidgetNode,
     snapshots: &mut HashMap<NodeId, RetainedNodeSnapshot>,
@@ -496,6 +764,7 @@ fn retained_snapshot(node: &WidgetNode) -> RetainedNodeSnapshot {
         attributes_hash: attributes_fingerprint(node),
         child_ids: node.children.iter().map(|child| child.id).collect(),
         state: node.state,
+        last_seen_epoch: 0,
     }
 }
 
@@ -1250,6 +1519,77 @@ mod tests {
         node
     }
 
+    fn first_deep_leaf_mut(mut node: &mut WidgetNode) -> &mut WidgetNode {
+        while !node.children.is_empty() {
+            node = &mut node.children[0];
+        }
+        node
+    }
+
+    fn update_via_snapshot_map(
+        retained: &mut RetainedWidgetTree,
+        root: &WidgetNode,
+        next_nodes: &mut HashMap<NodeId, RetainedNodeSnapshot>,
+    ) -> RetainedTreeDirtySummary {
+        next_nodes.clear();
+        collect_retained_snapshots(root, next_nodes);
+
+        let mut dirty = RetainedTreeDirtySummary::default();
+        let mut next_dirty = std::mem::take(&mut retained.next_dirty_scratch);
+        next_dirty.clear();
+        let mut next_dirty_node_ids = std::mem::take(&mut retained.next_dirty_node_ids_scratch);
+        next_dirty_node_ids.clear();
+
+        retained.node_keys.retain(|id, key| {
+            if next_nodes.contains_key(id) {
+                return true;
+            }
+            retained.nodes.remove(*key);
+            dirty.removed += 1;
+            false
+        });
+
+        for (node_id, next) in next_nodes.drain() {
+            match retained.node_keys.get(&node_id).copied() {
+                Some(previous_key) => match retained.nodes.get(previous_key) {
+                    Some(previous) => {
+                        let (flags, node_state_bits) = previous.diff_flags(&next);
+                        if !flags.is_empty() {
+                            dirty.add_flags(flags);
+                            dirty.changed_state_bits |= node_state_bits;
+                            next_dirty.insert(previous_key, flags);
+                            next_dirty_node_ids.insert(node_id);
+                            *retained.nodes.get_mut(previous_key).unwrap() = next;
+                        }
+                    }
+                    None => {
+                        let key = retained.nodes.insert(next);
+                        retained.node_keys.insert(node_id, key);
+                        next_dirty.insert(key, RetainedNodeDirtyFlags::INSERTED);
+                        dirty.inserted += 1;
+                    }
+                },
+                None => {
+                    let key = retained.nodes.insert(next);
+                    retained.node_keys.insert(node_id, key);
+                    next_dirty.insert(key, RetainedNodeDirtyFlags::INSERTED);
+                    dirty.inserted += 1;
+                }
+            }
+        }
+
+        if dirty.any() {
+            retained.generation = retained.generation.saturating_add(1);
+        }
+        let previous_dirty = std::mem::replace(&mut retained.dirty, next_dirty);
+        retained.next_dirty_scratch = previous_dirty;
+        let previous_dirty_node_ids =
+            std::mem::replace(&mut retained.dirty_node_ids, next_dirty_node_ids);
+        retained.next_dirty_node_ids_scratch = previous_dirty_node_ids;
+        retained.last_dirty = dirty;
+        dirty
+    }
+
     #[derive(Default)]
     struct ByteOnlyRuntimeTreeHasher(u64);
 
@@ -1896,6 +2236,7 @@ mod tests {
                     attributes_hash: 0,
                     child_ids: SmallVec::new(),
                     state: ElementState::default(),
+                    last_seen_epoch: 0,
                 })
             })
             .collect::<Vec<_>>();
@@ -1952,6 +2293,7 @@ mod tests {
                             focused: index % 3 == 0,
                             ..ElementState::default()
                         },
+                        last_seen_epoch: 0,
                     },
                 )
             })
@@ -2225,6 +2567,551 @@ mod tests {
         );
     }
 
+    #[test]
+    fn direct_retained_update_preserves_structural_insert_remove_and_reorder() {
+        let mut tree = WidgetNode::new("row");
+        tree.children.push(WidgetNode::new("button"));
+        tree.children.push(WidgetNode::new("text"));
+        annotate_with_empty_context(&mut tree);
+
+        let mut retained = RetainedWidgetTree::default();
+        assert_eq!(retained.update(&tree).inserted, 3);
+        let removed_id = tree.children[0].id;
+
+        tree.children.swap(0, 1);
+        let reordered = retained.update(&tree);
+        assert_eq!(reordered.children, 1);
+        assert_eq!(reordered.inserted, 0);
+        assert_eq!(reordered.removed, 0);
+
+        tree.children.remove(1);
+        let removed = retained.update(&tree);
+        assert_eq!(removed.children, 1);
+        assert_eq!(removed.removed, 1);
+        assert!(!retained.node_keys.contains_key(&removed_id));
+
+        tree.children.push(WidgetNode::new("slider"));
+        let inserted = retained.update(&tree);
+        assert_eq!(inserted.children, 1);
+        assert_eq!(inserted.inserted, 1);
+        assert_eq!(inserted.removed, 0);
+
+        tree.children[1] = WidgetNode::new("input");
+        let replaced = retained.update(&tree);
+        assert_eq!(replaced.children, 1);
+        assert_eq!(replaced.inserted, 1);
+        assert_eq!(replaced.removed, 1);
+    }
+
+    #[test]
+    fn scoped_retained_update_matches_full_diff_and_tracks_propagated_layout() {
+        let mut tree = benchmark_plain_tree(3, 4);
+        annotate_with_empty_context(&mut tree);
+        let mut full = RetainedWidgetTree::default();
+        let mut scoped = RetainedWidgetTree::default();
+        full.update(&tree);
+        scoped.update(&tree);
+
+        let dirty_id = {
+            let leaf = first_deep_leaf_mut(&mut tree);
+            leaf.computed_style.background_color = Color::BLACK;
+            leaf.attributes.insert("title".into(), "changed".into());
+            leaf.state.hovered = true;
+            leaf.id
+        };
+        let propagated_layout_id = tree.children[1].id;
+        tree.children[1].layout.x = 37.0;
+
+        let full_dirty = full.update(&tree);
+        let (scoped_dirty, dirty_node_refs) =
+            scoped.update_for_dirty_roots_collect(&tree, &HashSet::from([dirty_id]));
+        assert_eq!(scoped_dirty, full_dirty);
+        assert_eq!(scoped.dirty_node_ids(), full.dirty_node_ids());
+        assert_eq!(
+            dirty_node_refs
+                .expect("sparse update")
+                .iter()
+                .map(|node| node.id)
+                .collect::<HashSet<_>>(),
+            *full.dirty_node_ids()
+        );
+        assert!(scoped.dirty_node_ids().contains(&dirty_id));
+        assert!(scoped.dirty_node_ids().contains(&propagated_layout_id));
+        for node_id in full.dirty_node_ids() {
+            assert_eq!(
+                scoped.dirty_flags_for(*node_id),
+                full.dirty_flags_for(*node_id)
+            );
+        }
+    }
+
+    #[test]
+    fn scoped_retained_update_falls_back_when_structure_changes() {
+        let mut tree = benchmark_plain_tree(2, 3);
+        annotate_with_empty_context(&mut tree);
+        let mut full = RetainedWidgetTree::default();
+        let mut scoped = RetainedWidgetTree::default();
+        full.update(&tree);
+        scoped.update(&tree);
+
+        tree.children.push(WidgetNode::new("input"));
+        let full_dirty = full.update(&tree);
+        let scoped_dirty = scoped.update_for_dirty_roots(&tree, &HashSet::new());
+        assert_eq!(scoped_dirty, full_dirty);
+        assert_eq!(scoped.dirty_node_ids(), full.dirty_node_ids());
+        assert_eq!(scoped.node_keys.len(), full.node_keys.len());
+    }
+
+    #[test]
+    fn scoped_retained_update_promotes_broad_dirty_root_to_full_update() {
+        let mut tree = benchmark_plain_tree(4, 3);
+        annotate_with_empty_context(&mut tree);
+        let root_id = tree.id;
+        let mut retained = RetainedWidgetTree::default();
+        retained.update(&tree);
+
+        tree.computed_style.opacity = 0.5;
+        retained.update_for_dirty_roots(&tree, &HashSet::from([root_id]));
+
+        assert!(!retained.last_update_was_scoped());
+        assert_eq!(retained.last_dirty().style, 1);
+    }
+
+    #[test]
+    fn narrow_script_direct_diff_finds_leaf_and_rejects_structure_changes() {
+        let mut previous = benchmark_plain_tree(3, 4);
+        annotate_with_empty_context(&mut previous);
+        let mut full = RetainedWidgetTree::default();
+        let mut scoped = RetainedWidgetTree::default();
+        full.update(&previous);
+        scoped.update(&previous);
+        let mut fresh = previous.clone();
+        let dirty_id = first_deep_leaf_mut(&mut fresh).id;
+        first_deep_leaf_mut(&mut fresh)
+            .attributes
+            .insert("content".into(), "changed".into());
+        fresh.children[1].layout.x = 19.0;
+
+        let dirty_roots = narrow_script_dirty_roots(&previous, &fresh)
+            .expect("stable structure should produce authoritative roots");
+        assert_eq!(dirty_roots, HashSet::from([dirty_id]));
+        let full_dirty = full.update(&fresh);
+        let scoped_dirty = scoped.update_for_dirty_roots(&fresh, &dirty_roots);
+        assert_eq!(scoped_dirty, full_dirty);
+        assert_eq!(scoped.dirty_node_ids(), full.dirty_node_ids());
+
+        fresh.children.push(WidgetNode::new("input"));
+        assert!(narrow_script_dirty_roots(&previous, &fresh).is_none());
+    }
+
+    // cargo test -p mesh-core-shell --release -- narrow_script_scope_beats_full_fingerprinting --ignored --nocapture
+    #[test]
+    #[ignore = "release-only narrow-script retained-scope benchmark"]
+    fn narrow_script_scope_beats_full_fingerprinting() {
+        let mut tree = benchmark_plain_tree(4, 5);
+        annotate_with_empty_context(&mut tree);
+        let mut full_tree = tree.clone();
+        let mut previous_scoped_tree = tree.clone();
+        let mut scoped_tree = tree;
+
+        let mut full = RetainedWidgetTree::default();
+        let mut scoped = RetainedWidgetTree::default();
+        full.update(&full_tree);
+        scoped.update(&scoped_tree);
+
+        let iterations = 2_000;
+        let full_started = Instant::now();
+        let mut full_total = 0usize;
+        for iteration in 0..iterations {
+            first_deep_leaf_mut(&mut full_tree)
+                .attributes
+                .insert("content".into(), format!("value-{}", iteration % 2));
+            full_total +=
+                std::hint::black_box(full.update(std::hint::black_box(&full_tree))).attributes;
+        }
+        let full_time = full_started.elapsed();
+
+        let scoped_started = Instant::now();
+        let mut scoped_total = 0usize;
+        for iteration in 0..iterations {
+            let content = format!("value-{}", iteration % 2);
+            first_deep_leaf_mut(&mut scoped_tree)
+                .attributes
+                .insert("content".into(), content.clone());
+            let dirty_roots = narrow_script_dirty_roots(
+                std::hint::black_box(&previous_scoped_tree),
+                std::hint::black_box(&scoped_tree),
+            )
+            .expect("benchmark structure remains stable");
+            scoped_total += std::hint::black_box(
+                scoped.update_for_dirty_roots(std::hint::black_box(&scoped_tree), &dirty_roots),
+            )
+            .attributes;
+            first_deep_leaf_mut(&mut previous_scoped_tree)
+                .attributes
+                .insert("content".into(), content);
+        }
+        let scoped_time = scoped_started.elapsed();
+
+        assert_eq!(scoped_total, full_total);
+        let speedup = full_time.as_secs_f64() / scoped_time.as_secs_f64();
+        eprintln!(
+            "narrow-script retained fingerprinting over {iterations} one-leaf-dirty 1,365-node frames: full {full_time:?}; direct diff + scoped {scoped_time:?}; ratio {speedup:.2}x"
+        );
+        eprintln!("MESH_PERF metric=narrow_script_scope_speedup value={speedup:.3}");
+        assert!(
+            scoped_time * 3 < full_time * 2,
+            "direct narrow diff plus scoped fingerprints should be at least 1.5x faster"
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- direct_dirty_refs_beat_rewalking_for_render_sync --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained-to-render direct-reference benchmark"]
+    fn direct_dirty_refs_beat_rewalking_for_render_sync() {
+        use mesh_core_render::RenderObjectTree;
+
+        let mut traversed_root = benchmark_plain_tree(4, 5);
+        annotate_with_empty_context(&mut traversed_root);
+        let mut direct_root = traversed_root.clone();
+        let dirty_id = first_deep_leaf_mut(&mut traversed_root).id;
+        debug_assert_eq!(first_deep_leaf_mut(&mut direct_root).id, dirty_id);
+        let dirty_roots = HashSet::from([dirty_id]);
+
+        let mut traversed_retained = RetainedWidgetTree::default();
+        let mut direct_retained = RetainedWidgetTree::default();
+        traversed_retained.update(&traversed_root);
+        direct_retained.update(&direct_root);
+        let mut traversed_render = RenderObjectTree::default();
+        let mut direct_render = RenderObjectTree::default();
+        traversed_render.update_for_retained_generation(&traversed_root, 1);
+        direct_render.update_for_retained_generation(&direct_root, 1);
+
+        let iterations = 2_000_u64;
+        let mut traversed_time = std::time::Duration::ZERO;
+        let mut direct_time = std::time::Duration::ZERO;
+        let mut traversed_changes = 0usize;
+        let mut direct_changes = 0usize;
+        for generation in 2..iterations + 2 {
+            let next = if generation % 2 == 0 { "b" } else { "a" };
+            first_deep_leaf_mut(&mut traversed_root)
+                .attributes
+                .insert("content".into(), next.into());
+            first_deep_leaf_mut(&mut direct_root)
+                .attributes
+                .insert("content".into(), next.into());
+
+            if generation % 2 == 0 {
+                let started = Instant::now();
+                traversed_retained.update_for_dirty_roots(&traversed_root, &dirty_roots);
+                traversed_changes += traversed_render
+                    .update_for_retained_dirty_nodes(
+                        &traversed_root,
+                        generation,
+                        traversed_retained.dirty_node_ids(),
+                    )
+                    .text;
+                traversed_time += started.elapsed();
+
+                let started = Instant::now();
+                let (_, dirty_refs) =
+                    direct_retained.update_for_dirty_roots_collect(&direct_root, &dirty_roots);
+                direct_changes += direct_render
+                    .update_for_retained_dirty_node_refs(
+                        &direct_root,
+                        generation,
+                        dirty_refs.as_deref().expect("scoped refs"),
+                    )
+                    .text;
+                direct_time += started.elapsed();
+            } else {
+                let started = Instant::now();
+                let (_, dirty_refs) =
+                    direct_retained.update_for_dirty_roots_collect(&direct_root, &dirty_roots);
+                direct_changes += direct_render
+                    .update_for_retained_dirty_node_refs(
+                        &direct_root,
+                        generation,
+                        dirty_refs.as_deref().expect("scoped refs"),
+                    )
+                    .text;
+                direct_time += started.elapsed();
+
+                let started = Instant::now();
+                traversed_retained.update_for_dirty_roots(&traversed_root, &dirty_roots);
+                traversed_changes += traversed_render
+                    .update_for_retained_dirty_nodes(
+                        &traversed_root,
+                        generation,
+                        traversed_retained.dirty_node_ids(),
+                    )
+                    .text;
+                traversed_time += started.elapsed();
+            }
+        }
+
+        let speedup = traversed_time.as_secs_f64() / direct_time.as_secs_f64();
+        assert_eq!(direct_changes, iterations as usize);
+        assert_eq!(direct_changes, traversed_changes);
+        eprintln!(
+            "retained diff plus render sync over {iterations} one-node-dirty 1,365-node frames: tree walk {traversed_time:?}; direct refs {direct_time:?}; ratio {speedup:.2}x"
+        );
+        eprintln!("MESH_PERF metric=retained_render_direct_scope_speedup value={speedup:.3}");
+        assert!(
+            direct_time * 10 < traversed_time * 9,
+            "direct dirty references should improve combined retained/render sync by at least 10%"
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- scoped_retained_update_beats_full_fingerprinting --ignored --nocapture
+    #[test]
+    #[ignore = "release-only scoped retained fingerprint benchmark"]
+    fn scoped_retained_update_beats_full_fingerprinting() {
+        let mut tree = benchmark_plain_tree(4, 5);
+        annotate_with_empty_context(&mut tree);
+        let mut full_tree = tree.clone();
+        let mut scoped_tree = tree;
+        let dirty_id = first_deep_leaf_mut(&mut scoped_tree).id;
+        assert_eq!(first_deep_leaf_mut(&mut full_tree).id, dirty_id);
+        let dirty_roots = HashSet::from([dirty_id]);
+
+        let mut full = RetainedWidgetTree::default();
+        let mut scoped = RetainedWidgetTree::default();
+        full.update(&full_tree);
+        scoped.update(&scoped_tree);
+
+        let iterations = 2_000;
+        let full_started = Instant::now();
+        let mut full_total = 0usize;
+        for iteration in 0..iterations {
+            first_deep_leaf_mut(&mut full_tree)
+                .computed_style
+                .background_color = if iteration % 2 == 0 {
+                Color::BLACK
+            } else {
+                Color::WHITE
+            };
+            full_total += std::hint::black_box(full.update(std::hint::black_box(&full_tree))).style;
+        }
+        let full_time = full_started.elapsed();
+
+        let scoped_started = Instant::now();
+        let mut scoped_total = 0usize;
+        for iteration in 0..iterations {
+            first_deep_leaf_mut(&mut scoped_tree)
+                .computed_style
+                .background_color = if iteration % 2 == 0 {
+                Color::BLACK
+            } else {
+                Color::WHITE
+            };
+            scoped_total += std::hint::black_box(
+                scoped.update_for_dirty_roots(std::hint::black_box(&scoped_tree), &dirty_roots),
+            )
+            .style;
+        }
+        let scoped_time = scoped_started.elapsed();
+
+        assert_eq!(scoped_total, full_total);
+        assert_eq!(scoped.dirty_node_ids(), full.dirty_node_ids());
+        let speedup = full_time.as_secs_f64() / scoped_time.as_secs_f64();
+        eprintln!(
+            "retained fingerprint scope over {iterations} one-leaf-dirty 1,365-node frames: full {full_time:?}; scoped {scoped_time:?}; ratio {speedup:.2}x"
+        );
+        eprintln!("MESH_PERF metric=retained_scope_speedup value={speedup:.3}");
+        assert!(
+            scoped_time * 2 < full_time,
+            "scoped retained fingerprinting should be at least 2x faster"
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- scroll_layout_scope_beats_full_fingerprinting --ignored --nocapture
+    #[test]
+    #[ignore = "release-only scroll retained fingerprint benchmark"]
+    fn scroll_layout_scope_beats_full_fingerprinting() {
+        let mut full_tree = benchmark_plain_tree(4, 5);
+        annotate_with_empty_context(&mut full_tree);
+        let mut scoped_tree = full_tree.clone();
+        let mut full = RetainedWidgetTree::default();
+        let mut scoped = RetainedWidgetTree::default();
+        full.update(&full_tree);
+        scoped.update(&scoped_tree);
+        let iterations = 2_000_u64;
+        let empty_roots = HashSet::new();
+
+        let full_started = Instant::now();
+        let mut full_layout_changes = 0usize;
+        for generation in 0..iterations {
+            first_deep_leaf_mut(&mut full_tree).scroll_metrics =
+                Some(mesh_core_elements::WidgetScrollMetrics {
+                    y: (generation % 2) as f32,
+                    max_y: 128.0,
+                    content_height: 256.0,
+                    ..Default::default()
+                });
+            full_layout_changes += std::hint::black_box(full.update(&full_tree).layout);
+        }
+        let full_time = full_started.elapsed();
+
+        let scoped_started = Instant::now();
+        let mut scoped_layout_changes = 0usize;
+        for generation in 0..iterations {
+            first_deep_leaf_mut(&mut scoped_tree).scroll_metrics =
+                Some(mesh_core_elements::WidgetScrollMetrics {
+                    y: (generation % 2) as f32,
+                    max_y: 128.0,
+                    content_height: 256.0,
+                    ..Default::default()
+                });
+            scoped_layout_changes += std::hint::black_box(
+                scoped
+                    .update_for_dirty_roots(&scoped_tree, &empty_roots)
+                    .layout,
+            );
+        }
+        let scoped_time = scoped_started.elapsed();
+        let speedup = full_time.as_secs_f64() / scoped_time.as_secs_f64();
+
+        assert_eq!(scoped_layout_changes, full_layout_changes);
+        assert_eq!(scoped_layout_changes, iterations as usize);
+        eprintln!(
+            "scroll retained fingerprinting over {iterations} one-node-scrolled 1,365-node frames: full {full_time:?}; layout-scoped {scoped_time:?}; ratio {speedup:.2}x"
+        );
+        eprintln!("MESH_PERF metric=scroll_retained_scope_speedup value={speedup:.3}");
+        assert!(
+            scoped_time * 2 < full_time,
+            "layout-scoped scroll fingerprinting should be at least 2x faster"
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- animation_retained_scope_beats_full_fingerprinting --ignored --nocapture
+    #[test]
+    #[ignore = "release-only animation retained fingerprint benchmark"]
+    fn animation_retained_scope_beats_full_fingerprinting() {
+        let mut tree = benchmark_plain_tree(4, 5);
+        annotate_with_empty_context(&mut tree);
+        let mut full_tree = tree.clone();
+        let mut scoped_tree = tree;
+        let dirty_roots: HashSet<_> = scoped_tree
+            .children
+            .iter_mut()
+            .map(|child| first_deep_leaf_mut(child).id)
+            .collect();
+        let full_dirty_roots: HashSet<_> = full_tree
+            .children
+            .iter_mut()
+            .map(|child| first_deep_leaf_mut(child).id)
+            .collect();
+        assert_eq!(dirty_roots, full_dirty_roots);
+
+        let mut full = RetainedWidgetTree::default();
+        let mut scoped = RetainedWidgetTree::default();
+        full.update(&full_tree);
+        scoped.update(&scoped_tree);
+
+        let iterations = 2_000;
+        let full_started = Instant::now();
+        let mut full_total = 0usize;
+        for iteration in 0..iterations {
+            for child in &mut full_tree.children {
+                first_deep_leaf_mut(child).computed_style.opacity =
+                    if iteration % 2 == 0 { 0.25 } else { 0.75 };
+            }
+            full_total += std::hint::black_box(full.update(std::hint::black_box(&full_tree))).style;
+        }
+        let full_time = full_started.elapsed();
+
+        let scoped_started = Instant::now();
+        let mut scoped_total = 0usize;
+        for iteration in 0..iterations {
+            for child in &mut scoped_tree.children {
+                first_deep_leaf_mut(child).computed_style.opacity =
+                    if iteration % 2 == 0 { 0.25 } else { 0.75 };
+            }
+            scoped_total += std::hint::black_box(
+                scoped.update_for_dirty_roots(std::hint::black_box(&scoped_tree), &dirty_roots),
+            )
+            .style;
+        }
+        let scoped_time = scoped_started.elapsed();
+
+        assert_eq!(scoped_total, full_total);
+        assert_eq!(scoped.dirty_node_ids(), full.dirty_node_ids());
+        let speedup = full_time.as_secs_f64() / scoped_time.as_secs_f64();
+        eprintln!(
+            "retained animation fingerprinting over {iterations} four-node-dirty 1,365-node frames: full {full_time:?}; scoped {scoped_time:?}; ratio {speedup:.2}x"
+        );
+        eprintln!("MESH_PERF metric=animation_retained_scope_speedup value={speedup:.3}");
+        assert!(
+            scoped_time * 2 < full_time,
+            "scoped animation fingerprinting should be at least 2x faster"
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- direct_retained_update_beats_snapshot_map --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained update traversal benchmark"]
+    fn direct_retained_update_beats_snapshot_map() {
+        let mut tree = benchmark_plain_tree(4, 5);
+        annotate_with_empty_context(&mut tree);
+        let mut map_tree = tree.clone();
+        let mut direct_tree = tree;
+
+        let mut map_retained = RetainedWidgetTree::default();
+        let mut direct_retained = RetainedWidgetTree::default();
+        let mut snapshot_scratch = HashMap::new();
+        update_via_snapshot_map(&mut map_retained, &map_tree, &mut snapshot_scratch);
+        direct_retained.update(&direct_tree);
+
+        let iterations = 2_000;
+        let map_started = Instant::now();
+        let mut map_total = 0usize;
+        for iteration in 0..iterations {
+            map_tree.children[0].computed_style.background_color = if iteration % 2 == 0 {
+                Color::BLACK
+            } else {
+                Color::WHITE
+            };
+            map_total += std::hint::black_box(update_via_snapshot_map(
+                &mut map_retained,
+                std::hint::black_box(&map_tree),
+                &mut snapshot_scratch,
+            ))
+            .style;
+        }
+        let map_time = map_started.elapsed();
+
+        let direct_started = Instant::now();
+        let mut direct_total = 0usize;
+        for iteration in 0..iterations {
+            direct_tree.children[0].computed_style.background_color = if iteration % 2 == 0 {
+                Color::BLACK
+            } else {
+                Color::WHITE
+            };
+            direct_total +=
+                std::hint::black_box(direct_retained.update(std::hint::black_box(&direct_tree)))
+                    .style;
+        }
+        let direct_time = direct_started.elapsed();
+
+        assert_eq!(map_total, direct_total);
+        assert_eq!(
+            map_retained.node_keys.len(),
+            direct_retained.node_keys.len()
+        );
+        let speedup = map_time.as_secs_f64() / direct_time.as_secs_f64();
+        eprintln!(
+            "retained update over {iterations} one-node-dirty 1,365-node frames: snapshot map {map_time:?}; direct retained slots {direct_time:?}; ratio {:.2}x",
+            speedup
+        );
+        eprintln!("MESH_PERF metric=retained_update_speedup value={speedup:.3}");
+        assert!(
+            direct_time * 10 < map_time * 9,
+            "direct retained update should beat snapshot-map staging by at least 10%"
+        );
+    }
+
     // cargo test -p mesh-core-shell --release -- direct_dirty_node_id_membership_beats_slot_indirection --ignored --nocapture
     #[test]
     #[ignore = "release-only retained dirty-node membership microbenchmark"]
@@ -2420,7 +3307,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "runtime NodeId collision")]
-    fn retained_snapshot_collection_panics_on_duplicate_node_ids() {
+    fn direct_retained_update_panics_on_duplicate_node_ids() {
         let mut root = WidgetNode::new("row");
         root.id = 42;
         root.attributes
@@ -2432,8 +3319,7 @@ mod tests {
             .insert("_mesh_key".to_string(), "root/0".to_string());
         root.children.push(child);
 
-        let mut snapshots = HashMap::new();
-        collect_retained_snapshots(&root, &mut snapshots);
+        RetainedWidgetTree::default().update(&root);
     }
 
     #[test]

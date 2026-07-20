@@ -439,6 +439,181 @@ fn typed_invalidations_distinguish_restyle_from_script_rebuild() {
 }
 
 #[test]
+fn targeted_interaction_restyle_uses_scoped_retained_fingerprinting() {
+    let mut component = test_frontend_component(
+        r#"
+<template><row><box class="target" /><box /></row></template>
+<style>
+.target { width: 20px; height: 20px; background: #202020; }
+.target:hover { background: #f0f0f0; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+
+    component.hovered_path = vec!["root".into(), "root/0".into(), "root/0/0".into()];
+    component.hovered_key = Some("root/0/0".into());
+    component.invalidate_interaction_restyle();
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+
+    assert!(component.retained_tree.last_update_was_scoped());
+}
+
+#[test]
+fn targeted_interaction_animation_merges_scoped_retained_roots() {
+    let mut component = test_frontend_component(
+        r#"
+<template><row><box class="target" /><box /></row></template>
+<style>
+.target {
+  width: 20px;
+  height: 20px;
+  background: #202020;
+  transition: background-color 1000ms linear;
+}
+.target:hover { background: #f0f0f0; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+
+    component.hovered_path = vec!["root".into(), "root/0".into(), "root/0/0".into()];
+    component.hovered_key = Some("root/0/0".into());
+    component.invalidate_interaction_restyle();
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+
+    assert!(component.transitions.has_active(Instant::now()));
+    assert!(component.retained_tree.last_update_was_scoped());
+}
+
+#[test]
+fn paint_only_scroll_uses_scoped_retained_fingerprinting() {
+    let source = r#"
+<style>
+scroll { width: 80px; height: 40px; overflow-y: auto; }
+.content { height: 160px; background: #303030; }
+</style>
+<template><scroll><box class="content" /></scroll></template>
+"#;
+    let mut scoped = test_frontend_component(source);
+    let mut full = test_frontend_component(source);
+    full.force_full_retained_update = true;
+    let theme = default_theme();
+    let mut scoped_buffer = PixelBuffer::new(80, 40);
+    let mut full_buffer = PixelBuffer::new(80, 40);
+    scoped
+        .paint(&theme, 80, 40, &mut scoped_buffer, 1.0)
+        .unwrap();
+    full.paint(&theme, 80, 40, &mut full_buffer, 1.0).unwrap();
+
+    scoped
+        .scroll_offsets
+        .insert("root/0".into(), ScrollOffsetState { x: 0.0, y: 24.0 });
+    full.scroll_offsets
+        .insert("root/0".into(), ScrollOffsetState { x: 0.0, y: 24.0 });
+    scoped.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
+    full.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
+    scoped
+        .paint(&theme, 80, 40, &mut scoped_buffer, 1.0)
+        .unwrap();
+    full.paint(&theme, 80, 40, &mut full_buffer, 1.0).unwrap();
+
+    assert!(scoped.retained_tree.last_update_was_scoped());
+    assert_eq!(
+        scoped.retained_tree.last_dirty(),
+        full.retained_tree.last_dirty()
+    );
+    assert_eq!(scoped_buffer.data, full_buffer.data);
+}
+
+// cargo test -p mesh-core-shell --release -- paint_only_scoped_retained_end_to_end_benchmark --ignored --nocapture
+#[test]
+#[ignore = "release-only end-to-end paint-only retained-scope benchmark"]
+fn paint_only_scoped_retained_end_to_end_benchmark() {
+    use std::time::{Duration, Instant};
+
+    let mut source = String::from("<template><column>");
+    for _ in 0..2_048 {
+        source.push_str("<box />");
+    }
+    source.push_str("</column></template>");
+    let mut scoped = test_frontend_component(&source);
+    let mut full = test_frontend_component(&source);
+    full.force_full_retained_update = true;
+    let theme = default_theme();
+    let mut scoped_buffer = PixelBuffer::new(64, 16);
+    let mut full_buffer = PixelBuffer::new(64, 16);
+    scoped
+        .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+        .unwrap();
+    full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+
+    let iterations = 150;
+    let mut scoped_time = Duration::ZERO;
+    let mut full_time = Duration::ZERO;
+    for iteration in 0..iterations {
+        if iteration % 2 == 0 {
+            let started = Instant::now();
+            scoped.invalidate_paint();
+            scoped
+                .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+                .unwrap();
+            scoped_time += started.elapsed();
+
+            let started = Instant::now();
+            full.invalidate_paint();
+            full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+            full_time += started.elapsed();
+        } else {
+            let started = Instant::now();
+            full.invalidate_paint();
+            full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+            full_time += started.elapsed();
+
+            let started = Instant::now();
+            scoped.invalidate_paint();
+            scoped
+                .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+                .unwrap();
+            scoped_time += started.elapsed();
+        }
+    }
+
+    let speedup = full_time.as_secs_f64() / scoped_time.as_secs_f64();
+    assert_eq!(scoped_buffer.data, full_buffer.data);
+    eprintln!(
+        "end-to-end paint-only updates over {iterations} clean 2,050-node frames: full retained fingerprints {full_time:?}; scoped {scoped_time:?}; ratio {speedup:.3}x"
+    );
+    eprintln!("MESH_PERF metric=paint_only_frame_speedup value={speedup:.6}");
+    assert!(scoped_time < full_time);
+}
+
+#[test]
+fn surface_transition_annotation_forces_full_retained_fingerprinting() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="target" /></template>
+<style>.target:hover { opacity: 0.5; }</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+
+    component.surface_entering = true;
+    component.hovered_path = vec!["root".into(), "root/0".into()];
+    component.hovered_key = Some("root/0".into());
+    component.invalidate_interaction_restyle();
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+
+    assert!(!component.retained_tree.last_update_was_scoped());
+}
+
+#[test]
 fn render_skips_surface_bookkeeping_for_paint_only_dirty_frames() {
     let mut component = test_frontend_component("<template><box /></template>");
     let mut surface = CountingSurface::default();
