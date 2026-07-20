@@ -481,70 +481,40 @@ fn apply_prop_handler_calls(
     if prop_handler_calls.is_empty() {
         return;
     }
-    if prop_handler_calls.len() == 1 {
-        let (prop_name, call) = prop_handler_calls
-            .first_key_value()
-            .expect("single prop handler exists");
-        if let Some(handler) = props.get(prop_name) {
-            apply_single_prop_handler_call(node, handler, call);
-        }
-        return;
-    }
-    let mut handlers_by_value = HashMap::with_capacity(prop_handler_calls.len());
+    let mut calls_by_token = HashMap::with_capacity(prop_handler_calls.len());
     for (prop_name, call) in prop_handler_calls {
-        let Some(handler) = props.get(prop_name) else {
+        let Some(token) = props.get(prop_name) else {
             continue;
         };
-        // Preserve the old BTreeMap iteration behavior when multiple props
-        // resolve to the same handler: the first prop wins.
-        handlers_by_value.entry(handler.as_str()).or_insert(call);
+        calls_by_token.insert(token.as_str(), call);
     }
-    apply_indexed_prop_handler_calls(node, &handlers_by_value);
-}
-
-fn apply_single_prop_handler_call(
-    node: &mut WidgetNode,
-    target_handler: &str,
-    call: &EventHandlerCall,
-) {
-    for (event_name, handler) in &node.event_handlers {
-        if handler == target_handler {
-            node.event_handler_calls.insert(
-                event_name.clone(),
-                EventHandlerCall {
-                    handler: handler.clone(),
-                    args: call.args.clone(),
-                },
-            );
-        }
-    }
-    for child in &mut node.children {
-        apply_single_prop_handler_call(child, target_handler, call);
-    }
+    apply_indexed_prop_handler_calls(node, &calls_by_token);
 }
 
 fn apply_indexed_prop_handler_calls(
     node: &mut WidgetNode,
-    handlers_by_value: &HashMap<&str, &EventHandlerCall>,
+    calls_by_token: &HashMap<&str, &EventHandlerCall>,
 ) {
     let mut handler_calls = Vec::with_capacity(node.event_handlers.len());
     for (event_name, handler) in &node.event_handlers {
-        let Some(call) = handlers_by_value.get(handler.as_str()) else {
+        let Some(call) = calls_by_token.get(handler.as_str()) else {
             continue;
         };
         handler_calls.push((
             event_name.clone(),
             EventHandlerCall {
-                handler: handler.clone(),
+                handler: call.handler.clone(),
                 args: call.args.clone(),
             },
         ));
     }
     for (event_name, call) in handler_calls {
+        node.event_handlers
+            .insert(event_name.clone(), call.handler.clone());
         node.event_handler_calls.insert(event_name, call);
     }
     for child in &mut node.children {
-        apply_indexed_prop_handler_calls(child, handlers_by_value);
+        apply_indexed_prop_handler_calls(child, calls_by_token);
     }
 }
 
@@ -731,7 +701,14 @@ mod tests {
     #[test]
     fn prop_handler_calls_still_bind_matching_handlers() {
         let mut node = handler_tree(2);
-        let props = BTreeMap::from([("onMoveProp".into(), "onMove".into())]);
+        node.event_handlers
+            .insert("pointermove".into(), "move-prop-token".into());
+        for child in &mut node.children {
+            child
+                .event_handlers
+                .insert("pointermove".into(), "move-prop-token".into());
+        }
+        let props = BTreeMap::from([("onMoveProp".into(), "move-prop-token".into())]);
         let calls = BTreeMap::from([(
             "onMoveProp".into(),
             EventHandlerCall {
@@ -746,14 +723,66 @@ mod tests {
             node.event_handler_calls
                 .get("pointermove")
                 .map(|call| call.handler.as_str()),
-            Some("onMove")
+            Some("handleMove")
         );
         assert_eq!(
             node.children[0]
                 .event_handler_calls
                 .get("pointermove")
                 .map(|call| call.handler.as_str()),
-            Some("onMove")
+            Some("handleMove")
+        );
+        assert_eq!(
+            node.event_handlers.get("pointermove"),
+            Some(&"handleMove".into())
+        );
+    }
+
+    #[test]
+    fn prop_handler_calls_link_by_prop_when_handler_values_match() {
+        let mut node = WidgetNode::new("box");
+        node.event_handlers
+            .insert("click".into(), "primary-token".into());
+        node.event_handlers
+            .insert("pointerenter".into(), "secondary-token".into());
+        let props = BTreeMap::from([
+            ("onPrimary".into(), "primary-token".into()),
+            ("onSecondary".into(), "secondary-token".into()),
+        ]);
+        let shared_handler = "__mesh_embed__::parent::onShared".to_string();
+        let calls = BTreeMap::from([
+            (
+                "onPrimary".into(),
+                EventHandlerCall {
+                    handler: shared_handler.clone(),
+                    args: vec![serde_json::json!("primary")],
+                },
+            ),
+            (
+                "onSecondary".into(),
+                EventHandlerCall {
+                    handler: shared_handler.clone(),
+                    args: vec![serde_json::json!("secondary")],
+                },
+            ),
+        ]);
+
+        apply_prop_handler_calls(&mut node, &props, &calls);
+
+        assert_eq!(node.event_handlers.get("click"), Some(&shared_handler));
+        assert_eq!(
+            node.event_handlers.get("pointerenter"),
+            Some(&shared_handler)
+        );
+        assert_eq!(
+            node.event_handler_calls.get("click").map(|call| &call.args),
+            Some(&vec![serde_json::json!("primary")])
+        );
+        assert_eq!(
+            node.event_handler_calls
+                .get("pointerenter")
+                .map(|call| &call.args),
+            Some(&vec![serde_json::json!("secondary")])
         );
     }
 

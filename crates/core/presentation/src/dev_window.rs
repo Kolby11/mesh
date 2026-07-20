@@ -148,6 +148,10 @@ impl DevWindowBackend {
         Self::default()
     }
 
+    pub fn destroy_surface(&mut self, surface_id: &str) {
+        self.windows.remove(surface_id);
+    }
+
     pub fn present(
         &mut self,
         surface_id: &str,

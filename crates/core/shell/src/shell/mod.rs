@@ -415,6 +415,7 @@ pub struct Shell {
     transfer_owned_keyboard_modes: HashMap<SurfaceId, mesh_core_wayland::KeyboardMode>,
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,
+    pending_backend_runtimes: HashMap<String, PendingBackendRuntime>,
     backend_runtime_statuses: BackendRuntimeStatusMap,
     backend_supervision: HashMap<String, backend::BackendSupervisionState>,
     backend_respawn: Option<backend::BackendRespawnContext>,
@@ -436,6 +437,12 @@ struct BackendRuntimeSlot {
     provider_id: String,
     command_tx: mpsc::UnboundedSender<ServiceCommandMsg>,
     task: AbortHandle,
+}
+
+#[derive(Debug, Clone)]
+struct PendingBackendRuntime {
+    slot: BackendRuntimeSlot,
+    graph_path: PathBuf,
 }
 
 pub fn default_ipc_socket_path() -> PathBuf {

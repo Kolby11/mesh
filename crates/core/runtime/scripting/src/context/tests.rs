@@ -1244,6 +1244,49 @@ end
 }
 
 #[test]
+fn reactive_globals_preserve_scalar_table_transitions() {
+    let mut ctx =
+        ScriptContext::new("@test/reactive-type-transition", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+value = 1
+
+function to_table()
+    value = { nested = 2 }
+end
+
+function mutate_table()
+    value.nested = 3
+end
+
+function to_scalar()
+    value = 4
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_handler("to_table", &[]).unwrap();
+    assert_eq!(
+        ctx.state.get("value"),
+        Some(serde_json::json!({ "nested": 2 }))
+    );
+
+    ctx.call_handler("mutate_table", &[]).unwrap();
+    assert_eq!(
+        ctx.state.get("value"),
+        Some(serde_json::json!({ "nested": 3 }))
+    );
+
+    ctx.call_handler("to_scalar", &[]).unwrap();
+    assert_eq!(ctx.state.get("value"), Some(serde_json::json!(4)));
+
+    ctx.load_script("value = value + 1\nfunction noop() end")
+        .unwrap();
+    assert_eq!(ctx.state.get("value"), Some(serde_json::json!(5)));
+}
+
+#[test]
 fn reactive_global_marks_dirty_only_when_value_changes() {
     let mut state = ScriptState::new();
     state.set("count", serde_json::json!(1));
@@ -1883,6 +1926,65 @@ end
 }
 
 #[test]
+fn handler_only_context_discovers_late_global_without_repeating_full_scan() {
+    let mut ctx = ScriptContext::new("@test/handler-only-write-log", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+function add_later()
+    late_value = 42
+end
+"#,
+    )
+    .unwrap();
+
+    assert!(ctx.state().keys().is_empty());
+    ctx.call_handler("add_later", &[]).unwrap();
+    assert_eq!(ctx.state.get("late_value"), Some(Value::from(42)));
+    assert!(ctx.has_user_global_key_for_test("late_value"));
+}
+
+// cargo test -p mesh-core-scripting --release -- handler_only_discovery_flag_beats_repeated_env_scan --ignored --nocapture
+#[test]
+#[ignore = "release-only handler-only sync microbenchmark"]
+fn handler_only_discovery_flag_beats_repeated_env_scan() {
+    use std::time::Instant;
+
+    let mut source = String::new();
+    for index in 0..256 {
+        source.push_str(&format!("function handler_{index}() return {index} end\n"));
+    }
+    source.push_str("function noop() end\n");
+    let iterations = 20_000;
+
+    let mut repeated_scan =
+        ScriptContext::new("@test/handler-only-scan", CapabilitySet::new()).unwrap();
+    repeated_scan.load_script(&source).unwrap();
+    let scan_started = Instant::now();
+    for _ in 0..iterations {
+        repeated_scan
+            .call_lua_function_without_sync_for_test("noop")
+            .unwrap();
+        repeated_scan.old_sync_state_from_lua_scan_for_benchmark();
+    }
+    let scan_time = scan_started.elapsed();
+
+    let mut discovered =
+        ScriptContext::new("@test/handler-only-discovered", CapabilitySet::new()).unwrap();
+    discovered.load_script(&source).unwrap();
+    let discovered_started = Instant::now();
+    for _ in 0..iterations {
+        discovered.call_handler("noop", &[]).unwrap();
+    }
+    let discovered_time = discovered_started.elapsed();
+
+    eprintln!(
+        "handler-only sync: repeated env scan {scan_time:?}; explicit discovery flag {discovered_time:?}; ratio {:.1}x",
+        scan_time.as_secs_f64() / discovered_time.as_secs_f64()
+    );
+    assert!(discovered_time < scan_time);
+}
+
+#[test]
 fn lifecycle_handlers_reuse_self_table() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@test/self-cache", caps).unwrap();
@@ -1954,10 +2056,10 @@ end
     );
 }
 
-// cargo test -p mesh-core-scripting --release -- unchanged_scalar_gate_beats_lua_json_roundtrip --ignored --nocapture
+// cargo test -p mesh-core-scripting --release -- scalar_write_log_beats_known_global_reads --ignored --nocapture
 #[test]
-#[ignore = "release-only unchanged scalar sync microbenchmark"]
-fn unchanged_scalar_gate_beats_lua_json_roundtrip() {
+#[ignore = "release-only scalar write-log sync microbenchmark"]
+fn scalar_write_log_beats_known_global_reads() {
     use std::time::Instant;
 
     let mut source = String::new();
@@ -1967,30 +2069,32 @@ fn unchanged_scalar_gate_beats_lua_json_roundtrip() {
     source.push_str("function noop() end\n");
     let iterations = 5_000usize;
 
-    let mut roundtrip = ScriptContext::new("@test/scalar-roundtrip", CapabilitySet::new()).unwrap();
-    roundtrip.load_script(&source).unwrap();
-    let roundtrip_started = Instant::now();
+    let mut known_reads =
+        ScriptContext::new("@test/scalar-known-reads", CapabilitySet::new()).unwrap();
+    known_reads.load_script(&source).unwrap();
+    let known_reads_started = Instant::now();
     for _ in 0..iterations {
-        roundtrip
+        known_reads
             .call_lua_function_without_sync_for_test("noop")
             .unwrap();
-        roundtrip.sync_known_globals_without_scalar_gate_for_benchmark();
+        known_reads.sync_known_globals_with_scalar_gate_for_benchmark();
     }
-    let roundtrip_time = roundtrip_started.elapsed();
+    let known_reads_time = known_reads_started.elapsed();
 
-    let mut gated = ScriptContext::new("@test/scalar-gated", CapabilitySet::new()).unwrap();
-    gated.load_script(&source).unwrap();
-    let gated_started = Instant::now();
+    let mut write_logged =
+        ScriptContext::new("@test/scalar-write-log", CapabilitySet::new()).unwrap();
+    write_logged.load_script(&source).unwrap();
+    let write_logged_started = Instant::now();
     for _ in 0..iterations {
-        gated.call_handler("noop", &[]).unwrap();
+        write_logged.call_handler("noop", &[]).unwrap();
     }
-    let gated_time = gated_started.elapsed();
+    let write_logged_time = write_logged_started.elapsed();
 
     eprintln!(
-        "unchanged scalar sync: Lua→JSON roundtrip {roundtrip_time:?}; borrowed equality gate {gated_time:?}; ratio {:.1}x",
-        roundtrip_time.as_secs_f64() / gated_time.as_secs_f64()
+        "unchanged scalar sync: known-global reads {known_reads_time:?}; write-log proxy {write_logged_time:?}; ratio {:.1}x",
+        known_reads_time.as_secs_f64() / write_logged_time.as_secs_f64()
     );
-    assert!(gated_time < roundtrip_time);
+    assert!(write_logged_time < known_reads_time);
 }
 
 // Run with:

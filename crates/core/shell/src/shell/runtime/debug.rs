@@ -354,6 +354,9 @@ impl Shell {
                     module_id: module.id.clone(),
                     kind: format!("{:?}", module.kind).to_lowercase(),
                     enabled: module.enabled,
+                    root_layout: graph
+                        .layout_entrypoint()
+                        .is_some_and(|layout| layout.module_id == module.id),
                     path: module.path.clone(),
                     uses_modules: requirements
                         .map(|requirements| sorted_keys(&requirements.modules))
@@ -1170,6 +1173,7 @@ fn module_graph_entry_json(entry: &mesh_core_debug::ModuleGraphEntry) -> serde_j
         "module_id": entry.module_id,
         "kind": entry.kind,
         "enabled": entry.enabled,
+        "root_layout": entry.root_layout,
         "path": entry.path,
         "uses": {
             "modules": entry.uses_modules,

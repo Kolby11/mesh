@@ -84,7 +84,21 @@ impl Shell {
         candidate: BackendLaunchCandidate,
         eventfd_fd: std::os::unix::io::RawFd,
     ) {
-        self.stop_backend_runtime(&candidate.interface);
+        let interface = candidate.interface.clone();
+        let slot = self.start_backend_candidate(runtime, tx, candidate, eventfd_fd);
+        self.replace_backend_runtime(interface, slot);
+    }
+
+    /// Start a backend without publishing it as the active command handler.
+    /// Provider switches use this to keep the old runtime serving until the
+    /// candidate has completed its script initialization.
+    pub(in crate::shell) fn start_backend_candidate(
+        &self,
+        runtime: &tokio::runtime::Handle,
+        tx: mpsc::UnboundedSender<ShellMessage>,
+        candidate: BackendLaunchCandidate,
+        eventfd_fd: std::os::unix::io::RawFd,
+    ) -> BackendRuntimeSlot {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
         let shell_tx = tx.clone();
@@ -244,14 +258,11 @@ impl Shell {
             backend_tx,
             cmd_rx,
         ));
-        self.replace_backend_runtime(
-            interface.clone(),
-            BackendRuntimeSlot {
-                interface,
-                provider_id,
-                command_tx: cmd_tx,
-                task: task.abort_handle(),
-            },
-        );
+        BackendRuntimeSlot {
+            interface,
+            provider_id,
+            command_tx: cmd_tx,
+            task: task.abort_handle(),
+        }
     }
 }

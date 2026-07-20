@@ -265,6 +265,7 @@ fn debug_inspector_modules_view_renders_uses_provides_graph() {
                         "module_id": "@mesh/navigation-bar",
                         "kind": "frontend",
                         "enabled": true,
+                        "root_layout": true,
                         "path": "modules/frontend/navigation-bar/module.json",
                         "uses": {
                             "modules": ["@mesh/audio-popover"],
@@ -290,6 +291,7 @@ fn debug_inspector_modules_view_renders_uses_provides_graph() {
                         "module_id": "@mesh/pipewire-audio",
                         "kind": "backend",
                         "enabled": true,
+                        "root_layout": false,
                         "path": "modules/backend/pipewire-audio/module.json",
                         "uses": {
                             "modules": [],
@@ -499,6 +501,7 @@ fn settings_surface_renders_modules_providers_theme_and_locale() {
                         "module_id": "@mesh/pulseaudio-audio",
                         "kind": "backend",
                         "enabled": true,
+                        "root_layout": false,
                         "path": "modules/backend/pulseaudio-audio/module.json",
                         "uses": {
                             "modules": [],
@@ -554,12 +557,33 @@ fn settings_surface_renders_modules_providers_theme_and_locale() {
     }
 
     let requests = component
-        .call_namespaced_handler("__mesh_embed__::@mesh/settings::onProvider1Next", &[])
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/settings::onProviderNext",
+            &[
+                serde_json::json!("mesh.audio"),
+                serde_json::json!("@mesh/pipewire-audio"),
+            ],
+        )
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
         [CoreRequest::SetProvider { interface, provider_id }]
             if interface == "mesh.audio" && provider_id == "@mesh/pulseaudio-audio"
+    ));
+
+    let requests = component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/settings::onModuleToggle",
+            &[
+                serde_json::json!("@mesh/pulseaudio-audio"),
+                serde_json::json!(true),
+            ],
+        )
+        .unwrap();
+    assert!(matches!(
+        requests.as_slice(),
+        [CoreRequest::SetModuleEnabled { module_id, enabled: false }]
+            if module_id == "@mesh/pulseaudio-audio"
     ));
 
     let requests = component

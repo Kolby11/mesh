@@ -1014,13 +1014,14 @@ fn build_component_ref(
     host_instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
 ) -> WidgetNode {
-    let (_, _, mut props, _, prop_handler_calls) = parse_attributes_runtime(
+    let (_, _, mut props, _, parsed_handler_calls) = parse_attributes_runtime(
         &component.props,
         state,
         host_instance_key,
         composition,
         false,
     );
+    let mut prop_handler_calls = BTreeMap::new();
     for attr in &component.props {
         if let AttributeValue::EventHandler(handler) = &attr.value {
             props.insert(
@@ -1028,11 +1029,19 @@ fn build_component_ref(
                 resolve_component_prop_handler_value(state, host_instance_key, handler),
             );
         } else if matches!(attr.value, AttributeValue::EventHandlerCall { .. }) {
-            if let Some(call) = prop_handler_calls.get(&attr.name) {
+            // Attribute parsing normalizes event-looking names (`onselect` →
+            // `select`) for element dispatch. Component props must retain the
+            // authored prop name so two props bound to the same handler remain
+            // distinguishable at the composition boundary.
+            let event_name = normalize_event_handler_name(&attr.name);
+            if let Some(call) = parsed_handler_calls.get(&event_name) {
+                let mut call = call.clone();
+                call.handler = namespaced_handler(host_instance_key, &call.handler);
                 props.insert(
                     attr.name.clone(),
-                    namespaced_handler(host_instance_key, &call.handler),
+                    component_prop_handler_token(host_instance_key, &attr.name),
                 );
+                prop_handler_calls.insert(attr.name.clone(), call);
             }
         } else if let AttributeValue::Binding(binding) = &attr.value {
             props.insert(format!("__mesh_binding_{}", attr.name), binding.clone());
@@ -1076,6 +1085,23 @@ fn build_component_ref(
     node.attributes
         .insert("component".into(), component.name.clone());
     node
+}
+
+/// Opaque per-prop value used while rendering a component subtree.
+///
+/// Handler props are represented as strings in the child script state. A
+/// token keeps two props that target the same handler distinct until the shell
+/// attaches their typed call arguments, at which point it is replaced by the
+/// real namespaced handler and never reaches dispatch.
+fn component_prop_handler_token(host_instance_key: &str, prop_name: &str) -> String {
+    let mut token = String::with_capacity(
+        "__mesh_prop_handler__::".len() + host_instance_key.len() + 2 + prop_name.len(),
+    );
+    token.push_str("__mesh_prop_handler__::");
+    token.push_str(host_instance_key);
+    token.push_str("::");
+    token.push_str(prop_name);
+    token
 }
 
 fn attach_module_id(node: &mut WidgetNode, module_id: &str) {
@@ -1432,6 +1458,98 @@ mod tests {
         );
 
         assert_eq!(value, serde_json::json!("Open settings"));
+    }
+
+    #[test]
+    fn component_handler_calls_preserve_authored_prop_identity() {
+        #[derive(Default)]
+        struct CapturingComposition {
+            props: std::cell::RefCell<BTreeMap<String, String>>,
+            calls: std::cell::RefCell<BTreeMap<String, EventHandlerCall>>,
+        }
+
+        impl FrontendCompositionResolver for CapturingComposition {
+            fn evaluate_template_expression(
+                &self,
+                _instance_key: &str,
+                _expression: &str,
+                _locals: &serde_json::Map<String, serde_json::Value>,
+            ) -> Option<TemplateExpressionResult> {
+                None
+            }
+
+            fn render_import(
+                &self,
+                _host: &Manifest,
+                _host_instance_key: &str,
+                _alias: &str,
+                _source_ordinal: usize,
+                _duplicate_ordinal: Option<usize>,
+                _repeated_by_loop: bool,
+                props: &BTreeMap<String, String>,
+                prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
+                _container_width: f32,
+                _container_height: f32,
+            ) -> Option<WidgetNode> {
+                self.props.replace(props.clone());
+                self.calls.replace(prop_handler_calls.clone());
+                Some(WidgetNode::new("box"))
+            }
+
+            fn render_slot(
+                &self,
+                _host: &Manifest,
+                _host_instance_key: &str,
+                _slot_name: Option<&str>,
+                _container_width: f32,
+                _container_height: f32,
+            ) -> Vec<WidgetNode> {
+                Vec::new()
+            }
+        }
+
+        let component = mesh_core_component::parse_component(
+            r#"
+<template>
+  <Child onprimary={onShared("primary")} onsecondary={onShared("secondary")} />
+</template>
+<script lang="luau">
+import Child from "./child.mesh"
+</script>
+"#,
+        )
+        .unwrap();
+        let store = MapStore(
+            [("onShared".to_string(), serde_json::json!("onShared"))]
+                .into_iter()
+                .collect(),
+        );
+        let composition = CapturingComposition::default();
+
+        build_widget_tree_from_component(
+            &component,
+            &test_manifest(),
+            &mesh_core_theme::default_theme(),
+            200.0,
+            80.0,
+            Some(&composition),
+            "root",
+            Some(&store),
+            &[],
+        );
+
+        let props = composition.props.borrow();
+        assert!(props.contains_key("onprimary"));
+        assert!(props.contains_key("onsecondary"));
+        assert_ne!(props["onprimary"], props["onsecondary"]);
+        let calls = composition.calls.borrow();
+        assert_eq!(calls["onprimary"].handler, "__mesh_embed__::root::onShared");
+        assert_eq!(calls["onsecondary"].handler, calls["onprimary"].handler);
+        assert_eq!(calls["onprimary"].args, vec![serde_json::json!("primary")]);
+        assert_eq!(
+            calls["onsecondary"].args,
+            vec![serde_json::json!("secondary")]
+        );
     }
 
     fn test_manifest() -> Manifest {

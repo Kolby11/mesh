@@ -1,123 +1,84 @@
 <template>
-  <dialog class="settings-shell" aria-label="Settings">
-    <column class="settings-root">
-      <row class="settings-header">
-        <column class="header-copy">
-          <text class="settings-title">Settings</text>
-          <text class="settings-subtitle">{settings_summary}</text>
+    <dialog class="settings-shell" aria-label="Settings">
+        <column class="settings-root">
+            <row class="settings-header">
+                <column class="header-copy">
+                    <text class="settings-title">Settings</text>
+                    <text class="settings-subtitle">{settings_summary}</text>
+                </column>
+                <button class="icon-button" onclick={onClose} aria-label="Close settings">
+                    <icon name="window-close" size="16" />
+                </button>
+            </row>
+
+            <column class="section">
+                <text class="section-title">Appearance</text>
+                <row class="control-row">
+                    <column class="control-copy">
+                        <text class="control-title">Theme</text>
+                        <text class="control-meta">{theme_value}</text>
+                    </column>
+                    <row class="segmented">
+                        <button class={theme_dark_class} onclick={onThemeDark}><text class="segment-text">Dark</text></button>
+                        <button class={theme_light_class} onclick={onThemeLight}><text class="segment-text">Light</text></button>
+                    </row>
+                </row>
+                <row class="control-row">
+                    <column class="control-copy">
+                        <text class="control-title">Language</text>
+                        <text class="control-meta">{locale_value}</text>
+                    </column>
+                    <row class="segmented">
+                        <button class={locale_en_class} onclick={onLocaleEn}><text class="segment-text">EN</text></button>
+                        <button class={locale_sk_class} onclick={onLocaleSk}><text class="segment-text">SK</text></button>
+                    </row>
+                </row>
+            </column>
+
+            <column class="section">
+                <text class="section-title">Active Providers</text>
+                <text class="section-copy">{providers_summary}</text>
+                <list class="compact-list" label="Active providers">
+                    {#for row in provider_rows}
+                        <list-item class="compact-row provider-row">
+                            <column class="provider-copy">
+                                <text class="row-title">{row.interface}</text>
+                                <text class="row-meta">{row.provider}</text>
+                            </column>
+                            <button class="provider-action" hidden={row.action_hidden} onclick={onProviderNext(row.interface, row.provider)}>Next</button>
+                        </list-item>
+                    {/for}
+                </list>
+            </column>
+
+            <column class="section">
+                <text class="section-title">Installed Modules</text>
+                <text class="section-copy">{modules_summary}</text>
+                <input
+                    class="module-filter"
+                    value={module_filter}
+                    placeholder="Filter modules"
+                    label="Filter installed modules"
+                    onchange={onModuleFilterChange}
+                />
+                <list class="module-list" label="Installed modules">
+                    {#for row in module_rows}
+                        <list-item class="module-card">
+                            <column class="module-copy">
+                                <row class="module-head">
+                                    <text class="module-title">{row.module_id}</text>
+                                    <text class="kind-pill">{row.kind}</text>
+                                </row>
+                                <text class="row-meta">{row.status}</text>
+                                <text class="row-meta">{row.resources}</text>
+                            </column>
+                            <button class="module-action" hidden={row.action_hidden} onclick={onModuleToggle(row.module_id, row.enabled)}>{row.action}</button>
+                        </list-item>
+                    {/for}
+                </list>
+            </column>
         </column>
-        <button class="icon-button" onclick={onClose} aria-label="Close settings">
-          <icon name="window-close" size="16" />
-        </button>
-      </row>
-
-      <column class="section">
-        <text class="section-title">Appearance</text>
-        <row class="control-row">
-          <column class="control-copy">
-            <text class="control-title">Theme</text>
-            <text class="control-meta">{theme_value}</text>
-          </column>
-          <row class="segmented">
-            <button class="{theme_dark_class}" onclick={onThemeDark}><text class="segment-text">Dark</text></button>
-            <button class="{theme_light_class}" onclick={onThemeLight}><text class="segment-text">Light</text></button>
-          </row>
-        </row>
-        <row class="control-row">
-          <column class="control-copy">
-            <text class="control-title">Language</text>
-            <text class="control-meta">{locale_value}</text>
-          </column>
-          <row class="segmented">
-            <button class="{locale_en_class}" onclick={onLocaleEn}><text class="segment-text">EN</text></button>
-            <button class="{locale_sk_class}" onclick={onLocaleSk}><text class="segment-text">SK</text></button>
-          </row>
-        </row>
-      </column>
-
-      <column class="section">
-        <text class="section-title">Active Providers</text>
-        <text class="section-copy">{providers_summary}</text>
-        <list class="compact-list" label="Active providers">
-          <list-item class="compact-row provider-row" hidden={provider_row_1_hidden}>
-            <column class="provider-copy">
-              <text class="row-title">{provider_row_1_interface}</text>
-              <text class="row-meta">{provider_row_1_provider}</text>
-            </column>
-            <button class="provider-action" hidden={provider_row_1_action_hidden} onclick={onProvider1Next}>Next</button>
-          </list-item>
-          <list-item class="compact-row provider-row" hidden={provider_row_2_hidden}>
-            <column class="provider-copy">
-              <text class="row-title">{provider_row_2_interface}</text>
-              <text class="row-meta">{provider_row_2_provider}</text>
-            </column>
-            <button class="provider-action" hidden={provider_row_2_action_hidden} onclick={onProvider2Next}>Next</button>
-          </list-item>
-          <list-item class="compact-row provider-row" hidden={provider_row_3_hidden}>
-            <column class="provider-copy">
-              <text class="row-title">{provider_row_3_interface}</text>
-              <text class="row-meta">{provider_row_3_provider}</text>
-            </column>
-            <button class="provider-action" hidden={provider_row_3_action_hidden} onclick={onProvider3Next}>Next</button>
-          </list-item>
-        </list>
-      </column>
-
-      <column class="section">
-        <text class="section-title">Installed Modules</text>
-        <text class="section-copy">{modules_summary}</text>
-        <input
-          class="module-filter"
-          value={module_filter}
-          placeholder="Filter modules"
-          label="Filter installed modules"
-          onchange={onModuleFilterChange}
-        />
-        <list class="module-list" label="Installed modules">
-          <list-item class="module-card" hidden={module_row_1_hidden}>
-            <column class="module-copy">
-              <row class="module-head">
-                <text class="module-title">{module_row_1_id}</text>
-                <text class="kind-pill">{module_row_1_kind}</text>
-              </row>
-              <text class="row-meta">{module_row_1_status}</text>
-              <text class="row-meta">{module_row_1_resources}</text>
-            </column>
-          </list-item>
-          <list-item class="module-card" hidden={module_row_2_hidden}>
-            <column class="module-copy">
-              <row class="module-head">
-                <text class="module-title">{module_row_2_id}</text>
-                <text class="kind-pill">{module_row_2_kind}</text>
-              </row>
-              <text class="row-meta">{module_row_2_status}</text>
-              <text class="row-meta">{module_row_2_resources}</text>
-            </column>
-          </list-item>
-          <list-item class="module-card" hidden={module_row_3_hidden}>
-            <column class="module-copy">
-              <row class="module-head">
-                <text class="module-title">{module_row_3_id}</text>
-                <text class="kind-pill">{module_row_3_kind}</text>
-              </row>
-              <text class="row-meta">{module_row_3_status}</text>
-              <text class="row-meta">{module_row_3_resources}</text>
-            </column>
-          </list-item>
-          <list-item class="module-card" hidden={module_row_4_hidden}>
-            <column class="module-copy">
-              <row class="module-head">
-                <text class="module-title">{module_row_4_id}</text>
-                <text class="kind-pill">{module_row_4_kind}</text>
-              </row>
-              <text class="row-meta">{module_row_4_status}</text>
-              <text class="row-meta">{module_row_4_resources}</text>
-            </column>
-          </list-item>
-        </list>
-      </column>
-    </column>
-  </dialog>
+    </dialog>
 </template>
 
 <script lang="luau">
@@ -135,47 +96,19 @@ theme_dark_class = "segment segment-active"
 theme_light_class = "segment"
 locale_en_class = "segment segment-active"
 locale_sk_class = "segment"
-
-provider_row_1_hidden = true
-provider_row_2_hidden = true
-provider_row_3_hidden = true
-provider_row_1_action_hidden = true
-provider_row_2_action_hidden = true
-provider_row_3_action_hidden = true
-provider_row_1_interface = ""
-provider_row_2_interface = ""
-provider_row_3_interface = ""
-provider_row_1_provider = ""
-provider_row_2_provider = ""
-provider_row_3_provider = ""
-
-module_row_1_hidden = true
-module_row_2_hidden = true
-module_row_3_hidden = true
-module_row_4_hidden = true
-module_row_1_id = ""
-module_row_2_id = ""
-module_row_3_id = ""
-module_row_4_id = ""
-module_row_1_kind = ""
-module_row_2_kind = ""
-module_row_3_kind = ""
-module_row_4_kind = ""
-module_row_1_status = ""
-module_row_2_status = ""
-module_row_3_status = ""
-module_row_4_status = ""
-module_row_1_resources = ""
-module_row_2_resources = ""
-module_row_3_resources = ""
-module_row_4_resources = ""
+provider_rows = {}
+module_rows = {}
 provider_notice = ""
+module_notice = ""
 
 local provider_candidates = {}
 local pending_providers = {}
+local pending_module_enabled = {}
 
 local function list_count(values)
-    if type(values) ~= "table" then return 0 end
+    if type(values) ~= "table" then
+        return 0
+    end
     return #values
 end
 
@@ -212,43 +145,35 @@ local function lower(value)
 end
 
 local function module_matches(entry, query)
-    if query == "" then return true end
-    if string.find(lower(entry.module_id), query, 1, true) then return true end
-    if string.find(lower(entry.kind), query, 1, true) then return true end
+    if query == "" then
+        return true
+    end
+    if string.find(lower(entry.module_id), query, 1, true) then
+        return true
+    end
+    if string.find(lower(entry.kind), query, 1, true) then
+        return true
+    end
     local uses = entry.uses or {}
-    if string.find(lower(join_limited(uses.interfaces, 16)), query, 1, true) then return true end
-    if string.find(lower(join_limited(uses.active_providers, 16)), query, 1, true) then return true end
+    if string.find(lower(join_limited(uses.interfaces, 16)), query, 1, true) then
+        return true
+    end
+    if string.find(lower(join_limited(uses.active_providers, 16)), query, 1, true) then
+        return true
+    end
     local provides = entry.provides or {}
-    if string.find(lower(join_limited(provides.settings, 16)), query, 1, true) then return true end
+    if string.find(lower(join_limited(provides.settings, 16)), query, 1, true) then
+        return true
+    end
     return false
 end
 
-local function assign_provider_row(index, interface, provider, candidate_count)
-    if index == 1 then
-        provider_row_1_hidden = false
-        provider_row_1_action_hidden = candidate_count < 2
-        provider_row_1_interface = interface
-        provider_row_1_provider = provider
-    elseif index == 2 then
-        provider_row_2_hidden = false
-        provider_row_2_action_hidden = candidate_count < 2
-        provider_row_2_interface = interface
-        provider_row_2_provider = provider
-    elseif index == 3 then
-        provider_row_3_hidden = false
-        provider_row_3_action_hidden = candidate_count < 2
-        provider_row_3_interface = interface
-        provider_row_3_provider = provider
-    end
-end
-
-local function assign_module_row(index, entry)
+local function module_row(entry, enabled, action_allowed)
     local uses = entry.uses or {}
     local provides = entry.provides or {}
     local diagnostics = entry.diagnostics or {}
     local health = entry.health or {}
-    local status = "enabled"
-    if entry.enabled == false then status = "disabled" end
+    local status = enabled and "enabled" or "disabled"
     if #diagnostics > 0 then
         status = status .. "; diagnostics " .. join_limited(diagnostics, 2)
     elseif #health > 0 then
@@ -256,46 +181,20 @@ local function assign_module_row(index, entry)
     else
         status = status .. "; clear"
     end
-    local resources = "uses " .. tostring(list_count(uses.interfaces)) .. " interfaces"
-        .. "; settings " .. join_limited(provides.settings, 2)
-    if index == 1 then
-        module_row_1_hidden = false
-        module_row_1_id = tostring(entry.module_id or "")
-        module_row_1_kind = tostring(entry.kind or "module")
-        module_row_1_status = status
-        module_row_1_resources = resources
-    elseif index == 2 then
-        module_row_2_hidden = false
-        module_row_2_id = tostring(entry.module_id or "")
-        module_row_2_kind = tostring(entry.kind or "module")
-        module_row_2_status = status
-        module_row_2_resources = resources
-    elseif index == 3 then
-        module_row_3_hidden = false
-        module_row_3_id = tostring(entry.module_id or "")
-        module_row_3_kind = tostring(entry.kind or "module")
-        module_row_3_status = status
-        module_row_3_resources = resources
-    elseif index == 4 then
-        module_row_4_hidden = false
-        module_row_4_id = tostring(entry.module_id or "")
-        module_row_4_kind = tostring(entry.kind or "module")
-        module_row_4_status = status
-        module_row_4_resources = resources
-    end
-end
-
-local function reset_rows()
-    provider_row_1_hidden = true
-    provider_row_2_hidden = true
-    provider_row_3_hidden = true
-    provider_row_1_action_hidden = true
-    provider_row_2_action_hidden = true
-    provider_row_3_action_hidden = true
-    module_row_1_hidden = true
-    module_row_2_hidden = true
-    module_row_3_hidden = true
-    module_row_4_hidden = true
+    local resources = "uses "
+        .. tostring(list_count(uses.interfaces))
+        .. " interfaces"
+        .. "; settings "
+        .. join_limited(provides.settings, 2)
+    return {
+        module_id = tostring(entry.module_id or ""),
+        kind = tostring(entry.kind or "module"),
+        status = status,
+        resources = resources,
+        enabled = enabled,
+        action = enabled and "Disable" or "Enable",
+        action_hidden = not action_allowed,
+    }
 end
 
 local function sync_appearance()
@@ -318,7 +217,6 @@ local function sync_appearance()
 end
 
 function render(self)
-    reset_rows()
     sync_appearance()
 
     local graph = {}
@@ -331,6 +229,7 @@ function render(self)
     local providers = {}
     local active_providers = {}
     local seen_provider_bindings = {}
+    local active_provider_modules = {}
     provider_candidates = {}
     for _, entry in ipairs(graph) do
         local uses = entry.uses or {}
@@ -340,6 +239,7 @@ function render(self)
                 local provider = tostring(pair.provider or "")
                 if interface ~= "" and provider ~= "" then
                     active_providers[interface] = provider
+                    active_provider_modules[provider] = true
                     local binding_key = interface .. "=" .. provider
                     if not seen_provider_bindings[binding_key] then
                         providers[#providers + 1] = { interface = interface, provider = provider }
@@ -356,7 +256,8 @@ function render(self)
                     interface = tostring(interface or "")
                     if interface ~= "" then
                         provider_candidates[interface] = provider_candidates[interface] or {}
-                        provider_candidates[interface][#provider_candidates[interface] + 1] = tostring(entry.module_id or "")
+                        provider_candidates[interface][#provider_candidates[interface] + 1] =
+                            tostring(entry.module_id or "")
                     end
                 end
             end
@@ -378,20 +279,38 @@ function render(self)
     if provider_notice ~= "" then
         providers_summary = providers_summary .. "; " .. provider_notice
     end
+    provider_rows = {}
     for i = 1, math.min(#providers, 3) do
         local pair = providers[i]
         local interface = tostring(pair.interface or "")
         local provider = pending_providers[interface] or active_providers[interface] or tostring(pair.provider or "")
         local candidates = provider_candidates[interface] or {}
-        assign_provider_row(i, interface, provider, #candidates)
+        provider_rows[#provider_rows + 1] = {
+            interface = interface,
+            provider = provider,
+            action_hidden = #candidates < 2,
+        }
     end
 
     modules_summary = tostring(#matched) .. " of " .. tostring(#graph) .. " installed modules match"
     if #graph == 0 then
         modules_summary = "No installed modules published yet"
     end
+    if module_notice ~= "" then
+        modules_summary = modules_summary .. "; " .. module_notice
+    end
+    module_rows = {}
     for i = 1, math.min(#matched, 4) do
-        assign_module_row(i, matched[i])
+        local entry = matched[i]
+        local module_id = tostring(entry.module_id or "")
+        local enabled = pending_module_enabled[module_id]
+        if enabled == nil then
+            enabled = entry.enabled ~= false
+        end
+        local action_allowed = module_id ~= "@mesh/settings"
+            and entry.root_layout ~= true
+            and not active_provider_modules[module_id]
+        module_rows[#module_rows + 1] = module_row(entry, enabled, action_allowed)
     end
 end
 
@@ -427,33 +346,38 @@ function onLocaleSk()
     locale_sk_class = "segment segment-active"
 end
 
-local function select_next_provider(interface, current)
+function onProviderNext(interface, current)
     local candidates = provider_candidates[interface] or {}
-    if interface == "" or #candidates < 2 then return end
+    if interface == "" or #candidates < 2 then
+        return
+    end
     local current_index = 0
     for i, provider in ipairs(candidates) do
-        if provider == current then current_index = i end
+        if provider == current then
+            current_index = i
+        end
     end
     local next_index = (current_index % #candidates) + 1
     local provider_id = candidates[next_index]
     pending_providers[interface] = provider_id
-    provider_notice = "saved; restart MESH to apply"
+    provider_notice = "switching live; current provider stays active until ready"
     mesh.events.publish("shell.set-provider", {
         interface = interface,
         provider_id = provider_id,
     })
 end
 
-function onProvider1Next()
-    select_next_provider(provider_row_1_interface, provider_row_1_provider)
-end
-
-function onProvider2Next()
-    select_next_provider(provider_row_2_interface, provider_row_2_provider)
-end
-
-function onProvider3Next()
-    select_next_provider(provider_row_3_interface, provider_row_3_provider)
+function onModuleToggle(module_id, current_enabled)
+    if module_id == "" or module_id == "@mesh/settings" then
+        return
+    end
+    local enabled = not current_enabled
+    pending_module_enabled[module_id] = enabled
+    module_notice = "applying live"
+    mesh.events.publish("shell.set-module-enabled", {
+        module_id = module_id,
+        enabled = enabled,
+    })
 end
 
 function onClose()
@@ -462,164 +386,182 @@ end
 </script>
 
 <style>
-.settings-shell {
-    width: 420px;
-    max-width: 420px;
-    min-height: 100%;
-    background: var(--color-surface);
-    color: var(--color-on-surface);
-    border-left-width: 1px;
-    border-left-style: solid;
-    border-left-color: var(--color-outline-variant);
-}
+    .settings-shell {
+        width: 420px;
+        max-width: 420px;
+        min-height: 100%;
+        background: var(--color-surface);
+        color: var(--color-on-surface);
+        border-left-width: 1px;
+        border-left-style: solid;
+        border-left-color: var(--color-outline-variant);
+    }
 
-.settings-root {
-    width: 100%;
-    gap: var(--spacing-lg);
-    padding: var(--spacing-lg);
-}
+    .settings-root {
+        width: 100%;
+        gap: var(--spacing-lg);
+        padding: var(--spacing-lg);
+    }
 
-.settings-header,
-.control-row,
-.module-head {
-    width: 100%;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--spacing-md);
-}
+    .settings-header,
+    .control-row,
+    .module-head {
+        width: 100%;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--spacing-md);
+    }
 
-.header-copy,
-.control-copy,
-.section,
-.module-copy,
-.provider-copy {
-    gap: var(--spacing-xs);
-}
+    .header-copy,
+    .control-copy,
+    .section,
+    .module-copy,
+    .provider-copy {
+        gap: var(--spacing-xs);
+    }
 
-.provider-row {
-    width: 100%;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--spacing-sm);
-}
+    .provider-row {
+        width: 100%;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--spacing-sm);
+    }
 
-.provider-action {
-    min-width: 52px;
-    min-height: 28px;
-    padding-left: var(--spacing-sm);
-    padding-right: var(--spacing-sm);
-}
+    .provider-action {
+        min-width: 52px;
+        min-height: 28px;
+        padding-left: var(--spacing-sm);
+        padding-right: var(--spacing-sm);
+    }
 
-.settings-title {
-    font-size: var(--typography-size-xl);
-    font-weight: 700;
-    color: var(--color-on-surface);
-}
+    .module-action {
+        flex-shrink: 0;
+        min-width: 64px;
+        min-height: 28px;
+        padding-left: var(--spacing-sm);
+        padding-right: var(--spacing-sm);
+    }
 
-.settings-subtitle,
-.section-copy,
-.control-meta,
-.row-meta {
-    font-size: var(--typography-size-xs);
-    color: var(--color-on-surface-variant);
-}
+    .settings-title {
+        font-size: var(--typography-size-xl);
+        font-weight: 700;
+        color: var(--color-on-surface);
+    }
 
-.section-title,
-.control-title,
-.module-title,
-.row-title {
-    font-size: var(--typography-size-sm);
-    font-weight: 700;
-    color: var(--color-on-surface);
-}
+    .settings-subtitle,
+    .section-copy,
+    .control-meta,
+    .row-meta {
+        font-size: var(--typography-size-xs);
+        color: var(--color-on-surface-variant);
+    }
 
-.icon-button {
-    width: 32px;
-    height: 32px;
-    justify-content: center;
-    align-items: center;
-    border-radius: var(--radius-full);
-    background: var(--color-surface-container);
-    color: var(--color-on-surface);
-    border-width: 0;
-}
+    .section-title,
+    .control-title,
+    .module-title,
+    .row-title {
+        font-size: var(--typography-size-sm);
+        font-weight: 700;
+        color: var(--color-on-surface);
+    }
 
-.section {
-    width: 100%;
-    padding: var(--spacing-md);
-    border-radius: var(--radius-md);
-    background: var(--color-surface-container-low);
-    border-width: 1px;
-    border-style: solid;
-    border-color: var(--color-outline-variant);
-}
+    .icon-button {
+        width: 32px;
+        height: 32px;
+        justify-content: center;
+        align-items: center;
+        border-radius: var(--radius-full);
+        background: var(--color-surface-container);
+        color: var(--color-on-surface);
+        border-width: 0;
+    }
 
-.segmented {
-    flex-shrink: 0;
-    gap: var(--spacing-xs);
-}
+    .section {
+        width: 100%;
+        padding: var(--spacing-md);
+        border-radius: var(--radius-md);
+        background: var(--color-surface-container-low);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--color-outline-variant);
+    }
 
-.segment {
-    min-width: 52px;
-    height: 32px;
-    justify-content: center;
-    align-items: center;
-    padding-inline: var(--spacing-sm);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface-container);
-    color: var(--color-on-surface);
-    border-width: 1px;
-    border-style: solid;
-    border-color: var(--color-outline-variant);
-}
+    .segmented {
+        flex-shrink: 0;
+        gap: var(--spacing-xs);
+    }
 
-.segment-active {
-    background: var(--color-primary);
-    color: var(--color-on-primary);
-    border-color: var(--color-primary);
-}
+    .segment {
+        min-width: 52px;
+        height: 32px;
+        justify-content: center;
+        align-items: center;
+        padding-inline: var(--spacing-sm);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-container);
+        color: var(--color-on-surface);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--color-outline-variant);
+    }
 
-.segment-text {
-    font-size: var(--typography-size-xs);
-    font-weight: 700;
-    color: inherit;
-}
+    .segment-active {
+        background: var(--color-primary);
+        color: var(--color-on-primary);
+        border-color: var(--color-primary);
+    }
 
-.compact-list,
-.module-list {
-    width: 100%;
-    gap: var(--spacing-sm);
-}
+    .segment-text {
+        font-size: var(--typography-size-xs);
+        font-weight: 700;
+        color: inherit;
+    }
 
-.compact-row,
-.module-card {
-    width: 100%;
-    padding: var(--spacing-sm);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface-container);
-    border-width: 1px;
-    border-style: solid;
-    border-color: var(--color-outline-variant);
-}
+    .compact-list,
+    .module-list {
+        width: 100%;
+        gap: var(--spacing-sm);
+    }
 
-.compact-row {
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--spacing-md);
-}
+    .compact-row,
+    .module-card {
+        width: 100%;
+        padding: var(--spacing-sm);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-container);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--color-outline-variant);
+    }
 
-.module-filter {
-    width: 100%;
-}
+    .compact-row {
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--spacing-md);
+    }
 
-.kind-pill {
-    flex-shrink: 0;
-    padding-inline: var(--spacing-sm);
-    padding-block: var(--spacing-xs);
-    border-radius: var(--radius-full);
-    background: var(--color-secondary-container);
-    color: var(--color-on-secondary-container);
-    font-size: var(--typography-size-xs);
-    font-weight: 700;
-}
+    .module-card {
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--spacing-md);
+    }
+
+    .module-copy {
+        flex-grow: 1;
+    }
+
+    .module-filter {
+        width: 100%;
+    }
+
+    .kind-pill {
+        flex-shrink: 0;
+        padding-inline: var(--spacing-sm);
+        padding-block: var(--spacing-xs);
+        border-radius: var(--radius-full);
+        background: var(--color-secondary-container);
+        color: var(--color-on-secondary-container);
+        font-size: var(--typography-size-xs);
+        font-weight: 700;
+    }
 </style>

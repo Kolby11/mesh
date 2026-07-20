@@ -1141,6 +1141,31 @@ impl LayerShellBackend {
         }
     }
 
+    /// Tear down a top-level layer surface and any popup children it owns.
+    pub fn destroy_surface(&mut self, surface_id: &str) {
+        self.destroy_popups_for_parent(surface_id);
+        self.state.release_surface_focus_grab(surface_id);
+        let is_layer = self
+            .state
+            .surfaces
+            .get(surface_id)
+            .is_some_and(|entry| matches!(entry.role, SurfaceRole::Layer(_)));
+        if !is_layer {
+            return;
+        }
+        if let Some(entry) = self.state.remove_surface(surface_id) {
+            if let Some(viewport) = entry.viewport.as_ref() {
+                viewport.destroy();
+            }
+            if let Some(fractional_scale) = entry.fractional_scale.as_ref() {
+                fractional_scale.destroy();
+            }
+            if let Some(blur) = entry.kde_blur.as_ref() {
+                blur.release();
+            }
+        }
+    }
+
     /// Destroy every popup parented to `parent_surface_id`. The compositor
     /// auto-dismisses popups when their parent surface is destroyed or hidden;
     /// this keeps the backend's own bookkeeping in step (e.g. when the shell

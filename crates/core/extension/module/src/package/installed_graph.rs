@@ -1223,6 +1223,7 @@ fn is_declared_shell_event_channel(channel: &str) -> bool {
             | "shell.set-theme"
             | "shell.set-locale"
             | "shell.set-provider"
+            | "shell.set-module-enabled"
             | "shell.toggle-debug-overlay"
             | "shell.toggle-debug-layout-bounds"
             | "shell.toggle-debug-profiling"

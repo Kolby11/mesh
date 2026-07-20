@@ -28,13 +28,172 @@ fn service_unavailable_response() -> serde_json::Value {
 }
 
 impl Shell {
+    fn apply_set_module_enabled(
+        &mut self,
+        module_id: &str,
+        enabled: bool,
+    ) -> VecDeque<CoreRequest> {
+        let graph_path = self.installed_module_graph_path();
+        if !enabled
+            && self
+                .pending_backend_runtimes
+                .values()
+                .any(|pending| pending.slot.provider_id == module_id)
+        {
+            let message = format!(
+                "cannot disable {module_id} while it is being prepared as an active provider"
+            );
+            tracing::warn!(module_id, enabled, "{message}");
+            self.diagnostics.record_lifecycle_error(
+                "@mesh/settings".to_string(),
+                "invalid_module_enabled_selection",
+                message,
+            );
+            return VecDeque::new();
+        }
+        let rejection = match self.load_installed_module_graph_cached() {
+            Err(error) => Some(format!(
+                "cannot update module {module_id}: failed to load {}: {error}",
+                graph_path.display()
+            )),
+            Ok(graph) if graph.module(module_id).is_none() => {
+                Some(format!("cannot update unknown module {module_id}"))
+            }
+            Ok(_) if !enabled && module_id == "@mesh/settings" => {
+                Some("cannot disable @mesh/settings from its own settings surface".into())
+            }
+            Ok(graph)
+                if !enabled
+                    && graph
+                        .layout_entrypoint()
+                        .is_some_and(|layout| layout.module_id == module_id) =>
+            {
+                Some(format!(
+                    "cannot disable {module_id} while it is the active root layout"
+                ))
+            }
+            Ok(graph) if !enabled => graph
+                .backend_provider_contributions()
+                .into_iter()
+                .filter(|provider| provider.module_id == module_id)
+                .find_map(|provider| {
+                    graph
+                        .active_provider(&provider.interface)
+                        .filter(|active| active.module_id == module_id)
+                        .map(|_| {
+                            format!(
+                                "cannot disable {module_id} while it is the active provider for {}; select another provider first",
+                                provider.interface
+                            )
+                        })
+                }),
+            Ok(_) => None,
+        };
+        if let Some(message) = rejection {
+            tracing::warn!(module_id, enabled, "{message}");
+            self.diagnostics.record_lifecycle_error(
+                "@mesh/settings".to_string(),
+                "invalid_module_enabled_selection",
+                message,
+            );
+            return VecDeque::new();
+        }
+
+        let module_kind = self
+            .installed_module_graph
+            .as_ref()
+            .and_then(|graph| graph.module(module_id))
+            .map(|module| module.kind)
+            .expect("validated module disappeared from the cached graph");
+        let rollback = match crate::shell::module_config::write_module_enabled(
+            &graph_path,
+            module_id,
+            enabled,
+        ) {
+            Ok(rollback) => rollback,
+            Err(error) => {
+                let message = format!("failed to save enabled state for {module_id}: {error}");
+                tracing::warn!(module_id, enabled, "{message}");
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/settings".to_string(),
+                    "module_enabled_write_failed",
+                    message,
+                );
+                return VecDeque::new();
+            }
+        };
+
+        self.installed_module_graph = None;
+        let graph = match self.load_installed_module_graph_cached() {
+            Ok(graph) => graph.clone(),
+            Err(error) => {
+                let restore_error = rollback.restore().err();
+                self.installed_module_graph = None;
+                let _ = self.load_installed_module_graph_cached();
+                let message = format!(
+                    "module {module_id} update produced an unloadable graph: {error}{}",
+                    restore_error
+                        .map(|error| format!("; rollback also failed: {error}"))
+                        .unwrap_or_default()
+                );
+                tracing::warn!(module_id, enabled, "{message}");
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/settings".to_string(),
+                    "module_enabled_graph_reload_failed",
+                    message,
+                );
+                return VecDeque::new();
+            }
+        };
+        if enabled {
+            self.register_interfaces_from_graph(&graph);
+        }
+        let runtime_result = if module_kind == ModuleKind::Frontend {
+            if enabled {
+                self.activate_frontend_module(module_id, &graph)
+            } else {
+                self.deactivate_frontend_module(module_id)
+            }
+        } else {
+            Ok(VecDeque::new())
+        };
+        match runtime_result {
+            Ok(requests) => {
+                tracing::info!(module_id, enabled, "applied module enabled state live");
+                requests
+            }
+            Err(error) => {
+                let restore_error = rollback.restore().err();
+                self.installed_module_graph = None;
+                let _ = self.load_installed_module_graph_cached();
+                let message = format!(
+                    "failed to apply module {module_id} live: {error}{}",
+                    restore_error
+                        .map(|error| format!("; rollback also failed: {error}"))
+                        .unwrap_or_default()
+                );
+                tracing::warn!(module_id, enabled, "{message}");
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/settings".to_string(),
+                    "module_enabled_runtime_apply_failed",
+                    message,
+                );
+                VecDeque::new()
+            }
+        }
+    }
+
     fn apply_set_provider(&mut self, interface: &str, provider_id: &str) {
         let graph_path = self.installed_module_graph_path();
-        let selection_is_valid = match self.load_installed_module_graph_cached() {
-            Ok(graph) => graph
-                .backend_providers_for_interface(interface)
-                .iter()
-                .any(|provider| provider.module_id == provider_id),
+        let (graph, provider) = match self.load_installed_module_graph_cached() {
+            Ok(graph) => {
+                let provider = graph
+                    .backend_providers_for_interface(interface)
+                    .iter()
+                    .find(|provider| provider.module_id == provider_id)
+                    .cloned();
+                (graph.clone(), provider)
+            }
             Err(error) => {
                 let message = format!(
                     "cannot select provider {provider_id} for {interface}: failed to load {}: {error}",
@@ -49,7 +208,7 @@ impl Shell {
                 return;
             }
         };
-        if !selection_is_valid {
+        let Some(provider) = provider else {
             let message = format!(
                 "cannot select provider {provider_id}: it is not an enabled provider for {interface}"
             );
@@ -60,29 +219,115 @@ impl Shell {
                 message,
             );
             return;
-        }
+        };
 
-        match crate::shell::module_config::write_active_provider_selection(
-            &graph_path,
-            interface,
-            provider_id,
-        ) {
-            Ok(()) => tracing::info!(
+        if self
+            .pending_backend_runtimes
+            .get(interface)
+            .is_some_and(|pending| pending.slot.provider_id == provider_id)
+        {
+            tracing::debug!(
                 interface,
                 provider_id,
-                "saved active provider selection; restart MESH to apply it"
-            ),
-            Err(error) => {
-                let message =
-                    format!("failed to save provider {provider_id} for {interface}: {error}");
-                tracing::warn!(interface, provider_id, "{message}");
-                self.diagnostics.record_lifecycle_error(
-                    "@mesh/settings".to_string(),
-                    "provider_selection_write_failed",
-                    message,
+                "backend provider switch is already pending"
+            );
+            return;
+        }
+        if self
+            .backend_runtimes
+            .get(interface)
+            .is_some_and(|slot| slot.provider_id == provider_id)
+        {
+            if let Some(pending) = self.pending_backend_runtimes.remove(interface) {
+                pending.slot.task.abort();
+                self.record_backend_runtime_status(
+                    pending.slot.interface,
+                    pending.slot.provider_id,
+                    BackendRuntimeStatus::Stopped,
+                    "provider switch cancelled".to_string(),
                 );
             }
+            if graph
+                .active_provider(interface)
+                .is_some_and(|active| active.module_id == provider_id)
+            {
+                tracing::debug!(interface, provider_id, "backend provider is already active");
+                return;
+            }
+            match crate::shell::module_config::write_active_provider_selection(
+                &graph_path,
+                interface,
+                provider_id,
+            ) {
+                Ok(()) => {
+                    self.installed_module_graph = None;
+                    let _ = self.load_installed_module_graph_cached();
+                    tracing::info!(
+                        interface,
+                        provider_id,
+                        "saved selection for the already-running provider"
+                    );
+                }
+                Err(error) => {
+                    let message =
+                        format!("failed to save provider {provider_id} for {interface}: {error}");
+                    tracing::warn!(interface, provider_id, "{message}");
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/settings".to_string(),
+                        "provider_selection_write_failed",
+                        message,
+                    );
+                }
+            }
+            return;
         }
+        let Some(ctx) = self.backend_respawn.clone() else {
+            let message = format!(
+                "cannot switch provider {provider_id} for {interface}: backend runtime is unavailable"
+            );
+            tracing::warn!(interface, provider_id, "{message}");
+            self.diagnostics.record_lifecycle_error(
+                "@mesh/settings".to_string(),
+                "provider_switch_runtime_unavailable",
+                message,
+            );
+            return;
+        };
+        let mut candidate = match crate::shell::backend::launch_candidate_for_provider(
+            &graph,
+            &self.modules,
+            &self.config,
+            &self.interfaces,
+            &provider,
+        ) {
+            Ok(candidate) => candidate,
+            Err(status) => {
+                self.record_backend_runtime_status(
+                    status.interface.clone(),
+                    status
+                        .provider_id
+                        .clone()
+                        .unwrap_or_else(|| provider_id.to_string()),
+                    BackendRuntimeStatus::from_str(status.status),
+                    status.message.clone(),
+                );
+                tracing::warn!(
+                    interface,
+                    provider_id,
+                    "provider switch rejected: {}",
+                    status.message
+                );
+                return;
+            }
+        };
+        self.apply_shell_runtime_settings(&mut candidate);
+        let slot = self.start_backend_candidate(&ctx.handle, ctx.tx, candidate, ctx.eventfd_fd);
+        self.stage_backend_runtime_switch(interface.to_string(), slot, graph_path);
+        tracing::info!(
+            interface,
+            provider_id,
+            "started provider candidate; current provider remains active until readiness"
+        );
     }
 
     pub(in crate::shell) fn invalidate_debug_layout_bounds_targets(&mut self) {
@@ -495,6 +740,9 @@ impl Shell {
             } => {
                 self.apply_set_provider(&interface, &provider_id);
                 Ok(VecDeque::new())
+            }
+            CoreRequest::SetModuleEnabled { module_id, enabled } => {
+                Ok(self.apply_set_module_enabled(&module_id, enabled))
             }
             CoreRequest::ToggleDebugOverlay => {
                 self.debug.toggle();
@@ -1341,6 +1589,7 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::SetTheme { .. } => "set_theme",
         CoreRequest::SetLocale { .. } => "set_locale",
         CoreRequest::SetProvider { .. } => "set_provider",
+        CoreRequest::SetModuleEnabled { .. } => "set_module_enabled",
         CoreRequest::ActivatePopover { .. } => "activate_popover",
         CoreRequest::TransferTabFocus { .. } => "transfer_tab_focus",
         CoreRequest::ToggleDebugOverlay => "toggle_debug_overlay",

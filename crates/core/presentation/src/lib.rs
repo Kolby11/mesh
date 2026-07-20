@@ -81,6 +81,7 @@ struct TestingBackend {
     popup_supported: bool,
     popup_configs: HashMap<String, PopupConfig>,
     destroyed_popups: Vec<String>,
+    destroyed_surfaces: Vec<String>,
     dismissed_popups: Vec<String>,
     events: Vec<WindowEvent>,
     presented: Vec<String>,
@@ -138,6 +139,14 @@ impl PresentationEngine {
     pub fn testing_destroyed_popups(&self) -> &[String] {
         match &self.backend {
             Backend::Testing(backend) => &backend.destroyed_popups,
+            _ => &[],
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_destroyed_surfaces(&self) -> &[String] {
+        match &self.backend {
+            Backend::Testing(backend) => &backend.destroyed_surfaces,
             _ => &[],
         }
     }
@@ -214,6 +223,28 @@ impl PresentationEngine {
             Backend::Testing(backend) => {
                 backend.popup_configs.remove(surface_id);
                 backend.destroyed_popups.push(surface_id.to_string());
+            }
+        }
+    }
+
+    /// Destroy a top-level surface and every popup parented to it.
+    pub fn destroy_surface(&mut self, surface_id: &str) {
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.destroy_surface(surface_id),
+            Backend::DevWindow(bridge) => bridge.destroy_surface(surface_id),
+            Backend::Testing(backend) => {
+                let child_ids = backend
+                    .popup_configs
+                    .iter()
+                    .filter_map(|(id, config)| {
+                        (config.parent_surface_id == surface_id).then_some(id.clone())
+                    })
+                    .collect::<Vec<_>>();
+                for child_id in child_ids {
+                    backend.popup_configs.remove(&child_id);
+                    backend.destroyed_popups.push(child_id);
+                }
+                backend.destroyed_surfaces.push(surface_id.to_string());
             }
         }
     }

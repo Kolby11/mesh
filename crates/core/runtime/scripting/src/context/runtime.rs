@@ -179,6 +179,11 @@ pub struct ScriptContext {
     /// before the script is loaded so live bindings use the surface's handle.
     shared_vm: Option<Lua>,
     env_table: Option<Table>,
+    /// Backing table for scalar reactive globals removed from the raw `_ENV`.
+    /// Their absence from `_ENV` makes every subsequent assignment pass through
+    /// `__newindex`, allowing handler sync to consume the write log instead of
+    /// reading every unchanged scalar after every call.
+    reactive_scalar_globals: Option<Table>,
     interface_catalog: Arc<InterfaceCatalog>,
     pub(super) interface_bindings: HashMap<String, InterfaceResolution>,
     shared_interface_bindings: Arc<Mutex<SharedInterfaceBindings>>,
@@ -191,6 +196,11 @@ pub struct ScriptContext {
     /// instead of iterating the entire globals table.
     user_global_keys: Vec<String>,
     user_global_key_set: HashSet<String>,
+    proxied_scalar_global_keys: HashSet<String>,
+    /// Whether the one-time reactive-global discovery walk has completed.
+    /// Kept separate from `user_global_keys.is_empty()` because handler-only
+    /// scripts legitimately have no reactive globals.
+    user_globals_discovered: bool,
     assigned_global_keys: Arc<Mutex<HashSet<String>>>,
     pending_assigned_global_keys: Arc<AtomicBool>,
     /// Public members whose values changed during the most recent Lua sync.
@@ -254,6 +264,48 @@ impl ScriptContext {
         self.env_table
             .as_ref()
             .expect("ScriptContext not initialized — call ensure_initialized first")
+    }
+
+    fn proxy_scalar_global(&mut self, name: &str, value: LuaValue) -> mlua::Result<()> {
+        self.env().raw_set(name, LuaValue::Nil)?;
+        self.reactive_scalar_globals
+            .as_ref()
+            .expect("reactive scalar table initialized with _ENV")
+            .raw_set(name, value)?;
+        self.proxied_scalar_global_keys.insert(name.to_string());
+        Ok(())
+    }
+
+    fn restore_proxied_scalars_to_env(&mut self) -> mlua::Result<()> {
+        if self.proxied_scalar_global_keys.is_empty() {
+            return Ok(());
+        }
+        let backing = self
+            .reactive_scalar_globals
+            .as_ref()
+            .expect("reactive scalar table initialized with _ENV")
+            .clone();
+        let env = self.env().clone();
+        for name in self.proxied_scalar_global_keys.drain() {
+            let value = backing.raw_get::<LuaValue>(name.as_str())?;
+            backing.raw_set(name.as_str(), LuaValue::Nil)?;
+            if !matches!(value, LuaValue::Nil) {
+                env.raw_set(name, value)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn unproxy_scalar_global(&mut self, name: &str, value: LuaValue) -> mlua::Result<()> {
+        self.reactive_scalar_globals
+            .as_ref()
+            .expect("reactive scalar table initialized with _ENV")
+            .raw_set(name, LuaValue::Nil)?;
+        if !matches!(value, LuaValue::Nil) {
+            self.env().raw_set(name, value)?;
+        }
+        self.proxied_scalar_global_keys.remove(name);
+        Ok(())
     }
 
     /// Create a new script context for a module.
@@ -351,6 +403,7 @@ impl ScriptContext {
             vm: None,
             shared_vm: None,
             env_table: None,
+            reactive_scalar_globals: None,
             interface_catalog: Arc::new(InterfaceCatalog::default()),
             interface_bindings: HashMap::new(),
             shared_interface_bindings: Arc::new(Mutex::new(SharedInterfaceBindings::default())),
@@ -358,6 +411,8 @@ impl ScriptContext {
             builtin_globals: HashSet::new(),
             user_global_keys: Vec::new(),
             user_global_key_set: HashSet::new(),
+            proxied_scalar_global_keys: HashSet::new(),
+            user_globals_discovered: false,
             assigned_global_keys: Arc::new(Mutex::new(HashSet::new())),
             pending_assigned_global_keys: Arc::new(AtomicBool::new(false)),
             changed_public_members: Vec::new(),
@@ -404,9 +459,25 @@ impl ScriptContext {
         // ISO-01: create per-component _ENV with __index = globals() fallthrough
         let env = lua.create_table().map_err(lua_err)?;
         let meta = lua.create_table().map_err(lua_err)?;
-        meta.set("__index", lua.globals()).map_err(lua_err)?;
+        let reactive_scalar_globals = lua.create_table().map_err(lua_err)?;
+        let reactive_scalar_reads = reactive_scalar_globals.clone();
+        let fallback_globals = lua.globals();
+        meta.set(
+            "__index",
+            lua.create_function(move |_, (_table, key): (Table, String)| {
+                let value = reactive_scalar_reads.raw_get::<LuaValue>(key.as_str())?;
+                if matches!(value, LuaValue::Nil) {
+                    fallback_globals.get::<LuaValue>(key.as_str())
+                } else {
+                    Ok(value)
+                }
+            })
+            .map_err(lua_err)?,
+        )
+        .map_err(lua_err)?;
         let assigned_global_keys = Arc::clone(&self.assigned_global_keys);
         let pending_assigned_global_keys = Arc::clone(&self.pending_assigned_global_keys);
+        let reactive_scalar_writes = reactive_scalar_globals.clone();
         meta.set(
             "__newindex",
             lua.create_function(move |_, (table, key, value): (Table, String, LuaValue)| {
@@ -414,7 +485,14 @@ impl ScriptContext {
                     assigned_global_keys.lock().unwrap().insert(key.clone());
                     pending_assigned_global_keys.store(true, Ordering::Release);
                 }
-                table.raw_set(key, value)
+                if !matches!(
+                    reactive_scalar_writes.raw_get::<LuaValue>(key.as_str())?,
+                    LuaValue::Nil
+                ) {
+                    reactive_scalar_writes.raw_set(key, value)
+                } else {
+                    table.raw_set(key, value)
+                }
             })
             .map_err(lua_err)?,
         )
@@ -423,6 +501,7 @@ impl ScriptContext {
 
         self.vm = Some(vm);
         self.env_table = Some(env.clone());
+        self.reactive_scalar_globals = Some(reactive_scalar_globals);
 
         // Install host API into the per-component env table (ISO-02 completion)
         self.install_host_api(&env)?;
@@ -456,9 +535,14 @@ impl ScriptContext {
             let _ = env.clear();
             let _ = env.set_metatable(None);
         }
+        if let Some(globals) = self.reactive_scalar_globals.take() {
+            let _ = globals.clear();
+        }
         self.builtin_globals.clear();
         self.user_global_keys.clear();
         self.user_global_key_set.clear();
+        self.proxied_scalar_global_keys.clear();
+        self.user_globals_discovered = false;
         self.last_element_metrics_fingerprint = None;
         self.assigned_global_keys.lock().unwrap().clear();
         self.pending_assigned_global_keys
@@ -482,9 +566,11 @@ impl ScriptContext {
         imports: &[ScriptInterfaceImport],
     ) -> Result<(), ScriptError> {
         self.ensure_initialized()?;
+        self.restore_proxied_scalars_to_env().map_err(lua_err)?;
         self.interface_bindings.clear();
         self.user_global_keys.clear();
         self.user_global_key_set.clear();
+        self.user_globals_discovered = false;
         self.assigned_global_keys.lock().unwrap().clear();
         self.pending_assigned_global_keys
             .store(false, Ordering::Release);
@@ -1222,6 +1308,11 @@ impl ScriptContext {
         }
         let lua = self.lua();
         let child_env = child.env().clone();
+        let child_scalars = child
+            .reactive_scalar_globals
+            .as_ref()
+            .expect("initialized child has reactive scalar table")
+            .clone();
         let denylist = child.builtin_globals.clone();
         let child_external_accessed = Arc::clone(&child.live_binding_external_accessed);
 
@@ -1229,6 +1320,7 @@ impl ScriptContext {
         let meta = lua.create_table().map_err(lua_err)?;
 
         let index_env = child_env.clone();
+        let index_scalars = child_scalars;
         let index_deny = denylist.clone();
         let index_external_accessed = Arc::clone(&child_external_accessed);
         meta.set(
@@ -1239,7 +1331,10 @@ impl ScriptContext {
                 }
                 // raw_get keeps the surface curated: only the child's own public
                 // members are exposed, not globals inherited via `_ENV.__index`.
-                let raw = index_env.raw_get::<LuaValue>(key.as_str())?;
+                let mut raw = index_env.raw_get::<LuaValue>(key.as_str())?;
+                if matches!(raw, LuaValue::Nil) {
+                    raw = index_scalars.raw_get::<LuaValue>(key.as_str())?;
+                }
                 if !matches!(raw, LuaValue::Nil) {
                     if let LuaValue::Function(function) = raw {
                         let accessed = Arc::clone(&index_external_accessed);
@@ -1275,7 +1370,7 @@ impl ScriptContext {
                     return Ok(());
                 }
                 newindex_external_accessed.store(true, Ordering::Release);
-                newindex_env.raw_set(key, value)
+                newindex_env.set(key, value)
             })
             .map_err(lua_err)?,
         )
@@ -2104,7 +2199,7 @@ impl ScriptContext {
     pub(super) fn sync_state_from_lua(&mut self) {
         let _span = tracing::debug_span!("sync_state_from_lua", module = %self.module_id).entered();
         self.changed_public_members.clear();
-        if self.user_global_keys.is_empty() {
+        if !self.user_globals_discovered {
             // Full scan: discover all user globals (runs once per load_script).
             let user_globals: Vec<(String, LuaValue)> = self
                 .env()
@@ -2117,20 +2212,34 @@ impl ScriptContext {
                 })
                 .collect();
             for (name, lua_value) in user_globals {
+                let proxy_value = is_proxyable_lua_scalar(&lua_value).then(|| lua_value.clone());
                 if let Ok(value) = self.lua().from_value::<Value>(lua_value) {
                     self.state.set(name.clone(), value);
                     self.user_global_key_set.insert(name.clone());
-                    self.user_global_keys.push(name);
+                    self.user_global_keys.push(name.clone());
+                    if let Some(proxy_value) = proxy_value {
+                        let _ = self.proxy_scalar_global(&name, proxy_value);
+                    }
                 }
             }
             self.assigned_global_keys.lock().unwrap().clear();
             self.pending_assigned_global_keys
                 .store(false, Ordering::Release);
+            self.user_globals_discovered = true;
         } else {
-            // Fast path: only check known user global keys.
+            // Compound globals remain raw in `_ENV` because their tables can be
+            // mutated in place. Scalars are absent from the raw table and only
+            // need a read when `__newindex` records an assignment.
+            let mut newly_proxyable = Vec::new();
             for key in &self.user_global_keys {
+                if self.proxied_scalar_global_keys.contains(key) {
+                    continue;
+                }
                 if let Ok(lua_value) = self.env().get::<LuaValue>(key.as_str()) {
                     if !matches!(lua_value, LuaValue::Nil | LuaValue::Function(_)) {
+                        if is_proxyable_lua_scalar(&lua_value) {
+                            newly_proxyable.push((key.clone(), lua_value.clone()));
+                        }
                         if self
                             .state
                             .get_ref(key)
@@ -2145,6 +2254,9 @@ impl ScriptContext {
                     }
                 }
             }
+            for (name, value) in newly_proxyable {
+                let _ = self.proxy_scalar_global(&name, value);
+            }
             if self
                 .pending_assigned_global_keys
                 .swap(false, Ordering::AcqRel)
@@ -2154,20 +2266,47 @@ impl ScriptContext {
                     assigned.drain().collect::<Vec<_>>()
                 };
                 for name in assigned_keys {
-                    if name.starts_with("__")
-                        || self.builtin_globals.contains(&name)
-                        || self.user_global_key_set.contains(&name)
-                    {
+                    if name.starts_with("__") || self.builtin_globals.contains(&name) {
+                        continue;
+                    }
+                    if self.user_global_key_set.contains(&name) {
+                        if !self.proxied_scalar_global_keys.contains(&name) {
+                            // Raw compound globals were already checked above.
+                            continue;
+                        }
+                        if let Ok(lua_value) = self.env().get::<LuaValue>(name.as_str()) {
+                            if is_proxyable_lua_scalar(&lua_value) {
+                                if !self.state.get_ref(&name).is_some_and(|current| {
+                                    lua_scalar_matches_json(&lua_value, current)
+                                }) && let Ok(value) = self.lua().from_value::<Value>(lua_value)
+                                {
+                                    self.state.set(name.clone(), value);
+                                    self.changed_public_members.push(name.clone());
+                                }
+                            } else {
+                                let value_for_env = lua_value.clone();
+                                let _ = self.unproxy_scalar_global(&name, value_for_env);
+                                if !matches!(lua_value, LuaValue::Nil | LuaValue::Function(_))
+                                    && let Ok(value) = self.lua().from_value::<Value>(lua_value)
+                                {
+                                    self.state.set(name.clone(), value);
+                                    self.changed_public_members.push(name.clone());
+                                }
+                            }
+                        }
                         continue;
                     }
                     self.user_global_key_set.insert(name.clone());
                     self.user_global_keys.push(name.clone());
                     if let Ok(lua_value) = self.env().get::<LuaValue>(name.as_str())
                         && !matches!(lua_value, LuaValue::Nil | LuaValue::Function(_))
-                        && let Ok(value) = self.lua().from_value::<Value>(lua_value)
+                        && let Ok(value) = self.lua().from_value::<Value>(lua_value.clone())
                     {
                         self.state.set(name.clone(), value);
-                        self.changed_public_members.push(name);
+                        self.changed_public_members.push(name.clone());
+                        if is_proxyable_lua_scalar(&lua_value) {
+                            let _ = self.proxy_scalar_global(&name, lua_value);
+                        }
                     }
                 }
             }
@@ -2347,13 +2486,20 @@ impl ScriptContext {
     }
 
     #[cfg(test)]
-    pub(crate) fn sync_known_globals_without_scalar_gate_for_benchmark(&mut self) {
+    pub(crate) fn sync_known_globals_with_scalar_gate_for_benchmark(&mut self) {
         for key in &self.user_global_keys {
-            if let Ok(lua_value) = self.env().get::<LuaValue>(key.as_str())
-                && !matches!(lua_value, LuaValue::Nil | LuaValue::Function(_))
-                && let Ok(value) = self.lua().from_value::<Value>(lua_value)
-            {
-                self.state.set(key.clone(), value);
+            if let Ok(lua_value) = self.env().get::<LuaValue>(key.as_str()) {
+                if matches!(lua_value, LuaValue::Nil | LuaValue::Function(_))
+                    || self
+                        .state
+                        .get_ref(key)
+                        .is_some_and(|current| lua_scalar_matches_json(&lua_value, current))
+                {
+                    continue;
+                }
+                if let Ok(value) = self.lua().from_value::<Value>(lua_value) {
+                    self.state.set(key.clone(), value);
+                }
             }
         }
     }
@@ -2390,6 +2536,13 @@ impl ScriptContext {
 
 fn is_lifecycle_handler(name: &str) -> bool {
     matches!(name, "init" | "render" | "mount" | "unmount" | "onRender")
+}
+
+fn is_proxyable_lua_scalar(value: &LuaValue) -> bool {
+    matches!(
+        value,
+        LuaValue::Boolean(_) | LuaValue::Integer(_) | LuaValue::Number(_) | LuaValue::String(_)
+    )
 }
 
 fn lua_scalar_matches_json(lua_value: &LuaValue, json_value: &Value) -> bool {

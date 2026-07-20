@@ -196,6 +196,7 @@ impl Shell {
             transfer_owned_keyboard_modes: HashMap::new(),
             service_handlers: HashMap::new(),
             backend_runtimes: HashMap::new(),
+            pending_backend_runtimes: HashMap::new(),
             backend_runtime_statuses: HashMap::new(),
             backend_supervision: HashMap::new(),
             backend_respawn: None,
@@ -391,6 +392,114 @@ impl Shell {
         }
 
         Ok(())
+    }
+
+    pub(in crate::shell) fn activate_frontend_module(
+        &mut self,
+        module_id: &str,
+        graph: &InstalledModuleGraph,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        if self
+            .components
+            .iter()
+            .any(|runtime| runtime.component.id() == module_id)
+        {
+            return Ok(VecDeque::new());
+        }
+        let frontend_catalog =
+            std::sync::Arc::new(FrontendCatalog::from_modules(&self.modules, Some(graph))?);
+        let Some(entry) = frontend_catalog
+            .top_level_surfaces()
+            .into_iter()
+            .find(|entry| entry.compiled.manifest.package.id == module_id)
+        else {
+            // Widgets and component-only frontend packages own no surface.
+            return Ok(VecDeque::new());
+        };
+        let interface_catalog = std::sync::Arc::new(self.interfaces.catalog());
+        let mut component = FrontendSurfaceComponent::new(
+            entry.compiled,
+            entry.module_dir,
+            frontend_catalog,
+            interface_catalog,
+        )
+        .with_graph_i18n_catalogs(self.graph_i18n_catalog_paths());
+        let surface_id = component.surface_id().to_string();
+        let diagnostics = self.diagnostics.register(module_id.to_string());
+        let mut requests = VecDeque::from(
+            component
+                .mount(ComponentContext {
+                    component_id: module_id.to_string(),
+                    surface_id,
+                    diagnostics,
+                })
+                .map_err(ShellRunError::Component)?,
+        );
+        component
+            .locale_changed(&self.locale)
+            .map_err(ShellRunError::Component)?;
+        let latest = self
+            .latest_service_state
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        for state in latest {
+            let event = ServiceEvent::Updated {
+                service: state.interface,
+                source_module: state.provider_id,
+                payload: state.state,
+            };
+            if component.observes_service_event(&event) {
+                requests.extend(
+                    component
+                        .handle_service_event(&event)
+                        .map_err(ShellRunError::Component)?,
+                );
+            }
+        }
+        self.register_component(Box::new(component));
+        tracing::info!(module_id, "activated frontend module live");
+        Ok(requests)
+    }
+
+    pub(in crate::shell) fn deactivate_frontend_module(
+        &mut self,
+        module_id: &str,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let Some(index) = self
+            .components
+            .iter()
+            .position(|runtime| runtime.component.id() == module_id)
+        else {
+            return Ok(VecDeque::new());
+        };
+        let surface_id = self.components[index].surface_id.clone();
+        self.destroy_all_child_surfaces(index);
+        self.presentation_engine.destroy_surface(&surface_id);
+        self.components.remove(index);
+        self.core.surfaces.remove(&surface_id);
+        self.surfaces.remove(&surface_id);
+        self.pending_popover_hides.remove(&surface_id);
+        self.transfer_owned_keyboard_modes.remove(&surface_id);
+        if self.keyboard_focus_surface.as_deref() == Some(surface_id.as_str()) {
+            self.keyboard_focus_surface = None;
+        }
+        self.rebuild_component_surface_index();
+        self.service_delivery_index.mark_dirty();
+        tracing::info!(module_id, "deactivated frontend module live");
+        match self.broadcast_core_event(CoreEvent::SurfaceVisibilityChanged {
+            surface_id,
+            visible: false,
+        }) {
+            Ok(requests) => Ok(requests),
+            Err(error) => {
+                tracing::warn!(
+                    module_id,
+                    "frontend was disabled but its visibility notification failed: {error}"
+                );
+                Ok(VecDeque::new())
+            }
+        }
     }
 
     fn graph_i18n_catalog_paths(&self) -> Vec<(String, String, PathBuf)> {

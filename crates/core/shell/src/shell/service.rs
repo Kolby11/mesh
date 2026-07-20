@@ -234,6 +234,20 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                 provider_id: provider_id.to_string(),
             })
         }
+        "shell.set-module-enabled" if event.source_module_id == "@mesh/settings" => {
+            let module_id = event
+                .payload
+                .get("module_id")
+                .and_then(|value| value.as_str())?;
+            let enabled = event
+                .payload
+                .get("enabled")
+                .and_then(|value| value.as_bool())?;
+            Some(CoreRequest::SetModuleEnabled {
+                module_id: module_id.to_string(),
+                enabled,
+            })
+        }
         "shell.toggle-debug-overlay" => Some(CoreRequest::ToggleDebugOverlay),
         "shell.toggle-debug-layout-bounds" => Some(CoreRequest::ToggleDebugLayoutBounds),
         "shell.toggle-debug-element-picker" => Some(CoreRequest::ToggleDebugElementPicker),
@@ -431,6 +445,25 @@ mod tests {
             requests.as_slice(),
             [CoreRequest::PublishDiagnostics { message }]
                 if message.contains("shell.set-provider")
+        ));
+    }
+
+    #[test]
+    fn settings_module_enabled_event_maps_to_config_request() {
+        let requests = script_events_to_requests(vec![PublishedEvent {
+            channel: "shell.set-module-enabled".into(),
+            payload: serde_json::json!({
+                "module_id": "@mesh/audio-popover",
+                "enabled": false,
+            }),
+            source_module_id: "@mesh/settings".into(),
+            source_capabilities: Default::default(),
+        }]);
+
+        assert!(matches!(
+            requests.as_slice(),
+            [CoreRequest::SetModuleEnabled { module_id, enabled: false }]
+                if module_id == "@mesh/audio-popover"
         ));
     }
 

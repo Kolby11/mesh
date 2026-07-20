@@ -471,6 +471,7 @@ pub struct ModuleGraphEntry {
     pub module_id: String,
     pub kind: String,
     pub enabled: bool,
+    pub root_layout: bool,
     pub path: String,
     pub uses_modules: Vec<String>,
     pub uses_interfaces: Vec<String>,

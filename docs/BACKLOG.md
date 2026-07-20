@@ -16,7 +16,7 @@ Section letters (A–V) in the performance items below refer to that log.
 
 ## Shell features
 
-- [ ] Settings module — surface for managing installed modules, active providers, theme, i18n → v1.22. Progress 2026-07-02: added shipped `@mesh/settings` frontend surface (`modules/frontend/settings`) with a right-overlay dialog, graph-backed installed-module list/filter, active-provider binding summary, and live theme/locale controls wired through existing `shell.set-theme` and `mesh.locale.set` paths. `@mesh/quick-settings` now exposes an Open settings action that publishes `shell.show-surface` for `@mesh/settings` and hides the quick-settings popover. The installed graph now auto-discovers the settings module and the fixture test asserts it. Added 2026-07-16: provider rows enumerate enabled alternatives and persist a settings-only `shell.set-provider` selection into the root graph with validation and atomic replacement; the UI explicitly reports that restart is required because transactional live switching remains separate work. Remaining: write-through controls for enabling/disabling modules, transactional live application of provider changes, and full-shell render verification once the environment has the `xkbcommon` development package required by `smithay-client-toolkit`.
+- [x] Settings module — surface for managing installed modules, active providers, theme, i18n → v1.22. Progress 2026-07-02: added shipped `@mesh/settings` frontend surface (`modules/frontend/settings`) with a right-overlay dialog, graph-backed installed-module list/filter, active-provider binding summary, and live theme/locale controls wired through existing `shell.set-theme` and `mesh.locale.set` paths. `@mesh/quick-settings` now exposes an Open settings action that publishes `shell.show-surface` for `@mesh/settings` and hides the quick-settings popover. The installed graph now auto-discovers the settings module and the fixture test asserts it. Added 2026-07-16: provider rows enumerate enabled alternatives and use a settings-only `shell.set-provider` path that starts the candidate in isolation, keeps the current provider active until readiness, and persists the selection atomically before the live handoff. Module rows apply enable/disable decisions live for both auto-discovery and explicit-inventory root graphs; frontend surfaces are mounted or torn down dynamically, inactive backend graph changes take effect immediately, and configuration is rolled back if graph reload or frontend activation fails. The UI protects itself, the active root layout, active providers, and pending providers from disable actions. Full-shell verification now mounts the shipped surface dynamically, publishes the real debug graph, renders through the shell and presentation pipeline, and asserts configured geometry plus substantial painted output.
 - [ ] Popups / overlays — transient surfaces with custom content and dismiss behavior → v1.22
 
 ### Module architecture friction redesign — 2026-06-19
@@ -385,9 +385,23 @@ reference it. The historical subsystem map is
       new-global write log now has an atomic pending flag, so handlers that do
       not create new globals skip the empty mutex drain; release benchmark over
       1M empty checks measured 5.8ms mutex drain versus 1.7ms atomic pending
-      check (~3.3x faster for that subpath). Remaining: every known global is
-      still read unless the future `_ENV` forwarding proxy/Rust-owned-global
-      architecture lands.
+      check (~3.3x faster for that subpath). Added 2026-07-20: handler-only
+      contexts now track completion of initial globals discovery explicitly
+      instead of treating an empty known-globals list as "not discovered" and
+      rescanning `_ENV` after every handler. Over 20,000 release no-op handler
+      calls with 256 functions, repeated scanning measured 789.9ms versus 4.2ms
+      with the explicit discovery flag (~188x faster); late-created globals
+      remain covered by the write log. Added later 2026-07-20: discovered scalar
+      globals now move behind an `_ENV` forwarding table, so assignments enter
+      the write log and unchanged scalars need no Lua lookup or comparison.
+      Across 5,000 release no-op handlers with 512 scalar globals, the previous
+      known-global read/equality path measured 779.7ms versus 36.1ms through the
+      write-log proxy (~21.6x faster). Live bindings read the forwarded values
+      without exposing host globals, reload restores them before execution, and
+      scalar↔table transitions retain reactive semantics. Remaining: compound
+      table globals still require reads because nested in-place mutations do not
+      assign through `_ENV`; eliminating those reads needs recursively tracked
+      tables or Rust-owned reactive values.
 - [ ] Storage reads clone per Lua access; future attempt needs shared
       immutable JSON values or lock avoidance without an extra Lua table
       lookup (I; naive Lua-side cache rejected — see log). Progress
@@ -447,8 +461,12 @@ reference it. The historical subsystem map is
 
 ### P2 — composition correctness & structure (M)
 
-- [ ] Typed handler-call linkage matches by value equality; two props bound
-      to the same handler name get the wrong args — link by prop name.
+- [x] Typed handler-call linkage preserves authored prop identity, so two props
+      bound to the same handler name retain their own typed arguments. Added
+      2026-07-20: component-call props now survive event-name normalization,
+      use distinct render-time tokens, and lower to the real namespaced handler
+      only after the child tree is built; compiler-boundary and lowering
+      regressions cover equal target handlers with different arguments.
 - [ ] `{#if}`/`{#for}` always wrap children in a synthetic `column` node;
       needs a fragment/transparent-container concept.
 - [ ] No keyed list diffing; `{#for}` identity is positional — add `key=`

@@ -208,6 +208,10 @@ pub enum CoreRequest {
         interface: String,
         provider_id: String,
     },
+    SetModuleEnabled {
+        module_id: String,
+        enabled: bool,
+    },
     /// Show a surface as a popover triggered by a specific element.
     ///
     /// The shell records `(trigger_surface, trigger_key)` on the trigger's

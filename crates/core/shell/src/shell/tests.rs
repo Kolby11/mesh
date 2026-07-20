@@ -7658,6 +7658,224 @@ fn backend_lifecycle_replacement_records_stopped_after_transient_poll_failure() 
 }
 
 #[test]
+fn pending_provider_init_failure_keeps_current_runtime_active() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/old-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+    let (candidate, _candidate_rx) =
+        backend_runtime_slot(&runtime, "mesh.audio", "@mesh/new-audio");
+    shell.stage_backend_runtime_switch(
+        "mesh.audio".to_string(),
+        candidate,
+        PathBuf::from("unused-module.json"),
+    );
+
+    shell.handle_backend_lifecycle(
+        "mesh.audio".to_string(),
+        "@mesh/new-audio".to_string(),
+        "init".to_string(),
+        "init_failed".to_string(),
+        "candidate initialization failed".to_string(),
+    );
+
+    assert_eq!(
+        shell
+            .backend_runtimes
+            .get("mesh.audio")
+            .map(|slot| slot.provider_id.as_str()),
+        Some("@mesh/old-audio")
+    );
+    assert!(!shell.pending_backend_runtimes.contains_key("mesh.audio"));
+    assert_eq!(
+        shell
+            .backend_runtime_status("mesh.audio", "@mesh/new-audio")
+            .map(|entry| entry.status),
+        Some(BackendRuntimeStatus::InitFailed)
+    );
+}
+
+#[test]
+fn ready_provider_is_persisted_before_live_runtime_handoff() {
+    let runtime = Runtime::new().unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let graph_path = directory.path().join("module.json");
+    fs::write(
+        &graph_path,
+        r#"{
+  "name": "@mesh/test-config",
+  "version": "0.1.0",
+  "mesh": {
+    "schemaVersion": 1,
+    "modulesDir": "modules",
+    "providers": {"mesh.audio": "@mesh/old-audio"}
+  }
+}"#,
+    )
+    .unwrap();
+    let mut shell = Shell::new();
+    let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/old-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+    let (candidate, _candidate_rx) =
+        backend_runtime_slot(&runtime, "mesh.audio", "@mesh/new-audio");
+    shell.stage_backend_runtime_switch("mesh.audio".to_string(), candidate, graph_path.clone());
+
+    shell.handle_backend_lifecycle(
+        "mesh.audio".to_string(),
+        "@mesh/new-audio".to_string(),
+        "runtime".to_string(),
+        "running".to_string(),
+        "backend runtime started".to_string(),
+    );
+
+    let saved: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(graph_path).unwrap()).unwrap();
+    assert_eq!(saved["mesh"]["providers"]["mesh.audio"], "@mesh/new-audio");
+    assert_eq!(
+        shell
+            .backend_runtimes
+            .get("mesh.audio")
+            .map(|slot| slot.provider_id.as_str()),
+        Some("@mesh/new-audio")
+    );
+    assert!(!shell.pending_backend_runtimes.contains_key("mesh.audio"));
+}
+
+#[test]
+fn ready_provider_write_failure_keeps_current_runtime_active() {
+    let runtime = Runtime::new().unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let mut shell = Shell::new();
+    let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/old-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+    let (candidate, _candidate_rx) =
+        backend_runtime_slot(&runtime, "mesh.audio", "@mesh/new-audio");
+    shell.stage_backend_runtime_switch(
+        "mesh.audio".to_string(),
+        candidate,
+        directory.path().join("missing-module.json"),
+    );
+
+    shell.handle_backend_lifecycle(
+        "mesh.audio".to_string(),
+        "@mesh/new-audio".to_string(),
+        "runtime".to_string(),
+        "running".to_string(),
+        "backend runtime started".to_string(),
+    );
+
+    assert_eq!(
+        shell
+            .backend_runtimes
+            .get("mesh.audio")
+            .map(|slot| slot.provider_id.as_str()),
+        Some("@mesh/old-audio")
+    );
+    assert_eq!(
+        shell
+            .backend_runtime_status("mesh.audio", "@mesh/new-audio")
+            .map(|entry| entry.status),
+        Some(BackendRuntimeStatus::Failed)
+    );
+}
+
+#[test]
+fn frontend_module_deactivation_removes_runtime_and_destroys_surface() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    shell.register_component(Box::new(RecordingComponent::new(Arc::new(Mutex::new(
+        Vec::new(),
+    )))));
+
+    let requests = shell.deactivate_frontend_module("@test/recording").unwrap();
+
+    assert!(requests.is_empty());
+    assert!(shell.components.is_empty());
+    assert!(!shell.component_by_surface.contains_key("@test/recording"));
+    assert_eq!(
+        shell.presentation_engine.testing_destroyed_surfaces(),
+        &["@test/recording".to_string()]
+    );
+}
+
+#[test]
+fn frontend_module_activation_mounts_shipped_surface_live() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    shell.discover_modules();
+    shell.resolve_modules().unwrap();
+    let graph = shell.load_installed_module_graph_cached().unwrap().clone();
+
+    let mut requests = shell
+        .activate_frontend_module("@mesh/settings", &graph)
+        .unwrap();
+
+    assert!(!requests.is_empty());
+    shell.drain_requests(&mut requests).unwrap();
+    assert!(
+        shell
+            .components
+            .iter()
+            .any(|runtime| runtime.component.id() == "@mesh/settings")
+    );
+    assert!(shell.component_by_surface.contains_key("@mesh/settings"));
+
+    let surface = shell.surfaces.get_mut("@mesh/settings").unwrap();
+    surface.width = 420;
+    surface.height = 1200;
+    let mut requests = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@mesh/settings".into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut requests).unwrap();
+    shell.render_components().unwrap();
+    let mut requests = shell.publish_debug_snapshot().unwrap();
+    shell.drain_requests(&mut requests).unwrap();
+    shell.render_components().unwrap();
+
+    let runtime = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.surface_id == "@mesh/settings")
+        .unwrap();
+    let buffer = runtime
+        .parent
+        .paint_buffer
+        .as_ref()
+        .expect("settings surface should have a full-shell paint buffer");
+    let opaque_pixels = buffer
+        .data
+        .chunks_exact(4)
+        .filter(|pixel| pixel[3] != 0)
+        .count();
+    assert!(
+        opaque_pixels > 20_000,
+        "settings surface should paint substantial visible content, got {opaque_pixels} opaque pixels"
+    );
+    assert!(
+        shell
+            .presentation_engine
+            .testing_presented_surfaces()
+            .iter()
+            .any(|surface| surface == "@mesh/settings")
+    );
+    let config = runtime
+        .parent
+        .last_surface_config
+        .as_ref()
+        .expect("settings surface should be configured through the shell renderer");
+    assert_eq!(config.width, 420);
+    assert!(
+        (1000..=1200).contains(&config.height),
+        "settings content should fit the verification viewport without collapsing: {}",
+        config.height
+    );
+}
+
+#[test]
 fn backend_lifecycle_init_failure_removes_command_handler() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
