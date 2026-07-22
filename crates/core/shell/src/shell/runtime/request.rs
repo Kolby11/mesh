@@ -436,6 +436,7 @@ impl Shell {
                 margin_right: surface.margin_right,
                 margin_bottom: surface.margin_bottom,
                 margin_left: surface.margin_left,
+                blur: surface.blur,
             }
         } else {
             LayerSurfaceConfig {
@@ -451,6 +452,7 @@ impl Shell {
                 margin_right: 0,
                 margin_bottom: 0,
                 margin_left: 0,
+                blur: surface.blur,
             }
         };
 

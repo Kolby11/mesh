@@ -1274,7 +1274,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         let Some(display_list) = child_display_lists.get(&node.id) else {
             return Vec::new();
         };
-        mesh_core_render::display_list::backdrop_blur_regions(display_list.paint_commands())
+        // Stable full-tree regions: deriving these from `paint_commands` would
+        // drop the blurred nodes on scoped retained repaints, leaving an empty
+        // set that the compositor reads as "blur the whole surface".
+        display_list.blur_regions().to_vec()
     }
 
     fn child_hide_transition_ms(&self, node_key: &str) -> u64 {
@@ -1502,6 +1505,10 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn display_list_paint_commands(&self) -> &[DisplayPaintCommand] {
         self.retained_display_list.paint_commands()
+    }
+
+    fn display_list_blur_regions(&self) -> &[DamageRect] {
+        self.retained_display_list.blur_regions()
     }
 
     fn display_list_generation(&self) -> u64 {

@@ -144,7 +144,11 @@ end
         border-width: 2px;
         border-style: solid;
         border-color: transparent;
-        box-shadow: 0px 6px 18px rgba(0, 0, 0, 0.34);
+        /* No drop shadow: the core's frosted background is translucent, and the
+        renderer paints the shadow disc *behind* the fill where it shows through
+        the translucency as an opaque dark backing — hiding the compositor blur
+        that should read as the button's background. */
+        box-shadow: none;
         color: var(--color-on-surface);
         /* Frosted glass: translucent core over compositor-blurred backdrop
         (org_kde_kwin_blur on the promoted popup surface); also blurs any

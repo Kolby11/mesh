@@ -198,6 +198,12 @@ pub struct RetainedDisplayList {
     paint_commands: Arc<[DisplayPaintCommand]>,
     command_kinds: Arc<[DisplayPaintCommandKind]>,
     backdrop_regions: Vec<DamageRect>,
+    /// Compositor blur regions for `org_kde_kwin_blur`, computed from the full
+    /// widget tree (not the scoped `paint_commands` selection). Deriving them
+    /// from `paint_commands` would drop the blur nodes on partial retained
+    /// updates, yielding an empty region set that flips the compositor to
+    /// whole-surface blur.
+    blur_regions: Vec<DamageRect>,
     last_metrics: DisplayListMetrics,
     last_damage_rects: Vec<DamageRect>,
 }
@@ -222,6 +228,7 @@ impl Default for RetainedDisplayList {
             paint_commands: Vec::new().into(),
             command_kinds: Vec::new().into(),
             backdrop_regions: Vec::new(),
+            blur_regions: Vec::new(),
             last_metrics: DisplayListMetrics::default(),
             last_damage_rects: Vec::new(),
         }
@@ -1085,6 +1092,9 @@ impl RetainedDisplayList {
         };
 
         let backdrop_regions = compute_backdrop_regions(paint_commands.as_ref(), surface);
+        // Computed from the full `root` tree, not `paint_commands`, so scoped
+        // retained updates never drop blur nodes (see field docs).
+        let blur_regions = backdrop_blur_regions_from_tree(root, offset_x, offset_y, surface);
 
         let mut damage: Option<DamageRect> = None;
         let mut damage_rects = std::mem::take(&mut self.last_damage_rects);
@@ -1213,6 +1223,7 @@ impl RetainedDisplayList {
         self.paint_commands = paint_commands;
         self.command_kinds = command_kinds;
         self.backdrop_regions = backdrop_regions;
+        self.blur_regions = blur_regions;
         self.root_id = Some(root.id);
         self.retained_tree_generation = retained_tree_generation;
         self.surface_size = Some((surface.width, surface.height));
@@ -1380,6 +1391,13 @@ impl RetainedDisplayList {
 
     pub fn paint_commands(&self) -> &[DisplayPaintCommand] {
         self.paint_commands.as_ref()
+    }
+
+    /// Stable compositor blur regions for this surface, derived from the full
+    /// widget tree during the last rebuild. Callers hand these to
+    /// `org_kde_kwin_blur`; an empty slice means the surface has no blur.
+    pub fn blur_regions(&self) -> &[DamageRect] {
+        &self.blur_regions
     }
 
     pub fn paint_command_kinds(&self) -> &[DisplayPaintCommandKind] {
@@ -2349,6 +2367,63 @@ fn command_bounds(command: &DisplayPaintCommand) -> DamageRect {
     }
 }
 
+/// Full-tree compositor blur regions, keyed off `backdrop-filter` on the actual
+/// widget tree rather than the current frame's `paint_commands`. Scoped retained
+/// updates only rebuild the dirty subtree's paint commands, so deriving blur
+/// regions from `paint_commands` intermittently drops the blur nodes and returns
+/// an empty set — which `org_kde_kwin_blur` interprets as "blur the whole
+/// surface". Walking `root` keeps the regions stable across partial repaints.
+/// `offset_x`/`offset_y` are the same paint origin the display list was built
+/// with (surface-local), so the rects line up with the painted content.
+pub fn backdrop_blur_regions_from_tree(
+    root: &WidgetNode,
+    offset_x: f32,
+    offset_y: f32,
+    surface: DamageRect,
+) -> Vec<DamageRect> {
+    let mut regions = Vec::new();
+    collect_backdrop_blur_regions(root, offset_x, offset_y, surface, &mut regions);
+    regions
+}
+
+fn collect_backdrop_blur_regions(
+    node: &WidgetNode,
+    offset_x: f32,
+    offset_y: f32,
+    surface: DamageRect,
+    regions: &mut Vec<DamageRect>,
+) {
+    if node_is_explicitly_hidden(node) {
+        return;
+    }
+    let transform = node.computed_style.transform;
+    let offset_x = offset_x + transform.translate_x;
+    let offset_y = offset_y + transform.translate_y;
+
+    if node.computed_style.backdrop_filter.blur_radius > 0.0
+        && node.layout.width > 0.0
+        && node.layout.height > 0.0
+    {
+        let layout = transformed_layout_at(node, offset_x, offset_y);
+        if let Some(bounds) = blur_bounds_from_layout(layout) {
+            for rect in
+                rounded_region_bands(bounds, node.computed_style.border_radius.top_left, surface)
+            {
+                if !regions.contains(&rect) {
+                    regions.push(rect);
+                }
+            }
+        }
+    }
+
+    let scroll = node.resolved_scroll_metrics();
+    let child_offset_x = offset_x - scroll.x;
+    let child_offset_y = offset_y - scroll.y;
+    for child in &node.children {
+        collect_backdrop_blur_regions(child, child_offset_x, child_offset_y, surface, regions);
+    }
+}
+
 /// Logical-coordinate regions for display commands whose node has an active
 /// `backdrop-filter: blur(...)`. Keeping disjoint nodes separate avoids
 /// asking the compositor to blur transparent gaps between popup items.
@@ -2369,24 +2444,32 @@ pub fn backdrop_blur_regions(commands: &[DisplayPaintCommand]) -> Vec<DamageRect
     regions
 }
 
-/// Approximate the node's actual rounded painted shape with horizontal
-/// rectangles accepted by `wl_region`. A fully rounded 36×36 option therefore
-/// produces a circular mask instead of a 36×36 square. Rectangular surfaces
-/// remain a single protocol rectangle.
-fn rounded_blur_regions(command: &DisplayPaintCommand) -> Vec<DamageRect> {
-    let layout = command.node.layout;
+/// Clamp a (possibly transformed, possibly off-surface) layout rect to the
+/// integer `wl_region` bounds used for blur, matching the ceil/floor rounding
+/// the painter uses. Returns `None` for degenerate rects.
+fn blur_bounds_from_layout(layout: LayoutRect) -> Option<DamageRect> {
     let left = layout.x.max(0.0).ceil() as u32;
     let top = layout.y.max(0.0).ceil() as u32;
     let right = (layout.x + layout.width).max(0.0).floor() as u32;
     let bottom = (layout.y + layout.height).max(0.0).floor() as u32;
     if right <= left || bottom <= top {
-        return Vec::new();
+        return None;
     }
-    let bounds = DamageRect {
+    Some(DamageRect {
         x: left,
         y: top,
         width: right - left,
         height: bottom - top,
+    })
+}
+
+/// Approximate the node's actual rounded painted shape with horizontal
+/// rectangles accepted by `wl_region`. A fully rounded 36×36 option therefore
+/// produces a circular mask instead of a 36×36 square. Rectangular surfaces
+/// remain a single protocol rectangle.
+fn rounded_blur_regions(command: &DisplayPaintCommand) -> Vec<DamageRect> {
+    let Some(bounds) = blur_bounds_from_layout(command.node.layout) else {
+        return Vec::new();
     };
     let clip = DamageRect {
         x: command.clip.x.max(0) as u32,
@@ -2394,10 +2477,14 @@ fn rounded_blur_regions(command: &DisplayPaintCommand) -> Vec<DamageRect> {
         width: command.clip.width.max(0) as u32,
         height: command.clip.height.max(0) as u32,
     };
-    let radius = command
-        .node
-        .style
-        .border_radius
+    rounded_region_bands(bounds, command.node.style.border_radius, clip)
+}
+
+/// Decompose a rounded rectangle (`bounds` + corner `radius`) into horizontal
+/// bands clipped to `clip`, approximating the painted rounded shape with
+/// `wl_region`-friendly rectangles.
+fn rounded_region_bands(bounds: DamageRect, radius: f32, clip: DamageRect) -> Vec<DamageRect> {
+    let radius = radius
         .max(0.0)
         .min(bounds.width.min(bounds.height) as f32 * 0.5);
     if radius < 0.5 {
@@ -6468,6 +6555,53 @@ mod tests {
                 height: 64,
             }],
             "active backdrop region should be the node rect plus 12px pad"
+        );
+    }
+
+    #[test]
+    fn blur_regions_come_from_full_tree_not_scoped_paint_commands() {
+        // Popup-shaped case: transparent root with an opaque sibling beneath a
+        // frosted node. The frosted node's compositor blur region must be the
+        // node rect regardless of which subtree a scoped repaint selects.
+        let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+        root.computed_style.background_color = Color::TRANSPARENT;
+        root.children.push(node(2, "box", 0.0, 0.0, 50.0, 100.0));
+        root.children.push(frosted_node(3, 20.0, 20.0, 40.0, 40.0));
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 100, 100, true, true);
+        let expected = vec![DamageRect {
+            x: 20,
+            y: 20,
+            width: 40,
+            height: 40,
+        }];
+        assert_eq!(
+            list.blur_regions(),
+            expected.as_slice(),
+            "full rebuild should expose the frosted node's blur region"
+        );
+
+        // A scoped repaint that only marks the opaque sibling dirty rebuilds a
+        // partial paint-command set that need not contain the frosted node.
+        // Blur regions are computed from the full tree, so they must not
+        // collapse to empty (which the compositor reads as whole-surface blur).
+        list.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                material: 1,
+                ..Default::default()
+            },
+            &HashSet::from([2]),
+            100,
+            100,
+            false,
+            true,
+        );
+        assert_eq!(
+            list.blur_regions(),
+            expected.as_slice(),
+            "scoped repaint must not drop the frosted node's blur region"
         );
     }
 

@@ -43,13 +43,7 @@ fn text_node(text: &str, x: f32, y: f32, width: f32, height: f32, color: Color) 
 }
 
 fn pixel(buffer: &PixelBuffer, x: u32, y: u32) -> Color {
-    let offset = (y * buffer.stride + x * 4) as usize;
-    Color {
-        b: buffer.data[offset],
-        g: buffer.data[offset + 1],
-        r: buffer.data[offset + 2],
-        a: buffer.data[offset + 3],
-    }
+    buffer.get_pixel(x, y)
 }
 
 #[test]

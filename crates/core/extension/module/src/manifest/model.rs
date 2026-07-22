@@ -767,6 +767,13 @@ pub struct SurfaceLayoutSection {
     /// "none" | "on_demand" | "exclusive" (durable default; runtime may override)
     #[serde(default)]
     pub keyboard_mode: Option<String>,
+    /// Request compositor background blur for this surface. MESH cannot force
+    /// blur through a Wayland protocol on every compositor (e.g. Hyprland does
+    /// not expose `org_kde_kwin_blur`); instead, when this is true the surface
+    /// is given a `:blur`-suffixed layer-shell namespace that a single
+    /// compositor rule can target (Hyprland: `layerrule = blur, :blur$`).
+    #[serde(default)]
+    pub blur: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]

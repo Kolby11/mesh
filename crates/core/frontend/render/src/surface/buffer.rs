@@ -5,7 +5,8 @@ use skia_safe::{
     surfaces,
 };
 
-/// A BGRA8888 pixel buffer.
+/// A premultiplied-alpha BGRA8888 pixel buffer, matching Wayland
+/// `wl_shm::Format::Argb8888` on little-endian hosts.
 #[derive(Debug, Clone)]
 pub struct PixelBuffer {
     pub data: Vec<u8>,
@@ -77,7 +78,7 @@ impl PixelBuffer {
             }
             return true;
         }
-        let pixel = [color.b, color.g, color.r, color.a];
+        let pixel = premultiplied_bgra(color);
         for py in y..end_y {
             let start = (py * self.stride + x * 4) as usize;
             let end = start + row_bytes;
@@ -89,7 +90,8 @@ impl PixelBuffer {
         true
     }
 
-    /// Get a single pixel. Returns transparent black if out of bounds. BGRA → Color.
+    /// Get a single pixel as straight-alpha [`Color`]. Returns transparent
+    /// black if out of bounds.
     pub fn get_pixel(&self, x: u32, y: u32) -> Color {
         if x >= self.width || y >= self.height {
             return Color::TRANSPARENT;
@@ -98,12 +100,12 @@ impl PixelBuffer {
         if offset + 3 >= self.data.len() {
             return Color::TRANSPARENT;
         }
-        Color {
-            b: self.data[offset],
-            g: self.data[offset + 1],
-            r: self.data[offset + 2],
-            a: self.data[offset + 3],
-        }
+        unpremultiplied_color(
+            self.data[offset],
+            self.data[offset + 1],
+            self.data[offset + 2],
+            self.data[offset + 3],
+        )
     }
 
     /// Set a single pixel. Coordinates are bounds-checked.
@@ -113,10 +115,7 @@ impl PixelBuffer {
         }
         let offset = (y * self.stride + x * 4) as usize;
         if offset + 3 < self.data.len() {
-            self.data[offset] = color.b;
-            self.data[offset + 1] = color.g;
-            self.data[offset + 2] = color.r;
-            self.data[offset + 3] = color.a;
+            self.data[offset..offset + 4].copy_from_slice(&premultiplied_bgra(color));
         }
     }
 
@@ -181,7 +180,7 @@ impl PixelBuffer {
         let info = ImageInfo::new(
             (self.width as i32, self.height as i32),
             ColorType::BGRA8888,
-            AlphaType::Unpremul,
+            AlphaType::Premul,
             None,
         );
         let Some(mut surface) = surfaces::wrap_pixels(
@@ -230,7 +229,7 @@ impl<'a> PixelCanvasSession<'a> {
             let info = ImageInfo::new(
                 (self.buffer.width as i32, self.buffer.height as i32),
                 ColorType::BGRA8888,
-                AlphaType::Unpremul,
+                AlphaType::Premul,
                 None,
             );
             let borrows = surfaces::wrap_pixels(
@@ -284,6 +283,32 @@ fn fill_bgra_row(dst: &mut [u8], pixel: &[u8; 4]) {
     if remainder > 0 {
         let (head, tail) = dst.split_at_mut(width);
         tail[..remainder].copy_from_slice(&head[..remainder]);
+    }
+}
+
+fn premultiplied_bgra(color: Color) -> [u8; 4] {
+    let alpha = u16::from(color.a);
+    let premultiply = |channel: u8| ((u16::from(channel) * alpha + 127) / 255) as u8;
+    [
+        premultiply(color.b),
+        premultiply(color.g),
+        premultiply(color.r),
+        color.a,
+    ]
+}
+
+fn unpremultiplied_color(b: u8, g: u8, r: u8, a: u8) -> Color {
+    if a == 0 {
+        return Color::TRANSPARENT;
+    }
+    let alpha = u32::from(a);
+    let unpremultiply =
+        |channel: u8| ((u32::from(channel) * 255 + alpha / 2) / alpha).min(255) as u8;
+    Color {
+        b: unpremultiply(b),
+        g: unpremultiply(g),
+        r: unpremultiply(r),
+        a,
     }
 }
 
@@ -344,5 +369,25 @@ mod tests {
         let mut buf = PixelBuffer::new(1, 1);
         buf.blend_pixel(0, 0, Color::WHITE, 128);
         assert_eq!(&buf.data[0..4], &[128, 128, 128, 128]);
+    }
+
+    #[test]
+    fn translucent_pixels_are_stored_premultiplied_for_wayland() {
+        let mut buf = PixelBuffer::new(1, 1);
+        let color = Color {
+            r: 224,
+            g: 49,
+            b: 17,
+            a: 102,
+        };
+
+        buf.clear(color);
+
+        assert_eq!(&buf.data[0..4], &[7, 20, 90, 102]);
+        let round_trip = buf.get_pixel(0, 0);
+        assert_eq!(round_trip.a, color.a);
+        assert!((i16::from(round_trip.r) - i16::from(color.r)).abs() <= 1);
+        assert!((i16::from(round_trip.g) - i16::from(color.g)).abs() <= 1);
+        assert!((i16::from(round_trip.b) - i16::from(color.b)).abs() <= 1);
     }
 }

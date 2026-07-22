@@ -21,6 +21,10 @@ pub struct SurfaceLayoutSettings {
     pub margin_right: i32,
     pub margin_bottom: i32,
     pub margin_left: i32,
+    /// Opt this surface into compositor background blur. Surfaces up the layer
+    /// stack use this to acquire a `:blur`-suffixed compositor namespace that a
+    /// single blur rule can target (see [`SurfaceLayoutSection::blur`]).
+    pub blur: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +59,7 @@ pub fn generic_surface_layout_fallback() -> SurfaceLayoutSettings {
         margin_right: 0,
         margin_bottom: 0,
         margin_left: 0,
+        blur: false,
     }
 }
 
@@ -96,6 +101,9 @@ pub fn surface_layout_from_manifest(manifest: &Manifest) -> SurfaceLayoutSetting
         layout.margin_right = margins.right;
         layout.margin_bottom = margins.bottom;
         layout.margin_left = margins.left;
+    }
+    if let Some(blur) = surface.blur {
+        layout.blur = blur;
     }
 
     layout
@@ -189,6 +197,12 @@ pub fn load_frontend_module_settings(
         .and_then(|v| i32::try_from(v).ok())
     {
         layout.margin_left = v;
+    }
+    if let Some(blur) = surface
+        .and_then(|value| value.get("blur"))
+        .and_then(serde_json::Value::as_bool)
+    {
+        layout.blur = blur;
     }
 
     let props = load_prop_settings(&raw);

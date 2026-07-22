@@ -1,0 +1,58 @@
+<template>
+  <box class="opacity-test-shell">
+    <column class="opacity-test-stack">
+      <box class="heading"><text class="heading-label">NO BLUR - OPACITY ONLY</text></box>
+      <box class="band band-1"><text class="band-label">WHITE - 5% fill</text></box>
+      <box class="band band-2"><text class="band-label">WHITE - 15% fill</text></box>
+      <box class="band band-3"><text class="band-label">WHITE - 30% fill</text></box>
+      <box class="band band-4"><text class="band-label">WHITE - 50% fill</text></box>
+    </column>
+  </box>
+</template>
+
+<script lang="luau">
+</script>
+
+<style>
+.opacity-test-shell {
+    width: 640px;
+    height: 286px;
+    padding: 0;
+    background: transparent;
+}
+
+.opacity-test-stack {
+    width: 100%;
+    height: 100%;
+    gap: 6px;
+}
+
+.heading {
+    width: 100%;
+    height: 34px;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.70);
+    border-radius: 10px;
+}
+
+.band {
+    width: 100%;
+    height: 56px;
+    justify-content: center;
+    align-items: center;
+    border-radius: 12px;
+}
+
+.band-1 { background: rgba(255, 255, 255, 0.05); }
+.band-2 { background: rgba(255, 255, 255, 0.15); }
+.band-3 { background: rgba(255, 255, 255, 0.30); }
+.band-4 { background: rgba(255, 255, 255, 0.50); }
+
+.heading-label,
+.band-label {
+    font-size: 18px;
+    font-weight: 700;
+    color: #ffffff;
+}
+</style>

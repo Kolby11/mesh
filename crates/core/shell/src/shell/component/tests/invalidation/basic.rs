@@ -40,6 +40,10 @@ impl ShellSurface for CountingSurface {
         self.layout_calls += 1;
     }
 
+    fn set_blur(&mut self, _blur: bool) {
+        self.layout_calls += 1;
+    }
+
     fn show(&mut self) {
         self.visibility_calls += 1;
     }

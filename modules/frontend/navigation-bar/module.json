@@ -92,7 +92,8 @@
       "layer": "top",
       "exclusive_zone": 56,
       "keyboard_mode": "none",
-      "visible_on_start": true
+      "visible_on_start": true,
+      "blur": true
     },
     "provides": {
       "i18n": [

@@ -1,0 +1,30 @@
+{
+  "name": "@mesh/opacity-test",
+  "version": "0.1.0",
+  "description": "Opacity control surface without compositor blur.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "uses": {
+      "capabilities": [
+        "shell.surface",
+        "theme.read"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "top",
+      "layer": "overlay",
+      "exclusive_zone": 0,
+      "keyboard_mode": "none",
+      "visible_on_start": true,
+      "blur": false,
+      "margins": { "top": 90, "right": 0, "bottom": 0, "left": 0 }
+    },
+    "accessibility": {
+      "role": "status",
+      "label": "Opacity test",
+      "description": "Translucent controls rendered without compositor blur"
+    }
+  }
+}

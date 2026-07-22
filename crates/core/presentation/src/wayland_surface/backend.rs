@@ -25,6 +25,10 @@ pub struct LayerSurfaceConfig {
     pub margin_right: i32,
     pub margin_bottom: i32,
     pub margin_left: i32,
+    /// When true the compositor-facing namespace is suffixed with `:blur` so a
+    /// single compositor rule can blur every opted-in MESH surface (Hyprland:
+    /// `layerrule = blur, :blur$`). See [`LayerSurfaceConfig::wayland_namespace`].
+    pub blur: bool,
 }
 
 impl Default for LayerSurfaceConfig {
@@ -42,6 +46,7 @@ impl Default for LayerSurfaceConfig {
             margin_right: 0,
             margin_bottom: 0,
             margin_left: 0,
+            blur: false,
         }
     }
 }
@@ -51,6 +56,18 @@ impl LayerSurfaceConfig {
         let mut cfg = self.clone();
         cfg.keyboard_mode = keyboard_mode;
         cfg
+    }
+
+    /// The namespace handed to the compositor when creating the layer surface.
+    /// Blur-opted surfaces get a `:blur` suffix so one compositor rule targets
+    /// them all — MESH cannot request blur through a protocol on every
+    /// compositor, so it encodes the intent in the namespace instead.
+    pub(super) fn wayland_namespace(&self) -> String {
+        if self.blur {
+            format!("{}:blur", self.namespace)
+        } else {
+            self.namespace.clone()
+        }
     }
 }
 
@@ -918,7 +935,7 @@ impl LayerShellBackend {
                     &qh,
                     wl_surface,
                     map_layer(cfg.layer),
-                    Some(cfg.namespace.clone()),
+                    Some(cfg.wayland_namespace()),
                     None,
                 );
                 self.state.insert_surface(
@@ -956,15 +973,12 @@ impl LayerShellBackend {
                         entry.viewport = Some(viewporter.get_viewport(&wl_surface, &qh, ()));
                     }
                 }
-                // Create kde_blur object lazily (BLUR-01): will be used when
-                // update_blur_regions is called with at least one region.
-                if let Some(ref manager) = self.state.blur_manager {
-                    if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
-                        let wl_surface = entry.wl_surface().clone();
-                        let qh = self.state.qh.clone();
-                        entry.kde_blur = Some(manager.create(&wl_surface, &qh, ()));
-                    }
-                }
+                // The kde_blur object is created lazily (BLUR-01) when the first
+                // non-empty blur region is committed in `present_with_damage`.
+                // Creating it eagerly here would enable the compositor's default
+                // whole-surface blur on every surface — including ones with no
+                // `backdrop-filter` at all — because an org_kde_kwin_blur object
+                // with no region set blurs the entire surface.
             }
         }
     }
@@ -1262,15 +1276,18 @@ impl LayerShellBackend {
             if let Some(entry) = self.state.surfaces.get_mut(surface_id)
                 && entry.configured
             {
-                // Clear compositor blur before hiding (WR-01 / BLUR-04).
-                if let Some(ref kde_blur) = entry.kde_blur {
-                    if entry.blur_committed {
-                        kde_blur.set_region(None);
-                        kde_blur.commit();
-                        entry.blur_committed = false;
-                        entry.blur_region_dirty = false;
+                // Clear compositor blur before hiding (WR-01 / BLUR-04). A null
+                // region blurs the whole surface, so destroy the blur object to
+                // actually remove it rather than calling set_region(None).
+                if let Some(kde_blur) = entry.kde_blur.take() {
+                    if let Some(ref manager) = self.state.blur_manager {
+                        let wl_surface = entry.wl_surface().clone();
+                        manager.unset(&wl_surface);
                     }
+                    kde_blur.release();
                 }
+                entry.blur_committed = false;
+                entry.blur_region_dirty = false;
                 entry.blur_regions.clear();
                 entry.hide();
             }
@@ -1343,11 +1360,21 @@ impl LayerShellBackend {
             &shm_copy_damage,
         )?;
         // Commit kde_blur region before wl_surface commit (BLUR-02, BLUR-04, CR-01)
-        if entry.blur_region_dirty
-            && let Some(ref kde_blur) = entry.kde_blur
-        {
+        if entry.blur_region_dirty {
             if !entry.blur_regions.is_empty() {
-                if let Ok(region) = Region::new(&state.compositor_state) {
+                // Lazily create the blur object the first time this surface
+                // actually needs blur (BLUR-01), so surfaces without any
+                // backdrop-filter never acquire the compositor's default
+                // whole-surface blur.
+                if entry.kde_blur.is_none()
+                    && let Some(ref manager) = state.blur_manager
+                {
+                    let wl_surface = entry.wl_surface().clone();
+                    entry.kde_blur = Some(manager.create(&wl_surface, &qh, ()));
+                }
+                if let Some(ref kde_blur) = entry.kde_blur
+                    && let Ok(region) = Region::new(&state.compositor_state)
+                {
                     for region_rect in &entry.blur_regions {
                         region.add(
                             region_rect.x as i32,
@@ -1359,15 +1386,21 @@ impl LayerShellBackend {
                     kde_blur.set_region(Some(region.wl_region()));
                     kde_blur.commit();
                     entry.blur_committed = true;
-                    entry.blur_region_dirty = false;
                 }
-            } else if entry.blur_committed {
-                // Clear the compositor's blur region when backdrop-filter is removed (CR-01).
-                kde_blur.set_region(None);
-                kde_blur.commit();
-                entry.blur_committed = false;
                 entry.blur_region_dirty = false;
             } else {
+                // No blur regions: remove blur entirely. A null region on
+                // org_kde_kwin_blur means "blur the whole surface", not "no
+                // blur", so we must unset via the manager and destroy the blur
+                // object rather than calling set_region(None) (CR-01).
+                if let Some(kde_blur) = entry.kde_blur.take() {
+                    if let Some(ref manager) = state.blur_manager {
+                        let wl_surface = entry.wl_surface().clone();
+                        manager.unset(&wl_surface);
+                    }
+                    kde_blur.release();
+                }
+                entry.blur_committed = false;
                 entry.blur_region_dirty = false;
             }
         }
@@ -2189,6 +2222,7 @@ mod tests {
             margin_right: 0,
             margin_bottom: 0,
             margin_left: 24,
+            blur: false,
         }
     }
 
@@ -2805,6 +2839,7 @@ mod tests {
             margin_right: 4,
             margin_bottom: 6,
             margin_left: 8,
+            blur: false,
         };
         let iterations = 2_000_000;
 

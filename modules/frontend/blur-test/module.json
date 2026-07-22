@@ -1,0 +1,30 @@
+{
+  "name": "@mesh/blur-test",
+  "version": "0.1.0",
+  "description": "Isolated blur debugging surface: a translucent layer surface with mesh.surface.blur enabled.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "uses": {
+      "capabilities": [
+        "shell.surface",
+        "theme.read"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "top",
+      "layer": "overlay",
+      "exclusive_zone": 0,
+      "keyboard_mode": "none",
+      "visible_on_start": true,
+      "blur": true,
+      "margins": { "top": 400, "right": 0, "bottom": 0, "left": 0 }
+    },
+    "accessibility": {
+      "role": "status",
+      "label": "Blur test",
+      "description": "Isolated compositor-blur debugging surface"
+    }
+  }
+}

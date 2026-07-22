@@ -39,6 +39,9 @@ pub trait ShellSurface {
     fn set_layer(&mut self, layer: Layer);
     fn set_keyboard_interactivity(&mut self, mode: KeyboardMode);
     fn set_margin(&mut self, top: i32, right: i32, bottom: i32, left: i32);
+    /// Opt this surface into compositor blur. The presentation layer turns this
+    /// into a `:blur`-suffixed layer-shell namespace a compositor rule targets.
+    fn set_blur(&mut self, blur: bool);
     fn show(&mut self);
     fn hide(&mut self);
 }
@@ -140,6 +143,7 @@ pub struct StubSurface {
     pub margin_right: i32,
     pub margin_bottom: i32,
     pub margin_left: i32,
+    pub blur: bool,
 }
 
 #[derive(Debug, Default)]
@@ -172,6 +176,7 @@ impl Default for StubSurface {
             margin_right: 0,
             margin_bottom: 0,
             margin_left: 0,
+            blur: false,
         }
     }
 }
@@ -203,6 +208,10 @@ impl ShellSurface for StubSurface {
         self.margin_right = right;
         self.margin_bottom = bottom;
         self.margin_left = left;
+    }
+
+    fn set_blur(&mut self, blur: bool) {
+        self.blur = blur;
     }
 
     fn show(&mut self) {

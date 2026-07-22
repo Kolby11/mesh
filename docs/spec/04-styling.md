@@ -201,3 +201,39 @@ mesh themes set <id> [--mode m]
 mesh themes tokens [group]        # dump effective (composed) tokens
 mesh themes which <token-name>    # which cascade layer supplied the value
 ```
+
+## 9. Compositor background blur
+
+**Status: shipped (namespace opt-in) + target (`org_kde_kwin_blur`).**
+
+Background ("frosted glass") blur behind a shell surface is a **compositor**
+effect: the app cannot rasterize it itself without capturing the screen. MESH
+supports it two ways, and neither invents a rendering path:
+
+1. **`org_kde_kwin_blur`** — where the compositor advertises it (KWin, some
+   wlroots setups), MESH computes per-node blur regions from the surface's
+   `backdrop-filter` and hands them to the protocol. This is what Qt/KDE's
+   `enableBlurBehind()` uses. It is a **no-op on compositors that don't
+   advertise the global** (e.g. Hyprland).
+
+2. **Namespace opt-in** — because Hyprland (and others) blur by their own
+   config keyed on the layer-shell **namespace**, a surface sets
+   `mesh.surface.blur: true`. MESH then appends `:blur` to that surface's
+   compositor namespace, so a single compositor rule targets every opted-in
+   MESH surface. On Hyprland:
+
+   ```
+   # ~/.config/hypr/hyprland.conf
+   decoration { blur { enabled = true } }
+   layerrule = blur, :blur$
+   layerrule = ignorealpha 0.2, :blur$
+   ```
+
+The two are complementary — a surface can declare both; each compositor honours
+whichever it supports. For the blur to be *visible*, the surface must be
+translucent where you want it (a frosted `background-color` with alpha < 1) and
+must not mark that area opaque; a solid fill or an opaque `box-shadow` painted
+behind a translucent fill will hide it.
+
+Popovers promoted to `xdg_popup` inherit their parent layer surface's blur on
+compositors that blur layer popups.

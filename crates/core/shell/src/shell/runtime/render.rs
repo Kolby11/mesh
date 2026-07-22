@@ -188,6 +188,7 @@ impl Shell {
                             || last.margin_right != surface.margin_right
                             || last.margin_bottom != surface.margin_bottom
                             || last.margin_left != surface.margin_left
+                            || last.blur != surface.blur
                     });
                 if config_changed && !is_popup {
                     let cfg = LayerSurfaceConfig {
@@ -203,6 +204,7 @@ impl Shell {
                         margin_right: surface.margin_right,
                         margin_bottom: surface.margin_bottom,
                         margin_left: surface.margin_left,
+                        blur: surface.blur,
                     };
                     tracing::debug!(
                         surface_id = %surface_id,
@@ -1036,7 +1038,10 @@ impl Shell {
                 self.presentation_engine
                     .update_input_region(&surface_id, input_rect);
 
-                let blur_regions = compute_blur_regions(commands);
+                let blur_regions = self.components[index]
+                    .component
+                    .display_list_blur_regions()
+                    .to_vec();
                 self.presentation_engine
                     .update_blur_regions(&surface_id, blur_regions);
                 self.components[index].target_mut(target).last_region_state = Some(region_state);
@@ -1650,6 +1655,7 @@ fn map_popover_constraint(adjustment: PopoverConstraintAdjustment) -> PopupConst
 ///
 /// Returns an empty vector when no nodes have `backdrop_filter.blur_radius > 0.0`,
 /// which means no `kde_blur` protocol calls are emitted (BLUR-04).
+#[cfg(test)]
 fn compute_blur_regions(commands: &[DisplayPaintCommand]) -> Vec<DamageRect> {
     mesh_core_render::display_list::backdrop_blur_regions(commands)
 }

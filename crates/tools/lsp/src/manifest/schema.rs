@@ -1009,6 +1009,16 @@ fn surface_layout_node() -> Node {
                 },
             ),
             field(
+                "blur",
+                false,
+                scalar(
+                    "Request compositor background blur. MESH gives the surface a \
+                     `:blur` namespace suffix a single compositor rule can target \
+                     (Hyprland: `layerrule = blur, :blur$`).",
+                    "boolean",
+                ),
+            ),
+            field(
                 "margins",
                 false,
                 obj(

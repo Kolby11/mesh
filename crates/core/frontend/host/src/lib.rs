@@ -441,6 +441,12 @@ pub trait ShellComponent: Send {
     fn display_list_paint_commands(&self) -> &[DisplayPaintCommand] {
         &[]
     }
+    /// Stable compositor blur regions for the parent surface, derived from the
+    /// full widget tree (not the scoped paint-command selection) so partial
+    /// retained repaints never collapse them to a whole-surface blur.
+    fn display_list_blur_regions(&self) -> &[DamageRect] {
+        &[]
+    }
     fn display_list_generation(&self) -> u64 {
         0
     }

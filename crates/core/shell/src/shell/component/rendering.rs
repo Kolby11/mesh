@@ -146,6 +146,7 @@ impl FrontendSurfaceComponent {
             self.surface_layout.margin_bottom,
             self.surface_layout.margin_left,
         );
+        surface.set_blur(self.surface_layout.blur);
     }
 
     /// Capture the paint-time theme into `active_theme` if it changed since
