@@ -9,7 +9,7 @@
         open={open}
         class="theme-float-shell"
         aria-label="Select theme"
-        anchor-ref="theme-button"
+        anchor-ref="themeButton"
         anchor="bottom"
         gravity="bottom"
         onpointerenter={onPopoverEnter}
@@ -20,6 +20,10 @@
             items={items}
             onselect={onSelectTheme}
             onscroll={onThemeScroll}
+            onoptionpointerenter={onOptionPointerEnter}
+            onoptionfocus={onOptionFocus}
+            onoptionblur={onOptionBlur}
+            onoptionkeydown={onOptionKeyDown}
         />
     </popover>
 </template>
@@ -29,9 +33,22 @@ local theme = require("mesh.theme")
 local BubbleOptions = require("../../shared/components/bubble-options.mesh")
 
 open = false
+local CLOSE_BRIDGE_KEY = "theme-popover-close"
+local CLOSE_BRIDGE_DELAY_MS = 400
 
--- One struct per visible slot (left/center/right); BubbleOptions only
--- iterates this array, so position and active-state classes are baked in here.
+local function cancel_bridge_close()
+    mesh.events.publish("shell.cancel-handler", { key = CLOSE_BRIDGE_KEY })
+end
+
+local function schedule_bridge_close()
+    mesh.events.publish("shell.schedule-handler", {
+        key = CLOSE_BRIDGE_KEY,
+        handler = "closeThemePopoverBridge",
+        delay_ms = CLOSE_BRIDGE_DELAY_MS,
+    })
+end
+
+-- One descriptor per visible slot; BubbleOptions owns its structural classes.
 items = {}
 
 local THEME_DARK = "mesh-default-dark"
@@ -39,9 +56,9 @@ local THEME_LIGHT = "mesh-default-light"
 local THEME_GRUVBOX = "gruvbox-dark"
 
 local THEME_OPTIONS = {
-    { id = THEME_DARK, position = "left", core = "bubble-option-core-dark", icon = "weather-clear-night" },
-    { id = THEME_LIGHT, position = "center", core = "bubble-option-core-light", icon = "weather-clear" },
-    { id = THEME_GRUVBOX, position = "right", core = "bubble-option-core-gruvbox", icon = "palette" },
+    { id = THEME_DARK, core = "bubble-option-core-dark", icon = "weather-clear-night" },
+    { id = THEME_LIGHT, core = "bubble-option-core-light", icon = "weather-clear" },
+    { id = THEME_GRUVBOX, core = "bubble-option-core-gruvbox", icon = "palette" },
 }
 
 local THEME_LABELS = {
@@ -51,23 +68,20 @@ local THEME_LABELS = {
 }
 
 local function build_option(option, current)
-    local button_class = "bubble-option bubble-option-" .. option.position
     local core_class = "bubble-option-core " .. option.core
     if option.id == current then
-        button_class = button_class .. " bubble-option-active"
         core_class = core_class .. " bubble-option-core-active"
     end
 
     return {
         id = option.id,
-        button_class = button_class,
         core_class = core_class,
-        motion_class = "bubble-options-motion bubble-options-motion-" .. option.position,
         icon_class = "bubble-option-icon",
         icon = option.icon,
         text_class = "bubble-option-text bubble-option-hidden",
         text = "",
         title = THEME_LABELS[option.id],
+        active = option.id == current,
     }
 end
 
@@ -99,12 +113,40 @@ function onThemeScroll(_event)
 end
 
 function onPopoverEnter(event)
+    cancel_bridge_close()
     self.PopoverEnter:fire(event)
 end
 
 function onPopoverLeave()
-    open = false
+    schedule_bridge_close()
     self.PopoverLeave:fire()
+end
+
+function onOptionFocus(event)
+    cancel_bridge_close()
+    self.PopoverEnter:fire(event)
+end
+
+function onOptionPointerEnter(event)
+    cancel_bridge_close()
+    self.PopoverEnter:fire(event)
+end
+
+function onOptionBlur(_event)
+    schedule_bridge_close()
+end
+
+function onOptionKeyDown(event)
+    if event and event.key == "Escape" then
+        cancel_bridge_close()
+        open = false
+        self.KeyboardDismissRequested:fire()
+    end
+end
+
+function closeThemePopoverBridge()
+    open = false
+    self.CloseRequested:fire()
 end
 </script>
 

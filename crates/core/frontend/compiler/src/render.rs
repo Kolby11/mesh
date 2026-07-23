@@ -882,16 +882,19 @@ fn build_element_node(
     node.attributes = attributes;
     node.event_handlers = event_handlers;
     node.event_handler_calls = event_handler_calls;
-    node.computed_style = build_style.resolver.resolve_node_style_for_module_indexed(
-        build_style.rules,
-        build_style.index.as_ref(),
-        &tag,
-        style_classes,
-        style_id,
-        container_context,
-        Default::default(),
-        Some(&manifest.package.id),
-    );
+    node.computed_style = build_style
+        .resolver
+        .resolve_node_style_for_module_indexed_with_inline_style(
+            build_style.rules,
+            build_style.index.as_ref(),
+            &tag,
+            style_classes,
+            style_id,
+            node.attributes.get("style").map(String::as_str),
+            container_context,
+            Default::default(),
+            Some(&manifest.package.id),
+        );
     if let Some(parent_style) = parent_style {
         inherit_text_style(&mut node.computed_style, parent_style, inherited_mask);
     }
@@ -1865,6 +1868,51 @@ import Child from "./child.mesh"
             active_box.computed_style.width,
             mesh_core_elements::Dimension::Px(42.0)
         );
+    }
+
+    #[test]
+    fn dynamic_inline_style_overrides_stylesheet_layout() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<template>
+  <box class="positioned" style={position_style}/>
+</template>
+<style>
+.positioned {
+  position: absolute;
+  left: 1px;
+  top: 2px;
+}
+</style>
+"#,
+        )
+        .unwrap();
+        let manifest = test_manifest();
+        let theme = mesh_core_theme::default_theme();
+        let state = MapStore(std::collections::HashMap::from([(
+            "position_style".to_string(),
+            serde_json::json!("left: 38px; top: 32px;"),
+        )]));
+
+        let tree = build_widget_tree_from_component(
+            &component,
+            &manifest,
+            &theme,
+            200.0,
+            80.0,
+            None,
+            "root",
+            Some(&state),
+            &[],
+        );
+
+        let positioned = tree.children.first().expect("template root");
+        assert_eq!(
+            positioned.attributes.get("style").map(String::as_str),
+            Some("left: 38px; top: 32px;")
+        );
+        assert_eq!(positioned.computed_style.inset_left, Some(38.0));
+        assert_eq!(positioned.computed_style.inset_top, Some(32.0));
     }
 
     #[test]

@@ -1,11 +1,13 @@
 <template>
   <stack class="nav-button-shell">
     <button
-      ref="language-button"
+      ref="languageButton"
       class="{trigger_class}"
       onclick={onLanguageToggle}
       onpointerenter={onLanguageEnter}
       onpointerleave={onLanguageLeave}
+      aria-haspopup="true"
+      aria-expanded="{language_aria_expanded}"
       data-tooltip-disabled="{language_tooltip_disabled}"
       title="{language_tooltip}"
       aria-label="{t('nav.language_menu')}"
@@ -22,6 +24,7 @@ local LanguagePopover = require("@mesh/language-popover")
 
 current_locale_label = "EN"
 language_surface_hidden = true
+language_aria_expanded = "false"
 language_tooltip = ""
 language_tooltip_disabled = "false"
 trigger_class = "nav-button"
@@ -29,7 +32,7 @@ trigger_class = "nav-button"
 lang_popover = nil
 local lang_popover_connected = false
 local CLOSE_BRIDGE_KEY = "language-popover-close"
-local CLOSE_BRIDGE_DELAY_MS = 180
+local CLOSE_BRIDGE_DELAY_MS = 400
 
 local function cancel_bridge_close()
     mesh.events.publish("shell.cancel-handler", { key = CLOSE_BRIDGE_KEY })
@@ -76,6 +79,7 @@ end
 
 local function sync_trigger_state()
     trigger_class = language_surface_hidden and "nav-button" or "nav-button nav-button-open"
+    language_aria_expanded = language_surface_hidden and "false" or "true"
     if language_surface_hidden then
         language_tooltip = t("nav.language_menu")
         language_tooltip_disabled = "false"
@@ -113,7 +117,10 @@ function render(self)
         lang_popover.PopoverEnter:on(function()
             cancel_bridge_close()
         end)
-        lang_popover.PopoverLeave:on(function()
+        lang_popover.CloseRequested:on(function()
+            do_close()
+        end)
+        lang_popover.KeyboardDismissRequested:on(function()
             do_close()
         end)
     end

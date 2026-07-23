@@ -1877,6 +1877,12 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             .expect("debug child tree");
         let mut classes = Vec::new();
         collect_class_attributes(&child_tree, &mut classes);
+        let option = first_node_with_class_token(&child_tree, "bubble-option")
+            .expect("child popup should contain a bubble hit target");
+        assert_eq!(
+            option.computed_style.background_color.a, 0,
+            "{handler} stationary bubble hit targets must not paint circles at their final positions"
+        );
         assert!(
             first_node_with_class_token(&child_tree, expected_core_class).is_some(),
             "{handler} child popup should render option body class {expected_core_class}, got {classes:?}"
@@ -1900,6 +1906,19 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             painted > 0,
             "{handler} promoted popup should paint visible option pixels"
         );
+        let (popup_width, popup_height) = requests[0].content_size;
+        for (x, y) in [
+            (0, 0),
+            (popup_width - 1, 0),
+            (0, popup_height - 1),
+            (popup_width - 1, popup_height - 1),
+        ] {
+            assert_eq!(
+                child_buffer.get_pixel(x, y).a,
+                0,
+                "{handler} popup corner ({x}, {y}) must stay transparent instead of painting a bounding box"
+            );
+        }
     }
 }
 

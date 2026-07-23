@@ -15,7 +15,7 @@ pub mod style;
 /// any other mesh crate.
 pub mod template;
 
-pub use parser::{ParseError, parse_component};
+pub use parser::{ParseError, parse_component, parse_inline_style};
 pub use style::*;
 pub use template::*;
 

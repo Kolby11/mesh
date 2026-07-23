@@ -5,10 +5,29 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
 </props>
 
 <template>
-    <box class="bubble-options-stage" onscroll={onscroll} aria-label={label}>
+    <box
+        class="bubble-options-stage"
+        style={bubbleStageStyle()}
+        role="menu"
+        onscroll={onscroll}
+        aria-label={label}
+    >
         {#for item in items}
-            <button class={item.button_class} onclick={onselect(item.id)} data-tooltip-disabled="true" title={item.title} aria-label={item.title}>
-                <box class={item.motion_class}>
+            <button
+                class="bubble-option"
+                style={bubbleOptionStyle(item.id)}
+                role="menuitemradio"
+                aria-checked={item.active}
+                onclick={onselect(item.id)}
+                onpointerenter={onoptionpointerenter}
+                onfocus={onoptionfocus}
+                onblur={onoptionblur}
+                onkeydown={onoptionkeydown}
+                data-tooltip-disabled="true"
+                title={item.title}
+                aria-label={item.title}
+            >
+                <box class={bubbleMotionClass(item.id)}>
                     <box class={blurCoreClass(item.core_class)}>
                         <icon class={item.icon_class} name={item.icon} size="14" />
                         <text class={item.text_class}>{item.text}</text>
@@ -22,15 +41,61 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
 <script lang="luau">
 label = "Options"
 
--- Each entry: { id, button_class, core_class, motion_class, icon_class, icon,
--- text_class, text, title }. Position (left/center/right) and active/hover
--- state are baked into button_class/core_class/motion_class by the caller,
--- since this component only iterates — it has no notion of slot position.
+-- Each entry: { id, core_class, icon_class, icon, text_class, text, title,
+-- active }. This component owns layout and structural classes; callers only
+-- describe the option's content and visual variant.
 items = {}
 
 -- Called with the selected item's `id` (onselect(item.id)).
 onselect = nil
 onscroll = nil
+onoptionpointerenter = nil
+onoptionfocus = nil
+onoptionblur = nil
+onoptionkeydown = nil
+
+local ITEM_SIZE = 36
+local HORIZONTAL_STEP = 28
+local HORIZONTAL_PADDING = 10
+local TOP_OFFSET = 8
+local ARC_DEPTH = 24
+
+local function itemIndex(id)
+    for index, item in items do
+        if item.id == id then
+            return index
+        end
+    end
+    return 1
+end
+
+function bubbleStageStyle()
+    local count = math.max(#items, 1)
+    local width = HORIZONTAL_PADDING * 2 + ITEM_SIZE + HORIZONTAL_STEP * (count - 1)
+    return "width: " .. width .. "px; height: 74px;"
+end
+
+function bubbleOptionStyle(id)
+    local count = math.max(#items, 1)
+    local index = itemIndex(id)
+    local left = HORIZONTAL_PADDING + HORIZONTAL_STEP * (index - 1)
+    local top = TOP_OFFSET
+
+    if count > 1 then
+        local normalized = (2 * (index - 1) / (count - 1)) - 1
+        top = TOP_OFFSET + ARC_DEPTH * (1 - normalized * normalized)
+    end
+
+    return string.format("left: %.2fpx; top: %.2fpx;", left, top)
+end
+
+function bubbleMotionClass(id)
+    if #items ~= 3 then
+        return "bubble-options-motion"
+    end
+    local variants = { "left", "center", "right" }
+    return "bubble-options-motion bubble-options-motion-" .. variants[itemIndex(id)]
+end
 
 function blurCoreClass(core_class)
     if props.blur_enabled then
@@ -42,9 +107,7 @@ end
 
 <style>
     .bubble-options-stage {
-        /* box defaults to width/height: fit — sized to the bounding box of
-        its absolutely-positioned option buttons, so it never needs a
-        hardcoded size here. */
+        /* One continuous popup-local hitbox spans the gaps between bubbles. */
         position: relative;
         overflow: visible;
     }
@@ -57,27 +120,13 @@ end
         align-items: center;
         padding: 0;
         border-radius: var(--radius-full);
-        /* Alpha must be nonzero: exact-0 alpha reads as "unset" and gets replaced with this tag's opaque default background. */
-        background: #00000001;
+        /* The button is a stationary hit target while its child animates in.
+        It must not emit a paint primitive at the final resting position. */
+        background: transparent;
         border-width: 0;
         opacity: 1;
         /* Overrides the theme's global background-color-first transition default. */
         transition: none;
-    }
-
-    .bubble-option-left {
-        top: 8px;
-        left: 10px;
-    }
-
-    .bubble-option-center {
-        top: 32px;
-        left: 38px;
-    }
-
-    .bubble-option-right {
-        top: 8px;
-        left: 66px;
     }
 
     .bubble-options-motion,

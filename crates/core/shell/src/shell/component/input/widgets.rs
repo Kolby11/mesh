@@ -525,7 +525,7 @@ impl FrontendSurfaceComponent {
         } else if matches!(source, "menu-item" | "command-item" | "preference-row") {
             &["menu-item", "command-item", "preference-row"]
         } else {
-            return None;
+            return rove_aria_menu_focus(tree, key, backward);
         };
         sibling_source_key(tree, key, item_tags, backward)
     }
@@ -1498,6 +1498,42 @@ fn sibling_source_key(
         (index + 1) % candidates.len()
     };
     candidates.get(next_index).cloned()
+}
+
+fn rove_aria_menu_focus(tree: &WidgetNode, key: &str, backward: bool) -> Option<String> {
+    let path = key_path(tree, key)?;
+    let menu = path.iter().rev().skip(1).find_map(|candidate| {
+        find_node_by_key(tree, candidate).filter(|node| {
+            node.attributes
+                .get("role")
+                .is_some_and(|role| role == "menu")
+        })
+    })?;
+    let mut candidates = Vec::new();
+    collect_aria_menu_item_keys(menu, &mut candidates);
+    let index = candidates.iter().position(|candidate| candidate == key)?;
+    let next_index = if backward {
+        index.checked_sub(1).unwrap_or(candidates.len() - 1)
+    } else {
+        (index + 1) % candidates.len()
+    };
+    candidates.get(next_index).cloned()
+}
+
+fn collect_aria_menu_item_keys(node: &WidgetNode, keys: &mut Vec<String>) {
+    let is_menu_item = node
+        .attributes
+        .get("role")
+        .is_some_and(|role| role.starts_with("menuitem"));
+    if is_menu_item
+        && !node_disabled(node)
+        && let Some(key) = node.mesh_key()
+    {
+        keys.push(key.to_owned());
+    }
+    for child in &node.children {
+        collect_aria_menu_item_keys(child, keys);
+    }
 }
 
 fn descendant_source_keys(tree: &WidgetNode, root_key: &str, source_tags: &[&str]) -> Vec<String> {

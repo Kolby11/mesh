@@ -150,6 +150,9 @@ impl ShellComponent for FrontendSurfaceComponent {
                     self.focused_key = None;
                     self.focus_visible_key = None;
                     self.pending_auto_focus = false;
+                    self.pending_embedded_popover_focus = false;
+                    self.embedded_popover_return_focus = None;
+                    self.pending_embedded_popover_focus_restore = false;
                     self.return_focus = None;
                     self.close_on_focus_leave = false;
                     self.keyboard_mode_override = None;
@@ -594,6 +597,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         };
         self.prune_stale_interaction_targets(&tree);
         self.apply_pending_auto_focus(&tree);
+        self.apply_pending_embedded_popover_focus(&tree);
         let mut animation_dirty_roots = if run_style_animation_pass {
             self.apply_style_animations_with_previous(
                 &mut tree,
@@ -1057,6 +1061,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.init_root_runtime()?;
         self.render_hooks_pending = true;
         self.invalidate_script_state();
+        // Prepared local-component rules own cloned selectors and declarations
+        // from the previous compilation. Keeping them would rebuild the fresh
+        // template against stale CSS after a hot reload.
+        self.prepared_component_styles.get_mut().clear();
         // Source reload may change structure, styles, scripts, local imports,
         // or render-object identities. Drop every retained render/layout cache
         // so the next paint starts from the newly compiled module rather than
@@ -1534,6 +1542,34 @@ fn retained_dirty_affects_element_metrics(dirty: RetainedTreeDirtySummary) -> bo
 }
 
 impl FrontendSurfaceComponent {
+    fn apply_pending_embedded_popover_focus(&mut self, tree: &WidgetNode) {
+        if self.pending_embedded_popover_focus_restore {
+            self.pending_embedded_popover_focus_restore = false;
+            if let Some(key) = self.embedded_popover_return_focus.take()
+                && find_node_by_key(tree, &key).is_some()
+            {
+                self.focused_key = Some(key.clone());
+                self.focus_visible_key = Some(key);
+                self.invalidate_interaction_restyle();
+            }
+            return;
+        }
+        if !self.pending_embedded_popover_focus {
+            if !contains_open_popover(tree) {
+                self.embedded_popover_return_focus = None;
+            }
+            return;
+        }
+        self.pending_embedded_popover_focus = false;
+
+        if let Some(key) = first_focusable_in_open_popover(tree) {
+            self.embedded_popover_return_focus = self.focused_key.clone();
+            self.focused_key = Some(key.clone());
+            self.focus_visible_key = Some(key);
+            self.invalidate_interaction_restyle();
+        }
+    }
+
     pub fn display_list_paint_commands(&self) -> &[DisplayPaintCommand] {
         self.retained_display_list.paint_commands()
     }
@@ -1870,6 +1906,29 @@ impl FrontendSurfaceComponent {
     ) -> Option<&mesh_core_render::FocusedProofSnapshot> {
         self.focused_proof_snapshot.as_ref()
     }
+}
+
+fn first_focusable_in_open_popover(node: &WidgetNode) -> Option<String> {
+    if source_element_tag(node) == "popover" && popover_is_open(node) {
+        return node.children.iter().find_map(first_focusable_descendant);
+    }
+    node.children
+        .iter()
+        .find_map(first_focusable_in_open_popover)
+}
+
+fn contains_open_popover(node: &WidgetNode) -> bool {
+    (source_element_tag(node) == "popover" && popover_is_open(node))
+        || node.children.iter().any(contains_open_popover)
+}
+
+fn first_focusable_descendant(node: &WidgetNode) -> Option<String> {
+    if node.accessibility.focusable
+        && let Some(key) = node.mesh_key()
+    {
+        return Some(key.to_string());
+    }
+    node.children.iter().find_map(first_focusable_descendant)
 }
 
 fn scale_damage_rect_to_buffer(

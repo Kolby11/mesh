@@ -19,7 +19,11 @@ thread_local! {
     static VARIABLE_SCRATCH: RefCell<HashMap<String, StyleValue>> =
         RefCell::new(HashMap::new());
     static CANDIDATE_RULE_SCRATCH: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+    static INLINE_STYLE_CACHE: RefCell<HashMap<Arc<str>, CachedInlineStyle>> =
+        RefCell::new(HashMap::new());
 }
+
+const MAX_INLINE_STYLE_CACHE_ENTRIES: usize = 256;
 
 /// The five CSS-inherited fields from a parent node. Used instead of cloning
 /// the full `ComputedStyle` (~60 fields) when passing parent context into
@@ -97,6 +101,7 @@ pub struct StyleNodeAttrs<'a> {
     tag: &'a str,
     classes: ClassList<'a>,
     id: Option<&'a str>,
+    inline_style: Option<&'a str>,
     key: Option<&'a str>,
     module_id: Option<&'a str>,
     state: ElementState,
@@ -176,6 +181,7 @@ impl<'a> StyleNodeAttrs<'a> {
             tag,
             classes: ClassList::from_class_slice(classes),
             id,
+            inline_style: None,
             key: None,
             module_id: None,
             state,
@@ -190,6 +196,7 @@ impl<'a> StyleNodeAttrs<'a> {
             tag: node.tag.as_str(),
             classes,
             id: node.attributes.get("id").map(|value| value.as_str()),
+            inline_style: node.attributes.get("style").map(String::as_str),
             key: node.mesh_key(),
             module_id: node.module_id(),
             state: node.state,
@@ -316,61 +323,68 @@ impl StyleRuleIndex {
         attrs: &StyleNodeAttrs,
         mut visit: impl FnMut(&'a StyleRule),
     ) {
-        CANDIDATE_RULE_SCRATCH.with(|scratch| {
-            let mut ids = scratch.borrow_mut();
-            ids.clear();
-            ids.extend_from_slice(&self.fallback);
-            if let Some(tag) = self.tag.get(attrs.tag) {
-                ids.extend_from_slice(tag);
+        self.for_each_candidate_rule_index(attrs, |idx| {
+            if let Some(rule) = rules.get(idx) {
+                visit(rule);
             }
-            for class in attrs.classes.iter() {
-                if let Some(class_ids) = self.class.get(class) {
-                    ids.extend_from_slice(class_ids);
-                }
+        });
+    }
+
+    fn for_each_candidate_bucket<'a>(
+        &'a self,
+        attrs: &StyleNodeAttrs,
+        mut visit: impl FnMut(&'a [usize]),
+    ) {
+        if !self.fallback.is_empty() {
+            visit(&self.fallback);
+        }
+        if let Some(tag) = self.tag.get(attrs.tag) {
+            visit(tag);
+        }
+        for class in attrs.classes.iter() {
+            if let Some(class_ids) = self.class.get(class) {
+                visit(class_ids);
             }
-            if let Some(id) = attrs.id()
-                && let Some(id_ids) = self.id.get(id)
-            {
-                ids.extend_from_slice(id_ids);
+        }
+        if let Some(id) = attrs.id()
+            && let Some(id_ids) = self.id.get(id)
+        {
+            visit(id_ids);
+        }
+        for (state_bit, state_ids) in &self.state {
+            if attrs.state_mask & *state_bit != 0 {
+                visit(state_ids);
             }
-            for (state_bit, state_ids) in &self.state {
-                if attrs.state_mask & *state_bit != 0 {
-                    ids.extend_from_slice(state_ids);
-                }
-            }
-            ids.sort_unstable();
-            ids.dedup();
-            for &idx in ids.iter() {
-                if let Some(rule) = rules.get(idx) {
-                    visit(rule);
-                }
-            }
-        })
+        }
     }
 
     fn for_each_candidate_rule_index(&self, attrs: &StyleNodeAttrs, mut visit: impl FnMut(usize)) {
         CANDIDATE_RULE_SCRATCH.with(|scratch| {
             let mut ids = scratch.borrow_mut();
             ids.clear();
-            ids.extend_from_slice(&self.fallback);
-            if let Some(tag) = self.tag.get(attrs.tag) {
-                ids.extend_from_slice(tag);
-            }
-            for class in attrs.classes.iter() {
-                if let Some(class_ids) = self.class.get(class) {
-                    ids.extend_from_slice(class_ids);
+            let mut first_bucket = None;
+            let mut multiple_buckets = false;
+            self.for_each_candidate_bucket(attrs, |bucket| {
+                if let Some(first) = first_bucket {
+                    if !multiple_buckets {
+                        ids.extend_from_slice(first);
+                        multiple_buckets = true;
+                    }
+                    ids.extend_from_slice(bucket);
+                } else {
+                    first_bucket = Some(bucket);
                 }
-            }
-            if let Some(id) = attrs.id()
-                && let Some(id_ids) = self.id.get(id)
-            {
-                ids.extend_from_slice(id_ids);
-            }
-            for (state_bit, state_ids) in &self.state {
-                if attrs.state_mask & *state_bit != 0 {
-                    ids.extend_from_slice(state_ids);
+            });
+
+            if !multiple_buckets {
+                if let Some(bucket) = first_bucket {
+                    for &idx in bucket {
+                        visit(idx);
+                    }
                 }
+                return;
             }
+
             ids.sort_unstable();
             ids.dedup();
             for &idx in ids.iter() {
@@ -463,6 +477,37 @@ enum IndexedProperty {
         property: String,
         message: String,
     },
+}
+
+#[derive(Clone)]
+enum CachedInlineStyle {
+    Declarations(Arc<[IndexedDeclaration]>),
+    Error(Arc<str>),
+}
+
+fn cached_inline_style(source: &str) -> CachedInlineStyle {
+    INLINE_STYLE_CACHE.with(|cache| {
+        if let Some(cached) = cache.borrow().get(source).cloned() {
+            return cached;
+        }
+
+        let parsed = match mesh_core_component::parse_inline_style(source) {
+            Ok(declarations) => CachedInlineStyle::Declarations(
+                declarations
+                    .iter()
+                    .map(IndexedDeclaration::from_declaration)
+                    .collect::<Vec<_>>()
+                    .into(),
+            ),
+            Err(error) => CachedInlineStyle::Error(Arc::from(error.to_string())),
+        };
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= MAX_INLINE_STYLE_CACHE_ENTRIES {
+            cache.clear();
+        }
+        cache.insert(Arc::from(source), parsed.clone());
+        parsed
+    })
 }
 
 impl IndexedDeclaration {
@@ -1013,6 +1058,26 @@ impl<'a> StyleResolver<'a> {
         self.resolve_node_style_with_attrs_indexed_no_diagnostics(rules, index, &attrs, context)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_node_style_for_module_indexed_with_inline_style(
+        &self,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
+        tag: &str,
+        classes: &[String],
+        id: Option<&str>,
+        inline_style: Option<&str>,
+        context: StyleContext,
+        state: ElementState,
+        module_id: Option<&str>,
+    ) -> ComputedStyle {
+        debug_assert!(index.is_for(rules));
+        let mut attrs = StyleNodeAttrs::new(tag, classes, id, state);
+        attrs.module_id = module_id;
+        attrs.inline_style = inline_style;
+        self.resolve_node_style_with_attrs_indexed_no_diagnostics(rules, index, &attrs, context)
+    }
+
     pub fn resolve_node_style_with_diagnostics(
         &self,
         rules: &[StyleRule],
@@ -1270,6 +1335,33 @@ impl<'a> StyleResolver<'a> {
                         }
                     }
                 });
+            }
+
+            if let Some(inline_style) = attrs.inline_style {
+                match cached_inline_style(inline_style) {
+                    CachedInlineStyle::Declarations(declarations) => {
+                        for declaration in declarations.iter() {
+                            let diagnostic_sink = diagnostics
+                                .as_mut()
+                                .map(|diagnostics| ("@inline", &mut **diagnostics));
+                            self.apply_indexed_declaration(
+                                &mut style,
+                                declaration,
+                                diagnostic_sink,
+                                &mut scratch_variables,
+                            );
+                        }
+                    }
+                    CachedInlineStyle::Error(error) => {
+                        if let Some(diagnostics) = diagnostics.as_mut() {
+                            diagnostics.push(StyleDiagnostic {
+                                property: "style".into(),
+                                selector: Some("@inline".into()),
+                                message: error.to_string(),
+                            });
+                        }
+                    }
+                }
             }
         });
 
@@ -2792,6 +2884,22 @@ mod tests {
         }
     }
 
+    fn rule_with_class(class: &str) -> StyleRule {
+        StyleRule {
+            selector: Selector::Class(class.to_string()),
+            declarations: Vec::new(),
+            container_query: None,
+        }
+    }
+
+    fn rule_with_tag(tag: &str) -> StyleRule {
+        StyleRule {
+            selector: Selector::Tag(tag.to_string()),
+            declarations: Vec::new(),
+            container_query: None,
+        }
+    }
+
     fn rule_with_compound_state(tag: &str, state: &str) -> StyleRule {
         StyleRule {
             selector: Selector::Compound(vec![
@@ -3169,6 +3277,100 @@ mod tests {
             );
 
         assert_eq!(indexed, uncached);
+    }
+
+    #[test]
+    fn candidate_rule_fast_path_preserves_source_order_and_multi_bucket_deduplication() {
+        let rules = vec![
+            rule_with_class("primary"),
+            rule_with_compound_state("button", "hover"),
+            rule_with_tag("button"),
+        ];
+        let index = StyleRuleIndex::new(&rules);
+        let classes = vec!["primary".to_string()];
+        let mut state = ElementState::default();
+        state.hovered = true;
+        let attrs = StyleNodeAttrs::new("button", &classes, None, state);
+        let mut candidates = Vec::new();
+
+        index.for_each_candidate_rule_index(&attrs, |idx| candidates.push(idx));
+
+        assert_eq!(candidates, vec![0, 1, 2]);
+    }
+
+    // cargo test -p mesh-core-elements --release -- single_bucket_candidate_fast_path_beats_sort_dedup --ignored --nocapture
+    #[test]
+    #[ignore = "release-only style candidate filtering microbenchmark"]
+    fn single_bucket_candidate_fast_path_beats_sort_dedup() {
+        fn copy_sort_dedup(
+            index: &StyleRuleIndex,
+            attrs: &StyleNodeAttrs,
+            ids: &mut Vec<usize>,
+            mut visit: impl FnMut(usize),
+        ) {
+            ids.clear();
+            ids.extend_from_slice(&index.fallback);
+            if let Some(tag) = index.tag.get(attrs.tag) {
+                ids.extend_from_slice(tag);
+            }
+            for class in attrs.classes.iter() {
+                if let Some(class_ids) = index.class.get(class) {
+                    ids.extend_from_slice(class_ids);
+                }
+            }
+            if let Some(id) = attrs.id()
+                && let Some(id_ids) = index.id.get(id)
+            {
+                ids.extend_from_slice(id_ids);
+            }
+            for (state_bit, state_ids) in &index.state {
+                if attrs.state_mask & *state_bit != 0 {
+                    ids.extend_from_slice(state_ids);
+                }
+            }
+            ids.sort_unstable();
+            ids.dedup();
+            for &idx in ids.iter() {
+                visit(idx);
+            }
+        }
+
+        let rules = (0..64)
+            .map(|idx| rule_with_class(&format!("class-{idx}")))
+            .collect::<Vec<_>>();
+        let index = StyleRuleIndex::new(&rules);
+        let classes = vec!["class-63".to_string()];
+        let attrs = StyleNodeAttrs::new("box", &classes, None, ElementState::default());
+        let iterations = 2_000_000usize;
+
+        let copied_started = std::time::Instant::now();
+        let mut copied_checksum = 0usize;
+        let mut copied_scratch = Vec::new();
+        for _ in 0..iterations {
+            copy_sort_dedup(
+                std::hint::black_box(&index),
+                std::hint::black_box(&attrs),
+                std::hint::black_box(&mut copied_scratch),
+                |idx| copied_checksum = copied_checksum.wrapping_add(idx),
+            );
+        }
+        let copied = copied_started.elapsed();
+
+        let direct_started = std::time::Instant::now();
+        let mut direct_checksum = 0usize;
+        for _ in 0..iterations {
+            index.for_each_candidate_rule_index(std::hint::black_box(&attrs), |idx| {
+                direct_checksum = direct_checksum.wrapping_add(idx);
+            });
+        }
+        let direct = direct_started.elapsed();
+
+        eprintln!(
+            "single-bucket candidate filtering over {iterations} nodes: copy-sort-dedup {copied:?}, direct bucket {direct:?}, ratio {:.2}x",
+            copied.as_secs_f64() / direct.as_secs_f64()
+        );
+        assert_eq!(copied_checksum, direct_checksum);
+        assert!(direct < copied);
     }
 
     #[test]
@@ -5519,6 +5721,90 @@ mod tests {
         );
         assert_eq!(old_total, new_total);
         assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-elements --release -- inline_style_resolution_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only inline-style resolution benchmark"]
+    fn inline_style_resolution_benchmark() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = Vec::new();
+        let index = StyleRuleIndex::new(&rules);
+        let classes = Vec::new();
+        let inline_style =
+            "left: 38px; top: 32px; width: 36px; height: 36px; background: transparent;";
+        let iterations = 50_000_u32;
+
+        let started = std::time::Instant::now();
+        let mut checksum = 0.0_f32;
+        for _ in 0..iterations {
+            let style = resolver.resolve_node_style_for_module_indexed_with_inline_style(
+                &rules,
+                &index,
+                "button",
+                &classes,
+                None,
+                Some(std::hint::black_box(inline_style)),
+                StyleContext::default(),
+                ElementState::default(),
+                Some("@benchmark/inline-style"),
+            );
+            checksum += std::hint::black_box(style.inset_left.unwrap_or_default());
+        }
+        let elapsed = started.elapsed();
+        let ns_per_resolution = elapsed.as_nanos() as f64 / f64::from(iterations);
+
+        eprintln!(
+            "MESH_PERF metric=inline_style_resolution_ns_per_node value={ns_per_resolution:.3} total={elapsed:?} checksum={checksum}"
+        );
+        assert_eq!(checksum, 38.0 * iterations as f32);
+    }
+
+    #[test]
+    fn cached_inline_styles_preserve_values_and_parse_diagnostics() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = Vec::new();
+        let index = StyleRuleIndex::new(&rules);
+        let classes = Vec::new();
+
+        for (source, expected_left) in [
+            ("left: 12px; top: 8px;", 12.0),
+            ("left: 42px; top: 8px;", 42.0),
+            ("left: 12px; top: 8px;", 12.0),
+        ] {
+            let style = resolver.resolve_node_style_for_module_indexed_with_inline_style(
+                &rules,
+                &index,
+                "box",
+                &classes,
+                None,
+                Some(source),
+                StyleContext::default(),
+                ElementState::default(),
+                Some("@test/inline-style-cache"),
+            );
+            assert_eq!(style.inset_left, Some(expected_left));
+        }
+
+        let mut invalid = crate::tree::WidgetNode::new("box");
+        invalid.attributes.insert("style".into(), "left: {;".into());
+        let (_, first_diagnostics) = resolver.resolve_node_style_with_diagnostics_for_node_indexed(
+            &rules,
+            &index,
+            &mut invalid,
+            StyleContext::default(),
+        );
+        let (_, cached_diagnostics) = resolver
+            .resolve_node_style_with_diagnostics_for_node_indexed(
+                &rules,
+                &index,
+                &mut invalid,
+                StyleContext::default(),
+            );
+        assert!(!first_diagnostics.is_empty());
+        assert_eq!(cached_diagnostics, first_diagnostics);
     }
 
     #[test]

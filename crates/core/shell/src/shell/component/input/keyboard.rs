@@ -45,6 +45,9 @@ impl FrontendSurfaceComponent {
             return self.handle_tab_with_cross_surface(tree, modifiers.shift);
         }
         if matches!(key.as_str(), "Escape") && !modifiers.ctrl && !modifiers.alt {
+            if self.embedded_popover_return_focus.is_some() {
+                self.pending_embedded_popover_focus_restore = true;
+            }
             if let Some(requests) = self.handle_escape_with_cross_surface()? {
                 self.clear_selection();
                 self.invalidate_interaction_restyle();
@@ -333,6 +336,13 @@ impl FrontendSurfaceComponent {
                     "key": key,
                 }),
             );
+        }
+        if find_node_by_key(tree, node_key).is_some_and(|node| {
+            node.attributes
+                .get("aria-haspopup")
+                .is_some_and(|value| value == "true" || value == "menu")
+        }) {
+            self.pending_embedded_popover_focus = true;
         }
         self.call_node_handler(tree, node_key, "click", &[event])
     }

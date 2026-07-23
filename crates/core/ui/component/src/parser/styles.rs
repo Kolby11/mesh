@@ -37,6 +37,16 @@ pub(super) fn parse_style(source: &str) -> Result<StyleBlock, ParseError> {
     Ok(StyleBlock { rules, keyframes })
 }
 
+pub(super) fn parse_inline_style(source: &str) -> Result<Vec<Declaration>, ParseError> {
+    let wrapped = format!(".mesh-inline-style {{ {source} }}");
+    let mut block = parse_style(&wrapped)?;
+    Ok(block
+        .rules
+        .pop()
+        .map(|rule| rule.declarations)
+        .unwrap_or_default())
+}
+
 fn lower_css_rules(
     source_rules: &[LightningCssRule<'_>],
     inherited_query: Option<ContainerQuery>,

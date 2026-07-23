@@ -9,6 +9,19 @@ fn rect_matches_bounds(rect: (i32, i32, i32, i32), bounds: (f32, f32, f32, f32))
     rect == (left, top, (right - left).max(1), (bottom - top).max(1))
 }
 
+fn first_node_with_class_token<'a>(node: &'a WidgetNode, token: &str) -> Option<&'a WidgetNode> {
+    if node
+        .attributes
+        .get("class")
+        .is_some_and(|class| class.split_whitespace().any(|part| part == token))
+    {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .find_map(|child| first_node_with_class_token(child, token))
+}
+
 #[test]
 fn swipe_keeps_begin_target_and_reports_terminal_direction() {
     let mut component = test_frontend_component(
@@ -659,7 +672,7 @@ end
             &theme,
             240,
             160,
-            ComponentInput::KeyReleased {
+            ComponentInput::KeyPressed {
                 key: "Enter".into(),
                 modifiers: KeyModifiers::default(),
             },
@@ -839,7 +852,7 @@ end
             &theme,
             240,
             160,
-            ComponentInput::KeyPressed {
+            ComponentInput::KeyReleased {
                 key: "Enter".into(),
                 modifiers: KeyModifiers {
                     ctrl: true,
@@ -2366,7 +2379,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     let theme_bounds =
         find_node_bounds_by_key(tree, &theme_key, 0.0, 0.0).expect("theme button bounds");
     component.focused_key = Some(theme_key.clone());
-    component.focus_visible_key = Some(theme_key);
+    component.focus_visible_key = Some(theme_key.clone());
 
     let activation_requests = component
         .handle_input(
@@ -2400,22 +2413,24 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         child_requests[0].anchor_rect
     );
 
-    component
-        .handle_service_event(&ServiceEvent::Updated {
-            service: "mesh.theme".into(),
-            source_module: "@mesh/shell".into(),
-            payload: serde_json::json!({
-                "current": "mesh-default-light",
-                "theme_id": "mesh-default-light",
-                "is_dark": false
-            }),
-        })
-        .unwrap();
-    component
-        .paint(&theme, width, height, &mut buffer, 1.0)
-        .unwrap();
+    let focused_option_key = component
+        .focused_key
+        .clone()
+        .expect("keyboard activation should focus the first theme option");
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("navigation tree after opening theme popover");
+    assert!(
+        find_node_by_key(tree, &focused_option_key).is_some_and(|node| {
+            node.attributes
+                .get("class")
+                .is_some_and(|class| class.split_whitespace().any(|part| part == "bubble-option"))
+        }),
+        "keyboard activation should move focus into a theme bubble option"
+    );
 
-    let activation_requests = component
+    let selection_requests = component
         .handle_input(
             &theme,
             320,
@@ -2427,15 +2442,35 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         )
         .unwrap();
     assert!(
-        activation_requests.is_empty(),
-        "embedded theme selector should close through component state, not legacy hide requests: {activation_requests:?}"
+        selection_requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::SetTheme { theme_id } if theme_id == "mesh-default-dark"
+        )),
+        "Enter on a focused theme option should select it: {selection_requests:?}"
     );
+
+    component
+        .handle_input(
+            &theme,
+            320,
+            80,
+            ComponentInput::KeyPressed {
+                key: "Escape".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
     component
         .paint(&theme, width, height, &mut buffer, 1.0)
         .unwrap();
     assert!(
         component.child_surface_requests().is_empty(),
-        "re-activating an already-open theme trigger should close the derived popup"
+        "Escape from a focused theme option should close the derived popup"
+    );
+    assert_eq!(
+        component.focused_key.as_deref(),
+        Some(theme_key.as_str()),
+        "Escape should restore focus to the theme trigger"
     );
 }
 
@@ -2477,7 +2512,7 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
     let language_bounds =
         find_node_bounds_by_key(tree, &language_key, 0.0, 0.0).expect("language button bounds");
     component.focused_key = Some(language_key.clone());
-    component.focus_visible_key = Some(language_key);
+    component.focus_visible_key = Some(language_key.clone());
 
     let open_requests = component
         .handle_input(
@@ -2511,7 +2546,41 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         child_requests[0].anchor_rect
     );
 
-    let close_requests = component
+    let focused_option_key = component
+        .focused_key
+        .clone()
+        .expect("keyboard activation should focus the first language option");
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("navigation tree after opening language popover");
+    assert!(
+        find_node_by_key(tree, &focused_option_key).is_some_and(|node| {
+            node.attributes
+                .get("class")
+                .is_some_and(|class| class.split_whitespace().any(|part| part == "bubble-option"))
+        }),
+        "keyboard activation should move focus into a language bubble option"
+    );
+
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::KeyPressed {
+                key: "ArrowDown".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_ne!(
+        component.focused_key.as_deref(),
+        Some(focused_option_key.as_str()),
+        "ArrowDown should move focus to the next language option"
+    );
+
+    let select_requests = component
         .handle_input(
             &theme,
             width,
@@ -2523,15 +2592,34 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         )
         .unwrap();
     assert!(
-        close_requests.is_empty(),
-        "embedded language popover should close through component state, not legacy hide requests: {close_requests:?}"
+        select_requests
+            .iter()
+            .any(|request| matches!(request, CoreRequest::SetLocale { locale } if locale == "en")),
+        "Enter on a focused language option should select it: {select_requests:?}"
     );
+
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::KeyPressed {
+                key: "Escape".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
     component
         .paint(&theme, width, height, &mut buffer, 1.0)
         .unwrap();
     assert!(
         component.child_surface_requests().is_empty(),
-        "re-activating an already-open language trigger should close the derived popup"
+        "Escape from a focused language option should close the derived popup"
+    );
+    assert_eq!(
+        component.focused_key.as_deref(),
+        Some(language_key.as_str()),
+        "Escape should restore focus to the language trigger"
     );
 }
 
@@ -2587,6 +2675,17 @@ fn navigation_theme_and_language_popovers_close_when_trigger_hover_leaves() {
             component.child_surface_requests().len(),
             1,
             "{leave_handler} should keep its embedded popover open during the hover bridge"
+        );
+
+        std::thread::sleep(Duration::from_millis(220));
+        component.tick().unwrap();
+        component
+            .paint(&theme, width, height, &mut buffer, 1.0)
+            .unwrap();
+        assert_eq!(
+            component.child_surface_requests().len(),
+            1,
+            "{leave_handler} should retain its popover across a deliberate pointer trip"
         );
 
         std::thread::sleep(Duration::from_millis(220));
@@ -2682,16 +2781,133 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
         "popover must stay open while the pointer is over the promoted popup"
     );
 
-    // Pointer leaves the promoted popup — the popover must close itself.
+    // Pointer leaves the promoted popup. Keep it alive during the same bridge
+    // window used in the trigger-to-popup direction, so crossing a transparent
+    // gap or returning to the trigger cannot destroy it underneath the cursor.
     component
         .handle_child_surface_input(&node_key, &theme, cw, ch, ComponentInput::PointerLeave)
         .unwrap();
     component
         .paint(&theme, width, height, &mut buffer, 1.0)
         .unwrap();
+    assert_eq!(
+        component.child_surface_requests().len(),
+        1,
+        "language popover must remain open during the popup-to-trigger bridge"
+    );
+
+    std::thread::sleep(Duration::from_millis(420));
+    component.tick().unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     assert!(
         component.child_surface_requests().is_empty(),
-        "language popover must close when the pointer leaves the promoted popup"
+        "language popover must close after the popup hover bridge expires"
+    );
+}
+
+#[test]
+fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    let theme = default_theme();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.locale".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({ "locale": "en", "current": "en" }),
+        })
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    let enter_handler =
+        "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageEnter";
+    let leave_handler =
+        "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageLeave";
+    component
+        .call_namespaced_handler(enter_handler, &[])
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    let requests = component.child_surface_requests();
+    assert_eq!(requests.len(), 1, "language popover should open");
+    let node_key = requests[0].node_key.clone();
+    let (cw, ch) = requests[0].content_size;
+    let child_tree = component
+        .child_surface_debug_tree(&node_key, (0.0, 0.0))
+        .expect("language child tree");
+    let option =
+        first_node_with_class_token(&child_tree, "bubble-option").expect("language bubble option");
+    let option_x = option.layout.x + option.layout.width / 2.0;
+    let option_y = option.layout.y + option.layout.height / 2.0;
+
+    // Reproduce the pointer crossing from the trigger into an option: leaving
+    // the trigger starts the bridge timer, and entering the actual button must
+    // cancel it (not merely entering the promoted surface root).
+    component
+        .call_namespaced_handler(leave_handler, &[])
+        .unwrap();
+    component
+        .handle_child_surface_input(
+            &node_key,
+            &theme,
+            cw,
+            ch,
+            ComponentInput::PointerMove {
+                x: option_x,
+                y: option_y,
+            },
+        )
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(420));
+    component.tick().unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    assert_eq!(
+        component.child_surface_requests().len(),
+        1,
+        "entering a language option must cancel the trigger close timer"
+    );
+
+    component
+        .handle_child_surface_input(
+            &node_key,
+            &theme,
+            cw,
+            ch,
+            ComponentInput::PointerButton {
+                x: option_x,
+                y: option_y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    let click_requests = component
+        .handle_child_surface_input(
+            &node_key,
+            &theme,
+            cw,
+            ch,
+            ComponentInput::PointerButton {
+                x: option_x,
+                y: option_y,
+                pressed: false,
+            },
+        )
+        .unwrap();
+    assert!(
+        click_requests
+            .iter()
+            .any(|request| matches!(request, CoreRequest::SetLocale { .. })),
+        "mouse release over a language option should select it: {click_requests:?}"
     );
 }
 

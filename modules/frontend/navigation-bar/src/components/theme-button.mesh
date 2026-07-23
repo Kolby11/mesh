@@ -1,12 +1,13 @@
 <template>
     <stack class="nav-button-shell">
         <button
-            ref="theme-button"
+            ref="themeButton"
             class="{trigger_class}"
             onclick={onThemeToggle}
             onpointerenter={onThemeEnter}
             onpointerleave={onThemeLeave}
             aria-haspopup="true"
+            aria-expanded="{theme_aria_expanded}"
             data-tooltip-disabled="{theme_tooltip_disabled}"
             title="{theme_tooltip}"
             aria-label={t(theme_tooltip_key)}
@@ -28,12 +29,13 @@ theme_tooltip = ""
 theme_tooltip_disabled = "false"
 theme_is_dark = true
 theme_surface_hidden = true
+theme_aria_expanded = "false"
 trigger_class = "nav-button"
 
 theme_popover = nil
 local theme_popover_connected = false
 local CLOSE_BRIDGE_KEY = "theme-popover-close"
-local CLOSE_BRIDGE_DELAY_MS = 180
+local CLOSE_BRIDGE_DELAY_MS = 400
 
 local function cancel_bridge_close()
     mesh.events.publish("shell.cancel-handler", { key = CLOSE_BRIDGE_KEY })
@@ -70,6 +72,7 @@ end
 
 local function sync_trigger_state()
     trigger_class = theme_surface_hidden and "nav-button" or "nav-button nav-button-open"
+    theme_aria_expanded = theme_surface_hidden and "false" or "true"
     if theme_surface_hidden then
         theme_tooltip = t(theme_tooltip_key)
         theme_tooltip_disabled = "false"
@@ -113,7 +116,10 @@ function render(self)
         theme_popover.PopoverEnter:on(function()
             cancel_bridge_close()
         end)
-        theme_popover.PopoverLeave:on(function()
+        theme_popover.CloseRequested:on(function()
+            do_close()
+        end)
+        theme_popover.KeyboardDismissRequested:on(function()
             do_close()
         end)
     end

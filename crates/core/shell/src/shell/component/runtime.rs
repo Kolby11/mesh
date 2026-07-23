@@ -802,7 +802,20 @@ fn node_handler_and_args<'a>(
     event_args: &'a [serde_json::Value],
 ) -> Option<(&'a str, std::borrow::Cow<'a, [serde_json::Value]>)> {
     if let Some(call) = node.event_handler_calls.get(event_name) {
-        let mut merged = call.args.clone();
+        if call.args.is_empty() {
+            return Some((
+                call.handler.as_str(),
+                std::borrow::Cow::Borrowed(event_args),
+            ));
+        }
+        if event_args.is_empty() {
+            return Some((
+                call.handler.as_str(),
+                std::borrow::Cow::Borrowed(call.args.as_slice()),
+            ));
+        }
+        let mut merged = Vec::with_capacity(call.args.len() + event_args.len());
+        merged.extend(call.args.iter().cloned());
         merged.extend_from_slice(event_args);
         return Some((call.handler.as_str(), std::borrow::Cow::Owned(merged)));
     }
@@ -842,6 +855,30 @@ mod handler_call_tests {
         assert_eq!(handler, "__mesh_embed__::host::typed");
         assert_eq!(args[0], serde_json::json!("prebound"));
         assert_eq!(args[1], serde_json::json!({ "type": "click" }));
+        assert!(matches!(args, std::borrow::Cow::Owned(_)));
+    }
+
+    #[test]
+    fn node_handler_and_args_borrows_when_one_typed_arg_side_is_empty() {
+        let mut node = WidgetNode::new("button");
+        node.event_handler_calls.insert(
+            "click".into(),
+            EventHandlerCall {
+                handler: "__mesh_embed__::host::typed".into(),
+                args: Vec::new(),
+            },
+        );
+
+        let event_args = [serde_json::json!({ "type": "click" })];
+        let (_, args) = node_handler_and_args(&node, "click", &event_args).expect("handler");
+        assert_eq!(args.as_ref(), event_args.as_slice());
+        assert!(matches!(args, std::borrow::Cow::Borrowed(_)));
+
+        node.event_handler_calls.get_mut("click").unwrap().args =
+            vec![serde_json::json!("prebound")];
+        let (_, args) = node_handler_and_args(&node, "click", &[]).expect("handler");
+        assert_eq!(args.as_ref(), [serde_json::json!("prebound")].as_slice());
+        assert!(matches!(args, std::borrow::Cow::Borrowed(_)));
     }
 
     #[test]
@@ -1128,6 +1165,130 @@ mod handler_call_tests {
             typed_ns < legacy_ns,
             "typed handler calls should avoid per-dispatch JSON parsing"
         );
+    }
+
+    // Run with:
+    // nix develop --command cargo test -p mesh-core-shell --release -- typed_handler_empty_side_borrow_beats_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only typed handler argument transfer microbenchmark"]
+    fn typed_handler_empty_side_borrow_beats_clone() {
+        use std::time::Instant;
+
+        fn clone_and_extend<'a>(
+            node: &'a WidgetNode,
+            event_name: &str,
+            event_args: &[serde_json::Value],
+        ) -> Option<(&'a str, Vec<serde_json::Value>)> {
+            let call = node.event_handler_calls.get(event_name)?;
+            let mut merged = call.args.clone();
+            merged.extend_from_slice(event_args);
+            Some((call.handler.as_str(), merged))
+        }
+
+        let mut node = WidgetNode::new("button");
+        node.event_handler_calls.insert(
+            "click".into(),
+            EventHandlerCall {
+                handler: "__mesh_embed__::host::onClick".into(),
+                args: Vec::new(),
+            },
+        );
+        let event_args = [serde_json::json!({
+            "type": "click",
+            "x": 12,
+            "y": 34,
+            "button": 1
+        })];
+        let iterations = 1_000_000usize;
+
+        let cloned_started = Instant::now();
+        for _ in 0..iterations {
+            let (handler, args) =
+                clone_and_extend(&node, "click", std::hint::black_box(&event_args))
+                    .expect("handler");
+            std::hint::black_box((handler, args));
+        }
+        let cloned = cloned_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        for _ in 0..iterations {
+            let (handler, args) =
+                node_handler_and_args(&node, "click", std::hint::black_box(&event_args))
+                    .expect("handler");
+            std::hint::black_box((handler, args));
+        }
+        let borrowed = borrowed_started.elapsed();
+
+        eprintln!(
+            "typed handler args over {iterations} dispatches: clone-and-extend {cloned:?}, empty-side borrow {borrowed:?}, ratio {:.1}x",
+            cloned.as_secs_f64() / borrowed.as_secs_f64()
+        );
+        assert!(borrowed < cloned);
+    }
+
+    // Run with:
+    // CARGO_TARGET_DIR=/tmp/mesh-slot-memo-bench nix develop --command cargo test -p mesh-core-shell --release -- typed_handler_presized_merge_beats_clone_then_grow --ignored --nocapture
+    #[test]
+    #[ignore = "release-only typed handler merge microbenchmark"]
+    fn typed_handler_presized_merge_beats_clone_then_grow() {
+        use std::time::Instant;
+
+        fn clone_then_grow(
+            call: &EventHandlerCall,
+            event_args: &[serde_json::Value],
+        ) -> Vec<serde_json::Value> {
+            let mut merged = call.args.clone();
+            merged.extend_from_slice(event_args);
+            merged
+        }
+
+        let mut node = WidgetNode::new("button");
+        node.event_handler_calls.insert(
+            "click".into(),
+            EventHandlerCall {
+                handler: "__mesh_embed__::host::selectItem".into(),
+                args: vec![
+                    serde_json::json!("alpha"),
+                    serde_json::json!({ "source": "palette", "index": 3 }),
+                    serde_json::json!([1, 2, 3, 4]),
+                ],
+            },
+        );
+        let call = node.event_handler_calls.get("click").unwrap();
+        let event_args = [serde_json::json!({
+            "type": "click",
+            "x": 12,
+            "y": 34,
+            "button": 1
+        })];
+        let iterations = 1_000_000usize;
+
+        let grown_started = Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(clone_then_grow(
+                std::hint::black_box(call),
+                std::hint::black_box(&event_args),
+            ));
+        }
+        let grown = grown_started.elapsed();
+
+        let presized_started = Instant::now();
+        for _ in 0..iterations {
+            let (_, args) = node_handler_and_args(
+                std::hint::black_box(&node),
+                "click",
+                std::hint::black_box(&event_args),
+            )
+            .expect("handler");
+            std::hint::black_box(args);
+        }
+        let presized = presized_started.elapsed();
+
+        eprintln!(
+            "typed handler two-sided merge over {iterations} dispatches: clone-then-grow {grown:?}, presized {presized:?}, ratio {:.2}x",
+            grown.as_secs_f64() / presized.as_secs_f64()
+        );
+        assert!(presized < grown);
     }
 }
 

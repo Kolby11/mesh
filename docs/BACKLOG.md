@@ -527,7 +527,17 @@ reference it. The historical subsystem map is
       2026-07-20: component-call props now survive event-name normalization,
       use distinct render-time tokens, and lower to the real namespaced handler
       only after the child tree is built; compiler-boundary and lowering
-      regressions cover equal target handlers with different arguments.
+      regressions cover equal target handlers with different arguments. Added
+      2026-07-23: dispatch now borrows typed handler arguments when either the
+      prebound or runtime argument side is empty, retaining allocation only for
+      a real two-sided merge. Across three release runs of one million
+      runtime-only dispatches, clone-and-extend took 90.4–92.2ms versus
+      9.26–9.43ms borrowed, a conservative 9.6x improvement. The remaining
+      two-sided merge now allocates its final capacity once instead of cloning
+      into an exact-sized vector and growing it again. Across three release
+      runs of one million mixed prebound/runtime merges, clone-then-grow took
+      247.5–248.9ms versus 193.2–197.5ms presized, a conservative 1.25x
+      improvement.
 - [ ] `{#if}`/`{#for}` always wrap children in a synthetic `column` node;
       needs a fragment/transparent-container concept.
 - [ ] No keyed list diffing; `{#for}` identity is positional — add `key=`
@@ -592,6 +602,20 @@ reference it. The historical subsystem map is
       v1.18 (P1 renderer item; indexed declaration metadata landed). Animation
       frames now reuse live-key sets and previous-style snapshot storage;
       release microbenchmarks measured 2.35x and 1.68x over fresh allocations.
+      Added 2026-07-23: dynamic inline-style strings now use a bounded
+      thread-local cache of parsed and indexed declarations, including cached
+      parse failures for diagnostic parity. Across three release runs of
+      50,000 repeated resolutions, uncached parsing took 193.6–200.8ms
+      (3.872–4.015µs/node) versus 16.0–19.4ms cached
+      (0.320–0.387µs/node), a conservative 10.0x improvement and roughly 12x
+      at the median. Static stylesheet declarations were already indexed;
+      broader typed declaration storage remains open. Added later 2026-07-23:
+      nodes whose candidates come from one rule-index bucket now iterate that
+      bucket directly instead of copying its IDs into scratch storage and
+      sorting/deduplicating them. Multi-bucket nodes retain the ordered,
+      deduplicated fallback. Across three release runs over two million
+      single-class nodes, the previous reused-scratch copy-sort-dedup path took
+      29.2–31.0ms versus 22.7–23.2ms direct, a conservative 1.26x improvement.
 - [ ] Minor: display-list `update_inner` is ~220 lines mixing diff, damage,
       and metrics assembly; split when next touched (N).
 

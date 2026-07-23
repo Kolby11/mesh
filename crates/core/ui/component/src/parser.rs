@@ -74,6 +74,11 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
     })
 }
 
+/// Parse the declaration list carried by an element's `style` attribute.
+pub fn parse_inline_style(source: &str) -> Result<Vec<crate::style::Declaration>, ParseError> {
+    styles::parse_inline_style(source)
+}
+
 fn extract_blocks(source: &str) -> Result<HashMap<String, String>, ParseError> {
     let mut blocks = HashMap::new();
     let known_tags = ["props", "template", "script", "style", "i18n"];

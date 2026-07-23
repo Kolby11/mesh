@@ -9,7 +9,7 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
         open={open}
         class="language-popover-shell"
         aria-label={t('language.choose')}
-        anchor-ref="language-button"
+        anchor-ref="languageButton"
         anchor="bottom"
         gravity="bottom"
         onpointerenter={onPopoverEnter}
@@ -20,6 +20,10 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
             items={items}
             onselect={onSelectOption}
             onscroll={onOptionScroll}
+            onoptionpointerenter={onOptionPointerEnter}
+            onoptionfocus={onOptionFocus}
+            onoptionblur={onOptionBlur}
+            onoptionkeydown={onOptionKeyDown}
         />
     </popover>
 </template>
@@ -31,6 +35,21 @@ local BubbleOptions = require("../../shared/components/bubble-options.mesh")
 locales = { "en", "sk", "de", "fr", "es", "ja", "zh", "ko", "ar", "hi" }
 
 open = false
+local CLOSE_BRIDGE_KEY = "language-popover-close"
+local CLOSE_BRIDGE_DELAY_MS = 400
+
+local function cancel_bridge_close()
+    mesh.events.publish("shell.cancel-handler", { key = CLOSE_BRIDGE_KEY })
+end
+
+local function schedule_bridge_close()
+    mesh.events.publish("shell.schedule-handler", {
+        key = CLOSE_BRIDGE_KEY,
+        handler = "closeLanguagePopoverBridge",
+        delay_ms = CLOSE_BRIDGE_DELAY_MS,
+    })
+end
+
 selected_locale = "en"
 window_start = 1
 
@@ -86,29 +105,26 @@ local function sync_window_to_locale(locale)
 end
 
 local SLOTS = {
-    { position = "left", anim = "bubble-option-core-language-left" },
-    { position = "center", anim = "bubble-option-core-language-center" },
-    { position = "right", anim = "bubble-option-core-language-right" },
+    { anim = "bubble-option-core-language-left" },
+    { anim = "bubble-option-core-language-center" },
+    { anim = "bubble-option-core-language-right" },
 }
 
 local function build_option(slot, locale)
-    local button_class = "bubble-option bubble-option-" .. slot.position
     local core_class = "bubble-option-core bubble-option-core-language " .. slot.anim
     if locale == selected_locale then
-        button_class = button_class .. " bubble-option-active"
         core_class = core_class .. " bubble-option-core-active"
     end
 
     return {
         id = locale,
-        button_class = button_class,
         core_class = core_class,
-        motion_class = "bubble-options-motion bubble-options-motion-" .. slot.position,
         icon_class = "bubble-option-icon bubble-option-hidden",
         icon = "palette",
         text_class = "bubble-option-text",
         text = locale_label(locale),
         title = t("language." .. locale),
+        active = locale == selected_locale,
     }
 end
 
@@ -159,12 +175,40 @@ function onOptionScroll(event)
 end
 
 function onPopoverEnter(event)
+    cancel_bridge_close()
     self.PopoverEnter:fire(event)
 end
 
 function onPopoverLeave()
-    open = false
+    schedule_bridge_close()
     self.PopoverLeave:fire()
+end
+
+function onOptionFocus(event)
+    cancel_bridge_close()
+    self.PopoverEnter:fire(event)
+end
+
+function onOptionPointerEnter(event)
+    cancel_bridge_close()
+    self.PopoverEnter:fire(event)
+end
+
+function onOptionBlur(_event)
+    schedule_bridge_close()
+end
+
+function onOptionKeyDown(event)
+    if event and event.key == "Escape" then
+        cancel_bridge_close()
+        open = false
+        self.KeyboardDismissRequested:fire()
+    end
+end
+
+function closeLanguagePopoverBridge()
+    open = false
+    self.CloseRequested:fire()
 end
 </script>
 

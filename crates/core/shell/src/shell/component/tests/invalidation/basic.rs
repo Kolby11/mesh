@@ -1288,6 +1288,105 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
 }
 
 #[test]
+fn source_reload_rebuilds_imported_component_style_cache() {
+    use crate::shell::component::catalog::FrontendCatalog;
+    use mesh_core_frontend::compile_frontend_module;
+
+    let temp = tempfile::tempdir().unwrap();
+    let module_dir = temp.path();
+    let components_dir = module_dir.join("src/components");
+    std::fs::create_dir_all(&components_dir).unwrap();
+    std::fs::write(
+        module_dir.join("src/main.mesh"),
+        r#"
+<template><Child /></template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+</script>
+"#,
+    )
+    .unwrap();
+    let child_path = components_dir.join("child.mesh");
+    let write_child = |width| {
+        std::fs::write(
+            &child_path,
+            format!(
+                r#"
+<template><box class="reload-style-target" /></template>
+<style>
+    .reload-style-target {{
+        width: {width}px;
+        height: 10px;
+    }}
+</style>
+"#
+            ),
+        )
+        .unwrap();
+    };
+    write_child(10);
+
+    let manifest = minimal_test_manifest("@test/imported-style-hot-reload");
+    let compiled = compile_frontend_module(&manifest, module_dir).unwrap();
+    let catalog = FrontendCatalog {
+        modules: HashMap::from([(
+            manifest.package.id.clone(),
+            crate::shell::component::catalog::FrontendCatalogEntry {
+                module_dir: module_dir.to_path_buf(),
+                compiled: compiled.clone(),
+            },
+        )]),
+        slot_contributions: Default::default(),
+    };
+    let mut component = FrontendSurfaceComponent::new(
+        compiled,
+        module_dir.to_path_buf(),
+        catalog,
+        mesh_core_service::InterfaceCatalog::default(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: "@test/imported-style-hot-reload".into(),
+            surface_id: "@test/imported-style-hot-reload".into(),
+            diagnostics: Diagnostics::new("@test/imported-style-hot-reload"),
+        })
+        .unwrap();
+    component.visible = true;
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(100, 40);
+    component.paint(&theme, 100, 40, &mut buffer, 1.0).unwrap();
+    assert_eq!(
+        first_node_by_class(component.last_tree.as_ref().unwrap(), "reload-style-target")
+            .unwrap()
+            .computed_style
+            .width,
+        mesh_core_elements::Dimension::Px(10.0)
+    );
+    assert!(
+        !component.prepared_component_styles.borrow().is_empty(),
+        "first render should populate the imported component style cache"
+    );
+
+    write_child(24);
+    assert!(component.reload_source().unwrap());
+    assert!(
+        component.prepared_component_styles.borrow().is_empty(),
+        "source reload must discard style indexes built from the old component source"
+    );
+
+    component.paint(&theme, 100, 40, &mut buffer, 1.0).unwrap();
+    assert_eq!(
+        first_node_by_class(component.last_tree.as_ref().unwrap(), "reload-style-target")
+            .unwrap()
+            .computed_style
+            .width,
+        mesh_core_elements::Dimension::Px(24.0),
+        "the next render must resolve styles from the reloaded child component"
+    );
+}
+
+#[test]
 fn retained_paint_path_records_phase26_cpu_attribution_stages() {
     let mut component = test_frontend_component(
         "<template><row><text>Proof</text><icon name=\"phase26-missing-icon\" /></row></template>",
