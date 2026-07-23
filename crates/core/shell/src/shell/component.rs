@@ -12,10 +12,9 @@ use super::types::{
 use mesh_core_interaction::{
     collect_focus_traversal, find_click_handler, find_event_handler, find_node_bounds_by_key,
     find_node_by_key, find_node_path_at, find_node_with_bounds_by_key, find_nodes_by_keys,
-    find_scrollable_at_with_limits, find_tooltip_by_key, is_input_key, is_slider_key,
-    measure_content_size, next_focus_target, node_is_source, parse_namespaced_handler,
-    pointer_event_handler_hit, pointer_press_hit, scroll_into_view_offsets, scroll_limits,
-    source_element_tag,
+    find_scrollable_at_with_limits, is_input_key, is_slider_key, measure_content_size,
+    next_focus_target, node_is_source, parse_namespaced_handler, pointer_event_handler_hit,
+    pointer_press_hit, scroll_into_view_offsets, scroll_limits, source_element_tag,
 };
 mod animation;
 mod catalog;
@@ -653,6 +652,10 @@ pub(super) struct FrontendSurfaceComponent {
     tooltip_visible: bool,
     /// Bounding box of the currently hovered element: (left, top, right, bottom).
     hovered_element_bounds: Option<(f32, f32, f32, f32)>,
+    /// Fully resolved tooltip render inputs for stable paint-only/fade frames.
+    /// Retained generation and hovered key jointly guard every borrowed tree
+    /// fact copied into this cache.
+    tooltip_target_cache: mesh_core_interaction::TooltipTargetCache,
     /// Timestamp when the current tooltip became visible (for fade-in animation timing).
     tooltip_appeared_at: Option<std::time::Instant>,
     last_tooltip_damage: Option<DamageRect>,
@@ -932,6 +935,7 @@ impl FrontendSurfaceComponent {
             hover_start: None,
             tooltip_visible: false,
             hovered_element_bounds: None,
+            tooltip_target_cache: mesh_core_interaction::TooltipTargetCache::default(),
             tooltip_appeared_at: None,
             last_tooltip_damage: None,
             runtimes: Arc::new(Mutex::new(HashMap::new())),

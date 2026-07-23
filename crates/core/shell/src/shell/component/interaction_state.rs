@@ -380,6 +380,7 @@ impl FrontendSurfaceComponent {
                 self.hover_start = None;
                 self.tooltip_visible = false;
                 self.hovered_element_bounds = None;
+                self.tooltip_target_cache.clear();
                 self.tooltip_appeared_at = None;
             }
         }

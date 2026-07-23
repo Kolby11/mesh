@@ -648,7 +648,13 @@ impl ShellComponent for FrontendSurfaceComponent {
             Some("rebuild"),
         );
 
-        let tooltip = self.compute_tooltip_state(theme, &tree, paint_width, paint_height);
+        let tooltip = self.compute_tooltip_state(
+            theme,
+            &tree,
+            retained_tree_generation,
+            paint_width,
+            paint_height,
+        );
 
         let surface_damage = DamageRect {
             x: 0,
@@ -1651,16 +1657,23 @@ impl FrontendSurfaceComponent {
         &mut self,
         theme: &Theme,
         tree: &WidgetNode,
+        retained_tree_generation: u64,
         paint_width: u32,
         paint_height: u32,
-    ) -> Option<(String, f32, f32)> {
+    ) -> Option<(Arc<str>, f32, f32)> {
         if !self.tooltip_visible {
             return None;
         }
         self.refresh_tooltip_settings_from_theme(theme);
 
         let hovered_key = self.hovered_key.as_ref()?;
-        let (owner_key, text) = find_tooltip_by_key(tree, hovered_key)?;
+        let tooltip_target = self.tooltip_target_cache.resolve(
+            tree,
+            hovered_key,
+            retained_tree_generation,
+            self.hovered_element_bounds,
+        )?;
+        let text = tooltip_target.text.as_ref();
 
         // Sample the theme-CSS enter animation at the current elapsed time.
         // No animation in the theme (or no appear timestamp) → resting state.
@@ -1672,15 +1685,9 @@ impl FrontendSurfaceComponent {
         // Inherited tooltips use the owner for placement and style so a
         // titled button still anchors below the button when a child icon
         // receives pointer hover.
-        let owner_node = find_node_by_key(tree, &owner_key);
-        let element_anchor = owner_node
-            .map(|node| node.computed_style.tooltip_anchor)
-            .unwrap_or_default();
-        let anchor = tooltip::effective_anchor(element_anchor, &self.tooltip_settings);
-
-        let element_offset = owner_node.and_then(|node| node.computed_style.tooltip_offset);
-        let element_bounds =
-            find_node_bounds_by_key(tree, &owner_key, 0.0, 0.0).or(self.hovered_element_bounds);
+        let anchor = tooltip::effective_anchor(tooltip_target.anchor, &self.tooltip_settings);
+        let element_offset = tooltip_target.offset;
+        let element_bounds = tooltip_target.bounds;
         // Tooltips are overlay chrome. They should be constrained by the
         // tooltip-padded paint surface, not by a scroll/clip container inside
         // the component tree.
@@ -1723,7 +1730,7 @@ impl FrontendSurfaceComponent {
         mesh_core_render::set_tooltip_center_x(center_x);
         mesh_core_render::set_tooltip_paint_scale(sample.scale);
 
-        Some((text, paint_x, paint_y))
+        Some((Arc::clone(&tooltip_target.text), paint_x, paint_y))
     }
 
     fn paint_pixel_regions(
@@ -1734,7 +1741,7 @@ impl FrontendSurfaceComponent {
         selected_paint: &mesh_core_render::display_list::SelectedDisplayListPaint<'_>,
         effective_damage: &EffectiveDamage,
         paint_bounding_rect: bool,
-        tooltip: Option<&(String, f32, f32)>,
+        tooltip: Option<&(Arc<str>, f32, f32)>,
         current_tooltip_damage: Option<DamageRect>,
     ) -> mesh_core_render::PaintProfilingMetrics {
         let _span = tracing::debug_span!("paint_pixel_regions").entered();
@@ -1753,7 +1760,7 @@ impl FrontendSurfaceComponent {
                 scale,
                 selected_paint,
                 None,
-                tooltip.map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
+                tooltip.map(|(text, cx, cy)| (text.as_ref(), *cx, *cy)),
             );
         }
 
@@ -1805,7 +1812,7 @@ impl FrontendSurfaceComponent {
         scale: f32,
         selected_paint: &mesh_core_render::display_list::SelectedDisplayListPaint<'_>,
         damage: DamageRect,
-        tooltip: Option<&(String, f32, f32)>,
+        tooltip: Option<&(Arc<str>, f32, f32)>,
         current_tooltip_damage: Option<DamageRect>,
     ) -> mesh_core_render::PaintProfilingMetrics {
         let physical_damage =
@@ -1820,7 +1827,7 @@ impl FrontendSurfaceComponent {
         let tooltip_for_damage = tooltip.and_then(|(text, cx, cy)| {
             current_tooltip_damage
                 .filter(|tooltip_rect| tooltip_rect.intersects(damage))
-                .map(|_| (text.as_str(), *cx, *cy))
+                .map(|_| (text.as_ref(), *cx, *cy))
         });
         self.paint_selected_pixels(
             buffer,
@@ -2096,7 +2103,7 @@ fn select_damage_policy(
 }
 
 fn tooltip_damage_rect(
-    tooltip: Option<&(String, f32, f32)>,
+    tooltip: Option<&(Arc<str>, f32, f32)>,
     surface_width: u32,
     surface_height: u32,
 ) -> Option<DamageRect> {

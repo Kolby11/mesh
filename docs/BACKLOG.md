@@ -491,7 +491,11 @@ reference it. The historical subsystem map is
       payloads for text, input value/placeholder, and icon source/name now use
       `Arc<str>` with pointer-first equality. Dirty-node rebuilds reuse the
       prior allocation when payload bytes are unchanged, avoiding string
-      allocation for style-only updates. Widget-tree tags/attributes and the
+      allocation for style-only updates. Added 2026-07-23: compiler event-
+      attribute classification now strips the `on` prefix as a borrowed slice
+      instead of allocating a normalized `String`; a 2M-classification release
+      benchmark measured 13.40–16.23ms allocating versus 5.00–6.00ms borrowed
+      across three runs (2.23–3.24x faster). Widget-tree tags/attributes and the
       broader symbol types remain open.
 - [ ] Typed style declarations end-to-end: resolve theme tokens to typed
       values once per theme load; `apply_declaration` consumes typed values,
@@ -513,7 +517,30 @@ reference it. The historical subsystem map is
       strings are still allocated for interaction/refs (J). Scroll overflow
       annotation now reserves the reusable root key-path buffer; a 20,000-pass
       release benchmark measured 796.1ms unreserved versus 769.5ms reserved
-      (1.03x).
+      (1.03x). Added 2026-07-23: pointer and keyed tooltip traversal carry
+      borrowed owner/text references and allocate only the final API result
+      instead of allocating at every tooltip-bearing ancestor. A 64-node,
+      100,000-lookup release benchmark measured 331.61–342.17ms eager versus
+      171.52–173.52ms borrowed across three final runs (1.93–1.99x faster); the
+      canonical fused pointer-motion workload moved from a 700.51ms baseline
+      to 627.77–669.92ms across three final runs (1.05–1.12x faster).
+      Follow-up 2026-07-23: visible-tooltip rendering now resolves inherited
+      text, the owner node, and transformed owner bounds in one allocation-free
+      traversal instead of separate tooltip, node, and bounds walks. Across
+      three release runs of 20,000 deep lookups in a 2,601-node tree, separate
+      walks took 3.96–4.56s versus 2.86–2.89s fused (1.38–1.58x faster for the
+      per-frame lookup portion). Added later 2026-07-23: the resolved tooltip
+      render target is cached by retained-tree generation plus hovered key, so
+      stable fade and paint-only frames skip the tree entirely; hover changes
+      clear it and any retained layout/style/attribute/state/structure change
+      refreshes it. Across three release runs of 20,000 stable deep-tree frames,
+      repeated fused resolution took 3.04–3.39s versus 243–265µs for guarded
+      cache hits (11,693–13,929x faster for the eliminated lookup). The cached
+      text and frame-local paint tuple now share `Arc<str>` ownership instead
+      of deep-cloning a `String` so later mutable shell work can outlive the
+      cache borrow. Across three release runs of one million representative
+      504-byte tooltip handoffs, `String` cloning took 9.45–16.02ms versus
+      2.77–6.79ms for `Arc` cloning (2.25–3.41x faster).
 - [ ] Allocator-level profile mode (allocation counts per render pass) →
       v1.23
 - [ ] Magic-string protocol at the composition boundary (`__mesh_embed__::`,
@@ -582,13 +609,19 @@ reference it. The historical subsystem map is
       (mask filter) — full subtree blur needs layer push/pop command kinds in
       the retained display list; downsample-blur-upsample bounding and the
       GPU path per the plan doc.
-- [ ] Eliminate service-specific Rust branches: the hardcoded `mesh.audio`
-      optimistic-mute merge in `normalize_service_event` /
-      `apply_optimistic_audio_muted_state` should become an optimistic-state
-      declaration in the interface contract (S).
-- [ ] `legacy_backend_candidates_from_discovery` is a compat lane duplicating
-      graph-driven candidate selection; hard startup error or documented
-      degraded-mode boot, then delete (V).
+- [x] Eliminate the service-specific optimistic-state Rust branch (S).
+      Contract methods declare `optimistic: { field, fromArg }`; successful
+      dispatch records a generic `(interface, field)` patch, re-applies it
+      across stale provider updates, and clears it on confirmation. Verified
+      2026-07-23 with a non-audio `mesh.lighting.set_enabled` regression so
+      this path cannot silently depend on `mesh.audio`.
+- [x] Delete the discovery-order backend candidate compatibility lane (V).
+      Startup and supervised restarts consume the installed graph's explicit
+      active provider through `backend_launch_candidates_from_graph` /
+      `launch_candidate_for_provider`; missing or invalid selected providers
+      produce typed degraded-mode lifecycle statuses. Verified 2026-07-23 that
+      an installed, runnable but unselected discovered provider is never used
+      as a fallback when the graph-selected provider is unavailable.
 - [ ] Slider drags with `change`/`release` handlers still take script
       invalidation; closing this fully needs v1.18 narrow invalidation
       (J; handlerless drags already use interaction restyle). Added 2026-07-14:

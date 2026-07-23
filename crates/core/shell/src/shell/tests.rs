@@ -3913,6 +3913,80 @@ fn set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms() 
 }
 
 #[test]
+fn contract_declared_optimistic_state_is_interface_agnostic() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let interface = "mesh.lighting";
+    let provider = "@mesh/test-lighting";
+    let mut contract = test_contract(interface);
+    contract.state_fields[2].name = "enabled".to_string();
+    contract.methods[1].name = "set_enabled".to_string();
+    contract.methods[1].args[1].name = "enabled".to_string();
+    contract.methods[1].optimistic = Some(mesh_core_service::OptimisticUpdate {
+        field: "enabled".to_string(),
+        from_arg: Some("enabled".to_string()),
+    });
+    shell.interfaces.register_contract(contract);
+    register_test_provider(&shell.interfaces, interface, provider);
+    let (slot, mut rx) = backend_runtime_slot(&runtime, interface, provider);
+    shell.replace_backend_runtime(interface.to_string(), slot);
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.lighting.control",
+    ));
+
+    shell
+        .broadcast_service_event(service_update(
+            interface,
+            provider,
+            serde_json::json!({ "available": true, "percent": 0.0, "enabled": false }),
+        ))
+        .unwrap();
+    let result = shell.dispatch_service_command(
+        interface,
+        "set_enabled",
+        &serde_json::json!({ "device_id": "desk", "enabled": true }),
+        "@mesh/lighting-controls",
+        &capabilities,
+    );
+
+    assert_eq!(result["ok"], serde_json::json!(true));
+    assert_eq!(result["optimistic"], serde_json::json!(true));
+    assert_eq!(rx.try_recv().unwrap().command, "set_enabled");
+    assert_eq!(
+        shell.latest_service_state[interface].state["enabled"],
+        serde_json::json!(true)
+    );
+
+    shell
+        .broadcast_service_event(service_update(
+            interface,
+            provider,
+            serde_json::json!({ "available": true, "percent": 0.0, "enabled": false }),
+        ))
+        .unwrap();
+    assert_eq!(
+        shell.latest_service_state[interface].state["enabled"],
+        serde_json::json!(true),
+        "a stale provider update must retain the generic optimistic patch"
+    );
+
+    shell
+        .broadcast_service_event(service_update(
+            interface,
+            provider,
+            serde_json::json!({ "available": true, "percent": 0.0, "enabled": true }),
+        ))
+        .unwrap();
+    assert!(
+        !shell
+            .pending_optimistic_state
+            .contains_key(&(interface.to_string(), "enabled".to_string())),
+        "matching provider confirmation must clear the generic patch"
+    );
+}
+
+#[test]
 fn backend_supervision_quarantines_provider_after_exhausted_restart_cycles() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
@@ -7391,6 +7465,67 @@ fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
         !candidates
             .iter()
             .any(|candidate| candidate.module_id == "@mesh/pulseaudio-audio")
+    );
+}
+
+#[test]
+fn backend_lifecycle_never_falls_back_to_an_unselected_discovered_provider() {
+    let graph = graph_from_json(
+        r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/selected": { "kind": "backend", "path": "@mesh/selected", "enabled": true },
+                "@mesh/fallback": { "kind": "backend", "path": "@mesh/fallback", "enabled": true }
+              },
+              "providers": { "mesh.example": "@mesh/selected" }
+            }"#,
+        vec![
+            r#"{
+                  "name": "@mesh/selected",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "entrypoints": { "main": "src/main.luau" },
+                    "implements": [{ "interface": "mesh.example", "provider": "selected" }]
+                  }
+                }"#,
+            r#"{
+                  "name": "@mesh/fallback",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "entrypoints": { "main": "src/main.luau" },
+                    "implements": [{ "interface": "mesh.example", "provider": "fallback" }]
+                  }
+                }"#,
+        ],
+    );
+    // Only the unselected provider has a discovered runtime manifest. A
+    // discovery-driven compatibility lane would incorrectly launch it.
+    let (_fallback_dir, fallback) = module_instance("@mesh/fallback", Some("src/main.luau"));
+    let modules = HashMap::from([("@mesh/fallback".to_string(), fallback)]);
+    let interfaces = InterfaceRegistry::new();
+    interfaces.register_contract(test_contract("mesh.example"));
+    register_test_provider(&interfaces, "mesh.example", "@mesh/selected");
+    register_test_provider(&interfaces, "mesh.example", "@mesh/fallback");
+
+    let (candidates, statuses) =
+        backend_launch_candidates_from_graph(&graph, &modules, &test_config(), &interfaces);
+
+    assert!(candidates.is_empty());
+    assert!(statuses.iter().any(|status| {
+        status.status == "invalid_manifest"
+            && status.provider_id.as_deref() == Some("@mesh/selected")
+            && status.message.contains("no discovered runtime manifest")
+    }));
+    assert!(
+        statuses
+            .iter()
+            .all(|status| status.provider_id.as_deref() != Some("@mesh/fallback")),
+        "the graph-selected provider must never fall back to discovery order"
     );
 }
 

@@ -300,6 +300,7 @@ impl FrontendSurfaceComponent {
                     self.hovered_key = new_key.clone();
                     let previous_path = std::mem::take(&mut self.hovered_path);
                     self.hovered_tooltip = next_tooltip.clone();
+                    self.tooltip_target_cache.clear();
                     // Store the hovered element's bounds for tooltip positioning.
                     // Use the tooltip owner's bounds when available; fall back to
                     // the hovered node itself.
@@ -350,6 +351,7 @@ impl FrontendSurfaceComponent {
                     self.hover_start = None;
                     self.tooltip_visible = false;
                     self.hovered_element_bounds = None;
+                    self.tooltip_target_cache.clear();
                     self.tooltip_appeared_at = None;
                     self.invalidate_hover_change(tooltip_may_change);
                 }

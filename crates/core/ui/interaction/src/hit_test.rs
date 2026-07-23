@@ -1,4 +1,6 @@
 use super::*;
+use mesh_core_elements::style::TooltipAnchor;
+use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq)]
 pub struct PointerHit {
     pub path: Vec<String>,
@@ -66,7 +68,100 @@ fn inspect_hit_test_inner(
     })
 }
 
-type TooltipHit = (String, String, ContentBounds);
+#[derive(Debug, Clone, Copy)]
+pub struct TooltipTarget<'a> {
+    pub owner: &'a WidgetNode,
+    pub text: &'a str,
+    pub bounds: ContentBounds,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TooltipRenderTarget {
+    pub text: Arc<str>,
+    pub bounds: Option<ContentBounds>,
+    pub anchor: TooltipAnchor,
+    pub offset: Option<(f32, f32)>,
+}
+
+#[derive(Clone, Debug)]
+struct CachedTooltipTarget {
+    generation: u64,
+    hovered_key: String,
+    target: TooltipRenderTarget,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TooltipTargetCache {
+    cached: Option<CachedTooltipTarget>,
+}
+
+impl TooltipTargetCache {
+    pub fn clear(&mut self) {
+        self.cached = None;
+    }
+
+    pub fn resolve<'a>(
+        &'a mut self,
+        tree: &WidgetNode,
+        hovered_key: &str,
+        retained_generation: u64,
+        fallback_bounds: Option<ContentBounds>,
+    ) -> Option<&'a TooltipRenderTarget> {
+        let is_current = self.cached.as_ref().is_some_and(|cached| {
+            cached.generation == retained_generation && cached.hovered_key == hovered_key
+        });
+        if !is_current {
+            let Some(tooltip) = find_tooltip_target_by_key(tree, hovered_key) else {
+                self.cached = None;
+                return None;
+            };
+            // Preserve the shell's anonymous-owner behavior: without a stable
+            // key, placement uses the pointer-hit bounds and default style.
+            let keyed_owner = tooltip.owner.mesh_key().map(|_| tooltip.owner);
+            self.cached = Some(CachedTooltipTarget {
+                generation: retained_generation,
+                hovered_key: hovered_key.to_owned(),
+                target: TooltipRenderTarget {
+                    text: Arc::from(tooltip.text),
+                    bounds: keyed_owner.map(|_| tooltip.bounds).or(fallback_bounds),
+                    anchor: keyed_owner
+                        .map(|node| node.computed_style.tooltip_anchor)
+                        .unwrap_or_default(),
+                    offset: keyed_owner.and_then(|node| node.computed_style.tooltip_offset),
+                },
+            });
+        }
+        self.cached.as_ref().map(|cached| &cached.target)
+    }
+}
+
+impl TooltipTarget<'_> {
+    fn into_owned(self) -> (String, String) {
+        let owner = self
+            .owner
+            .mesh_key()
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("anonymous-tooltip-owner:{:p}", self.owner));
+        (owner, self.text.to_owned())
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TooltipRef<'a> {
+    owner: &'a WidgetNode,
+    text: &'a str,
+}
+
+impl TooltipRef<'_> {
+    fn into_owned(self) -> (String, String) {
+        let owner = self
+            .owner
+            .mesh_key()
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("anonymous-tooltip-owner:{:p}", self.owner));
+        (owner, self.text.to_owned())
+    }
+}
 
 /// Resolve all pointer-motion metadata in the same tree traversal.
 pub fn pointer_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<PointerHit> {
@@ -186,13 +281,13 @@ fn pointer_press_hit_inner<'a>(
     (hit.focusable.is_some() || hit.target.is_some()).then_some(hit)
 }
 
-fn pointer_hit_test_reversed(
-    node: &WidgetNode,
+fn pointer_hit_test_reversed<'a>(
+    node: &'a WidgetNode,
     x: f32,
     y: f32,
     offset_x: f32,
     offset_y: f32,
-    inherited_tooltip: Option<&TooltipHit>,
+    inherited_tooltip: Option<TooltipTarget<'a>>,
 ) -> Option<PointerHit> {
     if node_is_hidden(node) {
         return None;
@@ -202,9 +297,12 @@ fn pointer_hit_test_reversed(
     if !inside && node_clips_children(node) {
         return None;
     }
-    let owner_tooltip = node_tooltip_owner_text(node)
-        .map(|(owner, text)| (owner, text, node_rect_with_offset(node, offset_x, offset_y)));
-    let tooltip = owner_tooltip.as_ref().or(inherited_tooltip);
+    let owner_tooltip = node_tooltip_text_ref(node).map(|text| TooltipTarget {
+        owner: node,
+        text,
+        bounds: node_rect_with_offset(node, offset_x, offset_y),
+    });
+    let tooltip = owner_tooltip.or(inherited_tooltip);
     let (child_ox, child_oy) = child_offsets_with_scroll(node, offset_x, offset_y);
     for child in node.children.iter().rev() {
         if let Some(mut hit) = pointer_hit_test_reversed(child, x, y, child_ox, child_oy, tooltip) {
@@ -217,9 +315,9 @@ fn pointer_hit_test_reversed(
     let key = node.mesh_key()?;
     inside.then(|| PointerHit {
         path: vec![key.to_owned()],
-        tooltip: tooltip.map(|(owner, text, _)| (owner.clone(), text.clone())),
+        tooltip: tooltip.map(TooltipTarget::into_owned),
         bounds: tooltip
-            .map(|(_, _, bounds)| *bounds)
+            .map(|tooltip| tooltip.bounds)
             .unwrap_or_else(|| node_rect_with_offset(node, offset_x, offset_y)),
     })
 }
@@ -398,7 +496,8 @@ fn find_node_path_reversed(
 }
 
 /// Extract tooltip text from a node's attributes and accessibility metadata.
-pub fn node_tooltip_text(node: &WidgetNode) -> Option<String> {
+#[cfg(test)]
+fn node_tooltip_text(node: &WidgetNode) -> Option<String> {
     node_tooltip_text_ref(node).map(str::to_owned)
 }
 
@@ -475,40 +574,72 @@ fn find_container_bounds_inner(
 
 /// Find tooltip text for a specific node key in the tree.
 pub fn find_tooltip_text_by_key(node: &WidgetNode, key: &str) -> Option<String> {
-    find_tooltip_by_key(node, key).map(|(_, text)| text)
+    find_tooltip_by_key_with_inherited(node, key, None)
+        .flatten()
+        .map(|tooltip| tooltip.text.to_owned())
 }
 
 /// Find the tooltip owner key and text for a specific node key in the tree.
 pub fn find_tooltip_by_key(node: &WidgetNode, key: &str) -> Option<(String, String)> {
-    find_tooltip_by_key_with_inherited(node, key, None).flatten()
+    find_tooltip_by_key_with_inherited(node, key, None)
+        .flatten()
+        .map(TooltipRef::into_owned)
 }
 
-fn find_tooltip_by_key_with_inherited(
-    node: &WidgetNode,
+fn find_tooltip_by_key_with_inherited<'a>(
+    node: &'a WidgetNode,
     key: &str,
-    inherited: Option<&(String, String)>,
-) -> Option<Option<(String, String)>> {
-    let owner_text = node_tooltip_owner_text(node);
-    let inherited = owner_text.as_ref().or(inherited);
-    if node.mesh_key().is_some_and(|k| k == key) {
-        return Some(inherited.cloned());
+    inherited: Option<TooltipRef<'a>>,
+) -> Option<Option<TooltipRef<'a>>> {
+    let owner_tooltip = node_tooltip_text_ref(node).map(|text| TooltipRef { owner: node, text });
+    let inherited = owner_tooltip.or(inherited);
+    if node.mesh_key().is_some_and(|candidate| candidate == key) {
+        return Some(inherited);
     }
     for child in &node.children {
-        if let Some(text) = find_tooltip_by_key_with_inherited(child, key, inherited) {
-            return Some(text);
+        if let Some(found) = find_tooltip_by_key_with_inherited(child, key, inherited) {
+            return Some(found);
         }
     }
     None
 }
 
-fn node_tooltip_owner_text(node: &WidgetNode) -> Option<(String, String)> {
-    node_tooltip_text(node).map(|text| {
-        let owner = node
-            .mesh_key()
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("anonymous-tooltip-owner:{:p}", node));
-        (owner, text)
-    })
+/// Resolve inherited tooltip text, its owning node, and the owner's
+/// surface-space bounds in one allocation-free traversal.
+pub fn find_tooltip_target_by_key<'a>(
+    node: &'a WidgetNode,
+    key: &str,
+) -> Option<TooltipTarget<'a>> {
+    find_tooltip_target_by_key_inner(node, key, 0.0, 0.0, None).flatten()
+}
+
+/// Outer `Option` = keyed node found; inner = its nearest tooltip owner.
+fn find_tooltip_target_by_key_inner<'a>(
+    node: &'a WidgetNode,
+    key: &str,
+    offset_x: f32,
+    offset_y: f32,
+    inherited: Option<TooltipTarget<'a>>,
+) -> Option<Option<TooltipTarget<'a>>> {
+    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
+    let owner_tooltip = node_tooltip_text_ref(node).map(|text| TooltipTarget {
+        owner: node,
+        text,
+        bounds: node_rect_with_offset(node, offset_x, offset_y),
+    });
+    let inherited = owner_tooltip.or(inherited);
+    if node.mesh_key().is_some_and(|k| k == key) {
+        return Some(inherited);
+    }
+    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
+    for child in &node.children {
+        if let Some(text) =
+            find_tooltip_target_by_key_inner(child, key, child_offset_x, child_offset_y, inherited)
+        {
+            return Some(text);
+        }
+    }
+    None
 }
 
 pub fn is_input_key(tree: &WidgetNode, key: &str) -> bool {
@@ -946,6 +1077,87 @@ mod tests {
     }
 
     #[test]
+    fn tooltip_target_lookup_matches_separate_owner_and_bounds_walks() {
+        let mut root = indexed_tree(6, 8);
+        root.children[4]
+            .attributes
+            .insert("tooltip".into(), "Inherited row tooltip".into());
+        root.children[4].computed_style.transform.translate_x = 7.0;
+        root.children[4]
+            .attributes
+            .insert("_mesh_scroll_x".into(), "3".into());
+
+        let (owner_key, text) = find_tooltip_by_key(&root, "cell-4-3").unwrap();
+        let expected_owner = find_node_by_key(&root, &owner_key).unwrap();
+        let expected_bounds = find_node_bounds_by_key(&root, &owner_key, 0.0, 0.0).unwrap();
+
+        let target = find_tooltip_target_by_key(&root, "cell-4-3").unwrap();
+        assert!(std::ptr::eq(target.owner, expected_owner));
+        assert_eq!(target.text, text);
+        assert_eq!(target.bounds, expected_bounds);
+        assert!(find_tooltip_target_by_key(&root, "missing").is_none());
+    }
+
+    #[test]
+    fn tooltip_target_cache_reuses_generation_and_refreshes_on_change() {
+        let mut root = indexed_tree(4, 4);
+        root.children[2]
+            .attributes
+            .insert("tooltip".into(), "Initial tooltip".into());
+        let mut cache = TooltipTargetCache::default();
+
+        let initial = cache.resolve(&root, "cell-2-3", 7, None).unwrap().clone();
+        assert_eq!(initial.text.as_ref(), "Initial tooltip");
+        let initial_text = Arc::clone(&initial.text);
+
+        root.children[2]
+            .attributes
+            .insert("tooltip".into(), "Updated tooltip".into());
+        assert_eq!(
+            cache.resolve(&root, "cell-2-3", 7, None).unwrap(),
+            &initial,
+            "the same retained generation must reuse the cached snapshot"
+        );
+        assert!(Arc::ptr_eq(
+            &cache.resolve(&root, "cell-2-3", 7, None).unwrap().text,
+            &initial_text
+        ));
+        let refreshed = cache.resolve(&root, "cell-2-3", 8, None).unwrap();
+        assert_eq!(refreshed.text.as_ref(), "Updated tooltip");
+        assert!(
+            !Arc::ptr_eq(&refreshed.text, &initial_text),
+            "a new retained generation must refresh tree-derived fields"
+        );
+
+        cache.clear();
+        assert_eq!(
+            cache
+                .resolve(&root, "cell-2-3", 8, None)
+                .unwrap()
+                .text
+                .as_ref(),
+            "Updated tooltip"
+        );
+        assert!(cache.resolve(&root, "missing", 8, None).is_none());
+    }
+
+    #[test]
+    fn tooltip_target_cache_preserves_anonymous_owner_fallback() {
+        let fallback = Some((5.0, 6.0, 15.0, 16.0));
+        let mut root = WidgetNode::new("box");
+        root.attributes.insert("tooltip".into(), "Anonymous".into());
+        let mut child = WidgetNode::new("text");
+        child.attributes.insert("_mesh_key".into(), "child".into());
+        root.children.push(child);
+
+        let mut cache = TooltipTargetCache::default();
+        let target = cache.resolve(&root, "child", 1, fallback).unwrap();
+        assert_eq!(target.bounds, fallback);
+        assert_eq!(target.anchor, TooltipAnchor::Auto);
+        assert_eq!(target.offset, None);
+    }
+
+    #[test]
     fn find_nodes_by_keys_matches_separate_lookups() {
         let root = indexed_tree(6, 8);
         let keys: std::collections::HashSet<&str> =
@@ -1048,6 +1260,224 @@ mod tests {
 
         eprintln!("tree_walk={tree_walk:?} fused={fused:?}");
         assert!(fused < tree_walk, "fused lookup must improve pointer time");
+    }
+
+    // cargo test -p mesh-core-interaction --release -- borrowed_tooltip_traversal_beats_eager_string_allocation --ignored --nocapture
+    #[test]
+    #[ignore = "release-only tooltip traversal allocation microbenchmark"]
+    fn borrowed_tooltip_traversal_beats_eager_string_allocation() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        fn legacy_find(
+            node: &WidgetNode,
+            key: &str,
+            inherited: Option<&(String, String)>,
+        ) -> Option<Option<(String, String)>> {
+            let owner_text = node_tooltip_text(node).map(|text| {
+                let owner = node
+                    .mesh_key()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("anonymous-tooltip-owner:{node:p}"));
+                (owner, text)
+            });
+            let inherited = owner_text.as_ref().or(inherited);
+            if node.mesh_key().is_some_and(|candidate| candidate == key) {
+                return Some(inherited.cloned());
+            }
+            for child in &node.children {
+                if let Some(found) = legacy_find(child, key, inherited) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+
+        let mut tree = WidgetNode::new("box");
+        tree.attributes.insert("_mesh_key".into(), "node-0".into());
+        tree.attributes.insert("tooltip".into(), "tooltip-0".into());
+        let mut cursor = &mut tree;
+        for depth in 1..64 {
+            let mut child = WidgetNode::new("box");
+            child
+                .attributes
+                .insert("_mesh_key".into(), format!("node-{depth}"));
+            child
+                .attributes
+                .insert("tooltip".into(), format!("tooltip-{depth}"));
+            cursor.children.push(child);
+            cursor = cursor.children.last_mut().unwrap();
+        }
+        let iterations = 100_000;
+
+        let eager_started = Instant::now();
+        let mut eager_bytes = 0usize;
+        for _ in 0..iterations {
+            let (owner, text) = legacy_find(black_box(&tree), black_box("node-63"), None)
+                .flatten()
+                .unwrap();
+            eager_bytes = eager_bytes.wrapping_add(owner.len() + text.len());
+        }
+        let eager = eager_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_bytes = 0usize;
+        for _ in 0..iterations {
+            let (owner, text) =
+                find_tooltip_by_key(black_box(&tree), black_box("node-63")).unwrap();
+            borrowed_bytes = borrowed_bytes.wrapping_add(owner.len() + text.len());
+        }
+        let borrowed = borrowed_started.elapsed();
+
+        let speedup = eager.as_secs_f64() / borrowed.as_secs_f64();
+        eprintln!(
+            "MESH_PERF metric=borrowed_tooltip_traversal_speedup value={speedup:.3} eager={eager:?} borrowed={borrowed:?}"
+        );
+        assert_eq!(eager_bytes, borrowed_bytes);
+        assert!(borrowed < eager);
+    }
+
+    // cargo test -p mesh-core-interaction --release -- fused_tooltip_target_lookup_beats_separate_tree_walks --ignored --nocapture
+    #[test]
+    #[ignore = "release-only fused tooltip target lookup benchmark"]
+    fn fused_tooltip_target_lookup_beats_separate_tree_walks() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let mut tree = indexed_tree(200, 12);
+        let owner_key = "row-199";
+        let hovered_key = "cell-199-11";
+        tree.children[199]
+            .attributes
+            .insert("tooltip".into(), "Deep inherited tooltip".into());
+        tree.children[199].computed_style.transform.translate_x = 3.0;
+        let iterations = 20_000usize;
+
+        let separate_started = Instant::now();
+        let mut separate_total = 0usize;
+        for _ in 0..iterations {
+            let (resolved_owner, text) =
+                find_tooltip_by_key(black_box(&tree), black_box(hovered_key)).unwrap();
+            let owner = find_node_by_key(black_box(&tree), black_box(&resolved_owner)).unwrap();
+            let bounds =
+                find_node_bounds_by_key(black_box(&tree), black_box(&resolved_owner), 0.0, 0.0)
+                    .unwrap();
+            separate_total = separate_total
+                .wrapping_add(text.len())
+                .wrapping_add(owner.mesh_key().unwrap().len())
+                .wrapping_add(bounds.0 as usize);
+        }
+        let separate = separate_started.elapsed();
+
+        let fused_started = Instant::now();
+        let mut fused_total = 0usize;
+        for _ in 0..iterations {
+            let target =
+                find_tooltip_target_by_key(black_box(&tree), black_box(hovered_key)).unwrap();
+            fused_total = fused_total
+                .wrapping_add(target.text.len())
+                .wrapping_add(target.owner.mesh_key().unwrap().len())
+                .wrapping_add(target.bounds.0 as usize);
+        }
+        let fused = fused_started.elapsed();
+
+        assert_eq!(target_owner_key(&tree, hovered_key), Some(owner_key));
+        assert_eq!(separate_total, fused_total);
+        let speedup = separate.as_secs_f64() / fused.as_secs_f64();
+        eprintln!(
+            "MESH_PERF metric=fused_tooltip_target_lookup_speedup value={speedup:.3} separate={separate:?} fused={fused:?}"
+        );
+        assert!(fused < separate);
+
+        fn target_owner_key<'a>(tree: &'a WidgetNode, key: &str) -> Option<&'a str> {
+            find_tooltip_target_by_key(tree, key)?.owner.mesh_key()
+        }
+    }
+
+    // cargo test -p mesh-core-interaction --release -- stable_tooltip_target_cache_beats_repeated_tree_lookup --ignored --nocapture
+    #[test]
+    #[ignore = "release-only stable tooltip target cache benchmark"]
+    fn stable_tooltip_target_cache_beats_repeated_tree_lookup() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let mut tree = indexed_tree(200, 12);
+        let hovered_key = "cell-199-11";
+        tree.children[199]
+            .attributes
+            .insert("tooltip".into(), "Deep inherited tooltip".into());
+        let iterations = 20_000usize;
+
+        let repeated_started = Instant::now();
+        let mut repeated_total = 0usize;
+        for _ in 0..iterations {
+            let target =
+                find_tooltip_target_by_key(black_box(&tree), black_box(hovered_key)).unwrap();
+            repeated_total = repeated_total
+                .wrapping_add(target.text.len())
+                .wrapping_add(target.bounds.0 as usize);
+        }
+        let repeated = repeated_started.elapsed();
+
+        let cached_started = Instant::now();
+        let mut cached_total = 0usize;
+        let mut cache = TooltipTargetCache::default();
+        for _ in 0..iterations {
+            let target = cache
+                .resolve(
+                    black_box(&tree),
+                    black_box(hovered_key),
+                    black_box(42),
+                    None,
+                )
+                .unwrap();
+            cached_total = cached_total
+                .wrapping_add(target.text.len())
+                .wrapping_add(target.bounds.unwrap().0 as usize);
+        }
+        let cached = cached_started.elapsed();
+
+        assert_eq!(repeated_total, cached_total);
+        let speedup = repeated.as_secs_f64() / cached.as_secs_f64();
+        eprintln!(
+            "MESH_PERF metric=stable_tooltip_target_cache_speedup value={speedup:.3} repeated={repeated:?} cached={cached:?}"
+        );
+        assert!(cached < repeated);
+    }
+
+    // cargo test -p mesh-core-interaction --release -- arc_tooltip_text_clone_beats_string_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only tooltip text ownership benchmark"]
+    fn arc_tooltip_text_clone_beats_string_clone() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let owned = "Detailed tooltip text with localized state and shortcut hints. ".repeat(8);
+        let shared: Arc<str> = Arc::from(owned.as_str());
+        let iterations = 1_000_000usize;
+
+        let string_started = Instant::now();
+        let mut string_total = 0usize;
+        for _ in 0..iterations {
+            let cloned = black_box(owned.clone());
+            string_total = string_total.wrapping_add(cloned.len());
+        }
+        let string_time = string_started.elapsed();
+
+        let arc_started = Instant::now();
+        let mut arc_total = 0usize;
+        for _ in 0..iterations {
+            let cloned = black_box(Arc::clone(&shared));
+            arc_total = arc_total.wrapping_add(cloned.len());
+        }
+        let arc_time = arc_started.elapsed();
+
+        assert_eq!(string_total, arc_total);
+        let speedup = string_time.as_secs_f64() / arc_time.as_secs_f64();
+        eprintln!(
+            "MESH_PERF metric=arc_tooltip_text_clone_speedup value={speedup:.3} string={string_time:?} arc={arc_time:?}"
+        );
+        assert!(arc_time < string_time);
     }
 
     // cargo test -p mesh-core-interaction --release -- pointer_press_hit_beats_press_path_tree_walks --ignored --nocapture

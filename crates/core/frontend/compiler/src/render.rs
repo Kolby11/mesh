@@ -1273,7 +1273,11 @@ fn namespaced_handler(host_instance_key: &str, handler: &str) -> String {
 }
 
 fn normalize_event_handler_name(name: &str) -> String {
-    name.strip_prefix("on").unwrap_or(name).to_string()
+    normalized_event_handler_name(name).to_owned()
+}
+
+fn normalized_event_handler_name(name: &str) -> &str {
+    name.strip_prefix("on").unwrap_or(name)
 }
 
 fn is_event_handler_attribute(name: &str) -> bool {
@@ -1281,7 +1285,7 @@ fn is_event_handler_attribute(name: &str) -> bool {
         return false;
     }
     matches!(
-        normalize_event_handler_name(name).as_str(),
+        normalized_event_handler_name(name),
         "click"
             | "input"
             | "change"
@@ -2826,6 +2830,59 @@ import Child from "./child.mesh"
         ] {
             assert!(is_event_handler_attribute(name), "{name}");
         }
+    }
+
+    // cargo test -p mesh-core-frontend --release -- borrowed_event_attribute_classification_beats_owned_normalization --ignored --nocapture
+    #[test]
+    #[ignore = "release-only event attribute classification microbenchmark"]
+    fn borrowed_event_attribute_classification_beats_owned_normalization() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let names = [
+            "class",
+            "onclick",
+            "ontap",
+            "ontwofingerscroll",
+            "onlongpress",
+            "oncustom",
+            "style",
+            "onchange",
+        ];
+        let iterations = 2_000_000;
+
+        let owned_started = Instant::now();
+        let mut owned_matches = 0usize;
+        for index in 0..iterations {
+            let name = black_box(names[index % names.len()]);
+            if name.starts_with("on")
+                && matches!(
+                    name.strip_prefix("on").unwrap_or(name).to_string().as_str(),
+                    "click" | "change" | "tap" | "twofingerscroll" | "longpress"
+                )
+            {
+                owned_matches += 1;
+            }
+        }
+        let owned = owned_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_matches = 0usize;
+        for index in 0..iterations {
+            if is_event_handler_attribute(black_box(names[index % names.len()])) {
+                borrowed_matches += 1;
+            }
+        }
+        let borrowed = borrowed_started.elapsed();
+
+        // The production matcher recognizes more event names; all extra names
+        // in this workload are deliberately non-events.
+        assert_eq!(owned_matches, borrowed_matches);
+        let speedup = owned.as_secs_f64() / borrowed.as_secs_f64();
+        eprintln!(
+            "MESH_PERF metric=borrowed_event_attribute_classification_speedup value={speedup:.3} owned={owned:?} borrowed={borrowed:?}"
+        );
+        assert!(borrowed < owned);
     }
 
     // cargo test -p mesh-core-frontend --release -- compiler_handler_namespace_presizing_beats_format_benchmark --ignored --nocapture
