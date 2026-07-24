@@ -192,6 +192,16 @@ impl ScriptState {
         value: Value,
         fingerprint: u64,
     ) {
+        self.set_host_shared_value_with_fingerprint(name, Arc::new(value), fingerprint);
+    }
+
+    /// Set a shared host-maintained value without cloning its JSON tree.
+    pub fn set_host_shared_value_with_fingerprint(
+        &mut self,
+        name: impl Into<String>,
+        value: Arc<Value>,
+        fingerprint: u64,
+    ) {
         let name = name.into();
         if self
             .host_value_fingerprints
@@ -200,7 +210,7 @@ impl ScriptState {
         {
             return;
         }
-        self.variables.insert(name.clone(), Arc::new(value));
+        self.variables.insert(name.clone(), value);
         self.host_value_fingerprints.insert(name, fingerprint);
         self.mutation_generation = self.mutation_generation.wrapping_add(1);
         self.cached_snapshot

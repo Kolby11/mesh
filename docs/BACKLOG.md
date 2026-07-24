@@ -389,7 +389,7 @@ reference it. The historical subsystem map is
 
 ### P1 — boundary & dispatch
 
-- [ ] Per-paint element metrics: lazy `refs.<name>` field resolution for
+- [x] Per-paint element metrics: lazy `refs.<name>` field resolution for
       frames where metrics really changed (A; publication is already
       diff-gated and snapshots are lazy/sparse). Progress 2026-07-13:
       `refs.<name>` now caches the live element proxy table and element
@@ -433,6 +433,16 @@ reference it. The historical subsystem map is
       index, so unchanged finalize passes borrow it instead of rebuilding the
       map; the release microbenchmark measured 3.297ms rebuild versus 2.4µs
       cached lookup over 1,000 probes.
+      Completed 2026-07-24: live refs now share a surface-owned Rust metrics
+      store and lower only the requested element snapshot into Lua, caching
+      that table per proxy and publication version. The live store and
+      template-facing state share one `Arc<Value>`, preserving full-snapshot
+      template semantics without cloning the JSON tree; embedded component
+      contexts share the same live store. Across three release runs of 2,000
+      changed 256-element snapshots with one ref read, eager full JSON→Lua
+      publication took 619.0–622.8ms versus 9.87–10.44ms for shared lazy
+      publication and access (59.49–62.72x faster). The relative speedup is
+      checked by the canonical performance gate.
 - [ ] Push-based backend host API primitives (D-Bus signal subscribe,
       fd/socket watch, stream adoption) so providers are event-driven and the
       safety poll is fallback (C). Includes investigating `pw-dump --monitor`

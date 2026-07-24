@@ -3414,6 +3414,33 @@ end
 }
 
 #[test]
+fn refs_share_live_metrics_across_surface_component_contexts() {
+    let surface_vm = SurfaceVm::new();
+    let mut root = ScriptContext::new("@test/root", CapabilitySet::new()).unwrap();
+    let mut child = ScriptContext::new("@test/child", CapabilitySet::new()).unwrap();
+    root.attach_shared_vm(&surface_vm);
+    child.attach_shared_vm(&surface_vm);
+    root.load_script("function init() end").unwrap();
+    child
+        .load_script(
+            r#"
+width = -1
+function measure()
+    width = refs.panel.width
+end
+"#,
+        )
+        .unwrap();
+
+    root.apply_element_metrics(&serde_json::json!({
+        "panel": { "width": 280.0 }
+    }));
+    child.call_handler("measure", &[]).unwrap();
+
+    assert_eq!(child.state.get("width"), Some(serde_json::json!(280)));
+}
+
+#[test]
 fn element_metrics_fingerprint_skips_unchanged_lua_publication() {
     let mut ctx = ScriptContext::new("@test/refs-fingerprint", CapabilitySet::new()).unwrap();
     ctx.load_script("function init() end").unwrap();
@@ -3479,6 +3506,102 @@ fn unchanged_element_metrics_skip_lua_conversion() {
     assert!(
         new_ns * 10 < old_ns,
         "unchanged metrics should avoid repeated JSON-to-Lua conversion"
+    );
+}
+
+// Run with:
+// cargo test -p mesh-core-scripting --release -- lazy_element_metrics_beat_eager_snapshot_conversion --ignored --nocapture
+#[test]
+#[ignore = "release-only lazy element metrics publication benchmark"]
+fn lazy_element_metrics_beat_eager_snapshot_conversion() {
+    use std::time::Instant;
+
+    let mut entries = serde_json::Map::with_capacity(256);
+    for index in 0..256 {
+        entries.insert(
+            format!("node_{index}"),
+            serde_json::json!({
+                "width": 100.0 + index as f64,
+                "height": 24.0,
+                "left": index as f64,
+                "top": index as f64,
+                "attributes": {
+                    "class": "benchmark-node",
+                    "data-index": index.to_string(),
+                }
+            }),
+        );
+    }
+    let first_metrics = Arc::new(serde_json::Value::Object(entries));
+    let mut changed_metrics = first_metrics.as_ref().clone();
+    changed_metrics["node_255"]["width"] = serde_json::json!(356);
+    let changed_metrics = Arc::new(changed_metrics);
+    let iterations = 2_000usize;
+
+    let mut eager = ScriptContext::new("@mesh/metrics-eager", CapabilitySet::new()).unwrap();
+    eager
+        .load_script(
+            r#"
+measured_width = -1
+function measure()
+    measured_width = __mesh_element_metrics_benchmark.node_255.width
+end
+"#,
+        )
+        .unwrap();
+    let eager_started = Instant::now();
+    for iteration in 0..iterations {
+        let metrics = if iteration % 2 == 0 {
+            &first_metrics
+        } else {
+            &changed_metrics
+        };
+        eager.apply_element_metrics_eager_for_benchmark(std::hint::black_box(metrics.as_ref()));
+        eager.call_handler("measure", &[]).unwrap();
+    }
+    let eager_time = eager_started.elapsed();
+
+    let mut lazy = ScriptContext::new("@mesh/metrics-lazy", CapabilitySet::new()).unwrap();
+    lazy.load_script(
+        r#"
+measured_width = -1
+function measure()
+    measured_width = refs.node_255.width
+end
+"#,
+    )
+    .unwrap();
+    let lazy_started = Instant::now();
+    for iteration in 0..iterations {
+        let metrics = if iteration % 2 == 0 {
+            &first_metrics
+        } else {
+            &changed_metrics
+        };
+        lazy.apply_shared_element_metrics_with_fingerprint(
+            std::hint::black_box(Arc::clone(metrics)),
+            std::hint::black_box(iteration as u64),
+        );
+        lazy.call_handler("measure", &[]).unwrap();
+    }
+    let lazy_time = lazy_started.elapsed();
+
+    assert_eq!(
+        eager.state.get("measured_width"),
+        Some(serde_json::json!(356))
+    );
+    assert_eq!(
+        lazy.state.get("measured_width"),
+        Some(serde_json::json!(356))
+    );
+    let speedup = eager_time.as_secs_f64() / lazy_time.as_secs_f64().max(f64::EPSILON);
+    eprintln!(
+        "element metrics one-ref publication: eager {eager_time:?}; lazy {lazy_time:?}; ratio {speedup:.3}x"
+    );
+    eprintln!("MESH_PERF metric=lazy_element_metrics_speedup value={speedup:.6}");
+    assert!(
+        lazy_time < eager_time,
+        "one-ref reads should not eagerly convert the complete metrics snapshot"
     );
 }
 

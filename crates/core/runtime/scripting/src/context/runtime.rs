@@ -1,4 +1,6 @@
-use super::element_ref::{ElementAction, create_refs_proxy, install_bound_element_proxies};
+use super::element_ref::{
+    ElementAction, ElementMetricsStore, create_refs_proxy, install_bound_element_proxies,
+};
 use super::lookup::{
     interface_error_message, lookup_failure_reason, lua_err, lua_value_to_string, map_lua_error,
     record_lookup_diagnostic, record_lookup_diagnostic_lua,
@@ -92,16 +94,22 @@ impl ScriptVm {
 /// subscriptions isolated; sharing the realm enables live `bind:this` calls
 /// without per-surface standard-library allocation.
 #[derive(Clone, Debug)]
-pub struct SurfaceVm(Lua);
+pub struct SurfaceVm {
+    lua: Lua,
+    element_metrics: Arc<Mutex<ElementMetricsStore>>,
+}
 
 impl SurfaceVm {
     /// Clone the current thread's sandboxed realm for a frontend surface.
     pub fn new() -> Self {
-        Self(pool::thread_vm())
+        Self {
+            lua: pool::thread_vm(),
+            element_metrics: Arc::new(Mutex::new(ElementMetricsStore::default())),
+        }
     }
 
     pub(crate) fn handle(&self) -> Lua {
-        self.0.clone()
+        self.lua.clone()
     }
 }
 
@@ -229,9 +237,12 @@ pub struct ScriptContext {
     /// `bind:this` proxy. The shell consumes this before doing the expensive
     /// cross-instance state resync.
     live_binding_external_accessed: Arc<AtomicBool>,
-    /// Fingerprint of the last element metrics snapshot converted into Lua.
-    /// Shell paints commonly publish identical geometry across many frames.
+    /// Fingerprint of the last element metrics snapshot published to the live
+    /// refs store. Shell paints commonly repeat geometry across many frames.
     last_element_metrics_fingerprint: Option<u64>,
+    /// Rust-owned live element snapshots. Individual `refs.<name>` proxies
+    /// lower only their requested entry into Lua and cache it for this version.
+    shared_element_metrics: Arc<Mutex<ElementMetricsStore>>,
     cached_self_table: Option<Table>,
     cached_service_payload_fingerprints: Option<Table>,
 }
@@ -257,7 +268,11 @@ impl ScriptContext {
     /// thread realm. Must be called before the script is loaded/initialized; it
     /// has no effect once the context is already initialized.
     pub fn attach_shared_vm(&mut self, vm: &SurfaceVm) {
+        if self.vm.is_some() {
+            return;
+        }
         self.shared_vm = Some(vm.handle());
+        self.shared_element_metrics = Arc::clone(&vm.element_metrics);
     }
 
     fn env(&self) -> &Table {
@@ -434,6 +449,7 @@ impl ScriptContext {
             pending_redraw: Arc::new(AtomicBool::new(false)),
             live_binding_external_accessed: Arc::new(AtomicBool::new(false)),
             last_element_metrics_fingerprint: None,
+            shared_element_metrics: Arc::new(Mutex::new(ElementMetricsStore::default())),
             cached_self_table: None,
             cached_service_payload_fingerprints: None,
         })
@@ -1044,11 +1060,11 @@ impl ScriptContext {
     /// Publish the latest per-paint element metrics so live `refs.<name>` reads
     /// reflect the current frame's geometry/state.
     ///
-    /// `metrics` is a `{ name -> fields }` object (the same shape the shell builds
-    /// from the painted tree). Stored on the shared realm's globals so every
-    /// component in the surface reads through `_ENV.__index -> globals`.
+    /// `metrics` is a `{ name -> fields }` object. It remains in a shared
+    /// surface-owned Rust store; each live proxy converts only its requested
+    /// entry into Lua.
     pub fn apply_element_metrics(&mut self, metrics: &Value) {
-        self.apply_element_metrics_inner(metrics);
+        self.apply_element_metrics_inner(Arc::new(metrics.clone()));
     }
 
     /// Publish element metrics only when the producer's full-snapshot
@@ -1057,25 +1073,47 @@ impl ScriptContext {
         if self.last_element_metrics_fingerprint == Some(fingerprint) {
             return;
         }
+        self.apply_element_metrics_inner(Arc::new(metrics.clone()));
+        self.last_element_metrics_fingerprint = Some(fingerprint);
+    }
+
+    /// Publish an already shared snapshot without cloning its JSON tree.
+    pub fn apply_shared_element_metrics_with_fingerprint(
+        &mut self,
+        metrics: Arc<Value>,
+        fingerprint: u64,
+    ) {
+        if self.last_element_metrics_fingerprint == Some(fingerprint) {
+            return;
+        }
         self.apply_element_metrics_inner(metrics);
         self.last_element_metrics_fingerprint = Some(fingerprint);
     }
 
-    fn apply_element_metrics_inner(&mut self, metrics: &Value) {
+    fn apply_element_metrics_inner(&mut self, metrics: Arc<Value>) {
         let _ = self.ensure_initialized();
-        if let Ok(lua_value) = self.lua().to_value(metrics) {
-            let _ = self
-                .lua()
-                .globals()
-                .set("__mesh_element_metrics", lua_value);
-        }
+        self.shared_element_metrics
+            .lock()
+            .unwrap()
+            .replace(Arc::clone(&metrics));
         let _ = install_bound_element_proxies(
             self.lua(),
             self.env(),
-            metrics,
+            metrics.as_ref(),
+            Arc::clone(&self.shared_element_metrics),
             Arc::clone(&self.shared_element_actions),
             Arc::clone(&self.pending_side_channels),
         );
+    }
+
+    #[cfg(test)]
+    pub(crate) fn apply_element_metrics_eager_for_benchmark(&mut self, metrics: &Value) {
+        let _ = self.ensure_initialized();
+        if let Ok(lua_value) = self.lua().to_value(metrics) {
+            let _ = self
+                .env()
+                .set("__mesh_element_metrics_benchmark", lua_value);
+        }
     }
 
     pub fn emit_interface_event(
@@ -2094,12 +2132,11 @@ impl ScriptContext {
 
     fn install_refs_api(&mut self, globals: &mlua::Table) -> Result<(), ScriptError> {
         // `refs.<name>` is a live element-node reference: geometry/state fields
-        // read from the latest paint (`__mesh_element_metrics`, published by the
-        // shell each frame) and methods (`focus`, `blur`, …) enqueue element
-        // actions the shell executes against the real widget tree.
+        // read lazily from the latest surface snapshot and methods (`focus`,
+        // `blur`, …) enqueue element actions against the real widget tree.
         let refs_proxy = create_refs_proxy(
             self.lua(),
-            globals,
+            Arc::clone(&self.shared_element_metrics),
             Arc::clone(&self.shared_element_actions),
             Arc::clone(&self.pending_side_channels),
         )

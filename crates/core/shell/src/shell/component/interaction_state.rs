@@ -60,7 +60,9 @@ impl FrontendSurfaceComponent {
         );
         let elements_fingerprint = usage.elements.then(|| json_map_fingerprint(&elements));
         let refs_fingerprint = usage.refs.then(|| json_map_fingerprint(&refs));
-        let refs = usage.refs.then(|| serde_json::Value::Object(refs));
+        let refs = usage
+            .refs
+            .then(|| Arc::new(serde_json::Value::Object(refs)));
 
         if let Some(root_runtime) = self.runtimes.lock().unwrap().get_mut(self.id()) {
             // `elements` and the `refs` snapshot stay in script state (templates can
@@ -78,16 +80,15 @@ impl FrontendSurfaceComponent {
                     );
             }
             if let (Some(refs), Some(fingerprint)) = (refs, refs_fingerprint) {
-                // The live proxy only borrows this snapshot. Apply it first,
-                // then move the same JSON value into script state instead of
-                // cloning the complete refs table for the state write.
+                // The live proxy and template state share this snapshot, so
+                // neither publication clones the complete refs JSON tree.
                 root_runtime
                     .script_ctx
-                    .apply_element_metrics_with_fingerprint(&refs, fingerprint);
+                    .apply_shared_element_metrics_with_fingerprint(Arc::clone(&refs), fingerprint);
                 root_runtime
                     .script_ctx
                     .state_mut()
-                    .set_host_value_with_fingerprint("refs", refs, fingerprint);
+                    .set_host_shared_value_with_fingerprint("refs", refs, fingerprint);
             }
         }
         // Remember name -> node key so drained element actions resolve their target.

@@ -5,6 +5,28 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+#[derive(Debug)]
+pub(super) struct ElementMetricsStore {
+    version: u64,
+    metrics: Arc<Value>,
+}
+
+impl ElementMetricsStore {
+    pub(super) fn replace(&mut self, metrics: Arc<Value>) {
+        self.version = self.version.wrapping_add(1);
+        self.metrics = metrics;
+    }
+}
+
+impl Default for ElementMetricsStore {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            metrics: Arc::new(Value::Null),
+        }
+    }
+}
+
 /// A queued imperative action against a live element reference, e.g.
 /// `refs.search_input:focus()`. The shell drains these after a script handler
 /// runs and applies them to interaction state (focus, scroll, …) on the real
@@ -44,29 +66,24 @@ fn is_textual_value_tag(tag: &str) -> bool {
 }
 
 /// Build the `refs` proxy. `refs.<name>` returns a live element-node proxy whose
-/// geometry/state fields read from the most recent paint (fed via
-/// `__mesh_element_metrics` on the shared realm) and whose methods enqueue
-/// [`ElementAction`]s for the shell to execute against the real widget tree.
-///
-/// `scope` is the per-component `_ENV`; its metatable falls through to globals,
-/// where the shell publishes `__mesh_element_metrics` once per surface paint, so
-/// every component in the surface sees the same live element table.
+/// geometry/state fields read lazily from the surface's latest Rust-owned
+/// metrics snapshot and whose methods enqueue [`ElementAction`]s for the shell
+/// to execute against the real widget tree.
 pub(super) fn create_refs_proxy(
     lua: &Lua,
-    scope: &Table,
+    metrics_store: Arc<Mutex<ElementMetricsStore>>,
     actions: Arc<Mutex<Vec<ElementAction>>>,
     pending_side_channels: Arc<AtomicBool>,
 ) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
     let meta = lua.create_table()?;
-    let scope = scope.clone();
     meta.set(
         "__index",
         lua.create_function(move |lua, (proxy, name): (Table, String)| {
             let node = create_element_node_proxy(
                 lua,
-                &scope,
                 &name,
+                Arc::clone(&metrics_store),
                 Arc::clone(&actions),
                 Arc::clone(&pending_side_channels),
             )?;
@@ -82,6 +99,7 @@ pub(super) fn install_bound_element_proxies(
     lua: &Lua,
     scope: &Table,
     metrics: &Value,
+    metrics_store: Arc<Mutex<ElementMetricsStore>>,
     actions: Arc<Mutex<Vec<ElementAction>>>,
     pending_side_channels: Arc<AtomicBool>,
 ) -> mlua::Result<()> {
@@ -100,8 +118,8 @@ pub(super) fn install_bound_element_proxies(
         }
         let proxy = create_element_node_proxy(
             lua,
-            scope,
             name,
+            Arc::clone(&metrics_store),
             Arc::clone(&actions),
             Arc::clone(&pending_side_channels),
         )?;
@@ -113,8 +131,8 @@ pub(super) fn install_bound_element_proxies(
 
 fn create_element_node_proxy(
     lua: &Lua,
-    scope: &Table,
     name: &str,
+    metrics_store: Arc<Mutex<ElementMetricsStore>>,
     actions: Arc<Mutex<Vec<ElementAction>>>,
     pending_side_channels: Arc<AtomicBool>,
 ) -> mlua::Result<Table> {
@@ -124,9 +142,9 @@ fn create_element_node_proxy(
     // an argument. Set raw so it bypasses the `__index` geometry lookup below.
     node.raw_set("__mesh_is_element_ref", true)?;
     let meta = lua.create_table()?;
-    let scope = scope.clone();
     let name_owned = name.to_string();
     let method_cache = lua.create_table()?;
+    let metrics_cache = lua.create_table()?;
     // Clones for the `__newindex` closure, since `__index` moves the originals.
     let write_actions = Arc::clone(&actions);
     let write_pending_side_channels = Arc::clone(&pending_side_channels);
@@ -140,7 +158,7 @@ fn create_element_node_proxy(
             // `present`/`exists` let scripts guard against an element that is not
             // in the current tree (conditionally rendered or not yet painted).
             if key == "present" || key == "exists" {
-                let present = element_metrics_entry(&scope, &name_owned)?.is_some();
+                let present = element_metrics_present(&metrics_store, &name_owned);
                 return Ok(LuaValue::Boolean(present));
             }
             if ELEMENT_METHODS.contains(&key.as_str()) {
@@ -187,10 +205,11 @@ fn create_element_node_proxy(
                 method_cache.set(key.as_str(), method.clone())?;
                 return Ok(LuaValue::Function(method));
             }
-            let metrics = match element_metrics_entry(&scope, &name_owned)? {
-                Some(metrics) => metrics,
-                None => return Ok(LuaValue::Nil),
-            };
+            let metrics =
+                match element_metrics_entry(lua, &metrics_store, &metrics_cache, &name_owned)? {
+                    Some(metrics) => metrics,
+                    None => return Ok(LuaValue::Nil),
+                };
             // `value` on an input-like element is the live text (DOM `input.value`),
             // read from the attributes map rather than the snapshot's a11y flag.
             if key == "value" && metrics_is_textual(&metrics)? {
@@ -310,13 +329,40 @@ fn metrics_is_textual(metrics: &Table) -> mlua::Result<bool> {
     }
 }
 
-/// Resolve the latest metrics table for `name` from the surface-wide
-/// `__mesh_element_metrics` table (read through `_ENV.__index -> globals`).
-fn element_metrics_entry(scope: &Table, name: &str) -> mlua::Result<Option<Table>> {
-    let LuaValue::Table(all) = scope.get::<LuaValue>("__mesh_element_metrics")? else {
-        return Ok(None);
+fn element_metrics_present(store: &Mutex<ElementMetricsStore>, name: &str) -> bool {
+    store
+        .lock()
+        .unwrap()
+        .metrics
+        .as_object()
+        .is_some_and(|metrics| metrics.contains_key(name))
+}
+
+/// Convert only the requested element snapshot into Lua, and at most once per
+/// published metrics version for this live proxy. Most handlers touch one ref,
+/// so this avoids eagerly lowering every element snapshot at paint time.
+fn element_metrics_entry(
+    lua: &Lua,
+    store: &Mutex<ElementMetricsStore>,
+    cache: &Table,
+    name: &str,
+) -> mlua::Result<Option<Table>> {
+    let store = store.lock().unwrap();
+    if cache.raw_get::<Option<u64>>("version")? == Some(store.version) {
+        return match cache.raw_get::<LuaValue>("entry")? {
+            LuaValue::Table(entry) => Ok(Some(entry)),
+            _ => Ok(None),
+        };
+    }
+
+    let entry = store.metrics.get(name);
+    let lua_entry = match entry {
+        Some(entry) => lua.to_value(entry)?,
+        None => LuaValue::Nil,
     };
-    match all.get::<LuaValue>(name)? {
+    cache.raw_set("version", store.version)?;
+    cache.raw_set("entry", lua_entry.clone())?;
+    match lua_entry {
         LuaValue::Table(entry) => Ok(Some(entry)),
         _ => Ok(None),
     }
