@@ -63,6 +63,10 @@
         <text class="metric-label">Runtime entries</text>
         <text class="metric-value">{backend_count}</text>
       </row>
+      <row class="metric-row">
+        <text class="metric-label">Allocation profiling</text>
+        <text class="metric-value">{allocation_value}</text>
+      </row>
     </column>
 
     <column class="metric-group">

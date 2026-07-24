@@ -61,8 +61,11 @@ impl Shell {
                         .surface_size_changed(width, height);
                 }
             }
-            let total_render_started = self.profiling_enabled().then(std::time::Instant::now);
             let profiling_enabled = self.profiling_enabled();
+            let total_render_started = profiling_enabled.then(std::time::Instant::now);
+            let allocation_started = (profiling_enabled
+                && mesh_core_debug::allocation::profiling_available())
+            .then(mesh_core_debug::allocation::snapshot);
             let mut rerender_attempts = 0;
             let mut component_stage_records = Vec::new();
             let component_id = surface_id.as_str();
@@ -443,6 +446,7 @@ impl Shell {
                 paint_height,
                 scale,
                 total_render_started,
+                allocation_started,
             )?;
             any_component_presented |= presented;
             if presented {
@@ -796,6 +800,9 @@ impl Shell {
         total_render_started: Option<std::time::Instant>,
         exiting: bool,
     ) -> Result<bool, ShellRunError> {
+        let allocation_started = (self.profiling_enabled()
+            && mesh_core_debug::allocation::profiling_available())
+        .then(mesh_core_debug::allocation::snapshot);
         let child_surface_id = self.components[index].children[child_index]
             .target
             .surface_id
@@ -927,6 +934,7 @@ impl Shell {
             height,
             scale,
             total_render_started,
+            allocation_started,
         ) {
             Ok(presented) => Ok(presented),
             Err(ShellRunError::Presentation(error)) => {
@@ -1008,6 +1016,7 @@ impl Shell {
         height: u32,
         scale: f32,
         total_render_started: Option<std::time::Instant>,
+        allocation_started: Option<mesh_core_debug::allocation::AllocationCounters>,
     ) -> Result<bool, ShellRunError> {
         let surface_id = self.components[index].target(target).surface_id.clone();
         let visible = self.surface_is_effectively_visible(&surface_id);
@@ -1198,6 +1207,8 @@ impl Shell {
             present_result.map_err(ShellRunError::Presentation)?;
             presented = true;
         }
+        let allocation_counters = allocation_started
+            .map(|started| mesh_core_debug::allocation::snapshot().saturating_delta(started));
         if let Some(started) = present_started
             && presented
         {
@@ -1217,6 +1228,9 @@ impl Shell {
                 started.elapsed(),
                 Some("rebuild"),
             );
+        }
+        if let Some(counters) = allocation_counters {
+            self.record_surface_allocations(&surface_id, Some(component_id), counters);
         }
         if visible && presented {
             self.record_surface_redraw(&surface_id, Some(component_id), Some("present"));

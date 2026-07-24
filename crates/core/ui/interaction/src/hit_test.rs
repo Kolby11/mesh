@@ -355,7 +355,7 @@ pub fn node_is_source(node: &WidgetNode, tags: &[&str]) -> bool {
 pub fn find_nodes_by_keys<'a>(
     node: &'a WidgetNode,
     keys: &std::collections::HashSet<&str>,
-) -> std::collections::HashMap<String, (&'a WidgetNode, ContentBounds)> {
+) -> std::collections::HashMap<&'a str, (&'a WidgetNode, ContentBounds)> {
     let mut found = std::collections::HashMap::with_capacity(keys.len());
     collect_nodes_by_keys(node, keys, 0.0, 0.0, &mut found);
     found
@@ -366,7 +366,7 @@ fn collect_nodes_by_keys<'a>(
     keys: &std::collections::HashSet<&str>,
     offset_x: f32,
     offset_y: f32,
-    found: &mut std::collections::HashMap<String, (&'a WidgetNode, ContentBounds)>,
+    found: &mut std::collections::HashMap<&'a str, (&'a WidgetNode, ContentBounds)>,
 ) {
     if found.len() == keys.len() {
         return;
@@ -375,10 +375,7 @@ fn collect_nodes_by_keys<'a>(
     if let Some(key) = node.mesh_key()
         && keys.contains(key)
     {
-        found.insert(
-            key.to_owned(),
-            (node, node_rect_with_offset(node, offset_x, offset_y)),
-        );
+        found.insert(key, (node, node_rect_with_offset(node, offset_x, offset_y)));
     }
     let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
     for child in &node.children {
@@ -1194,6 +1191,79 @@ mod tests {
             bounds,
             &find_node_bounds_by_key(&root, "cell-1-1", 0.0, 0.0).unwrap()
         );
+    }
+
+    // cargo test -p mesh-core-interaction --release -- borrowed_find_nodes_keys_beat_owned_results --ignored --nocapture
+    #[test]
+    #[ignore = "release-only borrowed node-key result microbenchmark"]
+    fn borrowed_find_nodes_keys_beat_owned_results() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        fn collect_owned<'a>(
+            node: &'a WidgetNode,
+            keys: &std::collections::HashSet<&str>,
+            offset_x: f32,
+            offset_y: f32,
+            found: &mut std::collections::HashMap<String, (&'a WidgetNode, ContentBounds)>,
+        ) {
+            if found.len() == keys.len() {
+                return;
+            }
+            let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
+            if let Some(key) = node.mesh_key()
+                && keys.contains(key)
+            {
+                found.insert(
+                    key.to_owned(),
+                    (node, node_rect_with_offset(node, offset_x, offset_y)),
+                );
+            }
+            let (child_offset_x, child_offset_y) =
+                child_offsets_with_scroll(node, offset_x, offset_y);
+            for child in &node.children {
+                collect_owned(child, keys, child_offset_x, child_offset_y, found);
+                if found.len() == keys.len() {
+                    break;
+                }
+            }
+        }
+
+        let root = indexed_tree(32, 8);
+        let owned_keys: Vec<String> = root
+            .children
+            .iter()
+            .flat_map(|row| row.children.iter())
+            .filter_map(|node| node.mesh_key().map(str::to_owned))
+            .collect();
+        let keys: std::collections::HashSet<&str> = owned_keys.iter().map(String::as_str).collect();
+        let iterations = 20_000usize;
+
+        let owned_started = Instant::now();
+        let mut owned_total = 0usize;
+        for _ in 0..iterations {
+            let mut found = std::collections::HashMap::with_capacity(keys.len());
+            collect_owned(black_box(&root), black_box(&keys), 0.0, 0.0, &mut found);
+            owned_total = owned_total.wrapping_add(found.len());
+            black_box(found);
+        }
+        let owned = owned_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_total = 0usize;
+        for _ in 0..iterations {
+            let found = find_nodes_by_keys(black_box(&root), black_box(&keys));
+            borrowed_total = borrowed_total.wrapping_add(found.len());
+            black_box(found);
+        }
+        let borrowed = borrowed_started.elapsed();
+
+        let speedup = owned.as_secs_f64() / borrowed.as_secs_f64();
+        eprintln!(
+            "MESH_PERF metric=borrowed_find_nodes_keys_speedup value={speedup:.3} owned={owned:?} borrowed={borrowed:?}"
+        );
+        assert_eq!(owned_total, borrowed_total);
+        assert!(borrowed < owned);
     }
 
     // cargo test -p mesh-core-interaction --release -- find_nodes_by_keys_beats_per_key_lookups --ignored --nocapture

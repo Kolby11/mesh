@@ -65,6 +65,28 @@ hotspots, and the consumed/peak/leaked columns to distinguish temporary churn
 from retained memory. Heaptrack adds substantial overhead, so compare allocation
 counts and bytes rather than frame latency from this run.
 
+## Per-render-pass allocation counts
+
+Use the opt-in counting allocator when the question is which surface render
+allocates, rather than which call stack owns an allocation:
+
+```bash
+./tools/profile-shell alloc
+```
+
+Open the debug inspector and start profiling. The Overview and Surfaces views
+then report allocation operations and allocated bytes for each completed
+surface render pass. Recent per-pass samples and cumulative allocation,
+deallocation, and reallocation counters are also published through the
+`mesh.debug` profiling payload.
+
+Counters are thread-local to the shell render thread, so concurrent backend
+runtime allocations do not get charged to a surface. MESH's own timing-record
+bookkeeping is suspended around its profiler writes so it is not charged to the
+render being observed. The counting allocator is absent from normal builds and
+is intentionally separate from `perf-tracy`; choose `alloc` for pass-level
+counts or `live` for Tracy call stacks.
+
 ## Repeatable captures
 
 Profile one workload at a time: idle, pointer movement, scrolling, text update,

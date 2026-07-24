@@ -18,3 +18,7 @@ paint_only_frame_speedup                  lower      1.30      10
 template_dependency_gate_speedup          lower      20.00     50
 thread_vm_checkout_speedup                 lower      30.00     40
 perf_hud_micros_per_frame                 upper      205.00    100
+borrowed_find_nodes_keys_speedup           lower      1.35      12
+hover_prefix_diff_speedup                  lower      100.00    35
+borrowed_key_path_speedup                  lower      1.70      15
+allocation_profiler_operation_overhead     upper      1.15      25

@@ -17,6 +17,24 @@ fn point_in_bounds(x: f32, y: f32, (left, top, right, bottom): (f32, f32, f32, f
     x >= left && x <= right && y >= top && y <= bottom
 }
 
+/// Return the nodes that left and entered when moving between two root-to-leaf
+/// hover paths. Tree paths can only share a prefix, so a single paired scan
+/// replaces two quadratic set-difference scans and their temporary vectors.
+fn hover_path_suffixes<'a>(
+    previous_path: &'a [String],
+    new_path: &'a [String],
+) -> (&'a [String], &'a [String]) {
+    let shared_prefix_len = previous_path
+        .iter()
+        .zip(new_path)
+        .take_while(|(previous, new)| previous == new)
+        .count();
+    (
+        &previous_path[shared_prefix_len..],
+        &new_path[shared_prefix_len..],
+    )
+}
+
 impl FrontendSurfaceComponent {
     pub(in crate::shell::component) fn handle_component_input(
         &mut self,
@@ -499,16 +517,7 @@ impl FrontendSurfaceComponent {
         y: f32,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let mut requests = Vec::new();
-        let left_keys: Vec<&str> = previous_path
-            .iter()
-            .filter(|key| !new_path.contains(key))
-            .map(String::as_str)
-            .collect();
-        let entered_keys: Vec<&str> = new_path
-            .iter()
-            .filter(|key| !previous_path.contains(key))
-            .map(String::as_str)
-            .collect();
+        let (left_keys, entered_keys) = hover_path_suffixes(previous_path, new_path);
         if left_keys.is_empty() && entered_keys.is_empty() {
             return Ok(requests);
         }
@@ -519,12 +528,12 @@ impl FrontendSurfaceComponent {
         let target_keys: HashSet<&str> = left_keys
             .iter()
             .chain(entered_keys.iter())
-            .copied()
+            .map(String::as_str)
             .collect();
         let nodes = mesh_core_interaction::find_nodes_by_keys(tree, &target_keys);
 
         for key in left_keys {
-            let Some((node, bounds)) = nodes.get(key) else {
+            let Some((node, bounds)) = nodes.get(key.as_str()) else {
                 continue;
             };
             let has_pointerleave = node.event_handlers.contains_key("pointerleave");
@@ -542,7 +551,7 @@ impl FrontendSurfaceComponent {
             }
         }
         for key in entered_keys {
-            let Some((node, bounds)) = nodes.get(key) else {
+            let Some((node, bounds)) = nodes.get(key.as_str()) else {
                 continue;
             };
             let has_pointerenter = node.event_handlers.contains_key("pointerenter");
@@ -572,6 +581,7 @@ pub(super) fn is_bare_printable_key(key: &str, modifiers: KeyModifiers) -> bool 
 
 #[cfg(test)]
 mod press_target_tests {
+    use super::hover_path_suffixes;
     use super::pointer_event_target_with_focus;
     use super::widgets::captured_release_key;
     use mesh_core_elements::WidgetNode;
@@ -693,13 +703,72 @@ mod press_target_tests {
 
         assert_eq!(captured, None);
     }
+
+    #[test]
+    fn hover_path_suffixes_preserve_transition_order() {
+        let previous = ["root", "panel", "left", "button"]
+            .map(str::to_owned)
+            .to_vec();
+        let new = ["root", "panel", "right", "label"]
+            .map(str::to_owned)
+            .to_vec();
+
+        let (left, entered) = hover_path_suffixes(&previous, &new);
+
+        assert_eq!(left, ["left", "button"]);
+        assert_eq!(entered, ["right", "label"]);
+    }
 }
 
 #[cfg(test)]
 mod performance_tests {
+    use super::hover_path_suffixes;
     use mesh_core_elements::WidgetNode;
     use std::hint::black_box;
     use std::time::Instant;
+
+    // Run with:
+    // cargo test -p mesh-core-shell --release -- hover_prefix_diff_beats_pairwise_path_scans --ignored --nocapture
+    #[test]
+    #[ignore = "release-only hover path diff microbenchmark"]
+    fn hover_prefix_diff_beats_pairwise_path_scans() {
+        let previous: Vec<String> = (0..128).map(|depth| format!("old/{depth}")).collect();
+        let mut new = previous[..96].to_vec();
+        new.extend((96..128).map(|depth| format!("new/{depth}")));
+        let iterations = 200_000usize;
+
+        let pairwise_started = Instant::now();
+        let mut pairwise_total = 0usize;
+        for _ in 0..iterations {
+            let left: Vec<&str> = previous
+                .iter()
+                .filter(|key| !black_box(&new).contains(key))
+                .map(String::as_str)
+                .collect();
+            let entered: Vec<&str> = new
+                .iter()
+                .filter(|key| !black_box(&previous).contains(key))
+                .map(String::as_str)
+                .collect();
+            pairwise_total = pairwise_total.wrapping_add(left.len() + entered.len());
+        }
+        let pairwise = pairwise_started.elapsed();
+
+        let prefix_started = Instant::now();
+        let mut prefix_total = 0usize;
+        for _ in 0..iterations {
+            let (left, entered) = hover_path_suffixes(black_box(&previous), black_box(&new));
+            prefix_total = prefix_total.wrapping_add(left.len() + entered.len());
+        }
+        let prefix = prefix_started.elapsed();
+
+        let speedup = pairwise.as_secs_f64() / prefix.as_secs_f64();
+        eprintln!(
+            "MESH_PERF metric=hover_prefix_diff_speedup value={speedup:.3} pairwise={pairwise:?} prefix={prefix:?}"
+        );
+        assert_eq!(pairwise_total, prefix_total);
+        assert!(prefix < pairwise);
+    }
 
     fn large_tree(rows: usize, columns: usize) -> WidgetNode {
         let mut root = WidgetNode::new("column");

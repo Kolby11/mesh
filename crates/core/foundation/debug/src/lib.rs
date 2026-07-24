@@ -2,6 +2,7 @@
 ///
 /// `DebugSnapshot` is a point-in-time view of shell internals built by the
 /// core and handed to the renderer to paint over live surfaces.
+pub mod allocation;
 
 /// A point-in-time snapshot of shell state for the debug overlay.
 #[derive(Debug, Clone, Default)]
@@ -172,6 +173,7 @@ pub struct DebugBenchmarkRunState {
 #[derive(Debug, Clone, Default)]
 pub struct ProfilingSnapshot {
     pub session_id: u64,
+    pub allocation_profiling_available: bool,
     pub shell: ProfilingScopeSnapshot,
     pub surfaces: Vec<ProfilingSurfaceSnapshot>,
     pub backends: Vec<ProfilingBackendSnapshot>,
@@ -187,6 +189,7 @@ pub struct ProfilingScopeSnapshot {
     pub wasted_work_avoided: Vec<ProfilingWasteSummary>,
     pub redraw_count: u64,
     pub total_surface_render_time_micros: u64,
+    pub allocations: Option<ProfilingAllocationSummary>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -199,6 +202,30 @@ pub struct ProfilingSurfaceSnapshot {
     pub redraw_count: u64,
     pub total_surface_render_time_micros: u64,
     pub invalidation: Option<ProfilingInvalidationSnapshot>,
+    pub allocations: Option<ProfilingAllocationSummary>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProfilingAllocationSummary {
+    pub sample_count: u64,
+    pub allocation_count: u64,
+    pub allocated_bytes: u64,
+    pub deallocation_count: u64,
+    pub deallocated_bytes: u64,
+    pub reallocation_count: u64,
+    pub max_allocated_bytes_per_pass: u64,
+    pub recent_samples: Vec<ProfilingAllocationSample>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProfilingAllocationSample {
+    pub order: u64,
+    pub timestamp_micros: u64,
+    pub allocation_count: u64,
+    pub allocated_bytes: u64,
+    pub deallocation_count: u64,
+    pub deallocated_bytes: u64,
+    pub reallocation_count: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -3,10 +3,18 @@ use mesh_core_shell::{Shell, default_ipc_socket_path};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 
+#[cfg(all(feature = "perf-tracy", feature = "allocation-profiling"))]
+compile_error!("perf-tracy and allocation-profiling use different global allocators; enable one");
+
 #[cfg(feature = "perf-tracy")]
 #[global_allocator]
 static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
     tracy_client::ProfiledAllocator::new(std::alloc::System, 16);
+
+#[cfg(all(feature = "allocation-profiling", not(feature = "perf-tracy")))]
+#[global_allocator]
+static GLOBAL: mesh_core_debug::allocation::CountingAllocator<std::alloc::System> =
+    mesh_core_debug::allocation::CountingAllocator::new(std::alloc::System);
 
 fn main() {
     init_tracing();

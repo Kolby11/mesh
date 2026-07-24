@@ -901,14 +901,16 @@ impl ShellComponent for FrontendSurfaceComponent {
             snapshot.paint.skia_glyph_cache_capacity = paint_metrics.skia_glyph_cache_capacity;
         }
         if self.profiling_enabled {
-            self.profiling_records
-                .borrow_mut()
-                .push(ComponentProfilingRecord {
-                    stage: mesh_core_debug::ProfilingStage::Paint,
-                    duration: paint_started.elapsed(),
-                    module_id: Some(self.compiled.manifest.package.id.clone()),
-                    trigger_kind: Some("rebuild".to_string()),
-                });
+            mesh_core_debug::allocation::with_tracking_suspended(|| {
+                self.profiling_records
+                    .borrow_mut()
+                    .push(ComponentProfilingRecord {
+                        stage: mesh_core_debug::ProfilingStage::Paint,
+                        duration: paint_started.elapsed(),
+                        module_id: Some(self.compiled.manifest.package.id.clone()),
+                        trigger_kind: Some("rebuild".to_string()),
+                    });
+            });
         }
         self.tooltip_damage_scratch = tooltip_damage_rects;
         self.dirty_node_visual_damage_scratch = dirty_node_visual_damage_rects;

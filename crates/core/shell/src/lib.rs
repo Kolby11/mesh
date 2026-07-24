@@ -2,6 +2,11 @@
 ///
 /// This crate ties together all subsystems: module loading, capability
 /// enforcement, event routing, theming, localization, and diagnostics.
+#[cfg(all(test, feature = "allocation-profiling"))]
+#[global_allocator]
+static TEST_ALLOCATOR: mesh_core_debug::allocation::CountingAllocator<std::alloc::System> =
+    mesh_core_debug::allocation::CountingAllocator::new(std::alloc::System);
+
 pub mod shell;
 
 pub use shell::{

@@ -11,12 +11,17 @@ path = "src/main.rs"
 
 [features]
 perf-tracy = ["dep:tracing-tracy", "dep:tracy-client"]
+allocation-profiling = [
+    "mesh-core-debug/allocation-profiling",
+    "mesh-core-shell/allocation-profiling",
+]
 
 [dependencies]
 mesh-core-shell = { workspace = true }
 mesh-core-module = { workspace = true }
 mesh-core-config = { workspace = true }
 mesh-core-diagnostics = { workspace = true }
+mesh-core-debug = { workspace = true }
 
 tokio = { workspace = true }
 tracing = { workspace = true }

@@ -161,6 +161,7 @@ fn debug_service_payload(
         "inspected_element": debug.inspected_element.clone(),
         "profiling_enabled": debug.profiling_enabled,
         "profiling_session_id": debug.profiling_session_id,
+        "allocation_profiling_available": mesh_core_debug::allocation::profiling_available(),
         "active_view": debug.active_view.label(),
         "modules": snapshot.modules.iter().map(module_entry_json).collect::<Vec<_>>(),
         "module_graph": snapshot.module_graph.iter().map(module_graph_entry_json).collect::<Vec<_>>(),
@@ -1337,6 +1338,7 @@ fn keybind_entry_json(entry: &mesh_core_debug::DebugKeybindEntry) -> serde_json:
 fn profiling_snapshot_json(snapshot: &mesh_core_debug::ProfilingSnapshot) -> serde_json::Value {
     serde_json::json!({
         "session_id": snapshot.session_id,
+        "allocation_profiling_available": snapshot.allocation_profiling_available,
         "shell": profiling_scope_snapshot_json(&snapshot.shell),
         "surfaces": snapshot.surfaces.iter().map(profiling_surface_snapshot_json).collect::<Vec<_>>(),
         "backends": snapshot.backends.iter().map(profiling_backend_snapshot_json).collect::<Vec<_>>(),
@@ -1410,6 +1412,7 @@ fn profiling_scope_snapshot_json(
         })).collect::<Vec<_>>(),
         "redraw_count": snapshot.redraw_count,
         "total_surface_render_time_micros": snapshot.total_surface_render_time_micros,
+        "allocations": snapshot.allocations.as_ref().map(profiling_allocation_summary_json),
     })
 }
 
@@ -1434,6 +1437,30 @@ fn profiling_surface_snapshot_json(
         "redraw_count": snapshot.redraw_count,
         "total_surface_render_time_micros": snapshot.total_surface_render_time_micros,
         "invalidation": snapshot.invalidation.as_ref().map(profiling_invalidation_json),
+        "allocations": snapshot.allocations.as_ref().map(profiling_allocation_summary_json),
+    })
+}
+
+fn profiling_allocation_summary_json(
+    summary: &mesh_core_debug::ProfilingAllocationSummary,
+) -> serde_json::Value {
+    serde_json::json!({
+        "sample_count": summary.sample_count,
+        "allocation_count": summary.allocation_count,
+        "allocated_bytes": summary.allocated_bytes,
+        "deallocation_count": summary.deallocation_count,
+        "deallocated_bytes": summary.deallocated_bytes,
+        "reallocation_count": summary.reallocation_count,
+        "max_allocated_bytes_per_pass": summary.max_allocated_bytes_per_pass,
+        "recent_samples": summary.recent_samples.iter().map(|sample| serde_json::json!({
+            "order": sample.order,
+            "timestamp_micros": sample.timestamp_micros,
+            "allocation_count": sample.allocation_count,
+            "allocated_bytes": sample.allocated_bytes,
+            "deallocation_count": sample.deallocation_count,
+            "deallocated_bytes": sample.deallocated_bytes,
+            "reallocation_count": sample.reallocation_count,
+        })).collect::<Vec<_>>(),
     })
 }
 
@@ -1611,4 +1638,57 @@ fn profiling_backend_sample_json(
         "duration_micros": sample.duration_micros,
         "trigger_kind": sample.trigger_kind,
     })
+}
+
+#[cfg(test)]
+mod allocation_profiling_json_tests {
+    use super::*;
+
+    #[test]
+    fn allocation_summary_json_keeps_cumulative_and_recent_pass_counts() {
+        let summary = mesh_core_debug::ProfilingAllocationSummary {
+            sample_count: 2,
+            allocation_count: 7,
+            allocated_bytes: 4_096,
+            deallocation_count: 5,
+            deallocated_bytes: 2_048,
+            reallocation_count: 1,
+            max_allocated_bytes_per_pass: 3_072,
+            recent_samples: vec![mesh_core_debug::ProfilingAllocationSample {
+                order: 4,
+                timestamp_micros: 90,
+                allocation_count: 3,
+                allocated_bytes: 3_072,
+                deallocation_count: 2,
+                deallocated_bytes: 1_024,
+                reallocation_count: 1,
+            }],
+        };
+
+        let json = profiling_allocation_summary_json(&summary);
+        assert_eq!(json["sample_count"], serde_json::json!(2));
+        assert_eq!(json["allocated_bytes"], serde_json::json!(4_096));
+        assert_eq!(
+            json["max_allocated_bytes_per_pass"],
+            serde_json::json!(3_072)
+        );
+        assert_eq!(
+            json["recent_samples"][0]["allocation_count"],
+            serde_json::json!(3)
+        );
+    }
+
+    #[test]
+    fn profiling_snapshot_json_advertises_allocator_mode() {
+        let json = profiling_snapshot_json(&mesh_core_debug::ProfilingSnapshot {
+            allocation_profiling_available: true,
+            ..mesh_core_debug::ProfilingSnapshot::default()
+        });
+
+        assert_eq!(
+            json["allocation_profiling_available"],
+            serde_json::json!(true)
+        );
+        assert!(json["shell"]["allocations"].is_null());
+    }
 }

@@ -6221,6 +6221,36 @@ fn render_components_until_child_popup(shell: &mut Shell) {
     shell.render_components().unwrap();
 }
 
+#[cfg(feature = "allocation-profiling")]
+#[test]
+fn allocation_profiler_records_a_completed_surface_render_pass() {
+    let mut shell = Shell::new();
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state)));
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+
+    shell.render_components().unwrap();
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling enabled");
+    assert!(profiling.allocation_profiling_available);
+    let surface = profiling
+        .surfaces
+        .iter()
+        .find(|surface| surface.surface_id == "@test/popover-host")
+        .expect("rendered parent surface");
+    let allocations = surface
+        .allocations
+        .as_ref()
+        .expect("allocation sample for completed render pass");
+    assert_eq!(allocations.sample_count, 1);
+    assert!(allocations.allocation_count > 0);
+    assert!(allocations.allocated_bytes > 0);
+    assert_eq!(allocations.recent_samples.len(), 1);
+}
+
 #[test]
 fn child_surface_reconcile_creates_popup_and_paints_subtree() {
     let mut shell = Shell::new();

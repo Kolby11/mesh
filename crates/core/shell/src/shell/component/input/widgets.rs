@@ -1464,9 +1464,13 @@ fn node_disabled(node: &WidgetNode) -> bool {
 
 fn ancestor_source_key(tree: &WidgetNode, key: &str, source_tags: &[&str]) -> Option<String> {
     let path = key_path(tree, key)?;
-    path.into_iter().rev().skip(1).find(|candidate| {
-        find_node_by_key(tree, candidate).is_some_and(|node| node_is_source(node, source_tags))
-    })
+    path.into_iter()
+        .rev()
+        .skip(1)
+        .find(|candidate| {
+            find_node_by_key(tree, candidate).is_some_and(|node| node_is_source(node, source_tags))
+        })
+        .map(str::to_owned)
 }
 
 fn sibling_source_key(
@@ -1478,16 +1482,16 @@ fn sibling_source_key(
     let path = key_path(tree, key)?;
     let parent_key = path.iter().rev().nth(1)?;
     let siblings = find_node_by_key(tree, parent_key)?;
-    let candidates: Vec<String> = siblings
+    let candidates: Vec<&str> = siblings
         .children
         .iter()
         .filter(|child| node_is_source(child, source_tags) && !node_disabled(child))
-        .filter_map(|child| child.mesh_key().map(str::to_owned))
+        .filter_map(WidgetNode::mesh_key)
         .collect();
     if candidates.is_empty() {
         return None;
     }
-    let index = candidates.iter().position(|candidate| candidate == key)?;
+    let index = candidates.iter().position(|candidate| *candidate == key)?;
     let next_index = if backward {
         if index == 0 {
             candidates.len() - 1
@@ -1497,7 +1501,9 @@ fn sibling_source_key(
     } else {
         (index + 1) % candidates.len()
     };
-    candidates.get(next_index).cloned()
+    candidates
+        .get(next_index)
+        .map(|candidate| (*candidate).to_owned())
 }
 
 fn rove_aria_menu_focus(tree: &WidgetNode, key: &str, backward: bool) -> Option<String> {
@@ -1511,16 +1517,18 @@ fn rove_aria_menu_focus(tree: &WidgetNode, key: &str, backward: bool) -> Option<
     })?;
     let mut candidates = Vec::new();
     collect_aria_menu_item_keys(menu, &mut candidates);
-    let index = candidates.iter().position(|candidate| candidate == key)?;
+    let index = candidates.iter().position(|candidate| *candidate == key)?;
     let next_index = if backward {
         index.checked_sub(1).unwrap_or(candidates.len() - 1)
     } else {
         (index + 1) % candidates.len()
     };
-    candidates.get(next_index).cloned()
+    candidates
+        .get(next_index)
+        .map(|candidate| (*candidate).to_owned())
 }
 
-fn collect_aria_menu_item_keys(node: &WidgetNode, keys: &mut Vec<String>) {
+fn collect_aria_menu_item_keys<'a>(node: &'a WidgetNode, keys: &mut Vec<&'a str>) {
     let is_menu_item = node
         .attributes
         .get("role")
@@ -1529,7 +1537,7 @@ fn collect_aria_menu_item_keys(node: &WidgetNode, keys: &mut Vec<String>) {
         && !node_disabled(node)
         && let Some(key) = node.mesh_key()
     {
-        keys.push(key.to_owned());
+        keys.push(key);
     }
     for child in &node.children {
         collect_aria_menu_item_keys(child, keys);
@@ -1555,7 +1563,7 @@ fn collect_descendant_source_keys(node: &WidgetNode, source_tags: &[&str], keys:
     }
 }
 
-fn key_path(tree: &WidgetNode, key: &str) -> Option<Vec<String>> {
+fn key_path<'a>(tree: &'a WidgetNode, key: &str) -> Option<Vec<&'a str>> {
     let mut path = Vec::new();
     if collect_key_path(tree, key, &mut path) {
         Some(path)
@@ -1564,9 +1572,9 @@ fn key_path(tree: &WidgetNode, key: &str) -> Option<Vec<String>> {
     }
 }
 
-fn collect_key_path(node: &WidgetNode, key: &str, path: &mut Vec<String>) -> bool {
+fn collect_key_path<'a>(node: &'a WidgetNode, key: &str, path: &mut Vec<&'a str>) -> bool {
     if let Some(node_key) = node.mesh_key() {
-        path.push(node_key.to_owned());
+        path.push(node_key);
         if node_key == key {
             return true;
         }
@@ -1620,4 +1628,144 @@ pub(in crate::shell::component) fn captured_release_key(
         .target
         .map(|target| target.key.to_owned());
     (release_key.as_deref() == Some(down_key)).then(|| down_key.to_owned())
+}
+
+#[cfg(test)]
+mod navigation_performance_tests {
+    use super::{
+        ancestor_source_key, collect_key_path, key_path, rove_aria_menu_focus, sibling_source_key,
+    };
+    use mesh_core_elements::WidgetNode;
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    fn deep_keyed_tree(depth: usize) -> (WidgetNode, String) {
+        let mut leaf = WidgetNode::new("menu-item");
+        let leaf_key = format!("root/{}", depth - 1);
+        leaf.attributes.insert("_mesh_key".into(), leaf_key.clone());
+        for index in (0..depth - 1).rev() {
+            let mut parent = WidgetNode::new("column");
+            parent
+                .attributes
+                .insert("_mesh_key".into(), format!("root/{index}"));
+            parent.children.push(leaf);
+            leaf = parent;
+        }
+        (leaf, leaf_key)
+    }
+
+    #[test]
+    fn borrowed_key_path_preserves_root_to_leaf_order() {
+        let (tree, leaf_key) = deep_keyed_tree(4);
+
+        assert_eq!(
+            key_path(&tree, &leaf_key),
+            Some(vec!["root/0", "root/1", "root/2", "root/3"])
+        );
+    }
+
+    #[test]
+    fn borrowed_navigation_keys_preserve_ancestor_sibling_and_menu_results() {
+        fn keyed_node(tag: &str, key: &str) -> WidgetNode {
+            let mut node = WidgetNode::new(tag);
+            node.attributes.insert("_mesh_key".into(), key.into());
+            node
+        }
+
+        let mut root = keyed_node("column", "root");
+        let mut select = keyed_node("input", "root/select");
+        select
+            .attributes
+            .insert("data-mesh-element".into(), "select".into());
+        for key in ["root/select/first", "root/select/second"] {
+            let mut option = keyed_node("input", key);
+            option
+                .attributes
+                .insert("data-mesh-element".into(), "option".into());
+            select.children.push(option);
+        }
+
+        let mut menu = keyed_node("column", "root/menu");
+        menu.attributes.insert("role".into(), "menu".into());
+        for key in ["root/menu/first", "root/menu/second"] {
+            let mut item = keyed_node("row", key);
+            item.attributes.insert("role".into(), "menuitem".into());
+            menu.children.push(item);
+        }
+        root.children.extend([select, menu]);
+
+        assert_eq!(
+            ancestor_source_key(&root, "root/select/second", &["select"]).as_deref(),
+            Some("root/select")
+        );
+        assert_eq!(
+            sibling_source_key(&root, "root/select/first", &["option"], false).as_deref(),
+            Some("root/select/second")
+        );
+        assert_eq!(
+            rove_aria_menu_focus(&root, "root/menu/first", false).as_deref(),
+            Some("root/menu/second")
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- borrowed_key_path_beats_owned_strings --ignored --nocapture
+    #[test]
+    #[ignore = "release-only borrowed navigation key-path benchmark"]
+    fn borrowed_key_path_beats_owned_strings() {
+        fn owned_key_path(node: &WidgetNode, key: &str) -> Option<Vec<String>> {
+            fn collect(node: &WidgetNode, key: &str, path: &mut Vec<String>) -> bool {
+                if let Some(node_key) = node.mesh_key() {
+                    path.push(node_key.to_owned());
+                    if node_key == key {
+                        return true;
+                    }
+                }
+                for child in &node.children {
+                    if collect(child, key, path) {
+                        return true;
+                    }
+                }
+                if node.has_mesh_key() {
+                    path.pop();
+                }
+                false
+            }
+
+            let mut path = Vec::new();
+            collect(node, key, &mut path).then_some(path)
+        }
+
+        let (tree, leaf_key) = deep_keyed_tree(64);
+        let iterations = 200_000usize;
+
+        let owned_started = Instant::now();
+        let mut owned_total = 0usize;
+        for _ in 0..iterations {
+            let path = owned_key_path(black_box(&tree), black_box(&leaf_key)).expect("owned path");
+            owned_total = owned_total.wrapping_add(path.len());
+            black_box(path);
+        }
+        let owned = owned_started.elapsed();
+
+        let borrowed_started = Instant::now();
+        let mut borrowed_total = 0usize;
+        for _ in 0..iterations {
+            let mut path = Vec::new();
+            assert!(collect_key_path(
+                black_box(&tree),
+                black_box(&leaf_key),
+                &mut path
+            ));
+            borrowed_total = borrowed_total.wrapping_add(path.len());
+            black_box(path);
+        }
+        let borrowed = borrowed_started.elapsed();
+
+        let speedup = owned.as_secs_f64() / borrowed.as_secs_f64();
+        eprintln!(
+            "MESH_PERF metric=borrowed_key_path_speedup value={speedup:.3} owned={owned:?} borrowed={borrowed:?}"
+        );
+        assert_eq!(owned_total, borrowed_total);
+        assert!(borrowed < owned);
+    }
 }

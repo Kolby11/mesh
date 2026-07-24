@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use mesh_core_elements::style::Color;
+use mesh_core_elements::style::{Color, TextDirection};
 use mesh_core_elements::{NodeId, WidgetNode};
 use mesh_core_render::{
     DamageRect, DisplayListRepaintPolicy, PixelBuffer, RenderObjectDirtySummary,
@@ -83,46 +83,81 @@ fn perf_sparse_damage_filters_paint_selection() {
 }
 
 #[test]
-fn perf_text_heavy_path_exercises_text_cache() {
-    let mut root = node(1, "column", 0.0, 0.0, 800.0, 2000.0);
-    for idx in 0..120 {
-        let y = (idx * 16) as f32;
-        let mut label = node(2 + idx, "text", 0.0, y, 760.0, 14.0);
-        label.attributes.insert(
-            "content".into(),
-            format!("line-{idx}: performance text shaping cache scenario"),
+fn perf_text_heavy_path_exercises_locale_script_and_direction_cases() {
+    let cases = [
+        (
+            "en-Latn",
+            TextDirection::Ltr,
+            "Performance text shaping cache scenario",
+        ),
+        (
+            "ar-Arab",
+            TextDirection::Rtl,
+            "سيناريو ذاكرة التخزين المؤقت لتشكيل النص",
+        ),
+        (
+            "ja-Jpan",
+            TextDirection::Ltr,
+            "テキスト整形キャッシュのパフォーマンスシナリオ",
+        ),
+        ("hi-Deva", TextDirection::Ltr, "पाठ आकार कैश प्रदर्शन परिदृश्य"),
+    ];
+
+    for (case_index, (locale_script, direction, sample)) in cases.into_iter().enumerate() {
+        let mut root = node(1, "column", 0.0, 0.0, 800.0, 2000.0);
+        for idx in 0..120 {
+            let y = (idx * 16) as f32;
+            let mut label = node(2 + idx, "text", 0.0, y, 760.0, 14.0);
+            label.computed_style.text_direction = direction;
+            label.attributes.insert(
+                "content".into(),
+                format!("{locale_script}-{case_index}-{idx}: {sample}"),
+            );
+            root.children.push(label);
+        }
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 800, 2200, false, true);
+        let commands: Vec<_> = list.paint_commands().to_vec();
+        let mut first_buffer = PixelBuffer::new(800, 2200);
+        let first = paint_display_list_for_module_with_profiling_metrics(
+            &commands,
+            &mut first_buffer,
+            1.0,
+            None,
+            None,
+            None,
+            None,
         );
-        root.children.push(label);
+
+        let mut second_buffer = PixelBuffer::new(800, 2200);
+        let second = paint_display_list_for_module_with_profiling_metrics(
+            &commands,
+            &mut second_buffer,
+            1.0,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        assert!(
+            first.text.layout_misses > 0,
+            "{locale_script} should exercise cold text shaping"
+        );
+        assert!(
+            second.text.layout_hits > 0,
+            "{locale_script} should exercise the warm text cache"
+        );
+        assert!(
+            second.text.layout_misses <= first.text.layout_misses,
+            "{locale_script} warm misses should not exceed cold misses"
+        );
+        assert!(
+            second.text.shaping_micros <= first.text.shaping_micros,
+            "{locale_script} warm shaping should not exceed the cold pass"
+        );
     }
-
-    let mut list = RetainedDisplayList::default();
-    list.update(&root, 800, 2200, false, true);
-    let commands: Vec<_> = list.paint_commands().to_vec();
-    let mut first_buffer = PixelBuffer::new(800, 2200);
-    let first = paint_display_list_for_module_with_profiling_metrics(
-        &commands,
-        &mut first_buffer,
-        1.0,
-        None,
-        None,
-        None,
-        None,
-    );
-
-    let mut second_buffer = PixelBuffer::new(800, 2200);
-    let second = paint_display_list_for_module_with_profiling_metrics(
-        &commands,
-        &mut second_buffer,
-        1.0,
-        None,
-        None,
-        None,
-        None,
-    );
-
-    assert!(first.text.layout_misses > 0);
-    assert!(second.text.layout_hits > 0);
-    assert!(second.text.layout_misses <= first.text.layout_misses);
 }
 
 #[test]

@@ -335,7 +335,7 @@ pub(super) fn selectable_text_target_key(tree: &WidgetNode, x: f32, y: f32) -> O
     let nodes = find_nodes_by_keys(tree, &keys);
 
     let is_interactive = path.iter().any(|key| {
-        nodes.get(key).is_some_and(|(node, _)| {
+        nodes.get(key.as_str()).is_some_and(|(node, _)| {
             matches!(node.tag.as_str(), "button" | "slider" | "input")
                 || node_is_source(
                     node,

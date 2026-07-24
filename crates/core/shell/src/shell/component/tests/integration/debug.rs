@@ -737,6 +737,76 @@ fn debug_inspector_benchmark_view_renders_waiting_rows_when_profiling_live_witho
 }
 
 #[test]
+fn debug_inspector_renders_allocator_mode_and_per_surface_counts() {
+    let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(360, 720);
+    component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.debug".into(),
+            source_module: "@mesh/core-debug".into(),
+            payload: serde_json::json!({
+                "overlay_enabled": true,
+                "layout_bounds_enabled": false,
+                "allocation_profiling_available": true,
+                "profiling_enabled": true,
+                "profiling_session_id": 14,
+                "active_view": "overview",
+                "modules": [],
+                "module_graph": [],
+                "interfaces": [],
+                "backend_runtimes": [],
+                "active_surfaces": ["@mesh/navigation-bar"],
+                "benchmarks": { "scenarios": [] },
+                "profiling": {
+                    "session_id": 14,
+                    "allocation_profiling_available": true,
+                    "shell": {
+                        "stages": [],
+                        "redraw_count": 1,
+                        "total_surface_render_time_micros": 20,
+                        "allocations": {
+                            "sample_count": 1,
+                            "allocation_count": 12,
+                            "allocated_bytes": 4096
+                        }
+                    },
+                    "surfaces": [{
+                        "surface_id": "@mesh/navigation-bar",
+                        "module_id": "@mesh/navigation-bar",
+                        "stages": [],
+                        "redraw_count": 1,
+                        "total_surface_render_time_micros": 20,
+                        "allocations": {
+                            "sample_count": 1,
+                            "allocation_count": 12,
+                            "allocated_bytes": 4096
+                        }
+                    }],
+                    "backends": []
+                }
+            }),
+        })
+        .unwrap();
+
+    component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    let overview_text = rendered_text(&component);
+    assert!(overview_text.iter().any(|line| line == "4.0 KiB / 12 ops"));
+
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
+        .unwrap();
+    component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    let surface_text = rendered_text(&component);
+    assert!(
+        surface_text
+            .iter()
+            .any(|line| line == "Allocations 4.0 KiB in 12 ops across 1 passes")
+    );
+}
+
+#[test]
 fn debug_inspector_benchmark_view_renders_populated_benchmark_result_rows() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
     // Paint once so the inspector's script reads (and thus tracks) its

@@ -26,28 +26,32 @@ impl FrontendSurfaceComponent {
         let Some(started) = started else {
             return;
         };
-        self.profiling_records.borrow_mut().push(
-            mesh_core_frontend_host::ComponentProfilingRecord {
-                stage: mesh_core_debug::ProfilingStage::TreeBuild,
-                duration: started.elapsed(),
-                module_id: Some(module_id.to_owned()),
-                trigger_kind: Some(format!("attribution:component_instance:{instance_key}")),
-            },
-        );
+        mesh_core_debug::allocation::with_tracking_suspended(|| {
+            self.profiling_records.borrow_mut().push(
+                mesh_core_frontend_host::ComponentProfilingRecord {
+                    stage: mesh_core_debug::ProfilingStage::TreeBuild,
+                    duration: started.elapsed(),
+                    module_id: Some(module_id.to_owned()),
+                    trigger_kind: Some(format!("attribution:component_instance:{instance_key}")),
+                },
+            );
+        });
     }
 
     fn record_avoided_component_build(&self) {
         if !self.profiling_enabled {
             return;
         }
-        self.profiling_records.borrow_mut().push(
-            mesh_core_frontend_host::ComponentProfilingRecord {
-                stage: mesh_core_debug::ProfilingStage::TreeBuild,
-                duration: std::time::Duration::ZERO,
-                module_id: Some(self.compiled.manifest.package.id.clone()),
-                trigger_kind: Some("waste:component_build_avoided".to_owned()),
-            },
-        );
+        mesh_core_debug::allocation::with_tracking_suspended(|| {
+            self.profiling_records.borrow_mut().push(
+                mesh_core_frontend_host::ComponentProfilingRecord {
+                    stage: mesh_core_debug::ProfilingStage::TreeBuild,
+                    duration: std::time::Duration::ZERO,
+                    module_id: Some(self.compiled.manifest.package.id.clone()),
+                    trigger_kind: Some("waste:component_build_avoided".to_owned()),
+                },
+            );
+        });
     }
 
     fn next_loop_occurrence(

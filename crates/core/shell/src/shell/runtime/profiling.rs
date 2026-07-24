@@ -1,9 +1,10 @@
 use crate::shell::Shell;
 use mesh_core_debug::{
-    ProfilingAttributionSummary, ProfilingBackendSample, ProfilingBackendSnapshot,
-    ProfilingBackendStage, ProfilingBackendStageSummary, ProfilingInvalidationSnapshot,
-    ProfilingSample, ProfilingScopeSnapshot, ProfilingSnapshot, ProfilingStage,
-    ProfilingStageSummary, ProfilingSurfaceSnapshot, ProfilingWasteSummary,
+    ProfilingAllocationSample, ProfilingAllocationSummary, ProfilingAttributionSummary,
+    ProfilingBackendSample, ProfilingBackendSnapshot, ProfilingBackendStage,
+    ProfilingBackendStageSummary, ProfilingInvalidationSnapshot, ProfilingSample,
+    ProfilingScopeSnapshot, ProfilingSnapshot, ProfilingStage, ProfilingStageSummary,
+    ProfilingSurfaceSnapshot, ProfilingWasteSummary, allocation::AllocationCounters,
 };
 use mesh_core_render::DebugPerfHudSnapshot;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -53,6 +54,7 @@ struct ScopeAccumulator {
     wasted_work_avoided: BTreeMap<String, u64>,
     redraw_count: u64,
     total_surface_render_time_micros: u64,
+    allocations: AllocationAccumulator,
 }
 
 impl ScopeAccumulator {
@@ -129,7 +131,61 @@ impl ScopeAccumulator {
                 .collect(),
             redraw_count: self.redraw_count,
             total_surface_render_time_micros: self.total_surface_render_time_micros,
+            allocations: self.allocations.snapshot(),
         }
+    }
+}
+
+#[derive(Debug, Default)]
+struct AllocationAccumulator {
+    sample_count: u64,
+    allocation_count: u64,
+    allocated_bytes: u64,
+    deallocation_count: u64,
+    deallocated_bytes: u64,
+    reallocation_count: u64,
+    max_allocated_bytes_per_pass: u64,
+    recent_samples: VecDeque<ProfilingAllocationSample>,
+}
+
+impl AllocationAccumulator {
+    fn record(&mut self, sample: ProfilingAllocationSample, recent_capacity: usize) {
+        self.sample_count = self.sample_count.saturating_add(1);
+        self.allocation_count = self
+            .allocation_count
+            .saturating_add(sample.allocation_count);
+        self.allocated_bytes = self.allocated_bytes.saturating_add(sample.allocated_bytes);
+        self.deallocation_count = self
+            .deallocation_count
+            .saturating_add(sample.deallocation_count);
+        self.deallocated_bytes = self
+            .deallocated_bytes
+            .saturating_add(sample.deallocated_bytes);
+        self.reallocation_count = self
+            .reallocation_count
+            .saturating_add(sample.reallocation_count);
+        self.max_allocated_bytes_per_pass = self
+            .max_allocated_bytes_per_pass
+            .max(sample.allocated_bytes);
+        if recent_capacity > 0 {
+            if self.recent_samples.len() >= recent_capacity {
+                self.recent_samples.pop_front();
+            }
+            self.recent_samples.push_back(sample);
+        }
+    }
+
+    fn snapshot(&self) -> Option<ProfilingAllocationSummary> {
+        (self.sample_count > 0).then(|| ProfilingAllocationSummary {
+            sample_count: self.sample_count,
+            allocation_count: self.allocation_count,
+            allocated_bytes: self.allocated_bytes,
+            deallocation_count: self.deallocation_count,
+            deallocated_bytes: self.deallocated_bytes,
+            reallocation_count: self.reallocation_count,
+            max_allocated_bytes_per_pass: self.max_allocated_bytes_per_pass,
+            recent_samples: self.recent_samples.iter().cloned().collect(),
+        })
     }
 }
 
@@ -278,6 +334,7 @@ impl ProfilingRuntimeState {
                         .scope
                         .total_surface_render_time_micros,
                     invalidation: surface.invalidation.clone(),
+                    allocations: scope.allocations,
                 }
             })
             .collect();
@@ -301,10 +358,52 @@ impl ProfilingRuntimeState {
 
         ProfilingSnapshot {
             session_id: session_id.max(self.session_id),
+            allocation_profiling_available: mesh_core_debug::allocation::profiling_available(),
             shell: self.shell.snapshot(),
             surfaces,
             backends,
         }
+    }
+
+    pub(crate) fn record_surface_allocations(
+        &mut self,
+        surface_id: &str,
+        module_id: Option<&str>,
+        counters: AllocationCounters,
+    ) {
+        let module_id = module_id.filter(|id| !id.is_empty());
+        let sample = ProfilingAllocationSample {
+            order: self.next_sample_order,
+            timestamp_micros: self
+                .session_started
+                .elapsed()
+                .as_micros()
+                .min(u128::from(u64::MAX)) as u64,
+            allocation_count: counters.allocation_count,
+            allocated_bytes: counters.allocated_bytes,
+            deallocation_count: counters.deallocation_count,
+            deallocated_bytes: counters.deallocated_bytes,
+            reallocation_count: counters.reallocation_count,
+        };
+        self.next_sample_order = self.next_sample_order.saturating_add(1);
+        self.shell
+            .allocations
+            .record(sample.clone(), self.recent_capacity);
+        let surface = self
+            .surfaces
+            .entry(surface_id.to_owned())
+            .or_insert_with(|| SurfaceAccumulator {
+                module_id: module_id.map(str::to_owned),
+                scope: ScopeAccumulator::default(),
+                invalidation: None,
+            });
+        if surface.module_id.is_none() {
+            surface.module_id = module_id.map(str::to_owned);
+        }
+        surface
+            .scope
+            .allocations
+            .record(sample, self.recent_capacity);
     }
 
     pub(crate) fn record_shell_stage(
@@ -528,6 +627,19 @@ impl Shell {
             .record_surface_invalidation(surface_id, module_id, invalidation);
     }
 
+    pub(crate) fn record_surface_allocations(
+        &mut self,
+        surface_id: &str,
+        module_id: Option<&str>,
+        counters: AllocationCounters,
+    ) {
+        if !self.profiling_enabled() || !mesh_core_debug::allocation::profiling_available() {
+            return;
+        }
+        self.profiling
+            .record_surface_allocations(surface_id, module_id, counters);
+    }
+
     pub(crate) fn record_backend_profiling_stage(
         &mut self,
         interface: &str,
@@ -674,5 +786,47 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![("component_build_avoided", 2), ("empty_restyle_avoided", 1),]
         );
+    }
+
+    #[test]
+    fn render_pass_allocations_are_aggregated_and_recent_samples_are_bounded() {
+        let mut profiling = ProfilingRuntimeState {
+            recent_capacity: 2,
+            ..ProfilingRuntimeState::default()
+        };
+        for allocated_bytes in [100, 200, 300] {
+            profiling.record_surface_allocations(
+                "surface",
+                Some("@mesh/test"),
+                AllocationCounters {
+                    allocation_count: 2,
+                    allocated_bytes,
+                    deallocation_count: 1,
+                    deallocated_bytes: allocated_bytes / 2,
+                    reallocation_count: 1,
+                },
+            );
+        }
+
+        let snapshot = profiling.snapshot(1);
+        let shell = snapshot
+            .shell
+            .allocations
+            .expect("shell allocation summary");
+        let surface = snapshot.surfaces[0]
+            .allocations
+            .as_ref()
+            .expect("surface allocation summary");
+        assert_eq!(shell, *surface);
+        assert_eq!(surface.sample_count, 3);
+        assert_eq!(surface.allocation_count, 6);
+        assert_eq!(surface.allocated_bytes, 600);
+        assert_eq!(surface.deallocation_count, 3);
+        assert_eq!(surface.deallocated_bytes, 300);
+        assert_eq!(surface.reallocation_count, 3);
+        assert_eq!(surface.max_allocated_bytes_per_pass, 300);
+        assert_eq!(surface.recent_samples.len(), 2);
+        assert_eq!(surface.recent_samples[0].allocated_bytes, 200);
+        assert_eq!(surface.recent_samples[1].allocated_bytes, 300);
     }
 }

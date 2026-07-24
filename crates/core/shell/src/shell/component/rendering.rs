@@ -10,14 +10,16 @@ impl FrontendSurfaceComponent {
         if !self.profiling_enabled {
             return;
         }
-        self.profiling_records
-            .borrow_mut()
-            .push(ComponentProfilingRecord {
-                stage,
-                duration: started_at.elapsed(),
-                module_id: Some(self.compiled.manifest.package.id.clone()),
-                trigger_kind: trigger_kind.map(str::to_string),
-            });
+        mesh_core_debug::allocation::with_tracking_suspended(|| {
+            self.profiling_records
+                .borrow_mut()
+                .push(ComponentProfilingRecord {
+                    stage,
+                    duration: started_at.elapsed(),
+                    module_id: Some(self.compiled.manifest.package.id.clone()),
+                    trigger_kind: trigger_kind.map(str::to_string),
+                });
+        });
     }
 
     pub(super) fn record_profiling_stage_with_elapsed(
@@ -29,14 +31,16 @@ impl FrontendSurfaceComponent {
         if !self.profiling_enabled {
             return;
         }
-        self.profiling_records
-            .borrow_mut()
-            .push(ComponentProfilingRecord {
-                stage,
-                duration: elapsed,
-                module_id: Some(self.compiled.manifest.package.id.clone()),
-                trigger_kind: trigger_kind.map(str::to_string),
-            });
+        mesh_core_debug::allocation::with_tracking_suspended(|| {
+            self.profiling_records
+                .borrow_mut()
+                .push(ComponentProfilingRecord {
+                    stage,
+                    duration: elapsed,
+                    module_id: Some(self.compiled.manifest.package.id.clone()),
+                    trigger_kind: trigger_kind.map(str::to_string),
+                });
+        });
     }
 
     fn module_restyle_rules(&mut self) -> &[mesh_core_component::style::StyleRule] {

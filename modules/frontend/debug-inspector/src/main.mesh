@@ -74,6 +74,7 @@
                     module_count={module_count}
                     active_surface_count={active_surface_count}
                     backend_count={backend_count}
+                    allocation_value={allocation_value}
                     shell_stage_label={shell_stage_label}
                     shell_render_label={shell_render_label}
                     onToggleProfiling={onToggleProfiling}
@@ -163,6 +164,7 @@ overlay_value = "Hidden"
 module_count = "0"
 active_surface_count = "0"
 backend_count = "0"
+allocation_value = "Unavailable in this build"
 shell_stage_label = "No recent samples yet"
 shell_render_label = "Total surface render: --"
 
@@ -262,6 +264,17 @@ end
 local function micros_label(value)
     local numeric = tonumber(value) or 0
     return string.format("%dus", math.floor(numeric + 0.5))
+end
+
+local function bytes_label(value)
+    local numeric = tonumber(value) or 0
+    if numeric >= 1048576 then
+        return string.format("%.2f MiB", numeric / 1048576)
+    end
+    if numeric >= 1024 then
+        return string.format("%.1f KiB", numeric / 1024)
+    end
+    return string.format("%d B", math.floor(numeric + 0.5))
 end
 
 local function stage_total_label(summary)
@@ -717,12 +730,22 @@ local function surface_row(snapshot)
     if snapshot == nil then
         return nil
     end
+    local allocation_label = "Allocations unavailable in this build"
+    if type(snapshot.allocations) == "table" then
+        allocation_label = string.format(
+            "Allocations %s in %s ops across %s passes",
+            bytes_label(snapshot.allocations.allocated_bytes),
+            tostring(snapshot.allocations.allocation_count or 0),
+            tostring(snapshot.allocations.sample_count or 0)
+        )
+    end
     return {
         surface_id = tostring(snapshot.surface_id or "unknown-surface"),
         module_id = string.format("Module %s", tostring(snapshot.module_id or "unknown")),
         stage_label = first_stage_label(snapshot.stages),
         render_label = string.format("Total render %s", micros_label(snapshot.total_surface_render_time_micros)),
         redraw_label = string.format("Redraws %s", tostring(snapshot.redraw_count or 0)),
+        allocation_label = allocation_label,
         paint_policy_label = paint_policy_label(snapshot),
         paint_filter_label = paint_filter_label(snapshot),
     }
@@ -942,6 +965,11 @@ function render()
         module_count = "0"
         active_surface_count = "0"
         backend_count = "0"
+        if debug_service.allocation_profiling_available then
+            allocation_value = "Available when profiling starts"
+        else
+            allocation_value = "Unavailable in this build"
+        end
         shell_stage_label = "No recent samples yet"
         shell_render_label = "Total surface render: --"
         surfaces_empty = true
@@ -1004,6 +1032,20 @@ function render()
             )
             surface_samples = profiling.surfaces
             backend_samples = profiling.backends
+            if profiling.allocation_profiling_available then
+                local allocations = profiling.shell and profiling.shell.allocations
+                if type(allocations) == "table" then
+                    allocation_value = string.format(
+                        "%s / %s ops",
+                        bytes_label(allocations.allocated_bytes),
+                        tostring(allocations.allocation_count or 0)
+                    )
+                else
+                    allocation_value = "Enabled; awaiting render"
+                end
+            else
+                allocation_value = "Unavailable in this build"
+            end
 
             if list_size(profiling.shell and profiling.shell.stages) == 0 then
                 overview_state_kind = "idle"
@@ -1029,6 +1071,7 @@ function render()
         overview_state_copy = "Enable profiling to collect rolling shell, surface, and backend timings."
         shell_stage_label = "No recent samples yet"
         shell_render_label = "Total surface render: --"
+        allocation_value = "Unavailable in this build"
     end
 
     surfaces_empty = list_size(surface_samples) == 0

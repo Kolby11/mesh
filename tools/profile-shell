@@ -9,9 +9,10 @@ readonly STAMP="$(date +%Y%m%d-%H%M%S)"
 
 usage() {
   cat <<'EOF'
-Usage: ./tools/profile-shell <live|cpu|memory|build> [shell arguments...]
+Usage: ./tools/profile-shell <live|alloc|cpu|memory|build> [shell arguments...]
 
   live     Stream CPU spans and allocations to the Tracy profiler UI
+  alloc    Count allocation operations and bytes per surface render pass
   cpu      Record CPU stacks and write profiles/cpu/<timestamp>.svg
   memory   Record allocations and write profiles/memory/<timestamp>.*.gz
   build    Build the optimized, symbolized profiling binary only
@@ -48,6 +49,11 @@ build_shell() {
 build_tracy_shell() {
   require_build_space
   cargo build --profile "$PROFILE" -p mesh-tools-cli --bin mesh-shell --features perf-tracy
+}
+
+build_allocation_shell() {
+  require_build_space
+  cargo build --profile "$PROFILE" -p mesh-tools-cli --bin mesh-shell --features allocation-profiling
 }
 
 ensure_shell_is_not_running() {
@@ -93,6 +99,12 @@ main() {
         echo "Tracy UI exited before the shell started" >&2
         return 1
       fi
+      "$BINARY" "${shell_args[@]}"
+      ;;
+    alloc)
+      ensure_shell_is_not_running
+      build_allocation_shell
+      echo "Allocation profiling build ready. Start debug profiling in the inspector to collect per-render-pass counters."
       "$BINARY" "${shell_args[@]}"
       ;;
     build)

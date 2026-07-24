@@ -9,9 +9,14 @@ trap 'rm -f "$RESULTS"' EXIT
 run_benchmark() {
   local package="$1"
   local test_name="$2"
+  local features="${3:-}"
   local output
+  local -a feature_args=()
 
-  if ! output="$(cargo test -p "$package" --release -- "$test_name" --ignored --nocapture 2>&1)"; then
+  if [[ -n "$features" ]]; then
+    feature_args=(--features "$features")
+  fi
+  if ! output="$(cargo test -p "$package" "${feature_args[@]}" --release -- "$test_name" --ignored --nocapture 2>&1)"; then
     printf '%s\n' "$output"
     return 1
   fi
@@ -35,6 +40,10 @@ run_benchmark mesh-core-shell paint_only_scoped_retained_end_to_end_benchmark
 run_benchmark mesh-core-scripting template_dependency_rust_gate_beats_lua_table_lookup
 run_benchmark mesh-core-scripting thread_vm_handle_beats_fresh_vm_creation
 run_benchmark mesh-core-render performance_hud_native_paint_cost
+run_benchmark mesh-core-interaction borrowed_find_nodes_keys_beat_owned_results
+run_benchmark mesh-core-shell hover_prefix_diff_beats_pairwise_path_scans
+run_benchmark mesh-core-shell borrowed_key_path_beats_owned_strings
+run_benchmark mesh-core-debug allocation_counter_operation_overhead_is_bounded allocation-profiling
 
 awk '
   BEGIN { failed = 0 }

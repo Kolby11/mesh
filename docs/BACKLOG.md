@@ -200,8 +200,11 @@ already landed: **confirmed dead-code deletions** (commit `afc9a0d`) and
       instead of binary-search substring measurement.
 - [x] Add profiling visibility for text and glyph cache pressure: entry counts,
       hits, misses, invalidations, and shaping time.
-- [ ] Add locale-, script-, and direction-sensitive text cases to canonical
-      performance workloads before changing shaping behavior further.
+- [x] Add locale-, script-, and direction-sensitive text cases to canonical
+      performance workloads before changing shaping behavior further. Added
+      2026-07-24: the retained text-cache workload now runs Latin/LTR,
+      Arabic/RTL, Japanese/CJK LTR, and Devanagari/LTR cases, asserting cold
+      shaping misses and warm cache reuse independently for every case.
 
 Full history, benchmark baselines, and rejected experiments live in
 `.planning/performance/performance-log.md`; section letters (A–V) below
@@ -541,8 +544,34 @@ reference it. The historical subsystem map is
       cache borrow. Across three release runs of one million representative
       504-byte tooltip handoffs, `String` cloning took 9.45–16.02ms versus
       2.77–6.79ms for `Arc` cloning (2.25–3.41x faster).
-- [ ] Allocator-level profile mode (allocation counts per render pass) →
-      v1.23
+      Hover-transition path differences now use the shared root-to-leaf prefix
+      instead of two pairwise membership scans and temporary vectors. Across
+      three release runs of 200,000 deep sibling transitions on 2026-07-24,
+      pairwise scans took 4.667–4.799s versus 36.0–37.8ms for prefix slices
+      (123.5–132.1x faster). The fused multi-key node lookup now returns keys
+      borrowed from the retained tree instead of cloning every matched key.
+      Across three release runs of 20,000 dense lookups on 2026-07-24, owned
+      results took 427.3–432.4ms versus 284.8–287.4ms borrowed
+      (1.498–1.518x faster). Keyboard navigation key paths and candidate lists
+      now borrow retained-tree keys and allocate only the selected result.
+      Three release runs of 200,000 64-node key-path lookups measured
+      238.0–247.5ms with owned strings versus 124.7–126.5ms borrowed
+      (1.881–1.985x faster). All three relative improvements are checked by the
+      canonical performance gate.
+- [x] Allocator-level profile mode (allocation counts per render pass) →
+      v1.23. Added 2026-07-24: the opt-in `allocation-profiling` build wraps
+      the system allocator with allocation-free thread-local counters and
+      attributes allocation/deallocation operations, bytes, and reallocations
+      to each completed surface render pass while suspending counters around
+      profiler bookkeeping writes. Cumulative and bounded recent samples are
+      published through `mesh.debug` and rendered in the Overview and Surfaces
+      inspector views. `./tools/profile-shell alloc` builds and launches the
+      mode; normal builds remain uninstrumented, and the mode is deliberately
+      exclusive with Tracy's global allocator. Three alternating
+      release runs of four million 64-byte allocation/deallocation pairs
+      measured the counter wrapper at 1.047–1.098x the raw system allocator
+      time (4.7–9.8% profiling overhead per allocation pair); the overhead is
+      bounded by the canonical performance gate.
 - [ ] Magic-string protocol at the composition boundary (`__mesh_embed__::`,
       `__mesh_binding_*`, `__mesh_bind_this`, promoted-popover marker) —
       typed channels between compiler and shell (M).
