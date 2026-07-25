@@ -290,31 +290,41 @@ impl RenderObjectTree {
 }
 
 impl RenderObjectDirtySummary {
-    fn add_diff(&mut self, previous: &RenderObjectPaintData, next: &RenderObjectPaintData) {
+    fn add_diff(&mut self, previous: &RenderObjectPaintData, next: &RenderObjectPaintData) -> bool {
+        let mut changed = false;
         if previous.transform != next.transform {
             self.transform += 1;
+            changed = true;
         }
         if previous.clip != next.clip {
             self.clip += 1;
+            changed = true;
         }
         if previous.opacity != next.opacity {
             self.opacity += 1;
+            changed = true;
         }
         if previous.geometry != next.geometry {
             self.geometry += 1;
+            changed = true;
         }
         if previous.material != next.material {
             self.material += 1;
+            changed = true;
         }
         if previous.primitive != next.primitive {
             self.primitive += 1;
+            changed = true;
         }
         if previous.text != next.text {
             self.text += 1;
+            changed = true;
         }
         if previous.accessibility != next.accessibility {
             self.accessibility += 1;
+            changed = true;
         }
+        changed
     }
 }
 
@@ -366,21 +376,14 @@ fn update_retained_render_objects(
 ) -> usize {
     match objects.get_mut(&node.id) {
         Some(current) => {
-            let before = *dirty;
-            if current.parent != parent
-                || current.child_ids.len() != node.children.len()
-                || !current
-                    .child_ids
-                    .iter()
-                    .copied()
-                    .eq(node.children.iter().map(|child| child.id))
-            {
+            let parent_changed = current.parent != parent;
+            let (child_ids, children_changed) =
+                refresh_child_id_slot(node, std::mem::take(&mut current.child_ids));
+            if parent_changed || children_changed {
                 dirty.reordered += 1;
             }
-            let child_ids = refill_child_id_slot(node, std::mem::take(&mut current.child_ids));
             let next = render_object_paint_data(node, parent, Some(current), child_ids);
-            dirty.add_diff(current, &next);
-            if *dirty != before {
+            if dirty.add_diff(current, &next) || parent_changed || children_changed {
                 dirty_nodes.insert(node.id);
             }
             *current = RenderObjectPaintData {
@@ -457,12 +460,10 @@ fn update_dirty_render_object(
             .copied()
             .eq(node.children.iter().map(|child| child.id))
     );
-    let before = *dirty;
     let parent = current.parent;
     let child_ids = std::mem::take(&mut current.child_ids);
     let next = render_object_paint_data(node, parent, Some(current), child_ids);
-    dirty.add_diff(current, &next);
-    if *dirty != before {
+    if dirty.add_diff(current, &next) {
         dirty_nodes.insert(node.id);
     }
     *current = RenderObjectPaintData {
@@ -495,6 +496,20 @@ fn render_object_paint_data(
 
 fn child_id_slot(node: &WidgetNode) -> Vec<NodeId> {
     refill_child_id_slot(node, Vec::new())
+}
+
+fn refresh_child_id_slot(node: &WidgetNode, mut child_ids: Vec<NodeId>) -> (Vec<NodeId>, bool) {
+    let unchanged = child_ids.len() == node.children.len()
+        && child_ids
+            .iter()
+            .copied()
+            .eq(node.children.iter().map(|child| child.id));
+    if unchanged {
+        return (child_ids, false);
+    }
+    child_ids.clear();
+    child_ids.extend(node.children.iter().map(|child| child.id));
+    (child_ids, true)
 }
 
 fn refill_child_id_slot(node: &WidgetNode, mut child_ids: Vec<NodeId>) -> Vec<NodeId> {
@@ -720,6 +735,166 @@ mod tests {
         node.layout.width = 100.0;
         node.layout.height = 40.0;
         node
+    }
+
+    #[test]
+    fn stable_child_id_slots_reuse_their_backing_storage() {
+        let mut root = retained_visual_node();
+        root.children = (2..=17)
+            .map(|id| {
+                let mut child = WidgetNode::new("text");
+                child.id = id;
+                child
+            })
+            .collect();
+        let slot = child_id_slot(&root);
+        let pointer = slot.as_ptr();
+
+        let (slot, changed) = refresh_child_id_slot(&root, slot);
+
+        assert!(!changed);
+        assert_eq!(slot.as_ptr(), pointer);
+        assert_eq!(
+            slot,
+            root.children
+                .iter()
+                .map(|child| child.id)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn changed_child_id_slots_are_refilled() {
+        let mut root = retained_visual_node();
+        root.children = (2..=5)
+            .map(|id| {
+                let mut child = WidgetNode::new("text");
+                child.id = id;
+                child
+            })
+            .collect();
+        let mut slot = child_id_slot(&root);
+        root.children.swap(1, 2);
+
+        let (refreshed, changed) = refresh_child_id_slot(&root, std::mem::take(&mut slot));
+
+        assert!(changed);
+        assert_eq!(
+            refreshed,
+            root.children
+                .iter()
+                .map(|child| child.id)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    // cargo test -p mesh-core-render --release -- stable_child_id_reuse_beats_rewriting_slots --ignored --nocapture
+    #[test]
+    #[ignore = "release-only render-object child-ID slot microbenchmark"]
+    fn stable_child_id_reuse_beats_rewriting_slots() {
+        let mut root = retained_visual_node();
+        root.children = (2..=257)
+            .map(|id| {
+                let mut child = WidgetNode::new("text");
+                child.id = id;
+                child
+            })
+            .collect();
+        let expected = root
+            .children
+            .iter()
+            .map(|child| child.id)
+            .collect::<Vec<_>>();
+        let iterations = 200_000;
+
+        let mut rewritten = expected.clone();
+        let rewrite_started = Instant::now();
+        let mut rewrite_total = 0u64;
+        for _ in 0..iterations {
+            let unchanged = rewritten.len() == root.children.len()
+                && rewritten
+                    .iter()
+                    .copied()
+                    .eq(root.children.iter().map(|child| child.id));
+            std::hint::black_box(unchanged);
+            rewritten.clear();
+            rewritten.extend(root.children.iter().map(|child| child.id));
+            rewrite_total = rewrite_total.wrapping_add(std::hint::black_box(
+                rewritten.last().copied().unwrap_or_default(),
+            ));
+        }
+        let rewrite_time = rewrite_started.elapsed();
+
+        let mut reused = expected.clone();
+        let reuse_started = Instant::now();
+        let mut reuse_total = 0u64;
+        for _ in 0..iterations {
+            let (next, changed) = refresh_child_id_slot(&root, reused);
+            reused = next;
+            std::hint::black_box(changed);
+            reuse_total = reuse_total.wrapping_add(std::hint::black_box(
+                reused.last().copied().unwrap_or_default(),
+            ));
+        }
+        let reuse_time = reuse_started.elapsed();
+
+        assert_eq!(rewrite_total, reuse_total);
+        assert_eq!(rewritten, reused);
+        let speedup = rewrite_time.as_secs_f64() / reuse_time.as_secs_f64();
+        eprintln!(
+            "stable render child-ID slots over {iterations} 256-child updates: rewrite {rewrite_time:?}; reuse {reuse_time:?}; ratio {speedup:.2}x"
+        );
+        println!("MESH_PERF metric=render_child_id_reuse_speedup value={speedup:.6}");
+        assert!(
+            reuse_time * 5 < rewrite_time * 4,
+            "stable child-ID reuse should be at least 1.25x faster"
+        );
+    }
+
+    // cargo test -p mesh-core-render --release -- direct_diff_result_beats_summary_copy_comparison --ignored --nocapture
+    #[test]
+    #[ignore = "release-only render-object dirty-result microbenchmark"]
+    fn direct_diff_result_beats_summary_copy_comparison() {
+        let node = retained_visual_node();
+        let child_ids = Vec::new();
+        let previous = render_object_paint_data(&node, None, None, child_ids.clone());
+        let mut changed_node = node.clone();
+        changed_node.computed_style.background_color.r = 42;
+        let next = render_object_paint_data(&changed_node, None, Some(&previous), child_ids);
+        let iterations = 5_000_000;
+
+        let copied_started = Instant::now();
+        let mut copied_summary = RenderObjectDirtySummary::default();
+        let mut copied_changes = 0usize;
+        for _ in 0..iterations {
+            let before = copied_summary;
+            copied_summary.add_diff(std::hint::black_box(&previous), std::hint::black_box(&next));
+            copied_changes += usize::from(copied_summary != before);
+        }
+        let copied_time = copied_started.elapsed();
+
+        let direct_started = Instant::now();
+        let mut direct_summary = RenderObjectDirtySummary::default();
+        let mut direct_changes = 0usize;
+        for _ in 0..iterations {
+            direct_changes += usize::from(
+                direct_summary
+                    .add_diff(std::hint::black_box(&previous), std::hint::black_box(&next)),
+            );
+        }
+        let direct_time = direct_started.elapsed();
+
+        assert_eq!(copied_changes, direct_changes);
+        assert_eq!(copied_summary, direct_summary);
+        let speedup = copied_time.as_secs_f64() / direct_time.as_secs_f64();
+        eprintln!(
+            "render dirty detection over {iterations} material diffs: summary copy {copied_time:?}; direct result {direct_time:?}; ratio {speedup:.2}x"
+        );
+        println!("MESH_PERF metric=render_dirty_result_speedup value={speedup:.6}");
+        assert!(
+            direct_time * 10 < copied_time * 9,
+            "direct dirty results should be at least 1.11x faster"
+        );
     }
 
     // cargo test -p mesh-core-render --release -- render_object_epoch_marks_beat_visited_set --ignored --nocapture

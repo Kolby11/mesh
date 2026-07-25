@@ -947,9 +947,15 @@ impl RetainedDisplayList {
             );
         }
 
+        let has_authoritative_dirty_summary = dirty_summary.is_some();
         let dirty_summary = dirty_summary.unwrap_or_default();
         let empty_dirty_nodes = HashSet::new();
         let dirty_node_ids = dirty_node_ids.unwrap_or(&empty_dirty_nodes);
+        let blur_metadata_reuse_candidate = has_authoritative_dirty_summary
+            && self.root_id == Some(root.id)
+            && self.surface_size == Some((surface.width, surface.height))
+            && self.paint_origin == paint_origin
+            && dirty_summary_preserves_blur_metadata(dirty_summary);
         let patch_sparse_entries = (!cfg!(debug_assertions) || cfg!(test))
             && self.can_patch_sparse_entries(
                 root,
@@ -1091,11 +1097,6 @@ impl RetainedDisplayList {
             }
         };
 
-        let backdrop_regions = compute_backdrop_regions(paint_commands.as_ref(), surface);
-        // Computed from the full `root` tree, not `paint_commands`, so scoped
-        // retained updates never drop blur nodes (see field docs).
-        let blur_regions = backdrop_blur_regions_from_tree(root, offset_x, offset_y, surface);
-
         let mut damage: Option<DamageRect> = None;
         let mut damage_rects = std::mem::take(&mut self.last_damage_rects);
         damage_rects.clear();
@@ -1178,6 +1179,22 @@ impl RetainedDisplayList {
             (reused, rebuilt, removed)
         };
 
+        // A text/accessibility change can share a frame with a visibility
+        // annotation that the render-object summary does not classify as a
+        // primitive change. Command removal/count catches that topology change
+        // before preserving blur regions derived from the previous tree.
+        let can_reuse_blur_metadata = blur_metadata_reuse_candidate
+            && removed == 0
+            && self.paint_commands.len() == paint_commands.len();
+        let updated_blur_metadata = (!can_reuse_blur_metadata).then(|| {
+            (
+                compute_backdrop_regions(paint_commands.as_ref(), surface),
+                // Computed from the full `root` tree, not `paint_commands`, so scoped
+                // retained updates never drop blur nodes (see field docs).
+                backdrop_blur_regions_from_tree(root, offset_x, offset_y, surface),
+            )
+        });
+
         let full_surface_damage = force_full_damage || damage.is_none() && self.entries.is_empty();
         let damage_rect = if full_surface_damage {
             surface
@@ -1222,8 +1239,10 @@ impl RetainedDisplayList {
         self.command_spans = command_spans;
         self.paint_commands = paint_commands;
         self.command_kinds = command_kinds;
-        self.backdrop_regions = backdrop_regions;
-        self.blur_regions = blur_regions;
+        if let Some((backdrop_regions, blur_regions)) = updated_blur_metadata {
+            self.backdrop_regions = backdrop_regions;
+            self.blur_regions = blur_regions;
+        }
         self.root_id = Some(root.id);
         self.retained_tree_generation = retained_tree_generation;
         self.surface_size = Some((surface.width, surface.height));
@@ -2645,6 +2664,18 @@ fn changed_layout_count(dirty_summary: RenderObjectDirtySummary) -> u64 {
     .into_iter()
     .map(|count| count as u64)
     .sum()
+}
+
+fn dirty_summary_preserves_blur_metadata(dirty: RenderObjectDirtySummary) -> bool {
+    dirty.inserted == 0
+        && dirty.removed == 0
+        && dirty.reordered == 0
+        && dirty.transform == 0
+        && dirty.clip == 0
+        && dirty.opacity == 0
+        && dirty.geometry == 0
+        && dirty.material == 0
+        && dirty.primitive == 0
 }
 
 fn changed_paint_count(dirty_summary: RenderObjectDirtySummary) -> u64 {
@@ -4934,6 +4965,222 @@ mod tests {
         assert_eq!(sparse.damage_rects(), full.damage_rects());
         assert_eq!(sparse_metrics.entries_rebuilt, full_metrics.entries_rebuilt);
         assert_eq!(sparse_metrics.damage_area, full_metrics.damage_area);
+    }
+
+    #[test]
+    fn text_only_updates_preserve_cached_blur_metadata() {
+        let mut root = display_entry_benchmark_tree(8, 12);
+        root.children[3].children[6]
+            .computed_style
+            .backdrop_filter
+            .blur_radius = 8.0;
+        let changed_id = root.children[5].children[4].id;
+        let dirty_ids = HashSet::from([changed_id]);
+        let mut retained = RetainedDisplayList::default();
+        retained.update(&root, 144, 64, false, true);
+        let expected_backdrop = retained.backdrop_filter_regions().to_vec();
+        let expected_compositor = retained.blur_regions().to_vec();
+
+        root.children[5].children[4]
+            .attributes
+            .insert("content".into(), "changed".into());
+        retained.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                text: 1,
+                ..Default::default()
+            },
+            &dirty_ids,
+            144,
+            64,
+            false,
+            true,
+        );
+
+        assert_eq!(retained.backdrop_filter_regions(), expected_backdrop);
+        assert_eq!(retained.blur_regions(), expected_compositor);
+    }
+
+    #[test]
+    fn text_update_with_visibility_change_recomputes_blur_metadata() {
+        let mut root = display_entry_benchmark_tree(8, 12);
+        let blur_id = root.children[3].children[6].id;
+        root.children[3].children[6]
+            .computed_style
+            .backdrop_filter
+            .blur_radius = 8.0;
+        let text_id = root.children[5].children[4].id;
+        let dirty_ids = HashSet::from([blur_id, text_id]);
+        let mut retained = RetainedDisplayList::default();
+        retained.update(&root, 144, 64, false, true);
+        assert!(!retained.blur_regions().is_empty());
+
+        root.children[3].children[6]
+            .attributes
+            .insert("hidden".into(), "true".into());
+        root.children[5].children[4]
+            .attributes
+            .insert("content".into(), "changed".into());
+        retained.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                text: 1,
+                ..Default::default()
+            },
+            &dirty_ids,
+            144,
+            64,
+            false,
+            true,
+        );
+
+        assert!(retained.blur_regions().is_empty());
+    }
+
+    #[test]
+    fn blur_metadata_reuse_rejects_every_sensitive_dirty_category() {
+        assert!(dirty_summary_preserves_blur_metadata(
+            RenderObjectDirtySummary {
+                text: 1,
+                accessibility: 1,
+                ..Default::default()
+            }
+        ));
+        for dirty in [
+            RenderObjectDirtySummary {
+                inserted: 1,
+                ..Default::default()
+            },
+            RenderObjectDirtySummary {
+                removed: 1,
+                ..Default::default()
+            },
+            RenderObjectDirtySummary {
+                reordered: 1,
+                ..Default::default()
+            },
+            RenderObjectDirtySummary {
+                transform: 1,
+                ..Default::default()
+            },
+            RenderObjectDirtySummary {
+                clip: 1,
+                ..Default::default()
+            },
+            RenderObjectDirtySummary {
+                opacity: 1,
+                ..Default::default()
+            },
+            RenderObjectDirtySummary {
+                geometry: 1,
+                ..Default::default()
+            },
+            RenderObjectDirtySummary {
+                material: 1,
+                ..Default::default()
+            },
+            RenderObjectDirtySummary {
+                primitive: 1,
+                ..Default::default()
+            },
+        ] {
+            assert!(!dirty_summary_preserves_blur_metadata(dirty));
+        }
+    }
+
+    // cargo test -p mesh-core-render --release -- cached_blur_metadata_beats_text_update_rescans --ignored --nocapture
+    #[test]
+    #[ignore = "release-only text-update blur metadata benchmark"]
+    fn cached_blur_metadata_beats_text_update_rescans() {
+        fn blur_benchmark_tree() -> WidgetNode {
+            let mut root = display_entry_benchmark_tree(60, 20);
+            for row in root.children.iter_mut().step_by(3) {
+                row.children[10].computed_style.backdrop_filter.blur_radius = 8.0;
+            }
+            root
+        }
+
+        let iterations = 2_000_u64;
+        let surface = DamageRect {
+            x: 0,
+            y: 0,
+            width: 240,
+            height: 480,
+        };
+
+        let mut rescanned_root = blur_benchmark_tree();
+        let changed_id = rescanned_root.children[30].children[5].id;
+        let dirty_ids = HashSet::from([changed_id]);
+        let mut rescanned = RetainedDisplayList::default();
+        rescanned.update(&rescanned_root, surface.width, surface.height, false, true);
+        let mut cached_root = blur_benchmark_tree();
+        let mut cached = RetainedDisplayList::default();
+        cached.update(&cached_root, surface.width, surface.height, false, true);
+
+        let mut rescan_time = std::time::Duration::ZERO;
+        let mut cached_time = std::time::Duration::ZERO;
+        let mut rescan_total = 0usize;
+        let mut cached_total = 0usize;
+        for generation in 0..iterations {
+            rescanned_root.children[30].children[5]
+                .attributes
+                .insert("content".into(), generation.to_string());
+            let rescan_started = std::time::Instant::now();
+            rescanned.update_with_dirty_nodes(
+                &rescanned_root,
+                RenderObjectDirtySummary {
+                    text: 1,
+                    ..Default::default()
+                },
+                &dirty_ids,
+                surface.width,
+                surface.height,
+                false,
+                true,
+            );
+            let backdrop = compute_backdrop_regions(rescanned.paint_commands.as_ref(), surface);
+            let compositor = backdrop_blur_regions_from_tree(&rescanned_root, 0.0, 0.0, surface);
+            rescan_time += rescan_started.elapsed();
+            rescan_total =
+                rescan_total.wrapping_add(std::hint::black_box(backdrop.len() + compositor.len()));
+
+            cached_root.children[30].children[5]
+                .attributes
+                .insert("content".into(), generation.to_string());
+            let cached_started = std::time::Instant::now();
+            cached.update_with_dirty_nodes(
+                &cached_root,
+                RenderObjectDirtySummary {
+                    text: 1,
+                    ..Default::default()
+                },
+                &dirty_ids,
+                surface.width,
+                surface.height,
+                false,
+                true,
+            );
+            cached_time += cached_started.elapsed();
+            cached_total = cached_total.wrapping_add(std::hint::black_box(
+                cached.backdrop_filter_regions().len() + cached.blur_regions().len(),
+            ));
+        }
+
+        assert_eq!(rescan_total, cached_total);
+        assert_eq!(
+            rescanned.backdrop_filter_regions(),
+            cached.backdrop_filter_regions()
+        );
+        assert_eq!(rescanned.blur_regions(), cached.blur_regions());
+        let speedup = rescan_time.as_secs_f64() / cached_time.as_secs_f64();
+        eprintln!(
+            "text-only display updates over {iterations} 1,261-node blur-bearing frames: rescan {rescan_time:?}; cached metadata {cached_time:?}; ratio {speedup:.2}x"
+        );
+        println!("MESH_PERF metric=text_blur_metadata_cache_speedup value={speedup:.6}");
+        assert!(
+            cached_time * 100 < rescan_time * 98,
+            "cached blur metadata should make text updates at least 1.02x faster"
+        );
     }
 
     #[test]

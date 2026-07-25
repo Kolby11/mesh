@@ -306,6 +306,14 @@ reference it. The historical subsystem map is
       Structural changes, broad/root style changes, surface transitions, and
       external rebuilds deliberately retain the full checked fallback, completing
       clean-subtree skipping for the authoritative non-structural mutation paths.
+      Added 2026-07-25: stable full render-object syncs now retain already-matching
+      child-ID vectors instead of clearing and rewriting them after the structural
+      equality check; three release runs of 200,000 256-child updates measured
+      1.42–1.97x faster for that subpath. Per-node dirty-category comparison now
+      returns its changed bit directly instead of copying and comparing the
+      eleven-counter aggregate summary around every node; three release runs of
+      five million material diffs measured 1.29–1.34x faster. Both relative
+      improvements are checked by the canonical performance gate.
 - [ ] Triple full-tree fingerprinting on dirty frames: make
       `RetainedWidgetTree` the single fingerprint pass; render-object tree and
       display entries consume its per-node dirty flags (N). Progress
@@ -330,7 +338,14 @@ reference it. The historical subsystem map is
       render sync's redundant clean-node traversal while preserving the existing
       structural/broad fallback. Remaining: share the retained tree's computed
       fingerprint payloads directly, and prove any additional dirty categories
-      before widening them.
+      before widening them. Added 2026-07-25: authoritative text/accessibility-only
+      display updates retain their unchanged in-surface and compositor blur
+      metadata instead of rescanning the full command list and widget tree.
+      Blur-sensitive structural, transform, clip, opacity, geometry, material,
+      and primitive categories still force recomputation. Three alternating
+      release runs of 2,000 text updates on a 1,261-node blur-bearing surface
+      measured 1.156–1.172x faster end to end; parity and the conservative
+      relative speedup are checked in the canonical performance gate.
 - [ ] Any non-clean frame bypasses all generation shortcuts
       (`use_generation_shortcuts` requires an empty dirty set); widen to
       per-node dirty scoping together with the §N unification (P). Interaction
