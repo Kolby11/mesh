@@ -359,38 +359,49 @@ impl StyleRuleIndex {
     }
 
     fn for_each_candidate_rule_index(&self, attrs: &StyleNodeAttrs, mut visit: impl FnMut(usize)) {
+        // Keep the common one-bucket case allocation- and scratch-free. Only
+        // borrow the thread-local merge buffer after a second bucket appears;
+        // multi-bucket candidates still use the source-order-independent
+        // sort/dedup path below.
+        let mut first_bucket = None;
+        let mut multiple_buckets = false;
+        self.for_each_candidate_bucket(attrs, |bucket| {
+            if let Some(first) = first_bucket {
+                if !multiple_buckets {
+                    CANDIDATE_RULE_SCRATCH.with(|scratch| {
+                        let mut ids = scratch.borrow_mut();
+                        ids.clear();
+                        ids.extend_from_slice(first);
+                        ids.extend_from_slice(bucket);
+                    });
+                    multiple_buckets = true;
+                } else {
+                    CANDIDATE_RULE_SCRATCH.with(|scratch| {
+                        scratch.borrow_mut().extend_from_slice(bucket);
+                    });
+                }
+            } else {
+                first_bucket = Some(bucket);
+            }
+        });
+
+        if !multiple_buckets {
+            if let Some(bucket) = first_bucket {
+                for &idx in bucket {
+                    visit(idx);
+                }
+            }
+            return;
+        }
+
         CANDIDATE_RULE_SCRATCH.with(|scratch| {
             let mut ids = scratch.borrow_mut();
-            ids.clear();
-            let mut first_bucket = None;
-            let mut multiple_buckets = false;
-            self.for_each_candidate_bucket(attrs, |bucket| {
-                if let Some(first) = first_bucket {
-                    if !multiple_buckets {
-                        ids.extend_from_slice(first);
-                        multiple_buckets = true;
-                    }
-                    ids.extend_from_slice(bucket);
-                } else {
-                    first_bucket = Some(bucket);
-                }
-            });
-
-            if !multiple_buckets {
-                if let Some(bucket) = first_bucket {
-                    for &idx in bucket {
-                        visit(idx);
-                    }
-                }
-                return;
-            }
-
             ids.sort_unstable();
             ids.dedup();
             for &idx in ids.iter() {
                 visit(idx);
             }
-        })
+        });
     }
 
     fn no_diagnostics_declarations(&self, rule_idx: usize) -> &[IndexedDeclaration] {
@@ -3367,6 +3378,10 @@ mod tests {
 
         eprintln!(
             "single-bucket candidate filtering over {iterations} nodes: copy-sort-dedup {copied:?}, direct bucket {direct:?}, ratio {:.2}x",
+            copied.as_secs_f64() / direct.as_secs_f64()
+        );
+        println!(
+            "MESH_PERF metric=style_single_bucket_speedup value={:.6}",
             copied.as_secs_f64() / direct.as_secs_f64()
         );
         assert_eq!(copied_checksum, direct_checksum);

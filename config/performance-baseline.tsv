@@ -27,3 +27,4 @@ borrowed_find_nodes_keys_speedup           lower      1.35      12
 hover_prefix_diff_speedup                  lower      100.00    35
 borrowed_key_path_speedup                  lower      1.70      15
 allocation_profiler_operation_overhead     upper      1.15      25
+style_single_bucket_speedup                lower      1.20      20

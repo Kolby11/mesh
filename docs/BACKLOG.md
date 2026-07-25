@@ -703,6 +703,10 @@ reference it. The historical subsystem map is
       deduplicated fallback. Across three release runs over two million
       single-class nodes, the previous reused-scratch copy-sort-dedup path took
       29.2–31.0ms versus 22.7–23.2ms direct, a conservative 1.26x improvement.
+      Added 2026-07-25: the single-bucket path now streams the indexed rule
+      slice before borrowing merge scratch; multi-bucket candidate collection
+      retains the ordered sort/dedup fallback. The release benchmark records
+      `style_single_bucket_speedup` and gates the 1.20x checkpoint.
 - [ ] Minor: display-list `update_inner` is ~220 lines mixing diff, damage,
       and metrics assembly; split when next touched (N).
 

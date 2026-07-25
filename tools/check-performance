@@ -49,6 +49,7 @@ run_benchmark mesh-core-interaction borrowed_find_nodes_keys_beat_owned_results
 run_benchmark mesh-core-shell hover_prefix_diff_beats_pairwise_path_scans
 run_benchmark mesh-core-shell borrowed_key_path_beats_owned_strings
 run_benchmark mesh-core-debug allocation_counter_operation_overhead_is_bounded allocation-profiling
+run_benchmark mesh-core-elements single_bucket_candidate_fast_path_beats_sort_dedup
 
 awk '
   BEGIN { failed = 0 }
