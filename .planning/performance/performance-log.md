@@ -2002,7 +2002,12 @@ Performance:
       field descriptors instead of reparsing the schema string. A release
       benchmark over 300k four-field event validations measured 45.182ms
       parse-per-event versus 15.958ms cached (~2.8x faster). Moving the
-      compiled descriptors onto the registered contract remains open.
+      compiled descriptors onto the registered contract remains open. Added
+      2026-07-25: steady-state validation-cache hits now borrow the registered
+      contract's interface name for the map probe and clone it only when
+      replacing a cache entry. A release benchmark over 2M hits measured
+      44.67ms with the per-hit clone versus 25.18ms with the borrowed lookup
+      (1.77x faster); the relative speedup is checked by the canonical gate.
 - [ ] Minor: `canonical_interface_name` / `service_name_from_interface`
       allocate fresh Strings 2–3× per event across normalize/record/profiling
       (`service_state.rs:44,92`, `interface.rs:95-118`); thread the canonical

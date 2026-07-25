@@ -415,17 +415,19 @@ impl Shell {
         &mut self,
         contract: Arc<InterfaceContract>,
     ) -> &ContractValidationCache {
-        let interface = contract.interface.clone();
-        let rebuild = self
+        let interface = contract.interface.as_str();
+        let cached = self
             .service_contract_validation
-            .get(&interface)
-            .is_none_or(|cache| !Arc::ptr_eq(&cache.contract, &contract));
-        if rebuild {
-            self.service_contract_validation
-                .insert(interface.clone(), build_contract_validation_cache(contract));
+            .get(interface)
+            .is_some_and(|cache| Arc::ptr_eq(&cache.contract, &contract));
+        if !cached {
+            self.service_contract_validation.insert(
+                contract.interface.clone(),
+                build_contract_validation_cache(Arc::clone(&contract)),
+            );
         }
         self.service_contract_validation
-            .get(&interface)
+            .get(interface)
             .expect("contract validation cache inserted")
     }
 }
@@ -840,5 +842,49 @@ mod contract_validation_tests {
         assert_eq!(old_total, 0);
         assert_eq!(new_total, 0);
         assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- contract_validation_lookup_borrows_interface_name --ignored --nocapture
+    #[test]
+    #[ignore = "release-only contract validation lookup microbenchmark"]
+    fn contract_validation_lookup_borrows_interface_name() {
+        let contract = Arc::new(validation_contract(4, 4));
+        let mut cache = HashMap::new();
+        cache.insert(
+            contract.interface.clone(),
+            build_contract_validation_cache(Arc::clone(&contract)),
+        );
+        let iterations = 2_000_000usize;
+
+        let owned_started = std::time::Instant::now();
+        let mut owned_total = 0usize;
+        for _ in 0..iterations {
+            let interface = contract.interface.clone();
+            owned_total = owned_total.wrapping_add(std::hint::black_box(
+                cache.get(&interface).expect("cached contract").events.len(),
+            ));
+        }
+        let owned_time = owned_started.elapsed();
+
+        let borrowed_started = std::time::Instant::now();
+        let mut borrowed_total = 0usize;
+        for _ in 0..iterations {
+            borrowed_total = borrowed_total.wrapping_add(std::hint::black_box(
+                cache
+                    .get(contract.interface.as_str())
+                    .expect("cached contract")
+                    .events
+                    .len(),
+            ));
+        }
+        let borrowed_time = borrowed_started.elapsed();
+
+        assert_eq!(owned_total, borrowed_total);
+        let speedup = owned_time.as_secs_f64() / borrowed_time.as_secs_f64();
+        eprintln!(
+            "contract validation cache lookup over {iterations} hits: owned interface key {owned_time:?}; borrowed key {borrowed_time:?}; ratio {speedup:.2}x"
+        );
+        eprintln!("MESH_PERF metric=contract_validation_lookup_speedup value={speedup:.6}");
+        assert!(borrowed_time < owned_time);
     }
 }

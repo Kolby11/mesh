@@ -5,6 +5,7 @@
 handler_expression_cache_speedup          lower      1.38      15
 handler_sparse_vs_full_speedup            lower      2.00      25
 unbound_handler_speedup                   lower      50.00     75
+contract_validation_lookup_speedup        lower      1.50      20
 retained_update_speedup                   lower      1.15      5
 retained_scope_speedup                    lower      5.50      10
 animation_retained_scope_speedup          lower      5.50      10
