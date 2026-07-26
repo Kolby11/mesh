@@ -3,6 +3,7 @@ use crate::accessibility::AccessibilityInfo;
 use crate::layout::LayoutRect;
 use crate::style::ComputedStyle;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Live interaction state for a single node.
@@ -87,7 +88,11 @@ pub struct WidgetNode {
     /// Stable runtime identity for this node, kept out of the string attribute map.
     mesh_key: Option<String>,
     /// Source module identity used for module-scoped theme defaults.
-    module_id: Option<String>,
+    ///
+    /// Shared rather than owned per node: every node built from one module
+    /// carries the same identity, so the builder clones a pointer instead of
+    /// allocating and copying the id string once per node.
+    module_id: Option<Arc<str>>,
     /// Service field reads captured during template evaluation.
     /// Each entry is a (service_name, field_name) pair read by this node's expressions.
     pub service_field_reads: Vec<(String, String)>,
@@ -137,8 +142,14 @@ impl WidgetNode {
         self.mesh_key().is_some()
     }
 
-    pub fn set_module_id(&mut self, module_id: impl Into<String>) {
+    pub fn set_module_id(&mut self, module_id: impl Into<Arc<str>>) {
         self.module_id = Some(module_id.into());
+    }
+
+    /// The shared module identity, for handing the same allocation to sibling
+    /// and child nodes built from the same module.
+    pub fn shared_module_id(&self) -> Option<&Arc<str>> {
+        self.module_id.as_ref()
     }
 
     pub fn clear_module_id(&mut self) {

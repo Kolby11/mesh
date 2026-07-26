@@ -32,3 +32,7 @@ accessibility_empty_attribute_guard_speedup lower      1.60      20
 scroll_offset_scrollable_gate_speedup      lower      3.40      20
 unmatched_prop_handler_call_speedup        lower      1.05      20
 element_contract_dispatch_speedup          lower      4.40      20
+inherited_style_mask_bucket_speedup        lower      2.40      20
+accessibility_attribute_pass_speedup       lower      6.00      20
+shared_module_id_speedup                   lower      2.50      20
+for_children_capacity_speedup              lower      1.05      20

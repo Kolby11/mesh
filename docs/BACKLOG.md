@@ -541,7 +541,25 @@ reference it. The historical subsystem map is
       dispatching across three runs (4.53–4.91x faster); lookup parity with the
       scan, including near-miss and unknown tags, is covered and the relative
       speedup is gated as `element_contract_dispatch_speedup`. A `HashMap`
-      index was measured and rejected at only 2.0x. Widget-tree
+      index was measured and rejected at only 2.0x. Added later 2026-07-26:
+      `WidgetNode::module_id` moved from `Option<String>` to
+      `Option<Arc<str>>`. Every node built from one module carries the same
+      identity string, so the compiler resolves it once through a bounded
+      most-recently-used list (`shared_module_id`, a short string comparison,
+      not a hash) and clones a pointer per node instead of allocating and
+      copying the id. Isolated release measurements over one million
+      assignments were 14.66–15.69ms per-node `String` versus 4.17–5.07ms
+      shared `Arc` (3.00–3.76x), gated as `shared_module_id_speedup`; the
+      bounded cache is covered for reuse, distinct modules, and post-eviction
+      correctness. Element tag identity also stops round-tripping through an
+      owned `String`: runtime tags are static strings, so `build_element_node`
+      keeps them borrowed for style/mask/accessibility lookups and lets the
+      node own the single allocation, and the style-matching id is borrowed
+      instead of cloned. `{#for}` child vectors are now built at their exact
+      final capacity rather than grown, since each reallocation re-copies
+      every ~900-byte `WidgetNode` pushed so far (600-node release benchmark:
+      167.3–174.0ms growing versus 142.8–153.5ms reserved, 1.10–1.22x, gated
+      as `for_children_capacity_speedup`). Widget-tree
       tags/attributes and the broader symbol types remain open.
 - [ ] Typed style declarations end-to-end: resolve theme tokens to typed
       values once per theme load; `apply_declaration` consumes typed values,
@@ -567,7 +585,20 @@ reference it. The historical subsystem map is
       across repeated runs); parity with the unguarded chain is covered for
       both empty and populated attribute maps, and the relative speedup is
       now checked by the canonical performance gate
-      (`accessibility_empty_attribute_guard_speedup`). The typed end-to-end
+      (`accessibility_empty_attribute_guard_speedup`). Added 2026-07-26:
+      elements that *do* carry attributes no longer probe the map once per
+      accessibility field either. The ~19 remaining `BTreeMap` descents (each a
+      tree walk with string comparisons, for keys that are almost always
+      absent) became one ordered pass over the node's own attributes with a
+      match on the key; alternative spellings (`aria-label`/`label`/`alt`,
+      `title`/`tooltip`, `key`/`keybind`/`shortcut`, `expanded`/`open`) are
+      collected during the pass and resolved by the same precedence
+      afterwards. A release benchmark over 2,000,000 four-attribute elements
+      measured 373.3–440.0ms for the lookup chain versus 52.3–54.9ms for the
+      single pass (7.14–8.02x across three runs), gated as
+      `accessibility_attribute_pass_speedup`; parity with the chain is covered
+      for the full attribute set, every single-attribute map, and maps with
+      each higher-precedence spelling removed. The typed end-to-end
       storage work itself remains open.
 - [ ] Interaction identity is string-keyed end to end (`hovered_path`,
       `focused_key`, `scroll_offsets`, `input_values`, `slider_values`);
@@ -760,6 +791,32 @@ reference it. The historical subsystem map is
       slice before borrowing merge scratch; multi-bucket candidate collection
       retains the ordered sort/dedup fallback. The release benchmark records
       `style_single_bucket_speedup` and gates the 1.20x checkpoint.
+      Added 2026-07-26: the inherited-text-style mask
+      (`crates/core/frontend/compiler/src/style.rs`) kept its own cached
+      candidate list but still scanned *every* rule carrying an inheritable
+      declaration for every node. Candidates are now bucketed by a selector key
+      that is necessary for a match (tag, class, id; universal and `*`-state
+      selectors stay unkeyed and are visited by all nodes), and compound
+      selectors file under their first keyable part — so a node visits only its
+      own buckets, and `selector_matches` still decides every visited
+      candidate. Candidates whose mask bits are already accumulated skip
+      selector matching entirely. A release benchmark over 1,400,000 lookups
+      against a 94-rule stylesheet measured 336.9ms full candidate scan versus
+      119.2ms bucketed (2.83x), gated as
+      `inherited_style_mask_bucket_speedup`, with mask parity against the
+      retained full-scan reference covered across tags, classes, ids,
+      compounds, container queries, and rule-set changes.
+      End-to-end effect of this checkpoint: a new release benchmark
+      (`widget_tree_build_end_to_end_benchmark`) builds a 456-node tree from a
+      representative component (nested rows/columns, classes, text and
+      expression nodes, `{#if}`, a 64-item `{#for}`, 16-rule stylesheet).
+      Across three runs each, the pre-checkpoint tree took 0.571–0.579ms per
+      build versus 0.505–0.510ms after (1.12–1.15x for the whole tree build).
+      Profiling the same workload shows the remaining time is dominated by
+      allocator traffic and `BTreeMap<String, String>` attribute comparisons
+      (~25% malloc/free, ~10% memmove, ~8% memcmp) — i.e. the typed
+      `WidgetNode` and typed-declaration items above, not further per-node
+      pruning.
 - [ ] Minor: display-list `update_inner` is ~220 lines mixing diff, damage,
       and metrics assembly; split when next touched (N).
 
