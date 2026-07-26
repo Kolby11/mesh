@@ -523,8 +523,26 @@ reference it. The historical subsystem map is
       attribute classification now strips the `on` prefix as a borrowed slice
       instead of allocating a normalized `String`; a 2M-classification release
       benchmark measured 13.40–16.23ms allocating versus 5.00–6.00ms borrowed
-      across three runs (2.23–3.24x faster). Widget-tree tags/attributes and the
-      broader symbol types remain open.
+      across three runs (2.23–3.24x faster). Added 2026-07-26:
+      `element_contract_for_tag` (`crates/core/ui/elements/src/element.rs`) —
+      called once per node from `accessibility_for_element` on every tree
+      build, and per tag/attribute from LSP validation — resolved its result by
+      scanning all 62 `ELEMENT_CONTRACT_DEFS` entries and string-comparing
+      `def.tag`, so late definitions (`panel`, `surface`, `widget`,
+      `list-item`) and unknown tags cost the full scan. Tags now dispatch
+      through a generated `match` over the tag literals, which lowers to a
+      length switch instead of a scan, and the matched slot indexes the
+      unchanged definition array. Drift is closed from both sides: each arm
+      resolves its slot in an inline `const` block via `contract_slot_of`, so a
+      tag missing from `ELEMENT_CONTRACT_DEFS` fails the build, and
+      `element_contract_dispatch_covers_every_definition` fails if a definition
+      has no arm or the arms are misordered. A release benchmark over 3,000,000
+      representative lookups measured 52.1–55.3ms scanning versus 11.3–11.5ms
+      dispatching across three runs (4.53–4.91x faster); lookup parity with the
+      scan, including near-miss and unknown tags, is covered and the relative
+      speedup is gated as `element_contract_dispatch_speedup`. A `HashMap`
+      index was measured and rejected at only 2.0x. Widget-tree
+      tags/attributes and the broader symbol types remain open.
 - [ ] Typed style declarations end-to-end: resolve theme tokens to typed
       values once per theme load; `apply_declaration` consumes typed values,
       strings only for diagnostics (E; borrowed simple-value fast paths
@@ -537,7 +555,20 @@ reference it. The historical subsystem map is
       already typed, results still stringify into attributes (A). Progress
       2026-07-15: boolean, nil, number, string, and compound JSON values remain
       typed through expression evaluation; attribute-boundary stringification
-      is still the remaining step.
+      is still the remaining step. Added 2026-07-25: `accessibility_for_element`
+      (`crates/core/frontend/compiler/src/render.rs`) parses every element's
+      attributes back into typed accessibility fields (`disabled`, `checked`,
+      `selected`, `min`/`max`, etc.) on every tree build via ~15 separate
+      `BTreeMap` lookups; elements with no attributes at all — including every
+      synthetic `{#if}`/`{#for}` column wrapper — now return the default
+      accessibility state immediately instead of probing the empty map. A
+      release benchmark over 2,000,000 empty-attribute elements measured
+      47.7ms for the full lookup chain versus 26.6ms guarded (1.79–1.81x
+      across repeated runs); parity with the unguarded chain is covered for
+      both empty and populated attribute maps, and the relative speedup is
+      now checked by the canonical performance gate
+      (`accessibility_empty_attribute_guard_speedup`). The typed end-to-end
+      storage work itself remains open.
 - [ ] Interaction identity is string-keyed end to end (`hovered_path`,
       `focused_key`, `scroll_offsets`, `input_values`, `slider_values`);
       migrate to `NodeId` together with metrics/refs publication so
@@ -582,7 +613,18 @@ reference it. The historical subsystem map is
       Three release runs of 200,000 64-node key-path lookups measured
       238.0–247.5ms with owned strings versus 124.7–126.5ms borrowed
       (1.881–1.985x faster). All three relative improvements are checked by the
-      canonical performance gate.
+      canonical performance gate. Added 2026-07-26: overflow annotation
+      (`crates/core/ui/interaction/src/scroll.rs`) allocated a `key.to_string()`
+      `scroll_offsets` entry for every node in the tree, scrollable or not, so
+      the map grew to roughly one permanent entry per node ever rendered
+      instead of one per actual scroll container; every other reader of
+      `scroll_offsets` already treats a missing key as the default zero offset,
+      so non-scrollable nodes (the common case) now skip the map entirely and
+      report a local zero offset. A release benchmark over a 781-node tree
+      with only the root scrollable measured 335.4ms unconditional touching
+      (781 map entries) versus 93.6ms scrollable-gated (1 map entry) — 3.46–
+      3.58x faster across two runs, gated as
+      `scroll_offset_scrollable_gate_speedup`.
 - [x] Allocator-level profile mode (allocation counts per render pass) →
       v1.23. Added 2026-07-24: the opt-in `allocation-profiling` build wraps
       the system allocator with allocation-free thread-local counters and
@@ -618,7 +660,18 @@ reference it. The historical subsystem map is
       into an exact-sized vector and growing it again. Across three release
       runs of one million mixed prebound/runtime merges, clone-then-grow took
       247.5–248.9ms versus 193.2–197.5ms presized, a conservative 1.25x
-      improvement.
+      improvement. Added 2026-07-26: `apply_indexed_prop_handler_calls`
+      (`crates/core/shell/src/shell/component/composition.rs`) recurses the
+      whole embedded subtree once any prop-bound callback is passed down, and
+      pre-sized its per-node `handler_calls` buffer to `node.event_handlers.len()`
+      even though most handler-bearing nodes (plain `onclick`/`onchange`/etc.)
+      never match one of the few prop-bound-call tokens, so the buffer is
+      allocated and then thrown away empty. It now starts as `Vec::new()` and
+      only allocates on an actual match. A release benchmark over a 781-node
+      subtree where every node carries 3 non-matching handlers measured a
+      consistent but modest 1.05–1.11x across four runs (76.4ms presized vs.
+      71.5ms unallocated in the recorded run), gated as
+      `unmatched_prop_handler_call_speedup`.
 - [ ] `{#if}`/`{#for}` always wrap children in a synthetic `column` node;
       needs a fragment/transparent-container concept.
 - [ ] No keyed list diffing; `{#for}` identity is positional — add `key=`

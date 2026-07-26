@@ -499,7 +499,11 @@ fn apply_indexed_prop_handler_calls(
     node: &mut WidgetNode,
     calls_by_token: &HashMap<&str, &EventHandlerCall>,
 ) {
-    let mut handler_calls = Vec::with_capacity(node.event_handlers.len());
+    // Most event-handler-bearing nodes in an embedded subtree carry plain
+    // script handler names, not one of the few prop-bound-call tokens, so
+    // `handler_calls` is usually empty; start unallocated instead of
+    // pre-sizing for every one of this node's handlers regardless of match.
+    let mut handler_calls = Vec::new();
     for (event_name, handler) in &node.event_handlers {
         let Some(call) = calls_by_token.get(handler.as_str()) else {
             continue;
@@ -590,6 +594,99 @@ mod tests {
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- unmatched_prop_handler_calls_skip_presized_vec --ignored --nocapture
+    #[test]
+    #[ignore = "release-only prop handler call indexing microbenchmark"]
+    fn unmatched_prop_handler_calls_skip_presized_vec() {
+        fn old_apply_indexed_prop_handler_calls(
+            node: &mut WidgetNode,
+            calls_by_token: &HashMap<&str, &EventHandlerCall>,
+        ) {
+            let mut handler_calls = Vec::with_capacity(node.event_handlers.len());
+            for (event_name, handler) in &node.event_handlers {
+                let Some(call) = calls_by_token.get(handler.as_str()) else {
+                    continue;
+                };
+                handler_calls.push((
+                    event_name.clone(),
+                    EventHandlerCall {
+                        handler: call.handler.clone(),
+                        args: call.args.clone(),
+                    },
+                ));
+            }
+            for (event_name, call) in handler_calls {
+                node.event_handlers
+                    .insert(event_name.clone(), call.handler.clone());
+                node.event_handler_calls.insert(event_name, call);
+            }
+            for child in &mut node.children {
+                old_apply_indexed_prop_handler_calls(child, calls_by_token);
+            }
+        }
+
+        // A realistic embedded subtree: most nodes have a handful of plain
+        // script event handlers (onclick/onchange/...), none of which happen
+        // to be the specific prop-bound-call token this component passed down.
+        fn build_tree(width: usize, depth: usize) -> WidgetNode {
+            let mut node = WidgetNode::new("button");
+            node.event_handlers.insert("onclick".to_string(), "handleClick".to_string());
+            node.event_handlers
+                .insert("onpointerenter".to_string(), "handleHoverEnter".to_string());
+            node.event_handlers
+                .insert("onpointerleave".to_string(), "handleHoverLeave".to_string());
+            if depth > 0 {
+                node.children = (0..width).map(|_| build_tree(width, depth - 1)).collect();
+            }
+            node
+        }
+
+        fn count_nodes(node: &WidgetNode) -> usize {
+            1 + node.children.iter().map(count_nodes).sum::<usize>()
+        }
+
+        let tree = build_tree(5, 4);
+        let node_count = count_nodes(&tree);
+        let call = EventHandlerCall {
+            handler: "__mesh_embed__::@mesh/panel/local:Toolbar::onSelect".to_string(),
+            args: Vec::new(),
+        };
+        let mut calls_by_token: HashMap<&str, &EventHandlerCall> = HashMap::new();
+        calls_by_token.insert("onSelectRequested", &call);
+        let iterations = 2_000;
+
+        let old_started = Instant::now();
+        let mut old_tree = tree.clone();
+        for _ in 0..iterations {
+            old_apply_indexed_prop_handler_calls(
+                std::hint::black_box(&mut old_tree),
+                std::hint::black_box(&calls_by_token),
+            );
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_tree = tree;
+        for _ in 0..iterations {
+            apply_indexed_prop_handler_calls(
+                std::hint::black_box(&mut new_tree),
+                std::hint::black_box(&calls_by_token),
+            );
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "unmatched prop handler calls, {iterations} passes over {node_count} nodes: presized {old_time:?}; unallocated {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        println!(
+            "MESH_PERF metric=unmatched_prop_handler_call_speedup value={:.6}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(old_tree.event_handlers, new_tree.event_handlers);
         assert!(new_time < old_time);
     }
 

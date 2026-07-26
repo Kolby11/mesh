@@ -995,6 +995,121 @@ pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
     contract!(Widget, "widget", Shell, AccessibilityRole::Region, false),
 ];
 
+const fn str_eq(left: &str, right: &str) -> bool {
+    let (left, right) = (left.as_bytes(), right.as_bytes());
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < left.len() {
+        if left[index] != right[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+/// Slot of `tag` in [`ELEMENT_CONTRACT_DEFS`], evaluated at compile time.
+///
+/// Panicking here is deliberate: every caller passes a literal from
+/// `contract_slots!`, so a tag that no longer exists in the definition list
+/// fails the build instead of silently resolving to the wrong contract.
+const fn contract_slot_of(tag: &str) -> usize {
+    let mut index = 0;
+    while index < ELEMENT_CONTRACT_DEFS.len() {
+        if str_eq(ELEMENT_CONTRACT_DEFS[index].tag, tag) {
+            return index;
+        }
+        index += 1;
+    }
+    panic!("contract_slots! lists a tag that is not in ELEMENT_CONTRACT_DEFS");
+}
+
+/// Build the tag → slot dispatch used by [`element_contract_for_tag`].
+///
+/// A `match` over string literals lowers to a length switch plus direct
+/// comparisons, so a lookup costs one dispatch instead of scanning all 62
+/// definitions. Slots are resolved by `contract_slot_of` in an inline `const`
+/// block, which keeps this list honest against `ELEMENT_CONTRACT_DEFS` at
+/// compile time; `element_contract_dispatch_covers_every_definition` covers
+/// the other direction (a definition with no arm here).
+macro_rules! contract_slots {
+    ($($tag:literal),* $(,)?) => {
+        fn contract_slot_for_tag(tag: &str) -> Option<usize> {
+            match tag {
+                $($tag => Some(const { contract_slot_of($tag) }),)*
+                _ => None,
+            }
+        }
+    };
+}
+
+contract_slots!(
+    "box",
+    "row",
+    "column",
+    "grid",
+    "stack",
+    "spacer",
+    "divider",
+    "separator",
+    "scroll-area",
+    "section",
+    "header",
+    "footer",
+    "group",
+    "form-row",
+    "text",
+    "icon",
+    "image",
+    "badge",
+    "progress",
+    "meter",
+    "tooltip",
+    "avatar",
+    "shortcut",
+    "button",
+    "icon-button",
+    "toggle-button",
+    "command-button",
+    "link-button",
+    "input",
+    "textarea",
+    "search",
+    "password",
+    "number-input",
+    "stepper",
+    "select",
+    "option",
+    "checkbox",
+    "switch",
+    "radio",
+    "radio-group",
+    "segmented-control",
+    "menu",
+    "menu-item",
+    "command-item",
+    "preference-row",
+    "panel",
+    "popover",
+    "dialog",
+    "sheet",
+    "tabs",
+    "tab",
+    "accordion",
+    "details",
+    "list",
+    "list-item",
+    "table",
+    "cell",
+    "tree",
+    "empty-state",
+    "slot",
+    "surface",
+    "widget",
+);
+
 pub static ELEMENT_TYPE_DEFS: &[ElementTypeDef] = &[
     element_type(ElementKind::Box, "box", "MeshElement", &[]),
     element_type(ElementKind::Row, "row", "RowElement", &[]),
@@ -1106,7 +1221,7 @@ pub fn element_type_for_tag(tag: &str) -> &'static ElementTypeDef {
 }
 
 pub fn element_contract_for_tag(tag: &str) -> Option<&'static ElementContractDef> {
-    ELEMENT_CONTRACT_DEFS.iter().find(|def| def.tag == tag)
+    Some(&ELEMENT_CONTRACT_DEFS[contract_slot_for_tag(tag)?])
 }
 
 pub fn element_contract_tags() -> impl Iterator<Item = &'static str> {
@@ -1691,6 +1806,96 @@ mod tests {
     use serde_json::json;
     use std::collections::BTreeMap;
     use std::time::Instant;
+
+    /// Pre-index behavior: scan every definition comparing tags.
+    fn element_contract_for_tag_scanning(tag: &str) -> Option<&'static ElementContractDef> {
+        ELEMENT_CONTRACT_DEFS.iter().find(|def| def.tag == tag)
+    }
+
+    #[test]
+    fn element_contract_dispatch_covers_every_definition() {
+        for (slot, def) in ELEMENT_CONTRACT_DEFS.iter().enumerate() {
+            assert_eq!(
+                contract_slot_for_tag(def.tag),
+                Some(slot),
+                "`contract_slots!` is missing or misorders `{}`",
+                def.tag
+            );
+            let resolved = element_contract_for_tag(def.tag).expect("definition tag resolves");
+            assert_eq!(resolved.tag, def.tag);
+            assert_eq!(resolved.kind, def.kind);
+        }
+    }
+
+    #[test]
+    fn element_contract_dispatch_matches_scanning_lookup() {
+        let queries = ELEMENT_CONTRACT_DEFS
+            .iter()
+            .map(|def| def.tag)
+            .chain(["", "Box", "box ", "not-an-element", "widgets", "widge"]);
+        for tag in queries {
+            assert_eq!(
+                element_contract_for_tag(tag).map(|def| def.tag),
+                element_contract_for_tag_scanning(tag).map(|def| def.tag),
+                "lookup parity differs for `{tag}`"
+            );
+        }
+    }
+
+    // cargo test -p mesh-core-elements --release -- element_contract_dispatch_beats_definition_scan --ignored --nocapture
+    #[test]
+    #[ignore = "release-only element contract lookup microbenchmark"]
+    fn element_contract_dispatch_beats_definition_scan() {
+        const ITERATIONS: usize = 3_000_000;
+        // Runtime tags a tree build actually resolves, mixing early definitions
+        // (`box`/`row`/`column`) with late ones (`panel`, `surface`, `widget`)
+        // and one authored tag that has no contract at all.
+        let queries = [
+            "column",
+            "row",
+            "box",
+            "text",
+            "button",
+            "icon",
+            "input",
+            "surface",
+            "widget",
+            "panel",
+            "list-item",
+            "not-an-element",
+        ];
+
+        let scanning_started = Instant::now();
+        let mut scanning_total = 0usize;
+        for index in 0..ITERATIONS {
+            let tag = std::hint::black_box(queries[index % queries.len()]);
+            scanning_total += element_contract_for_tag_scanning(tag)
+                .map(|def| def.tag.len())
+                .unwrap_or(0);
+        }
+        let scanning = scanning_started.elapsed();
+
+        let dispatch_started = Instant::now();
+        let mut dispatch_total = 0usize;
+        for index in 0..ITERATIONS {
+            let tag = std::hint::black_box(queries[index % queries.len()]);
+            dispatch_total += element_contract_for_tag(tag)
+                .map(|def| def.tag.len())
+                .unwrap_or(0);
+        }
+        let dispatch = dispatch_started.elapsed();
+
+        eprintln!(
+            "element contract lookup over {ITERATIONS} queries: definition scan {scanning:?}, tag dispatch {dispatch:?}, ratio {:.2}x",
+            scanning.as_secs_f64() / dispatch.as_secs_f64()
+        );
+        println!(
+            "MESH_PERF metric=element_contract_dispatch_speedup value={:.6}",
+            scanning.as_secs_f64() / dispatch.as_secs_f64()
+        );
+        assert_eq!(scanning_total, dispatch_total);
+        assert!(dispatch < scanning);
+    }
 
     #[test]
     fn direct_f32_json_conversion_matches_serialization() {

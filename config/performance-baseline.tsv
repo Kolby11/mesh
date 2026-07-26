@@ -28,3 +28,7 @@ hover_prefix_diff_speedup                  lower      100.00    35
 borrowed_key_path_speedup                  lower      1.70      15
 allocation_profiler_operation_overhead     upper      1.15      25
 style_single_bucket_speedup                lower      1.20      20
+accessibility_empty_attribute_guard_speedup lower      1.60      20
+scroll_offset_scrollable_gate_speedup      lower      3.40      20
+unmatched_prop_handler_call_speedup        lower      1.05      20
+element_contract_dispatch_speedup          lower      4.40      20

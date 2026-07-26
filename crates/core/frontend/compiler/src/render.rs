@@ -1337,6 +1337,13 @@ fn accessibility_for_element(
             "button" | "input" | "slider" | "checkbox" | "switch"
         );
     }
+    // Synthetic layout wrappers ({#if}/{#for} column nodes) and many plain
+    // structural elements carry no attributes at all; every field below
+    // already defaults to what an all-`None`/`false` attribute lookup chain
+    // would produce, so skip the ~15 BTreeMap probes entirely in that case.
+    if attributes.is_empty() {
+        return info;
+    }
     info.label = attributes
         .get("aria-label")
         .or_else(|| attributes.get("label"))
@@ -1371,6 +1378,66 @@ fn accessibility_for_element(
 #[cfg(test)]
 fn accessibility_for_tag(tag: &str) -> AccessibilityInfo {
     accessibility_for_element(tag, tag, &BTreeMap::new())
+}
+
+/// Pre-guard behavior: always runs the full attribute lookup chain, even for
+/// an empty attribute map. Kept only for the release benchmark comparison
+/// below; production code takes the early-return path in
+/// `accessibility_for_element`.
+#[cfg(test)]
+fn accessibility_for_element_unguarded(
+    source_tag: &str,
+    runtime_tag: &str,
+    attributes: &BTreeMap<String, String>,
+) -> AccessibilityInfo {
+    let mut info = AccessibilityInfo::default();
+    if let Some(contract) = element_contract_for_tag(source_tag) {
+        info.role = contract.accessibility.role.clone();
+        info.focusable = contract.accessibility.focusable;
+    } else {
+        info.role = match runtime_tag {
+            "button" => mesh_core_elements::AccessibilityRole::Button,
+            "input" => mesh_core_elements::AccessibilityRole::TextInput,
+            "slider" => mesh_core_elements::AccessibilityRole::Slider,
+            "checkbox" => mesh_core_elements::AccessibilityRole::Checkbox,
+            "switch" => mesh_core_elements::AccessibilityRole::Switch,
+            "text" => mesh_core_elements::AccessibilityRole::Label,
+            _ => mesh_core_elements::AccessibilityRole::Region,
+        };
+        info.focusable = matches!(
+            runtime_tag,
+            "button" | "input" | "slider" | "checkbox" | "switch"
+        );
+    }
+    info.label = attributes
+        .get("aria-label")
+        .or_else(|| attributes.get("label"))
+        .or_else(|| attributes.get("alt"))
+        .cloned();
+    info.description = attributes
+        .get("title")
+        .or_else(|| attributes.get("tooltip"))
+        .cloned();
+    info.keyboard_shortcut = attributes
+        .get("key")
+        .or_else(|| attributes.get("keybind"))
+        .or_else(|| attributes.get("shortcut"))
+        .cloned();
+    info.state.disabled = bool_attr(attributes, "disabled");
+    info.state.checked = attributes.get("checked").map(|value| bool_value(value));
+    info.state.expanded = attributes
+        .get("expanded")
+        .or_else(|| attributes.get("open"))
+        .map(|value| bool_value(value));
+    info.state.selected = bool_attr(attributes, "selected");
+    info.state.pressed = bool_attr(attributes, "pressed");
+    info.state.busy = bool_attr(attributes, "busy");
+    info.state.invalid = bool_attr(attributes, "invalid");
+    info.state.required = bool_attr(attributes, "required");
+    info.state.value = attributes.get("value").cloned();
+    info.state.value_min = number_attr(attributes, "min");
+    info.state.value_max = number_attr(attributes, "max");
+    info
 }
 
 fn bool_attr(attributes: &BTreeMap<String, String>, name: &str) -> bool {
@@ -2916,5 +2983,98 @@ import Child from "./child.mesh"
         );
         assert_eq!(old_total, new_total);
         assert!(new_time < old_time);
+    }
+
+    // `AccessibilityInfo`/`AccessibilityState` intentionally don't derive
+    // `PartialEq` (they're not otherwise compared for equality), so compare
+    // the fields this benchmark pair actually produces.
+    fn accessibility_info_eq(a: &AccessibilityInfo, b: &AccessibilityInfo) -> bool {
+        a.role == b.role
+            && a.label == b.label
+            && a.description == b.description
+            && a.focusable == b.focusable
+            && a.focused == b.focused
+            && a.keyboard_shortcut == b.keyboard_shortcut
+            && a.state.disabled == b.state.disabled
+            && a.state.checked == b.state.checked
+            && a.state.expanded == b.state.expanded
+            && a.state.selected == b.state.selected
+            && a.state.pressed == b.state.pressed
+            && a.state.busy == b.state.busy
+            && a.state.invalid == b.state.invalid
+            && a.state.required == b.state.required
+            && a.state.value == b.state.value
+            && a.state.value_min == b.state.value_min
+            && a.state.value_max == b.state.value_max
+    }
+
+    #[test]
+    fn accessibility_for_element_empty_attributes_matches_unguarded_chain() {
+        let empty = BTreeMap::new();
+        for tag in ["box", "row", "column", "button", "text", "custom-widget"] {
+            assert!(accessibility_info_eq(
+                &accessibility_for_element(tag, tag, &empty),
+                &accessibility_for_element_unguarded(tag, tag, &empty)
+            ));
+        }
+    }
+
+    #[test]
+    fn accessibility_for_element_non_empty_attributes_matches_unguarded_chain() {
+        let mut attributes = BTreeMap::new();
+        attributes.insert("class".to_string(), "active".to_string());
+        attributes.insert("disabled".to_string(), "true".to_string());
+        attributes.insert("min".to_string(), "1".to_string());
+        assert!(accessibility_info_eq(
+            &accessibility_for_element("input", "input", &attributes),
+            &accessibility_for_element_unguarded("input", "input", &attributes)
+        ));
+    }
+
+    // cargo test -p mesh-core-frontend --release -- accessibility_empty_attribute_guard_beats_full_lookup_chain --ignored --nocapture
+    #[test]
+    #[ignore = "release-only accessibility attribute-guard microbenchmark"]
+    fn accessibility_empty_attribute_guard_beats_full_lookup_chain() {
+        use std::time::Instant;
+
+        // Synthetic {#if}/{#for} column wrappers and many plain structural
+        // elements carry no attributes; this is the realistic empty case.
+        let empty = BTreeMap::new();
+        let iterations = 2_000_000usize;
+
+        let unguarded_started = Instant::now();
+        let mut unguarded_checksum = 0usize;
+        for _ in 0..iterations {
+            let info = accessibility_for_element_unguarded(
+                std::hint::black_box("column"),
+                std::hint::black_box("column"),
+                std::hint::black_box(&empty),
+            );
+            unguarded_checksum ^= info.focusable as usize;
+        }
+        let unguarded_time = unguarded_started.elapsed();
+
+        let guarded_started = Instant::now();
+        let mut guarded_checksum = 0usize;
+        for _ in 0..iterations {
+            let info = accessibility_for_element(
+                std::hint::black_box("column"),
+                std::hint::black_box("column"),
+                std::hint::black_box(&empty),
+            );
+            guarded_checksum ^= info.focusable as usize;
+        }
+        let guarded_time = guarded_started.elapsed();
+
+        eprintln!(
+            "accessibility (empty attrs) over {iterations} nodes: unguarded {unguarded_time:?}, guarded {guarded_time:?}, ratio {:.2}x",
+            unguarded_time.as_secs_f64() / guarded_time.as_secs_f64()
+        );
+        println!(
+            "MESH_PERF metric=accessibility_empty_attribute_guard_speedup value={:.6}",
+            unguarded_time.as_secs_f64() / guarded_time.as_secs_f64()
+        );
+        assert_eq!(unguarded_checksum, guarded_checksum);
+        assert!(guarded_time < unguarded_time);
     }
 }

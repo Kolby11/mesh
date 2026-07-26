@@ -311,30 +311,42 @@ pub fn annotate_overflow_node(
         .map(|(_, _, _, max_y)| (max_y - content_origin_y).max(0.0))
         .unwrap_or(0.0);
 
-    let max_x = if node.computed_style.overflow_x.is_scrollable() {
+    let scrollable_x = node.computed_style.overflow_x.is_scrollable();
+    let scrollable_y = node.computed_style.overflow_y.is_scrollable();
+    let max_x = if scrollable_x {
         (content_width - viewport_width).max(0.0)
     } else {
         0.0
     };
-    let max_y = if node.computed_style.overflow_y.is_scrollable() {
+    let max_y = if scrollable_y {
         (content_height - viewport_height).max(0.0)
     } else {
         0.0
     };
 
-    let offset = if scroll_offsets.contains_key(key) {
-        scroll_offsets
-            .get_mut(key)
-            .expect("scroll offset key was just checked")
+    // A node that scrolls on neither axis always settles at offset (0, 0)
+    // (there's nothing to clamp against), so skip allocating a `key.to_string()`
+    // map entry for it. Non-scrollable nodes vastly outnumber scrollable
+    // containers in most trees, and every reader of `scroll_offsets` already
+    // treats a missing entry as the default zero offset.
+    let (offset_x, offset_y) = if scrollable_x || scrollable_y {
+        let offset = if scroll_offsets.contains_key(key) {
+            scroll_offsets
+                .get_mut(key)
+                .expect("scroll offset key was just checked")
+        } else {
+            scroll_offsets.entry(key.to_string()).or_default()
+        };
+        offset.x = offset.x.clamp(0.0, max_x);
+        offset.y = offset.y.clamp(0.0, max_y);
+        (offset.x, offset.y)
     } else {
-        scroll_offsets.entry(key.to_string()).or_default()
+        (0.0, 0.0)
     };
-    offset.x = offset.x.clamp(0.0, max_x);
-    offset.y = offset.y.clamp(0.0, max_y);
 
     node.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
-        x: offset.x,
-        y: offset.y,
+        x: offset_x,
+        y: offset_y,
         max_x,
         max_y,
         content_width,
@@ -715,6 +727,141 @@ mod scroll_into_view_tests {
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_total, new_total);
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-interaction --release -- scrollable_gate_skips_offset_map_for_non_scrollable_nodes --ignored --nocapture
+    #[test]
+    #[ignore = "release-only scroll-offset map allocation microbenchmark"]
+    fn scrollable_gate_skips_offset_map_for_non_scrollable_nodes() {
+        fn build_tree(width: usize, depth: usize, key: &str) -> WidgetNode {
+            let mut node = node(key, "column", 0.0, 0.0, 120.0, 120.0);
+            // Only the root scrolls; every descendant is a plain non-scrollable
+            // container, the realistic common case for most subtrees.
+            if key == "root" {
+                node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Auto;
+            }
+            if depth == 0 {
+                node.layout.height = 16.0;
+                return node;
+            }
+            node.children = (0..width)
+                .map(|index| build_tree(width, depth - 1, &format!("{key}/{index}")))
+                .collect();
+            node
+        }
+
+        // Pre-guard behavior: touch (and lazily allocate into) `scroll_offsets`
+        // for every node, scrollable or not.
+        fn old_annotate_overflow_tree(
+            node: &mut WidgetNode,
+            key: &str,
+            scroll_offsets: &mut HashMap<String, ScrollOffsetState>,
+        ) -> Option<ContentBounds> {
+            let mut children_bounds: Option<ContentBounds> = None;
+            for (index, child) in node.children.iter_mut().enumerate() {
+                if let Some(child_bounds) =
+                    old_annotate_overflow_tree(child, &format!("{key}/{index}"), scroll_offsets)
+                {
+                    children_bounds = Some(union_bounds(children_bounds, child_bounds));
+                }
+            }
+
+            let content_origin_x = node.layout.x + node.computed_style.padding.left;
+            let content_origin_y = node.layout.y + node.computed_style.padding.top;
+            let viewport_width =
+                (node.layout.width - node.computed_style.padding.horizontal()).max(0.0);
+            let viewport_height =
+                (node.layout.height - node.computed_style.padding.vertical()).max(0.0);
+            let content_width = children_bounds
+                .map(|(_, _, max_x, _)| (max_x - content_origin_x).max(0.0))
+                .unwrap_or(0.0);
+            let content_height = children_bounds
+                .map(|(_, _, _, max_y)| (max_y - content_origin_y).max(0.0))
+                .unwrap_or(0.0);
+            let max_x = if node.computed_style.overflow_x.is_scrollable() {
+                (content_width - viewport_width).max(0.0)
+            } else {
+                0.0
+            };
+            let max_y = if node.computed_style.overflow_y.is_scrollable() {
+                (content_height - viewport_height).max(0.0)
+            } else {
+                0.0
+            };
+            let offset = if scroll_offsets.contains_key(key) {
+                scroll_offsets
+                    .get_mut(key)
+                    .expect("scroll offset key was just checked")
+            } else {
+                scroll_offsets.entry(key.to_string()).or_default()
+            };
+            offset.x = offset.x.clamp(0.0, max_x);
+            offset.y = offset.y.clamp(0.0, max_y);
+            node.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+                x: offset.x,
+                y: offset.y,
+                max_x,
+                max_y,
+                content_width,
+                content_height,
+            });
+
+            let own_bounds = (
+                node.layout.x,
+                node.layout.y,
+                node.layout.x + node.layout.width.max(0.0),
+                node.layout.y + node.layout.height.max(0.0),
+            );
+            if node_clips_children(node) {
+                Some(own_bounds)
+            } else {
+                Some(union_bounds(
+                    Some(own_bounds),
+                    children_bounds.unwrap_or(own_bounds),
+                ))
+            }
+        }
+
+        let tree = build_tree(5, 4, "root");
+        let iterations = 5_000;
+
+        let old_started = std::time::Instant::now();
+        let mut old_tree = tree.clone();
+        let mut old_offsets: HashMap<String, ScrollOffsetState> = HashMap::new();
+        for _ in 0..iterations {
+            old_annotate_overflow_tree(
+                std::hint::black_box(&mut old_tree),
+                "root",
+                std::hint::black_box(&mut old_offsets),
+            );
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = std::time::Instant::now();
+        let mut new_tree = tree;
+        let mut new_offsets: HashMap<String, ScrollOffsetState> = HashMap::new();
+        for _ in 0..iterations {
+            annotate_overflow_tree(
+                std::hint::black_box(&mut new_tree),
+                "root",
+                std::hint::black_box(&mut new_offsets),
+            );
+        }
+        let new_time = new_started.elapsed();
+
+        eprintln!(
+            "scroll-offset map touch, {iterations} passes: unconditional {old_time:?} (map={} entries); scrollable-gated {new_time:?} (map={} entries); ratio {:.2}x",
+            old_offsets.len(),
+            new_offsets.len(),
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        println!(
+            "MESH_PERF metric=scroll_offset_scrollable_gate_speedup value={:.6}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert_eq!(new_offsets.len(), 1);
+        assert!(old_offsets.len() > new_offsets.len());
         assert!(new_time < old_time);
     }
 
