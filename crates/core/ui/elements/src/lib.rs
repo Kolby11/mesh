@@ -1,4 +1,5 @@
 pub mod accessibility;
+pub mod attributes;
 pub mod element;
 pub mod events;
 pub mod layout;
@@ -23,6 +24,7 @@ pub use accessibility::{
     AccessibilityInfo, AccessibilityRole, AccessibilityState, AccessibilityTree,
     AccessibilityTreeNode,
 };
+pub use attributes::{AttrKey, AttributeMap};
 pub use element::{
     BASE_ELEMENT_FIELDS, ELEMENT_CONTRACT_DEFS, ELEMENT_TYPE_DEFS, ElementAttributeDef,
     ElementAttributeType, ElementContractDef, ElementDiagnostic, ElementDiagnosticKind,

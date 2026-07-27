@@ -5,6 +5,7 @@ use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue, p
 use mesh_core_theme::{Theme, TokenValue};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
 fn empty_variables() -> &'static HashMap<String, StyleValue> {
@@ -57,15 +58,45 @@ pub struct StyleResolver<'a> {
     /// per-node custom-variable scratch. Empty without a `<props>` block.
     props: HashMap<String, StyleValue>,
     module_variable_cache: RefCell<HashMap<String, Vec<(String, StyleValue)>>>,
-    theme_default_cache: RefCell<HashMap<String, (ComputedStyle, HashMap<String, StyleValue>)>>,
+    theme_default_cache: RefCell<HashMap<String, Rc<ThemeComponentDefaults>>>,
     module_theme_default_cache:
-        RefCell<HashMap<String, HashMap<String, (ComputedStyle, HashMap<String, StyleValue>)>>>,
+        RefCell<HashMap<String, HashMap<String, Rc<ThemeComponentDefaults>>>>,
+    /// Comparison-keyed front cache for [`Self::theme_default_cache`].
+    ///
+    /// Every node resolves the defaults for its own `(module_id, tag)`, and a
+    /// tree walks long runs of the same pair. The map behind this answers in
+    /// two SipHash computations of short strings per node; this answers most
+    /// nodes in one or two string comparisons instead.
+    theme_default_recent: RefCell<Vec<RecentThemeDefaults>>,
     theme_default_diagnostic_cache: RefCell<HashMap<String, ThemeDefaultDiagnosticPrototype>>,
     module_theme_default_diagnostic_cache:
         RefCell<HashMap<String, HashMap<String, ThemeDefaultDiagnosticPrototype>>>,
     theme_reference_cache: RefCell<HashMap<String, Arc<str>>>,
     theme_value_cache: RefCell<HashMap<String, CachedThemeTokenValue>>,
 }
+
+/// Lowered theme defaults for one `(module_id, tag)` pair.
+///
+/// Shared rather than cloned per node: only `style` is needed by value (it is
+/// the mutable base a node's own rules are applied to), and `variables` is read
+/// through, so the per-node cost is one refcount bump plus one `ComputedStyle`
+/// clone instead of a deep copy of both.
+#[derive(Debug, Default)]
+struct ThemeComponentDefaults {
+    style: ComputedStyle,
+    variables: HashMap<String, StyleValue>,
+}
+
+struct RecentThemeDefaults {
+    module_id: Option<String>,
+    tag: String,
+    defaults: Rc<ThemeComponentDefaults>,
+}
+
+/// Entries kept in the comparison-keyed front cache. Small enough that a linear
+/// scan of short-string compares beats hashing, large enough to cover the
+/// handful of tags a surface actually repeats.
+const THEME_DEFAULT_RECENT_CAPACITY: usize = 8;
 
 type ThemeDefaultDiagnosticPrototype = (
     ComputedStyle,
@@ -521,6 +552,28 @@ fn cached_inline_style(source: &str) -> CachedInlineStyle {
     })
 }
 
+/// True when a literal style value still mentions a `var(` or `prop(`
+/// reference and therefore cannot be consumed directly.
+///
+/// `str::contains(&str)` builds a two-way substring searcher per call, and this
+/// question is asked twice for every literal declaration on every node. One
+/// byte scan answers both halves with the same result.
+fn references_style_function(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte != b'(' {
+            continue;
+        }
+        if index >= 3 && &bytes[index - 3..index] == b"var" {
+            return true;
+        }
+        if index >= 4 && &bytes[index - 4..index] == b"prop" {
+            return true;
+        }
+    }
+    false
+}
+
 impl IndexedDeclaration {
     fn from_declaration(decl: &Declaration) -> Self {
         Self {
@@ -611,6 +664,7 @@ impl<'a> StyleResolver<'a> {
             module_variable_cache: RefCell::new(HashMap::new()),
             theme_default_cache: RefCell::new(HashMap::new()),
             module_theme_default_cache: RefCell::new(HashMap::new()),
+            theme_default_recent: RefCell::new(Vec::new()),
             theme_default_diagnostic_cache: RefCell::new(HashMap::new()),
             module_theme_default_diagnostic_cache: RefCell::new(HashMap::new()),
             theme_reference_cache: RefCell::new(HashMap::new()),
@@ -697,7 +751,7 @@ impl<'a> StyleResolver<'a> {
         }
         match value {
             StyleValue::Literal(value) => {
-                if value.contains("var(") || value.contains("prop(") {
+                if references_style_function(value) {
                     None
                 } else {
                     Some(value.as_str())
@@ -933,7 +987,7 @@ impl<'a> StyleResolver<'a> {
         }
         match value {
             StyleValue::Literal(value) => {
-                if value.contains("var(") || value.contains("prop(") {
+                if references_style_function(value) {
                     None
                 } else {
                     Some(Color::from_css(value).unwrap_or(Color::TRANSPARENT))
@@ -989,7 +1043,7 @@ impl<'a> StyleResolver<'a> {
         }
         match value {
             StyleValue::Literal(value) => {
-                if value.contains("var(") || value.contains("prop(") {
+                if references_style_function(value) {
                     None
                 } else {
                     Some(parse_px(value))
@@ -1190,7 +1244,11 @@ impl<'a> StyleResolver<'a> {
         &self,
         tag: &str,
         module_id: Option<&str>,
-    ) -> (ComputedStyle, HashMap<String, StyleValue>) {
+    ) -> Rc<ThemeComponentDefaults> {
+        if let Some(recent) = self.recent_theme_defaults(tag, module_id) {
+            return recent;
+        }
+
         let cached = if let Some(module_id) = module_id {
             self.module_theme_default_cache
                 .borrow()
@@ -1201,31 +1259,66 @@ impl<'a> StyleResolver<'a> {
             self.theme_default_cache.borrow().get(tag).cloned()
         };
         if let Some(cached) = cached {
+            self.remember_theme_defaults(tag, module_id, &cached);
             return cached;
         }
 
         let mut style = ComputedStyle::default();
-        let mut default_variables = HashMap::new();
-        self.apply_theme_component_defaults(
-            &mut style,
-            tag,
-            module_id,
-            None,
-            &mut default_variables,
-        );
-        let cached = (style, default_variables);
+        let mut variables = HashMap::new();
+        self.apply_theme_component_defaults(&mut style, tag, module_id, None, &mut variables);
+        let cached = Rc::new(ThemeComponentDefaults { style, variables });
         if let Some(module_id) = module_id {
             self.module_theme_default_cache
                 .borrow_mut()
                 .entry(module_id.to_owned())
                 .or_default()
-                .insert(tag.to_owned(), cached.clone());
+                .insert(tag.to_owned(), Rc::clone(&cached));
         } else {
             self.theme_default_cache
                 .borrow_mut()
-                .insert(tag.to_owned(), cached.clone());
+                .insert(tag.to_owned(), Rc::clone(&cached));
         }
+        self.remember_theme_defaults(tag, module_id, &cached);
         cached
+    }
+
+    /// Look for `(module_id, tag)` in the comparison-keyed front cache.
+    ///
+    /// Most-recently-used order, so the run of sibling nodes sharing a tag
+    /// answers on the first compare.
+    fn recent_theme_defaults(
+        &self,
+        tag: &str,
+        module_id: Option<&str>,
+    ) -> Option<Rc<ThemeComponentDefaults>> {
+        let mut recent = self.theme_default_recent.borrow_mut();
+        let position = recent
+            .iter()
+            .position(|entry| entry.tag == tag && entry.module_id.as_deref() == module_id)?;
+        if position > 0 {
+            recent[..=position].rotate_right(1);
+        }
+        Some(Rc::clone(&recent[0].defaults))
+    }
+
+    fn remember_theme_defaults(
+        &self,
+        tag: &str,
+        module_id: Option<&str>,
+        defaults: &Rc<ThemeComponentDefaults>,
+    ) {
+        let mut recent = self.theme_default_recent.borrow_mut();
+        if recent.len() == THEME_DEFAULT_RECENT_CAPACITY {
+            recent.pop();
+        }
+        recent.insert(
+            0,
+            RecentThemeDefaults {
+                module_id: module_id.map(str::to_owned),
+                tag: tag.to_owned(),
+                defaults: Rc::clone(defaults),
+            },
+        );
     }
 
     fn lookup_variable<'b>(
@@ -1288,19 +1381,41 @@ impl<'a> StyleResolver<'a> {
         mut diagnostics: Option<&mut Vec<StyleDiagnostic>>,
         mut attribution: Option<&mut StyleRuleAttribution>,
     ) -> ComputedStyle {
+        // `shared` holds the defaults by reference when they came from the
+        // no-diagnostics cache; the diagnostics path still builds its own copy
+        // because it also carries per-resolution diagnostics.
+        let mut shared = None;
         let (mut style, default_variables) = if let Some(diagnostics) = diagnostics.as_mut() {
             let (style, variables, default_diagnostics) =
                 self.cached_theme_component_defaults_with_diagnostics(attrs.tag, attrs.module_id());
             diagnostics.extend(default_diagnostics);
-            (style, variables)
+            (style, Some(variables))
         } else {
-            self.cached_theme_component_defaults_no_diagnostics(attrs.tag, attrs.module_id())
+            let defaults =
+                self.cached_theme_component_defaults_no_diagnostics(attrs.tag, attrs.module_id());
+            let style = defaults.style.clone();
+            shared = Some(defaults);
+            (style, None)
         };
 
         VARIABLE_SCRATCH.with(|scratch| {
             let mut scratch_variables = scratch.borrow_mut();
             scratch_variables.clear();
-            scratch_variables.extend(default_variables);
+            // Themes usually declare no default custom properties at all, so
+            // the common case seeds nothing and every lookup falls through to
+            // the node's own declarations.
+            match (&shared, default_variables) {
+                (Some(defaults), _) if !defaults.variables.is_empty() => {
+                    scratch_variables.extend(
+                        defaults
+                            .variables
+                            .iter()
+                            .map(|(name, value)| (name.clone(), value.clone())),
+                    );
+                }
+                (_, Some(variables)) => scratch_variables.extend(variables),
+                _ => {}
+            }
 
             if let Some(attribution) = attribution.as_deref_mut() {
                 index.for_each_candidate_rule_index(attrs, |rule_idx| {
@@ -2775,8 +2890,8 @@ fn apply_declaration(
             let parts: Vec<&str> = resolved.split_whitespace().collect();
             if parts.len() == 2 {
                 if let (Ok(x), Ok(y)) = (
-                    parts[0].trim_end_matches("px").parse::<f32>(),
-                    parts[1].trim_end_matches("px").parse::<f32>(),
+                    super::parse::trim_px_suffix(parts[0]).parse::<f32>(),
+                    super::parse::trim_px_suffix(parts[1]).parse::<f32>(),
                 ) {
                     style.tooltip_offset = Some((x, y));
                 }
@@ -2883,6 +2998,95 @@ fn canonicalize_suffixed(value: &str, suffixes: &[&str]) -> String {
 mod tests {
     use super::*;
     use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
+
+    // cargo test -p mesh-core-elements --release -- style_function_scan_beats_contains_pair --ignored --nocapture
+    #[test]
+    #[ignore = "release-only literal style-value scan microbenchmark"]
+    fn style_function_scan_beats_contains_pair() {
+        use std::time::Instant;
+
+        // Representative literal declaration values: mostly plain, a few real
+        // references, in the proportion a theme stylesheet produces.
+        const VALUES: &[&str] = &[
+            "8px",
+            "1px solid rgba(0, 0, 0, 0.12)",
+            "var(--color-surface)",
+            "600",
+            "center",
+            "calc(var(--spacing-2) * 2)",
+            "0 2px 8px rgba(0, 0, 0, 0.24)",
+            "prop(size)",
+            "flex-start",
+            "12px 16px",
+        ];
+        const ITERATIONS: usize = 3_000_000;
+
+        for value in VALUES {
+            assert_eq!(
+                references_style_function(value),
+                value.contains("var(") || value.contains("prop(")
+            );
+        }
+
+        let contains_started = Instant::now();
+        let mut contains_total = 0usize;
+        for index in 0..ITERATIONS {
+            let value = std::hint::black_box(VALUES[index % VALUES.len()]);
+            contains_total += (value.contains("var(") || value.contains("prop(")) as usize;
+        }
+        let contains = contains_started.elapsed();
+
+        let scan_started = Instant::now();
+        let mut scan_total = 0usize;
+        for index in 0..ITERATIONS {
+            let value = std::hint::black_box(VALUES[index % VALUES.len()]);
+            scan_total += references_style_function(value) as usize;
+        }
+        let scan = scan_started.elapsed();
+
+        assert_eq!(contains_total, scan_total);
+        eprintln!(
+            "literal style-value reference check over {ITERATIONS} values: contains pair {contains:?}, byte scan {scan:?}, ratio {:.2}x",
+            contains.as_secs_f64() / scan.as_secs_f64()
+        );
+        println!(
+            "MESH_PERF metric=style_function_scan_speedup value={:.6}",
+            contains.as_secs_f64() / scan.as_secs_f64()
+        );
+    }
+
+    #[test]
+    fn references_style_function_matches_the_contains_pair_it_replaced() {
+        for value in [
+            "",
+            "(",
+            "var",
+            "prop",
+            "var(",
+            "prop(",
+            "var(--x)",
+            "prop(size)",
+            "8px",
+            "rgba(0, 0, 0, 0.5)",
+            "calc(var(--gap) * 2)",
+            "linear-gradient(prop(a), var(b))",
+            "avar(",
+            "aprop(",
+            "novar",
+            "wrap(",
+            "p(",
+            "ar(",
+            "(var",
+            "translate(4px) var(--y)",
+            "☃var(--snow)",
+        ] {
+            assert_eq!(
+                references_style_function(value),
+                value.contains("var(") || value.contains("prop("),
+                "mismatch for {value:?}"
+            );
+        }
+    }
 
     fn rule_with_state(state_selector: &str) -> StyleRule {
         StyleRule {
@@ -3115,7 +3319,10 @@ mod tests {
         let old_started = std::time::Instant::now();
         let mut old_accumulator = 0_u32;
         for _ in 0..iterations {
-            let classes = node.attributes["class"]
+            let classes = node
+                .attributes
+                .get("class")
+                .unwrap()
                 .split_whitespace()
                 .map(str::to_owned)
                 .collect::<Vec<_>>();
@@ -3386,6 +3593,233 @@ mod tests {
         );
         assert_eq!(copied_checksum, direct_checksum);
         assert!(direct < copied);
+    }
+
+    // cargo test -p mesh-core-elements --release -- shared_theme_defaults_beat_hashed_deep_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only theme-default lookup microbenchmark"]
+    fn shared_theme_defaults_beat_hashed_deep_clone() {
+        use std::time::Instant;
+
+        const MODULE: &str = "@mesh/benchmark";
+        // The tag mix a surface actually walks: a few containers repeated far
+        // more often than the leaves between them.
+        const TAGS: &[&str] = &[
+            "row", "text", "row", "text", "column", "text", "button", "row", "icon", "text",
+        ];
+        const ITERATIONS: usize = 400_000;
+
+        let mut theme = mesh_core_theme::default_theme();
+        for (index, tag) in ["row", "column", "box", "button", "text", "icon"]
+            .into_iter()
+            .enumerate()
+        {
+            theme.defaults.components.insert(
+                tag.into(),
+                [
+                    ("font-size".into(), format!("{}px", 10 + index)),
+                    ("padding".into(), format!("{}px", index)),
+                ]
+                .into_iter()
+                .collect(),
+            );
+        }
+        let resolver = StyleResolver::new(&theme);
+
+        // The previous shape: defaults stored by value behind two hashed
+        // lookups, deep-cloned for every node.
+        let mut owned: HashMap<
+            String,
+            HashMap<String, (ComputedStyle, HashMap<String, StyleValue>)>,
+        > = HashMap::new();
+        for tag in TAGS {
+            let shared = resolver.cached_theme_component_defaults_no_diagnostics(tag, Some(MODULE));
+            owned.entry(MODULE.to_string()).or_default().insert(
+                (*tag).to_string(),
+                (shared.style.clone(), shared.variables.clone()),
+            );
+        }
+
+        // Parity: both paths must hand the caller the same starting style.
+        for tag in TAGS {
+            let hashed = &owned[MODULE][*tag].0;
+            let shared = resolver.cached_theme_component_defaults_no_diagnostics(tag, Some(MODULE));
+            assert_eq!(hashed.font_size, shared.style.font_size);
+            assert_eq!(hashed.padding, shared.style.padding);
+        }
+
+        let hashed_started = Instant::now();
+        let mut hashed_total = 0f32;
+        for index in 0..ITERATIONS {
+            let tag = std::hint::black_box(TAGS[index % TAGS.len()]);
+            let (style, variables) = owned
+                .get(MODULE)
+                .and_then(|tags| tags.get(tag))
+                .cloned()
+                .expect("seeded above");
+            hashed_total += style.font_size + variables.len() as f32;
+        }
+        let hashed = hashed_started.elapsed();
+
+        let shared_started = Instant::now();
+        let mut shared_total = 0f32;
+        for index in 0..ITERATIONS {
+            let tag = std::hint::black_box(TAGS[index % TAGS.len()]);
+            let defaults =
+                resolver.cached_theme_component_defaults_no_diagnostics(tag, Some(MODULE));
+            let style = defaults.style.clone();
+            shared_total += style.font_size + defaults.variables.len() as f32;
+        }
+        let shared = shared_started.elapsed();
+
+        assert_eq!(hashed_total, shared_total);
+        eprintln!(
+            "theme defaults over {ITERATIONS} node resolutions: hashed lookup + deep clone {hashed:?}, front cache + shared defaults {shared:?}, ratio {:.2}x",
+            hashed.as_secs_f64() / shared.as_secs_f64()
+        );
+        println!(
+            "MESH_PERF metric=shared_theme_defaults_speedup value={:.6}",
+            hashed.as_secs_f64() / shared.as_secs_f64()
+        );
+    }
+
+    /// The comparison-keyed front cache sits ahead of the hashed maps, so it
+    /// must key on the *pair* and survive eviction. A wrong hit here silently
+    /// paints one element's defaults onto another.
+    #[test]
+    fn recent_theme_defaults_key_on_tag_and_module_together() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.defaults.components.insert(
+            "card".into(),
+            [("font-size".into(), "11px".into())].into_iter().collect(),
+        );
+        theme.defaults.components.insert(
+            "panel".into(),
+            [("font-size".into(), "22px".into())].into_iter().collect(),
+        );
+        let mut module = mesh_core_theme::ThemeModule::default();
+        module.defaults.components.insert(
+            "card".into(),
+            [("font-size".into(), "33px".into())].into_iter().collect(),
+        );
+        theme.modules.insert("@mesh/demo".into(), module);
+
+        let resolver = StyleResolver::new(&theme);
+        let font_size = |tag: &str, module_id: Option<&str>| {
+            resolver
+                .cached_theme_component_defaults_no_diagnostics(tag, module_id)
+                .style
+                .font_size
+        };
+
+        assert_eq!(font_size("card", None), 11.0);
+        assert_eq!(font_size("panel", None), 22.0);
+        assert_eq!(
+            font_size("card", Some("@mesh/demo")),
+            33.0,
+            "a module override must not be served for the module-less key"
+        );
+
+        // Re-request in a different order: every answer must still be its own.
+        assert_eq!(font_size("panel", None), 22.0);
+        assert_eq!(font_size("card", Some("@mesh/demo")), 33.0);
+        assert_eq!(font_size("card", None), 11.0);
+        assert_eq!(font_size("panel", Some("@mesh/demo")), 22.0);
+    }
+
+    #[test]
+    fn recent_theme_defaults_stay_correct_past_eviction() {
+        let mut theme = mesh_core_theme::default_theme();
+        let tags: Vec<String> = (0..THEME_DEFAULT_RECENT_CAPACITY * 3)
+            .map(|index| format!("probe-{index}"))
+            .collect();
+        for (index, tag) in tags.iter().enumerate() {
+            theme.defaults.components.insert(
+                tag.clone(),
+                [("font-size".into(), format!("{}px", index + 8))]
+                    .into_iter()
+                    .collect(),
+            );
+        }
+
+        let resolver = StyleResolver::new(&theme);
+        let expected: Vec<f32> = tags
+            .iter()
+            .map(|tag| {
+                resolver
+                    .cached_theme_component_defaults_no_diagnostics(tag, None)
+                    .style
+                    .font_size
+            })
+            .collect();
+
+        assert!(
+            resolver.theme_default_recent.borrow().len() <= THEME_DEFAULT_RECENT_CAPACITY,
+            "the front cache must stay bounded"
+        );
+        for (index, tag) in tags.iter().enumerate() {
+            assert_eq!(
+                resolver
+                    .cached_theme_component_defaults_no_diagnostics(tag, None)
+                    .style
+                    .font_size,
+                expected[index],
+                "{tag} resolved differently after eviction"
+            );
+            assert_eq!(expected[index], (index + 8) as f32);
+        }
+    }
+
+    /// Sharing the defaults by `Rc` must not let one node's resolution leak
+    /// into the next: every node still starts from an untouched copy.
+    #[test]
+    fn shared_theme_defaults_are_not_mutated_by_node_resolution() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.defaults.components.insert(
+            "card".into(),
+            [("font-size".into(), "13px".into())].into_iter().collect(),
+        );
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("big".into()),
+            declarations: vec![Declaration {
+                property: "font-size".into(),
+                value: StyleValue::Literal("31px".into()),
+            }],
+            container_query: None,
+        }];
+
+        let plain = resolver.resolve_node_style(
+            &rules,
+            "card",
+            &[],
+            None,
+            Default::default(),
+            ElementState::default(),
+        );
+        let big = resolver.resolve_node_style(
+            &rules,
+            "card",
+            &["big".to_string()],
+            None,
+            Default::default(),
+            ElementState::default(),
+        );
+        let plain_again = resolver.resolve_node_style(
+            &rules,
+            "card",
+            &[],
+            None,
+            Default::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(plain.font_size, 13.0);
+        assert_eq!(big.font_size, 31.0);
+        assert_eq!(
+            plain_again.font_size, 13.0,
+            "the shared defaults were mutated by an earlier node"
+        );
     }
 
     #[test]

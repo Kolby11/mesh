@@ -2,6 +2,12 @@
 # Relative speedups are intentionally preferred over raw wall time so this gate
 # remains portable across CI runners. The HUD has no equivalent control path,
 # so its per-frame ceiling carries a wider tolerance.
+#
+# accessibility_empty_attribute_guard_speedup was lowered from 1.60 to 1.15 on
+# 2026-07-27: the interned flat AttributeMap made the unguarded lookup chain it
+# is measured against cheaper on an empty map (47.4ms -> 30.1-31.4ms per 2M
+# nodes), while the guarded path was unchanged. The guard still wins; its
+# denominator simply stopped being slow.
 handler_expression_cache_speedup          lower      1.38      15
 handler_sparse_vs_full_speedup            lower      2.00      25
 unbound_handler_speedup                   lower      50.00     75
@@ -28,7 +34,7 @@ hover_prefix_diff_speedup                  lower      100.00    35
 borrowed_key_path_speedup                  lower      1.70      15
 allocation_profiler_operation_overhead     upper      1.15      25
 style_single_bucket_speedup                lower      1.20      20
-accessibility_empty_attribute_guard_speedup lower      1.60      20
+accessibility_empty_attribute_guard_speedup lower      1.15      20
 scroll_offset_scrollable_gate_speedup      lower      3.40      20
 unmatched_prop_handler_call_speedup        lower      1.05      20
 element_contract_dispatch_speedup          lower      4.40      20
@@ -36,3 +42,6 @@ inherited_style_mask_bucket_speedup        lower      2.40      20
 accessibility_attribute_pass_speedup       lower      6.00      20
 shared_module_id_speedup                   lower      2.50      20
 for_children_capacity_speedup              lower      1.05      20
+interned_attribute_map_speedup             lower      1.05      20
+style_function_scan_speedup                lower      3.00      20
+shared_theme_defaults_speedup              lower      1.80      20

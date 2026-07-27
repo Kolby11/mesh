@@ -688,8 +688,18 @@ pub(super) fn parse_time_ms(value: &str) -> u32 {
 }
 
 pub(super) fn parse_px(s: &str) -> f32 {
-    let s = s.trim().trim_end_matches("px");
-    s.parse().unwrap_or(0.0)
+    trim_px_suffix(s.trim()).parse().unwrap_or(0.0)
+}
+
+/// `str::trim_end_matches("px")` builds a two-way substring searcher for a
+/// two-byte suffix; on style values this runs once per declaration per node.
+/// Repeated `strip_suffix` keeps the identical semantics without the searcher.
+pub(super) fn trim_px_suffix(value: &str) -> &str {
+    let mut value = value;
+    while let Some(stripped) = value.strip_suffix("px") {
+        value = stripped;
+    }
+    value
 }
 
 pub(super) fn parse_filter(value: &str) -> VisualFilter {

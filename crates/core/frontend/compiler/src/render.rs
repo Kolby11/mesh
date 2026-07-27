@@ -13,8 +13,8 @@ use mesh_core_component::template::{
 use mesh_core_component::{PropValue, PropsBlock};
 use mesh_core_elements::accessibility::AccessibilityInfo;
 use mesh_core_elements::{
-    ComputedStyle, EventHandlerCall, StyleContext, StyleResolver, StyleRuleIndex, VariableStore,
-    WidgetNode, element_contract_for_tag,
+    AttrKey, AttributeMap, ComputedStyle, EventHandlerCall, StyleContext, StyleResolver,
+    StyleRuleIndex, VariableStore, WidgetNode, element_contract_for_tag,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
@@ -975,7 +975,7 @@ fn default_input_type(source_tag: &SourceTag) -> Option<&'static str> {
     }
 }
 
-fn apply_source_tag_defaults(source_tag: &SourceTag, attributes: &mut BTreeMap<String, String>) {
+fn apply_source_tag_defaults(source_tag: &SourceTag, attributes: &mut AttributeMap) {
     match source_tag {
         SourceTag::TextArea => {
             attributes
@@ -1039,7 +1039,7 @@ fn build_component_ref(
     for attr in &component.props {
         if let AttributeValue::EventHandler(handler) = &attr.value {
             props.insert(
-                attr.name.clone(),
+                AttrKey::new(&attr.name),
                 resolve_component_prop_handler_value(state, host_instance_key, handler),
             );
         } else if matches!(attr.value, AttributeValue::EventHandlerCall { .. }) {
@@ -1052,15 +1052,18 @@ fn build_component_ref(
                 let mut call = call.clone();
                 call.handler = namespaced_handler(host_instance_key, &call.handler);
                 props.insert(
-                    attr.name.clone(),
+                    AttrKey::new(&attr.name),
                     component_prop_handler_token(host_instance_key, &attr.name),
                 );
                 prop_handler_calls.insert(attr.name.clone(), call);
             }
         } else if let AttributeValue::Binding(binding) = &attr.value {
-            props.insert(format!("__mesh_binding_{}", attr.name), binding.clone());
+            props.insert(
+                AttrKey::new(&format!("__mesh_binding_{}", attr.name)),
+                binding.clone(),
+            );
         } else if let AttributeValue::InstanceBinding(binding) = &attr.value {
-            props.insert("__mesh_bind_this".to_string(), binding.clone());
+            props.insert(AttrKey::new("__mesh_bind_this"), binding.clone());
         }
     }
     if let Some(composition) = composition {
@@ -1162,7 +1165,7 @@ pub(crate) fn parse_attributes(
 ) -> (
     Vec<String>,
     Option<String>,
-    BTreeMap<String, String>,
+    AttributeMap,
     BTreeMap<String, String>,
     BTreeMap<String, EventHandlerCall>,
 ) {
@@ -1178,13 +1181,16 @@ fn parse_attributes_runtime(
 ) -> (
     Vec<String>,
     Option<String>,
-    BTreeMap<String, String>,
+    AttributeMap,
     BTreeMap<String, String>,
     BTreeMap<String, EventHandlerCall>,
 ) {
     let mut classes = Vec::new();
     let mut id = None;
-    let mut resolved = BTreeMap::new();
+    // One allocation for the whole map: the source attributes plus the handful
+    // the builder adds afterwards (`data-mesh-element`, source-tag defaults,
+    // `class`/`id` write-back, `content`).
+    let mut resolved = AttributeMap::with_capacity(attrs.len() + 4);
     let mut event_handlers = BTreeMap::new();
     let mut event_handler_calls = BTreeMap::new();
 
@@ -1196,7 +1202,7 @@ fn parse_attributes_runtime(
                 } else if attr.name == "id" {
                     id = Some(value.clone());
                 } else {
-                    resolved.insert(attr.name.clone(), value.clone());
+                    resolved.insert(AttrKey::new(&attr.name), value.clone());
                 }
             }
             AttributeValue::Binding(binding) | AttributeValue::TwoWayBinding(binding) => {
@@ -1218,7 +1224,7 @@ fn parse_attributes_runtime(
                         ))
                     })
                     .unwrap_or_default();
-                resolved.insert(attr.name.clone(), value);
+                resolved.insert(AttrKey::new(&attr.name), value);
             }
             AttributeValue::InstanceBinding(_) => {}
             AttributeValue::EventHandler(handler) => {
@@ -1360,7 +1366,7 @@ fn is_event_handler_attribute(name: &str) -> bool {
 fn accessibility_for_element(
     source_tag: &str,
     runtime_tag: &str,
-    attributes: &BTreeMap<String, String>,
+    attributes: &AttributeMap,
 ) -> AccessibilityInfo {
     let mut info = AccessibilityInfo::default();
     if let Some(contract) = element_contract_for_tag(source_tag) {
@@ -1438,7 +1444,7 @@ fn accessibility_for_element(
 
 #[cfg(test)]
 fn accessibility_for_tag(tag: &str) -> AccessibilityInfo {
-    accessibility_for_element(tag, tag, &BTreeMap::new())
+    accessibility_for_element(tag, tag, &AttributeMap::new())
 }
 
 /// Pre-guard behavior: always runs the full attribute lookup chain, even for
@@ -1449,7 +1455,7 @@ fn accessibility_for_tag(tag: &str) -> AccessibilityInfo {
 fn accessibility_for_element_unguarded(
     source_tag: &str,
     runtime_tag: &str,
-    attributes: &BTreeMap<String, String>,
+    attributes: &AttributeMap,
 ) -> AccessibilityInfo {
     let mut info = AccessibilityInfo::default();
     if let Some(contract) = element_contract_for_tag(source_tag) {
@@ -1501,7 +1507,7 @@ fn accessibility_for_element_unguarded(
     info
 }
 
-fn bool_attr(attributes: &BTreeMap<String, String>, name: &str) -> bool {
+fn bool_attr(attributes: &AttributeMap, name: &str) -> bool {
     attributes.get(name).is_some_and(|value| bool_value(value))
 }
 
@@ -1509,7 +1515,7 @@ fn bool_value(value: &str) -> bool {
     matches!(value.trim(), "" | "true" | "1")
 }
 
-fn number_attr(attributes: &BTreeMap<String, String>, name: &str) -> Option<f32> {
+fn number_attr(attributes: &AttributeMap, name: &str) -> Option<f32> {
     attributes.get(name)?.trim().parse::<f32>().ok()
 }
 
@@ -1563,7 +1569,7 @@ mod tests {
             _source_ordinal: usize,
             _duplicate_ordinal: Option<usize>,
             _repeated_by_loop: bool,
-            _props: &BTreeMap<String, String>,
+            _props: &AttributeMap,
             _prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
             _container_width: f32,
             _container_height: f32,
@@ -1599,7 +1605,7 @@ mod tests {
     fn component_handler_calls_preserve_authored_prop_identity() {
         #[derive(Default)]
         struct CapturingComposition {
-            props: std::cell::RefCell<BTreeMap<String, String>>,
+            props: std::cell::RefCell<AttributeMap>,
             calls: std::cell::RefCell<BTreeMap<String, EventHandlerCall>>,
         }
 
@@ -1621,7 +1627,7 @@ mod tests {
                 _source_ordinal: usize,
                 _duplicate_ordinal: Option<usize>,
                 _repeated_by_loop: bool,
-                props: &BTreeMap<String, String>,
+                props: &AttributeMap,
                 prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
                 _container_width: f32,
                 _container_height: f32,
@@ -1676,7 +1682,7 @@ import Child from "./child.mesh"
         let props = composition.props.borrow();
         assert!(props.contains_key("onprimary"));
         assert!(props.contains_key("onsecondary"));
-        assert_ne!(props["onprimary"], props["onsecondary"]);
+        assert_ne!(props.get("onprimary"), props.get("onsecondary"));
         let calls = composition.calls.borrow();
         assert_eq!(calls["onprimary"].handler, "__mesh_embed__::root::onShared");
         assert_eq!(calls["onsecondary"].handler, calls["onprimary"].handler);
@@ -3071,7 +3077,7 @@ import Child from "./child.mesh"
 
     #[test]
     fn accessibility_for_element_empty_attributes_matches_unguarded_chain() {
-        let empty = BTreeMap::new();
+        let empty = AttributeMap::new();
         for tag in ["box", "row", "column", "button", "text", "custom-widget"] {
             assert!(accessibility_info_eq(
                 &accessibility_for_element(tag, tag, &empty),
@@ -3082,10 +3088,10 @@ import Child from "./child.mesh"
 
     #[test]
     fn accessibility_for_element_non_empty_attributes_matches_unguarded_chain() {
-        let mut attributes = BTreeMap::new();
-        attributes.insert("class".to_string(), "active".to_string());
-        attributes.insert("disabled".to_string(), "true".to_string());
-        attributes.insert("min".to_string(), "1".to_string());
+        let mut attributes = AttributeMap::new();
+        attributes.insert("class".into(), "active".to_string());
+        attributes.insert("disabled".into(), "true".to_string());
+        attributes.insert("min".into(), "1".to_string());
         assert!(accessibility_info_eq(
             &accessibility_for_element("input", "input", &attributes),
             &accessibility_for_element_unguarded("input", "input", &attributes)
@@ -3123,16 +3129,22 @@ import Child from "./child.mesh"
 
         // Full set, then every single-attribute map, then each attribute with
         // its higher-precedence sibling removed.
-        let mut cases: Vec<BTreeMap<String, String>> =
-            vec![all.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()];
+        let mut cases: Vec<AttributeMap> = vec![
+            all.iter()
+                .map(|(k, v)| (AttrKey::new(k), v.to_string()))
+                .collect(),
+        ];
         for (name, value) in &all {
-            cases.push(BTreeMap::from([(name.to_string(), value.to_string())]));
+            cases.push(AttributeMap::from([(
+                AttrKey::new(name),
+                value.to_string(),
+            )]));
         }
         for skip in ["aria-label", "label", "title", "key", "keybind", "expanded"] {
             cases.push(
                 all.iter()
                     .filter(|(name, _)| *name != skip)
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .map(|(k, v)| (AttrKey::new(k), v.to_string()))
                     .collect(),
             );
         }
@@ -3160,14 +3172,14 @@ import Child from "./child.mesh"
 
         // A representative populated element: a few real attributes, none of
         // which most of the accessibility chain is looking for.
-        let attributes: BTreeMap<String, String> = [
+        let attributes: AttributeMap = [
             ("class", "entry-action primary"),
             ("data-mesh-element", "button"),
             ("style", "padding: 4px"),
             ("aria-label", "Open entry"),
         ]
         .into_iter()
-        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .map(|(name, value)| (AttrKey::new(name), value.to_string()))
         .collect();
         let iterations = 2_000_000usize;
 
@@ -3216,7 +3228,7 @@ import Child from "./child.mesh"
 
         // Synthetic {#if}/{#for} column wrappers and many plain structural
         // elements carry no attributes; this is the realistic empty case.
-        let empty = BTreeMap::new();
+        let empty = AttributeMap::new();
         let iterations = 2_000_000usize;
 
         let unguarded_started = Instant::now();
@@ -3506,5 +3518,4 @@ import Child from "./child.mesh"
             elapsed.as_secs_f64() * 1000.0 / builds as f64
         );
     }
-
 }

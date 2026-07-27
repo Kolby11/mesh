@@ -121,7 +121,7 @@ impl PopoverPlacement {
     }
 
     /// Parse placement from a raw attribute map.
-    pub fn from_attributes(attrs: &BTreeMap<String, String>) -> Self {
+    pub fn from_attributes(attrs: &crate::attributes::AttributeMap) -> Self {
         let mut placement = Self::default();
 
         if let Some(anchor) = attrs.get("anchor").and_then(|v| parse_anchor(v)) {
@@ -257,7 +257,7 @@ mod tests {
     fn node_with(attrs: &[(&str, &str)]) -> WidgetNode {
         let mut node = WidgetNode::new("popover");
         for (k, v) in attrs {
-            node.attributes.insert((*k).to_string(), (*v).to_string());
+            node.attributes.insert((*k).into(), (*v).to_string());
         }
         node
     }

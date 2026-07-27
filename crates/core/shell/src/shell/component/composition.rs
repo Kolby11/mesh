@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use mesh_core_elements::style::Dimension;
-use mesh_core_elements::{EventHandlerCall, WidgetNode};
+use mesh_core_elements::{AttributeMap, EventHandlerCall, WidgetNode};
 use mesh_core_frontend::FrontendCompositionResolver;
 use mesh_core_interaction::source_element_tag;
 use mesh_core_module::ModuleType;
@@ -109,7 +109,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         source_ordinal: usize,
         duplicate_ordinal: Option<usize>,
         repeated_by_loop: bool,
-        props: &BTreeMap<String, String>,
+        props: &AttributeMap,
         prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
         container_width: f32,
         container_height: f32,
@@ -437,7 +437,7 @@ fn embedded_root_is_popover(node: &WidgetNode) -> bool {
         .is_some_and(|child| source_element_tag(child) == "popover")
 }
 
-fn runtime_props_json(props: &BTreeMap<String, String>) -> HashMap<String, serde_json::Value> {
+fn runtime_props_json(props: &AttributeMap) -> HashMap<String, serde_json::Value> {
     // Typical embedded components have only a few props. Avoid a separate
     // count pass there while keeping precise capacity for larger prop maps.
     let capacity = if props.len() <= 8 {
@@ -451,7 +451,7 @@ fn runtime_props_json(props: &BTreeMap<String, String>) -> HashMap<String, serde
     let mut props_json = HashMap::with_capacity(capacity);
     for (key, value) in props {
         if runtime_prop_is_public(key) {
-            props_json.insert(key.clone(), decode_prop_value(value));
+            props_json.insert(key.as_str().to_string(), decode_prop_value(value));
         }
     }
     props_json
@@ -479,7 +479,7 @@ fn runtime_prop_is_public(key: &str) -> bool {
 
 fn apply_prop_handler_calls(
     node: &mut WidgetNode,
-    props: &BTreeMap<String, String>,
+    props: &AttributeMap,
     prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
 ) {
     if prop_handler_calls.is_empty() {
@@ -487,7 +487,7 @@ fn apply_prop_handler_calls(
     }
     let mut calls_by_token = HashMap::with_capacity(prop_handler_calls.len());
     for (prop_name, call) in prop_handler_calls {
-        let Some(token) = props.get(prop_name) else {
+        let Some(token) = props.get(prop_name.as_str()) else {
             continue;
         };
         calls_by_token.insert(token.as_str(), call);
@@ -633,7 +633,8 @@ mod tests {
         // to be the specific prop-bound-call token this component passed down.
         fn build_tree(width: usize, depth: usize) -> WidgetNode {
             let mut node = WidgetNode::new("button");
-            node.event_handlers.insert("onclick".to_string(), "handleClick".to_string());
+            node.event_handlers
+                .insert("onclick".to_string(), "handleClick".to_string());
             node.event_handlers
                 .insert("onpointerenter".to_string(), "handleHoverEnter".to_string());
             node.event_handlers
@@ -742,7 +743,7 @@ mod tests {
 
     fn old_apply_prop_handler_calls(
         node: &mut WidgetNode,
-        props: &BTreeMap<String, String>,
+        props: &AttributeMap,
         prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
     ) {
         if prop_handler_calls.is_empty() {
@@ -751,7 +752,7 @@ mod tests {
         for (event_name, handler) in node.event_handlers.clone() {
             let Some((_, call)) = prop_handler_calls
                 .iter()
-                .find(|(prop_name, _)| props.get(*prop_name) == Some(&handler))
+                .find(|(prop_name, _)| props.get(prop_name.as_str()) == Some(&handler))
             else {
                 continue;
             };
@@ -770,7 +771,7 @@ mod tests {
 
     fn borrow_scan_prop_handler_calls(
         node: &mut WidgetNode,
-        props: &BTreeMap<String, String>,
+        props: &AttributeMap,
         prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
     ) {
         let handler_calls = node
@@ -779,7 +780,7 @@ mod tests {
             .filter_map(|(event_name, handler)| {
                 prop_handler_calls
                     .iter()
-                    .find(|(prop_name, _)| props.get(*prop_name) == Some(handler))
+                    .find(|(prop_name, _)| props.get(prop_name.as_str()) == Some(handler))
                     .map(|(_, call)| {
                         (
                             event_name.clone(),
@@ -809,7 +810,7 @@ mod tests {
                 .event_handlers
                 .insert("pointermove".into(), "move-prop-token".into());
         }
-        let props = BTreeMap::from([("onMoveProp".into(), "move-prop-token".into())]);
+        let props = AttributeMap::from([("onMoveProp".into(), "move-prop-token".into())]);
         let calls = BTreeMap::from([(
             "onMoveProp".into(),
             EventHandlerCall {
@@ -846,7 +847,7 @@ mod tests {
             .insert("click".into(), "primary-token".into());
         node.event_handlers
             .insert("pointerenter".into(), "secondary-token".into());
-        let props = BTreeMap::from([
+        let props = AttributeMap::from([
             ("onPrimary".into(), "primary-token".into()),
             ("onSecondary".into(), "secondary-token".into()),
         ]);
@@ -889,7 +890,7 @@ mod tests {
 
     #[test]
     fn runtime_props_json_filters_internal_binding_props() {
-        let props = BTreeMap::from([
+        let props = AttributeMap::from([
             ("label".into(), "Volume".into()),
             ("__mesh_binding_hidden".into(), "isHidden".into()),
             ("__mesh_bind_this".into(), "child".into()),
@@ -911,7 +912,7 @@ mod tests {
         // JSON-stringified by the attribute resolver upstream. It must come
         // back out as a real array/object, not a string blob the child's
         // `{#for item in items}` can't iterate.
-        let props = BTreeMap::from([
+        let props = AttributeMap::from([
             (
                 "items".into(),
                 r#"[{"id":"en","text":"EN"},{"id":"sk","text":"SK"}]"#.into(),
@@ -950,23 +951,26 @@ mod tests {
     #[test]
     #[ignore = "release-only runtime prop map construction microbenchmark"]
     fn presized_runtime_props_json_beats_filtered_collect() {
-        fn old_runtime_props_json(
-            props: &BTreeMap<String, String>,
-        ) -> HashMap<String, serde_json::Value> {
+        fn old_runtime_props_json(props: &AttributeMap) -> HashMap<String, serde_json::Value> {
             props
                 .iter()
                 .filter(|(key, _)| {
                     !key.starts_with("__mesh_binding_") && key.as_str() != "__mesh_bind_this"
                 })
-                .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
+                .map(|(key, value)| {
+                    (
+                        key.as_str().to_string(),
+                        serde_json::Value::String(value.clone()),
+                    )
+                })
                 .collect()
         }
 
-        let mut props = BTreeMap::new();
+        let mut props = AttributeMap::new();
         for index in 0..64 {
-            props.insert(format!("prop{index}"), format!("value{index}"));
+            props.insert(format!("prop{index}").into(), format!("value{index}"));
             props.insert(
-                format!("__mesh_binding_prop{index}"),
+                format!("__mesh_binding_prop{index}").into(),
                 format!("state{index}"),
             );
         }
@@ -999,7 +1003,7 @@ mod tests {
     #[test]
     #[ignore = "release-only prop handler matching microbenchmark"]
     fn prop_handler_matching_skips_event_handler_map_clone() {
-        let props = BTreeMap::from([("onSelected".into(), "missingHandler".into())]);
+        let props = AttributeMap::from([("onSelected".into(), "missingHandler".into())]);
         let calls = BTreeMap::from([(
             "onSelected".into(),
             EventHandlerCall {
@@ -1055,9 +1059,12 @@ mod tests {
                 } else {
                     format!("missingHandler{index}")
                 };
-                (format!("onEvent{index}"), handler)
+                (
+                    mesh_core_elements::AttrKey::new(&format!("onEvent{index}")),
+                    handler,
+                )
             })
-            .collect::<BTreeMap<_, _>>();
+            .collect::<AttributeMap>();
         let calls = (0..16)
             .map(|index| {
                 (
@@ -1118,7 +1125,7 @@ mod tests {
     #[test]
     #[ignore = "release-only single prop-handler microbenchmark"]
     fn single_prop_handler_fast_path_beats_repeated_map_scan() {
-        let props = BTreeMap::from([("onMoveProp".into(), "onMove".into())]);
+        let props = AttributeMap::from([("onMoveProp".into(), "onMove".into())]);
         let calls = BTreeMap::from([(
             "onMoveProp".into(),
             EventHandlerCall {

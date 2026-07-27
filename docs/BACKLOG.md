@@ -559,8 +559,47 @@ reference it. The historical subsystem map is
       final capacity rather than grown, since each reallocation re-copies
       every ~900-byte `WidgetNode` pushed so far (600-node release benchmark:
       167.3–174.0ms growing versus 142.8–153.5ms reserved, 1.10–1.22x, gated
-      as `for_children_capacity_speedup`). Widget-tree
-      tags/attributes and the broader symbol types remain open.
+      as `for_children_capacity_speedup`). Added 2026-07-27: widget-tree
+      *attributes* are now interned and flat.
+      `WidgetNode::attributes` (and the component-prop maps that share its
+      shape) moved from `BTreeMap<String, String>` to a purpose-built
+      `AttributeMap` (`crates/core/ui/elements/src/attributes.rs`) whose keys
+      are an `AttrKey` enum: names in the known template/runtime vocabulary
+      resolve to `&'static str` through a generated `match`, and anything else
+      shares an `Arc<str>` from a bounded per-thread intern cache — so a node no
+      longer allocates, copies, and frees one `String` per attribute per build.
+      The map itself is a sorted `Vec` rather than a B-tree, built at the
+      source-attribute count so the whole map costs one allocation; iteration
+      order, `map.get("class")` borrowed lookups, and `entry(..).or_insert(..)`
+      all behave exactly as the `BTreeMap` did, which a randomized differential
+      test asserts against a live `BTreeMap<String, String>` reference. Drift is
+      closed from both sides: `well_known_covers_every_contract_attribute` fails
+      if an element contract declares a name the vocabulary is missing. Style
+      resolution lost two hot substring searchers in the same pass: the
+      `value.contains("var(") || value.contains("prop(")` pair asked per literal
+      declaration per node became one byte scan
+      (`references_style_function`, 3.21–4.23x over 3,000,000 values, gated as
+      `style_function_scan_speedup`), and `trim_end_matches("px")` — a two-way
+      searcher for a two-byte suffix, run once per length value — became
+      repeated `strip_suffix`. Building a tree's worth of attribute maps and
+      holding them, which is what makes the key allocations cost more than a
+      tcache round-trip, measured 50.3–51.4ms owned-`String` `BTreeMap` versus
+      46.6–47.3ms interned flat map over 900 trees of 456 nodes (1.08x), gated
+      as `interned_attribute_map_speedup`. End-to-end effect of this checkpoint:
+      three interleaved release runs of `widget_tree_build_end_to_end_benchmark`
+      measured 0.500–0.506ms per build before versus 0.442–0.453ms after
+      (1.10–1.15x for the whole 456-node tree build; the runs are interleaved
+      because consecutive before/after batches drift by more than the effect); `perf` over the same
+      workload shows the B-tree node allocation, walk, and teardown symbols gone
+      from the profile entirely. Note that
+      `accessibility_empty_attribute_guard_speedup` was rebaselined from 1.60 to
+      1.15 as a consequence: the empty-map lookup chain it is measured against
+      got cheaper (47.4ms → 30.1–31.4ms per 2M nodes) while the guarded path was
+      unchanged. Widget-tree *tags*, attribute *values*, and the broader symbol
+      types remain open; the same profile now puts the dominant remaining cost
+      in style resolution (~45% of the build: theme-default clones,
+      `apply_indexed_declaration`, and token→number resolution), i.e. the typed
+      style declaration item below, not further attribute work.
 - [ ] Typed style declarations end-to-end: resolve theme tokens to typed
       values once per theme load; `apply_declaration` consumes typed values,
       strings only for diagnostics (E; borrowed simple-value fast paths
@@ -568,7 +607,45 @@ reference it. The historical subsystem map is
       property/message prototypes are prepared once per `StyleRuleIndex`
       generation, removing repeated per-matched-node message formatting while
       preserving diagnostic parity and rule-index invalidation. Typed style
-      value lowering remains open.
+      value lowering remains open. Added 2026-07-27: per-node theme-default
+      delivery stopped being a deep copy behind two hashed lookups. The
+      resolver's `(module_id, tag)` default caches now hold
+      `Rc<ThemeComponentDefaults>`, so a node clones one `ComputedStyle` (the
+      mutable base its own rules are applied to) and bumps a refcount instead of
+      also deep-copying the default *variables* map; the variables are read
+      through, and the per-node `VARIABLE_SCRATCH` is only seeded when a theme
+      actually declares default custom properties (the shipped theme declares
+      none, so the common path seeds nothing). In front of the hashed maps sits
+      a bounded most-recently-used list compared by string rather than hashed —
+      the same shape as `shared_module_id` — because a tree walks long runs of
+      the same `(module_id, tag)` and each node was otherwise paying two SipHash
+      computations of short strings. A release benchmark over 400,000 node
+      resolutions measured 38.9–40.5ms for hashed lookup plus deep clone versus
+      19.6–21.2ms for the front cache plus shared defaults (1.84–1.98x), gated
+      as `shared_theme_defaults_speedup`; the front cache is covered for
+      tag/module key separation, correctness past eviction, and for not letting
+      one node's resolution mutate the defaults the next node starts from.
+      Measured end to end with interleaved release runs of
+      `widget_tree_build_end_to_end_benchmark`: 0.443–0.449ms per build before
+      versus 0.416–0.424ms after (1.06x), and style resolution fell from 45% to
+      39% of the build in `perf`. Cumulatively with the interned attribute map
+      above, three interleaved pairs measured 0.504–0.511ms per build before
+      both checkpoints versus 0.417–0.428ms after (1.18–1.22x).
+
+      Still open, with the analysis done: `apply_theme_defaults_map` remains
+      ~15% of the build. The result cache hits 99% of the time (measured: 896k
+      hits, 10k misses over 2,000 builds), but a fresh `StyleResolver` is
+      constructed for every `build_widget_tree_from_component` call, so the ~5
+      distinct `(module_id, tag)` pairs per build re-lower every theme default
+      property from strings each time. Removing that means caching the lowering
+      across resolver instances, which needs a sound theme identity: pointer
+      identity is *not* sound because `ThemeEngine::set_active` assigns
+      `self.active = theme.clone()`, replacing the theme in place at the same
+      address with different content, and `Theme`'s fields are all public and
+      mutable. The lowering also reads `self.props`, which is per-instance. So
+      this wants either an explicit revision on `Theme` or a cache handle owned
+      by whoever owns the theme and invalidated on theme load — a cross-crate
+      API decision, not a local optimization.
 - [ ] Typed template-expression attribute storage; internal evaluation is
       already typed, results still stringify into attributes (A). Progress
       2026-07-15: boolean, nil, number, string, and compound JSON values remain
@@ -816,7 +893,9 @@ reference it. The historical subsystem map is
       allocator traffic and `BTreeMap<String, String>` attribute comparisons
       (~25% malloc/free, ~10% memmove, ~8% memcmp) — i.e. the typed
       `WidgetNode` and typed-declaration items above, not further per-node
-      pruning.
+      pruning. Followed up 2026-07-27 by the interned flat `AttributeMap`
+      (see the interning item above), which removed the B-tree half of that
+      allocator traffic.
 - [ ] Minor: display-list `update_inner` is ~220 lines mixing diff, damage,
       and metrics assembly; split when next touched (N).
 

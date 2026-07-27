@@ -3311,12 +3311,12 @@ mod tests {
         let mut root = WidgetNode::new("row");
         root.id = 42;
         root.attributes
-            .insert("_mesh_key".to_string(), "root".to_string());
+            .insert("_mesh_key".into(), "root".to_string());
         let mut child = WidgetNode::new("button");
         child.id = 42;
         child
             .attributes
-            .insert("_mesh_key".to_string(), "root/0".to_string());
+            .insert("_mesh_key".into(), "root/0".to_string());
         root.children.push(child);
 
         RetainedWidgetTree::default().update(&root);

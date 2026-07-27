@@ -536,7 +536,7 @@ mod tests {
     fn focused_text_evidence_default_build_preserves_placeholder() {
         let mut node = WidgetNode::new("text");
         node.attributes
-            .insert("content".to_string(), "World".to_string());
+            .insert("content".into(), "World".to_string());
         node.layout = LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -584,12 +584,11 @@ mod tests {
     #[cfg(not(feature = "renderer-parley"))]
     fn focused_text_evidence_default_build_selection_is_raw_attribute() {
         let mut node = WidgetNode::new("text");
+        node.attributes.insert("content".into(), "Hi".to_string());
         node.attributes
-            .insert("content".to_string(), "Hi".to_string());
+            .insert("_mesh_selection_anchor_x".into(), "12.5".to_string());
         node.attributes
-            .insert("_mesh_selection_anchor_x".to_string(), "12.5".to_string());
-        node.attributes
-            .insert("_mesh_selection_anchor_y".to_string(), "3.0".to_string());
+            .insert("_mesh_selection_anchor_y".into(), "3.0".to_string());
         node.layout = LayoutRect {
             x: 0.0,
             y: 0.0,

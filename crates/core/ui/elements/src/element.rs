@@ -1545,7 +1545,7 @@ pub struct ElementSnapshot {
     pub pressed: bool,
     pub invalid: bool,
     pub value: bool,
-    pub attributes: BTreeMap<String, String>,
+    pub attributes: crate::attributes::AttributeMap,
 }
 
 pub fn element_snapshot(node: &WidgetNode, offset_x: f32, offset_y: f32) -> ElementSnapshot {
@@ -1740,7 +1740,7 @@ fn element_snapshot_json_object(
 
     let mut attributes = Map::with_capacity(node.attributes.len());
     for (key, value) in &node.attributes {
-        attributes.insert(key.clone(), Value::String(value.clone()));
+        attributes.insert(key.as_str().to_string(), Value::String(value.clone()));
     }
     object.insert("attributes".into(), Value::Object(attributes));
 
@@ -1829,10 +1829,14 @@ mod tests {
 
     #[test]
     fn element_contract_dispatch_matches_scanning_lookup() {
-        let queries = ELEMENT_CONTRACT_DEFS
-            .iter()
-            .map(|def| def.tag)
-            .chain(["", "Box", "box ", "not-an-element", "widgets", "widge"]);
+        let queries = ELEMENT_CONTRACT_DEFS.iter().map(|def| def.tag).chain([
+            "",
+            "Box",
+            "box ",
+            "not-an-element",
+            "widgets",
+            "widge",
+        ]);
         for tag in queries {
             assert_eq!(
                 element_contract_for_tag(tag).map(|def| def.tag),
@@ -2287,7 +2291,7 @@ mod tests {
     #[test]
     #[ignore = "release-only element snapshot attribute clone microbenchmark"]
     fn btreemap_attribute_clone_beats_collect_clone() {
-        fn old_attribute_clone(node: &WidgetNode) -> BTreeMap<String, String> {
+        fn old_attribute_clone(node: &WidgetNode) -> crate::attributes::AttributeMap {
             node.attributes
                 .iter()
                 .map(|(key, value)| (key.clone(), value.clone()))
@@ -2297,7 +2301,7 @@ mod tests {
         let mut node = WidgetNode::new("input");
         for index in 0..16 {
             node.attributes
-                .insert(format!("attr{index}"), format!("value{index}"));
+                .insert(format!("attr{index}").into(), format!("value{index}"));
         }
         let iterations = 500_000;
 

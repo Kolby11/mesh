@@ -7,7 +7,8 @@ mod tags;
 
 use mesh_core_component::ComponentFile;
 use mesh_core_elements::{
-    EventHandlerCall, LayoutEngine, StyleContext, StyleResolver, VariableStore, WidgetNode,
+    AttributeMap, EventHandlerCall, LayoutEngine, StyleContext, StyleResolver, VariableStore,
+    WidgetNode,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
@@ -95,7 +96,7 @@ pub trait FrontendCompositionResolver {
         source_ordinal: usize,
         duplicate_ordinal: Option<usize>,
         repeated_by_loop: bool,
-        props: &BTreeMap<String, String>,
+        props: &AttributeMap,
         prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
         container_width: f32,
         container_height: f32,

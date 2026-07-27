@@ -58,6 +58,9 @@ run_benchmark mesh-core-frontend inherited_mask_buckets_beat_full_candidate_scan
 run_benchmark mesh-core-frontend accessibility_attribute_pass_beats_lookup_chain
 run_benchmark mesh-core-frontend shared_module_id_beats_per_node_string
 run_benchmark mesh-core-frontend for_children_capacity_beats_growing
+run_benchmark mesh-core-elements interned_attribute_map_beats_owned_btreemap
+run_benchmark mesh-core-elements style_function_scan_beats_contains_pair
+run_benchmark mesh-core-elements shared_theme_defaults_beat_hashed_deep_clone
 
 awk '
   BEGIN { failed = 0 }

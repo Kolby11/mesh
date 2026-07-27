@@ -1,5 +1,6 @@
 /// Widget tree — the live, evaluated UI structure.
 use crate::accessibility::AccessibilityInfo;
+use crate::attributes::AttributeMap;
 use crate::layout::LayoutRect;
 use crate::style::ComputedStyle;
 use std::collections::BTreeMap;
@@ -68,7 +69,11 @@ pub struct WidgetNode {
     /// Tag name: `row`, `column`, `text`, `button`, `image`, `icon`, etc.
     pub tag: String,
     /// Resolved attributes (after binding evaluation).
-    pub attributes: BTreeMap<String, String>,
+    ///
+    /// Keyed by interned [`crate::attributes::AttrKey`]: names are template
+    /// vocabulary, so nodes share them instead of allocating one string per
+    /// attribute per build.
+    pub attributes: AttributeMap,
     /// Fully resolved style (theme tokens → concrete values).
     pub computed_style: ComputedStyle,
     /// Layout rectangle computed by the layout engine.
@@ -107,7 +112,7 @@ impl WidgetNode {
         Self {
             id: next_node_id(),
             tag: tag.into(),
-            attributes: BTreeMap::new(),
+            attributes: AttributeMap::new(),
             computed_style: ComputedStyle::default(),
             layout: LayoutRect::default(),
             children: Vec::new(),
@@ -338,7 +343,7 @@ mod tests {
         for index in 0..8 {
             template
                 .attributes
-                .insert(format!("attr{index}"), format!("value{index}"));
+                .insert(format!("attr{index}").into(), format!("value{index}"));
         }
 
         let attribute_started = std::time::Instant::now();
