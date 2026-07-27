@@ -600,6 +600,12 @@ reference it. The historical subsystem map is
       in style resolution (~45% of the build: theme-default clones,
       `apply_indexed_declaration`, and token→number resolution), i.e. the typed
       style declaration item below, not further attribute work.
+      Added 2026-07-27: ordered attribute construction now takes an append-only
+      fast path in `AttributeMap::insert`, avoiding the binary search and tail
+      shift used by out-of-order inserts. The existing release construction
+      gate remains green at 1.046x versus the owned `BTreeMap` reference; the
+      randomized differential test continues to cover arbitrary insertion
+      order and replacement semantics.
 - [ ] Typed style declarations end-to-end: resolve theme tokens to typed
       values once per theme load; `apply_declaration` consumes typed values,
       strings only for diagnostics (E; borrowed simple-value fast paths

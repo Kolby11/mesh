@@ -63,6 +63,29 @@ impl AttributeMap {
     }
 
     pub fn insert(&mut self, key: AttrKey, value: String) -> Option<String> {
+        // Parsed attributes and conversions from ordered maps normally arrive
+        // in key order. Keep that common construction path append-only: it
+        // avoids a binary search and, more importantly, avoids asking Vec to
+        // shift the existing tail for every new attribute.
+        if let Some((last_key, _)) = self.entries.last() {
+            match last_key.as_str().cmp(key.as_str()) {
+                Ordering::Less => {
+                    self.entries.push((key, value));
+                    return None;
+                }
+                Ordering::Equal => {
+                    return Some(std::mem::replace(
+                        &mut self.entries.last_mut().expect("last entry").1,
+                        value,
+                    ));
+                }
+                Ordering::Greater => {}
+            }
+        } else {
+            self.entries.push((key, value));
+            return None;
+        }
+
         match self.find(key.as_str()) {
             Ok(index) => Some(std::mem::replace(&mut self.entries[index].1, value)),
             Err(index) => {
