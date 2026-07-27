@@ -340,16 +340,58 @@ mod tests {
     }
 
     #[test]
-    fn shipped_settings_surface_source_parses() {
-        let source = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../../modules/frontend/settings/src/main.mesh"
-        ));
-        let component = mesh_core_component::parse_component(source).unwrap();
+    fn shipped_settings_surface_compiles_with_local_pages() {
+        fn first_node_with_class<'a>(
+            node: &'a WidgetNode,
+            class_name: &str,
+        ) -> Option<&'a WidgetNode> {
+            if node
+                .attributes
+                .get("class")
+                .is_some_and(|classes| classes.split_whitespace().any(|class| class == class_name))
+            {
+                return Some(node);
+            }
+            node.children
+                .iter()
+                .find_map(|child| first_node_with_class(child, class_name))
+        }
 
-        assert!(component.template.is_some());
-        assert!(component.script.is_some());
-        assert!(component.style.is_some());
+        let module_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../modules/frontend/settings");
+        let loaded = mesh_core_module::manifest::load_manifest(&module_dir)
+            .expect("settings manifest should load");
+        let compiled = compile_frontend_module(&loaded.manifest, &module_dir)
+            .expect("settings module should compile");
+
+        for page in [
+            "AdvancedPage",
+            "AppearancePage",
+            "AudioPage",
+            "BluetoothPage",
+            "DeviceInfoPage",
+            "WifiPage",
+        ] {
+            assert!(
+                compiled.local_components.contains_key(page),
+                "settings should register {page}"
+            );
+        }
+        assert_eq!(compiled.watched_paths.len(), 7);
+
+        // A hidden, non-docked layer surface is initially laid out against a
+        // 1x1 safety configure. Concrete constraints must still expose the
+        // intended content size so the next configure is not stuck at 1x1.
+        let tree = compiled.build_preview_tree(&mesh_core_theme::default_theme(), 1, 1);
+        let settings_shell =
+            first_node_with_class(&tree, "settings-shell").expect("settings-shell node");
+        assert_eq!(
+            (
+                settings_shell.layout.width.round() as u32,
+                settings_shell.layout.height.round() as u32,
+            ),
+            (920, 700)
+        );
     }
 
     #[test]

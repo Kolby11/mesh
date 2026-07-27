@@ -1,0 +1,383 @@
+<template>
+    <column class="settings-page" hidden={hidden}>
+        <column class="settings-section">
+            <text class="settings-section-title">{t('appearance.theme')}</text>
+            <text class="settings-section-copy">{t('appearance.theme.copy')}</text>
+            <row class="theme-grid">
+                {#for row in theme_rows}
+                    <button class={row.button_class} onclick={onThemeSelect(row.id)}>
+                        <box class="theme-preview" style={row.preview_style}>
+                            <column class="theme-preview-sidebar" style={row.sidebar_style}>
+                                <box class="theme-preview-dot" style={row.primary_style} />
+                                <box class="theme-preview-line" style={row.outline_style} />
+                                <box class="theme-preview-line theme-preview-line-short" style={row.outline_style} />
+                            </column>
+                            <column class="theme-preview-body">
+                                <box class="theme-preview-heading" style={row.heading_style} />
+                                <box class="theme-preview-panel" style={row.panel_style} />
+                            </column>
+                        </box>
+                        <row class="theme-option-copy">
+                            <column class="settings-card-copy">
+                                <text class="settings-card-title">{row.label}</text>
+                                <text class="settings-card-meta">{row.id}</text>
+                            </column>
+                            <text class="theme-check" hidden={row.check_hidden}>✓</text>
+                        </row>
+                    </button>
+                {/for}
+            </row>
+        </column>
+
+        <column class="settings-section">
+            <text class="settings-section-title">{t('appearance.language')}</text>
+            <text class="settings-section-copy">{t('appearance.language.copy')}</text>
+            <column class="settings-list">
+                <button class={english_class} onclick={onLocaleEnglish}>
+                    <column class="settings-card-copy">
+                        <text class="settings-card-title">{t('language.english.native')}</text>
+                        <text class="settings-card-meta">{t('language.english.detail')}</text>
+                    </column>
+                    <text class="language-check" hidden={english_check_hidden}>{t('common.selected')}</text>
+                </button>
+                <button class={slovak_class} onclick={onLocaleSlovak}>
+                    <column class="settings-card-copy">
+                        <text class="settings-card-title">{t('language.slovak.native')}</text>
+                        <text class="settings-card-meta">{t('language.slovak.detail')}</text>
+                    </column>
+                    <text class="language-check" hidden={slovak_check_hidden}>{t('common.selected')}</text>
+                </button>
+            </column>
+        </column>
+
+        <column class="settings-section">
+            <text class="settings-section-title">{t('appearance.current')}</text>
+            <column class="settings-card">
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('common.theme')}</text>
+                    <text class="settings-info-value">{theme_value}</text>
+                </row>
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('common.locale')}</text>
+                    <text class="settings-info-value">{locale_value}</text>
+                </row>
+            </column>
+        </column>
+    </column>
+</template>
+
+<script lang="luau">
+hidden = false
+
+local theme = require("mesh.theme")
+local debug_service = require("mesh.debug")
+local t = import("mesh.i18n", "t")
+
+theme_value = "mesh-default-dark"
+locale_value = "en"
+theme_rows = {}
+english_class = "language-option language-option-active"
+slovak_class = "language-option"
+english_check_hidden = false
+slovak_check_hidden = true
+
+local function fallback_preview_palette(theme_id)
+    local id = string.lower(tostring(theme_id or ""))
+    local light = string.find(id, "light", 1, true) ~= nil
+    if light then
+        return {
+            surface = "#f5f6fa",
+            surface_container_low = "#e8e9ef",
+            surface_container_high = "#d9dbe4",
+            primary = "#6750a4",
+            outline_variant = "#79747e",
+            on_surface = "#1c1b1f",
+        }
+    end
+    return {
+        surface = "#17181c",
+        surface_container_low = "#24252b",
+        surface_container_high = "#34353d",
+        primary = "#d0bcff",
+        outline_variant = "#938f99",
+        on_surface = "#e6e1e5",
+    }
+end
+
+local function preview_palette(option)
+    local fallback = fallback_preview_palette(option.id)
+    local palette = type(option.palette) == "table" and option.palette or {}
+    return {
+        surface = tostring(palette.surface or fallback.surface),
+        surface_container_low = tostring(
+            palette.surface_container_low or fallback.surface_container_low
+        ),
+        surface_container_high = tostring(
+            palette.surface_container_high or fallback.surface_container_high
+        ),
+        primary = tostring(palette.primary or fallback.primary),
+        outline_variant = tostring(palette.outline_variant or fallback.outline_variant),
+        on_surface = tostring(palette.on_surface or fallback.on_surface),
+    }
+end
+
+local function installed_themes()
+    local rows = {}
+    local seen = {}
+    local positions = {}
+
+    local function add_theme(candidate)
+        local id = type(candidate) == "table" and candidate.id or candidate
+        id = tostring(id or "")
+        if id == "" then return end
+
+        local label = type(candidate) == "table"
+            and tostring(candidate.label or id)
+            or id
+        local palette = type(candidate) == "table" and candidate.palette or nil
+        local position = positions[id]
+        if position then
+            -- A later source may know more than an early partial registry
+            -- snapshot. Enrich the existing row without creating duplicates.
+            if rows[position].label == id and label ~= id then
+                rows[position].label = label
+            end
+            if rows[position].palette == nil and palette ~= nil then
+                rows[position].palette = palette
+            end
+            return
+        end
+
+        rows[#rows + 1] = {
+            id = id,
+            label = label,
+            palette = palette,
+        }
+        positions[id] = #rows
+        seen[id] = true
+    end
+
+    local service_themes = theme and theme.themes or {}
+
+    if type(service_themes) == "table" then
+        for _, candidate in ipairs(service_themes) do
+            add_theme(candidate)
+        end
+    end
+
+    local available = theme and theme.available or {}
+    if type(available) == "table" then
+        for _, candidate in ipairs(available) do
+            add_theme(candidate)
+        end
+    end
+
+    -- Merge the module graph even when the service has already published a
+    -- partial registry. During startup the service may initially contain only
+    -- the active theme, while the graph already knows every installed theme.
+    local graph = debug_service and debug_service.module_graph or {}
+    if type(graph) == "table" then
+        for _, entry in ipairs(graph) do
+            if entry.enabled ~= false then
+                local provided = (entry.provides or {}).themes
+                if type(provided) == "table" then
+                    for _, candidate in ipairs(provided) do
+                        add_theme(candidate)
+                    end
+                end
+            end
+        end
+    end
+
+    return rows, seen
+end
+
+local function sync_theme(theme_id)
+    theme_value = tostring(theme_id or "mesh-default-dark")
+    local installed, seen = installed_themes()
+
+    -- Keep the current theme selectable while the module graph is still being
+    -- published, or if it came from a theme source not represented there yet.
+    if not seen[theme_value] then
+        installed[#installed + 1] = { id = theme_value, label = theme_value }
+    end
+
+    local rows = {}
+    for index, option in ipairs(installed) do
+        local active = option.id == theme_value
+        local palette = preview_palette(option)
+        rows[index] = {
+            id = option.id,
+            label = option.label,
+            preview_style = "background: " .. palette.surface,
+            sidebar_style = "background: " .. palette.surface_container_low,
+            primary_style = "background: " .. palette.primary,
+            outline_style = "background: " .. palette.outline_variant,
+            heading_style = "background: " .. palette.on_surface,
+            panel_style = "background: " .. palette.surface_container_high,
+            button_class = active and "theme-option theme-option-active" or "theme-option",
+            check_hidden = not active,
+        }
+    end
+    theme_rows = rows
+end
+
+local function sync_locale(locale)
+    locale_value = tostring(locale or "en")
+    local slovak = locale_value == "sk" or string.find(locale_value, "sk-", 1, true) == 1
+    english_class = slovak and "language-option" or "language-option language-option-active"
+    slovak_class = slovak and "language-option language-option-active" or "language-option"
+    english_check_hidden = slovak
+    slovak_check_hidden = not slovak
+end
+
+function render()
+    local current_theme = "mesh-default-dark"
+    if theme then
+        current_theme = theme.current or theme.theme_id or current_theme
+        if theme.state then
+            current_theme = theme.state.current or theme.state.theme_id or current_theme
+        end
+    end
+    sync_theme(current_theme)
+    sync_locale(mesh.locale.current() or "en")
+end
+
+function onThemeSelect(theme_id)
+    local selected = tostring(theme_id or "")
+    if selected == "" then return end
+    sync_theme(selected)
+    mesh.events.publish("shell.set-theme", { theme_id = selected })
+end
+
+-- Keep the former fixed-theme handlers available to callers compiled against
+-- the previous settings component while all rendered options use the generic
+-- ID-based handler above.
+function onThemeDark() onThemeSelect("mesh-default-dark") end
+function onThemeLight() onThemeSelect("mesh-default-light") end
+
+function onLocaleEnglish()
+    sync_locale("en")
+    mesh.locale.set("en")
+end
+
+function onLocaleSlovak()
+    sync_locale("sk")
+    mesh.locale.set("sk")
+end
+</script>
+
+<style>
+    .theme-grid {
+        width: 100%;
+        gap: var(--spacing-md);
+        flex-wrap: wrap;
+    }
+
+    .theme-option {
+        min-width: 0;
+        flex-basis: 180px;
+        flex-grow: 1;
+        gap: var(--spacing-sm);
+        padding: var(--spacing-sm);
+        border-radius: var(--radius-md);
+        border-width: 2px;
+        border-style: solid;
+        border-color: var(--color-outline-variant);
+        background: var(--color-surface-container-low);
+        color: var(--color-on-surface);
+    }
+
+    .theme-option-active {
+        border-color: var(--color-primary);
+        background: var(--color-secondary-container);
+    }
+
+    .theme-preview {
+        width: 100%;
+        height: 118px;
+        overflow: hidden;
+        border-radius: var(--radius-sm);
+    }
+
+    .theme-preview-sidebar {
+        width: 30%;
+        height: 100%;
+        gap: 8px;
+        padding: 12px;
+    }
+
+    .theme-preview-body {
+        flex-grow: 1;
+        gap: 12px;
+        padding: 16px;
+    }
+
+    .theme-preview-dot {
+        width: 18px;
+        height: 18px;
+        border-radius: var(--radius-full);
+    }
+
+    .theme-preview-line,
+    .theme-preview-heading,
+    .theme-preview-panel {
+        border-radius: var(--radius-full);
+    }
+
+    .theme-preview-line {
+        width: 100%;
+        height: 5px;
+    }
+
+    .theme-preview-line-short {
+        width: 68%;
+    }
+
+    .theme-preview-heading {
+        width: 55%;
+        height: 8px;
+    }
+
+    .theme-preview-panel {
+        width: 100%;
+        height: 58px;
+        border-radius: var(--radius-sm);
+    }
+
+    .theme-option-copy {
+        width: 100%;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--spacing-sm);
+    }
+
+    .theme-check,
+    .language-check {
+        color: var(--color-primary);
+        font-size: var(--typography-size-xs);
+        font-weight: 800;
+    }
+
+    .language-option {
+        width: 100%;
+        min-height: 58px;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--spacing-md);
+        padding-inline: var(--spacing-md);
+        border-radius: var(--radius-md);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--color-outline-variant);
+        background: var(--color-surface-container-low);
+        color: var(--color-on-surface);
+        text-align: left;
+    }
+
+    .language-option-active {
+        border-color: var(--color-primary);
+        background: var(--color-secondary-container);
+    }
+
+</style>

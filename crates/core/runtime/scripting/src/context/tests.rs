@@ -45,34 +45,34 @@ fn audio_catalog() -> InterfaceCatalog {
                         arg_type: "string".into(),
                     },
                     InterfaceArgument {
-                        name: "volume".into(),
+                        name: "percent".into(),
                         arg_type: "float".into(),
                     },
                 ],
                 returns: Some("Result".into()),
                 coalesce: false,
-                optimistic: None,
+                state_binding: None,
             },
             InterfaceMethod {
                 name: "volume_up".into(),
                 args: Vec::new(),
                 returns: None,
                 coalesce: false,
-                optimistic: None,
+                state_binding: None,
             },
             InterfaceMethod {
                 name: "volume_down".into(),
                 args: Vec::new(),
                 returns: None,
                 coalesce: false,
-                optimistic: None,
+                state_binding: None,
             },
             InterfaceMethod {
                 name: "toggle_mute".into(),
                 args: Vec::new(),
                 returns: None,
                 coalesce: false,
-                optimistic: None,
+                state_binding: None,
             },
             InterfaceMethod {
                 name: "set_muted".into(),
@@ -88,7 +88,7 @@ fn audio_catalog() -> InterfaceCatalog {
                 ],
                 returns: Some("Result".into()),
                 coalesce: false,
-                optimistic: None,
+                state_binding: None,
             },
         ],
         events: vec![InterfaceEvent {
@@ -2794,8 +2794,8 @@ fn interface_proxy_method_publishes_service_command() {
         r#"
 function init()
     local audio = require("mesh.audio@>=1.0")
-    audio:set_volume("default", 0.5)
-    audio.set_volume("default", 0.5)
+    audio:set_volume("default", 50)
+    audio.set_volume("default", 50)
 end
 "#,
     )
@@ -2813,7 +2813,7 @@ end
         );
         assert_eq!(
             event.payload,
-            serde_json::json!({ "device_id": "default", "volume": 0.5 })
+            serde_json::json!({ "device_id": "default", "percent": 50 })
         );
     }
 }
@@ -2891,7 +2891,7 @@ queued = false
 
 function init()
     local audio = require("mesh.audio@>=1.0")
-    local result = audio.set_volume("default", 0.5)
+    local result = audio.set_volume("default", 50)
     queued_ok = result.ok
     queued = result.queued
 end
@@ -2927,7 +2927,7 @@ end
 
 function change_volume()
     local audio = require("mesh.audio@>=1.0")
-    local result = audio.set_volume("default", 0.5)
+    local result = audio.set_volume("default", 50)
     denied_ok = result.ok
     denied_error = result.error or ""
 end

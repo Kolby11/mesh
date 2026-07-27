@@ -58,7 +58,7 @@
               "args": [{ "name": "level", "type": "float" }],
               "returns": "Result",
               "coalesce": true,
-              "optimistic": { "field": "level", "fromArg": "level" }
+              "stateBinding": { "field": "level", "fromArg": "level" }
             },
             {
               "name": "increase",

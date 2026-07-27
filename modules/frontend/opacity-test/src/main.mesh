@@ -1,4 +1,5 @@
 <template>
+  <!--
   <box class="opacity-test-shell">
     <column class="opacity-test-stack">
       <box class="heading"><text class="heading-label">NO BLUR - OPACITY ONLY</text></box>
@@ -8,6 +9,7 @@
       <box class="band band-4"><text class="band-label">WHITE - 50% fill</text></box>
     </column>
   </box>
+  -->
 </template>
 
 <script lang="luau">

@@ -315,6 +315,12 @@ pub trait ShellComponent: Send {
     fn observes_service_event(&self, _event: &ServiceEvent) -> bool {
         true
     }
+    /// Record a service payload for a declared-but-not-yet-read service without
+    /// running the full update path. A surface that has not built its tree yet
+    /// (or whose page component is lazily instantiated) reads no service field,
+    /// so it is not a delivery target — but the payload must still be available
+    /// to seed those runtimes when they are created.
+    fn cache_service_payload(&mut self, _event: &ServiceEvent) {}
     fn service_observation_summary(&self) -> Option<ServiceObservationSummary> {
         None
     }

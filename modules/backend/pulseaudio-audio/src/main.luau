@@ -94,11 +94,7 @@ local function clamp_percent(percent)
 end
 
 local function command_percent_from_payload(payload)
-    if payload.percent ~= nil then
-        return clamp_percent(payload.percent)
-    end
-
-    return clamp_percent(math.floor(((tonumber(payload.volume) or 0) * 100) + 0.5))
+    return clamp_percent(payload.percent)
 end
 
 local function resolve_sound_path(path)
@@ -168,7 +164,7 @@ end
 function on_command_set_volume(self)
     local payload = mesh.service.payload()
     local percent = command_percent_from_payload(payload)
-    debug_info("received set_volume payload volume=" .. tostring(payload.volume) .. " percent=" .. tostring(percent))
+    debug_info("received set_volume payload percent=" .. tostring(percent))
     local result = mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", tostring(percent) .. "%" })
     refresh_state()
     emit_volume_changed(self)

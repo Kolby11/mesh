@@ -340,7 +340,7 @@ mod tests {
                     args: Vec::new(),
                     returns: None,
                     coalesce: false,
-                    optimistic: None,
+                    state_binding: None,
                 })
                 .collect(),
             events: vec![],
@@ -385,7 +385,7 @@ mod tests {
                 args: Vec::new(),
                 returns: None,
                 coalesce: false,
-                optimistic: None,
+                state_binding: None,
             }],
             events: vec![InterfaceEvent {
                 name: "VolumeChanged".into(),

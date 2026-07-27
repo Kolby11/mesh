@@ -39,6 +39,7 @@
         "emblem-photos": "hicolor/emblem-photos",
         "wifi": "hicolor/network-wireless",
         "bluetooth": "hicolor/bluetooth",
+        "computer": "hicolor/computer",
         "close": "hicolor/window-close",
         "window-close": "hicolor/window-close"
       }

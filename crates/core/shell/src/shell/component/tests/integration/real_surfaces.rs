@@ -86,6 +86,138 @@ fn parent_of_node_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a WidgetN
 }
 
 #[test]
+fn settings_page_title_keeps_its_full_line_box() {
+    let theme = default_theme();
+    let mut settings =
+        real_frontend_module_component("@mesh/settings", audio_network_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+
+    settings
+        .paint(&theme, 920, 900, &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = settings.last_tree.as_ref().expect("rendered settings tree");
+    let title =
+        first_node_with_class_token(tree, "page-title").expect("settings page title");
+    let required_height = title.computed_style.font_size * title.computed_style.line_height;
+
+    assert!(
+        title.layout.height + 0.5 >= required_height,
+        "settings page title height {} should preserve its {}px line box (flex-shrink {})",
+        title.layout.height,
+        required_height,
+        title.computed_style.flex_shrink
+    );
+}
+
+#[test]
+fn settings_wrapped_descriptions_expand_to_their_content() {
+    let theme = default_theme();
+    let mut settings =
+        real_frontend_module_component("@mesh/settings", audio_network_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+
+    settings
+        .paint(&theme, 920, 900, &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = settings.last_tree.as_ref().expect("rendered settings tree");
+    let settings_description = first_node_with_class_token(tree, "sidebar-foot-copy")
+        .expect("settings sidebar description");
+    assert!(
+        settings_description.layout.height > 22.5,
+        "wrapped settings description should exceed the theme's fixed 22px text height, got {}",
+        settings_description.layout.height
+    );
+
+    settings
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
+        .unwrap();
+    settings
+        .paint(&theme, 920, 900, &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = settings.last_tree.as_ref().expect("rendered audio settings tree");
+    let audio_description = first_node_with_attr(
+        tree,
+        "content",
+        "Adjust the default output through the active PipeWire or PulseAudio provider.",
+    )
+    .expect("audio output description");
+    assert!(
+        (audio_description.layout.height - 22.0).abs() > 0.5,
+        "audio description should use intrinsic height instead of the theme's fixed 22px height"
+    );
+    assert!(
+        audio_description.layout.height > 0.0,
+        "audio description should retain a visible line box, got {}",
+        audio_description.layout.height
+    );
+}
+
+#[test]
+fn settings_tab_switch_resets_scroll_and_replaces_the_visible_page() {
+    let theme = default_theme();
+    let mut settings =
+        real_frontend_module_component("@mesh/settings", audio_network_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+
+    settings
+        .paint(&theme, 920, 900, &mut buffer, 1.0)
+        .unwrap();
+    settings
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showBluetooth", &[])
+        .unwrap();
+    settings
+        .paint(&theme, 920, 900, &mut buffer, 1.0)
+        .unwrap();
+
+    let scroll_key = first_node_with_attr(
+        settings.last_tree.as_ref().expect("rendered Bluetooth tree"),
+        "ref",
+        "settings_scroll",
+    )
+    .and_then(|node| node.mesh_key())
+    .expect("settings scroll key")
+    .to_string();
+    settings.scroll_offsets.entry(scroll_key.clone()).or_default().y = 120.0;
+
+    settings
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
+        .unwrap();
+    assert_eq!(
+        settings
+            .scroll_offsets
+            .get(&scroll_key)
+            .map(|offset| offset.y),
+        Some(0.0),
+        "switching settings pages should reset the shared scroll container"
+    );
+    settings
+        .paint(&theme, 920, 900, &mut buffer, 1.0)
+        .unwrap();
+
+    let command_text = settings
+        .display_list_paint_commands()
+        .iter()
+        .filter_map(|command| match &command.node.content {
+            mesh_core_render::display_list::DisplayPaintContent::Text(text) => {
+                Some(text.text.as_ref())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        command_text.contains(&"Color theme"),
+        "Appearance paint commands should be present after the switch"
+    );
+    assert!(
+        !command_text.contains(&"My devices") && !command_text.contains(&"Nearby devices"),
+        "Bluetooth page paint commands must be removed after switching to Appearance"
+    );
+}
+
+#[test]
 fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
     let theme = default_theme();
 
@@ -543,7 +675,6 @@ fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
     theme_selector
         .paint(&theme, 112, 92, &mut buffer, 1.0)
         .unwrap();
-
     let tree = theme_selector
         .last_tree
         .as_ref()
@@ -1979,7 +2110,7 @@ if not audio_ok then audio = nil end
 function onVolumeChange(value)
     local percent = math.floor((tonumber(value) or 0) + 0.5)
     if audio_ok and audio and audio.available ~= false then
-        audio.set_volume("default", percent / 100)
+        audio.set_volume("default", percent)
     end
 end
 "#,
@@ -2005,7 +2136,7 @@ end
             assert_eq!(command, "set_volume");
             assert_eq!(
                 payload,
-                &serde_json::json!({ "device_id": "default", "volume": 0.55 })
+                &serde_json::json!({ "device_id": "default", "percent": 55 })
             );
         }
         other => panic!("expected one mesh.audio set_volume command, got {other:?}"),
@@ -2066,7 +2197,7 @@ fn shipped_workspace_button_publishes_focus_workspace_request() {
             }],
             returns: Some("Result".into()),
             coalesce: false,
-            optimistic: None,
+            state_binding: None,
         }],
         events: Vec::new(),
         types: HashMap::new(),

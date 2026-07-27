@@ -203,6 +203,8 @@ impl Shell {
         let mut pending = VecDeque::new();
         pending.extend(self.mount_components()?);
         pending.extend(self.replay_cached_service_events()?);
+        let active_theme_id = self.theme.active().id.clone();
+        pending.extend(self.sync_theme_service_state(&active_theme_id)?);
         self.mark_components_locale_changed()?;
         pending.extend(self.sync_locale_service_state()?);
         pending.extend(self.broadcast_core_event(CoreEvent::Started)?);
@@ -322,6 +324,7 @@ impl Shell {
                 event,
             } => {
                 let profiling_started = self.profiling_enabled().then(std::time::Instant::now);
+                let event = self.normalize_service_event(event);
                 if self.record_latest_service_state(&event) {
                     pending.extend(self.deliver_service_event(&event)?);
                     if let Some(started) = profiling_started {

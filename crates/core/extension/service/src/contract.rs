@@ -45,21 +45,21 @@ pub struct InterfaceMethod {
     /// (set_volume, set_muted) where intermediate values are stale; wrong for
     /// relative/accumulating commands (volume_up, increment).
     pub coalesce: bool,
-    /// Optional optimistic-state annotation: when this command is dispatched,
-    /// the shell may patch the named public state field from the given command
-    /// argument before the provider confirms, so UI reacts instantly. `toggle`
-    /// flips the current boolean value instead of reading an argument.
-    pub optimistic: Option<OptimisticUpdate>,
+    /// Optional reactive state binding. When the command is accepted, the
+    /// shell writes the command value into the service's shared state and
+    /// publishes it to every observer before the provider confirms it.
+    pub state_binding: Option<StateBinding>,
 }
 
-/// Contract-declared optimistic state patch applied on command dispatch.
+/// Contract-declared binding between a command and shared service state.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OptimisticUpdate {
-    /// Public state field the shell patches optimistically.
+pub struct StateBinding {
+    /// Public service-state field controlled by the command.
     pub field: String,
-    /// Command argument whose value becomes the field's optimistic value.
-    /// `None` means toggle: the current boolean field value is negated.
+    /// Command argument whose value is written into the shared state field.
     pub from_arg: Option<String>,
+    /// Negate the current boolean state instead of copying an argument.
+    pub toggle: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,9 +240,10 @@ pub fn parse_interface_contract(
                     .collect(),
                 returns: method.returns,
                 coalesce: method.coalesce,
-                optimistic: method.optimistic.map(|value| OptimisticUpdate {
+                state_binding: method.state_binding.map(|value| StateBinding {
                     field: value.field,
                     from_arg: value.from_arg,
+                    toggle: value.toggle,
                 }),
             })
             .collect(),
@@ -336,23 +337,47 @@ pub fn contract_type_errors(contract: &InterfaceContract) -> Vec<String> {
                 returns,
             );
         }
-        if let Some(optimistic) = &method.optimistic {
-            if !contract
+        if let Some(binding) = &method.state_binding {
+            let bound_field = contract
                 .state_fields
                 .iter()
-                .any(|field| field.name == optimistic.field)
-            {
+                .find(|field| field.name == binding.field);
+            if bound_field.is_none() {
                 errors.push(format!(
-                    "method '{}' optimistic field '{}' is not a declared state field",
-                    method.name, optimistic.field
+                    "method '{}' stateBinding field '{}' is not a declared state field",
+                    method.name, binding.field
                 ));
             }
-            if let Some(from_arg) = &optimistic.from_arg
-                && !method.args.iter().any(|arg| &arg.name == from_arg)
+            if binding.from_arg.is_some() == binding.toggle {
+                errors.push(format!(
+                    "method '{}' stateBinding must declare exactly one of fromArg or toggle=true",
+                    method.name
+                ));
+            } else if let Some(from_arg) = &binding.from_arg {
+                let source_arg = method.args.iter().find(|arg| &arg.name == from_arg);
+                if source_arg.is_none() {
+                    errors.push(format!(
+                        "method '{}' stateBinding fromArg '{}' is not a declared argument",
+                        method.name, from_arg
+                    ));
+                } else if let (Some(field), Some(arg)) = (bound_field, source_arg)
+                    && field.field_type != arg.arg_type
+                {
+                    errors.push(format!(
+                        "method '{}' stateBinding type mismatch: state field '{}' is '{}' but argument '{}' is '{}'",
+                        method.name,
+                        field.name,
+                        field.field_type,
+                        arg.name,
+                        arg.arg_type
+                    ));
+                }
+            } else if let Some(field) = bound_field
+                && field.field_type != "boolean"
             {
                 errors.push(format!(
-                    "method '{}' optimistic fromArg '{}' is not a declared argument",
-                    method.name, from_arg
+                    "method '{}' toggle stateBinding field '{}' must be boolean",
+                    method.name, field.name
                 ));
             }
         }
@@ -441,16 +466,18 @@ struct ContractMethodJson {
     returns: Option<String>,
     #[serde(default)]
     coalesce: bool,
-    #[serde(default)]
-    optimistic: Option<ContractOptimisticJson>,
+    #[serde(default, rename = "stateBinding")]
+    state_binding: Option<ContractStateBindingJson>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ContractOptimisticJson {
+struct ContractStateBindingJson {
     field: String,
     #[serde(default, rename = "fromArg")]
     from_arg: Option<String>,
+    #[serde(default)]
+    toggle: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -558,7 +585,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_state_fields_and_optimistic_annotation() {
+    fn parses_command_state_binding() {
         let contract = serde_json::json!({
             "state": [
                 {
@@ -577,11 +604,11 @@ mod tests {
                     ],
                     "returns": "Result",
                     "coalesce": true,
-                    "optimistic": { "field": "muted", "fromArg": "muted" }
+                    "stateBinding": { "field": "muted", "fromArg": "muted" }
                 },
                 {
                     "name": "toggle_mute",
-                    "optimistic": { "field": "muted" }
+                    "stateBinding": { "field": "muted", "toggle": true }
                 }
             ]
         });
@@ -596,12 +623,61 @@ mod tests {
         );
         let set_muted = &contract.methods[0];
         assert!(set_muted.coalesce);
-        let optimistic = set_muted.optimistic.as_ref().unwrap();
-        assert_eq!(optimistic.field, "muted");
-        assert_eq!(optimistic.from_arg.as_deref(), Some("muted"));
-        let toggle = contract.methods[1].optimistic.as_ref().unwrap();
+        let binding = set_muted.state_binding.as_ref().unwrap();
+        assert_eq!(binding.field, "muted");
+        assert_eq!(binding.from_arg.as_deref(), Some("muted"));
+        assert!(!binding.toggle);
+        let toggle = contract.methods[1].state_binding.as_ref().unwrap();
         assert_eq!(toggle.field, "muted");
         assert_eq!(toggle.from_arg, None);
+        assert!(toggle.toggle);
+    }
+
+    #[test]
+    fn rejects_legacy_optimistic_annotation() {
+        let contract = serde_json::json!({
+            "state": [{ "name": "level", "type": "float" }],
+            "methods": [{
+                "name": "set",
+                "args": [{ "name": "level", "type": "float" }],
+                "optimistic": { "field": "level", "fromArg": "level" }
+            }]
+        });
+
+        let err = parse_interface_contract("mesh.brightness", "1.0", &contract).unwrap_err();
+        assert!(matches!(err, ContractError::Parse { .. }));
+        assert!(err.to_string().contains("unknown field `optimistic`"));
+    }
+
+    #[test]
+    fn rejects_state_binding_type_mismatch() {
+        let contract = serde_json::json!({
+            "state": [{ "name": "level", "type": "float" }],
+            "methods": [{
+                "name": "set",
+                "args": [{ "name": "level", "type": "string" }],
+                "stateBinding": { "field": "level", "fromArg": "level" }
+            }]
+        });
+
+        let err = parse_interface_contract("mesh.brightness", "1.0", &contract).unwrap_err();
+        assert!(matches!(err, ContractError::InvalidType { .. }));
+        assert!(err.to_string().contains("stateBinding type mismatch"));
+    }
+
+    #[test]
+    fn rejects_toggle_binding_for_non_boolean_state() {
+        let contract = serde_json::json!({
+            "state": [{ "name": "level", "type": "float" }],
+            "methods": [{
+                "name": "toggle",
+                "stateBinding": { "field": "level", "toggle": true }
+            }]
+        });
+
+        let err = parse_interface_contract("mesh.brightness", "1.0", &contract).unwrap_err();
+        assert!(matches!(err, ContractError::InvalidType { .. }));
+        assert!(err.to_string().contains("must be boolean"));
     }
 
     #[test]

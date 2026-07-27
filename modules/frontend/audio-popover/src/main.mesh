@@ -110,7 +110,7 @@ function onVolumeChange(value)
     if audio and audio.available ~= false then
         if last_sent_slider_value == nil or math.abs(last_sent_slider_value - pct) >= 1 then
             last_sent_slider_value = pct
-            audio.set_volume("default", pct / 100)
+            audio.set_volume("default", pct)
         end
     end
 end

@@ -167,12 +167,14 @@ end
     match requests.as_slice() {
         [
             CoreRequest::ShowSurface { surface_id },
-            CoreRequest::HideSurface {
+            CoreRequest::HidePopover {
                 surface_id: hidden_surface_id,
+                defer_for_hover_bridge,
             },
         ] => {
             assert_eq!(surface_id, "@mesh/settings");
             assert_eq!(hidden_surface_id, "@mesh/quick-settings");
+            assert!(!defer_for_hover_bridge);
         }
         other => panic!("expected settings show and quick settings hide requests, got {other:?}"),
     }

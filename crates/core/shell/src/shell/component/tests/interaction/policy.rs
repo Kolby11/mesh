@@ -123,7 +123,7 @@ function onVolumeChange(value)
     local normalized = clamp_volume(value)
     slider_value = normalized
     if audio_ok and audio then
-        audio.set_volume("default", normalized)
+        audio.set_volume("default", normalized * 100)
     end
 end
 </script>
@@ -299,10 +299,12 @@ fn audio_popover_first_slider_grab_dispatches_change() {
         ] => {
             assert_eq!(interface, "mesh.audio");
             assert_eq!(command, "set_volume");
-            let volume = payload["volume"].as_f64().expect("numeric volume payload");
+            let percent = payload["percent"]
+                .as_f64()
+                .expect("numeric percent payload");
             assert!(
-                (volume - 0.7).abs() < 0.03,
-                "first slider grab should dispatch the grabbed value, got {volume}"
+                (percent - 70.0).abs() < 3.0,
+                "first slider grab should dispatch the grabbed value, got {percent}"
             );
         }
         other => panic!("expected one set_volume request on first grab, got {other:?}"),
@@ -548,10 +550,12 @@ fn audio_popover_slider_keyboard_still_steps_after_mouse_drag() {
         ] => {
             assert_eq!(interface, "mesh.audio");
             assert_eq!(command, "set_volume");
-            let volume = payload["volume"].as_f64().expect("numeric volume payload");
+            let percent = payload["percent"]
+                .as_f64()
+                .expect("numeric percent payload");
             assert!(
-                (volume - 0.75).abs() < 0.001,
-                "keyboard step after mouse drag should decrement from the drag value, got {volume}"
+                (percent - 75.0).abs() < 0.001,
+                "keyboard step after mouse drag should decrement from the drag value, got {percent}"
             );
         }
         other => panic!("expected one audio set_volume request, got {other:?}"),

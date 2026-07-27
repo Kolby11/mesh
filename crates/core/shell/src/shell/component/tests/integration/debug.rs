@@ -1,6 +1,8 @@
 use super::*;
+use mesh_core_service::contract::ContractStateField;
 use mesh_core_service::{
-    ContractCapabilities, InterfaceContract, InterfaceProvider, parse_contract_version,
+    ContractCapabilities, InterfaceArgument, InterfaceContract, InterfaceMethod, InterfaceProvider,
+    parse_contract_version,
 };
 use std::collections::HashMap;
 
@@ -404,7 +406,37 @@ fn settings_catalog() -> InterfaceCatalog {
         catalog.register_contract(InterfaceContract {
             interface: interface.into(),
             version: parse_contract_version("1.0").unwrap(),
-            state_fields: Vec::new(),
+            state_fields: if interface == "mesh.theme" {
+                vec![
+                    ContractStateField {
+                        name: "current".into(),
+                        field_type: "string".into(),
+                        description: None,
+                    },
+                    ContractStateField {
+                        name: "theme_id".into(),
+                        field_type: "string".into(),
+                        description: None,
+                    },
+                    ContractStateField {
+                        name: "is_dark".into(),
+                        field_type: "boolean".into(),
+                        description: None,
+                    },
+                    ContractStateField {
+                        name: "themes".into(),
+                        field_type: "array".into(),
+                        description: None,
+                    },
+                    ContractStateField {
+                        name: "available".into(),
+                        field_type: "array".into(),
+                        description: None,
+                    },
+                ]
+            } else {
+                Vec::new()
+            },
             methods: Vec::new(),
             events: Vec::new(),
             types: HashMap::new(),
@@ -419,16 +451,86 @@ fn settings_catalog() -> InterfaceCatalog {
             priority: 100,
         });
     }
+    catalog.register_contract(InterfaceContract {
+        interface: "mesh.audio".into(),
+        version: parse_contract_version("1.0").unwrap(),
+        state_fields: vec![
+            ContractStateField {
+                name: "available".into(),
+                field_type: "boolean".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "percent".into(),
+                field_type: "float".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "muted".into(),
+                field_type: "boolean".into(),
+                description: None,
+            },
+        ],
+        methods: vec![
+            InterfaceMethod {
+                name: "set_volume".into(),
+                args: vec![
+                    InterfaceArgument {
+                        name: "device_id".into(),
+                        arg_type: "string".into(),
+                    },
+                    InterfaceArgument {
+                        name: "percent".into(),
+                        arg_type: "float".into(),
+                    },
+                ],
+                returns: None,
+                coalesce: true,
+                state_binding: Some(mesh_core_service::StateBinding {
+                    field: "percent".into(),
+                    from_arg: Some("percent".into()),
+                    toggle: false,
+                }),
+            },
+            InterfaceMethod {
+                name: "set_muted".into(),
+                args: vec![
+                    InterfaceArgument {
+                        name: "device_id".into(),
+                        arg_type: "string".into(),
+                    },
+                    InterfaceArgument {
+                        name: "muted".into(),
+                        arg_type: "boolean".into(),
+                    },
+                ],
+                returns: None,
+                coalesce: true,
+                state_binding: None,
+            },
+        ],
+        events: Vec::new(),
+        types: HashMap::new(),
+        capabilities: ContractCapabilities::default(),
+    });
+    catalog.register_provider(InterfaceProvider {
+        interface: "mesh.audio".into(),
+        version: Some("1.0".into()),
+        base_module: Some("@mesh/audio-interface".into()),
+        provider_module: "@mesh/pipewire-audio".into(),
+        backend_name: "PipeWire".into(),
+        priority: 100,
+    });
     catalog
 }
 
 #[test]
-fn settings_surface_renders_modules_providers_theme_and_locale() {
+fn settings_surface_renders_backend_pages_and_advanced_controls() {
     let mut component = real_frontend_module_component("@mesh/settings", settings_catalog());
     {
         let theme = default_theme();
-        let mut buffer = PixelBuffer::new(420, 720);
-        component.paint(&theme, 420, 720, &mut buffer, 1.0).unwrap();
+        let mut buffer = PixelBuffer::new(920, 700);
+        component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
     }
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -524,6 +626,36 @@ fn settings_surface_renders_modules_providers_theme_and_locale() {
                         },
                         "diagnostics": [],
                         "health": []
+                    },
+                    {
+                        "module_id": "@mesh/mesh-default-dark",
+                        "kind": "theme",
+                        "enabled": true,
+                        "uses": {},
+                        "provides": {
+                            "themes": [{ "id": "mesh-default-dark", "label": "MESH Default Dark" }]
+                        },
+                        "diagnostics": []
+                    },
+                    {
+                        "module_id": "@mesh/mesh-default-light",
+                        "kind": "theme",
+                        "enabled": true,
+                        "uses": {},
+                        "provides": {
+                            "themes": [{ "id": "mesh-default-light", "label": "MESH Default Light" }]
+                        },
+                        "diagnostics": []
+                    },
+                    {
+                        "module_id": "@mesh/gruvbox-dark",
+                        "kind": "theme",
+                        "enabled": true,
+                        "uses": {},
+                        "provides": {
+                            "themes": [{ "id": "gruvbox-dark", "label": "Gruvbox Dark" }]
+                        },
+                        "diagnostics": []
                     }
                 ],
                 "interfaces": [],
@@ -534,22 +666,179 @@ fn settings_surface_renders_modules_providers_theme_and_locale() {
             }),
         })
         .unwrap();
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.theme".into(),
+            source_module: "@mesh/core-settings".into(),
+            payload: serde_json::json!({
+                "current": "gruvbox-dark",
+                "theme_id": "gruvbox-dark",
+                "is_dark": true,
+                "themes": [
+                    { "id": "gruvbox-dark", "label": "Gruvbox Dark" }
+                ],
+                "available": [
+                    "gruvbox-dark"
+                ]
+            }),
+        })
+        .unwrap();
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 64,
+                "muted": false
+            }),
+        })
+        .unwrap();
 
     let theme = default_theme();
-    let mut buffer = PixelBuffer::new(420, 720);
-    component.paint(&theme, 420, 720, &mut buffer, 1.0).unwrap();
+    let mut buffer = PixelBuffer::new(920, 700);
+    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Settings"));
     assert!(text.iter().any(|line| line == "Appearance"));
-    assert!(text.iter().any(|line| line == "Active Providers"));
-    assert!(text.iter().any(|line| line == "mesh.audio"));
-    assert!(text.iter().any(|line| line == "@mesh/pipewire-audio"));
-    assert!(text.iter().any(|line| line == "Installed Modules"));
-    assert!(text.iter().any(|line| line == "@mesh/navigation-bar"));
+    assert!(text.iter().any(|line| line == "Wi-Fi"));
+    assert!(text.iter().any(|line| line == "Bluetooth"));
+    assert!(
+        text.iter()
+            .any(|line| line == "Network service unavailable"),
+        "settings Wi-Fi fallback should resolve from the English catalog: {text:?}"
+    );
+
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
+        .unwrap();
+    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    let text = rendered_text(&component);
+    assert!(text.iter().any(|line| line == "64%"));
+    assert!(text.iter().any(|line| line == "Active audio provider"));
 
     let requests = component
-        .call_namespaced_handler("__mesh_embed__::@mesh/settings::onThemeLight", &[])
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/settings/local:AudioPage::onVolumeChange",
+            &[serde_json::json!(38)],
+        )
+        .unwrap();
+    assert!(matches!(
+        requests.as_slice(),
+        [CoreRequest::ServiceCommand {
+            interface,
+            command,
+            payload,
+            ..
+        }] if interface == "mesh.audio"
+            && command == "set_volume"
+            && payload == &serde_json::json!({ "device_id": "default", "percent": 38 })
+    ));
+
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAdvanced", &[])
+        .unwrap();
+    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    let text = rendered_text(&component);
+    assert!(text.iter().any(|line| line == "Active providers"));
+    assert!(text.iter().any(|line| line == "mesh.audio"));
+    assert!(text.iter().any(|line| line == "@mesh/pipewire-audio"));
+    assert!(text.iter().any(|line| line == "Installed modules"));
+    assert!(text.iter().any(|line| line == "@mesh/navigation-bar"));
+
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
+        .unwrap();
+    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    let text = rendered_text(&component);
+    assert!(text.iter().any(|line| line == "Color theme"));
+    assert!(text.iter().any(|line| line == "Language"));
+    assert!(text.iter().any(|line| line == "MESH Default Dark"));
+    assert!(text.iter().any(|line| line == "MESH Default Light"));
+    assert!(text.iter().any(|line| line == "Gruvbox Dark"));
+    first_node_with_attr(
+        component
+            .last_tree
+            .as_ref()
+            .expect("rendered settings tree"),
+        "content",
+        "Slovenčina",
+    )
+    .expect("Slovak language label");
+
+    fn collect_theme_options(
+        node: &mesh_core_elements::WidgetNode,
+        options: &mut Vec<(String, String)>,
+    ) {
+        if let Some(call) = node.event_handler_calls.get("click")
+            && call.handler.ends_with("::onThemeSelect")
+            && let Some(theme_id) = call.args.first().and_then(|arg| arg.as_str())
+        {
+            options.push((
+                theme_id.to_string(),
+                node.attributes.get("class").cloned().unwrap_or_default(),
+            ));
+        }
+        for child in &node.children {
+            collect_theme_options(child, options);
+        }
+    }
+
+    let mut theme_options = Vec::new();
+    collect_theme_options(
+        component
+            .last_tree
+            .as_ref()
+            .expect("rendered settings tree"),
+        &mut theme_options,
+    );
+    assert_eq!(theme_options.len(), 3);
+    assert!(
+        theme_options.iter().any(|(id, class)| {
+            id == "gruvbox-dark"
+                && class
+                    .split_whitespace()
+                    .any(|token| token == "theme-option-active")
+        }),
+        "the exact current theme should be highlighted: {theme_options:?}"
+    );
+    assert!(
+        theme_options.iter().all(|(id, class)| {
+            id == "gruvbox-dark"
+                || !class
+                    .split_whitespace()
+                    .any(|token| token == "theme-option-active")
+        }),
+        "only the exact current theme should be highlighted: {theme_options:?}"
+    );
+
+    let slovak_locale = mesh_core_locale::LocaleEngine::new("sk");
+    component.locale_changed(&slovak_locale).unwrap();
+    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    let text = rendered_text(&component);
+    assert!(
+        text.iter().any(|line| line == "Farebná téma"),
+        "changing locale must translate and preserve the active Appearance settings page"
+    );
+    assert!(text.iter().any(|line| line == "Nastavenia"));
+    assert!(text.iter().any(|line| line == "Slovenčina (sk)"));
+
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
+        .unwrap();
+    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    let text = rendered_text(&component);
+    assert!(
+        text.iter().any(|line| line == "Aktívny poskytovateľ zvuku"),
+        "live backend fallback copy should also use the Slovak catalog"
+    );
+
+    let requests = component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/settings/local:AppearancePage::onThemeSelect",
+            &[serde_json::json!("mesh-default-light")],
+        )
         .unwrap();
     match requests.as_slice() {
         [CoreRequest::SetTheme { theme_id }] => assert_eq!(theme_id, "mesh-default-light"),
@@ -558,7 +847,7 @@ fn settings_surface_renders_modules_providers_theme_and_locale() {
 
     let requests = component
         .call_namespaced_handler(
-            "__mesh_embed__::@mesh/settings::onProviderNext",
+            "__mesh_embed__::@mesh/settings/local:AdvancedPage::onProviderNext",
             &[
                 serde_json::json!("mesh.audio"),
                 serde_json::json!("@mesh/pipewire-audio"),
@@ -573,7 +862,7 @@ fn settings_surface_renders_modules_providers_theme_and_locale() {
 
     let requests = component
         .call_namespaced_handler(
-            "__mesh_embed__::@mesh/settings::onModuleToggle",
+            "__mesh_embed__::@mesh/settings/local:AdvancedPage::onModuleToggle",
             &[
                 serde_json::json!("@mesh/pulseaudio-audio"),
                 serde_json::json!(true),

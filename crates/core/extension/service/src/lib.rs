@@ -28,9 +28,8 @@ pub mod registry;
 
 pub use contract::{
     BaseType, ContractCapabilities, ContractError, ContractStateField, InterfaceArgument,
-    InterfaceContract, InterfaceEvent, InterfaceMethod, InterfaceTypeDef, OptimisticUpdate,
-    TypeExpr, contract_type_errors, parse_contract_version, parse_interface_contract,
-    parse_version_req,
+    InterfaceContract, InterfaceEvent, InterfaceMethod, InterfaceTypeDef, StateBinding, TypeExpr,
+    contract_type_errors, parse_contract_version, parse_interface_contract, parse_version_req,
 };
 pub use interface::{
     InterfaceCatalog, InterfaceProvider, InterfaceRegistry, InterfaceResolution,

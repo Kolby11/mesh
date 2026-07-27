@@ -439,7 +439,20 @@ fn shell_theme_backend_accepts_current_payload() {
     let payload = ctx
         .run_command(
             "set-current",
-            &serde_json::json!({ "current": "mesh-default-light", "is_dark": false }),
+            &serde_json::json!({
+                "current": "mesh-default-light",
+                "is_dark": false,
+                "themes": [
+                    { "id": "mesh-default-dark", "label": "MESH Default Dark" },
+                    { "id": "mesh-default-light", "label": "MESH Default Light" },
+                    { "id": "gruvbox-dark", "label": "Gruvbox Dark" }
+                ],
+                "available": [
+                    "mesh-default-dark",
+                    "mesh-default-light",
+                    "gruvbox-dark"
+                ]
+            }),
         )
         .unwrap()
         .unwrap();
@@ -450,6 +463,20 @@ fn shell_theme_backend_accepts_current_payload() {
     assert_eq!(
         payload.get("is_dark").and_then(|v| v.as_bool()),
         Some(false)
+    );
+    assert_eq!(
+        payload
+            .get("themes")
+            .and_then(|value| value.as_array())
+            .map(Vec::len),
+        Some(3)
+    );
+    assert_eq!(
+        payload
+            .get("available")
+            .and_then(|value| value.as_array())
+            .map(Vec::len),
+        Some(3)
     );
 }
 

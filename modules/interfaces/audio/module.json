@@ -38,10 +38,11 @@
             "name": "set_volume",
             "args": [
               { "name": "device_id", "type": "string" },
-              { "name": "volume", "type": "float" }
+              { "name": "percent", "type": "float" }
             ],
             "returns": "Result",
-            "coalesce": true
+            "coalesce": true,
+            "stateBinding": { "field": "percent", "fromArg": "percent" }
           },
           {
             "name": "set_muted",
@@ -51,13 +52,13 @@
             ],
             "returns": "Result",
             "coalesce": true,
-            "optimistic": { "field": "muted", "fromArg": "muted" }
+            "stateBinding": { "field": "muted", "fromArg": "muted" }
           },
           { "name": "volume_up" },
           { "name": "volume_down" },
           {
             "name": "toggle_mute",
-            "optimistic": { "field": "muted" }
+            "stateBinding": { "field": "muted", "toggle": true }
           }
         ],
         "events": [

@@ -369,7 +369,7 @@ function onVolumeChange(value)
     local percent = clamp_percent(value)
     audio_percent = percent
     if audio_ok and audio and audio.available ~= false then
-        audio.set_volume("default", percent / 100)
+        audio.set_volume("default", percent)
     else
         audio_status = "Audio controls unavailable"
     end
@@ -396,7 +396,7 @@ end
             assert_eq!(command, "set_volume");
             assert_eq!(
                 payload,
-                &serde_json::json!({ "device_id": "default", "volume": 0.42 })
+                &serde_json::json!({ "device_id": "default", "percent": 42 })
             );
         }
         other => panic!("expected one mesh.audio set_volume command, got {other:?}"),
@@ -490,5 +490,60 @@ end
     assert_eq!(
         ctx.state.get("network_status"),
         Some(serde_json::json!("Network unavailable"))
+    );
+}
+
+#[test]
+fn lazily_created_child_runtime_reads_service_state_cached_before_its_first_build() {
+    let mut component = test_frontend_component_with_local_components(
+        r#"
+<template>
+  <box>
+    <Child />
+  </box>
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+</script>
+"#,
+        &[(
+            "Child",
+            r#"
+<template>
+  <text content="{label}" />
+</template>
+<script lang="luau">
+local audio = require("mesh.audio@>=1.0")
+label = "none"
+
+function render()
+    label = tostring(audio.percent or "none")
+end
+</script>
+"#,
+        )],
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+
+    let update = ServiceEvent::Updated {
+        service: "mesh.audio".into(),
+        source_module: "@mesh/pipewire-audio".into(),
+        payload: serde_json::json!({ "available": true, "percent": 42 }),
+    };
+
+    // The surface has not painted, so no runtime reads an audio field yet and
+    // the shell routes the update past it — the payload must still be cached.
+    assert!(!ShellComponent::observes_service_event(&component, &update));
+    ShellComponent::cache_service_payload(&mut component, &update);
+
+    let theme = mesh_core_theme::default_theme();
+    let mut buffer = PixelBuffer::new(160, 60);
+    component.paint(&theme, 160, 60, &mut buffer, 1.0).unwrap();
+
+    assert!(
+        rendered_text(&component).iter().any(|text| text == "42"),
+        "child created after the update should render cached service state, got {:?}",
+        rendered_text(&component)
     );
 }

@@ -2,7 +2,7 @@
   <stack class="nav-button-shell">
     <button
       class="nav-button"
-      onclick={onSettingsToggle}
+      onclick={onOpenSettings}
       onpointerenter={onSettingsEnter}
       onpointerleave={onSettingsLeave}
       aria-haspopup="true"
@@ -42,12 +42,11 @@ local function hide_settings_selector(bridge)
     end
 end
 
-function onSettingsToggle(event)
-    if settings_surface_hidden then
-        show_settings_selector(event)
-    else
-        hide_settings_selector(false)
-    end
+function onOpenSettings()
+    -- A click is the explicit path into the full settings application. The
+    -- quick-settings popup remains the lightweight hover surface.
+    mesh.events.publish("shell.show-surface", { surface_id = "@mesh/settings" })
+    hide_settings_selector(false)
 end
 
 -- Hover opens quick settings; leaving the trigger starts a core-owned hover

@@ -650,7 +650,7 @@ mod tests {
              function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function on_command_set_volume()\n\
                local payload = mesh.service.payload()\n\
-               mesh.service.emit_event(\"VolumeChanged\", { device_id = payload.device_id, level = payload.volume })\n\
+               mesh.service.emit_event(\"VolumeChanged\", { device_id = payload.device_id, level = payload.percent })\n\
              end"
             .to_string(),
             update_tx,
@@ -660,7 +660,7 @@ mod tests {
         cmd_tx
             .send(BackendServiceCommand {
                 command: "set_volume".to_string(),
-                payload: serde_json::json!({ "device_id": "default", "volume": 0.42 }),
+                payload: serde_json::json!({ "device_id": "default", "percent": 42 }),
                 coalesce: false,
             })
             .unwrap();
@@ -672,7 +672,7 @@ mod tests {
         assert_eq!(event.name, "VolumeChanged");
         assert_eq!(
             event.payload,
-            serde_json::json!({ "device_id": "default", "level": 0.42 })
+            serde_json::json!({ "device_id": "default", "level": 42 })
         );
 
         drop(cmd_tx);
@@ -940,7 +940,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn backend_command_dispatches_set_volume_normalized_payload() {
+    async fn backend_command_dispatches_set_volume_percent_payload() {
         let (update_tx, mut update_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
@@ -952,7 +952,7 @@ mod tests {
             "function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function on_command_set_volume()\n\
                local payload = mesh.service.payload()\n\
-               mesh.service.emit({ device_id = payload.device_id, volume = payload.volume })\n\
+               mesh.service.emit({ device_id = payload.device_id, percent = payload.percent })\n\
              end"
             .to_string(),
             update_tx,
@@ -964,7 +964,7 @@ mod tests {
                 command: "set_volume".to_string(),
                 payload: serde_json::json!({
                     "device_id": "default",
-                    "volume": 0.42
+                    "percent": 42
                 }),
                 coalesce: false,
             })
@@ -972,7 +972,7 @@ mod tests {
 
         let update = next_update(
             &mut update_rx,
-            "set_volume command should emit normalized payload",
+            "set_volume command should emit percent payload",
         )
         .await;
         assert_eq!(update.service.as_ref(), "audio");
@@ -982,8 +982,8 @@ mod tests {
             Some("default")
         );
         assert_eq!(
-            update.payload.get("volume").and_then(|v| v.as_f64()),
-            Some(0.42)
+            update.payload.get("percent").and_then(|v| v.as_i64()),
+            Some(42)
         );
 
         drop(cmd_tx);

@@ -1,0 +1,289 @@
+<template>
+    <column class="settings-page" hidden={hidden}>
+        <column class="settings-section">
+            <text class="settings-section-title">{t('advanced.active_providers')}</text>
+            <text class="settings-section-copy">{providers_count .. t(providers_summary) .. providers_notice_separator .. t(provider_notice)}</text>
+            <list class="settings-list" label={t('advanced.active_backend_providers')} hidden={providers_hidden}>
+                {#for row in provider_rows}
+                    <list-item class="settings-card">
+                        <column class="settings-card-copy">
+                            <text class="settings-card-title">{row.interface}</text>
+                            <text class="settings-card-meta">{row.provider}</text>
+                        </column>
+                        <button
+                            class="settings-secondary-button"
+                            hidden={row.action_hidden}
+                            onclick={onProviderNext(row.interface, row.provider)}
+                        >
+                            {t('advanced.next_provider')}
+                        </button>
+                    </list-item>
+                {/for}
+            </list>
+            <empty-state class="settings-empty-state" hidden={providers_empty_hidden}>
+                <text class="settings-card-title">{t('advanced.no_active_bindings')}</text>
+                <text class="settings-section-copy">{t('advanced.bindings_waiting')}</text>
+            </empty-state>
+        </column>
+
+        <column class="settings-section">
+            <row class="settings-section-head">
+                <column class="settings-card-copy">
+                    <text class="settings-section-title">{t('advanced.installed_modules')}</text>
+                    <text class="settings-section-copy">{modules_match_count .. t(modules_of) .. modules_total_count .. t(modules_summary) .. modules_notice_separator .. t(module_notice)}</text>
+                </column>
+                <input
+                    class="module-filter"
+                    value={module_filter}
+                    placeholder={t('advanced.filter_modules')}
+                    label={t('advanced.filter_installed_modules')}
+                    onchange={onModuleFilterChange}
+                />
+            </row>
+            <list class="settings-list" label={t('advanced.installed_modules')} hidden={modules_hidden}>
+                {#for row in module_rows}
+                    <list-item class="settings-card">
+                        <column class="settings-card-copy">
+                            <row class="module-title-row">
+                                <text class="settings-card-title">{row.module_id}</text>
+                                <text class="settings-status-pill">{t(row.kind)}</text>
+                            </row>
+                            <text class="settings-card-meta">{t(row.status) .. row.status_details}</text>
+                            <text class="settings-card-meta">{t('advanced.uses') .. ' ' .. row.interface_count .. ' ' .. t('advanced.interface_count') .. ' · ' .. t('advanced.settings') .. ' ' .. t(row.settings_list)}</text>
+                        </column>
+                        <button
+                            class={row.button_class}
+                            hidden={row.action_hidden}
+                            onclick={onModuleToggle(row.module_id, row.enabled)}
+                        >
+                            {t(row.action)}
+                        </button>
+                    </list-item>
+                {/for}
+            </list>
+            <empty-state class="settings-empty-state" hidden={modules_empty_hidden}>
+                <text class="settings-card-title">{t('advanced.no_matching_modules')}</text>
+                <text class="settings-section-copy">{t('advanced.clear_filter')}</text>
+            </empty-state>
+        </column>
+    </column>
+</template>
+
+<script lang="luau">
+hidden = false
+
+local debug_service = require("mesh.debug")
+local t = import("mesh.i18n", "t")
+
+providers_count = ""
+providers_summary = "advanced.waiting_graph"
+providers_notice_separator = ""
+modules_match_count = ""
+modules_of = ""
+modules_total_count = ""
+modules_summary = "advanced.waiting_graph"
+modules_notice_separator = ""
+module_filter = ""
+provider_rows = {}
+module_rows = {}
+providers_hidden = true
+providers_empty_hidden = false
+modules_hidden = true
+modules_empty_hidden = false
+
+local provider_candidates = {}
+local pending_providers = {}
+local pending_module_enabled = {}
+local provider_notice = ""
+local module_notice = ""
+
+local function lower(value)
+    return string.lower(tostring(value or ""))
+end
+
+local function list_count(values)
+    if type(values) ~= "table" then return 0 end
+    return #values
+end
+
+local function join_limited(values, limit)
+    if type(values) ~= "table" or #values == 0 then return "common.none" end
+    local out = {}
+    for i = 1, math.min(#values, limit) do
+        local item = values[i]
+        if type(item) == "table" then
+            out[#out + 1] = tostring(item.interface or item.id or item.name or "")
+        else
+            out[#out + 1] = tostring(item)
+        end
+    end
+    if #values > limit then out[#out + 1] = "+" .. tostring(#values - limit) end
+    return table.concat(out, ", ")
+end
+
+local function module_matches(entry, query)
+    if query == "" then return true end
+    if string.find(lower(entry.module_id), query, 1, true) then return true end
+    if string.find(lower(entry.kind), query, 1, true) then return true end
+    local uses = entry.uses or {}
+    if string.find(lower(join_limited(uses.interfaces, 16)), query, 1, true) then return true end
+    local provides = entry.provides or {}
+    return string.find(lower(join_limited(provides.settings, 16)), query, 1, true) ~= nil
+end
+
+function render()
+    local graph = {}
+    if debug_service and type(debug_service.module_graph) == "table" then
+        graph = debug_service.module_graph
+    end
+
+    local active_providers = {}
+    local active_provider_modules = {}
+    local providers = {}
+    local matched = {}
+    local seen_bindings = {}
+    provider_candidates = {}
+
+    for _, entry in ipairs(graph) do
+        local uses = entry.uses or {}
+        local active = uses.active_providers
+        if type(active) == "table" then
+            for _, pair in ipairs(active) do
+                local interface = tostring(pair.interface or "")
+                local provider = tostring(pair.provider or "")
+                if interface ~= "" and provider ~= "" then
+                    active_providers[interface] = provider
+                    active_provider_modules[provider] = true
+                    local key = interface .. "=" .. provider
+                    if not seen_bindings[key] then
+                        providers[#providers + 1] = { interface = interface, provider = provider }
+                        seen_bindings[key] = true
+                    end
+                end
+            end
+        end
+
+        if entry.enabled ~= false and entry.kind == "backend" then
+            local provided = (entry.provides or {}).interfaces
+            if type(provided) == "table" then
+                for _, value in ipairs(provided) do
+                    local interface = type(value) == "table" and value.interface or value
+                    interface = tostring(interface or "")
+                    if interface ~= "" then
+                        provider_candidates[interface] = provider_candidates[interface] or {}
+                        provider_candidates[interface][#provider_candidates[interface] + 1] = tostring(entry.module_id or "")
+                    end
+                end
+            end
+        end
+
+        if module_matches(entry, lower(module_filter)) then
+            matched[#matched + 1] = entry
+        end
+    end
+
+    provider_rows = {}
+    for _, pair in ipairs(providers) do
+        local interface = pair.interface
+        local candidates = provider_candidates[interface] or {}
+        provider_rows[#provider_rows + 1] = {
+            interface = interface,
+            provider = pending_providers[interface] or active_providers[interface] or pair.provider,
+            action_hidden = #candidates < 2,
+        }
+    end
+    providers_hidden = #provider_rows == 0
+    providers_empty_hidden = #provider_rows > 0
+    providers_count = #providers == 0 and "" or (tostring(#providers) .. " ")
+    providers_summary = #providers == 0 and "advanced.no_bindings_published"
+        or "advanced.binding_count"
+    providers_notice_separator = provider_notice == "" and "" or " · "
+
+    module_rows = {}
+    for i = 1, math.min(#matched, 12) do
+        local entry = matched[i]
+        local module_id = tostring(entry.module_id or "")
+        local enabled = pending_module_enabled[module_id]
+        if enabled == nil then enabled = entry.enabled ~= false end
+        local uses = entry.uses or {}
+        local provides = entry.provides or {}
+        local diagnostics = entry.diagnostics or {}
+        local status = enabled and "common.enabled" or "common.disabled"
+        local status_details = #diagnostics > 0
+            and (" · " .. join_limited(diagnostics, 2))
+            or ""
+        local action_allowed = module_id ~= "@mesh/settings"
+            and entry.root_layout ~= true
+            and not active_provider_modules[module_id]
+        module_rows[#module_rows + 1] = {
+            module_id = module_id,
+            kind = tostring(entry.kind or "advanced.module"),
+            status = status,
+            status_details = status_details,
+            interface_count = tostring(list_count(uses.interfaces)),
+            settings_list = join_limited(provides.settings, 2),
+            enabled = enabled,
+            action = enabled and "common.disable" or "common.enable",
+            action_hidden = not action_allowed,
+            button_class = enabled and "settings-danger-button" or "settings-primary-button",
+        }
+    end
+    modules_hidden = #module_rows == 0
+    modules_empty_hidden = #module_rows > 0
+    modules_match_count = #graph == 0 and "" or (tostring(#matched) .. " ")
+    modules_of = #graph == 0 and "" or "advanced.of"
+    modules_total_count = #graph == 0 and "" or (" " .. tostring(#graph) .. " ")
+    modules_summary = #graph == 0 and "advanced.no_modules_published"
+        or "advanced.modules_match"
+    modules_notice_separator = module_notice == "" and "" or " · "
+end
+
+function onModuleFilterChange(value)
+    if type(value) == "table" then
+        module_filter = tostring(value.value or "")
+    else
+        module_filter = tostring(value or "")
+    end
+end
+
+function onProviderNext(interface, current)
+    local candidates = provider_candidates[interface] or {}
+    if interface == "" or #candidates < 2 then return end
+    local index = 0
+    for i, provider in ipairs(candidates) do
+        if provider == current then index = i end
+    end
+    local provider_id = candidates[(index % #candidates) + 1]
+    pending_providers[interface] = provider_id
+    provider_notice = "advanced.switching_live"
+    mesh.events.publish("shell.set-provider", {
+        interface = interface,
+        provider_id = provider_id,
+    })
+end
+
+function onModuleToggle(module_id, current_enabled)
+    if module_id == "" or module_id == "@mesh/settings" then return end
+    local enabled = not current_enabled
+    pending_module_enabled[module_id] = enabled
+    module_notice = "advanced.applying_live"
+    mesh.events.publish("shell.set-module-enabled", {
+        module_id = module_id,
+        enabled = enabled,
+    })
+end
+</script>
+
+<style>
+    .module-filter {
+        width: 190px;
+        flex-shrink: 0;
+    }
+
+    .module-title-row {
+        width: 100%;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--spacing-sm);
+    }
+</style>

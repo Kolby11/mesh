@@ -4,6 +4,27 @@ const THEME_RELOAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::fro
 const SHELL_SETTINGS_RELOAD_POLL_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(500);
 
+fn theme_preview_palette(theme: &mesh_core_theme::Theme) -> serde_json::Value {
+    let color = |name: &str, fallback: &str| {
+        theme
+            .token(name)
+            .map(ToString::to_string)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| fallback.to_string())
+    };
+    let surface = color("color.surface", "transparent");
+    let on_surface = color("color.on-surface", "currentcolor");
+
+    serde_json::json!({
+        "surface": surface,
+        "surface_container_low": color("color.surface-container-low", &surface),
+        "surface_container_high": color("color.surface-container-high", &surface),
+        "primary": color("color.primary", &on_surface),
+        "outline_variant": color("color.outline-variant", &on_surface),
+        "on_surface": on_surface,
+    })
+}
+
 impl Shell {
     pub(in crate::shell) fn reload_theme_if_changed(
         &mut self,
@@ -102,8 +123,46 @@ impl Shell {
         theme_id: &str,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let is_dark = theme_id.contains("dark");
-        let payload =
-            serde_json::json!({ "current": theme_id, "theme_id": theme_id, "is_dark": is_dark });
+        let mut themes = self
+            .theme
+            .available_themes()
+            .iter()
+            .map(|theme| {
+                serde_json::json!({
+                    "id": theme.id,
+                    "label": theme.name,
+                    "palette": theme_preview_palette(theme),
+                })
+            })
+            .collect::<Vec<_>>();
+        if !themes
+            .iter()
+            .any(|theme| theme["id"].as_str() == Some(theme_id))
+        {
+            themes.push(serde_json::json!({
+                "id": self.theme.active().id,
+                "label": self.theme.active().name,
+                "palette": theme_preview_palette(self.theme.active()),
+            }));
+        }
+        themes.sort_by(|left, right| {
+            left["id"]
+                .as_str()
+                .unwrap_or_default()
+                .cmp(right["id"].as_str().unwrap_or_default())
+        });
+        let available = themes
+            .iter()
+            .filter_map(|theme| theme["id"].as_str())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let payload = serde_json::json!({
+            "current": theme_id,
+            "theme_id": theme_id,
+            "is_dark": is_dark,
+            "themes": themes,
+            "available": available,
+        });
         if let Some(tx) = self.service_handlers.get("mesh.theme") {
             let _ = tx.send(ServiceCommandMsg {
                 command: "set-current".to_string(),

@@ -450,7 +450,7 @@ function onVolumeChange(value)
     slider_value = normalized
     update_audio_copy(percent, false)
     if audio_ok and audio then
-        audio.set_volume("default", normalized)
+        audio.set_volume("default", percent)
     end
 end
 </script>
@@ -542,7 +542,7 @@ end
             assert_eq!(command, "set_volume");
             assert_eq!(
                 payload,
-                &serde_json::json!({ "device_id": "default", "volume": 0.5 })
+                &serde_json::json!({ "device_id": "default", "percent": 50 })
             );
         }
         other => panic!("expected one mesh.audio.set_volume request, got {other:?}"),

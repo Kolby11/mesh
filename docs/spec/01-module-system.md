@@ -216,10 +216,11 @@ the contract inline:
             "name": "set_volume",
             "args": [
               { "name": "device_id", "type": "string" },
-              { "name": "volume", "type": "float" }
+              { "name": "percent", "type": "float" }
             ],
             "returns": "Result",
-            "coalesce": true
+            "coalesce": true,
+            "stateBinding": { "field": "percent", "fromArg": "percent" }
           },
           {
             "name": "set_muted",
@@ -229,7 +230,7 @@ the contract inline:
             ],
             "returns": "Result",
             "coalesce": true,
-            "optimistic": { "field": "muted", "fromArg": "muted" }
+            "stateBinding": { "field": "muted", "fromArg": "muted" }
           }
         ],
         "events": [
@@ -292,12 +293,12 @@ provider stubs, mocks, documentation, and compatibility reports.
   interface with **no declaration at all** (name in `mesh.implements` with no
   `baseModule`). Interface modules without a contract report
   `missing_interface_contract`.
-- **Optimistic methods.** A method may declare
-  `"optimistic": { "field", "fromArg"? }`: on successful dispatch the shell
-  patches the named public state field (from the named argument, or by
-  toggling the boolean field when `fromArg` is omitted) and re-applies it
-  until the provider confirms. This is the generic replacement for
-  service-specific optimistic state in core.
+- **Reactive command state.** A method may declare
+  `"stateBinding": { "field", "fromArg" }` or
+  `"stateBinding": { "field", "toggle": true }`: on successful dispatch the
+  shell updates that field in the interface's canonical shared state,
+  publishes it to every observer, retains it across stale provider snapshots,
+  and releases the pending binding when the provider confirms the value.
 - Do not put provider identity (`source_module`) in contract state — that is
   runtime metadata.
 

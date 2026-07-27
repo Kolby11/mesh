@@ -197,14 +197,12 @@ fn preprocess_template(source: &str) -> String {
             if b == b'<' {
                 in_tag = true;
             }
-            out.push(b as char);
-            i += 1;
+            push_source_char(source, &mut out, &mut i);
         } else if in_quoted {
             if b == quote_char {
                 in_quoted = false;
             }
-            out.push(b as char);
-            i += 1;
+            push_source_char(source, &mut out, &mut i);
         } else if b == b'"' || b == b'\'' {
             in_quoted = true;
             quote_char = b;
@@ -249,12 +247,20 @@ fn preprocess_template(source: &str) -> String {
             out.push_str(&xml_attr_escape(&source[expression_start..i]));
             out.push('"');
         } else {
-            out.push(b as char);
-            i += 1;
+            push_source_char(source, &mut out, &mut i);
         }
     }
 
     out
+}
+
+fn push_source_char(source: &str, out: &mut String, offset: &mut usize) {
+    let ch = source[*offset..]
+        .chars()
+        .next()
+        .expect("offset remains within the source");
+    out.push(ch);
+    *offset += ch.len_utf8();
 }
 
 pub(super) fn parse_markup(
@@ -988,6 +994,27 @@ struct OpenNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn template_preprocessing_preserves_utf8_text_and_attributes() {
+        let template = parse_markup(
+            r#"<text aria-label="Slovenčina">Slovenčina</text>"#,
+            &HashMap::new(),
+        )
+        .expect("Unicode template parses");
+
+        let TemplateNode::Element(text) = &template.root[0] else {
+            panic!("expected text element");
+        };
+        assert_eq!(
+            find_static_attr(&text.attributes, "aria-label").as_deref(),
+            Some("Slovenčina")
+        );
+        let [TemplateNode::Text(content)] = text.children.as_slice() else {
+            panic!("expected literal text child");
+        };
+        assert_eq!(content.content, "Slovenčina");
+    }
 
     #[test]
     fn planned_native_tags_parse_as_elements() {

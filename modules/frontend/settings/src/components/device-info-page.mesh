@@ -1,0 +1,237 @@
+<template>
+    <column class="settings-page" hidden={hidden}>
+        <row class="device-hero">
+            <box class="device-icon">
+                <icon name="computer" size="34" />
+            </box>
+            <column class="settings-card-copy">
+                <text class="device-name">{t(device_name)}</text>
+                <text class="settings-card-meta">{t(device_summary)}</text>
+            </column>
+            <text class={service_pill_class}>{t(service_pill)}</text>
+        </row>
+
+        <column class="settings-section">
+            <text class="settings-section-title">{t('device.operating_system')}</text>
+            <column class="settings-card">
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('device.distribution')}</text>
+                    <text class="settings-info-value">{t(os_label)}</text>
+                </row>
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('device.kernel')}</text>
+                    <text class="settings-info-value">{t(kernel_label)}</text>
+                </row>
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('device.architecture')}</text>
+                    <text class="settings-info-value">{t(architecture_label)}</text>
+                </row>
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('device.desktop_session')}</text>
+                    <text class="settings-info-value">{t(session_label)}</text>
+                </row>
+            </column>
+        </column>
+
+        <column class="settings-section">
+            <text class="settings-section-title">{t('device.hardware')}</text>
+            <column class="settings-card">
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('device.processor')}</text>
+                    <text class="settings-info-value">{t(processor_label)}</text>
+                </row>
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('device.memory')}</text>
+                    <text class="settings-info-value">{t(memory_label)}</text>
+                </row>
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('device.graphics')}</text>
+                    <text class="settings-info-value">{t(graphics_label)}</text>
+                </row>
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('device.uptime')}</text>
+                    <text class="settings-info-value">{t(uptime_label)}</text>
+                </row>
+            </column>
+        </column>
+
+        <column class="settings-section">
+            <text class="settings-section-title">{t('device.mesh_runtime')}</text>
+            <row class="runtime-grid">
+                <column class="runtime-card">
+                    <text class="runtime-value">{module_count}</text>
+                    <text class="settings-card-meta">{t('device.known_modules')}</text>
+                </column>
+                <column class="runtime-card">
+                    <text class="runtime-value">{backend_count}</text>
+                    <text class="settings-card-meta">{t('device.backend_modules')}</text>
+                </column>
+                <column class="runtime-card">
+                    <text class="runtime-value">{provider_count}</text>
+                    <text class="settings-card-meta">{t('device.active_bindings')}</text>
+                </column>
+            </row>
+            <text class="settings-section-copy">{t(device_backend_notice) .. device_backend_joiner .. t(device_backend_source) .. device_backend_period}</text>
+        </column>
+    </column>
+</template>
+
+<script lang="luau">
+hidden = false
+
+local debug_service = require("mesh.debug")
+local device_ok, device = pcall(require, "mesh.device@>=1.0")
+if not device_ok then device = nil end
+local t = import("mesh.i18n", "t")
+
+device_name = "device.this_device"
+device_summary = "device.identity_unpublished"
+service_pill = "device.partial"
+service_pill_class = "settings-status-pill"
+os_label = "common.not_reported"
+kernel_label = "common.not_reported"
+architecture_label = "common.not_reported"
+session_label = "device.mesh_session"
+processor_label = "common.not_reported"
+memory_label = "common.not_reported"
+graphics_label = "common.not_reported"
+uptime_label = "common.not_reported"
+module_count = "0"
+backend_count = "0"
+provider_count = "0"
+device_backend_notice = "device.install_provider"
+device_backend_joiner = ""
+device_backend_source = ""
+device_backend_period = ""
+
+local function value_or(value, fallback)
+    if value == nil or tostring(value) == "" then return fallback end
+    return tostring(value)
+end
+
+local function format_memory(value)
+    local numeric = tonumber(value)
+    if numeric == nil then return value_or(value, "common.not_reported") end
+    if numeric > 1024 * 1024 * 1024 then
+        return string.format("%.1f GB", numeric / (1024 * 1024 * 1024))
+    end
+    if numeric > 1024 * 1024 then
+        return string.format("%.1f MB", numeric / (1024 * 1024))
+    end
+    return tostring(numeric)
+end
+
+local function format_uptime(value)
+    local seconds = tonumber(value)
+    if seconds == nil or seconds < 0 then return value_or(value, "common.not_reported") end
+    local days = math.floor(seconds / 86400)
+    local hours = math.floor((seconds % 86400) / 3600)
+    local minutes = math.floor((seconds % 3600) / 60)
+    if days > 0 then return string.format("%dd %dh", days, hours) end
+    if hours > 0 then return string.format("%dh %dm", hours, minutes) end
+    return string.format("%dm", minutes)
+end
+
+function render()
+    local graph = {}
+    if debug_service and type(debug_service.module_graph) == "table" then
+        graph = debug_service.module_graph
+    end
+
+    local backends = 0
+    local bindings = 0
+    for _, entry in ipairs(graph) do
+        if entry.kind == "backend" and entry.enabled ~= false then
+            backends = backends + 1
+        end
+        local active = (entry.uses or {}).active_providers
+        if type(active) == "table" then
+            bindings = bindings + #active
+        end
+    end
+    module_count = tostring(#graph)
+    backend_count = tostring(backends)
+    provider_count = tostring(bindings)
+
+    if not device or device.available == false then
+        service_pill = "device.partial"
+        service_pill_class = "settings-status-pill"
+        device_backend_notice = "device.runtime_live"
+        device_backend_joiner = ""
+        device_backend_source = ""
+        device_backend_period = ""
+        return
+    end
+
+    device_name = value_or(device.hostname or device.device_name, "device.this_device")
+    local os_name = value_or(device.os_name or device.distribution, "Linux")
+    local os_version = value_or(device.os_version or device.distribution_version, "")
+    os_label = os_version == "" and os_name or (os_name .. " " .. os_version)
+    kernel_label = value_or(device.kernel or device.kernel_version, "common.not_reported")
+    architecture_label = value_or(device.architecture or device.arch, "common.not_reported")
+    session_label = value_or(device.desktop or device.session, "device.mesh_session")
+    processor_label = value_or(device.processor or device.cpu_model, "common.not_reported")
+    memory_label = format_memory(device.memory_total_bytes or device.memory_total)
+    graphics_label = value_or(device.graphics or device.gpu_model, "common.not_reported")
+    uptime_label = format_uptime(device.uptime_seconds or device.uptime)
+    device_summary = os_label .. " · " .. architecture_label
+    service_pill = "device.live"
+    service_pill_class = "settings-status-pill settings-status-pill-active"
+    device_backend_notice = "device.supplied_by"
+    device_backend_joiner = " "
+    device_backend_source = value_or(device.source_module, "device.active_provider")
+    device_backend_period = "."
+end
+</script>
+
+<style>
+    .device-hero {
+        width: 100%;
+        align-items: center;
+        gap: var(--spacing-md);
+        padding: var(--spacing-lg);
+        border-radius: var(--radius-lg);
+        background: var(--color-secondary-container);
+        color: var(--color-on-secondary-container);
+    }
+
+    .device-icon {
+        width: 66px;
+        height: 66px;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--radius-lg);
+        background: var(--color-primary);
+        color: var(--color-on-primary);
+    }
+
+    .device-name {
+        color: var(--color-on-secondary-container);
+        font-size: var(--typography-size-lg);
+        font-weight: 750;
+    }
+
+    .runtime-grid {
+        width: 100%;
+        gap: var(--spacing-sm);
+    }
+
+    .runtime-card {
+        min-width: 0;
+        flex-grow: 1;
+        gap: var(--spacing-xs);
+        padding: var(--spacing-md);
+        border-radius: var(--radius-md);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--color-outline-variant);
+        background: var(--color-surface-container-low);
+    }
+
+    .runtime-value {
+        color: var(--color-primary);
+        font-size: 24px;
+        font-weight: 800;
+    }
+</style>

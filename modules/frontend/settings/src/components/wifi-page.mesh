@@ -1,0 +1,217 @@
+<template>
+    <column class="settings-page" hidden={hidden}>
+        <row class="settings-control-row">
+            <column class="settings-card-copy">
+                <text class="settings-control-title">{t('nav.wifi')}</text>
+                <text class="settings-card-meta">{t(wifi_status)}</text>
+            </column>
+            <button class={wifi_toggle_class} onclick={onToggleWifi} disabled={controls_disabled}>
+                {t(wifi_toggle_label)}
+            </button>
+        </row>
+
+        <column class="settings-section">
+            <row class="settings-section-head">
+                <column class="settings-card-copy">
+                    <text class="settings-section-title">{t('wifi.available_networks')}</text>
+                    <text class="settings-section-copy">{network_count .. t(network_summary)}</text>
+                </column>
+                <button class="settings-secondary-button" onclick={onScan} disabled={scan_disabled}>{t('common.scan')}</button>
+            </row>
+
+            <list class="settings-list" label={t('wifi.available_wifi_networks')} hidden={networks_hidden}>
+                {#for row in network_rows}
+                    <list-item class="settings-card">
+                        <icon name="wifi" size="20" />
+                        <column class="settings-card-copy">
+                            <text class="settings-card-title">{t(row.name)}</text>
+                            <text class="settings-card-meta">{t(row.details) .. row.details_suffix .. t(row.security)}</text>
+                        </column>
+                        <button
+                            class={row.button_class}
+                            onclick={onNetworkAction(row.id, row.connected)}
+                            disabled={row.disabled}
+                        >
+                            {t(row.action)}
+                        </button>
+                    </list-item>
+                {/for}
+            </list>
+
+            <empty-state class="settings-empty-state" hidden={empty_hidden}>
+                <icon name="wifi" size="24" />
+                <text class="settings-card-title">{t(empty_title)}</text>
+                <text class="settings-section-copy">{t(empty_copy)}</text>
+            </empty-state>
+        </column>
+
+        <column class="settings-section">
+            <text class="settings-section-title">{t('wifi.connection_details')}</text>
+            <column class="settings-card">
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('wifi.active_network')}</text>
+                    <text class="settings-info-value">{t(active_network)}</text>
+                </row>
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('common.interface')}</text>
+                    <text class="settings-info-value">{t(interface_name)}</text>
+                </row>
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('common.provider')}</text>
+                    <text class="settings-info-value">{t(provider_label)}</text>
+                </row>
+            </column>
+        </column>
+    </column>
+</template>
+
+<script lang="luau">
+hidden = false
+
+local network_ok, network = pcall(require, "mesh.network@>=1.0")
+if not network_ok then network = nil end
+local t = import("mesh.i18n", "t")
+
+wifi_status = "wifi.waiting"
+wifi_toggle_label = "common.unavailable"
+wifi_toggle_class = "settings-secondary-button"
+controls_disabled = true
+scan_disabled = true
+network_count = ""
+network_summary = "wifi.networks_waiting"
+network_rows = {}
+networks_hidden = true
+empty_hidden = false
+empty_title = "wifi.service_unavailable"
+empty_copy = "wifi.install_provider"
+active_network = "common.not_connected"
+interface_name = "common.not_reported"
+provider_label = "common.no_provider"
+
+local function bool_value(value)
+    if type(value) == "table" then
+        if value.checked ~= nil then return value.checked == true end
+        if value.value ~= nil then return value.value == true end
+    end
+    return value == true
+end
+
+local function network_name(entry)
+    return tostring(entry.ssid or entry.name or entry.id or "wifi.hidden_network")
+end
+
+local function signal_label(entry)
+    local signal = tonumber(entry.signal or entry.strength or entry.quality)
+    if signal == nil then return "wifi.signal_unavailable", "" end
+    signal = math.max(0, math.min(100, math.floor(signal + 0.5)))
+    local suffix = " · " .. tostring(signal) .. "%"
+    if signal >= 75 then return "wifi.signal_excellent", suffix end
+    if signal >= 50 then return "wifi.signal_good", suffix end
+    if signal >= 25 then return "wifi.signal_fair", suffix end
+    return "wifi.signal_weak", suffix
+end
+
+function render()
+    if not network or network.available == false then
+        wifi_status = "wifi.no_compatible_service"
+        wifi_toggle_label = "common.unavailable"
+        wifi_toggle_class = "settings-secondary-button"
+        controls_disabled = true
+        scan_disabled = true
+        network_rows = {}
+        networks_hidden = true
+        empty_hidden = false
+        network_count = ""
+        empty_title = "wifi.service_unavailable"
+        empty_copy = "wifi.install_provider"
+        active_network = "common.not_connected"
+        interface_name = "common.not_reported"
+        provider_label = "common.no_provider"
+        return
+    end
+
+    local enabled = network.wifi_enabled == true
+    local control_allowed = network.controls_available ~= false and network.permission_denied ~= true
+    controls_disabled = not control_allowed
+    scan_disabled = not enabled or type(network.scan) ~= "function"
+    wifi_toggle_label = enabled and "common.turn_off" or "common.turn_on"
+    wifi_toggle_class = enabled and "settings-primary-button" or "settings-secondary-button"
+    wifi_status = enabled and "wifi.enabled" or "wifi.disabled"
+    provider_label = tostring(network.source_module or "wifi.active_provider")
+    interface_name = tostring(network.interface_name or network.device_name or "wifi.wireless_adapter")
+
+    network_rows = {}
+    local networks = network.networks
+    if enabled and type(networks) == "table" then
+        for _, entry in ipairs(networks) do
+            local connected = entry.connected == true or entry.active == true
+            local secure = entry.secured == true or entry.security ~= nil
+            local details, details_suffix = signal_label(entry)
+            network_rows[#network_rows + 1] = {
+                id = tostring(entry.id or entry.connection_id or entry.ssid or entry.name or ""),
+                name = network_name(entry),
+                details = details,
+                details_suffix = details_suffix .. (secure and " · " or ""),
+                security = secure and "wifi.secured" or "",
+                connected = connected,
+                action = connected and "common.connected" or "common.connect",
+                button_class = connected and "settings-primary-button" or "settings-secondary-button",
+                disabled = connected or not control_allowed,
+            }
+            if connected then
+                active_network = network_name(entry)
+            end
+        end
+    end
+
+    networks_hidden = #network_rows == 0
+    empty_hidden = #network_rows > 0
+    if not enabled then
+        network_count = ""
+        empty_title = "wifi.turned_off"
+        empty_copy = "wifi.turn_on_copy"
+        network_summary = "wifi.scanning_paused"
+        active_network = "common.not_connected"
+    elseif #network_rows == 0 then
+        network_count = ""
+        empty_title = "wifi.no_networks"
+        empty_copy = "wifi.no_networks_copy"
+        network_summary = "wifi.waiting_scan"
+    else
+        network_count = tostring(#network_rows) .. " "
+        network_summary = "wifi.network_count"
+    end
+end
+
+function onToggleWifi(value)
+    if not network or network.available == false or type(network.set_wifi_enabled) ~= "function" then
+        return
+    end
+    local requested = bool_value(value)
+    if type(value) ~= "table" and type(value) ~= "boolean" then
+        requested = not (network.wifi_enabled == true)
+    elseif requested == (network.wifi_enabled == true) then
+        requested = not requested
+    end
+    network.set_wifi_enabled(requested)
+end
+
+function onScan()
+    if network and type(network.scan) == "function" then
+        network.scan()
+    end
+end
+
+function onNetworkAction(connection_id, connected)
+    if connected or not network or connection_id == "" then return end
+    if type(network.connect) == "function" then
+        network.connect(connection_id)
+    end
+end
+</script>
+
+<style>
+    .settings-list {
+        min-height: 0;
+    }
+</style>

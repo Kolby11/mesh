@@ -3029,7 +3029,7 @@ fn navigation_shipped_keybind_metadata_resolves_from_i18n_catalogs() {
 }
 
 #[test]
-fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
+fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     let theme = default_theme();
@@ -3046,7 +3046,7 @@ fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
         .expect("rendered navigation tree");
     let settings_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onSettingsToggle",
+        "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onOpenSettings",
     )
     .expect("rendered settings button");
     let settings_key = settings_button
@@ -3070,6 +3070,23 @@ fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
         )
         .unwrap();
 
+    let requests = component
+        .handle_input(
+            &theme,
+            320,
+            80,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                pressed: false,
+            },
+        )
+        .unwrap();
+
+    assert!(matches!(
+        requests.as_slice(),
+        [CoreRequest::ShowSurface { surface_id }] if surface_id == "@mesh/settings"
+    ));
     assert_eq!(
         component.focused_key.as_deref(),
         Some(settings_key.as_str())
@@ -3645,10 +3662,12 @@ fn navigation_bar_keyboard_audio_popover_slider_responds_to_arrow_keys() {
             assert_eq!(interface, "mesh.audio");
             assert_eq!(command, "set_volume");
             assert_eq!(payload["device_id"], serde_json::json!("default"));
-            let volume = payload["volume"].as_f64().expect("numeric volume payload");
+            let percent = payload["percent"]
+                .as_f64()
+                .expect("numeric percent payload");
             assert!(
-                (volume - 0.55).abs() < 0.001,
-                "expected slider keyboard step near 0.55, got {volume}"
+                (percent - 55.0).abs() < 0.001,
+                "expected slider keyboard step near 55%, got {percent}"
             );
         }
         other => panic!("expected one audio set_volume request, got {other:?}"),

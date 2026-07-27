@@ -421,9 +421,9 @@ pub struct Shell {
     backend_respawn: Option<backend::BackendRespawnContext>,
     latest_service_state: HashMap<String, LatestServiceState>,
     service_contract_validation: HashMap<String, ContractValidationCache>,
-    /// Contract-declared optimistic state patches awaiting provider
-    /// confirmation, keyed by (interface, state field).
-    pending_optimistic_state: HashMap<(String, String), serde_json::Value>,
+    /// Command-bound service state awaiting provider confirmation, keyed by
+    /// (interface, state field).
+    pending_bound_service_state: HashMap<(String, String), serde_json::Value>,
     command_throttle: HashMap<(String, String), CommandThrottleState>,
     pending_popover_hides: HashMap<SurfaceId, std::time::Instant>,
     profiling: runtime::profiling::ProfilingRuntimeState,

@@ -1,0 +1,159 @@
+<template>
+    <column class="settings-page" hidden={hidden}>
+        <row class="settings-control-row">
+            <column class="settings-card-copy">
+                <text class="settings-control-title">{t('audio.service')}</text>
+                <text class="settings-card-meta">{t(audio_status)}</text>
+            </column>
+            <text class={service_pill_class}>{t(service_pill)}</text>
+        </row>
+
+        <column class="settings-section">
+            <row class="settings-section-head">
+                <column class="settings-card-copy">
+                    <text class="settings-section-title">{t('audio.volume')}</text>
+                    <text class="settings-section-copy">{t('audio.volume.copy')}</text>
+                </column>
+                <button class={mute_button_class} onclick={onToggleMute} disabled={controls_disabled}>
+                    {t(mute_button_label)}
+                </button>
+            </row>
+            <row class="settings-card">
+                <icon name={volume_icon} size="22" />
+                <slider
+                    class="settings-slider"
+                    min="0"
+                    max="100"
+                    value={volume_percent}
+                    onchange={onVolumeChange}
+                    disabled={controls_disabled}
+                    aria-label={t('audio.volume')}
+                />
+                <text class="settings-value">{volume_label}</text>
+            </row>
+        </column>
+
+        <column class="settings-section">
+            <text class="settings-section-title">{t('audio.output_device')}</text>
+            <row class="settings-card">
+                <column class="settings-card-copy">
+                    <text class="settings-card-title">{t(output_name)}</text>
+                    <text class="settings-card-meta">{t(output_description)}</text>
+                </column>
+                <text class="settings-status-pill settings-status-pill-active">{t('common.default')}</text>
+            </row>
+        </column>
+
+        <column class="settings-section">
+            <text class="settings-section-title">{t('common.backend_details')}</text>
+            <column class="settings-card">
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('common.provider')}</text>
+                    <text class="settings-info-value">{t(provider_label)}</text>
+                </row>
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('common.interface')}</text>
+                    <text class="settings-info-value">mesh.audio@1.x</text>
+                </row>
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('audio.control_path')}</text>
+                    <text class="settings-info-value">{t(control_path)}</text>
+                </row>
+            </column>
+        </column>
+    </column>
+</template>
+
+<script lang="luau">
+hidden = false
+
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
+if not audio_ok then audio = nil end
+local t = import("mesh.i18n", "t")
+
+audio_status = "audio.waiting"
+service_pill = "common.unavailable"
+service_pill_class = "settings-status-pill"
+volume_percent = 0
+volume_label = "0%"
+volume_icon = "audio-volume-muted"
+mute_button_label = "audio.mute"
+mute_button_class = "settings-secondary-button"
+controls_disabled = true
+output_name = "audio.default_output"
+output_description = "audio.discovery_unavailable"
+provider_label = "common.no_provider"
+control_path = "common.unavailable"
+
+local function clamp_percent(value)
+    local numeric = tonumber(value) or 0
+    return math.max(0, math.min(100, math.floor(numeric + 0.5)))
+end
+
+local function event_value(value)
+    if type(value) == "table" then
+        return value.value
+    end
+    return value
+end
+
+local function sync_volume(percent, muted)
+    volume_percent = clamp_percent(percent)
+    volume_label = string.format("%d%%", volume_percent)
+    if muted or volume_percent == 0 then
+        volume_icon = "audio-volume-muted"
+    elseif volume_percent < 34 then
+        volume_icon = "audio-volume-low"
+    elseif volume_percent < 67 then
+        volume_icon = "audio-volume-medium"
+    else
+        volume_icon = "audio-volume-high"
+    end
+    mute_button_label = muted and "audio.unmute" or "audio.mute"
+    mute_button_class = muted and "settings-primary-button" or "settings-secondary-button"
+end
+
+function render()
+    if not audio or audio.available == false then
+        audio_status = "audio.install_backend"
+        service_pill = "common.unavailable"
+        service_pill_class = "settings-status-pill"
+        controls_disabled = true
+        provider_label = "common.no_active_provider"
+        control_path = "common.unavailable"
+        sync_volume(0, false)
+        return
+    end
+
+    local muted = audio.muted == true
+    controls_disabled = false
+    audio_status = muted and "audio.output_muted" or "audio.output_active"
+    service_pill = muted and "audio.muted" or "common.active"
+    service_pill_class = "settings-status-pill settings-status-pill-active"
+    provider_label = tostring(audio.source_module or "audio.active_provider")
+    control_path = type(audio.set_volume) == "function" and "audio.read_control" or "audio.read_only"
+    output_name = tostring(audio.output_name or audio.device_name or "audio.default_system_output")
+    output_description = tostring(audio.output_description or "audio.managed_by_backend")
+    sync_volume(audio.percent, muted)
+end
+
+function onVolumeChange(value)
+    if not audio or audio.available == false or type(audio.set_volume) ~= "function" then
+        return
+    end
+    local percent = clamp_percent(event_value(value))
+    sync_volume(percent, false)
+    audio.set_volume("default", percent)
+end
+
+function onToggleMute()
+    if not audio or audio.available == false then
+        return
+    end
+    if type(audio.set_muted) == "function" then
+        audio.set_muted("default", not (audio.muted == true))
+    elseif type(audio.toggle_mute) == "function" then
+        audio.toggle_mute()
+    end
+end
+</script>

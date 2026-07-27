@@ -91,7 +91,8 @@
             {
               "name": "focus_workspace",
               "args": [{ "name": "id", "type": "int" }],
-              "returns": "Result"
+              "returns": "Result",
+              "stateBinding": { "field": "active_workspace", "fromArg": "id" }
             }
           ],
           "events": [

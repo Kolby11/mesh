@@ -5,6 +5,29 @@ use std::collections::HashSet;
 
 const BUILTIN_DEBUG_INSPECTOR_ID: &str = "@mesh/debug-inspector";
 
+fn builtin_state_contract(
+    interface: &str,
+    fields: &[(&str, &str)],
+) -> mesh_core_service::InterfaceContract {
+    mesh_core_service::InterfaceContract {
+        interface: interface.to_string(),
+        version: mesh_core_service::parse_contract_version("1.0")
+            .expect("built-in interface version must be valid"),
+        state_fields: fields
+            .iter()
+            .map(|(name, field_type)| mesh_core_service::ContractStateField {
+                name: (*name).to_string(),
+                field_type: (*field_type).to_string(),
+                description: None,
+            })
+            .collect(),
+        methods: Vec::new(),
+        events: Vec::new(),
+        types: HashMap::new(),
+        capabilities: mesh_core_service::ContractCapabilities::default(),
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct DiscoveredModuleManifest {
     pub(super) dir: PathBuf,
@@ -132,6 +155,20 @@ impl Shell {
         };
 
         let interfaces = InterfaceRegistry::new();
+        interfaces.register_contract(builtin_state_contract(
+            "mesh.theme",
+            &[
+                ("current", "string"),
+                ("theme_id", "string"),
+                ("is_dark", "boolean"),
+                ("themes", "object[]"),
+                ("available", "string[]"),
+            ],
+        ));
+        interfaces.register_contract(builtin_state_contract(
+            "mesh.locale",
+            &[("current", "string"), ("locale", "string")],
+        ));
         interfaces.register(InterfaceProvider {
             interface: mesh_core_debug::DEBUG_INTERFACE.to_string(),
             version: Some("1.0".to_string()),
@@ -202,7 +239,7 @@ impl Shell {
             backend_respawn: None,
             latest_service_state: HashMap::new(),
             service_contract_validation: HashMap::new(),
-            pending_optimistic_state: HashMap::new(),
+            pending_bound_service_state: HashMap::new(),
             command_throttle: HashMap::new(),
             pending_popover_hides: HashMap::new(),
             profiling: runtime::profiling::ProfilingRuntimeState::default(),

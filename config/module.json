@@ -1,20 +1,22 @@
 {
-  "name": "@mesh/local-config",
-  "version": "0.1.0",
-  "private": true,
   "mesh": {
-    "schemaVersion": 1,
-    "modulesDir": "../modules",
     "disabled": [
-      "@mesh/text-selection-proof",
-      "@mesh/debug-inspector"
+      "@mesh/audio-popover",
+      "@mesh/debug-inspector",
+      "@mesh/language-popover",
+      "@mesh/text-selection-proof"
     ],
+    "layout": {
+      "entrypoint": "@mesh/navigation-bar:main"
+    },
+    "modulesDir": "../modules",
     "providers": {
       "mesh.audio": "@mesh/pipewire-audio",
       "mesh.brightness": "@mesh/backlight-brightness"
     },
-    "layout": {
-      "entrypoint": "@mesh/navigation-bar:main"
-    }
-  }
+    "schemaVersion": 1
+  },
+  "name": "@mesh/local-config",
+  "private": true,
+  "version": "0.1.0"
 }

@@ -70,7 +70,7 @@ local THEME_LABELS = {
 local function build_option(option, current)
     local core_class = "bubble-option-core " .. option.core
     if option.id == current then
-        core_class = core_class .. " bubble-option-core-active"
+        core_class = core_class .. " bubble-option-core-active " .. option.core .. "-active"
     end
 
     return {

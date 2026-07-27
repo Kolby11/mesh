@@ -3,7 +3,7 @@
         <button
             ref="volume-button"
             class="nav-button"
-            keybind="{this.keybinds.mute.id}"
+            keybind="mute"
             onclick={onAudioToggle}
             onpointerenter={onAudioEnter}
             onpointerleave={onAudioLeave}

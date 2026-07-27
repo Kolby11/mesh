@@ -940,7 +940,7 @@ impl Shell {
             .and_then(|value| value.as_bool())
             .unwrap_or(false)
         {
-            let optimistic = self
+            let state_binding = self
                 .interfaces
                 .resolve(interface_canonical.as_ref(), None)
                 .contract
@@ -950,21 +950,14 @@ impl Shell {
                         .methods
                         .iter()
                         .find(|method| method.name == command)
-                        .and_then(|method| method.optimistic.clone())
+                        .and_then(|method| method.state_binding.clone())
                 });
-            if let Some(optimistic) = optimistic
-                && let Some(value) = self.optimistic_value_for_command(
-                    interface_canonical.as_ref(),
-                    &optimistic,
-                    payload,
-                )
+            if let Some(binding) = state_binding
+                && let Some(value) =
+                    self.bound_value_for_command(interface_canonical.as_ref(), &binding, payload)
             {
-                self.apply_optimistic_service_state(
-                    interface_canonical.as_ref(),
-                    &optimistic.field,
-                    value,
-                );
-                dispatch_result["optimistic"] = serde_json::json!(true);
+                self.apply_bound_service_state(interface_canonical.as_ref(), &binding.field, value);
+                dispatch_result["state_bound"] = serde_json::json!(true);
             }
         }
 

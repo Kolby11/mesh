@@ -1,7 +1,7 @@
 {
   "name": "@mesh/settings",
   "version": "0.1.0",
-  "description": "Shell settings surface for modules, providers, theme, and language.",
+  "description": "Backend-aware desktop settings for connectivity, audio, appearance, device details, and modules.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "frontend",
@@ -9,18 +9,52 @@
       "interfaces": {
         "mesh.debug": ">=1.0",
         "mesh.theme": ">=1.0",
-        "mesh.locale": ">=1.0"
+        "mesh.locale": ">=1.0",
+        "mesh.audio": ">=1.0"
+      },
+      "optionalInterfaces": {
+        "mesh.network": ">=1.0",
+        "mesh.bluetooth": ">=1.0",
+        "mesh.device": ">=1.0"
+      },
+      "resources": {
+        "icons": ["@mesh/icons-default"]
       },
       "capabilities": [
         "shell.surface",
         "service.debug.read",
+        "service.audio.read",
+        "service.audio.control",
+        "service.network.read",
+        "service.network.control",
+        "service.bluetooth.read",
+        "service.bluetooth.control",
+        "service.device.read",
         "theme.read",
         "theme.write",
         "locale.read",
         "locale.write"
       ]
     },
+    "i18n": {
+      "defaultLocale": "en"
+    },
     "entry": "src/main.mesh",
+    "iconRequirements": {
+      "required": [
+        "preferences-system",
+        "settings",
+        "wifi",
+        "bluetooth",
+        "computer",
+        "applications-graphics",
+        "audio-volume-muted",
+        "audio-volume-low",
+        "audio-volume-medium",
+        "audio-volume-high",
+        "window-close"
+      ]
+    },
     "surface": {
       "anchor": "right",
       "layer": "overlay",
@@ -28,10 +62,24 @@
       "keyboard_mode": "on_demand",
       "visible_on_start": false
     },
+    "provides": {
+      "i18n": [
+        {
+          "id": "en",
+          "locale": "en",
+          "path": "config/i18n/en.json"
+        },
+        {
+          "id": "sk",
+          "locale": "sk",
+          "path": "config/i18n/sk.json"
+        }
+      ]
+    },
     "accessibility": {
       "role": "dialog",
       "label": "Settings",
-      "description": "Manage installed modules, active providers, theme, and language"
+      "description": "Manage connectivity, audio, appearance, device details, modules, and providers"
     }
   }
 }

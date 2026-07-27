@@ -1,4 +1,5 @@
 <template>
+  <!--
   <box class="blur-test-shell">
     <column class="blur-test-stack">
       <box class="band band-1"><text class="band-label">RED - 5% fill</text></box>
@@ -8,6 +9,7 @@
       <box class="band band-5"><text class="band-label">SOLID - 100% fill</text></box>
     </column>
   </box>
+  -->
 </template>
 
 <script lang="luau">

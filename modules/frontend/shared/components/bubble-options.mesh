@@ -227,24 +227,51 @@ end
     }
 
     .bubble-option-core-dark {
-        background-color: prop(blur_background);
-        color: #8394aa;
+        background-color: #1d1b20;
+        color: #6750a4;
+        border-color: #49454f;
         animation-name: bubble-option-float-left;
         animation-delay: 360ms;
     }
 
+    .bubble-option-core-dark-active {
+        border-color: #6750a4;
+    }
+
+    .bubble-option-core-dark:hover {
+        border-color: #ccc2dc;
+    }
+
     .bubble-option-core-light {
-        background-color: prop(blur_background);
-        color: #e9c46a;
+        background-color: #f7f2fa;
+        color: #6750a4;
+        border-color: #cac4d0;
         animation-name: bubble-option-float-center;
         animation-delay: 430ms;
     }
 
+    .bubble-option-core-light-active {
+        border-color: #6750a4;
+    }
+
+    .bubble-option-core-light:hover {
+        border-color: #625b71;
+    }
+
     .bubble-option-core-gruvbox {
-        background-color: prop(blur_background);
-        color: #d79921;
+        background-color: #282828;
+        color: #fabd2f;
+        border-color: #504945;
         animation-name: bubble-option-float-right;
         animation-delay: 500ms;
+    }
+
+    .bubble-option-core-gruvbox-active {
+        border-color: #fabd2f;
+    }
+
+    .bubble-option-core-gruvbox:hover {
+        border-color: #83a598;
     }
 
     .bubble-option-core-language {

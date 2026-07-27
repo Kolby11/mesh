@@ -336,7 +336,7 @@ fn test_contract(interface: &str) -> InterfaceContract {
                 args: Vec::new(),
                 returns: Some("Result".to_string()),
                 coalesce: false,
-                optimistic: None,
+                state_binding: None,
             },
             InterfaceMethod {
                 name: "set_muted".to_string(),
@@ -352,9 +352,10 @@ fn test_contract(interface: &str) -> InterfaceContract {
                 ],
                 returns: Some("Result".to_string()),
                 coalesce: false,
-                optimistic: Some(mesh_core_service::OptimisticUpdate {
+                state_binding: Some(mesh_core_service::StateBinding {
                     field: "muted".to_string(),
                     from_arg: Some("muted".to_string()),
+                    toggle: false,
                 }),
             },
         ],
@@ -509,6 +510,7 @@ impl super::types::ShellComponent for RecordingComponent {
 struct IndexedRecordingState {
     observed: usize,
     handled: Vec<ServiceEvent>,
+    cached: Vec<ServiceEvent>,
 }
 
 struct IndexedRecordingComponent {
@@ -560,6 +562,10 @@ impl super::types::ShellComponent for IndexedRecordingComponent {
     ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
         self.state.lock().unwrap().handled.push(event.clone());
         Ok(Vec::new())
+    }
+
+    fn cache_service_payload(&mut self, event: &ServiceEvent) {
+        self.state.lock().unwrap().cached.push(event.clone());
     }
 
     fn observes_service_event(&self, _event: &ServiceEvent) -> bool {
@@ -1704,6 +1710,52 @@ fn service_delivery_index_routes_updates_without_scanning_unrelated_components()
         "unknown-summary components keep the legacy observation gate"
     );
     assert_eq!(fallback_state.lock().unwrap().handled.len(), 1);
+}
+
+#[test]
+fn service_updates_are_cached_by_components_that_do_not_observe_them() {
+    let audio_summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
+        update_services: vec!["audio".to_string()],
+        interface_events: Vec::new(),
+    })));
+    let idle_summary = Arc::new(Mutex::new(Some(ServiceObservationSummary::default())));
+    let audio_state = Arc::new(Mutex::new(IndexedRecordingState::default()));
+    let idle_state = Arc::new(Mutex::new(IndexedRecordingState::default()));
+
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(IndexedRecordingComponent::new(
+        "@test/audio-observer",
+        audio_summary,
+        Arc::clone(&audio_state),
+    )));
+    shell.register_component(Box::new(IndexedRecordingComponent::new(
+        "@test/idle-surface",
+        idle_summary,
+        Arc::clone(&idle_state),
+    )));
+
+    shell
+        .broadcast_service_event(service_update(
+            "mesh.audio",
+            "@mesh/pipewire-audio",
+            serde_json::json!({ "available": true, "percent": 55.0 }),
+        ))
+        .unwrap();
+
+    assert_eq!(audio_state.lock().unwrap().handled.len(), 1);
+    assert!(
+        audio_state.lock().unwrap().cached.is_empty(),
+        "components that handle an update already own the payload"
+    );
+    assert!(
+        idle_state.lock().unwrap().handled.is_empty(),
+        "a surface that reads no audio field is not a delivery target"
+    );
+    assert_eq!(
+        idle_state.lock().unwrap().cached.len(),
+        1,
+        "non-observing surfaces still cache the payload for runtimes created later"
+    );
 }
 
 #[test]
@@ -3172,6 +3224,19 @@ fn shell_registers_theme_provider_for_frontend_theme_proxy() {
         Some("@mesh/shell"),
         "frontend modules with theme.read must be able to resolve require(\"mesh.theme\")"
     );
+    let fields = resolution
+        .contract
+        .as_ref()
+        .expect("built-in mesh.theme contract")
+        .state_fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        fields,
+        ["current", "theme_id", "is_dark", "themes", "available"],
+        "theme registry fields must be declared so frontend reads are reactive"
+    );
 }
 
 #[test]
@@ -3800,7 +3865,7 @@ fn profiling_disabled_backend_paths_do_not_fabricate_snapshots() {
     let result = shell.dispatch_service_command(
         "mesh.audio",
         "set_volume",
-        &serde_json::json!({ "volume": 0.4 }),
+        &serde_json::json!({ "percent": 40 }),
         "@mesh/panel",
         &capabilities,
     );
@@ -3814,7 +3879,7 @@ fn profiling_disabled_backend_paths_do_not_fabricate_snapshots() {
 }
 
 #[test]
-fn set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms() {
+fn set_muted_command_broadcasts_bound_audio_state_until_backend_confirms() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
     shell
@@ -3848,7 +3913,7 @@ fn set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms() 
     );
 
     assert_eq!(result["ok"], serde_json::json!(true));
-    assert_eq!(result["optimistic"], serde_json::json!(true));
+    assert_eq!(result["state_bound"], serde_json::json!(true));
     assert_eq!(rx.try_recv().unwrap().command, "set_muted");
     assert_eq!(
         events.lock().unwrap().last().and_then(|event| match event {
@@ -3856,7 +3921,7 @@ fn set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms() 
             ServiceEvent::InterfaceEvent { .. } => None,
         }),
         Some(serde_json::json!(false)),
-        "optimistic set_muted(false) should update frontend consumers immediately"
+        "bound set_muted(false) should update frontend consumers immediately"
     );
 
     let delivered_events = events.lock().unwrap().len();
@@ -3874,7 +3939,7 @@ fn set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms() 
     );
     assert_eq!(
         shell
-            .pending_optimistic_state
+            .pending_bound_service_state
             .get(&("mesh.audio".to_string(), "muted".to_string())),
         Some(&serde_json::json!(false)),
         "inactive provider updates must not clear pending mute state"
@@ -3905,7 +3970,7 @@ fn set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms() 
         .unwrap();
     assert_eq!(
         shell
-            .pending_optimistic_state
+            .pending_bound_service_state
             .get(&("mesh.audio".to_string(), "muted".to_string())),
         None,
         "matching backend confirmation should clear pending mute state"
@@ -3913,7 +3978,136 @@ fn set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms() 
 }
 
 #[test]
-fn contract_declared_optimistic_state_is_interface_agnostic() {
+fn set_volume_updates_canonical_audio_percent_until_backend_confirms() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let mut contract = test_contract("mesh.audio");
+    contract.methods[0].args = vec![
+        InterfaceArgument {
+            name: "device_id".to_string(),
+            arg_type: "string".to_string(),
+        },
+        InterfaceArgument {
+            name: "percent".to_string(),
+            arg_type: "float".to_string(),
+        },
+    ];
+    contract.methods[0].state_binding = Some(mesh_core_service::StateBinding {
+        field: "percent".to_string(),
+        from_arg: Some("percent".to_string()),
+        toggle: false,
+    });
+    shell.interfaces.register_contract(contract);
+    register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
+    let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let settings_state = Arc::new(Mutex::new(IndexedRecordingState::default()));
+    let navigation_state = Arc::new(Mutex::new(IndexedRecordingState::default()));
+    for (id, state) in [
+        ("@mesh/settings", Arc::clone(&settings_state)),
+        ("@mesh/navigation-bar", Arc::clone(&navigation_state)),
+    ] {
+        shell.register_component(Box::new(IndexedRecordingComponent::new(
+            id,
+            Arc::new(Mutex::new(Some(ServiceObservationSummary {
+                update_services: vec!["audio".to_string()],
+                interface_events: Vec::new(),
+            }))),
+            state,
+        )));
+    }
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.audio.control",
+    ));
+
+    shell
+        .broadcast_service_event(service_update(
+            "mesh.audio",
+            "@mesh/pipewire-audio",
+            serde_json::json!({ "available": true, "percent": 42.0, "muted": false }),
+        ))
+        .unwrap();
+    settings_state.lock().unwrap().handled.clear();
+    navigation_state.lock().unwrap().handled.clear();
+
+    let result = shell.dispatch_service_command(
+        "mesh.audio",
+        "set_volume",
+        &serde_json::json!({ "device_id": "default", "percent": 73 }),
+        "@mesh/settings",
+        &capabilities,
+    );
+
+    assert_eq!(result["ok"], serde_json::json!(true));
+    assert_eq!(result["state_bound"], serde_json::json!(true));
+    assert_eq!(rx.try_recv().unwrap().command, "set_volume");
+    assert_eq!(
+        shell.latest_service_state["mesh.audio"].state["percent"],
+        serde_json::json!(73),
+        "the shell-owned audio state should change as soon as any surface dispatches set_volume"
+    );
+    for state in [&settings_state, &navigation_state] {
+        assert_eq!(
+            state
+                .lock()
+                .unwrap()
+                .handled
+                .last()
+                .and_then(|event| match event {
+                    ServiceEvent::Updated { payload, .. } => payload.get("percent").cloned(),
+                    ServiceEvent::InterfaceEvent { .. } => None,
+                }),
+            Some(serde_json::json!(73)),
+            "settings and navigation should receive the shared bound percent"
+        );
+    }
+
+    let mut pending = VecDeque::new();
+    shell
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::BackendServiceUpdate {
+                interface: "mesh.audio".to_string(),
+                provider_id: "@mesh/pipewire-audio".to_string(),
+                event: service_update(
+                    "mesh.audio",
+                    "@mesh/pipewire-audio",
+                    serde_json::json!({ "available": true, "percent": 42.0, "muted": false }),
+                ),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        shell.latest_service_state["mesh.audio"].state["percent"],
+        serde_json::json!(73),
+        "a stale provider snapshot must not roll back the shared value"
+    );
+
+    shell
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::BackendServiceUpdate {
+                interface: "mesh.audio".to_string(),
+                provider_id: "@mesh/pipewire-audio".to_string(),
+                event: service_update(
+                    "mesh.audio",
+                    "@mesh/pipewire-audio",
+                    serde_json::json!({ "available": true, "percent": 73.0, "muted": false }),
+                ),
+            },
+        )
+        .unwrap();
+    assert!(
+        !shell
+            .pending_bound_service_state
+            .contains_key(&("mesh.audio".to_string(), "percent".to_string())),
+        "matching provider state should confirm and clear the bound value"
+    );
+}
+
+#[test]
+fn command_state_binding_updates_non_audio_service() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
     let interface = "mesh.lighting";
@@ -3922,9 +4116,10 @@ fn contract_declared_optimistic_state_is_interface_agnostic() {
     contract.state_fields[2].name = "enabled".to_string();
     contract.methods[1].name = "set_enabled".to_string();
     contract.methods[1].args[1].name = "enabled".to_string();
-    contract.methods[1].optimistic = Some(mesh_core_service::OptimisticUpdate {
+    contract.methods[1].state_binding = Some(mesh_core_service::StateBinding {
         field: "enabled".to_string(),
         from_arg: Some("enabled".to_string()),
+        toggle: false,
     });
     shell.interfaces.register_contract(contract);
     register_test_provider(&shell.interfaces, interface, provider);
@@ -3951,7 +4146,7 @@ fn contract_declared_optimistic_state_is_interface_agnostic() {
     );
 
     assert_eq!(result["ok"], serde_json::json!(true));
-    assert_eq!(result["optimistic"], serde_json::json!(true));
+    assert_eq!(result["state_bound"], serde_json::json!(true));
     assert_eq!(rx.try_recv().unwrap().command, "set_enabled");
     assert_eq!(
         shell.latest_service_state[interface].state["enabled"],
@@ -3968,7 +4163,7 @@ fn contract_declared_optimistic_state_is_interface_agnostic() {
     assert_eq!(
         shell.latest_service_state[interface].state["enabled"],
         serde_json::json!(true),
-        "a stale provider update must retain the generic optimistic patch"
+        "a stale provider update must retain the generic state binding"
     );
 
     shell
@@ -3980,9 +4175,9 @@ fn contract_declared_optimistic_state_is_interface_agnostic() {
         .unwrap();
     assert!(
         !shell
-            .pending_optimistic_state
+            .pending_bound_service_state
             .contains_key(&(interface.to_string(), "enabled".to_string())),
-        "matching provider confirmation must clear the generic patch"
+        "matching provider confirmation must clear the generic state binding"
     );
 }
 
@@ -4166,7 +4361,7 @@ fn profiling_snapshot_groups_backend_stage_proof_under_expected_provider_identit
     let result = shell.dispatch_service_command(
         "mesh.audio",
         "set_volume",
-        &serde_json::json!({ "volume": 0.4 }),
+        &serde_json::json!({ "percent": 40 }),
         "@mesh/panel",
         &capabilities,
     );
@@ -5975,6 +6170,64 @@ fn shell_theme_update_is_authoritative_when_theme_provider_is_active() {
 }
 
 #[test]
+fn theme_service_state_lists_every_registered_theme() {
+    let mut shell = Shell::new();
+    for (id, name) in [
+        ("mesh-default-dark", "MESH Default Dark"),
+        ("mesh-default-light", "MESH Default Light"),
+        ("gruvbox-dark", "Gruvbox Dark"),
+    ] {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.id = id.to_string();
+        theme.name = name.to_string();
+        shell.theme.register_theme(theme);
+    }
+
+    shell.sync_theme_service_state("mesh-default-dark").unwrap();
+
+    let state = &shell.latest_service_state["mesh.theme"].state;
+    assert_eq!(
+        state["available"],
+        serde_json::json!(["gruvbox-dark", "mesh-default-dark", "mesh-default-light"])
+    );
+    assert_eq!(
+        state["themes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|theme| {
+                (
+                    theme["id"].as_str().unwrap().to_string(),
+                    theme["label"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            ("gruvbox-dark".to_string(), "Gruvbox Dark".to_string()),
+            (
+                "mesh-default-dark".to_string(),
+                "MESH Default Dark".to_string(),
+            ),
+            (
+                "mesh-default-light".to_string(),
+                "MESH Default Light".to_string(),
+            ),
+        ]
+    );
+    assert_eq!(
+        state["themes"][0]["palette"],
+        serde_json::json!({
+            "surface": "#1c1b1f",
+            "surface_container_low": "#1d1b20",
+            "surface_container_high": "#2b2930",
+            "primary": "#6750a4",
+            "outline_variant": "#49454f",
+            "on_surface": "#e6e1e5",
+        })
+    );
+}
+
+#[test]
 fn shell_theme_backend_candidate_receives_resolved_active_theme_setting() {
     let mut shell = Shell::new();
     shell.settings.theme.active = "missing-theme".to_string();
@@ -7072,7 +7325,7 @@ fn service_command_dispatch_records_debug_method_call() {
     let result = shell.dispatch_service_command(
         "mesh.audio",
         "set_volume",
-        &serde_json::json!({ "volume": 0.4 }),
+        &serde_json::json!({ "percent": 40 }),
         "@mesh/panel",
         &capabilities,
     );
@@ -7102,7 +7355,7 @@ fn backend_command_result_records_debug_method_result() {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
                 command: "set_volume".to_string(),
-                result: serde_json::json!({ "ok": true, "volume": 0.4 }),
+                result: serde_json::json!({ "ok": true, "percent": 40 }),
             },
         )
         .unwrap();
@@ -7212,7 +7465,7 @@ fn closed_service_command_channel_returns_unavailable_result() {
     let result = shell.dispatch_service_command(
         "mesh.audio",
         "set_volume",
-        &serde_json::json!({ "volume": 0.4 }),
+        &serde_json::json!({ "percent": 40 }),
         "@mesh/panel",
         &capabilities,
     );
@@ -7242,7 +7495,7 @@ fn profiling_service_command_attributes_active_provider_dispatch() {
     let result = shell.dispatch_service_command(
         "mesh.audio",
         "set_volume",
-        &serde_json::json!({ "volume": 0.4 }),
+        &serde_json::json!({ "percent": 40 }),
         "@mesh/panel",
         &capabilities,
     );
@@ -7288,7 +7541,7 @@ fn profiling_service_command_stays_silent_when_disabled() {
     let result = shell.dispatch_service_command(
         "mesh.audio",
         "set_volume",
-        &serde_json::json!({ "volume": 0.2 }),
+        &serde_json::json!({ "percent": 20 }),
         "@mesh/panel",
         &capabilities,
     );
@@ -8032,12 +8285,8 @@ fn frontend_module_activation_mounts_shipped_surface_live() {
         .last_surface_config
         .as_ref()
         .expect("settings surface should be configured through the shell renderer");
-    assert_eq!(config.width, 420);
-    assert!(
-        (1000..=1200).contains(&config.height),
-        "settings content should fit the verification viewport without collapsing: {}",
-        config.height
-    );
+    assert_eq!(config.width, 920);
+    assert_eq!(config.height, 900);
 }
 
 #[test]

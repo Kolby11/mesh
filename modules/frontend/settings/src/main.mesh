@@ -1,384 +1,179 @@
 <template>
-    <dialog class="settings-shell" aria-label="Settings">
-        <column class="settings-root">
-            <row class="settings-header">
-                <column class="header-copy">
-                    <text class="settings-title">Settings</text>
-                    <text class="settings-subtitle">{settings_summary}</text>
+    <dialog class="settings-shell" aria-label={t('settings.title')}>
+        <row class="settings-layout">
+            <column class="settings-sidebar">
+                <row class="settings-brand">
+                    <box class="brand-mark">
+                        <icon name="preferences-system" size="20" />
+                    </box>
+                    <column class="brand-copy">
+                        <text class="brand-title">{t('settings.title')}</text>
+                        <text class="brand-subtitle">{t('settings.control_center')}</text>
+                    </column>
+                </row>
+
+                <column class="settings-navigation" aria-label={t('settings.categories')}>
+                    <button class={wifi_nav_class} onclick={showWifi}>
+                        <icon name="wifi" size="18" />
+                        <column class="nav-copy">
+                            <text class="nav-title">{t('nav.wifi')}</text>
+                            <text class="nav-subtitle">{t('nav.wifi.subtitle')}</text>
+                        </column>
+                    </button>
+                    <button class={audio_nav_class} onclick={showAudio}>
+                        <icon name="audio-volume-high" size="18" />
+                        <column class="nav-copy">
+                            <text class="nav-title">{t('nav.audio')}</text>
+                            <text class="nav-subtitle">{t('nav.audio.subtitle')}</text>
+                        </column>
+                    </button>
+                    <button class={bluetooth_nav_class} onclick={showBluetooth}>
+                        <icon name="bluetooth" size="18" />
+                        <column class="nav-copy">
+                            <text class="nav-title">{t('nav.bluetooth')}</text>
+                            <text class="nav-subtitle">{t('nav.bluetooth.subtitle')}</text>
+                        </column>
+                    </button>
+                    <button class={appearance_nav_class} onclick={showAppearance}>
+                        <icon name="applications-graphics" size="18" />
+                        <column class="nav-copy">
+                            <text class="nav-title">{t('nav.appearance')}</text>
+                            <text class="nav-subtitle">{t('nav.appearance.subtitle')}</text>
+                        </column>
+                    </button>
+                    <button class={device_nav_class} onclick={showDevice}>
+                        <icon name="computer" size="18" />
+                        <column class="nav-copy">
+                            <text class="nav-title">{t('nav.device')}</text>
+                            <text class="nav-subtitle">{t('nav.device.subtitle')}</text>
+                        </column>
+                    </button>
+                    <button class={advanced_nav_class} onclick={showAdvanced}>
+                        <icon name="settings" size="18" />
+                        <column class="nav-copy">
+                            <text class="nav-title">{t('nav.advanced')}</text>
+                            <text class="nav-subtitle">{t('nav.advanced.subtitle')}</text>
+                        </column>
+                    </button>
                 </column>
-                <button class="icon-button" onclick={onClose} aria-label="Close settings">
-                    <icon name="window-close" size="16" />
-                </button>
-            </row>
 
-            <column class="section">
-                <text class="section-title">Appearance</text>
-                <row class="control-row">
-                    <column class="control-copy">
-                        <text class="control-title">Theme</text>
-                        <text class="control-meta">{theme_value}</text>
+                <spacer />
+
+                <column class="sidebar-foot">
+                    <text class="sidebar-foot-title">{t('settings.backend_aware')}</text>
+                    <text class="sidebar-foot-copy">{t('settings.backend_aware.copy')}</text>
+                </column>
+            </column>
+
+            <column class="settings-workspace">
+                <row class="settings-header">
+                    <column class="header-copy">
+                        <text class="page-eyebrow">{t('settings.eyebrow')}</text>
+                        <text class="page-title">{t(page_title)}</text>
+                        <text class="page-subtitle">{t(page_subtitle)}</text>
                     </column>
-                    <row class="segmented">
-                        <button class={theme_dark_class} onclick={onThemeDark}><text class="segment-text">Dark</text></button>
-                        <button class={theme_light_class} onclick={onThemeLight}><text class="segment-text">Light</text></button>
-                    </row>
+                    <button class="close-button" onclick={onClose} aria-label={t('settings.close')}>
+                        <icon name="window-close" size="18" />
+                    </button>
                 </row>
-                <row class="control-row">
-                    <column class="control-copy">
-                        <text class="control-title">Language</text>
-                        <text class="control-meta">{locale_value}</text>
+
+                <scroll ref="settings_scroll" class="settings-scroll">
+                    <column class="settings-page-stack">
+                        <column class="settings-page-slot" hidden={wifi_hidden}>
+                            <WifiPage />
+                        </column>
+                        <column class="settings-page-slot" hidden={audio_hidden}>
+                            <AudioPage />
+                        </column>
+                        <column class="settings-page-slot" hidden={bluetooth_hidden}>
+                            <BluetoothPage />
+                        </column>
+                        <column class="settings-page-slot" hidden={appearance_hidden}>
+                            <AppearancePage />
+                        </column>
+                        <column class="settings-page-slot" hidden={device_hidden}>
+                            <DeviceInfoPage />
+                        </column>
+                        <column class="settings-page-slot" hidden={advanced_hidden}>
+                            <AdvancedPage />
+                        </column>
                     </column>
-                    <row class="segmented">
-                        <button class={locale_en_class} onclick={onLocaleEn}><text class="segment-text">EN</text></button>
-                        <button class={locale_sk_class} onclick={onLocaleSk}><text class="segment-text">SK</text></button>
-                    </row>
-                </row>
+                </scroll>
             </column>
-
-            <column class="section">
-                <text class="section-title">Active Providers</text>
-                <text class="section-copy">{providers_summary}</text>
-                <list class="compact-list" label="Active providers">
-                    {#for row in provider_rows}
-                        <list-item class="compact-row provider-row">
-                            <column class="provider-copy">
-                                <text class="row-title">{row.interface}</text>
-                                <text class="row-meta">{row.provider}</text>
-                            </column>
-                            <button class="provider-action" hidden={row.action_hidden} onclick={onProviderNext(row.interface, row.provider)}>Next</button>
-                        </list-item>
-                    {/for}
-                </list>
-            </column>
-
-            <column class="section">
-                <text class="section-title">Installed Modules</text>
-                <text class="section-copy">{modules_summary}</text>
-                <input
-                    class="module-filter"
-                    value={module_filter}
-                    placeholder="Filter modules"
-                    label="Filter installed modules"
-                    onchange={onModuleFilterChange}
-                />
-                <list class="module-list" label="Installed modules">
-                    {#for row in module_rows}
-                        <list-item class="module-card">
-                            <column class="module-copy">
-                                <row class="module-head">
-                                    <text class="module-title">{row.module_id}</text>
-                                    <text class="kind-pill">{row.kind}</text>
-                                </row>
-                                <text class="row-meta">{row.status}</text>
-                                <text class="row-meta">{row.resources}</text>
-                            </column>
-                            <button class="module-action" hidden={row.action_hidden} onclick={onModuleToggle(row.module_id, row.enabled)}>{row.action}</button>
-                        </list-item>
-                    {/for}
-                </list>
-            </column>
-        </column>
+        </row>
     </dialog>
 </template>
 
 <script lang="luau">
-local debug_service = require("mesh.debug")
-local theme = require("mesh.theme")
+local AdvancedPage = require("./components/advanced-page.mesh")
+local AppearancePage = require("./components/appearance-page.mesh")
+local AudioPage = require("./components/audio-page.mesh")
+local BluetoothPage = require("./components/bluetooth-page.mesh")
+local DeviceInfoPage = require("./components/device-info-page.mesh")
+local WifiPage = require("./components/wifi-page.mesh")
+local t = import("mesh.i18n", "t")
 
-settings_summary = "Waiting for module graph"
-theme_value = "Current theme unknown"
-locale_value = "Current language unknown"
-providers_summary = "No active providers published yet"
-modules_summary = "No installed modules published yet"
-module_filter = ""
+active_page = "wifi"
+page_title = "page.wifi.title"
+page_subtitle = "page.wifi.subtitle"
 
-theme_dark_class = "segment segment-active"
-theme_light_class = "segment"
-locale_en_class = "segment segment-active"
-locale_sk_class = "segment"
-provider_rows = {}
-module_rows = {}
-provider_notice = ""
-module_notice = ""
+wifi_hidden = false
+audio_hidden = true
+bluetooth_hidden = true
+appearance_hidden = true
+device_hidden = true
+advanced_hidden = true
 
-local provider_candidates = {}
-local pending_providers = {}
-local pending_module_enabled = {}
+wifi_nav_class = "settings-nav-item settings-nav-item-active"
+audio_nav_class = "settings-nav-item"
+bluetooth_nav_class = "settings-nav-item"
+appearance_nav_class = "settings-nav-item"
+device_nav_class = "settings-nav-item"
+advanced_nav_class = "settings-nav-item"
 
-local function list_count(values)
-    if type(values) ~= "table" then
-        return 0
-    end
-    return #values
-end
-
-local function join_limited(values, limit)
-    if type(values) ~= "table" or #values == 0 then
-        return "none"
-    end
-    local out = {}
-    local max_items = math.min(#values, limit)
-    for i = 1, max_items do
-        local item = values[i]
-        if type(item) == "table" then
-            if item.interface and item.provider then
-                out[#out + 1] = tostring(item.interface) .. "=" .. tostring(item.provider)
-            elseif item.interface then
-                out[#out + 1] = tostring(item.interface)
-            elseif item.id then
-                out[#out + 1] = tostring(item.id)
-            elseif item.name then
-                out[#out + 1] = tostring(item.name)
-            end
-        elseif item ~= nil then
-            out[#out + 1] = tostring(item)
-        end
-    end
-    if #values > limit then
-        out[#out + 1] = "+" .. tostring(#values - limit)
-    end
-    return table.concat(out, ", ")
-end
-
-local function lower(value)
-    return string.lower(tostring(value or ""))
-end
-
-local function module_matches(entry, query)
-    if query == "" then
-        return true
-    end
-    if string.find(lower(entry.module_id), query, 1, true) then
-        return true
-    end
-    if string.find(lower(entry.kind), query, 1, true) then
-        return true
-    end
-    local uses = entry.uses or {}
-    if string.find(lower(join_limited(uses.interfaces, 16)), query, 1, true) then
-        return true
-    end
-    if string.find(lower(join_limited(uses.active_providers, 16)), query, 1, true) then
-        return true
-    end
-    local provides = entry.provides or {}
-    if string.find(lower(join_limited(provides.settings, 16)), query, 1, true) then
-        return true
-    end
-    return false
-end
-
-local function module_row(entry, enabled, action_allowed)
-    local uses = entry.uses or {}
-    local provides = entry.provides or {}
-    local diagnostics = entry.diagnostics or {}
-    local health = entry.health or {}
-    local status = enabled and "enabled" or "disabled"
-    if #diagnostics > 0 then
-        status = status .. "; diagnostics " .. join_limited(diagnostics, 2)
-    elseif #health > 0 then
-        status = status .. "; health " .. join_limited(health, 2)
-    else
-        status = status .. "; clear"
-    end
-    local resources = "uses "
-        .. tostring(list_count(uses.interfaces))
-        .. " interfaces"
-        .. "; settings "
-        .. join_limited(provides.settings, 2)
+local function page_copy(page)
+    local key = "page." .. tostring(page or "wifi")
     return {
-        module_id = tostring(entry.module_id or ""),
-        kind = tostring(entry.kind or "module"),
-        status = status,
-        resources = resources,
-        enabled = enabled,
-        action = enabled and "Disable" or "Enable",
-        action_hidden = not action_allowed,
+        title = key .. ".title",
+        subtitle = key .. ".subtitle",
     }
 end
 
-local function sync_appearance()
-    local current_theme = "mesh-default-dark"
-    if theme and theme.current then
-        current_theme = tostring(theme.current)
-    elseif theme and theme.active then
-        current_theme = tostring(theme.active)
-    end
-    theme_value = current_theme
-    local is_dark = string.find(current_theme, "dark", 1, true) ~= nil
-    theme_dark_class = is_dark and "segment segment-active" or "segment"
-    theme_light_class = is_dark and "segment" or "segment segment-active"
+local function activate(page)
+    active_page = page
+    local copy = page_copy(page)
+    page_title = copy.title
+    page_subtitle = copy.subtitle
 
-    local locale = mesh.locale.current() or "en"
-    locale_value = tostring(locale)
-    local is_sk = locale == "sk" or string.find(locale, "sk-", 1, true) == 1
-    locale_en_class = is_sk and "segment" or "segment segment-active"
-    locale_sk_class = is_sk and "segment segment-active" or "segment"
+    wifi_hidden = page ~= "wifi"
+    audio_hidden = page ~= "audio"
+    bluetooth_hidden = page ~= "bluetooth"
+    appearance_hidden = page ~= "appearance"
+    device_hidden = page ~= "device"
+    advanced_hidden = page ~= "advanced"
+
+    wifi_nav_class = page == "wifi" and "settings-nav-item settings-nav-item-active" or "settings-nav-item"
+    audio_nav_class = page == "audio" and "settings-nav-item settings-nav-item-active" or "settings-nav-item"
+    bluetooth_nav_class = page == "bluetooth" and "settings-nav-item settings-nav-item-active" or "settings-nav-item"
+    appearance_nav_class = page == "appearance" and "settings-nav-item settings-nav-item-active" or "settings-nav-item"
+    device_nav_class = page == "device" and "settings-nav-item settings-nav-item-active" or "settings-nav-item"
+    advanced_nav_class = page == "advanced" and "settings-nav-item settings-nav-item-active" or "settings-nav-item"
+
+    refs.settings_scroll:scroll_to(0)
 end
 
-function render(self)
-    sync_appearance()
-
-    local graph = {}
-    if debug_service and type(debug_service.module_graph) == "table" then
-        graph = debug_service.module_graph
-    end
-
-    local query = lower(module_filter)
-    local matched = {}
-    local providers = {}
-    local active_providers = {}
-    local seen_provider_bindings = {}
-    local active_provider_modules = {}
-    provider_candidates = {}
-    for _, entry in ipairs(graph) do
-        local uses = entry.uses or {}
-        if type(uses.active_providers) == "table" then
-            for _, pair in ipairs(uses.active_providers) do
-                local interface = tostring(pair.interface or "")
-                local provider = tostring(pair.provider or "")
-                if interface ~= "" and provider ~= "" then
-                    active_providers[interface] = provider
-                    active_provider_modules[provider] = true
-                    local binding_key = interface .. "=" .. provider
-                    if not seen_provider_bindings[binding_key] then
-                        providers[#providers + 1] = { interface = interface, provider = provider }
-                        seen_provider_bindings[binding_key] = true
-                    end
-                end
-            end
-        end
-        if entry.enabled ~= false and entry.kind == "backend" then
-            local provides = entry.provides or {}
-            if type(provides.interfaces) == "table" then
-                for _, provided in ipairs(provides.interfaces) do
-                    local interface = type(provided) == "table" and provided.interface or provided
-                    interface = tostring(interface or "")
-                    if interface ~= "" then
-                        provider_candidates[interface] = provider_candidates[interface] or {}
-                        provider_candidates[interface][#provider_candidates[interface] + 1] =
-                            tostring(entry.module_id or "")
-                    end
-                end
-            end
-        end
-        if module_matches(entry, query) then
-            matched[#matched + 1] = entry
-        end
-    end
-
-    settings_summary = tostring(#graph) .. " modules indexed"
-    if #graph == 0 then
-        settings_summary = "Waiting for module graph"
-    end
-
-    providers_summary = tostring(#providers) .. " active provider bindings"
-    if #providers == 0 then
-        providers_summary = "No active providers published yet"
-    end
-    if provider_notice ~= "" then
-        providers_summary = providers_summary .. "; " .. provider_notice
-    end
-    provider_rows = {}
-    for i = 1, math.min(#providers, 3) do
-        local pair = providers[i]
-        local interface = tostring(pair.interface or "")
-        local provider = pending_providers[interface] or active_providers[interface] or tostring(pair.provider or "")
-        local candidates = provider_candidates[interface] or {}
-        provider_rows[#provider_rows + 1] = {
-            interface = interface,
-            provider = provider,
-            action_hidden = #candidates < 2,
-        }
-    end
-
-    modules_summary = tostring(#matched) .. " of " .. tostring(#graph) .. " installed modules match"
-    if #graph == 0 then
-        modules_summary = "No installed modules published yet"
-    end
-    if module_notice ~= "" then
-        modules_summary = modules_summary .. "; " .. module_notice
-    end
-    module_rows = {}
-    for i = 1, math.min(#matched, 4) do
-        local entry = matched[i]
-        local module_id = tostring(entry.module_id or "")
-        local enabled = pending_module_enabled[module_id]
-        if enabled == nil then
-            enabled = entry.enabled ~= false
-        end
-        local action_allowed = module_id ~= "@mesh/settings"
-            and entry.root_layout ~= true
-            and not active_provider_modules[module_id]
-        module_rows[#module_rows + 1] = module_row(entry, enabled, action_allowed)
-    end
+function render()
+    local copy = page_copy(active_page)
+    page_title = copy.title
+    page_subtitle = copy.subtitle
 end
 
-function onModuleFilterChange(event)
-    module_filter = tostring(event.value or "")
-end
-
-function onThemeDark()
-    mesh.events.publish("shell.set-theme", { theme_id = "mesh-default-dark" })
-    theme_value = "mesh-default-dark"
-    theme_dark_class = "segment segment-active"
-    theme_light_class = "segment"
-end
-
-function onThemeLight()
-    mesh.events.publish("shell.set-theme", { theme_id = "mesh-default-light" })
-    theme_value = "mesh-default-light"
-    theme_dark_class = "segment"
-    theme_light_class = "segment segment-active"
-end
-
-function onLocaleEn()
-    mesh.locale.set("en")
-    locale_value = "en"
-    locale_en_class = "segment segment-active"
-    locale_sk_class = "segment"
-end
-
-function onLocaleSk()
-    mesh.locale.set("sk")
-    locale_value = "sk"
-    locale_en_class = "segment"
-    locale_sk_class = "segment segment-active"
-end
-
-function onProviderNext(interface, current)
-    local candidates = provider_candidates[interface] or {}
-    if interface == "" or #candidates < 2 then
-        return
-    end
-    local current_index = 0
-    for i, provider in ipairs(candidates) do
-        if provider == current then
-            current_index = i
-        end
-    end
-    local next_index = (current_index % #candidates) + 1
-    local provider_id = candidates[next_index]
-    pending_providers[interface] = provider_id
-    provider_notice = "switching live; current provider stays active until ready"
-    mesh.events.publish("shell.set-provider", {
-        interface = interface,
-        provider_id = provider_id,
-    })
-end
-
-function onModuleToggle(module_id, current_enabled)
-    if module_id == "" or module_id == "@mesh/settings" then
-        return
-    end
-    local enabled = not current_enabled
-    pending_module_enabled[module_id] = enabled
-    module_notice = "applying live"
-    mesh.events.publish("shell.set-module-enabled", {
-        module_id = module_id,
-        enabled = enabled,
-    })
-end
+function showWifi() activate("wifi") end
+function showAudio() activate("audio") end
+function showBluetooth() activate("bluetooth") end
+function showAppearance() activate("appearance") end
+function showDevice() activate("device") end
+function showAdvanced() activate("advanced") end
 
 function onClose()
     mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/settings" })
@@ -387,181 +182,343 @@ end
 
 <style>
     .settings-shell {
-        width: 420px;
-        max-width: 420px;
-        min-height: 100%;
+        width: 920px;
+        height: 700px;
+        min-width: 920px;
+        max-width: 920px;
+        min-height: 700px;
+        max-height: 700px;
         background: var(--color-surface);
         color: var(--color-on-surface);
-        border-left-width: 1px;
-        border-left-style: solid;
-        border-left-color: var(--color-outline-variant);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--color-outline-variant);
     }
 
-    .settings-root {
+    .settings-layout {
         width: 100%;
+        height: 100%;
+        min-width: 0;
+    }
+
+    .settings-sidebar {
+        width: 250px;
+        height: 100%;
+        flex-shrink: 0;
         gap: var(--spacing-lg);
         padding: var(--spacing-lg);
+        background: var(--color-surface-container-low);
+        border-right-width: 1px;
+        border-right-style: solid;
+        border-right-color: var(--color-outline-variant);
     }
 
-    .settings-header,
-    .control-row,
-    .module-head {
+    .settings-brand {
         width: 100%;
         align-items: center;
-        justify-content: space-between;
-        gap: var(--spacing-md);
-    }
-
-    .header-copy,
-    .control-copy,
-    .section,
-    .module-copy,
-    .provider-copy {
-        gap: var(--spacing-xs);
-    }
-
-    .provider-row {
-        width: 100%;
-        align-items: center;
-        justify-content: space-between;
         gap: var(--spacing-sm);
     }
 
-    .provider-action {
-        min-width: 52px;
-        min-height: 28px;
-        padding-left: var(--spacing-sm);
-        padding-right: var(--spacing-sm);
-    }
-
-    .module-action {
+    .brand-mark {
+        width: 40px;
+        height: 40px;
         flex-shrink: 0;
-        min-width: 64px;
-        min-height: 28px;
-        padding-left: var(--spacing-sm);
-        padding-right: var(--spacing-sm);
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--radius-md);
+        background: var(--color-primary);
+        color: var(--color-on-primary);
     }
 
-    .settings-title {
-        font-size: var(--typography-size-xl);
-        font-weight: 700;
+    .brand-copy,
+    .nav-copy,
+    .header-copy,
+    .settings-page,
+    .settings-section,
+    .settings-card-copy,
+    .sidebar-foot {
+        gap: var(--spacing-xs);
+    }
+
+    .brand-title {
+        color: var(--color-on-surface);
+        font-size: var(--typography-size-md);
+        font-weight: 750;
+    }
+
+    .brand-subtitle,
+    .nav-subtitle,
+    .page-subtitle,
+    .sidebar-foot-copy,
+    .settings-muted,
+    .settings-card-meta {
+        height: auto;
+        flex-shrink: 0;
+        color: var(--color-on-surface-variant);
+        font-size: var(--typography-size-xs);
+    }
+
+    .settings-navigation {
+        width: 100%;
+        gap: var(--spacing-xs);
+    }
+
+    .settings-nav-item {
+        width: 100%;
+        min-height: 56px;
+        align-items: center;
+        justify-content: flex-start;
+        gap: var(--spacing-sm);
+        padding-inline: var(--spacing-sm);
+        padding-block: var(--spacing-xs);
+        border-radius: var(--radius-md);
+        border-width: 0;
+        background: transparent;
+        color: var(--color-on-surface-variant);
+        text-align: left;
+        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                    color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    .settings-nav-item:hover {
+        background: var(--color-surface-container-high);
         color: var(--color-on-surface);
     }
 
-    .settings-subtitle,
-    .section-copy,
-    .control-meta,
-    .row-meta {
-        font-size: var(--typography-size-xs);
-        color: var(--color-on-surface-variant);
+    .settings-nav-item-active {
+        background: var(--color-secondary-container);
+        color: var(--color-on-secondary-container);
     }
 
-    .section-title,
-    .control-title,
-    .module-title,
-    .row-title {
+    .nav-title {
+        color: inherit;
         font-size: var(--typography-size-sm);
         font-weight: 700;
-        color: var(--color-on-surface);
     }
 
-    .icon-button {
-        width: 32px;
-        height: 32px;
-        justify-content: center;
-        align-items: center;
-        border-radius: var(--radius-full);
-        background: var(--color-surface-container);
-        color: var(--color-on-surface);
-        border-width: 0;
+    .nav-subtitle {
+        color: inherit;
+        opacity: 0.75;
     }
 
-    .section {
+    .sidebar-foot {
         width: 100%;
         padding: var(--spacing-md);
         border-radius: var(--radius-md);
-        background: var(--color-surface-container-low);
-        border-width: 1px;
-        border-style: solid;
-        border-color: var(--color-outline-variant);
-    }
-
-    .segmented {
-        flex-shrink: 0;
-        gap: var(--spacing-xs);
-    }
-
-    .segment {
-        min-width: 52px;
-        height: 32px;
-        justify-content: center;
-        align-items: center;
-        padding-inline: var(--spacing-sm);
-        border-radius: var(--radius-sm);
         background: var(--color-surface-container);
+    }
+
+    .sidebar-foot-title {
         color: var(--color-on-surface);
-        border-width: 1px;
-        border-style: solid;
-        border-color: var(--color-outline-variant);
-    }
-
-    .segment-active {
-        background: var(--color-primary);
-        color: var(--color-on-primary);
-        border-color: var(--color-primary);
-    }
-
-    .segment-text {
         font-size: var(--typography-size-xs);
         font-weight: 700;
-        color: inherit;
+        text-transform: uppercase;
     }
 
-    .compact-list,
-    .module-list {
+    .settings-workspace {
+        min-width: 0;
+        height: 100%;
+        flex-grow: 1;
+    }
+
+    .settings-header {
+        width: 100%;
+        min-height: 112px;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--spacing-lg);
+        padding-inline: 28px;
+        padding-block: var(--spacing-lg);
+        border-bottom-width: 1px;
+        border-bottom-style: solid;
+        border-bottom-color: var(--color-outline-variant);
+    }
+
+    .page-eyebrow {
+        color: var(--color-primary);
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 1.4px;
+    }
+
+    .page-title {
+        height: auto;
+        flex-shrink: 0;
+        color: var(--color-on-surface);
+        font-size: 26px;
+        font-weight: 750;
+    }
+
+    .close-button {
+        width: 38px;
+        height: 38px;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--radius-full);
+        border-width: 0;
+        background: var(--color-surface-container);
+        color: var(--color-on-surface-variant);
+    }
+
+    .close-button:hover {
+        background: var(--color-error-container);
+        color: var(--color-on-error-container);
+    }
+
+    .settings-scroll {
+        width: 100%;
+        min-height: 0;
+        flex-grow: 1;
+        overflow-y: scroll;
+        overflow-x: hidden;
+    }
+
+    .settings-page-stack {
+        width: 100%;
+        padding: 28px;
+    }
+
+    .settings-page-slot {
+        width: 100%;
+    }
+
+    .settings-page {
+        width: 100%;
+        gap: var(--spacing-lg);
+    }
+
+    .settings-section {
         width: 100%;
         gap: var(--spacing-sm);
     }
 
-    .compact-row,
-    .module-card {
+    .settings-section-head,
+    .settings-control-row,
+    .settings-card,
+    .settings-card-head,
+    .settings-info-row {
         width: 100%;
-        padding: var(--spacing-sm);
-        border-radius: var(--radius-sm);
-        background: var(--color-surface-container);
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--spacing-md);
+    }
+
+    .settings-section-title,
+    .settings-control-title,
+    .settings-card-title {
+        color: var(--color-on-surface);
+        font-size: var(--typography-size-sm);
+        font-weight: 700;
+    }
+
+    .settings-section-copy {
+        height: auto;
+        flex-shrink: 0;
+        color: var(--color-on-surface-variant);
+        font-size: var(--typography-size-xs);
+        line-height: 1.45;
+    }
+
+    .settings-card,
+    .settings-control-row,
+    .settings-empty-state {
+        width: 100%;
+        padding: var(--spacing-md);
+        border-radius: var(--radius-md);
         border-width: 1px;
         border-style: solid;
         border-color: var(--color-outline-variant);
+        background: var(--color-surface-container-low);
     }
 
-    .compact-row {
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--spacing-md);
-    }
-
-    .module-card {
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--spacing-md);
-    }
-
-    .module-copy {
+    .settings-card-copy {
+        min-width: 0;
         flex-grow: 1;
     }
 
-    .module-filter {
-        width: 100%;
+    .settings-empty-state {
+        gap: var(--spacing-sm);
+        align-items: center;
+        justify-content: center;
+        min-height: 116px;
+        text-align: center;
     }
 
-    .kind-pill {
+    .settings-status-pill {
         flex-shrink: 0;
         padding-inline: var(--spacing-sm);
         padding-block: var(--spacing-xs);
         border-radius: var(--radius-full);
-        background: var(--color-secondary-container);
-        color: var(--color-on-secondary-container);
+        background: var(--color-surface-container-high);
+        color: var(--color-on-surface-variant);
         font-size: var(--typography-size-xs);
         font-weight: 700;
+    }
+
+    .settings-status-pill-active {
+        background: var(--color-tertiary-container);
+        color: var(--color-on-tertiary-container);
+    }
+
+    .settings-primary-button,
+    .settings-secondary-button,
+    .settings-danger-button {
+        min-height: 34px;
+        flex-shrink: 0;
+        padding-inline: var(--spacing-md);
+        border-radius: var(--radius-sm);
+        font-size: var(--typography-size-xs);
+        font-weight: 700;
+    }
+
+    .settings-primary-button {
+        border-width: 0;
+        background: var(--color-primary);
+        color: var(--color-on-primary);
+    }
+
+    .settings-secondary-button {
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--color-outline-variant);
+        background: var(--color-surface-container);
+        color: var(--color-on-surface);
+    }
+
+    .settings-danger-button {
+        border-width: 0;
+        background: var(--color-error-container);
+        color: var(--color-on-error-container);
+    }
+
+    .settings-list {
+        width: 100%;
+        gap: var(--spacing-sm);
+    }
+
+    .settings-slider {
+        min-width: 240px;
+        flex-grow: 1;
+    }
+
+    .settings-value {
+        min-width: 48px;
+        color: var(--color-on-surface);
+        font-size: var(--typography-size-sm);
+        font-weight: 750;
+        text-align: right;
+    }
+
+    .settings-info-label {
+        color: var(--color-on-surface-variant);
+        font-size: var(--typography-size-xs);
+    }
+
+    .settings-info-value {
+        color: var(--color-on-surface);
+        font-size: var(--typography-size-xs);
+        font-weight: 650;
+        text-align: right;
     }
 </style>

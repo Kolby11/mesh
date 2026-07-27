@@ -6,7 +6,7 @@ use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_component::parse_component;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::style::Display;
-use mesh_core_frontend::CompiledFrontendModule;
+use mesh_core_frontend::{CompiledFrontendModule, compile_frontend_module};
 use mesh_core_module::manifest::{
     CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
 };
@@ -36,13 +36,17 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
                         arg_type: "string".into(),
                     },
                     InterfaceArgument {
-                        name: "volume".into(),
+                        name: "percent".into(),
                         arg_type: "float".into(),
                     },
                 ],
                 returns: None,
                 coalesce: false,
-                optimistic: None,
+                state_binding: Some(mesh_core_service::StateBinding {
+                    field: "percent".into(),
+                    from_arg: Some("percent".into()),
+                    toggle: false,
+                }),
             },
             InterfaceMethod {
                 name: "set_muted".into(),
@@ -58,28 +62,28 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
                 ],
                 returns: None,
                 coalesce: false,
-                optimistic: None,
+                state_binding: None,
             },
             InterfaceMethod {
                 name: "volume_up".into(),
                 args: Vec::new(),
                 returns: None,
                 coalesce: false,
-                optimistic: None,
+                state_binding: None,
             },
             InterfaceMethod {
                 name: "volume_down".into(),
                 args: Vec::new(),
                 returns: None,
                 coalesce: false,
-                optimistic: None,
+                state_binding: None,
             },
             InterfaceMethod {
                 name: "toggle_mute".into(),
                 args: Vec::new(),
                 returns: None,
                 coalesce: false,
-                optimistic: None,
+                state_binding: None,
             },
         ],
         events: vec![InterfaceEvent {
@@ -119,7 +123,7 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
                 }],
                 returns: None,
                 coalesce: false,
-                optimistic: None,
+                state_binding: None,
             },
             InterfaceMethod {
                 name: "connect".into(),
@@ -129,7 +133,7 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
                 }],
                 returns: None,
                 coalesce: false,
-                optimistic: None,
+                state_binding: None,
             },
         ],
         events: Vec::new(),
@@ -147,7 +151,20 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
     catalog.register_contract(InterfaceContract {
         interface: "mesh.theme".into(),
         version: parse_contract_version("1.0").unwrap(),
-        state_fields: Vec::new(),
+        state_fields: [
+            ("current", "string"),
+            ("theme_id", "string"),
+            ("is_dark", "boolean"),
+            ("themes", "object[]"),
+            ("available", "string[]"),
+        ]
+        .into_iter()
+        .map(|(name, field_type)| ContractStateField {
+            name: name.into(),
+            field_type: field_type.into(),
+            description: None,
+        })
+        .collect(),
         methods: Vec::new(),
         events: Vec::new(),
         types: HashMap::new(),
@@ -230,7 +247,7 @@ pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
                         }],
                         returns: None,
                         coalesce: false,
-                        optimistic: None,
+                        state_binding: None,
                     })
                     .collect(),
             )
@@ -429,6 +446,55 @@ pub(super) fn minimal_test_manifest(id: &str) -> Manifest {
 
 pub(super) fn test_frontend_component(source: &str) -> FrontendSurfaceComponent {
     test_frontend_component_with_catalog(source, InterfaceCatalog::default(), &[])
+}
+
+/// Surface with locally imported `.mesh` children, so tests can exercise child
+/// runtimes that are only instantiated once the template renders them.
+pub(super) fn test_frontend_component_with_local_components(
+    source: &str,
+    local_components: &[(&str, &str)],
+    interface_catalog: InterfaceCatalog,
+    required_capabilities: &[&str],
+) -> FrontendSurfaceComponent {
+    let mut manifest = minimal_test_manifest("@test/reactive-surface");
+    manifest.capabilities.required = required_capabilities
+        .iter()
+        .map(|capability| (*capability).to_string())
+        .collect();
+    let compiled = CompiledFrontendModule {
+        manifest,
+        source_path: PathBuf::from("src/main.mesh"),
+        component: parse_component(source).unwrap(),
+        local_components: local_components
+            .iter()
+            .map(|(name, source)| ((*name).to_string(), parse_component(source).unwrap()))
+            .collect(),
+        module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
+    };
+    // The catalog points back at this surface so local PascalCase components
+    // resolve during render.
+    let catalog = FrontendCatalog {
+        modules: HashMap::from([(
+            "@test/reactive-surface".to_string(),
+            FrontendCatalogEntry {
+                module_dir: PathBuf::from("."),
+                compiled: compiled.clone(),
+            },
+        )]),
+        slot_contributions: HashMap::new(),
+    };
+    let mut component =
+        FrontendSurfaceComponent::new(compiled, PathBuf::from("."), catalog, interface_catalog);
+    component
+        .mount(ComponentContext {
+            component_id: "@test/reactive-surface".into(),
+            surface_id: "@test/reactive-surface".into(),
+            diagnostics: Diagnostics::new("@test/reactive-surface"),
+        })
+        .unwrap();
+    component.visible = true;
+    component
 }
 
 pub(super) fn test_frontend_component_with_manifest(
@@ -826,18 +892,8 @@ pub(super) fn real_frontend_module_component(
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
     };
-    let settings_compiled = CompiledFrontendModule {
-        manifest: settings_manifest,
-        source_path: settings_dir.join("src/main.mesh"),
-        component: parse_component(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../modules/frontend/settings/src/main.mesh"
-        )))
-        .unwrap(),
-        local_components: HashMap::new(),
-        module_component_imports: HashMap::new(),
-        watched_paths: Vec::new(),
-    };
+    let settings_compiled = compile_frontend_module(&settings_manifest, &settings_dir)
+        .expect("settings module and its local pages should compile");
 
     let catalog = FrontendCatalog {
         modules: HashMap::from([

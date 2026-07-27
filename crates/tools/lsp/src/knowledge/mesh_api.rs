@@ -39,7 +39,7 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
     //   Mutating command methods — declared in [[methods]] of the interface
     //   contract and callable from frontend scripts:
     //     audio.volume_up()
-    //     audio.set_volume("sink-1", 0.75)
+    //     audio.set_volume("sink-1", 75)
     //     network.set_wifi_enabled(true)
     //
     //   There are no read-style helper methods (no default_output(), no

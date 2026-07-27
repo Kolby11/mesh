@@ -1,0 +1,232 @@
+<template>
+    <column class="settings-page" hidden={hidden}>
+        <row class="settings-control-row">
+            <column class="settings-card-copy">
+                <text class="settings-control-title">{t('nav.bluetooth')}</text>
+                <text class="settings-card-meta">{t(bluetooth_status)}</text>
+            </column>
+            <button class={bluetooth_toggle_class} onclick={onToggleBluetooth} disabled={controls_disabled}>
+                {t(bluetooth_toggle_label)}
+            </button>
+        </row>
+
+        <column class="settings-section">
+            <row class="settings-section-head">
+                <column class="settings-card-copy">
+                    <text class="settings-section-title">{t('bluetooth.my_devices')}</text>
+                    <text class="settings-section-copy">{paired_count .. t(paired_summary)}</text>
+                </column>
+            </row>
+            <list class="settings-list" label={t('bluetooth.paired_devices')} hidden={paired_hidden}>
+                {#for row in paired_rows}
+                    <list-item class="settings-card">
+                        <icon name="bluetooth" size="20" />
+                        <column class="settings-card-copy">
+                            <text class="settings-card-title">{t(row.name)}</text>
+                            <text class="settings-card-meta">{t(row.details)}</text>
+                        </column>
+                        <button class={row.button_class} onclick={onPairedAction(row.id, row.connected)}>
+                            {t(row.action)}
+                        </button>
+                    </list-item>
+                {/for}
+            </list>
+            <empty-state class="settings-empty-state" hidden={paired_empty_hidden}>
+                <icon name="bluetooth" size="24" />
+                <text class="settings-card-title">{t(empty_title)}</text>
+                <text class="settings-section-copy">{t(empty_copy)}</text>
+            </empty-state>
+        </column>
+
+        <column class="settings-section">
+            <row class="settings-section-head">
+                <column class="settings-card-copy">
+                    <text class="settings-section-title">{t('bluetooth.nearby_devices')}</text>
+                    <text class="settings-section-copy">{nearby_count .. t(nearby_summary)}</text>
+                </column>
+                <button class="settings-secondary-button" onclick={onScan} disabled={scan_disabled}>{t(scan_label)}</button>
+            </row>
+            <list class="settings-list" label={t('bluetooth.nearby_bluetooth_devices')} hidden={nearby_hidden}>
+                {#for row in nearby_rows}
+                    <list-item class="settings-card">
+                        <icon name="bluetooth" size="20" />
+                        <column class="settings-card-copy">
+                            <text class="settings-card-title">{t(row.name)}</text>
+                            <text class="settings-card-meta">{t(row.details)}</text>
+                        </column>
+                        <button class="settings-primary-button" onclick={onPair(row.id)}>{t('bluetooth.pair')}</button>
+                    </list-item>
+                {/for}
+            </list>
+        </column>
+
+        <column class="settings-section">
+            <text class="settings-section-title">{t('common.backend_details')}</text>
+            <column class="settings-card">
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('bluetooth.adapter')}</text>
+                    <text class="settings-info-value">{t(adapter_name)}</text>
+                </row>
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('common.provider')}</text>
+                    <text class="settings-info-value">{t(provider_label)}</text>
+                </row>
+            </column>
+        </column>
+    </column>
+</template>
+
+<script lang="luau">
+hidden = false
+
+local bluetooth_ok, bluetooth = pcall(require, "mesh.bluetooth@>=1.0")
+if not bluetooth_ok then bluetooth = nil end
+local t = import("mesh.i18n", "t")
+
+bluetooth_status = "bluetooth.waiting"
+bluetooth_toggle_label = "common.unavailable"
+bluetooth_toggle_class = "settings-secondary-button"
+controls_disabled = true
+scan_disabled = true
+scan_label = "common.scan"
+paired_count = ""
+nearby_count = ""
+paired_summary = "bluetooth.paired_waiting"
+nearby_summary = "bluetooth.discovery_requires_provider"
+paired_rows = {}
+nearby_rows = {}
+paired_hidden = true
+nearby_hidden = true
+paired_empty_hidden = false
+empty_title = "bluetooth.service_unavailable"
+empty_copy = "bluetooth.install_backend"
+adapter_name = "common.not_reported"
+provider_label = "common.no_provider"
+
+local function device_name(entry)
+    return tostring(entry.alias or entry.name or entry.id or entry.address or "bluetooth.device")
+end
+
+local function device_id(entry)
+    return tostring(entry.id or entry.address or entry.path or "")
+end
+
+function render()
+    if not bluetooth or bluetooth.available == false then
+        bluetooth_status = "bluetooth.no_compatible_service"
+        bluetooth_toggle_label = "common.unavailable"
+        bluetooth_toggle_class = "settings-secondary-button"
+        controls_disabled = true
+        scan_disabled = true
+        paired_rows = {}
+        nearby_rows = {}
+        paired_hidden = true
+        nearby_hidden = true
+        paired_empty_hidden = false
+        paired_count = ""
+        nearby_count = ""
+        empty_title = "bluetooth.service_unavailable"
+        empty_copy = "bluetooth.install_mesh_backend"
+        adapter_name = "common.not_reported"
+        provider_label = "common.no_provider"
+        return
+    end
+
+    local enabled = bluetooth.enabled == true or bluetooth.powered == true
+    local control_allowed = bluetooth.controls_available ~= false and bluetooth.permission_denied ~= true
+    controls_disabled = not control_allowed
+    scan_disabled = not enabled or type(bluetooth.scan) ~= "function"
+    scan_label = bluetooth.scanning == true and "common.scanning" or "common.scan"
+    bluetooth_toggle_label = enabled and "common.turn_off" or "common.turn_on"
+    bluetooth_toggle_class = enabled and "settings-primary-button" or "settings-secondary-button"
+    bluetooth_status = enabled and "bluetooth.powered_on" or "bluetooth.powered_off"
+    adapter_name = tostring(bluetooth.adapter_name or bluetooth.adapter or "bluetooth.default_adapter")
+    provider_label = tostring(bluetooth.source_module or "bluetooth.active_provider")
+
+    paired_rows = {}
+    local paired = bluetooth.paired_devices or bluetooth.devices
+    if type(paired) == "table" then
+        for _, entry in ipairs(paired) do
+            if entry.paired ~= false then
+                local connected = entry.connected == true
+                paired_rows[#paired_rows + 1] = {
+                    id = device_id(entry),
+                    name = device_name(entry),
+                    connected = connected,
+                    details = connected and "common.connected" or "bluetooth.paired",
+                    action = connected and "common.disconnect" or "common.connect",
+                    button_class = connected and "settings-danger-button" or "settings-secondary-button",
+                }
+            end
+        end
+    end
+
+    nearby_rows = {}
+    local nearby = bluetooth.nearby_devices or bluetooth.discovered_devices
+    if enabled and type(nearby) == "table" then
+        for _, entry in ipairs(nearby) do
+            if entry.paired ~= true then
+                nearby_rows[#nearby_rows + 1] = {
+                    id = device_id(entry),
+                    name = device_name(entry),
+                    details = tostring(entry.kind or entry.class or "bluetooth.available_to_pair"),
+                }
+            end
+        end
+    end
+
+    paired_hidden = #paired_rows == 0
+    paired_empty_hidden = #paired_rows > 0
+    nearby_hidden = #nearby_rows == 0
+    paired_count = #paired_rows == 0 and "" or (tostring(#paired_rows) .. " ")
+    nearby_count = #nearby_rows == 0 and "" or (tostring(#nearby_rows) .. " ")
+    paired_summary = #paired_rows == 0 and "bluetooth.no_paired_reported"
+        or "bluetooth.paired_count"
+    nearby_summary = #nearby_rows == 0 and "bluetooth.no_nearby_reported"
+        or "bluetooth.nearby_count"
+    if not enabled then
+        empty_title = "bluetooth.turned_off"
+        empty_copy = "bluetooth.turn_on_copy"
+    else
+        empty_title = "bluetooth.no_paired"
+        empty_copy = "bluetooth.discovery_copy"
+    end
+end
+
+function onToggleBluetooth()
+    if not bluetooth then return end
+    local enabled = bluetooth.enabled == true or bluetooth.powered == true
+    if type(bluetooth.set_enabled) == "function" then
+        bluetooth.set_enabled(not enabled)
+    elseif type(bluetooth.set_powered) == "function" then
+        bluetooth.set_powered(not enabled)
+    end
+end
+
+function onScan()
+    if bluetooth and type(bluetooth.scan) == "function" then
+        bluetooth.scan()
+    end
+end
+
+function onPair(id)
+    if bluetooth and id ~= "" and type(bluetooth.pair) == "function" then
+        bluetooth.pair(id)
+    end
+end
+
+function onPairedAction(id, connected)
+    if not bluetooth or id == "" then return end
+    if connected and type(bluetooth.disconnect) == "function" then
+        bluetooth.disconnect(id)
+    elseif not connected and type(bluetooth.connect) == "function" then
+        bluetooth.connect(id)
+    end
+end
+</script>
+
+<style>
+    .settings-page {
+        min-height: 0;
+    }
+</style>

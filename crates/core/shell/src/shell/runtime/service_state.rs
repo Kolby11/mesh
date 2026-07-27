@@ -43,7 +43,10 @@ impl Shell {
         Ok(requests)
     }
 
-    fn normalize_service_event(&mut self, event: ServiceEvent) -> ServiceEvent {
+    pub(in crate::shell) fn normalize_service_event(
+        &mut self,
+        event: ServiceEvent,
+    ) -> ServiceEvent {
         let ServiceEvent::Updated {
             service,
             source_module,
@@ -74,21 +77,25 @@ impl Shell {
                 payload,
             };
         }
-        // Re-apply pending optimistic patches until the provider confirms the
-        // expected value; a confirming update clears the pending entry.
+        // A command-bound field remains shell-authoritative until the provider
+        // confirms it. This keeps every observer on one reactive value even if
+        // an older provider snapshot arrives while the command is in flight.
         let pending_fields: Vec<String> = self
-            .pending_optimistic_state
+            .pending_bound_service_state
             .keys()
             .filter(|(pending_interface, _)| pending_interface == &interface)
             .map(|(_, field)| field.clone())
             .collect();
         for field in pending_fields {
             let key = (interface.clone(), field);
-            let Some(expected) = self.pending_optimistic_state.get(&key) else {
+            let Some(expected) = self.pending_bound_service_state.get(&key) else {
                 continue;
             };
-            if payload.get(&key.1) == Some(expected) {
-                self.pending_optimistic_state.remove(&key);
+            if payload
+                .get(&key.1)
+                .is_some_and(|actual| service_values_equivalent(actual, expected))
+            {
+                self.pending_bound_service_state.remove(&key);
             } else {
                 payload[key.1.as_str()] = expected.clone();
             }
@@ -155,17 +162,16 @@ impl Shell {
         true
     }
 
-    /// Apply a contract-declared optimistic state patch: set the public state
-    /// field to the expected value immediately so UI reacts before the
-    /// provider confirms. `normalize_service_event` keeps re-applying the
-    /// patch until a provider update carries the expected value.
-    pub(in crate::shell) fn apply_optimistic_service_state(
+    /// Write a contract-bound command value into the shell's canonical service
+    /// state and publish it to every observer. Provider state later confirms
+    /// the value through `normalize_service_event`.
+    pub(in crate::shell) fn apply_bound_service_state(
         &mut self,
         interface: &str,
         field: &str,
         value: serde_json::Value,
     ) {
-        self.pending_optimistic_state
+        self.pending_bound_service_state
             .insert((interface.to_string(), field.to_string()), value.clone());
         let interface = interface.to_string();
         let provider_id = self
@@ -177,7 +183,7 @@ impl Shell {
                     .get(&interface)
                     .map(|latest| latest.provider_id.clone())
             })
-            .unwrap_or_else(|| "@mesh/optimistic".to_string());
+            .unwrap_or_else(|| "@mesh/shell".to_string());
         let mut payload = self
             .latest_service_state
             .get(&interface)
@@ -195,26 +201,26 @@ impl Shell {
         });
     }
 
-    /// Compute the optimistic value for a dispatched command from its
-    /// contract annotation: either the named argument's payload value, or the
-    /// negation of the current boolean state field for toggles.
-    pub(in crate::shell) fn optimistic_value_for_command(
+    /// Resolve a command's state-bound value: either copy the declared
+    /// argument or negate the current boolean field for a toggle binding.
+    pub(in crate::shell) fn bound_value_for_command(
         &self,
         interface: &str,
-        optimistic: &mesh_core_service::OptimisticUpdate,
+        binding: &mesh_core_service::StateBinding,
         payload: &serde_json::Value,
     ) -> Option<serde_json::Value> {
-        match &optimistic.from_arg {
+        match &binding.from_arg {
             Some(arg) => payload.get(arg).cloned(),
-            None => {
+            None if binding.toggle => {
                 let current = self
                     .latest_service_state
                     .get(interface)
-                    .and_then(|latest| latest.state.get(&optimistic.field))
+                    .and_then(|latest| latest.state.get(&binding.field))
                     .and_then(|value| value.as_bool())
                     .unwrap_or(false);
                 Some(serde_json::json!(!current))
             }
+            None => None,
         }
     }
 
@@ -224,12 +230,25 @@ impl Shell {
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         self.rebuild_service_delivery_index_if_needed();
         let target_indices = self.service_delivery_targets(event);
+        // Components outside the delivery set still cache payloads for the
+        // services they declare. Without this a surface that has not rendered
+        // yet reads no service field, so it observes nothing and later seeds
+        // its child runtimes from an empty cache.
+        if matches!(event, ServiceEvent::Updated { .. }) {
+            for (index, runtime) in self.components.iter_mut().enumerate() {
+                if target_indices.contains(&index) {
+                    continue;
+                }
+                runtime.component.cache_service_payload(event);
+            }
+        }
         let mut requests = VecDeque::new();
         for index in target_indices {
             let Some(runtime) = self.components.get_mut(index) else {
                 continue;
             };
             if !runtime.component.observes_service_event(event) {
+                runtime.component.cache_service_payload(event);
                 continue;
             }
             requests.extend(
@@ -430,6 +449,14 @@ impl Shell {
             .get(interface)
             .expect("contract validation cache inserted")
     }
+}
+
+fn service_values_equivalent(actual: &serde_json::Value, expected: &serde_json::Value) -> bool {
+    actual == expected
+        || actual
+            .as_f64()
+            .zip(expected.as_f64())
+            .is_some_and(|(actual, expected)| (actual - expected).abs() < f64::EPSILON)
 }
 
 fn build_contract_validation_cache(contract: Arc<InterfaceContract>) -> ContractValidationCache {

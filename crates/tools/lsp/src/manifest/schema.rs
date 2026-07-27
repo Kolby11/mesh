@@ -882,24 +882,34 @@ fn contract_node() -> Node {
                                 ),
                             ),
                             field(
-                                "optimistic",
+                                "stateBinding",
                                 false,
                                 obj(
-                                    "Optimistic state patch applied on dispatch: set `field` \
-                                     from `fromArg`, or toggle the boolean field when \
-                                     `fromArg` is omitted.",
+                                    "Reactive command-to-state binding applied by the shell. \
+                                     Declare exactly one of `fromArg` or `toggle: true`.",
                                     vec![
                                         field(
                                             "field",
                                             true,
-                                            scalar("State field to patch.", "string"),
+                                            scalar(
+                                                "Shared service-state field to update.",
+                                                "string",
+                                            ),
                                         ),
                                         field(
                                             "fromArg",
                                             false,
                                             scalar(
-                                                "Argument supplying the optimistic value.",
+                                                "Command argument supplying the bound value.",
                                                 "string",
+                                            ),
+                                        ),
+                                        field(
+                                            "toggle",
+                                            false,
+                                            scalar(
+                                                "Negate the current boolean state field.",
+                                                "boolean",
                                             ),
                                         ),
                                     ],

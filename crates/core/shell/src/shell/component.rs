@@ -577,6 +577,11 @@ pub(super) struct FrontendSurfaceComponent {
     last_service_update: Option<String>,
     cached_service_capabilities: HashMap<String, Arc<ServiceCapabilities>>,
     cached_service_payloads: HashMap<String, CachedServicePayload>,
+    /// Service names declared by this surface's manifest (and the manifests of
+    /// the component modules it embeds). Payloads for these are cached even
+    /// while no live runtime reads them, so lazily created child runtimes are
+    /// seeded with real state instead of an empty service proxy.
+    declared_service_names: HashSet<String>,
     focused_key: Option<String>,
     focus_visible_key: Option<String>,
     pointer_down_key: Option<String>,
@@ -871,6 +876,8 @@ impl FrontendSurfaceComponent {
         let service_payload_capacity = service_payload_cache_capacity(&compiled.manifest);
         let element_metric_usage = element_metric_usage(&compiled);
         let has_animatable_style_rules = compiled_module_has_animatable_style_rules(&compiled);
+        let frontend_catalog = frontend_catalog.into();
+        let declared_service_names = declared_service_names(&compiled, &frontend_catalog);
         Self {
             compiled,
             module_dir,
@@ -879,7 +886,7 @@ impl FrontendSurfaceComponent {
             surface_layout: settings_state.layout.clone(),
             keyboard_mode_override: None,
             popup_promoted: false,
-            frontend_catalog: frontend_catalog.into(),
+            frontend_catalog,
             graph_i18n_catalogs: Vec::new(),
             visible: settings_state.layout.visible_on_start,
             surface_exiting: false,
@@ -893,6 +900,7 @@ impl FrontendSurfaceComponent {
             last_service_update: None,
             cached_service_capabilities: HashMap::with_capacity(service_payload_capacity),
             cached_service_payloads: HashMap::with_capacity(service_payload_capacity),
+            declared_service_names,
             focused_key: None,
             focus_visible_key: None,
             pointer_down_key: None,
@@ -1422,6 +1430,52 @@ fn capability_caches_service_payload(capability: &str) -> bool {
             .strip_prefix("service.")
             .and_then(|capability| capability.strip_suffix(".read"))
             .is_some_and(|service| !service.is_empty())
+}
+
+/// Service names this surface may read: everything its manifest (and the
+/// manifests of the component modules it embeds) declares through interface
+/// dependencies or read capabilities. Runtime field tracking only knows what
+/// has already been read, so this is what keeps the payload cache warm for
+/// runtimes that do not exist yet.
+fn declared_service_names(
+    compiled: &CompiledFrontendModule,
+    frontend_catalog: &FrontendCatalog,
+) -> HashSet<String> {
+    let mut names = HashSet::new();
+    let mut collect = |manifest: &mesh_core_module::Manifest| {
+        for dependency in &manifest.dependencies.interfaces {
+            names.insert(
+                crate::shell::service::service_name_from_interface(&dependency.name).to_string(),
+            );
+        }
+        for capability in manifest
+            .capabilities
+            .required
+            .iter()
+            .chain(manifest.capabilities.optional.iter())
+            .filter(|capability| capability_caches_service_payload(capability))
+        {
+            let service = match capability.as_str() {
+                "theme.read" => "theme",
+                "locale.read" => "locale",
+                other => other
+                    .strip_prefix("service.")
+                    .and_then(|other| other.strip_suffix(".read"))
+                    .unwrap_or_default(),
+            };
+            if !service.is_empty() {
+                names.insert(service.to_string());
+            }
+        }
+    };
+
+    collect(&compiled.manifest);
+    for module_id in compiled.module_component_imports.values() {
+        if let Some(entry) = frontend_catalog.modules.get(module_id) {
+            collect(&entry.compiled.manifest);
+        }
+    }
+    names
 }
 
 pub(super) fn json_field_diff(

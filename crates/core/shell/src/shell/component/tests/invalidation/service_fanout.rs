@@ -38,10 +38,14 @@ fn json_diff_unchanged_returns_empty() {
 
 #[test]
 fn json_diff_multiple_changes() {
-    let prev = serde_json::json!({"percent": 65, "muted": false, "volume": 0.5});
-    let next = serde_json::json!({"percent": 70, "muted": true, "volume": 0.5});
+    let prev = serde_json::json!({"percent": 65, "muted": false, "balance": 0.5});
+    let next = serde_json::json!({"percent": 70, "muted": true, "balance": 0.5});
     let diff = json_field_diff("audio", &prev, &next);
-    assert_eq!(diff.len(), 2, "percent and muted changed, volume unchanged");
+    assert_eq!(
+        diff.len(),
+        2,
+        "percent and muted changed, balance unchanged"
+    );
 }
 
 #[test]

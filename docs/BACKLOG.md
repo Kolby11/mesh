@@ -36,7 +36,7 @@ The 2026-06-18 redesign largely shipped (canonical `module.json` with `mesh.uses
 diagnostics for interfaces/icons/i18n/keybinds/capabilities, library modules,
 resource packs). Remaining open work:
 
-- [ ] Eliminate service-specific Rust branches where possible. Progress 2026-07-13: audio optimistic mute is now generic — contract methods declare `optimistic: { field, fromArg }` and core applies the patch for any interface (`pending_optimistic_state`); the `mesh.theme` settings-injection branch became a generic `__shell` context (`{ theme, locale }`) injected into every backend's settings. Remaining: startup-sound path calls the mesh.audio handler directly; debug/profiling paths.
+- [ ] Eliminate service-specific Rust branches where possible. Progress 2026-07-26: command-to-state reactivity is a shell feature — contract methods declare `stateBinding: { field, fromArg }`, and core updates the canonical state for any interface (`pending_bound_service_state`) until the provider confirms it; the `mesh.theme` settings-injection branch became a generic `__shell` context (`{ theme, locale }`) injected into every backend's settings. Remaining: startup-sound path calls the mesh.audio handler directly; debug/profiling paths.
 - [ ] Support multiple instances of the same frontend module. Module identity should not be the only surface identity; root graph should support configured instances like two panels or repeated widgets with separate settings/storage scopes.
 - [ ] Implement named shell profiles as the starting point for root component
       instances, surface placement, provider bindings, resources, and
@@ -747,12 +747,12 @@ reference it. The historical subsystem map is
       (mask filter) — full subtree blur needs layer push/pop command kinds in
       the retained display list; downsample-blur-upsample bounding and the
       GPU path per the plan doc.
-- [x] Eliminate the service-specific optimistic-state Rust branch (S).
-      Contract methods declare `optimistic: { field, fromArg }`; successful
-      dispatch records a generic `(interface, field)` patch, re-applies it
-      across stale provider updates, and clears it on confirmation. Verified
-      2026-07-23 with a non-audio `mesh.lighting.set_enabled` regression so
-      this path cannot silently depend on `mesh.audio`.
+- [x] Make command-bound service state a generic shell feature (S).
+      Contract methods declare `stateBinding: { field, fromArg }`; successful
+      dispatch writes the canonical `(interface, field)` state, republishes it
+      to all observers, retains it across stale provider updates, and clears
+      the pending binding on confirmation. Verified with a non-audio service
+      regression so this path cannot silently depend on `mesh.audio`.
 - [x] Delete the discovery-order backend candidate compatibility lane (V).
       Startup and supervised restarts consume the installed graph's explicit
       active provider through `backend_launch_candidates_from_graph` /

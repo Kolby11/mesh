@@ -285,6 +285,26 @@ impl ShellComponent for FrontendSurfaceComponent {
         Ok(Vec::new())
     }
 
+    fn cache_service_payload(&mut self, event: &ServiceEvent) {
+        let ServiceEvent::Updated {
+            service, payload, ..
+        } = event
+        else {
+            return;
+        };
+        let service_name = crate::shell::service::service_name_from_interface_cow(service);
+        if !self.declared_service_names.contains(service_name.as_ref()) {
+            return;
+        }
+        let fingerprint = ScriptContext::service_payload_fingerprint(payload);
+        update_cached_service_payload(
+            &mut self.cached_service_payloads,
+            service_name.as_ref(),
+            payload,
+            fingerprint,
+        );
+    }
+
     fn observes_service_event(&self, event: &ServiceEvent) -> bool {
         let Ok(runtimes) = self.runtimes.lock() else {
             return true;
@@ -964,8 +984,22 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn locale_changed(&mut self, locale: &LocaleEngine) -> Result<(), ComponentError> {
         tracing::debug!("locale_changed for component '{}'", self.id());
         self.locale.set_locale(locale.current());
-        self.runtimes.lock().unwrap().clear();
-        self.init_root_runtime()?;
+        let payload = serde_json::json!({
+            "locale": locale.current(),
+            "current": locale.current(),
+        });
+        for runtime in self.runtimes.lock().unwrap().values_mut() {
+            runtime.script_ctx.apply_service_payload("locale", &payload);
+            if script_has_service_read(&runtime.script_ctx, "mesh.locale", "locale") {
+                apply_service_update_with_name(
+                    runtime.script_ctx.state_mut(),
+                    true,
+                    "locale",
+                    "@mesh/shell",
+                    &payload,
+                );
+            }
+        }
         self.reset_render_caches();
         self.render_hooks_pending = true;
         self.surface_pixels_invalid = true;
