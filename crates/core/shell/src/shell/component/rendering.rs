@@ -1525,6 +1525,72 @@ mod interaction_changed_key_tests {
         assert!(node_time < string_time);
     }
 
+    // cargo test -p mesh-core-shell --release -- node_id_input_values_beat_string_keys --ignored --nocapture
+    #[test]
+    #[ignore = "release-only input-value identity microbenchmark"]
+    fn node_id_input_values_beat_string_keys() {
+        const NODES: usize = 1_024;
+        const ITERATIONS: usize = 40_000;
+
+        let keys = (0..NODES)
+            .map(|index| format!("root/{}/{}", index / 32, index % 32))
+            .collect::<Vec<_>>();
+        let node_ids = keys
+            .iter()
+            .map(|key| runtime_node_id_for_key(key))
+            .collect::<Vec<_>>();
+        let values = (0..NODES)
+            .map(|index| format!("input-value-{index}"))
+            .collect::<Vec<_>>();
+        let string_state = keys
+            .iter()
+            .zip(&values)
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<HashMap<_, _>>();
+        let node_state = node_ids
+            .iter()
+            .zip(&values)
+            .map(|(node_id, value)| (*node_id, value.clone()))
+            .collect::<HashMap<_, _>>();
+
+        let string_started = Instant::now();
+        let mut string_total = 0usize;
+        for _ in 0..ITERATIONS {
+            for key in &keys {
+                string_total = string_total.wrapping_add(
+                    string_state
+                        .get(std::hint::black_box(key.as_str()))
+                        .map_or(0, String::len),
+                );
+            }
+        }
+        let string_time = string_started.elapsed();
+
+        let node_started = Instant::now();
+        let mut node_total = 0usize;
+        for _ in 0..ITERATIONS {
+            for node_id in &node_ids {
+                node_total = node_total.wrapping_add(
+                    node_state
+                        .get(std::hint::black_box(node_id))
+                        .map_or(0, String::len),
+                );
+            }
+        }
+        let node_time = node_started.elapsed();
+
+        assert_eq!(string_total, node_total);
+        eprintln!(
+            "input-value annotation across {ITERATIONS} {NODES}-node passes: string keys {string_time:?}; NodeId keys {node_time:?}; ratio {:.2}x",
+            string_time.as_secs_f64() / node_time.as_secs_f64()
+        );
+        println!(
+            "MESH_PERF metric=node_id_input_values_speedup value={:.6}",
+            string_time.as_secs_f64() / node_time.as_secs_f64()
+        );
+        assert!(node_time < string_time);
+    }
+
     #[test]
     fn hover_changed_ids_only_collects_tails_after_common_ancestor() {
         let previous = ["root", "root/menu", "root/menu/left"]

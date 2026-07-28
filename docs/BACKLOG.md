@@ -702,7 +702,7 @@ reference it. The historical subsystem map is
       storage (1.64–1.68x); the relative speedup is checked by the canonical
       performance gate (`typed_attribute_storage_speedup`).
 - [ ] Remaining interaction identity is string-keyed end to end
-      (`hovered_path`, `focused_key`, `input_values`, `slider_values`);
+      (`hovered_path`, `focused_key`, `slider_values`);
       migrate to `NodeId` together with metrics/refs publication so
       `_mesh_key` strings lose their last hot consumers (Q); runtime key-path
       strings are still allocated for interaction/refs (J). The earlier scroll
@@ -778,7 +778,15 @@ reference it. The historical subsystem map is
       boundary. Across three release runs of 40,000 1,024-node annotation
       passes, string-keyed state took 419.5–421.0ms versus 247.7–253.4ms for
       NodeId state (1.66–1.69x faster), gated as
-      `node_id_checked_state_speedup`.
+      `node_id_checked_state_speedup`. Completed input-value checkpoint
+      2026-07-28: text inputs, selects, and radio groups now store their live
+      values by stable `NodeId`; character and keyboard edits, imperative ref
+      writes, choice activation, runtime attribute annotation, and
+      accessibility publication carry the ID without changing readable
+      script-facing dispatch keys. Across three release runs of 40,000
+      1,024-node annotation lookup passes, string-keyed state took
+      421.9–425.5ms versus 252.1–252.7ms for NodeId state (1.67–1.68x faster),
+      gated as `node_id_input_values_speedup`.
 - [x] Allocator-level profile mode (allocation counts per render pass) →
       v1.23. Added 2026-07-24: the opt-in `allocation-profiling` build wraps
       the system allocator with allocation-free thread-local counters and

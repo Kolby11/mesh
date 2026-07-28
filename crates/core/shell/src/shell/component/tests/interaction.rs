@@ -18,7 +18,7 @@ pub(super) fn annotate_runtime_tree(
     hovered_path: &[String],
     active_key: &Option<String>,
     active_slider_key: &Option<String>,
-    input_values: &HashMap<String, String>,
+    input_values: &HashMap<NodeId, String>,
     slider_values: &mut HashMap<String, f32>,
     slider_script_values: &mut HashMap<String, f32>,
     checked_values: &HashMap<NodeId, bool>,

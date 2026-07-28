@@ -623,7 +623,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// entry is dropped when the popover hides.
     pub(super) triggered_popovers: HashMap<String, String>,
     selection: Option<TextSelectionState>,
-    input_values: HashMap<String, String>,
+    input_values: HashMap<NodeId, String>,
     slider_values: HashMap<String, f32>,
     slider_script_values: HashMap<String, f32>,
     checked_values: HashMap<NodeId, bool>,

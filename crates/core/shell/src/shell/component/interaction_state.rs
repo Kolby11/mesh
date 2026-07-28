@@ -187,7 +187,7 @@ impl FrontendSurfaceComponent {
                     // sets the input's text directly (DOM `input.value = ...`). Like
                     // the DOM, this does not fire `oninput`/`onchange`.
                     if let Some(key) = ref_keys.get(&action.target).cloned()
-                        && find_node_by_key(tree, &key).is_some()
+                        && let Some(node) = find_node_by_key(tree, &key)
                     {
                         let text = action
                             .args
@@ -195,7 +195,7 @@ impl FrontendSurfaceComponent {
                             .and_then(|values| values.first())
                             .map(json_value_to_string)
                             .unwrap_or_default();
-                        self.input_values.insert(key, text);
+                        self.input_values.insert(node.id, text);
                         self.invalidate_text_state();
                     }
                 }

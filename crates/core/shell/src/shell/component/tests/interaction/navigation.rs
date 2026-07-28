@@ -508,7 +508,10 @@ end
         &[("change", "onInputChange")],
     )]));
     component.focused_key = Some("root/0".into());
-    component.input_values.insert("root/0".into(), "ab".into());
+    let input_id = find_node_by_key(component.last_tree.as_ref().unwrap(), "root/0")
+        .unwrap()
+        .id;
+    component.input_values.insert(input_id, "ab".into());
 
     let theme = default_theme();
     component
@@ -524,7 +527,7 @@ end
         .unwrap();
 
     assert_eq!(
-        component.input_values.get("root/0").map(String::as_str),
+        component.input_values.get(&input_id).map(String::as_str),
         Some("a")
     );
     assert_eq!(
@@ -599,7 +602,10 @@ end
         &[("input", "onInput"), ("change", "onChange")],
     )]));
     component.focused_key = Some("root/0".into());
-    component.input_values.insert("root/0".into(), "me".into());
+    let input_id = find_node_by_key(component.last_tree.as_ref().unwrap(), "root/0")
+        .unwrap()
+        .id;
+    component.input_values.insert(input_id, "me".into());
 
     let theme = default_theme();
     component
@@ -607,7 +613,7 @@ end
         .unwrap();
 
     assert_eq!(
-        component.input_values.get("root/0").map(String::as_str),
+        component.input_values.get(&input_id).map(String::as_str),
         Some("mes")
     );
     assert_eq!(
@@ -617,6 +623,74 @@ end
     assert_eq!(
         runtime_value(&component, "change_seen"),
         Some(serde_json::Value::String("mes".into()))
+    );
+}
+
+#[test]
+fn option_and_radio_activation_store_group_values_by_live_node_id() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau"></script>
+"#,
+    );
+    let mut select = event_node_with_attrs(
+        "input",
+        "root/0",
+        0.0,
+        0.0,
+        120.0,
+        44.0,
+        &[("data-mesh-element", "select")],
+        &[],
+    );
+    select.children.push(event_node_with_attrs(
+        "input",
+        "root/0/0",
+        0.0,
+        24.0,
+        120.0,
+        20.0,
+        &[("data-mesh-element", "option"), ("value", "sk")],
+        &[],
+    ));
+    let mut radio_group = event_node_with_attrs(
+        "column",
+        "root/1",
+        0.0,
+        52.0,
+        120.0,
+        44.0,
+        &[("data-mesh-element", "radio-group")],
+        &[],
+    );
+    radio_group.children.push(event_node_with_attrs(
+        "input",
+        "root/1/0",
+        0.0,
+        52.0,
+        120.0,
+        20.0,
+        &[("data-mesh-element", "radio"), ("value", "compact")],
+        &[],
+    ));
+    let tree = root_with(vec![select, radio_group]);
+    let select_id = find_node_by_key(&tree, "root/0").unwrap().id;
+    let radio_group_id = find_node_by_key(&tree, "root/1").unwrap().id;
+
+    component.activate_option_choice(&tree, "root/0/0").unwrap();
+    component.activate_radio_choice(&tree, "root/1/0").unwrap();
+
+    assert_eq!(
+        component.input_values.get(&select_id).map(String::as_str),
+        Some("sk")
+    );
+    assert_eq!(
+        component
+            .input_values
+            .get(&radio_group_id)
+            .map(String::as_str),
+        Some("compact")
     );
 }
 
@@ -665,6 +739,9 @@ end
     ));
     component.last_tree = Some(root_with(vec![select]));
     component.focused_key = Some("root/0/1".into());
+    let select_id = find_node_by_key(component.last_tree.as_ref().unwrap(), "root/0")
+        .unwrap()
+        .id;
 
     let theme = default_theme();
     component
@@ -684,7 +761,7 @@ end
         Some(serde_json::Value::String("sk".into()))
     );
     assert_eq!(
-        component.input_values.get("root/0").map(String::as_str),
+        component.input_values.get(&select_id).map(String::as_str),
         Some("sk")
     );
 }

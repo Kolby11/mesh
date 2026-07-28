@@ -463,11 +463,14 @@ impl FrontendSurfaceComponent {
             }
             ComponentInput::Char { ch } => {
                 if let Some(focused_key) = self.focused_key.clone() {
-                    let accepts_char = find_node_by_key(tree, &focused_key)
-                        .is_some_and(|node| input_accepts_char(node, ch));
-                    if is_input_key(tree, &focused_key) && accepts_char {
+                    let input_node = find_node_by_key(tree, &focused_key);
+                    let accepts_char = input_node.is_some_and(|node| input_accepts_char(node, ch));
+                    if is_input_key(tree, &focused_key)
+                        && accepts_char
+                        && let Some(input_node) = input_node
+                    {
                         self.clear_selection();
-                        let value = self.input_values.entry(focused_key.clone()).or_default();
+                        let value = self.input_values.entry(input_node.id).or_default();
                         value.push(ch);
                         let current = value.clone();
                         self.invalidate_text_state();

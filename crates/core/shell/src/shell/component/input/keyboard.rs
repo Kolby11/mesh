@@ -85,7 +85,10 @@ impl FrontendSurfaceComponent {
             )?;
             if is_input_key(tree, &focused_key) {
                 self.clear_selection();
-                let value = self.input_values.entry(focused_key.clone()).or_default();
+                let input_id = find_node_by_key(tree, &focused_key)
+                    .expect("is_input_key verified the focused input exists")
+                    .id;
+                let value = self.input_values.entry(input_id).or_default();
                 match key.as_str() {
                     "Backspace" => {
                         value.pop();

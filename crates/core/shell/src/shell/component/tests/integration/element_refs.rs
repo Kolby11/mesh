@@ -387,7 +387,10 @@ end
 
     component.call_namespaced_handler("set_it", &[]).unwrap();
     assert_eq!(
-        component.input_values.get("root/0").map(String::as_str),
+        component
+            .input_values
+            .get(&runtime_node_id_for_key("root/0"))
+            .map(String::as_str),
         Some("typed"),
         "writing refs.field.value should update the input's stored text"
     );

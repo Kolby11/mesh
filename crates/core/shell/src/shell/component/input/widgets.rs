@@ -425,7 +425,7 @@ impl FrontendSurfaceComponent {
         self.call_namespaced_handler(&handler.handler, &args)
     }
 
-    pub(super) fn activate_option_choice(
+    pub(in crate::shell::component) fn activate_option_choice(
         &mut self,
         tree: &WidgetNode,
         option_key: &str,
@@ -453,10 +453,11 @@ impl FrontendSurfaceComponent {
             .unwrap_or_default();
         self.checked_values.insert(option.id, true);
 
-        let Some(select_key) = ancestor_source_key(tree, option_key, &["select"]) else {
+        let Some((select_key, select_id)) = ancestor_source_target(tree, option_key, &["select"])
+        else {
             return self.call_node_handler(tree, option_key, "change", &[serde_json::json!(value)]);
         };
-        self.input_values.insert(select_key.clone(), value.clone());
+        self.input_values.insert(select_id, value.clone());
         let mut requests = self.call_node_handler(
             tree,
             &select_key,
@@ -473,7 +474,7 @@ impl FrontendSurfaceComponent {
         Ok(requests)
     }
 
-    pub(super) fn activate_radio_choice(
+    pub(in crate::shell::component) fn activate_radio_choice(
         &mut self,
         tree: &WidgetNode,
         radio_key: &str,
@@ -494,11 +495,13 @@ impl FrontendSurfaceComponent {
             return Ok(Vec::new());
         }
         let value = radio.attributes.get("value").cloned().unwrap_or_default();
-        if let Some(group_key) = ancestor_source_key(tree, radio_key, &["radio-group"]) {
+        if let Some((group_key, group_id)) =
+            ancestor_source_target(tree, radio_key, &["radio-group"])
+        {
             for sibling_id in descendant_source_node_ids(tree, &group_key, &["radio"]) {
                 self.checked_values.insert(sibling_id, false);
             }
-            self.input_values.insert(group_key.clone(), value.clone());
+            self.input_values.insert(group_id, value.clone());
             self.checked_values.insert(radio.id, true);
             let mut requests = self.call_node_handler(
                 tree,
@@ -1470,15 +1473,17 @@ fn node_disabled(node: &WidgetNode) -> bool {
             .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1" | "disabled"))
 }
 
-fn ancestor_source_key(tree: &WidgetNode, key: &str, source_tags: &[&str]) -> Option<String> {
+fn ancestor_source_target(
+    tree: &WidgetNode,
+    key: &str,
+    source_tags: &[&str],
+) -> Option<(String, NodeId)> {
     let path = key_path(tree, key)?;
-    path.into_iter()
-        .rev()
-        .skip(1)
-        .find(|candidate| {
-            find_node_by_key(tree, candidate).is_some_and(|node| node_is_source(node, source_tags))
-        })
-        .map(str::to_owned)
+    path.into_iter().rev().skip(1).find_map(|candidate| {
+        find_node_by_key(tree, candidate)
+            .filter(|node| node_is_source(node, source_tags))
+            .map(|node| (candidate.to_owned(), node.id))
+    })
 }
 
 fn sibling_source_key(
@@ -1647,7 +1652,8 @@ pub(in crate::shell::component) fn captured_release_key(
 #[cfg(test)]
 mod navigation_performance_tests {
     use super::{
-        ancestor_source_key, collect_key_path, key_path, rove_aria_menu_focus, sibling_source_key,
+        ancestor_source_target, collect_key_path, key_path, rove_aria_menu_focus,
+        sibling_source_key,
     };
     use mesh_core_elements::WidgetNode;
     use std::hint::black_box;
@@ -1708,10 +1714,10 @@ mod navigation_performance_tests {
         }
         root.children.extend([select, menu]);
 
-        assert_eq!(
-            ancestor_source_key(&root, "root/select/second", &["select"]).as_deref(),
-            Some("root/select")
-        );
+        let (ancestor_key, ancestor_id) =
+            ancestor_source_target(&root, "root/select/second", &["select"]).unwrap();
+        assert_eq!(ancestor_key, "root/select");
+        assert_eq!(ancestor_id, root.children[0].id);
         assert_eq!(
             sibling_source_key(&root, "root/select/first", &["option"], false).as_deref(),
             Some("root/select/second")

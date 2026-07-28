@@ -1148,7 +1148,7 @@ pub(super) struct RuntimeAnnotationContext<'a> {
     hovered_keys: HashSet<&'a str>,
     active_key: &'a Option<String>,
     active_slider_key: &'a Option<String>,
-    input_values: &'a HashMap<String, String>,
+    input_values: &'a HashMap<NodeId, String>,
     slider_values: &'a mut HashMap<String, f32>,
     slider_script_values: &'a mut HashMap<String, f32>,
     checked_values: &'a HashMap<NodeId, bool>,
@@ -1162,7 +1162,7 @@ impl<'a> RuntimeAnnotationContext<'a> {
         hovered_path: &'a [String],
         active_key: &'a Option<String>,
         active_slider_key: &'a Option<String>,
-        input_values: &'a HashMap<String, String>,
+        input_values: &'a HashMap<NodeId, String>,
         slider_values: &'a mut HashMap<String, f32>,
         slider_script_values: &'a mut HashMap<String, f32>,
         checked_values: &'a HashMap<NodeId, bool>,
@@ -1263,7 +1263,7 @@ fn annotate_runtime_tree_inner(
         "input" => {
             let value = context
                 .input_values
-                .get(key_str)
+                .get(&node_id)
                 .cloned()
                 .or_else(|| node.attributes.get("value").cloned())
                 .unwrap_or_default();
@@ -1306,7 +1306,7 @@ fn annotate_runtime_tree_inner(
     if selectable_group
         && let Some(value) = context
             .input_values
-            .get(key_str)
+            .get(&node_id)
             .cloned()
             .or_else(|| node.attributes.get("value").cloned())
     {

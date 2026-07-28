@@ -59,7 +59,10 @@ end
             &[("change", "onSliderChange")],
         ),
     ]));
-    component.input_values.insert("root/0".into(), "ab".into());
+    let input_id = find_node_by_key(component.last_tree.as_ref().unwrap(), "root/0")
+        .unwrap()
+        .id;
+    component.input_values.insert(input_id, "ab".into());
     let theme = default_theme();
 
     component
@@ -150,7 +153,7 @@ end
     let runtime_count_before = component.runtimes.lock().unwrap().len();
     component
         .input_values
-        .insert("root/0/0".into(), "local".into());
+        .insert(runtime_node_id_for_key("root/0/0"), "local".into());
     component
         .checked_values
         .insert(runtime_node_id_for_key("root/0/1"), true);
@@ -241,7 +244,7 @@ end
     );
     component
         .input_values
-        .insert("root/0/0".into(), "local".into());
+        .insert(runtime_node_id_for_key("root/0/0"), "local".into());
     component.slider_values.insert("root/0/1".into(), 73.0);
     component
         .checked_values

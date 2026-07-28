@@ -154,7 +154,7 @@ text {
     // Seed shell-side interaction state maps directly.
     component
         .input_values
-        .insert("root/0/0".into(), "typed-text".into());
+        .insert(runtime_node_id_for_key("root/0/0"), "typed-text".into());
     component.slider_values.insert("root/0/1".into(), 88.0);
     component
         .checked_values
