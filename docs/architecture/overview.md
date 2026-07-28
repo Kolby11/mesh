@@ -1,4 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
 # Architecture
 
 ## System overview
@@ -114,7 +113,10 @@ modules/             shipped editable module sources
 config/              current development graph and settings
 docs/spec/           public shipped/target contract
 docs/                current author and maintainer guidance
-.planning/           historical plans, evidence, and design records
+docs/BACKLOG.md      the single list of open work
+.planning/STATUS.md  what is in flight now
+.planning/log/       dated, append-only history and measurements
+.planning/archive/   frozen superseded records
 ```
 
 Detailed crate dependency rules are documented in

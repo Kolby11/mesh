@@ -1,4 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
 # MESH
 
 MESH is a Wayland-native shell-building platform written in Rust: its core

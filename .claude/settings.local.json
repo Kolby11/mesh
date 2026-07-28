@@ -189,7 +189,9 @@
       "Bash(sed -i 's|spec in docs/component-configuration\\\\.md|spec in docs/spec/03-components.md|' MEMORY.md)",
       "Bash(find / -maxdepth 4 -iname \"*mesh*.log\")",
       "Read(//home/kolby/.local/share/mesh/**)",
-      "Bash(grim -g \"1980,88 260x140\" .popover-shot.png)"
+      "Bash(grim -g \"1980,88 260x140\" .popover-shot.png)",
+      "Read(//home/kolby/.claude/**)",
+      "Read(//home/kolby/.claude/plugins/**)"
     ]
   }
 }

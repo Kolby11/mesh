@@ -14,14 +14,19 @@ MESH uses four explicit document classes:
 2. **`docs/` — current guidance.** Architecture, configuration, authoring,
    testing, module indexes, and implementation references verified against the
    source tree.
-3. **`.planning/` — history and evidence.** Milestone plans, experiments,
-   performance logs, migrations, and superseded design discussions. These may
-   explain why a decision was made but do not override the specification.
+3. **[`../.planning/`](../.planning/README.md) — intent and evidence.** Current
+   status, the dated work log, experiments, and superseded design discussions.
+   These may explain why a decision was made but do not override the
+   specification.
 4. **[`BACKLOG.md`](BACKLOG.md) — unfinished work.** The only active backlog;
    other documents may link to it but must not maintain competing TODO lists.
+   It records what is *open* — progress narratives and measurements belong in
+   the log, and a completed item leaves the backlog rather than accumulating
+   as a checked box.
 
-`CLAUDE.md` remains at the repository root as tool-specific project guidance,
-not product documentation.
+[`AGENTS.md`](../AGENTS.md) remains at the repository root as agent-facing
+project guidance, not product documentation. `CLAUDE.md` and `opencode.json`
+are thin pointers to it so every coding tool reads one set of instructions.
 
 ## Core guides
 
@@ -52,5 +57,13 @@ keyboard behavior, automation, and MCP direction.
 - [Renderer ownership](renderer-ownership.md)
 - [Performance profiling](performance-profiling.md)
 
+## Progress and history
+
+- [Current status](../.planning/STATUS.md) — what is in flight now.
+- [Work log](../.planning/log/README.md) — dated, append-only history including
+  performance measurements and the rejected-experiments table.
+- [How the planning system works](../.planning/README.md).
+
 Historical renderer migration, UI transition, performance-roadmap, benchmark,
-and iteration narratives live under `.planning/`.
+and iteration narratives live under `.planning/`; superseded milestone records
+are frozen in [`.planning/archive/`](../.planning/archive/README.md).
