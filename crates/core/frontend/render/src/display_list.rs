@@ -1097,87 +1097,8 @@ impl RetainedDisplayList {
             }
         };
 
-        let mut damage: Option<DamageRect> = None;
-        let mut damage_rects = std::mem::take(&mut self.last_damage_rects);
-        damage_rects.clear();
-        let (reused, rebuilt, removed) = if patch_sparse_entries {
-            let mut rebuilt = 0u64;
-            let mut removed = 0u64;
-            for node_id in dirty_node_ids {
-                for slot in DISPLAY_PRIMITIVE_SLOTS {
-                    let key = DisplayListKey {
-                        node_id: *node_id,
-                        slot,
-                    };
-                    let previous = self.entries.get(&key).copied();
-                    let next_entry = next.remove(&key);
-                    match (previous, next_entry) {
-                        (Some(previous), Some(next_entry)) if previous == next_entry => {}
-                        (Some(previous), Some(next_entry)) => {
-                            rebuilt = rebuilt.saturating_add(1);
-                            damage = union_damage(damage, previous.bounds);
-                            damage = union_damage(damage, next_entry.bounds);
-                            push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
-                            push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
-                            self.entries.insert(key, next_entry);
-                        }
-                        (None, Some(next_entry)) => {
-                            rebuilt = rebuilt.saturating_add(1);
-                            damage = union_damage(damage, next_entry.bounds);
-                            push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
-                            self.entries.insert(key, next_entry);
-                        }
-                        (Some(previous), None) => {
-                            removed = removed.saturating_add(1);
-                            damage = union_damage(damage, previous.bounds);
-                            push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
-                            self.entries.remove(&key);
-                        }
-                        (None, None) => {}
-                    }
-                }
-            }
-            debug_assert!(
-                next.is_empty(),
-                "sparse display-entry collection emitted an unknown primitive slot"
-            );
-            let reused = (self.entries.len() as u64).saturating_sub(rebuilt);
-            (reused, rebuilt, removed)
-        } else {
-            let mut reused = 0u64;
-            let mut rebuilt = 0u64;
-            let mut inserted = 0u64;
-            for (key, next_entry) in &next {
-                match self.entries.get(key) {
-                    Some(previous) if previous == next_entry => reused = reused.saturating_add(1),
-                    Some(previous) => {
-                        rebuilt = rebuilt.saturating_add(1);
-                        damage = union_damage(damage, previous.bounds);
-                        damage = union_damage(damage, next_entry.bounds);
-                        push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
-                        push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
-                    }
-                    None => {
-                        inserted = inserted.saturating_add(1);
-                        rebuilt = rebuilt.saturating_add(1);
-                        damage = union_damage(damage, next_entry.bounds);
-                        push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
-                    }
-                }
-            }
-
-            let mut removed = 0u64;
-            if inserted > 0 || next.len() != self.entries.len() {
-                for (key, previous) in &self.entries {
-                    if !next.contains_key(key) {
-                        removed = removed.saturating_add(1);
-                        damage = union_damage(damage, previous.bounds);
-                        push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
-                    }
-                }
-            }
-            (reused, rebuilt, removed)
-        };
+        let (damage, mut damage_rects, reused, rebuilt, removed) =
+            self.reconcile_entries(&mut next, patch_sparse_entries, dirty_node_ids, surface);
 
         // A text/accessibility change can share a frame with a visibility
         // annotation that the render-object summary does not classify as a
@@ -1294,6 +1215,97 @@ impl RetainedDisplayList {
         };
         self.last_damage_rects = damage_rects;
         self.last_metrics
+    }
+
+    fn reconcile_entries(
+        &mut self,
+        next: &mut HashMap<DisplayListKey, DisplayListEntry>,
+        patch_sparse_entries: bool,
+        dirty_node_ids: &HashSet<NodeId>,
+        surface: DamageRect,
+    ) -> (Option<DamageRect>, Vec<DamageRect>, u64, u64, u64) {
+        let mut damage: Option<DamageRect> = None;
+        let mut damage_rects = std::mem::take(&mut self.last_damage_rects);
+        damage_rects.clear();
+        let (reused, rebuilt, removed) = if patch_sparse_entries {
+            let mut rebuilt = 0u64;
+            let mut removed = 0u64;
+            for node_id in dirty_node_ids {
+                for slot in DISPLAY_PRIMITIVE_SLOTS {
+                    let key = DisplayListKey {
+                        node_id: *node_id,
+                        slot,
+                    };
+                    let previous = self.entries.get(&key).copied();
+                    let next_entry = next.remove(&key);
+                    match (previous, next_entry) {
+                        (Some(previous), Some(next_entry)) if previous == next_entry => {}
+                        (Some(previous), Some(next_entry)) => {
+                            rebuilt = rebuilt.saturating_add(1);
+                            damage = union_damage(damage, previous.bounds);
+                            damage = union_damage(damage, next_entry.bounds);
+                            push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
+                            push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
+                            self.entries.insert(key, next_entry);
+                        }
+                        (None, Some(next_entry)) => {
+                            rebuilt = rebuilt.saturating_add(1);
+                            damage = union_damage(damage, next_entry.bounds);
+                            push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
+                            self.entries.insert(key, next_entry);
+                        }
+                        (Some(previous), None) => {
+                            removed = removed.saturating_add(1);
+                            damage = union_damage(damage, previous.bounds);
+                            push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
+                            self.entries.remove(&key);
+                        }
+                        (None, None) => {}
+                    }
+                }
+            }
+            debug_assert!(
+                next.is_empty(),
+                "sparse display-entry collection emitted an unknown primitive slot"
+            );
+            let reused = (self.entries.len() as u64).saturating_sub(rebuilt);
+            (reused, rebuilt, removed)
+        } else {
+            let mut reused = 0u64;
+            let mut rebuilt = 0u64;
+            let mut inserted = 0u64;
+            for (key, next_entry) in next.iter() {
+                match self.entries.get(key) {
+                    Some(previous) if previous == next_entry => reused = reused.saturating_add(1),
+                    Some(previous) => {
+                        rebuilt = rebuilt.saturating_add(1);
+                        damage = union_damage(damage, previous.bounds);
+                        damage = union_damage(damage, next_entry.bounds);
+                        push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
+                        push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
+                    }
+                    None => {
+                        inserted = inserted.saturating_add(1);
+                        rebuilt = rebuilt.saturating_add(1);
+                        damage = union_damage(damage, next_entry.bounds);
+                        push_sparse_damage_rect(&mut damage_rects, next_entry.bounds, surface);
+                    }
+                }
+            }
+
+            let mut removed = 0u64;
+            if inserted > 0 || next.len() != self.entries.len() {
+                for (key, previous) in &self.entries {
+                    if !next.contains_key(key) {
+                        removed = removed.saturating_add(1);
+                        damage = union_damage(damage, previous.bounds);
+                        push_sparse_damage_rect(&mut damage_rects, previous.bounds, surface);
+                    }
+                }
+            }
+            (reused, rebuilt, removed)
+        };
+        (damage, damage_rects, reused, rebuilt, removed)
     }
 
     fn update_metrics_without_rebuild(

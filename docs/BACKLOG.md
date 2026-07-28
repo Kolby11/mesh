@@ -902,8 +902,11 @@ reference it. The historical subsystem map is
       pruning. Followed up 2026-07-27 by the interned flat `AttributeMap`
       (see the interning item above), which removed the B-tree half of that
       allocator traffic.
-- [ ] Minor: display-list `update_inner` is ~220 lines mixing diff, damage,
-      and metrics assembly; split when next touched (N).
+- [x] Minor: display-list `update_inner` is ~220 lines mixing diff, damage,
+      and metrics assembly; split when next touched (N). Completed 2026-07-28:
+      entry reconciliation and sparse/full damage accounting now live in the
+      dedicated `reconcile_entries` helper; the full render test suite passed
+      with 188 tests and 35 ignored release benchmarks.
 
 ### Suggested attack order (updated 2026-07-13)
 
