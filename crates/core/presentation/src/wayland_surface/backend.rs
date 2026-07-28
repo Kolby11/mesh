@@ -79,6 +79,10 @@ pub struct LayerShellBackend {
 
 const SHM_BUFFER_POOL_DEPTH: usize = 2;
 const SHM_BUFFER_POOL_MAX: usize = 3;
+/// Buffers are rounded only when a viewport crops the excess before the
+/// compositor sees it. This absorbs the small resize jitter emitted by
+/// content-measured surfaces without changing their visible geometry.
+const SHM_SIZE_CLASS_STEP: u32 = 64;
 const MAX_FRAME_CALLBACK_WAIT: Duration = Duration::from_millis(50);
 // This wait only runs between a surface's creation and its first configure
 // event, so a generous deadline costs nothing in steady state. It must be long
@@ -94,6 +98,35 @@ struct ShmPoolConfig {
     width: u32,
     height: u32,
     stride: i32,
+}
+
+fn shm_pool_config_for(width: u32, height: u32, viewport_available: bool) -> ShmPoolConfig {
+    let round_up = |value: u32| {
+        value.max(1).saturating_add(SHM_SIZE_CLASS_STEP - 1) / SHM_SIZE_CLASS_STEP
+            * SHM_SIZE_CLASS_STEP
+    };
+    let (width, height) = if viewport_available {
+        (round_up(width), round_up(height))
+    } else {
+        (width.max(1), height.max(1))
+    };
+    ShmPoolConfig {
+        width,
+        height,
+        stride: width as i32 * 4,
+    }
+}
+
+fn viewport_source_dimensions(
+    physical_width: u32,
+    physical_height: u32,
+    buffer_scale: i32,
+) -> (f64, f64) {
+    let scale = f64::from(buffer_scale.max(1));
+    (
+        physical_width as f64 / scale,
+        physical_height as f64 / scale,
+    )
 }
 
 #[derive(Debug)]
@@ -296,13 +329,8 @@ impl SurfaceEntry {
     ) -> Result<(usize, SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]>), PresentationError> {
         let width = width.max(1);
         let height = height.max(1);
-        let stride = width as i32 * 4;
         let full = full_damage(width, height);
-        let pool_config = ShmPoolConfig {
-            width,
-            height,
-            stride,
-        };
+        let pool_config = shm_pool_config_for(width, height, self.viewport.is_some());
         if self.shm_pool_config != Some(pool_config) {
             self.shm_buffers.clear();
             self.next_shm_buffer = 0;
@@ -311,7 +339,7 @@ impl SurfaceEntry {
 
         while self.shm_buffers.len() < SHM_BUFFER_POOL_DEPTH {
             self.shm_buffers
-                .push(create_surface_shm_buffer(pool, width, height, stride)?);
+                .push(create_surface_shm_buffer(pool, pool_config, full)?);
         }
 
         for slot in &mut self.shm_buffers {
@@ -324,7 +352,14 @@ impl SurfaceEntry {
             if let Some(canvas) = pool.canvas(&self.shm_buffers[index].buffer) {
                 let copy_damage = std::mem::take(&mut self.shm_buffers[index].pending_damage);
                 for rect in &copy_damage {
-                    copy_bgra_damage_to_canvas(src, canvas, width, height, *rect);
+                    copy_bgra_damage_to_canvas(
+                        src,
+                        canvas,
+                        width,
+                        height,
+                        pool_config.width,
+                        *rect,
+                    );
                 }
                 self.next_shm_buffer = (index + 1) % self.shm_buffers.len();
                 // When a buffer is reused while older frame callbacks are still
@@ -346,13 +381,13 @@ impl SurfaceEntry {
         let index = self.shm_buffers.len();
         let (wl_buffer, canvas) = pool
             .create_buffer(
-                width as i32,
-                height as i32,
-                stride,
+                pool_config.width as i32,
+                pool_config.height as i32,
+                pool_config.stride,
                 wl_shm::Format::Argb8888,
             )
             .map_err(|e| PresentationError::BufferAlloc(format!("create_buffer: {e}")))?;
-        copy_bgra_to_canvas(src, canvas, width, height);
+        copy_bgra_to_canvas(src, canvas, width, height, pool_config.width);
         self.shm_buffers.push(SurfaceShmBuffer {
             buffer: wl_buffer,
             pending_damage: SmallVec::new(),
@@ -409,27 +444,32 @@ impl SurfaceEntry {
             );
         }
 
-        // Set buffer scale and viewport destination per D-01/CONTEXT.md
+        // Set buffer scale per D-01/CONTEXT.md.
         let scale_is_integer = (scale - scale.round()).abs() < f32::EPSILON;
-        if scale_is_integer {
-            // Integer scale: use set_buffer_scale only. No viewporter needed.
-            wl_surface.set_buffer_scale(scale as i32);
-            if let Some(ref viewport) = self.viewport {
-                viewport.set_destination(-1, -1); // Reset viewport to intrinsic size
-            }
+        let buffer_scale = if scale_is_integer {
+            // Integer scale uses the viewport crop below when it is available.
+            scale as i32
         } else if self.viewport.is_some() {
             // Fractional scale WITH viewporter: set_buffer_scale to ceil(scale),
             // then set_destination to logical dimensions so the compositor scales down.
-            let integer_scale = scale.ceil() as i32;
-            wl_surface.set_buffer_scale(integer_scale);
-            if let Some(ref viewport) = self.viewport {
-                viewport.set_destination(logical_width as i32, logical_height as i32);
-            }
+            scale.ceil() as i32
         } else {
             // Fractional scale WITHOUT viewporter: round to nearest integer,
             // accept slight sizing mismatch per CONTEXT.md Fallback Behavior.
-            let rounded_scale = scale.round() as i32;
-            wl_surface.set_buffer_scale(rounded_scale);
+            scale.round() as i32
+        }
+        .max(1);
+        wl_surface.set_buffer_scale(buffer_scale);
+
+        // Viewporter source coordinates apply *after* buffer scaling. Crop the
+        // rounded SHM allocation to the actual rendered extent, then scale that
+        // source to the authoritative logical size. Without a viewport, pool
+        // configs stay exact-sized so this branch is not needed.
+        if let Some(ref viewport) = self.viewport {
+            let (source_width, source_height) =
+                viewport_source_dimensions(physical_width, physical_height, buffer_scale);
+            viewport.set_source(0.0, 0.0, source_width, source_height);
+            viewport.set_destination(logical_width as i32, logical_height as i32);
         }
 
         buffer.attach_to(wl_surface).ok();
@@ -602,29 +642,42 @@ fn resolved_surface_size_for_config(
 
 fn create_surface_shm_buffer(
     pool: &mut SlotPool,
-    width: u32,
-    height: u32,
-    stride: i32,
+    config: ShmPoolConfig,
+    initial_damage: DamageRect,
 ) -> Result<SurfaceShmBuffer, PresentationError> {
     let (buffer, _) = pool
         .create_buffer(
-            width as i32,
-            height as i32,
-            stride,
+            config.width as i32,
+            config.height as i32,
+            config.stride,
             wl_shm::Format::Argb8888,
         )
         .map_err(|e| PresentationError::BufferAlloc(format!("create_buffer: {e}")))?;
     Ok(SurfaceShmBuffer {
         buffer,
-        pending_damage: smallvec![full_damage(width, height)],
+        // Newly allocated SHM memory contains no usable frame. Seed the
+        // visible (cropped) extent as dirty even when this frame itself is
+        // sparse, otherwise untouched pixels can expose stale memory.
+        pending_damage: smallvec![initial_damage],
     })
 }
 
-fn copy_bgra_to_canvas(src: &[u8], canvas: &mut [u8], width: u32, height: u32) {
+fn copy_bgra_to_canvas(src: &[u8], canvas: &mut [u8], width: u32, height: u32, canvas_width: u32) {
     // wl_shm Argb8888 is B,G,R,A in little-endian memory, matching PixelBuffer.
-    let len = (width as usize) * (height as usize) * 4;
-    if canvas.len() >= len && src.len() >= len {
-        canvas[..len].copy_from_slice(&src[..len]);
+    let row_bytes = width as usize * 4;
+    let src_len = row_bytes * height as usize;
+    let canvas_stride = canvas_width as usize * 4;
+    if src.len() < src_len || canvas_stride < row_bytes {
+        return;
+    }
+    for row in 0..height as usize {
+        let src_start = row * row_bytes;
+        let canvas_start = row * canvas_stride;
+        let canvas_end = canvas_start + row_bytes;
+        if canvas_end > canvas.len() {
+            return;
+        }
+        canvas[canvas_start..canvas_end].copy_from_slice(&src[src_start..src_start + row_bytes]);
     }
 }
 
@@ -787,19 +840,23 @@ fn copy_bgra_damage_to_canvas(
     canvas: &mut [u8],
     width: u32,
     height: u32,
+    canvas_width: u32,
     damage: DamageRect,
 ) {
     let Some(damage) = clip_damage(damage, full_damage(width, height)) else {
         return;
     };
-    let stride = width as usize * 4;
+    let src_stride = width as usize * 4;
+    let canvas_stride = canvas_width as usize * 4;
     let row_bytes = damage.width as usize * 4;
     let x_offset = damage.x as usize * 4;
     for row in damage.y as usize..damage.y.saturating_add(damage.height) as usize {
-        let start = row * stride + x_offset;
-        let end = start + row_bytes;
-        if end <= src.len() && end <= canvas.len() {
-            canvas[start..end].copy_from_slice(&src[start..end]);
+        let src_start = row * src_stride + x_offset;
+        let canvas_start = row * canvas_stride + x_offset;
+        let src_end = src_start + row_bytes;
+        let canvas_end = canvas_start + row_bytes;
+        if src_end <= src.len() && canvas_end <= canvas.len() {
+            canvas[canvas_start..canvas_end].copy_from_slice(&src[src_start..src_end]);
         }
     }
 }
@@ -2432,6 +2489,83 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
+    // SHM size-class tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn viewport_shm_size_classes_absorb_small_content_resizes() {
+        let first = shm_pool_config_for(401, 199, true);
+        let second = shm_pool_config_for(447, 223, true);
+
+        assert_eq!(first, second);
+        assert_eq!((first.width, first.height), (448, 256));
+    }
+
+    #[test]
+    fn viewport_size_classes_eliminate_content_resize_pool_churn() {
+        let sizes = [
+            (401, 199),
+            (418, 205),
+            (432, 217),
+            (447, 223),
+            (405, 201),
+            (440, 220),
+        ];
+        let config_changes = |viewport_available| {
+            sizes
+                .into_iter()
+                .map(|(width, height)| shm_pool_config_for(width, height, viewport_available))
+                .fold((None, 0usize), |(previous, changes), next| {
+                    (Some(next), changes + usize::from(previous != Some(next)))
+                })
+                .1
+        };
+
+        assert_eq!(config_changes(false), sizes.len());
+        assert_eq!(config_changes(true), 1);
+    }
+
+    #[test]
+    fn shm_buffers_stay_exact_without_a_viewporter_crop() {
+        let config = shm_pool_config_for(401, 199, false);
+
+        assert_eq!(config.width, 401);
+        assert_eq!(config.height, 199);
+        assert_eq!(config.stride, 401 * 4);
+    }
+
+    #[test]
+    fn viewport_crop_uses_post_buffer_scale_coordinates() {
+        assert_eq!(viewport_source_dimensions(800, 400, 2), (400.0, 200.0));
+        assert_eq!(viewport_source_dimensions(600, 300, 2), (300.0, 150.0));
+    }
+
+    #[test]
+    fn full_copy_uses_the_allocation_stride_for_size_class_buffers() {
+        let width = 3;
+        let height = 2;
+        let canvas_width = 4;
+        let src: Vec<u8> = (0..width * height * 4).map(|value| value as u8).collect();
+        let mut canvas = vec![0xff; canvas_width as usize * height as usize * 4];
+
+        copy_bgra_to_canvas(&src, &mut canvas, width, height, canvas_width);
+
+        for row in 0..height as usize {
+            let src_start = row * width as usize * 4;
+            let canvas_start = row * canvas_width as usize * 4;
+            assert_eq!(
+                &canvas[canvas_start..canvas_start + width as usize * 4],
+                &src[src_start..src_start + width as usize * 4],
+            );
+            assert_eq!(
+                &canvas
+                    [canvas_start + width as usize * 4..canvas_start + canvas_width as usize * 4],
+                &[0xff; 4],
+            );
+        }
+    }
+
+    // ---------------------------------------------------------------------------
     // scale factor tests
     // ---------------------------------------------------------------------------
 
@@ -2946,6 +3080,7 @@ mod tests {
                 black_box(&mut canvas),
                 width,
                 height,
+                width,
                 union,
             );
         }
@@ -2959,6 +3094,7 @@ mod tests {
                     black_box(&mut canvas),
                     width,
                     height,
+                    width,
                     rect,
                 );
             }
@@ -2997,6 +3133,7 @@ mod tests {
                 black_box(&mut canvas),
                 width,
                 height,
+                width,
                 full_damage(width, height),
             );
         }
@@ -3009,6 +3146,7 @@ mod tests {
                 black_box(&mut canvas),
                 width,
                 height,
+                width,
                 physical_damage,
             );
         }

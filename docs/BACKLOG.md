@@ -794,8 +794,19 @@ reference it. The historical subsystem map is
 
 - [ ] Direct Skia paint into the mapped SHM canvas for full-present frames,
       keeping `PixelBuffer` as the retained/compare copy (H).
-- [ ] SHM pool size classes (round up, viewport crop) so animated
+- [x] SHM pool size classes (round up, viewport crop) so animated
       content-measured resizes stop reallocating the whole buffer set (H).
+      Completed 2026-07-28: Wayland surfaces with `wp_viewporter` now round
+      physical SHM allocations up to 64px classes and crop the allocation to
+      the rendered extent before applying the logical destination. A six-frame
+      content-size jitter sequence now keeps one pool configuration instead of
+      six; compositors without a viewporter deliberately retain exact-size
+      allocations. Strided full and sparse copies preserve the visible source
+      pixels inside a larger canvas, and newly allocated buffers begin with
+      full visible damage so a first sparse frame cannot expose uninitialized
+      pixels. The viewport crop uses post-`buffer_scale` source coordinates,
+      including fractional-scale frames. Presentation tests pass (55 passed,
+      12 ignored).
 - [ ] Rotation transforms allocate a temp `PixelBuffer` + full subtree
       repaint per frame; low priority until rotation ships in surfaces
       (P; scratch-buffer reuse rejected — see log).
