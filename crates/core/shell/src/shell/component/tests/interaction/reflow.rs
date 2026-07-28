@@ -165,7 +165,9 @@ end
     let render_count_after_first = runtime_number(&component, "render_count");
     let runtime_count_after_first = component.runtimes.lock().unwrap().len();
 
-    component.hovered_path = vec!["root".into(), "root/0".into(), "root/0/1".into()];
+    component.hovered_path = ["root", "root/0", "root/0/1"]
+        .map(runtime_node_id_for_key)
+        .to_vec();
     component.hovered_key = Some("root/0/1".into());
     component.dirty = true;
     component.paint(&theme, 240, 120, &mut buffer, 1.0).unwrap();
@@ -245,7 +247,9 @@ end
     component
         .input_values
         .insert(runtime_node_id_for_key("root/0/0"), "local".into());
-    component.slider_values.insert("root/0/1".into(), 73.0);
+    component
+        .slider_values
+        .insert(runtime_node_id_for_key("root/0/1"), 73.0);
     component
         .checked_values
         .insert(runtime_node_id_for_key("root/0/2"), true);

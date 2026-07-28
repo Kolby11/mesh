@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn pseudo_state_annotation_uses_stable_keys_after_rebuild() {
     let focused_key = Some("root/0".to_string());
-    let hovered_path = vec!["root".to_string(), "root/0".to_string()];
+    let hovered_path = ["root", "root/0"].map(runtime_node_id_for_key);
     let active_key = Some("root/0".to_string());
     let checked_values = HashMap::from([(runtime_node_id_for_key("root/1"), true)]);
 
@@ -138,7 +138,9 @@ input:checked {
     );
     component.render_hooks_pending = false;
     component.focused_key = Some("root/0/1".into());
-    component.hovered_path = vec!["root".into(), "root/0".into(), "root/0/2".into()];
+    component.hovered_path = ["root", "root/0", "root/0/2"]
+        .map(runtime_node_id_for_key)
+        .to_vec();
     component.hovered_key = Some("root/0/2".into());
     component.pointer_down_key = Some("root/0/2".into());
     component

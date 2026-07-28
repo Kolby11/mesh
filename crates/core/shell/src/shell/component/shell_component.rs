@@ -149,6 +149,8 @@ impl ShellComponent for FrontendSurfaceComponent {
                     self.clear_selection();
                     self.focused_key = None;
                     self.focus_visible_key = None;
+                    self.focused_id = None;
+                    self.focus_visible_id = None;
                     self.pending_auto_focus = false;
                     self.pending_embedded_popover_focus = false;
                     self.embedded_popover_return_focus = None;
@@ -1592,6 +1594,8 @@ impl FrontendSurfaceComponent {
             {
                 self.focused_key = Some(key.clone());
                 self.focus_visible_key = Some(key);
+                self.focused_id = self.focused_key.as_deref().map(runtime_node_id_for_key);
+                self.focus_visible_id = self.focused_id;
                 self.invalidate_interaction_restyle();
             }
             return;
@@ -1608,6 +1612,8 @@ impl FrontendSurfaceComponent {
             self.embedded_popover_return_focus = self.focused_key.clone();
             self.focused_key = Some(key.clone());
             self.focus_visible_key = Some(key);
+            self.focused_id = self.focused_key.as_deref().map(runtime_node_id_for_key);
+            self.focus_visible_id = self.focused_id;
             self.invalidate_interaction_restyle();
         }
     }

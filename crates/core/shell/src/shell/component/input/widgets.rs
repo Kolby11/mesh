@@ -171,15 +171,16 @@ impl FrontendSurfaceComponent {
         slider_key: &str,
         value: f32,
     ) {
-        if let Some(script_value) = find_node_by_key(tree, slider_key).and_then(|node| {
-            node.attributes
+        if let Some(node) = find_node_by_key(tree, slider_key) {
+            if let Some(script_value) = node
+                .attributes
                 .get("value")
                 .and_then(|value| value.parse::<f32>().ok())
-        }) {
-            self.slider_script_values
-                .insert(slider_key.to_string(), script_value);
+            {
+                self.slider_script_values.insert(node.id, script_value);
+            }
+            self.slider_values.insert(node.id, value);
         }
-        self.slider_values.insert(slider_key.to_string(), value);
     }
 
     pub(super) fn update_slider_from_position(
@@ -273,15 +274,14 @@ impl FrontendSurfaceComponent {
             .get("value")
             .and_then(|value| value.parse::<f32>().ok())
         {
-            self.slider_script_values
-                .insert(slider_key.to_string(), script_value);
+            self.slider_script_values.insert(node.id, script_value);
         }
-        self.slider_values.insert(slider_key.to_string(), value);
+        self.slider_values.insert(node.id, value);
     }
 
     pub(super) fn slider_value(&self, tree: &WidgetNode, slider_key: &str) -> Option<f32> {
-        self.slider_values.get(slider_key).copied().or_else(|| {
-            find_node_by_key(tree, slider_key).and_then(|node| {
+        find_node_by_key(tree, slider_key).and_then(|node| {
+            self.slider_values.get(&node.id).copied().or_else(|| {
                 node.attributes
                     .get("value")
                     .and_then(|value| value.parse::<f32>().ok())

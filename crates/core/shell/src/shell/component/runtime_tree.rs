@@ -1143,35 +1143,35 @@ fn clone_or_take_last_metric(
 }
 
 pub(super) struct RuntimeAnnotationContext<'a> {
-    focused_key: &'a Option<String>,
-    focus_visible_key: &'a Option<String>,
-    hovered_keys: HashSet<&'a str>,
+    focused_id: Option<NodeId>,
+    focus_visible_id: Option<NodeId>,
+    hovered_ids: HashSet<NodeId>,
     active_key: &'a Option<String>,
     active_slider_key: &'a Option<String>,
     input_values: &'a HashMap<NodeId, String>,
-    slider_values: &'a mut HashMap<String, f32>,
-    slider_script_values: &'a mut HashMap<String, f32>,
+    slider_values: &'a mut HashMap<NodeId, f32>,
+    slider_script_values: &'a mut HashMap<NodeId, f32>,
     checked_values: &'a HashMap<NodeId, bool>,
     scroll_offsets: &'a mut HashMap<NodeId, ScrollOffsetState>,
 }
 
 impl<'a> RuntimeAnnotationContext<'a> {
     pub(super) fn new(
-        focused_key: &'a Option<String>,
-        focus_visible_key: &'a Option<String>,
-        hovered_path: &'a [String],
+        focused_id: Option<NodeId>,
+        focus_visible_id: Option<NodeId>,
+        hovered_path: &'a [NodeId],
         active_key: &'a Option<String>,
         active_slider_key: &'a Option<String>,
         input_values: &'a HashMap<NodeId, String>,
-        slider_values: &'a mut HashMap<String, f32>,
-        slider_script_values: &'a mut HashMap<String, f32>,
+        slider_values: &'a mut HashMap<NodeId, f32>,
+        slider_script_values: &'a mut HashMap<NodeId, f32>,
         checked_values: &'a HashMap<NodeId, bool>,
         scroll_offsets: &'a mut HashMap<NodeId, ScrollOffsetState>,
     ) -> Self {
         Self {
-            focused_key,
-            focus_visible_key,
-            hovered_keys: hovered_path.iter().map(String::as_str).collect(),
+            focused_id,
+            focus_visible_id,
+            hovered_ids: hovered_path.iter().copied().collect(),
             active_key,
             active_slider_key,
             input_values,
@@ -1235,12 +1235,12 @@ fn annotate_runtime_tree_inner(
         .unwrap_or(false);
 
     node.state = ElementState {
-        focused: context.focused_key.as_deref() == Some(key_str),
-        focus_visible: context.focus_visible_key.as_deref() == Some(key_str)
-            || (context.focus_visible_key.is_none()
-                && context.focused_key.as_deref() == Some(key_str)
+        focused: context.focused_id == Some(node_id),
+        focus_visible: context.focus_visible_id == Some(node_id)
+            || (context.focus_visible_id.is_none()
+                && context.focused_id == Some(node_id)
                 && node.tag == "input"),
-        hovered: context.hovered_keys.contains(key_str),
+        hovered: context.hovered_ids.contains(&node_id),
         active: context.active_key.as_deref() == Some(key_str),
         disabled,
         checked,
@@ -1270,7 +1270,7 @@ fn annotate_runtime_tree_inner(
             node.attributes.insert("value".into(), value);
         }
         "slider" => {
-            annotate_slider_node(node, key_str, key_str, context);
+            annotate_slider_node(node, node_id, key_str, context);
         }
         "switch" | "checkbox" => {
             node.attributes.insert(
@@ -1359,7 +1359,7 @@ fn annotate_runtime_tree_inner(
 
 fn annotate_slider_node(
     node: &mut WidgetNode,
-    key: &str,
+    node_id: NodeId,
     key_str: &str,
     context: &mut RuntimeAnnotationContext<'_>,
 ) {
@@ -1367,7 +1367,7 @@ fn annotate_slider_node(
         .attributes
         .get("value")
         .and_then(|value: &String| value.parse::<f32>().ok());
-    let value = resolved_slider_value(key, key_str, script_value, context);
+    let value = resolved_slider_value(node_id, key_str, script_value, context);
     {
         use std::fmt::Write as _;
         let entry = node
@@ -1380,12 +1380,12 @@ fn annotate_slider_node(
 }
 
 fn resolved_slider_value(
-    key: &str,
+    node_id: NodeId,
     key_str: &str,
     script_value: Option<f32>,
     context: &mut RuntimeAnnotationContext<'_>,
 ) -> f32 {
-    let preserved_value = context.slider_values.get(key).copied();
+    let preserved_value = context.slider_values.get(&node_id).copied();
     if context.active_slider_key.as_deref() == Some(key_str) {
         return preserved_value.or(script_value).unwrap_or(0.0);
     }
@@ -1393,15 +1393,15 @@ fn resolved_slider_value(
     if let Some(script_value) = script_value {
         match (
             preserved_value,
-            context.slider_script_values.get(key).copied(),
+            context.slider_script_values.get(&node_id).copied(),
         ) {
             (Some(preserved), Some(previous_script)) if float_eq(script_value, previous_script) => {
                 preserved
             }
             (Some(preserved), None) => preserved,
             (Some(_), Some(_)) => {
-                context.slider_values.remove(key);
-                context.slider_script_values.remove(key);
+                context.slider_values.remove(&node_id);
+                context.slider_script_values.remove(&node_id);
                 script_value
             }
             (None, _) => script_value,
@@ -1490,8 +1490,8 @@ mod tests {
         let checked_values = HashMap::new();
         let mut scroll_offsets = HashMap::new();
         let mut context = RuntimeAnnotationContext::new(
-            &None,
-            &None,
+            None,
+            None,
             &[],
             &None,
             &None,
@@ -3176,8 +3176,8 @@ mod tests {
             let mut slider_script_values = HashMap::new();
             let checked_values = HashMap::new();
             let mut context = RuntimeAnnotationContext::new(
-                &None,
-                &None,
+                None,
+                None,
                 &[],
                 &None,
                 &None,

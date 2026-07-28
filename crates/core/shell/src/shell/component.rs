@@ -582,8 +582,12 @@ pub(super) struct FrontendSurfaceComponent {
     /// while no live runtime reads them, so lazily created child runtimes are
     /// seeded with real state instead of an empty service proxy.
     declared_service_names: HashSet<String>,
+    /// Readable key cache used only at event/ref navigation boundaries.
     focused_key: Option<String>,
     focus_visible_key: Option<String>,
+    /// Authoritative focus identities for runtime annotation and restyling.
+    focused_id: Option<NodeId>,
+    focus_visible_id: Option<NodeId>,
     pointer_down_key: Option<String>,
     pointer_down_bounds: Option<(f32, f32, f32, f32)>,
     pointer_down_target: Option<input::PressedTargetSnapshot>,
@@ -624,8 +628,8 @@ pub(super) struct FrontendSurfaceComponent {
     pub(super) triggered_popovers: HashMap<String, String>,
     selection: Option<TextSelectionState>,
     input_values: HashMap<NodeId, String>,
-    slider_values: HashMap<String, f32>,
-    slider_script_values: HashMap<String, f32>,
+    slider_values: HashMap<NodeId, f32>,
+    slider_script_values: HashMap<NodeId, f32>,
     checked_values: HashMap<NodeId, bool>,
     render_hooks_pending: bool,
     pub(super) scroll_offsets: HashMap<NodeId, ScrollOffsetState>,
@@ -637,18 +641,21 @@ pub(super) struct FrontendSurfaceComponent {
     pub(super) scroll_animations: HashMap<NodeId, ScrollAnimation>,
     // Hover tracking for CSS :hover and tooltip system.
     hovered_key: Option<String>,
-    hovered_path: Vec<String>,
+    hovered_path: Vec<NodeId>,
+    /// Structural paths retained only to dispatch pointer enter/leave handlers.
+    /// The runtime style/restyle path above is keyed by `NodeId`.
+    hovered_event_path: Vec<String>,
     hovered_tooltip: Option<(String, String)>,
     /// Previous frame's hovered path — used to detect which nodes' hover state
     /// changed between frames for targeted interaction restyle.
-    previous_hovered_path: Vec<String>,
+    previous_hovered_path: Vec<NodeId>,
     /// Previous frame's focused key — used to detect which node's focus state
     /// changed between frames for targeted interaction restyle.
-    previous_focused_key: Option<String>,
+    previous_focused_key: Option<NodeId>,
+    previous_focus_visible_key: Option<NodeId>,
     /// Previous interaction states whose pseudo-classes can change without a
     /// template rebuild. Together with hover/focus these make targeted
     /// interaction restyle complete for every supported dynamic pseudo-state.
-    previous_focus_visible_key: Option<String>,
     previous_active_key: Option<String>,
     previous_checked_values: HashMap<NodeId, bool>,
     interaction_snapshot_valid: bool,
@@ -903,6 +910,8 @@ impl FrontendSurfaceComponent {
             declared_service_names,
             focused_key: None,
             focus_visible_key: None,
+            focused_id: None,
+            focus_visible_id: None,
             pointer_down_key: None,
             pointer_down_bounds: None,
             pointer_down_target: None,
@@ -932,6 +941,7 @@ impl FrontendSurfaceComponent {
             scroll_animations: HashMap::new(),
             hovered_key: None,
             hovered_path: Vec::new(),
+            hovered_event_path: Vec::new(),
             hovered_tooltip: None,
             previous_hovered_path: Vec::new(),
             previous_focused_key: None,

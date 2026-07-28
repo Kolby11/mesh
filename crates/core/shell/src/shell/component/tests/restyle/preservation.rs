@@ -49,7 +49,7 @@ end
 
     // Trigger a pseudo-state restyle by setting hover (no service re-emit).
     component.hovered_key = Some("root/0".into());
-    component.hovered_path = vec!["root".into(), "root/0".into()];
+    component.hovered_path = ["root", "root/0"].map(runtime_node_id_for_key).to_vec();
     component.dirty = true;
     component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
 
@@ -155,7 +155,9 @@ text {
     component
         .input_values
         .insert(runtime_node_id_for_key("root/0/0"), "typed-text".into());
-    component.slider_values.insert("root/0/1".into(), 88.0);
+    component
+        .slider_values
+        .insert(runtime_node_id_for_key("root/0/1"), 88.0);
     component
         .checked_values
         .insert(runtime_node_id_for_key("root/0/2"), true);
@@ -242,7 +244,9 @@ fn restyle_state_cleanup_hover_cleared_when_node_removed() {
 
     // Simulate hovering the second button.
     component.hovered_key = Some("root/0/1".into());
-    component.hovered_path = vec!["root".into(), "root/0".into(), "root/0/1".into()];
+    component.hovered_path = ["root", "root/0", "root/0/1"]
+        .map(runtime_node_id_for_key)
+        .to_vec();
     component.hover_start = Some(std::time::Instant::now());
     component.dirty = true;
     component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
@@ -274,7 +278,9 @@ fn restyle_state_cleanup_hover_cleared_when_node_removed() {
     // Transplant the hovered state into the new component to test cleanup.
     let mut component = component2;
     component.hovered_key = Some("root/0/1".into()); // stale key
-    component.hovered_path = vec!["root".into(), "root/0".into(), "root/0/1".into()];
+    component.hovered_path = ["root", "root/0", "root/0/1"]
+        .map(runtime_node_id_for_key)
+        .to_vec();
     component.hover_start = Some(std::time::Instant::now());
     component.dirty = true;
     component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();

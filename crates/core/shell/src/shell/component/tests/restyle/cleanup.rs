@@ -104,7 +104,9 @@ button:hover {
     // Both keys are valid — set focus on first, hover on second.
     component.focused_key = Some("root/0/0".into());
     component.hovered_key = Some("root/0/1".into());
-    component.hovered_path = vec!["root".into(), "root/0".into(), "root/0/1".into()];
+    component.hovered_path = ["root", "root/0", "root/0/1"]
+        .map(runtime_node_id_for_key)
+        .to_vec();
     component.pointer_down_key = Some("root/0/0".into());
     component.dirty = true;
     component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();

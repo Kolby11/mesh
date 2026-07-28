@@ -290,14 +290,18 @@ impl FrontendSurfaceComponent {
                 // Update hover state for CSS :hover and the tooltip system.
                 self.hovered_pos = (x, y);
                 let mut pointer_hit = mesh_core_interaction::pointer_hit_test(tree, x, y);
-                let new_path = pointer_hit
+                let new_event_path = pointer_hit
                     .as_mut()
                     .map(|hit| std::mem::take(&mut hit.path))
                     .unwrap_or_default();
-                let new_key = new_path.last().cloned();
+                let new_key = new_event_path.last().cloned();
+                let new_path = new_event_path
+                    .iter()
+                    .map(|key| runtime_node_id_for_key(key))
+                    .collect::<Vec<_>>();
                 tracing::trace!(
                     "[hover] pointer=({x:.1},{y:.1}) path={:?} hit={:?} prev={:?}",
-                    new_path,
+                    new_event_path,
                     new_key,
                     self.hovered_key
                 );
@@ -315,7 +319,7 @@ impl FrontendSurfaceComponent {
                             previous_owner == next_owner
                         });
                     self.hovered_key = new_key.clone();
-                    let previous_path = std::mem::take(&mut self.hovered_path);
+                    let previous_event_path = std::mem::take(&mut self.hovered_event_path);
                     self.hovered_tooltip = next_tooltip.clone();
                     self.tooltip_target_cache.clear();
                     // Store the hovered element's bounds for tooltip positioning.
@@ -342,12 +346,13 @@ impl FrontendSurfaceComponent {
                     // the entered/left nodes (e.g. hover-to-open popovers).
                     let hover_result = self.dispatch_hover_transition_handlers(
                         tree,
-                        &previous_path,
-                        &new_path,
+                        &previous_event_path,
+                        &new_event_path,
                         x,
                         y,
                     );
                     self.hovered_path = new_path;
+                    self.hovered_event_path = new_event_path;
                     let hover_requests = hover_result?;
                     if !hover_requests.is_empty() {
                         return Ok(hover_requests);
@@ -358,7 +363,8 @@ impl FrontendSurfaceComponent {
                 let had_hover_state = self.hovered_key.is_some()
                     || !self.hovered_path.is_empty()
                     || self.hover_start.is_some();
-                let previous_path = std::mem::take(&mut self.hovered_path);
+                self.hovered_path.clear();
+                let previous_event_path = std::mem::take(&mut self.hovered_event_path);
                 if had_hover_state {
                     let tooltip_may_change = self.hovered_tooltip.is_some()
                         || self.tooltip_visible
@@ -374,8 +380,13 @@ impl FrontendSurfaceComponent {
                 }
                 // The pointer left the whole surface — fire pointerleave/mouseleave
                 // on everything that was hovered so popovers can close themselves.
-                let leave_requests =
-                    self.dispatch_hover_transition_handlers(tree, &previous_path, &[], 0.0, 0.0)?;
+                let leave_requests = self.dispatch_hover_transition_handlers(
+                    tree,
+                    &previous_event_path,
+                    &[],
+                    0.0,
+                    0.0,
+                )?;
                 if !leave_requests.is_empty() {
                     return Ok(leave_requests);
                 }

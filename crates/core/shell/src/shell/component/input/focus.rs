@@ -18,6 +18,9 @@ impl FrontendSurfaceComponent {
                 requests.extend(self.call_node_handler(tree, previous_key, "blur", &[event])?);
             }
             self.focused_key = next_key.clone();
+            self.focused_id = next_key
+                .as_deref()
+                .and_then(|key| find_node_by_key(tree, key).map(|node| node.id));
             if let Some(next_key) = next_key.as_deref() {
                 let event = self.build_focus_event(tree, next_key, "focus");
                 requests.extend(self.call_node_handler(tree, next_key, "focus", &[event])?);
@@ -25,6 +28,7 @@ impl FrontendSurfaceComponent {
         }
 
         self.focus_visible_key = if focus_visible { next_key } else { None };
+        self.focus_visible_id = if focus_visible { self.focused_id } else { None };
         Ok(requests)
     }
 
@@ -192,6 +196,8 @@ impl FrontendSurfaceComponent {
         if let Some(key) = new_key {
             self.focused_key = Some(key.clone());
             self.focus_visible_key = Some(key);
+            self.focused_id = self.focused_key.as_deref().map(runtime_node_id_for_key);
+            self.focus_visible_id = self.focused_id;
             self.invalidate_interaction_restyle();
         }
         self.return_focus = return_focus;
@@ -204,6 +210,8 @@ impl FrontendSurfaceComponent {
     pub(in crate::shell::component) fn clear_focus_for_transfer(&mut self) {
         self.focused_key = None;
         self.focus_visible_key = None;
+        self.focused_id = None;
+        self.focus_visible_id = None;
         self.invalidate_interaction_restyle();
     }
 
@@ -249,6 +257,8 @@ impl FrontendSurfaceComponent {
         if let Some(first) = next_focus_target(tree, None, false) {
             self.focused_key = Some(first.clone());
             self.focus_visible_key = Some(first);
+            self.focused_id = self.focused_key.as_deref().map(runtime_node_id_for_key);
+            self.focus_visible_id = self.focused_id;
         }
     }
 
@@ -259,6 +269,8 @@ impl FrontendSurfaceComponent {
         } else {
             self.focused_key = None;
             self.focus_visible_key = None;
+            self.focused_id = None;
+            self.focus_visible_id = None;
             None
         }
     }

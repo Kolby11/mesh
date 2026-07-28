@@ -854,7 +854,11 @@ fn handlerless_slider_drag_uses_interaction_restyle_not_script_rebuild() {
         )
         .unwrap();
 
-    assert!(component.slider_values.contains_key("root/0"));
+    assert!(
+        component
+            .slider_values
+            .contains_key(&runtime_node_id_for_key("root/0"))
+    );
     assert!(
         component
             .dirty_types

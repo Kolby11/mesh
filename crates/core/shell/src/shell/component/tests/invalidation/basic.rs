@@ -457,7 +457,9 @@ fn targeted_interaction_restyle_uses_scoped_retained_fingerprinting() {
     let mut buffer = PixelBuffer::new(120, 40);
     component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
 
-    component.hovered_path = vec!["root".into(), "root/0".into(), "root/0/0".into()];
+    component.hovered_path = ["root", "root/0", "root/0/0"]
+        .map(runtime_node_id_for_key)
+        .to_vec();
     component.hovered_key = Some("root/0/0".into());
     component.invalidate_interaction_restyle();
     component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
@@ -485,7 +487,9 @@ fn targeted_interaction_animation_merges_scoped_retained_roots() {
     let mut buffer = PixelBuffer::new(120, 40);
     component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
 
-    component.hovered_path = vec!["root".into(), "root/0".into(), "root/0/0".into()];
+    component.hovered_path = ["root", "root/0", "root/0/0"]
+        .map(runtime_node_id_for_key)
+        .to_vec();
     component.hovered_key = Some("root/0/0".into());
     component.invalidate_interaction_restyle();
     component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
@@ -612,7 +616,7 @@ fn surface_transition_annotation_forces_full_retained_fingerprinting() {
     component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
 
     component.surface_entering = true;
-    component.hovered_path = vec!["root".into(), "root/0".into()];
+    component.hovered_path = ["root", "root/0"].map(runtime_node_id_for_key).to_vec();
     component.hovered_key = Some("root/0".into());
     component.invalidate_interaction_restyle();
     component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
@@ -824,7 +828,7 @@ fn selector_dependencies_filter_unrelated_interaction_changes() {
     );
     assert!(component.module_styles_have_state_rules());
     component.interaction_snapshot_valid = true;
-    component.previous_focused_key = Some("root/old".into());
+    component.previous_focused_key = Some(runtime_node_id_for_key("root/old"));
     component.focused_key = Some("root/new".into());
     component.previous_active_key = Some("root/pressed".into());
     component.pointer_down_key = None;

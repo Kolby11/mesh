@@ -44,7 +44,7 @@ end
 
     // Simulate a hover over the button region.  The button key is "root/0/0"
     // (surface → column/row → button, index 0 in the single-child template).
-    component.hovered_path = vec!["root".into(), "root/0".into()];
+    component.hovered_path = ["root", "root/0"].map(runtime_node_id_for_key).to_vec();
     component.hovered_key = Some("root/0".into());
     component.dirty = true;
     component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();

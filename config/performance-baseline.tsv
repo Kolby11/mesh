@@ -39,6 +39,9 @@ scroll_offset_scrollable_gate_speedup      lower      3.40      20
 node_id_scroll_offsets_speedup              lower      4.30      15
 node_id_checked_state_speedup               lower      1.60      10
 node_id_input_values_speedup                lower      1.60      10
+node_id_slider_values_speedup               lower      1.60      10
+node_id_hover_path_speedup                  lower      1.60      10
+node_id_focus_state_speedup                 lower      1.60      10
 unmatched_prop_handler_call_speedup        lower      1.05      20
 element_contract_dispatch_speedup          lower      4.40      20
 inherited_style_mask_bucket_speedup        lower      2.40      20

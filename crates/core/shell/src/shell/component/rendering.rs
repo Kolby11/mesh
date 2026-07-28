@@ -321,8 +321,13 @@ impl FrontendSurfaceComponent {
         // so the eased offset lands in this frame's `_mesh_scroll_*` attributes.
         self.advance_scroll_animations(std::time::Instant::now());
         let mut annotation_context = RuntimeAnnotationContext::new(
-            &self.focused_key,
-            &self.focus_visible_key,
+            self.focused_id
+                .or_else(|| self.focused_key.as_deref().map(runtime_node_id_for_key)),
+            self.focus_visible_id.or_else(|| {
+                self.focus_visible_key
+                    .as_deref()
+                    .map(runtime_node_id_for_key)
+            }),
             &self.hovered_path,
             &self.pointer_down_key,
             &self.active_slider_key,
@@ -633,9 +638,14 @@ impl FrontendSurfaceComponent {
         // Preserve the prior frame's allocation while replacing its contents.
         // Interaction paths typically have the same depth across pointer moves.
         self.previous_hovered_path.clone_from(&self.hovered_path);
-        self.previous_focused_key.clone_from(&self.focused_key);
-        self.previous_focus_visible_key
-            .clone_from(&self.focus_visible_key);
+        self.previous_focused_key = self
+            .focused_id
+            .or_else(|| self.focused_key.as_deref().map(runtime_node_id_for_key));
+        self.previous_focus_visible_key = self.focus_visible_id.or_else(|| {
+            self.focus_visible_key
+                .as_deref()
+                .map(runtime_node_id_for_key)
+        });
         self.previous_active_key.clone_from(&self.pointer_down_key);
         if self.cached_restyle_state_dependencies.checked {
             self.previous_checked_values
@@ -681,35 +691,34 @@ impl FrontendSurfaceComponent {
             );
         }
 
-        // Collect keys that had focus change.
-        if dependencies.focus && self.previous_focused_key != self.focused_key {
-            if let Some(ref prev) = self.previous_focused_key {
-                changed_ids.insert(runtime_node_id_for_key(prev));
-            }
-            if let Some(ref curr) = self.focused_key {
-                changed_ids.insert(runtime_node_id_for_key(curr));
-            }
+        let focused_id = self
+            .focused_id
+            .or_else(|| self.focused_key.as_deref().map(runtime_node_id_for_key));
+        let focus_visible_id = self.focus_visible_id.or_else(|| {
+            self.focus_visible_key
+                .as_deref()
+                .map(runtime_node_id_for_key)
+        });
+
+        // Focus keys remain at input and handler boundaries; restyle diffs use
+        // the stable identities computed once here.
+        if dependencies.focus && self.previous_focused_key != focused_id {
+            changed_ids.extend(self.previous_focused_key.into_iter().chain(focused_id));
         }
 
         if dependencies.focus_visible
-            && (self.previous_focus_visible_key != self.focus_visible_key
-                || self.previous_focused_key != self.focused_key)
+            && (self.previous_focus_visible_key != focus_visible_id
+                || self.previous_focused_key != focused_id)
         {
-            if let Some(ref prev) = self.previous_focus_visible_key {
-                changed_ids.insert(runtime_node_id_for_key(prev));
-            }
-            if let Some(ref curr) = self.focus_visible_key {
-                changed_ids.insert(runtime_node_id_for_key(curr));
-            }
+            changed_ids.extend(
+                self.previous_focus_visible_key
+                    .into_iter()
+                    .chain(focus_visible_id),
+            );
             // Inputs implicitly expose focus-visible while focused even when
             // no explicit focus-visible key is stored, so logical focus is
             // part of the dependency for this pseudo-state too.
-            if let Some(ref prev) = self.previous_focused_key {
-                changed_ids.insert(runtime_node_id_for_key(prev));
-            }
-            if let Some(ref curr) = self.focused_key {
-                changed_ids.insert(runtime_node_id_for_key(curr));
-            }
+            changed_ids.extend(self.previous_focused_key.into_iter().chain(focused_id));
         }
 
         if dependencies.active && self.previous_active_key != self.pointer_down_key {
@@ -860,8 +869,8 @@ impl FrontendSurfaceComponent {
 }
 
 fn collect_hover_changed_ids(
-    previous: &[String],
-    current: &[String],
+    previous: &[NodeId],
+    current: &[NodeId],
     changed_ids: &mut HashSet<NodeId>,
 ) {
     let shared_prefix_len = previous
@@ -873,7 +882,7 @@ fn collect_hover_changed_ids(
         previous[shared_prefix_len..]
             .iter()
             .chain(&current[shared_prefix_len..])
-            .map(|key| runtime_node_id_for_key(key)),
+            .copied(),
     );
 }
 
@@ -1591,19 +1600,172 @@ mod interaction_changed_key_tests {
         assert!(node_time < string_time);
     }
 
+    // cargo test -p mesh-core-shell --release -- node_id_slider_values_beat_string_keys --ignored --nocapture
+    #[test]
+    #[ignore = "release-only slider-value identity microbenchmark"]
+    fn node_id_slider_values_beat_string_keys() {
+        const NODES: usize = 1_024;
+        const ITERATIONS: usize = 40_000;
+
+        let keys = (0..NODES)
+            .map(|index| format!("root/{}/{}", index / 32, index % 32))
+            .collect::<Vec<_>>();
+        let node_ids = keys
+            .iter()
+            .map(|key| runtime_node_id_for_key(key))
+            .collect::<Vec<_>>();
+        let string_state = keys
+            .iter()
+            .enumerate()
+            .map(|(index, key)| (key.clone(), index as f32))
+            .collect::<HashMap<_, _>>();
+        let node_state = node_ids
+            .iter()
+            .enumerate()
+            .map(|(index, node_id)| (*node_id, index as f32))
+            .collect::<HashMap<_, _>>();
+
+        let string_started = Instant::now();
+        let mut string_total = 0f32;
+        for _ in 0..ITERATIONS {
+            for key in &keys {
+                string_total += string_state
+                    .get(std::hint::black_box(key.as_str()))
+                    .copied()
+                    .unwrap_or_default();
+            }
+        }
+        let string_time = string_started.elapsed();
+
+        let node_started = Instant::now();
+        let mut node_total = 0f32;
+        for _ in 0..ITERATIONS {
+            for node_id in &node_ids {
+                node_total += node_state
+                    .get(std::hint::black_box(node_id))
+                    .copied()
+                    .unwrap_or_default();
+            }
+        }
+        let node_time = node_started.elapsed();
+
+        assert_eq!(string_total, node_total);
+        eprintln!(
+            "slider-value annotation across {ITERATIONS} {NODES}-node passes: string keys {string_time:?}; NodeId keys {node_time:?}; ratio {:.2}x",
+            string_time.as_secs_f64() / node_time.as_secs_f64()
+        );
+        println!(
+            "MESH_PERF metric=node_id_slider_values_speedup value={:.6}",
+            string_time.as_secs_f64() / node_time.as_secs_f64()
+        );
+        assert!(node_time < string_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- node_id_hover_path_beats_string_keys --ignored --nocapture
+    #[test]
+    #[ignore = "release-only hover-path identity microbenchmark"]
+    fn node_id_hover_path_beats_string_keys() {
+        const NODES: usize = 1_024;
+        const ITERATIONS: usize = 40_000;
+
+        let keys = (0..NODES)
+            .map(|index| format!("root/{}/{}", index / 32, index % 32))
+            .collect::<Vec<_>>();
+        let node_ids = keys
+            .iter()
+            .map(|key| runtime_node_id_for_key(key))
+            .collect::<Vec<_>>();
+        let string_state = keys.iter().cloned().collect::<HashSet<_>>();
+        let node_state = node_ids.iter().copied().collect::<HashSet<_>>();
+
+        let string_started = Instant::now();
+        let mut string_total = 0usize;
+        for _ in 0..ITERATIONS {
+            for key in &keys {
+                string_total += usize::from(string_state.contains(std::hint::black_box(key)));
+            }
+        }
+        let string_time = string_started.elapsed();
+
+        let node_started = Instant::now();
+        let mut node_total = 0usize;
+        for _ in 0..ITERATIONS {
+            for node_id in &node_ids {
+                node_total += usize::from(node_state.contains(std::hint::black_box(node_id)));
+            }
+        }
+        let node_time = node_started.elapsed();
+
+        assert_eq!(string_total, node_total);
+        eprintln!(
+            "hover annotation across {ITERATIONS} {NODES}-node passes: string keys {string_time:?}; NodeId keys {node_time:?}; ratio {:.2}x",
+            string_time.as_secs_f64() / node_time.as_secs_f64()
+        );
+        println!(
+            "MESH_PERF metric=node_id_hover_path_speedup value={:.6}",
+            string_time.as_secs_f64() / node_time.as_secs_f64()
+        );
+        assert!(node_time < string_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- node_id_focus_state_beats_string_keys --ignored --nocapture
+    #[test]
+    #[ignore = "release-only focus-state identity microbenchmark"]
+    fn node_id_focus_state_beats_string_keys() {
+        const NODES: usize = 1_024;
+        const ITERATIONS: usize = 40_000;
+
+        let keys = (0..NODES)
+            .map(|index| format!("root/{}/{}", index / 32, index % 32))
+            .collect::<Vec<_>>();
+        let node_ids = keys
+            .iter()
+            .map(|key| runtime_node_id_for_key(key))
+            .collect::<Vec<_>>();
+        let focused_index = NODES / 2;
+        let focused_key = &keys[focused_index];
+        let focused_id = node_ids[focused_index];
+
+        let string_started = Instant::now();
+        let mut string_total = 0usize;
+        for _ in 0..ITERATIONS {
+            for key in &keys {
+                string_total += usize::from(std::hint::black_box(key) == focused_key);
+            }
+        }
+        let string_time = string_started.elapsed();
+
+        let node_started = Instant::now();
+        let mut node_total = 0usize;
+        for _ in 0..ITERATIONS {
+            for node_id in &node_ids {
+                node_total += usize::from(std::hint::black_box(*node_id) == focused_id);
+            }
+        }
+        let node_time = node_started.elapsed();
+
+        assert_eq!(string_total, node_total);
+        eprintln!(
+            "focus annotation across {ITERATIONS} {NODES}-node passes: string keys {string_time:?}; NodeId keys {node_time:?}; ratio {:.2}x",
+            string_time.as_secs_f64() / node_time.as_secs_f64()
+        );
+        println!(
+            "MESH_PERF metric=node_id_focus_state_speedup value={:.6}",
+            string_time.as_secs_f64() / node_time.as_secs_f64()
+        );
+        assert!(node_time < string_time);
+    }
+
     #[test]
     fn hover_changed_ids_only_collects_tails_after_common_ancestor() {
-        let previous = ["root", "root/menu", "root/menu/left"]
-            .map(str::to_string)
-            .to_vec();
+        let previous = ["root", "root/menu", "root/menu/left"].map(stable_runtime_node_id);
         let current = [
             "root",
             "root/menu",
             "root/menu/right",
             "root/menu/right/icon",
         ]
-        .map(str::to_string)
-        .to_vec();
+        .map(stable_runtime_node_id);
         let mut changed = HashSet::new();
 
         collect_hover_changed_ids(&previous, &current, &mut changed);
@@ -1631,23 +1793,24 @@ mod interaction_changed_key_tests {
                     (0..=depth).map(|_| "left").collect::<Vec<_>>().join("/")
                 )
             })
+            .map(|key| stable_runtime_node_id(&key))
             .collect::<Vec<_>>();
         let mut current = previous[..63].to_vec();
-        current.push(format!("{}/right", current.last().unwrap()));
+        current.push(stable_runtime_node_id("root/right"));
         let iterations = 100_000usize;
 
         let mut old_changed = HashSet::with_capacity(previous.len() + current.len());
         let old_started = Instant::now();
         for _ in 0..iterations {
             old_changed.clear();
-            for key in &previous {
-                if !current.contains(key) {
-                    old_changed.insert(stable_runtime_node_id(key));
+            for node_id in &previous {
+                if !current.contains(node_id) {
+                    old_changed.insert(*node_id);
                 }
             }
-            for key in &current {
-                if !previous.contains(key) {
-                    old_changed.insert(stable_runtime_node_id(key));
+            for node_id in &current {
+                if !previous.contains(node_id) {
+                    old_changed.insert(*node_id);
                 }
             }
             std::hint::black_box(&old_changed);

@@ -74,6 +74,7 @@ impl FrontendSurfaceComponent {
             }
         }
         self.focus_visible_key = self.focused_key.clone();
+        self.focus_visible_id = self.focused_id;
         if let Some(focused_key) = focused_key {
             let mut requests = self.dispatch_focused_keyboard_handler(
                 tree,
@@ -172,6 +173,7 @@ impl FrontendSurfaceComponent {
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let keyboard_settings = self.current_keyboard_settings();
         self.focus_visible_key = self.focused_key.clone();
+        self.focus_visible_id = self.focused_id;
         if let Some(focused_key) = self.normalized_focused_key(tree) {
             let mut requests = self.dispatch_focused_keyboard_handler(
                 tree,

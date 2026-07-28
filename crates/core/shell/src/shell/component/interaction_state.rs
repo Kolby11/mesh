@@ -370,6 +370,8 @@ impl FrontendSurfaceComponent {
             if find_node_by_key(tree, key).is_none() {
                 self.focused_key = None;
                 self.focus_visible_key = None;
+                self.focused_id = None;
+                self.focus_visible_id = None;
             }
         }
 
@@ -377,12 +379,14 @@ impl FrontendSurfaceComponent {
             && find_node_by_key(tree, key).is_none()
         {
             self.focus_visible_key = None;
+            self.focus_visible_id = None;
         }
 
         if let Some(key) = &self.hovered_key {
             if find_node_by_key(tree, key).is_none() {
                 self.hovered_key = None;
                 self.hovered_path.clear();
+                self.hovered_event_path.clear();
                 self.hover_start = None;
                 self.tooltip_visible = false;
                 self.hovered_element_bounds = None;
