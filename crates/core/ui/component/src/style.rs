@@ -155,7 +155,7 @@ pub fn prop_variable_key(name: &str) -> String {
 }
 
 /// A style value that may reference local or theme CSS variables.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StyleValue {
     /// A literal value: `#ff0000`, `16px`, `bold`.
     Literal(String),

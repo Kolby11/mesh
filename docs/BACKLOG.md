@@ -638,22 +638,25 @@ reference it. The historical subsystem map is
       above, three interleaved pairs measured 0.504–0.511ms per build before
       both checkpoints versus 0.417–0.428ms after (1.18–1.22x).
 
-      Still open, with the analysis done: `apply_theme_defaults_map` remains
-      ~15% of the build. The result cache hits 99% of the time (measured: 896k
-      hits, 10k misses over 2,000 builds), but a fresh `StyleResolver` is
-      constructed for every `build_widget_tree_from_component` call, so the ~5
-      distinct `(module_id, tag)` pairs per build re-lower every theme default
-      property from strings each time. Removing that means caching the lowering
-      across resolver instances, which needs a sound theme identity: pointer
-      identity is *not* sound because `ThemeEngine::set_active` assigns
-      `self.active = theme.clone()`, replacing the theme in place at the same
-      address with different content, and `Theme`'s fields are all public and
-      mutable. The lowering also reads `self.props`, which is per-instance. So
-      this wants either an explicit revision on `Theme` or a cache handle owned
-      by whoever owns the theme and invalidated on theme load — a cross-crate
-      API decision, not a local optimization.
-- [ ] Typed template-expression attribute storage; internal evaluation is
-      already typed, results still stringify into attributes (A). Progress
+      Added 2026-07-28: ordinary no-diagnostic theme-default lowering now
+      survives fresh `StyleResolver` construction. `Theme` carries a monotonic
+      style revision; clones with identical contents retain it, while mutable
+      access to tokens, defaults, or module contributions advances it before
+      exposing the data.
+      Resolvers share a bounded thread-local cache keyed by that revision,
+      `(module_id, tag)`, and an exact collision-checked prop snapshot, so
+      identical component instances share lowering while different `prop(...)`
+      values remain isolated. Correctness coverage proves cross-resolver
+      sharing, mutation invalidation, and prop-map isolation. Across three
+      release runs of 100,000 fresh prop-bearing resolvers, repeated lowering
+      took 125.7–128.8ms versus 18.83–20.35ms through the revision cache
+      (6.18–6.84x); the relative speedup is checked by the canonical
+      performance gate. The representative 456-node tree build measured
+      0.390–0.397ms after this checkpoint versus 0.416–0.424ms before it
+      (1.05–1.09x end to end). Typed property values and one-time token lowering
+      remain open.
+- [x] Typed template-expression attribute storage (A). Internal evaluation was
+      already typed, but results still stringified into attributes. Progress
       2026-07-15: boolean, nil, number, string, and compound JSON values remain
       typed through expression evaluation; attribute-boundary stringification
       is still the remaining step. Added 2026-07-25: `accessibility_for_element`
@@ -681,16 +684,33 @@ reference it. The historical subsystem map is
       single pass (7.14–8.02x across three runs), gated as
       `accessibility_attribute_pass_speedup`; parity with the chain is covered
       for the full attribute set, every single-attribute map, and maps with
-      each higher-precedence spelling removed. The typed end-to-end
-      storage work itself remains open.
-- [ ] Interaction identity is string-keyed end to end (`hovered_path`,
-      `focused_key`, `scroll_offsets`, `input_values`, `slider_values`);
+      each higher-precedence spelling removed. Completed 2026-07-28:
+      non-string template bindings now enter `AttributeMap` as their original
+      JSON boolean, number, null, array, or object instead of being formatted
+      immediately. The existing string-facing map API remains compatible:
+      string values stay allocation-free, while a boxed typed value lazily
+      caches its historical string representation only when a legacy consumer
+      requests it. Equality, ordered iteration, replacement, mutable access,
+      owned iteration, and serialization retain their previous string
+      semantics. Accessibility lowering uses a pointer-sized typed value view,
+      so boolean and numeric fields no longer stringify and parse during a
+      tree build. Correctness coverage exercises every stored JSON category,
+      lazy materialization, mutation, serialization, map equality, runtime
+      expression lowering, and accessibility parity. Across three release
+      runs building and lowering six bound attributes on 500,000 nodes,
+      stringify-plus-parse took 139.6–143.9ms versus 84.6–88.0ms for typed
+      storage (1.64–1.68x); the relative speedup is checked by the canonical
+      performance gate (`typed_attribute_storage_speedup`).
+- [ ] Remaining interaction identity is string-keyed end to end
+      (`hovered_path`, `focused_key`, `input_values`, `slider_values`);
       migrate to `NodeId` together with metrics/refs publication so
       `_mesh_key` strings lose their last hot consumers (Q); runtime key-path
-      strings are still allocated for interaction/refs (J). Scroll overflow
-      annotation now reserves the reusable root key-path buffer; a 20,000-pass
-      release benchmark measured 796.1ms unreserved versus 769.5ms reserved
-      (1.03x). Added 2026-07-23: pointer and keyed tooltip traversal carry
+      strings are still allocated for interaction/refs (J). The earlier scroll
+      overflow annotation reserved its reusable root key-path buffer; a
+      20,000-pass release benchmark measured 796.1ms unreserved versus 769.5ms
+      reserved (1.03x). That intermediate optimization was superseded by the
+      NodeId scroll-state checkpoint below. Added 2026-07-23: pointer and keyed
+      tooltip traversal carry
       borrowed owner/text references and allocate only the final API result
       instead of allocating at every tooltip-bearing ancestor. A 64-node,
       100,000-lookup release benchmark measured 331.61–342.17ms eager versus
@@ -738,7 +758,27 @@ reference it. The historical subsystem map is
       with only the root scrollable measured 335.4ms unconditional touching
       (781 map entries) versus 93.6ms scrollable-gated (1 map entry) — 3.46–
       3.58x faster across two runs, gated as
-      `scroll_offset_scrollable_gate_speedup`.
+      `scroll_offset_scrollable_gate_speedup`. Completed scroll-state
+      checkpoint 2026-07-28: wheel/two-finger hit results, live offsets,
+      smooth-scroll animations, overflow annotation, and scroll-into-view
+      updates now carry stable `NodeId` values end to end. String key paths
+      remain only at the imperative ref lookup boundary, and standalone
+      overflow annotation no longer constructs or formats structural paths.
+      Across three release runs annotating 20,000 781-node trees, string-keyed
+      state took 1.101–1.111s versus 237.8–253.0ms for NodeId state
+      (4.39–4.66x faster), gated as `node_id_scroll_offsets_speedup`.
+      Scroll action regressions now use explicitly non-shrinking overflow
+      content so they exercise real scrolling rather than a flex-shrunk child.
+      Completed checked-state checkpoint 2026-07-28: checkbox, switch, radio,
+      and option selection state plus its previous-frame restyle snapshot now
+      use stable `NodeId` keys. Runtime annotation no longer hashes structural
+      strings for every checked-state lookup, and checked-state diffs pass IDs
+      directly into targeted restyling instead of reconstructing them from
+      paths. Script handlers retain readable string keys only at their dispatch
+      boundary. Across three release runs of 40,000 1,024-node annotation
+      passes, string-keyed state took 419.5–421.0ms versus 247.7–253.4ms for
+      NodeId state (1.66–1.69x faster), gated as
+      `node_id_checked_state_speedup`.
 - [x] Allocator-level profile mode (allocation counts per render pass) →
       v1.23. Added 2026-07-24: the opt-in `allocation-profiling` build wraps
       the system allocator with allocation-free thread-local counters and

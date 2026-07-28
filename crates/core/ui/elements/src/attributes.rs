@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// Key type for [`AttributeMap`].
 ///
@@ -31,16 +31,165 @@ pub enum AttrKey {
     Shared(Arc<str>),
 }
 
+/// A borrowed resolved attribute value that preserves the type produced by a
+/// template expression.
+#[derive(Clone, Copy)]
+pub struct ResolvedAttributeValueRef<'a> {
+    value: &'a StoredAttributeValue,
+}
+
+impl ResolvedAttributeValueRef<'_> {
+    /// Match the historical string-backed boolean interpretation without
+    /// formatting a typed value first.
+    pub fn legacy_bool(self) -> bool {
+        match self.value {
+            StoredAttributeValue::String(value) => {
+                matches!(value.trim(), "" | "true" | "1")
+            }
+            StoredAttributeValue::Typed(value) => match &value.value {
+                serde_json::Value::Null => true,
+                serde_json::Value::Bool(value) => *value,
+                serde_json::Value::Number(value) => {
+                    value.as_i64() == Some(1) || value.as_u64() == Some(1)
+                }
+                serde_json::Value::String(value) => {
+                    matches!(value.trim(), "" | "true" | "1")
+                }
+                serde_json::Value::Array(_) | serde_json::Value::Object(_) => false,
+            },
+        }
+    }
+
+    /// Match the historical string parse used by numeric attribute consumers.
+    pub fn parse_f32(self) -> Option<f32> {
+        match self.value {
+            StoredAttributeValue::String(value) => value.trim().parse::<f32>().ok(),
+            StoredAttributeValue::Typed(value) => match &value.value {
+                serde_json::Value::Number(value) => value.as_f64().map(|value| value as f32),
+                serde_json::Value::String(value) => value.trim().parse::<f32>().ok(),
+                serde_json::Value::Null
+                | serde_json::Value::Bool(_)
+                | serde_json::Value::Array(_)
+                | serde_json::Value::Object(_) => None,
+            },
+        }
+    }
+
+    /// Materialize the legacy string representation for consumers whose public
+    /// data model still requires owned text.
+    pub fn to_legacy_string(self) -> String {
+        match self.value {
+            StoredAttributeValue::String(value) => value.clone(),
+            StoredAttributeValue::Typed(value) => value_ref_to_string(&value.value),
+        }
+    }
+
+    #[cfg(test)]
+    fn is_string(self) -> bool {
+        match self.value {
+            StoredAttributeValue::String(_) => true,
+            StoredAttributeValue::Typed(value) => {
+                matches!(&value.value, serde_json::Value::String(_))
+            }
+        }
+    }
+}
+
+impl fmt::Debug for ResolvedAttributeValueRef<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.value {
+            StoredAttributeValue::String(value) => fmt::Debug::fmt(value, formatter),
+            StoredAttributeValue::Typed(value) => fmt::Debug::fmt(&value.value, formatter),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct TypedAttributeValue {
+    value: serde_json::Value,
+    rendered: OnceLock<String>,
+}
+
+#[derive(Clone)]
+enum StoredAttributeValue {
+    String(String),
+    Typed(Box<TypedAttributeValue>),
+}
+
+impl StoredAttributeValue {
+    fn from_json(value: serde_json::Value) -> Self {
+        match value {
+            serde_json::Value::String(value) => Self::String(value),
+            value => Self::Typed(Box::new(TypedAttributeValue {
+                value,
+                rendered: OnceLock::new(),
+            })),
+        }
+    }
+
+    fn value_ref(&self) -> ResolvedAttributeValueRef<'_> {
+        ResolvedAttributeValueRef { value: self }
+    }
+
+    fn as_string(&self) -> &String {
+        match self {
+            Self::String(value) => value,
+            Self::Typed(value) => value
+                .rendered
+                .get_or_init(|| value_ref_to_string(&value.value)),
+        }
+    }
+
+    fn into_string(self) -> String {
+        match self {
+            Self::String(value) => value,
+            Self::Typed(value) => value
+                .rendered
+                .into_inner()
+                .unwrap_or_else(|| value_ref_to_string(&value.value)),
+        }
+    }
+
+    fn as_string_mut(&mut self) -> &mut String {
+        if matches!(self, Self::Typed(_)) {
+            let previous = std::mem::replace(self, Self::String(String::new()));
+            *self = Self::String(previous.into_string());
+        }
+        match self {
+            Self::String(value) => value,
+            Self::Typed(_) => unreachable!("typed attribute converted to a string above"),
+        }
+    }
+}
+
+impl PartialEq for StoredAttributeValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_string() == other.as_string()
+    }
+}
+
+impl Eq for StoredAttributeValue {}
+
+fn value_ref_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::String(value) => value.clone(),
+        value => value.to_string(),
+    }
+}
+
 /// Resolved attributes of a widget node.
 ///
 /// A sorted `Vec` rather than a `BTreeMap`: real elements carry a handful of
 /// attributes, so a B-tree spends its time allocating and walking node blocks
 /// for a set that fits in one cache-friendly run. Iteration order is the same
 /// key order a `BTreeMap<String, String>` would produce, so nothing downstream
-/// of the widget tree observes the change.
+/// of the widget tree observes the change. Non-string template bindings retain
+/// their JSON type and lazily materialize the legacy string representation only
+/// when a string-only consumer asks for it.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct AttributeMap {
-    entries: Vec<(AttrKey, String)>,
+    entries: Vec<(AttrKey, StoredAttributeValue)>,
 }
 
 impl AttributeMap {
@@ -63,6 +212,16 @@ impl AttributeMap {
     }
 
     pub fn insert(&mut self, key: AttrKey, value: String) -> Option<String> {
+        self.insert_stored(key, StoredAttributeValue::String(value))
+    }
+
+    /// Insert a value produced by template expression evaluation without
+    /// stringifying booleans, numbers, null, arrays, or objects.
+    pub fn insert_value(&mut self, key: AttrKey, value: serde_json::Value) -> Option<String> {
+        self.insert_stored(key, StoredAttributeValue::from_json(value))
+    }
+
+    fn insert_stored(&mut self, key: AttrKey, value: StoredAttributeValue) -> Option<String> {
         // Parsed attributes and conversions from ordered maps normally arrive
         // in key order. Keep that common construction path append-only: it
         // avoids a binary search and, more importantly, avoids asking Vec to
@@ -74,10 +233,13 @@ impl AttributeMap {
                     return None;
                 }
                 Ordering::Equal => {
-                    return Some(std::mem::replace(
-                        &mut self.entries.last_mut().expect("last entry").1,
-                        value,
-                    ));
+                    return Some(
+                        std::mem::replace(
+                            &mut self.entries.last_mut().expect("last entry").1,
+                            value,
+                        )
+                        .into_string(),
+                    );
                 }
                 Ordering::Greater => {}
             }
@@ -87,7 +249,7 @@ impl AttributeMap {
         }
 
         match self.find(key.as_str()) {
-            Ok(index) => Some(std::mem::replace(&mut self.entries[index].1, value)),
+            Ok(index) => Some(std::mem::replace(&mut self.entries[index].1, value).into_string()),
             Err(index) => {
                 self.entries.insert(index, (key, value));
                 None
@@ -96,12 +258,20 @@ impl AttributeMap {
     }
 
     pub fn get(&self, key: &str) -> Option<&String> {
-        self.find(key).ok().map(|index| &self.entries[index].1)
+        self.find(key)
+            .ok()
+            .map(|index| self.entries[index].1.as_string())
+    }
+
+    pub fn get_value(&self, key: &str) -> Option<ResolvedAttributeValueRef<'_>> {
+        self.find(key)
+            .ok()
+            .map(|index| self.entries[index].1.value_ref())
     }
 
     pub fn get_mut(&mut self, key: &str) -> Option<&mut String> {
         match self.find(key) {
-            Ok(index) => Some(&mut self.entries[index].1),
+            Ok(index) => Some(self.entries[index].1.as_string_mut()),
             Err(_) => None,
         }
     }
@@ -112,7 +282,7 @@ impl AttributeMap {
 
     pub fn remove(&mut self, key: &str) -> Option<String> {
         match self.find(key) {
-            Ok(index) => Some(self.entries.remove(index).1),
+            Ok(index) => Some(self.entries.remove(index).1.into_string()),
             Err(_) => None,
         }
     }
@@ -143,7 +313,15 @@ impl AttributeMap {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&AttrKey, &String)> {
-        self.entries.iter().map(|(key, value)| (key, value))
+        self.entries
+            .iter()
+            .map(|(key, value)| (key, value.as_string()))
+    }
+
+    pub fn iter_values(&self) -> impl Iterator<Item = (&AttrKey, ResolvedAttributeValueRef<'_>)> {
+        self.entries
+            .iter()
+            .map(|(key, value)| (key, value.value_ref()))
     }
 
     pub fn keys(&self) -> impl Iterator<Item = &AttrKey> {
@@ -151,15 +329,18 @@ impl AttributeMap {
     }
 
     pub fn values(&self) -> impl Iterator<Item = &String> {
-        self.entries.iter().map(|(_, value)| value)
+        self.entries.iter().map(|(_, value)| value.as_string())
     }
 
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut String> {
-        self.entries.iter_mut().map(|(_, value)| value)
+        self.entries
+            .iter_mut()
+            .map(|(_, value)| value.as_string_mut())
     }
 
     pub fn retain<F: FnMut(&AttrKey, &mut String) -> bool>(&mut self, mut keep: F) {
-        self.entries.retain_mut(|(key, value)| keep(key, value));
+        self.entries
+            .retain_mut(|(key, value)| keep(key, value.as_string_mut()));
     }
 }
 
@@ -182,9 +363,12 @@ impl<'a> Entry<'a> {
 
     pub fn or_insert_with<F: FnOnce() -> String>(self, default: F) -> &'a mut String {
         if !self.occupied {
-            self.map.entries.insert(self.slot, (self.key, default()));
+            self.map.entries.insert(
+                self.slot,
+                (self.key, StoredAttributeValue::String(default())),
+            );
         }
-        &mut self.map.entries[self.slot].1
+        self.map.entries[self.slot].1.as_string_mut()
     }
 }
 
@@ -196,27 +380,86 @@ impl fmt::Debug for AttributeMap {
 
 impl<'a> IntoIterator for &'a AttributeMap {
     type Item = (&'a AttrKey, &'a String);
-    type IntoIter = std::iter::Map<
-        std::slice::Iter<'a, (AttrKey, String)>,
-        fn(&'a (AttrKey, String)) -> (&'a AttrKey, &'a String),
-    >;
+    type IntoIter = AttributeIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        fn split(entry: &(AttrKey, String)) -> (&AttrKey, &String) {
-            (&entry.0, &entry.1)
+        AttributeIter {
+            inner: self.entries.iter(),
         }
-        self.entries.iter().map(split as fn(_) -> _)
     }
 }
 
 impl IntoIterator for AttributeMap {
     type Item = (AttrKey, String);
-    type IntoIter = std::vec::IntoIter<(AttrKey, String)>;
+    type IntoIter = AttributeIntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.entries.into_iter()
+        AttributeIntoIter {
+            inner: self.entries.into_iter(),
+        }
     }
 }
+
+#[derive(Clone)]
+pub struct AttributeIter<'a> {
+    inner: std::slice::Iter<'a, (AttrKey, StoredAttributeValue)>,
+}
+
+impl<'a> Iterator for AttributeIter<'a> {
+    type Item = (&'a AttrKey, &'a String);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next()
+            .map(|(key, value)| (key, value.as_string()))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl ExactSizeIterator for AttributeIter<'_> {}
+
+impl DoubleEndedIterator for AttributeIter<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next_back()
+            .map(|(key, value)| (key, value.as_string()))
+    }
+}
+
+impl std::iter::FusedIterator for AttributeIter<'_> {}
+
+pub struct AttributeIntoIter {
+    inner: std::vec::IntoIter<(AttrKey, StoredAttributeValue)>,
+}
+
+impl Iterator for AttributeIntoIter {
+    type Item = (AttrKey, String);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next()
+            .map(|(key, value)| (key, value.into_string()))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl ExactSizeIterator for AttributeIntoIter {}
+
+impl DoubleEndedIterator for AttributeIntoIter {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next_back()
+            .map(|(key, value)| (key, value.into_string()))
+    }
+}
+
+impl std::iter::FusedIterator for AttributeIntoIter {}
 
 impl FromIterator<(AttrKey, String)> for AttributeMap {
     fn from_iter<T: IntoIterator<Item = (AttrKey, String)>>(iter: T) -> Self {
@@ -795,6 +1038,83 @@ mod tests {
         assert_eq!(json, r#"{"class":"panel","zzz-custom":"value"}"#);
         let restored: AttributeMap = serde_json::from_str(&json).unwrap();
         assert_eq!(restored, map);
+    }
+
+    #[test]
+    fn expression_values_remain_typed_until_a_string_consumer_reads_them() {
+        let mut map = AttributeMap::new();
+        map.insert_value(AttrKey::new("disabled"), serde_json::json!(true));
+        map.insert_value(AttrKey::new("min"), serde_json::json!(1.5));
+        map.insert_value(AttrKey::new("value"), serde_json::Value::Null);
+        map.insert_value(
+            AttrKey::new("zzz-custom"),
+            serde_json::json!({"enabled": true}),
+        );
+        map.insert_value(AttrKey::new("data-items"), serde_json::json!([1, 2]));
+
+        assert!(map.get_value("disabled").unwrap().legacy_bool());
+        assert_eq!(map.get_value("min").unwrap().parse_f32(), Some(1.5));
+        assert_eq!(
+            map.get_value("value").unwrap().to_legacy_string(),
+            String::new()
+        );
+        assert_eq!(
+            map.get_value("zzz-custom").unwrap().to_legacy_string(),
+            r#"{"enabled":true}"#
+        );
+        assert_eq!(
+            map.get_value("data-items").unwrap().to_legacy_string(),
+            "[1,2]"
+        );
+
+        for (_, value) in &map.entries {
+            let StoredAttributeValue::Typed(value) = value else {
+                panic!("non-string expression values should retain their type");
+            };
+            assert!(
+                value.rendered.get().is_none(),
+                "typed reads must not materialize the compatibility string"
+            );
+        }
+
+        assert_eq!(map.get("disabled").map(String::as_str), Some("true"));
+        let disabled = &map.entries[map.find("disabled").unwrap()].1;
+        let StoredAttributeValue::Typed(disabled) = disabled else {
+            panic!("immutable string reads should preserve the typed value");
+        };
+        assert_eq!(disabled.rendered.get().map(String::as_str), Some("true"));
+
+        map.insert_value(AttrKey::new("label"), serde_json::json!("Ready"));
+        assert!(map.get_value("label").unwrap().is_string());
+        assert_eq!(map.get("label").map(String::as_str), Some("Ready"));
+
+        map.get_mut("min").unwrap().push('0');
+        assert!(map.get_value("min").unwrap().is_string());
+        assert_eq!(map.get("min").map(String::as_str), Some("1.50"));
+    }
+
+    #[test]
+    fn typed_and_legacy_attribute_maps_compare_and_serialize_identically() {
+        let mut typed = AttributeMap::new();
+        typed.insert_value(AttrKey::new("checked"), serde_json::json!(false));
+        typed.insert_value(AttrKey::new("max"), serde_json::json!(42));
+        typed.insert_value(AttrKey::new("value"), serde_json::Value::Null);
+
+        let legacy = AttributeMap::from([
+            (AttrKey::new("checked"), "false".to_owned()),
+            (AttrKey::new("max"), "42".to_owned()),
+            (AttrKey::new("value"), String::new()),
+        ]);
+
+        assert_eq!(typed, legacy);
+        assert_eq!(
+            serde_json::to_string(&typed).unwrap(),
+            r#"{"checked":"false","max":"42","value":""}"#
+        );
+        assert_eq!(
+            typed.into_iter().collect::<Vec<_>>(),
+            legacy.into_iter().collect::<Vec<_>>()
+        );
     }
 
     /// Representative per-node attribute sets from the shipped modules: a

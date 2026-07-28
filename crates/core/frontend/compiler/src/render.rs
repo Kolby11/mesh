@@ -1216,15 +1216,15 @@ fn parse_attributes_runtime(
                 }
                 let value = state
                     .map(|store| {
-                        template_value_to_string(evaluate_template_expression(
+                        evaluate_template_expression(
                             binding,
                             Some(store),
                             instance_key,
                             composition,
-                        ))
+                        )
                     })
-                    .unwrap_or_default();
-                resolved.insert(AttrKey::new(&attr.name), value);
+                    .unwrap_or(serde_json::Value::Null);
+                resolved.insert_value(AttrKey::new(&attr.name), value);
             }
             AttributeValue::InstanceBinding(_) => {}
             AttributeValue::EventHandler(handler) => {
@@ -1410,7 +1410,7 @@ fn accessibility_for_element(
     let mut shortcut = None;
     let mut expanded = None;
     let mut open = None;
-    for (name, value) in attributes {
+    for (name, value) in attributes.iter_values() {
         match name.as_str() {
             "aria-label" => aria_label = Some(value),
             "label" => label = Some(value),
@@ -1422,23 +1422,29 @@ fn accessibility_for_element(
             "shortcut" => shortcut = Some(value),
             "expanded" => expanded = Some(value),
             "open" => open = Some(value),
-            "disabled" => info.state.disabled = bool_value(value),
-            "checked" => info.state.checked = Some(bool_value(value)),
-            "selected" => info.state.selected = bool_value(value),
-            "pressed" => info.state.pressed = bool_value(value),
-            "busy" => info.state.busy = bool_value(value),
-            "invalid" => info.state.invalid = bool_value(value),
-            "required" => info.state.required = bool_value(value),
-            "value" => info.state.value = Some(value.clone()),
-            "min" => info.state.value_min = value.trim().parse::<f32>().ok(),
-            "max" => info.state.value_max = value.trim().parse::<f32>().ok(),
+            "disabled" => info.state.disabled = value.legacy_bool(),
+            "checked" => info.state.checked = Some(value.legacy_bool()),
+            "selected" => info.state.selected = value.legacy_bool(),
+            "pressed" => info.state.pressed = value.legacy_bool(),
+            "busy" => info.state.busy = value.legacy_bool(),
+            "invalid" => info.state.invalid = value.legacy_bool(),
+            "required" => info.state.required = value.legacy_bool(),
+            "value" => info.state.value = Some(value.to_legacy_string()),
+            "min" => info.state.value_min = value.parse_f32(),
+            "max" => info.state.value_max = value.parse_f32(),
             _ => {}
         }
     }
-    info.label = aria_label.or(label).or(alt).cloned();
-    info.description = title.or(tooltip).cloned();
-    info.keyboard_shortcut = key.or(keybind).or(shortcut).cloned();
-    info.state.expanded = expanded.or(open).map(|value| bool_value(value));
+    info.label = aria_label
+        .or(label)
+        .or(alt)
+        .map(|value| value.to_legacy_string());
+    info.description = title.or(tooltip).map(|value| value.to_legacy_string());
+    info.keyboard_shortcut = key
+        .or(keybind)
+        .or(shortcut)
+        .map(|value| value.to_legacy_string());
+    info.state.expanded = expanded.or(open).map(|value| value.legacy_bool());
     info
 }
 
@@ -1507,14 +1513,17 @@ fn accessibility_for_element_unguarded(
     info
 }
 
+#[cfg(test)]
 fn bool_attr(attributes: &AttributeMap, name: &str) -> bool {
     attributes.get(name).is_some_and(|value| bool_value(value))
 }
 
+#[cfg(test)]
 fn bool_value(value: &str) -> bool {
     matches!(value.trim(), "" | "true" | "1")
 }
 
+#[cfg(test)]
 fn number_attr(attributes: &AttributeMap, name: &str) -> Option<f32> {
     attributes.get(name)?.trim().parse::<f32>().ok()
 }
@@ -1557,6 +1566,55 @@ mod tests {
                         .unwrap_or(expression)
                         .to_string(),
                 ),
+                service_reads: Vec::new(),
+            })
+        }
+
+        fn render_import(
+            &self,
+            _host: &Manifest,
+            _host_instance_key: &str,
+            _alias: &str,
+            _source_ordinal: usize,
+            _duplicate_ordinal: Option<usize>,
+            _repeated_by_loop: bool,
+            _props: &AttributeMap,
+            _prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
+            _container_width: f32,
+            _container_height: f32,
+        ) -> Option<WidgetNode> {
+            None
+        }
+
+        fn render_slot(
+            &self,
+            _host: &Manifest,
+            _host_instance_key: &str,
+            _slot_name: Option<&str>,
+            _container_width: f32,
+            _container_height: f32,
+        ) -> Vec<WidgetNode> {
+            Vec::new()
+        }
+    }
+
+    struct TypedExpressionComposition;
+
+    impl FrontendCompositionResolver for TypedExpressionComposition {
+        fn evaluate_template_expression(
+            &self,
+            _instance_key: &str,
+            expression: &str,
+            _locals: &serde_json::Map<String, serde_json::Value>,
+        ) -> Option<TemplateExpressionResult> {
+            let value = match expression {
+                "enabled" => serde_json::json!(true),
+                "minimum" => serde_json::json!(1.5),
+                "metadata" => serde_json::json!({"source": "runtime"}),
+                _ => serde_json::Value::Null,
+            };
+            Some(TemplateExpressionResult {
+                value,
                 service_reads: Vec::new(),
             })
         }
@@ -2191,6 +2249,44 @@ import Child from "./child.mesh"
         let (_, _, resolved, _, _) = parse_attributes(&attrs, None);
 
         assert_eq!(resolved.get("value"), Some(&String::new()));
+    }
+
+    #[test]
+    fn bound_attributes_retain_runtime_types_through_accessibility_lowering() {
+        let attrs = [
+            ("disabled", "enabled"),
+            ("min", "minimum"),
+            ("data-metadata", "metadata"),
+        ]
+        .map(|(name, binding)| Attribute {
+            name: name.into(),
+            value: AttributeValue::Binding(binding.into()),
+        });
+        let store = MapStore(std::collections::HashMap::new());
+
+        let (_, _, resolved, _, _) = parse_attributes_runtime(
+            &attrs,
+            Some(&store),
+            "typed-attributes",
+            Some(&TypedExpressionComposition),
+            false,
+        );
+
+        assert!(resolved.get_value("disabled").unwrap().legacy_bool());
+        assert_eq!(resolved.get_value("min").unwrap().parse_f32(), Some(1.5));
+        assert_eq!(
+            resolved
+                .get_value("data-metadata")
+                .unwrap()
+                .to_legacy_string(),
+            r#"{"source":"runtime"}"#
+        );
+
+        let accessibility = accessibility_for_element("input", "input", &resolved);
+        assert!(accessibility.state.disabled);
+        assert_eq!(accessibility.state.value_min, Some(1.5));
+        assert_eq!(resolved.get("disabled").map(String::as_str), Some("true"));
+        assert_eq!(resolved.get("min").map(String::as_str), Some("1.5"));
     }
 
     #[test]
@@ -3218,6 +3314,91 @@ import Child from "./child.mesh"
         );
         assert_eq!(chain_checksum, pass_checksum);
         assert!(pass_time < chain_time);
+    }
+
+    // cargo test -p mesh-core-frontend --release -- typed_attribute_storage_beats_stringify_then_parse --ignored --nocapture
+    #[test]
+    #[ignore = "release-only typed attribute storage microbenchmark"]
+    fn typed_attribute_storage_beats_stringify_then_parse() {
+        use std::time::Instant;
+
+        const ITERATIONS: usize = 500_000;
+        let values = [
+            ("checked", serde_json::json!(false)),
+            ("disabled", serde_json::json!(true)),
+            ("expanded", serde_json::json!(true)),
+            ("max", serde_json::json!(100.5)),
+            ("min", serde_json::json!(1.5)),
+            ("selected", serde_json::json!(false)),
+        ];
+        let legacy_map = || {
+            let mut attributes = AttributeMap::with_capacity(values.len());
+            for (name, value) in &values {
+                attributes.insert(AttrKey::new(name), template_value_to_string(value.clone()));
+            }
+            attributes
+        };
+        let typed_map = || {
+            let mut attributes = AttributeMap::with_capacity(values.len());
+            for (name, value) in &values {
+                attributes.insert_value(AttrKey::new(name), value.clone());
+            }
+            attributes
+        };
+
+        let legacy = legacy_map();
+        let typed = typed_map();
+        assert!(accessibility_info_eq(
+            &accessibility_for_element("input", "input", &legacy),
+            &accessibility_for_element("input", "input", &typed)
+        ));
+
+        let legacy_started = Instant::now();
+        let mut legacy_checksum = 0f32;
+        for _ in 0..ITERATIONS {
+            let attributes = legacy_map();
+            let info = accessibility_for_element(
+                std::hint::black_box("input"),
+                std::hint::black_box("input"),
+                std::hint::black_box(&attributes),
+            );
+            legacy_checksum += std::hint::black_box(
+                info.state.disabled as u8 as f32
+                    + info.state.expanded.unwrap_or(false) as u8 as f32
+                    + info.state.value_min.unwrap_or_default()
+                    + info.state.value_max.unwrap_or_default(),
+            );
+        }
+        let legacy_time = legacy_started.elapsed();
+
+        let typed_started = Instant::now();
+        let mut typed_checksum = 0f32;
+        for _ in 0..ITERATIONS {
+            let attributes = typed_map();
+            let info = accessibility_for_element(
+                std::hint::black_box("input"),
+                std::hint::black_box("input"),
+                std::hint::black_box(&attributes),
+            );
+            typed_checksum += std::hint::black_box(
+                info.state.disabled as u8 as f32
+                    + info.state.expanded.unwrap_or(false) as u8 as f32
+                    + info.state.value_min.unwrap_or_default()
+                    + info.state.value_max.unwrap_or_default(),
+            );
+        }
+        let typed_time = typed_started.elapsed();
+
+        assert_eq!(legacy_checksum, typed_checksum);
+        eprintln!(
+            "six bound attributes across {ITERATIONS} nodes: stringify + parse {legacy_time:?}, typed storage {typed_time:?}, ratio {:.2}x",
+            legacy_time.as_secs_f64() / typed_time.as_secs_f64()
+        );
+        println!(
+            "MESH_PERF metric=typed_attribute_storage_speedup value={:.6}",
+            legacy_time.as_secs_f64() / typed_time.as_secs_f64()
+        );
+        assert!(typed_time < legacy_time);
     }
 
     // cargo test -p mesh-core-frontend --release -- accessibility_empty_attribute_guard_beats_full_lookup_chain --ignored --nocapture

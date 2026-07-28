@@ -155,6 +155,7 @@ impl FrontendSurfaceComponent {
                     if let Some(key) = ref_keys.get(&action.target).cloned()
                         && let Some(node) = find_node_by_key(tree, &key)
                     {
+                        let node_id = node.id;
                         let (max_x, max_y) = scroll_limits(node);
                         let nums = action.args.as_array();
                         let arg_f32 = |index: usize| {
@@ -162,7 +163,11 @@ impl FrontendSurfaceComponent {
                                 .and_then(serde_json::Value::as_f64)
                                 .map(|value| value as f32)
                         };
-                        let current = self.scroll_offsets.get(&key).copied().unwrap_or_default();
+                        let current = self
+                            .scroll_offsets
+                            .get(&node_id)
+                            .copied()
+                            .unwrap_or_default();
                         let mut target = current;
                         if let Some(top) = arg_f32(0) {
                             target.y = top.clamp(0.0, max_y);
@@ -170,7 +175,7 @@ impl FrontendSurfaceComponent {
                         if let Some(left) = arg_f32(1) {
                             target.x = left.clamp(0.0, max_x);
                         }
-                        if self.apply_scroll_target(key, current, target, &action.options) {
+                        if self.apply_scroll_target(node_id, current, target, &action.options) {
                             self.invalidate(
                                 ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS,
                             );
@@ -270,7 +275,7 @@ impl FrontendSurfaceComponent {
     /// whether anything will change (so the caller can invalidate).
     pub(super) fn apply_scroll_target(
         &mut self,
-        key: String,
+        node_id: NodeId,
         current: ScrollOffsetState,
         target: ScrollOffsetState,
         options: &serde_json::Value,
@@ -292,7 +297,7 @@ impl FrontendSurfaceComponent {
                 .filter(|value| *value > 0.0)
                 .unwrap_or(250.0);
             self.scroll_animations.insert(
-                key,
+                node_id,
                 ScrollAnimation {
                     start: current,
                     target,
@@ -302,8 +307,8 @@ impl FrontendSurfaceComponent {
             );
         } else {
             // A snap supersedes any in-flight smooth scroll on the same container.
-            self.scroll_animations.remove(&key);
-            self.scroll_offsets.insert(key, target);
+            self.scroll_animations.remove(&node_id);
+            self.scroll_offsets.insert(node_id, target);
         }
         true
     }
@@ -329,9 +334,9 @@ impl FrontendSurfaceComponent {
                 mesh_core_animation::apply_easing(mesh_core_animation::Easing::EaseOut, progress);
             let x = animation.start.x + (animation.target.x - animation.start.x) * eased;
             let y = animation.start.y + (animation.target.y - animation.start.y) * eased;
-            updates.push((key.clone(), ScrollOffsetState { x, y }));
+            updates.push((*key, ScrollOffsetState { x, y }));
             if progress >= 1.0 {
-                finished.push(key.clone());
+                finished.push(*key);
             }
         }
 

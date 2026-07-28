@@ -13,7 +13,7 @@ mod tests {
     use crate::tree::ElementState;
     use mesh_core_component::{
         parser::parse_component,
-        style::{Declaration, Selector, StyleRule, StyleValue},
+        style::{Declaration, Selector, StyleRule, StyleValue, prop_variable_key},
     };
 
     fn parse_fixture_style(source: &str) -> Vec<StyleRule> {
@@ -771,35 +771,30 @@ box.card { padding: 3px; }
 
     #[test]
     fn module_component_defaults_are_subtree_scoped() {
-        let mut theme = mesh_core_theme::Theme {
-            id: "scoped".into(),
-            name: "Scoped".into(),
-            tokens: std::collections::HashMap::from([
-                (
-                    "color.on-background".into(),
-                    mesh_core_theme::TokenValue::String("#112233".into()),
-                ),
-                (
-                    "animation.duration.short".into(),
-                    mesh_core_theme::TokenValue::Number(150.0),
-                ),
-                (
-                    "animation.curves.bezier.standard".into(),
-                    mesh_core_theme::TokenValue::String("ease".into()),
-                ),
-            ]),
-            defaults: mesh_core_theme::ThemeDefaults {
-                components: std::collections::HashMap::from([(
-                    "base".into(),
-                    [("color".into(), "var(--color-on-background)".into())]
-                        .into_iter()
-                        .collect(),
-                )]),
-            },
-            keyframes: std::collections::HashMap::new(),
-            modules: std::collections::HashMap::new(),
+        let mut theme = mesh_core_theme::Theme::new("scoped", "Scoped");
+        *theme.tokens_mut() = std::collections::HashMap::from([
+            (
+                "color.on-background".into(),
+                mesh_core_theme::TokenValue::String("#112233".into()),
+            ),
+            (
+                "animation.duration.short".into(),
+                mesh_core_theme::TokenValue::Number(150.0),
+            ),
+            (
+                "animation.curves.bezier.standard".into(),
+                mesh_core_theme::TokenValue::String("ease".into()),
+            ),
+        ]);
+        *theme.defaults_mut() = mesh_core_theme::ThemeDefaults {
+            components: std::collections::HashMap::from([(
+                "base".into(),
+                [("color".into(), "var(--color-on-background)".into())]
+                    .into_iter()
+                    .collect(),
+            )]),
         };
-        theme.modules.insert(
+        theme.modules_mut().insert(
             "@mesh/weather".into(),
             mesh_core_theme::ThemeModule {
                 tokens: std::collections::HashMap::from([(
@@ -1851,7 +1846,10 @@ box.card { padding: 3px; }
     #[test]
     fn shipped_navigation_style_expected_diagnostics_do_not_block_tokens() {
         let theme = mesh_core_theme::default_theme();
-        let resolver = StyleResolver::new(&theme);
+        let resolver = StyleResolver::new(&theme).with_props(std::collections::HashMap::from([(
+            prop_variable_key("blur_background"),
+            StyleValue::Var("--effect-backdrop-blur-surface-background".into()),
+        )]));
         let mut rules = parse_fixture_style(include_str!(
             "../../../../../modules/frontend/navigation-bar/src/main.mesh"
         ));
@@ -1878,7 +1876,7 @@ box.card { padding: 3px; }
                 r: 10,
                 g: 10,
                 b: 14,
-                a: 191,
+                a: 92,
             }
         );
         assert_eq!(nav_style.padding.left, 16.0);
@@ -1913,7 +1911,10 @@ box.card { padding: 3px; }
     #[test]
     fn shipped_audio_style_fixture_resolves_painter_relevant_values() {
         let theme = mesh_core_theme::default_theme();
-        let resolver = StyleResolver::new(&theme);
+        let resolver = StyleResolver::new(&theme).with_props(std::collections::HashMap::from([(
+            prop_variable_key("blur_background"),
+            StyleValue::Var("--effect-backdrop-blur-popup-background".into()),
+        )]));
         let rules = parse_fixture_style(include_str!(
             "../../../../../modules/frontend/audio-popover/src/main.mesh"
         ));
@@ -1927,7 +1928,7 @@ box.card { padding: 3px; }
                 r: 24,
                 g: 26,
                 b: 34,
-                a: 173,
+                a: 71,
             }
         );
         assert_eq!(style.color, Color::from_hex("#E6E1E5").unwrap());

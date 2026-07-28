@@ -198,7 +198,7 @@ fn unhandled_two_finger_scroll_preserves_native_scroll_fallback() {
         r#"
 <style>
 scroll { height: 60px; overflow-y: auto; }
-.content { height: 240px; }
+.content { height: 240px; flex-shrink: 0; }
 </style>
 <template><scroll><box class="content" /></scroll></template>
 <script lang="luau"></script>

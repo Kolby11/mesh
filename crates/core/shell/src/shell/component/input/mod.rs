@@ -145,8 +145,7 @@ impl FrontendSurfaceComponent {
                             } else if node_is_source(target.node, &["switch", "checkbox"])
                                 || matches!(target.node.tag.as_str(), "switch" | "checkbox")
                             {
-                                let value =
-                                    self.toggle_checked_value_for_node(&node_key, target.node);
+                                let value = self.toggle_checked_value_for_node(target.node);
                                 requests.extend(self.call_node_handler(
                                     tree,
                                     &node_key,
@@ -387,7 +386,7 @@ impl FrontendSurfaceComponent {
                 }
 
                 if let Some(scroll_hit) = find_scrollable_at_with_limits(tree, x, y) {
-                    let current = self.scroll_offsets.entry(scroll_hit.key).or_default();
+                    let current = self.scroll_offsets.entry(scroll_hit.node_id).or_default();
                     let next_x = (current.x - dx * 28.0).clamp(0.0, scroll_hit.max_x);
                     let next_y = (current.y - dy * 28.0).clamp(0.0, scroll_hit.max_y);
                     if (next_x - current.x).abs() > f32::EPSILON
@@ -409,7 +408,7 @@ impl FrontendSurfaceComponent {
                 // A surface that does not opt into `ontwofingerscroll` keeps
                 // the existing continuous-scroll behavior.
                 if let Some(scroll_hit) = find_scrollable_at_with_limits(tree, x, y) {
-                    let current = self.scroll_offsets.entry(scroll_hit.key).or_default();
+                    let current = self.scroll_offsets.entry(scroll_hit.node_id).or_default();
                     let next_x = (current.x - dx * 28.0).clamp(0.0, scroll_hit.max_x);
                     let next_y = (current.y - dy * 28.0).clamp(0.0, scroll_hit.max_y);
                     if (next_x - current.x).abs() > f32::EPSILON

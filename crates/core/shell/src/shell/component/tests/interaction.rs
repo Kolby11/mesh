@@ -21,8 +21,8 @@ pub(super) fn annotate_runtime_tree(
     input_values: &HashMap<String, String>,
     slider_values: &mut HashMap<String, f32>,
     slider_script_values: &mut HashMap<String, f32>,
-    checked_values: &HashMap<String, bool>,
-    scroll_offsets: &mut HashMap<String, ScrollOffsetState>,
+    checked_values: &HashMap<NodeId, bool>,
+    scroll_offsets: &mut HashMap<NodeId, ScrollOffsetState>,
 ) {
     let mut context = crate::shell::component::runtime_tree::RuntimeAnnotationContext::new(
         focused_key,

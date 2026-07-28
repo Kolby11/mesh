@@ -45,11 +45,11 @@ text {
     let mut light = default_theme();
     light.id = "mesh-default-light".into();
     light.name = "mesh-default-light".into();
-    light.tokens.insert(
+    light.tokens_mut().insert(
         "color.surface-container".into(),
         mesh_core_theme::TokenValue::String("#f0f0f0".into()),
     );
-    light.tokens.insert(
+    light.tokens_mut().insert(
         "color.on-surface".into(),
         mesh_core_theme::TokenValue::String("#111111".into()),
     );

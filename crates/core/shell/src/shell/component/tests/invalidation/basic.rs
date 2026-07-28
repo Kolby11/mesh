@@ -514,11 +514,14 @@ scroll { width: 80px; height: 40px; overflow-y: auto; }
         .unwrap();
     full.paint(&theme, 80, 40, &mut full_buffer, 1.0).unwrap();
 
-    scoped
-        .scroll_offsets
-        .insert("root/0".into(), ScrollOffsetState { x: 0.0, y: 24.0 });
-    full.scroll_offsets
-        .insert("root/0".into(), ScrollOffsetState { x: 0.0, y: 24.0 });
+    scoped.scroll_offsets.insert(
+        runtime_node_id_for_key("root/0"),
+        ScrollOffsetState { x: 0.0, y: 24.0 },
+    );
+    full.scroll_offsets.insert(
+        runtime_node_id_for_key("root/0"),
+        ScrollOffsetState { x: 0.0, y: 24.0 },
+    );
     scoped.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
     full.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
     scoped
@@ -827,8 +830,10 @@ fn selector_dependencies_filter_unrelated_interaction_changes() {
     component.pointer_down_key = None;
     component
         .previous_checked_values
-        .insert("root/check".into(), false);
-    component.checked_values.insert("root/check".into(), true);
+        .insert(runtime_node_id_for_key("root/check"), false);
+    component
+        .checked_values
+        .insert(runtime_node_id_for_key("root/check"), true);
 
     assert!(
         component

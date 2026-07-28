@@ -289,28 +289,36 @@ impl FrontendSurfaceComponent {
         })
     }
 
-    pub(super) fn current_checked_value(&self, tree: &WidgetNode, key: &str) -> bool {
-        self.checked_values.get(key).copied().unwrap_or_else(|| {
-            find_node_by_key(tree, key)
-                .and_then(|node| node.attributes.get("checked"))
-                .is_some_and(|value| matches!(value.as_str(), "true" | "1" | "checked"))
-        })
-    }
-
     pub(super) fn toggle_checked_value(&mut self, tree: &WidgetNode, key: &str) -> bool {
-        let next = !self.current_checked_value(tree, key);
-        self.checked_values.insert(key.to_string(), next);
+        let Some(node) = find_node_by_key(tree, key) else {
+            return false;
+        };
+        let current = self
+            .checked_values
+            .get(&node.id)
+            .copied()
+            .unwrap_or_else(|| {
+                node.attributes
+                    .get("checked")
+                    .is_some_and(|value| matches!(value.as_str(), "true" | "1" | "checked"))
+            });
+        let next = !current;
+        self.checked_values.insert(node.id, next);
         next
     }
 
-    pub(super) fn toggle_checked_value_for_node(&mut self, key: &str, node: &WidgetNode) -> bool {
-        let current = self.checked_values.get(key).copied().unwrap_or_else(|| {
-            node.attributes
-                .get("checked")
-                .is_some_and(|value| matches!(value.as_str(), "true" | "1" | "checked"))
-        });
+    pub(super) fn toggle_checked_value_for_node(&mut self, node: &WidgetNode) -> bool {
+        let current = self
+            .checked_values
+            .get(&node.id)
+            .copied()
+            .unwrap_or_else(|| {
+                node.attributes
+                    .get("checked")
+                    .is_some_and(|value| matches!(value.as_str(), "true" | "1" | "checked"))
+            });
         let next = !current;
-        self.checked_values.insert(key.to_string(), next);
+        self.checked_values.insert(node.id, next);
         next
     }
 
@@ -443,7 +451,7 @@ impl FrontendSurfaceComponent {
             .cloned()
             .or_else(|| option.attributes.get("label").cloned())
             .unwrap_or_default();
-        self.checked_values.insert(option_key.to_string(), true);
+        self.checked_values.insert(option.id, true);
 
         let Some(select_key) = ancestor_source_key(tree, option_key, &["select"]) else {
             return self.call_node_handler(tree, option_key, "change", &[serde_json::json!(value)]);
@@ -487,11 +495,11 @@ impl FrontendSurfaceComponent {
         }
         let value = radio.attributes.get("value").cloned().unwrap_or_default();
         if let Some(group_key) = ancestor_source_key(tree, radio_key, &["radio-group"]) {
-            for sibling in descendant_source_keys(tree, &group_key, &["radio"]) {
-                self.checked_values.insert(sibling, false);
+            for sibling_id in descendant_source_node_ids(tree, &group_key, &["radio"]) {
+                self.checked_values.insert(sibling_id, false);
             }
             self.input_values.insert(group_key.clone(), value.clone());
-            self.checked_values.insert(radio_key.to_string(), true);
+            self.checked_values.insert(radio.id, true);
             let mut requests = self.call_node_handler(
                 tree,
                 &group_key,
@@ -508,7 +516,7 @@ impl FrontendSurfaceComponent {
             return Ok(requests);
         }
 
-        self.checked_values.insert(radio_key.to_string(), true);
+        self.checked_values.insert(radio.id, true);
         self.invalidate_interaction_restyle();
         self.call_node_handler(tree, radio_key, "change", &[serde_json::json!(value)])
     }
@@ -1544,22 +1552,28 @@ fn collect_aria_menu_item_keys<'a>(node: &'a WidgetNode, keys: &mut Vec<&'a str>
     }
 }
 
-fn descendant_source_keys(tree: &WidgetNode, root_key: &str, source_tags: &[&str]) -> Vec<String> {
-    let mut keys = Vec::new();
+fn descendant_source_node_ids(
+    tree: &WidgetNode,
+    root_key: &str,
+    source_tags: &[&str],
+) -> Vec<NodeId> {
+    let mut node_ids = Vec::new();
     if let Some(root) = find_node_by_key(tree, root_key) {
-        collect_descendant_source_keys(root, source_tags, &mut keys);
+        collect_descendant_source_node_ids(root, source_tags, &mut node_ids);
     }
-    keys
+    node_ids
 }
 
-fn collect_descendant_source_keys(node: &WidgetNode, source_tags: &[&str], keys: &mut Vec<String>) {
-    if node_is_source(node, source_tags)
-        && let Some(key) = node.mesh_key()
-    {
-        keys.push(key.to_owned());
+fn collect_descendant_source_node_ids(
+    node: &WidgetNode,
+    source_tags: &[&str],
+    node_ids: &mut Vec<NodeId>,
+) {
+    if node_is_source(node, source_tags) {
+        node_ids.push(node.id);
     }
     for child in &node.children {
-        collect_descendant_source_keys(child, source_tags, keys);
+        collect_descendant_source_node_ids(child, source_tags, node_ids);
     }
 }
 

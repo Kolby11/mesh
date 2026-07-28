@@ -545,7 +545,7 @@ pub(super) fn themed_primary(id: &str, primary_hex: &str) -> Theme {
     let mut theme = default_theme();
     theme.id = id.to_string();
     theme.name = id.to_string();
-    theme.tokens.insert(
+    theme.tokens_mut().insert(
         "color.primary".into(),
         mesh_core_theme::TokenValue::String(primary_hex.to_string()),
     );

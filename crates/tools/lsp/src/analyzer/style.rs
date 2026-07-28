@@ -178,7 +178,7 @@ fn theme_css_variables() -> &'static Vec<String> {
     static VARIABLES: OnceLock<Vec<String>> = OnceLock::new();
     VARIABLES.get_or_init(|| {
         let mut variables: Vec<String> = mesh_core_theme::default_theme()
-            .tokens
+            .tokens()
             .keys()
             .map(|name| format!("--{}", name.replace('.', "-")))
             .collect();

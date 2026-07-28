@@ -5,7 +5,7 @@ fn pseudo_state_annotation_uses_stable_keys_after_rebuild() {
     let focused_key = Some("root/0".to_string());
     let hovered_path = vec!["root".to_string(), "root/0".to_string()];
     let active_key = Some("root/0".to_string());
-    let checked_values = HashMap::from([("root/1".to_string(), true)]);
+    let checked_values = HashMap::from([(runtime_node_id_for_key("root/1"), true)]);
 
     let mut first_tree = root_with(vec![
         child_with_attrs("button", &[]),
@@ -61,7 +61,7 @@ fn pseudo_state_annotation_uses_stable_keys_after_rebuild() {
 
 #[test]
 fn pseudo_state_annotation_sets_disabled_and_checked_deterministically() {
-    let checked_values = HashMap::from([("root/2".to_string(), false)]);
+    let checked_values = HashMap::from([(runtime_node_id_for_key("root/2"), false)]);
     let mut tree = root_with(vec![
         child_with_attrs("button", &[("disabled", "true")]),
         child_with_attrs("button", &[("aria-disabled", "true")]),
@@ -141,7 +141,9 @@ input:checked {
     component.hovered_path = vec!["root".into(), "root/0".into(), "root/0/2".into()];
     component.hovered_key = Some("root/0/2".into());
     component.pointer_down_key = Some("root/0/2".into());
-    component.checked_values.insert("root/0/3".into(), true);
+    component
+        .checked_values
+        .insert(runtime_node_id_for_key("root/0/3"), true);
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 120);
@@ -213,7 +215,9 @@ fn targeted_restyle_tracks_active_checked_and_focus_visible_changes() {
     }
 
     component.pointer_down_key = Some("root/0/0".into());
-    component.checked_values.insert("root/0/1".into(), true);
+    component
+        .checked_values
+        .insert(runtime_node_id_for_key("root/0/1"), true);
     component.focused_key = Some("root/0/2".into());
     component.focus_visible_key = Some("root/0/2".into());
     assert!(component.cached_restyle_state_dependencies.active);
@@ -257,7 +261,9 @@ fn targeted_restyle_tracks_active_checked_and_focus_visible_changes() {
     );
 
     component.pointer_down_key = None;
-    component.checked_values.insert("root/0/1".into(), false);
+    component
+        .checked_values
+        .insert(runtime_node_id_for_key("root/0/1"), false);
     component.focus_visible_key = None;
     component.invalidate_interaction_restyle();
     component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();

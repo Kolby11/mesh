@@ -547,7 +547,7 @@ mod tests {
         use mesh_core_theme::ThemeKeyframeStop;
         let mut theme = mesh_core_theme::default_theme();
         theme
-            .defaults
+            .defaults_mut()
             .components
             .entry("tooltip".into())
             .or_default()
@@ -610,7 +610,7 @@ mod tests {
         // duration-short: 150`); a var() substitution must stay a CSS time.
         let mut theme =
             theme_with_tooltip_animation("tooltip-enter var(--animation-duration-short) ease-out");
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "animation.duration.short".into(),
             mesh_core_theme::TokenValue::Number(150.0),
         );
@@ -624,7 +624,7 @@ mod tests {
         let mut theme = theme_with_tooltip_animation("does-not-exist 100ms");
         assert!(tooltip_animation_from_theme(&theme).is_none());
 
-        let tooltip_defaults = theme.defaults.components.get_mut("tooltip").unwrap();
+        let tooltip_defaults = theme.defaults_mut().components.get_mut("tooltip").unwrap();
         *tooltip_defaults = tooltip_defaults
             .iter()
             .filter(|(property, _)| property.as_str() != "animation")

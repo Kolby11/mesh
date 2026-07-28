@@ -5,6 +5,8 @@ use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue, p
 use mesh_core_theme::{Theme, TokenValue};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
@@ -22,9 +24,13 @@ thread_local! {
     static CANDIDATE_RULE_SCRATCH: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
     static INLINE_STYLE_CACHE: RefCell<HashMap<Arc<str>, CachedInlineStyle>> =
         RefCell::new(HashMap::new());
+    static SHARED_THEME_DEFAULT_CACHE: RefCell<HashMap<u64, SharedThemeDefaultCache>> =
+        RefCell::new(HashMap::new());
 }
 
 const MAX_INLINE_STYLE_CACHE_ENTRIES: usize = 256;
+const MAX_SHARED_THEME_REVISIONS: usize = 16;
+const MAX_SHARED_THEME_DEFAULTS_PER_REVISION: usize = 256;
 
 /// The five CSS-inherited fields from a parent node. Used instead of cloning
 /// the full `ComputedStyle` (~60 fields) when passing parent context into
@@ -57,11 +63,9 @@ pub struct StyleResolver<'a> {
     /// (`--mesh-prop-<name>`). Consulted as a read-only fallback after the
     /// per-node custom-variable scratch. Empty without a `<props>` block.
     props: HashMap<String, StyleValue>,
+    props_fingerprint: u64,
     module_variable_cache: RefCell<HashMap<String, Vec<(String, StyleValue)>>>,
-    theme_default_cache: RefCell<HashMap<String, Rc<ThemeComponentDefaults>>>,
-    module_theme_default_cache:
-        RefCell<HashMap<String, HashMap<String, Rc<ThemeComponentDefaults>>>>,
-    /// Comparison-keyed front cache for [`Self::theme_default_cache`].
+    /// Comparison-keyed front cache for the shared theme-default cache.
     ///
     /// Every node resolves the defaults for its own `(module_id, tag)`, and a
     /// tree walks long runs of the same pair. The map behind this answers in
@@ -85,6 +89,110 @@ pub struct StyleResolver<'a> {
 struct ThemeComponentDefaults {
     style: ComputedStyle,
     variables: HashMap<String, StyleValue>,
+}
+
+#[derive(Default)]
+struct SharedThemeDefaultCache {
+    prop_sets: Vec<SharedThemePropDefaults>,
+    entry_count: usize,
+}
+
+struct SharedThemePropDefaults {
+    fingerprint: u64,
+    props: HashMap<String, StyleValue>,
+    defaults: HashMap<String, Rc<ThemeComponentDefaults>>,
+    module_defaults: HashMap<String, HashMap<String, Rc<ThemeComponentDefaults>>>,
+}
+
+fn style_props_fingerprint(props: &HashMap<String, StyleValue>) -> u64 {
+    let mut fingerprint = props.len() as u64;
+    for (name, value) in props {
+        let mut entry = DefaultHasher::new();
+        name.hash(&mut entry);
+        value.hash(&mut entry);
+        fingerprint ^= entry.finish().rotate_left(17);
+    }
+    fingerprint
+}
+
+fn shared_theme_defaults(
+    revision: u64,
+    props_fingerprint: u64,
+    props: &HashMap<String, StyleValue>,
+    tag: &str,
+    module_id: Option<&str>,
+) -> Option<Rc<ThemeComponentDefaults>> {
+    SHARED_THEME_DEFAULT_CACHE.with(|cache| {
+        let cache = cache.borrow();
+        let revision_cache = cache.get(&revision)?;
+        let prop_defaults = revision_cache
+            .prop_sets
+            .iter()
+            .find(|entry| entry.fingerprint == props_fingerprint && entry.props == *props)?;
+        match module_id {
+            Some(module_id) => prop_defaults
+                .module_defaults
+                .get(module_id)
+                .and_then(|tags| tags.get(tag))
+                .cloned(),
+            None => prop_defaults.defaults.get(tag).cloned(),
+        }
+    })
+}
+
+fn remember_shared_theme_defaults(
+    revision: u64,
+    props_fingerprint: u64,
+    props: &HashMap<String, StyleValue>,
+    tag: &str,
+    module_id: Option<&str>,
+    defaults: &Rc<ThemeComponentDefaults>,
+) {
+    SHARED_THEME_DEFAULT_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if !cache.contains_key(&revision) && cache.len() >= MAX_SHARED_THEME_REVISIONS {
+            cache.clear();
+        }
+        let revision_cache = cache.entry(revision).or_default();
+        if revision_cache.entry_count >= MAX_SHARED_THEME_DEFAULTS_PER_REVISION {
+            revision_cache.prop_sets.clear();
+            revision_cache.entry_count = 0;
+        }
+        let prop_defaults = match revision_cache
+            .prop_sets
+            .iter()
+            .position(|entry| entry.fingerprint == props_fingerprint && entry.props == *props)
+        {
+            Some(position) => &mut revision_cache.prop_sets[position],
+            None => {
+                revision_cache.prop_sets.push(SharedThemePropDefaults {
+                    fingerprint: props_fingerprint,
+                    props: props.clone(),
+                    defaults: HashMap::new(),
+                    module_defaults: HashMap::new(),
+                });
+                revision_cache
+                    .prop_sets
+                    .last_mut()
+                    .expect("prop-default cache entry inserted above")
+            }
+        };
+        match module_id {
+            Some(module_id) => {
+                prop_defaults
+                    .module_defaults
+                    .entry(module_id.to_owned())
+                    .or_default()
+                    .insert(tag.to_owned(), Rc::clone(defaults));
+            }
+            None => {
+                prop_defaults
+                    .defaults
+                    .insert(tag.to_owned(), Rc::clone(defaults));
+            }
+        }
+        revision_cache.entry_count += 1;
+    });
 }
 
 struct RecentThemeDefaults {
@@ -661,9 +769,8 @@ impl<'a> StyleResolver<'a> {
         Self {
             theme,
             props: HashMap::new(),
+            props_fingerprint: style_props_fingerprint(&HashMap::new()),
             module_variable_cache: RefCell::new(HashMap::new()),
-            theme_default_cache: RefCell::new(HashMap::new()),
-            module_theme_default_cache: RefCell::new(HashMap::new()),
             theme_default_recent: RefCell::new(Vec::new()),
             theme_default_diagnostic_cache: RefCell::new(HashMap::new()),
             module_theme_default_diagnostic_cache: RefCell::new(HashMap::new()),
@@ -675,6 +782,7 @@ impl<'a> StyleResolver<'a> {
     /// Attach per-instance component-prop values. `props` is keyed by
     /// `prop_variable_key(name)` and holds the resolved value for each prop.
     pub fn with_props(mut self, props: HashMap<String, StyleValue>) -> Self {
+        self.props_fingerprint = style_props_fingerprint(&props);
         self.props = props;
         self
     }
@@ -1249,16 +1357,13 @@ impl<'a> StyleResolver<'a> {
             return recent;
         }
 
-        let cached = if let Some(module_id) = module_id {
-            self.module_theme_default_cache
-                .borrow()
-                .get(module_id)
-                .and_then(|tags| tags.get(tag))
-                .cloned()
-        } else {
-            self.theme_default_cache.borrow().get(tag).cloned()
-        };
-        if let Some(cached) = cached {
+        if let Some(cached) = shared_theme_defaults(
+            self.theme.revision(),
+            self.props_fingerprint,
+            &self.props,
+            tag,
+            module_id,
+        ) {
             self.remember_theme_defaults(tag, module_id, &cached);
             return cached;
         }
@@ -1267,17 +1372,14 @@ impl<'a> StyleResolver<'a> {
         let mut variables = HashMap::new();
         self.apply_theme_component_defaults(&mut style, tag, module_id, None, &mut variables);
         let cached = Rc::new(ThemeComponentDefaults { style, variables });
-        if let Some(module_id) = module_id {
-            self.module_theme_default_cache
-                .borrow_mut()
-                .entry(module_id.to_owned())
-                .or_default()
-                .insert(tag.to_owned(), Rc::clone(&cached));
-        } else {
-            self.theme_default_cache
-                .borrow_mut()
-                .insert(tag.to_owned(), Rc::clone(&cached));
-        }
+        remember_shared_theme_defaults(
+            self.theme.revision(),
+            self.props_fingerprint,
+            &self.props,
+            tag,
+            module_id,
+            &cached,
+        );
         self.remember_theme_defaults(tag, module_id, &cached);
         cached
     }
@@ -1895,7 +1997,7 @@ impl<'a> StyleResolver<'a> {
         module_id: &str,
         variables: &mut HashMap<String, StyleValue>,
     ) {
-        let Some(module) = self.theme.modules.get(module_id) else {
+        let Some(module) = self.theme.modules().get(module_id) else {
             return;
         };
         let mut cache = self.module_variable_cache.borrow_mut();
@@ -3614,7 +3716,7 @@ mod tests {
             .into_iter()
             .enumerate()
         {
-            theme.defaults.components.insert(
+            theme.defaults_mut().components.insert(
                 tag.into(),
                 [
                     ("font-size".into(), format!("{}px", 10 + index)),
@@ -3689,11 +3791,11 @@ mod tests {
     #[test]
     fn recent_theme_defaults_key_on_tag_and_module_together() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.defaults.components.insert(
+        theme.defaults_mut().components.insert(
             "card".into(),
             [("font-size".into(), "11px".into())].into_iter().collect(),
         );
-        theme.defaults.components.insert(
+        theme.defaults_mut().components.insert(
             "panel".into(),
             [("font-size".into(), "22px".into())].into_iter().collect(),
         );
@@ -3702,7 +3804,7 @@ mod tests {
             "card".into(),
             [("font-size".into(), "33px".into())].into_iter().collect(),
         );
-        theme.modules.insert("@mesh/demo".into(), module);
+        theme.modules_mut().insert("@mesh/demo".into(), module);
 
         let resolver = StyleResolver::new(&theme);
         let font_size = |tag: &str, module_id: Option<&str>| {
@@ -3734,7 +3836,7 @@ mod tests {
             .map(|index| format!("probe-{index}"))
             .collect();
         for (index, tag) in tags.iter().enumerate() {
-            theme.defaults.components.insert(
+            theme.defaults_mut().components.insert(
                 tag.clone(),
                 [("font-size".into(), format!("{}px", index + 8))]
                     .into_iter()
@@ -3775,7 +3877,7 @@ mod tests {
     #[test]
     fn shared_theme_defaults_are_not_mutated_by_node_resolution() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.defaults.components.insert(
+        theme.defaults_mut().components.insert(
             "card".into(),
             [("font-size".into(), "13px".into())].into_iter().collect(),
         );
@@ -3823,9 +3925,166 @@ mod tests {
     }
 
     #[test]
+    fn prop_less_theme_defaults_are_shared_across_resolver_instances() {
+        let mut theme = mesh_core_theme::Theme::new("shared-defaults", "Shared defaults");
+        theme.defaults_mut().components.insert(
+            "card".into(),
+            [("font-size".into(), "17px".into())].into_iter().collect(),
+        );
+
+        let first_resolver = StyleResolver::new(&theme);
+        let first = first_resolver.cached_theme_component_defaults_no_diagnostics("card", None);
+        let second_resolver = StyleResolver::new(&theme);
+        let second = second_resolver.cached_theme_component_defaults_no_diagnostics("card", None);
+
+        assert_eq!(second.style.font_size, 17.0);
+        assert!(
+            Rc::ptr_eq(&first, &second),
+            "a stable theme revision should reuse its lowered defaults"
+        );
+    }
+
+    #[test]
+    fn mutating_theme_style_data_invalidates_shared_defaults() {
+        let mut theme = mesh_core_theme::Theme::new("mutable-defaults", "Mutable defaults");
+        theme.defaults_mut().components.insert(
+            "card".into(),
+            [("font-size".into(), "11px".into())].into_iter().collect(),
+        );
+        let first =
+            StyleResolver::new(&theme).cached_theme_component_defaults_no_diagnostics("card", None);
+
+        theme.defaults_mut().components.insert(
+            "card".into(),
+            [("font-size".into(), "23px".into())].into_iter().collect(),
+        );
+        let second =
+            StyleResolver::new(&theme).cached_theme_component_defaults_no_diagnostics("card", None);
+
+        assert_eq!(first.style.font_size, 11.0);
+        assert_eq!(second.style.font_size, 23.0);
+        assert!(!Rc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn prop_bearing_resolvers_share_only_matching_values() {
+        let mut theme = mesh_core_theme::Theme::new("prop-defaults", "Prop defaults");
+        theme.defaults_mut().components.insert(
+            "card".into(),
+            [("font-size".into(), "prop(size)".into())]
+                .into_iter()
+                .collect(),
+        );
+        let resolver_with = |size: &str| {
+            StyleResolver::new(&theme).with_props(HashMap::from([(
+                prop_variable_key("size"),
+                StyleValue::Literal(size.into()),
+            )]))
+        };
+
+        let small =
+            resolver_with("12px").cached_theme_component_defaults_no_diagnostics("card", None);
+        let small_again =
+            resolver_with("12px").cached_theme_component_defaults_no_diagnostics("card", None);
+        let large =
+            resolver_with("28px").cached_theme_component_defaults_no_diagnostics("card", None);
+
+        assert_eq!(small.style.font_size, 12.0);
+        assert_eq!(large.style.font_size, 28.0);
+        assert!(Rc::ptr_eq(&small, &small_again));
+        assert!(!Rc::ptr_eq(&small, &large));
+    }
+
+    // cargo test -p mesh-core-elements --release -- shared_theme_revision_cache_beats_per_resolver_lowering --ignored --nocapture
+    #[test]
+    #[ignore = "release-only cross-resolver theme-default benchmark"]
+    fn shared_theme_revision_cache_beats_per_resolver_lowering() {
+        use std::time::Instant;
+
+        const ITERATIONS: usize = 100_000;
+        let mut theme =
+            mesh_core_theme::Theme::new("revision-cache-benchmark", "Revision cache benchmark");
+        theme.defaults_mut().components.insert(
+            "base".into(),
+            [
+                ("color".into(), "#f4f4f4".into()),
+                ("font-family".into(), "Inter".into()),
+                ("font-size".into(), "13px".into()),
+                ("line-height".into(), "1.4".into()),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        theme.defaults_mut().components.insert(
+            "card".into(),
+            [
+                ("background".into(), "#202124".into()),
+                ("border-color".into(), "#45474d".into()),
+                ("border-radius".into(), "9px".into()),
+                ("border-width".into(), "1px".into()),
+                ("padding".into(), "8px 12px".into()),
+                ("background-color".into(), "prop(blur_background)".into()),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let props = HashMap::from([(
+            prop_variable_key("blur_background"),
+            StyleValue::Literal("#202124".into()),
+        )]);
+
+        let uncached_started = Instant::now();
+        let mut uncached_checksum = 0f32;
+        for _ in 0..ITERATIONS {
+            let resolver = StyleResolver::new(std::hint::black_box(&theme))
+                .with_props(std::hint::black_box(props.clone()));
+            let mut style = ComputedStyle::default();
+            let mut variables = HashMap::new();
+            resolver.apply_theme_component_defaults(&mut style, "card", None, None, &mut variables);
+            uncached_checksum += std::hint::black_box(
+                style.font_size
+                    + style.border_width.left
+                    + style.padding.left
+                    + style.background_color.r as f32,
+            );
+        }
+        let uncached = uncached_started.elapsed();
+
+        let _ = StyleResolver::new(&theme)
+            .with_props(props.clone())
+            .cached_theme_component_defaults_no_diagnostics("card", None);
+        let cached_started = Instant::now();
+        let mut cached_checksum = 0f32;
+        for _ in 0..ITERATIONS {
+            let resolver = StyleResolver::new(std::hint::black_box(&theme))
+                .with_props(std::hint::black_box(props.clone()));
+            let defaults = resolver.cached_theme_component_defaults_no_diagnostics("card", None);
+            let style = defaults.style.clone();
+            cached_checksum += std::hint::black_box(
+                style.font_size
+                    + style.border_width.left
+                    + style.padding.left
+                    + style.background_color.r as f32,
+            );
+        }
+        let cached = cached_started.elapsed();
+
+        assert_eq!(uncached_checksum, cached_checksum);
+        eprintln!(
+            "theme defaults across {ITERATIONS} fresh resolvers: per-resolver lowering {uncached:?}, revision cache {cached:?}, ratio {:.2}x",
+            uncached.as_secs_f64() / cached.as_secs_f64()
+        );
+        println!(
+            "MESH_PERF metric=shared_theme_revision_cache_speedup value={:.6}",
+            uncached.as_secs_f64() / cached.as_secs_f64()
+        );
+        assert!(cached < uncached);
+    }
+
+    #[test]
     fn cached_diagnostic_theme_defaults_match_replayed_defaults() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.defaults.components.insert(
+        theme.defaults_mut().components.insert(
             "benchmark-card".into(),
             [
                 ("background-color".into(), "#112233".into()),
@@ -4078,10 +4337,10 @@ mod tests {
     fn numeric_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
         theme
-            .tokens
+            .tokens_mut()
             .insert("spacing.large".into(), TokenValue::Number(18.0));
         theme
-            .tokens
+            .tokens_mut()
             .insert("opacity.enabled".into(), TokenValue::Bool(true));
         let resolver = StyleResolver::new(&theme);
         let mut variables = HashMap::new();
@@ -4109,10 +4368,10 @@ mod tests {
     fn color_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
         theme
-            .tokens
+            .tokens_mut()
             .insert("color.primary".into(), TokenValue::String("#112233".into()));
         theme
-            .tokens
+            .tokens_mut()
             .insert("spacing.large".into(), TokenValue::Number(18.0));
         let resolver = StyleResolver::new(&theme);
         let mut variables = HashMap::new();
@@ -4144,7 +4403,7 @@ mod tests {
     fn keyword_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
         theme
-            .tokens
+            .tokens_mut()
             .insert("display.hidden".into(), TokenValue::String("none".into()));
         let resolver = StyleResolver::new(&theme);
         let mut variables = HashMap::new();
@@ -4181,7 +4440,7 @@ mod tests {
     fn dimension_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
         theme
-            .tokens
+            .tokens_mut()
             .insert("size.panel".into(), TokenValue::String("320px".into()));
         let resolver = StyleResolver::new(&theme);
         let mut variables = HashMap::new();
@@ -4210,7 +4469,7 @@ mod tests {
     #[test]
     fn overflow_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "overflow.panel".into(),
             TokenValue::String("hidden auto".into()),
         );
@@ -4245,7 +4504,7 @@ mod tests {
     #[test]
     fn time_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "animation.duration.fast".into(),
             TokenValue::String("120ms".into()),
         );
@@ -4279,7 +4538,7 @@ mod tests {
     #[test]
     fn transition_property_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "transition.properties.common".into(),
             TokenValue::String("opacity, transform, width".into()),
         );
@@ -4314,7 +4573,7 @@ mod tests {
     #[test]
     fn filter_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "filter.blur.medium".into(),
             TokenValue::String("blur(12px)".into()),
         );
@@ -4344,7 +4603,7 @@ mod tests {
     #[test]
     fn background_image_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "background.gradient.accent".into(),
             TokenValue::String("linear-gradient(#112233, #445566)".into()),
         );
@@ -4379,7 +4638,7 @@ mod tests {
     #[test]
     fn edge_shorthand_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "spacing.inset.panel".into(),
             TokenValue::String("4px 8px 12px 16px".into()),
         );
@@ -4414,7 +4673,7 @@ mod tests {
     #[test]
     fn corner_shorthand_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "radius.panel".into(),
             TokenValue::String("4px 8px 12px 16px".into()),
         );
@@ -4449,7 +4708,7 @@ mod tests {
     #[test]
     fn border_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "border.panel".into(),
             TokenValue::String("2px solid #112233".into()),
         );
@@ -4494,7 +4753,7 @@ mod tests {
     #[test]
     fn transform_origin_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "transform.origin.panel".into(),
             TokenValue::String("25% 75%".into()),
         );
@@ -4528,7 +4787,7 @@ mod tests {
     #[test]
     fn transform_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "transform.panel".into(),
             TokenValue::String("translate(12px, 8px) scale(1.2) rotate(15deg)".into()),
         );
@@ -4561,7 +4820,7 @@ mod tests {
     #[test]
     fn box_shadow_resolution_matches_string_resolution_for_simple_references() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "shadow.panel".into(),
             TokenValue::String("2px 4px 8px 1px #112233".into()),
         );
@@ -4611,7 +4870,7 @@ mod tests {
 
         let mut theme = mesh_core_theme::default_theme();
         theme
-            .tokens
+            .tokens_mut()
             .insert("flex.panel".into(), TokenValue::String("2 1 240px".into()));
         let resolver = StyleResolver::new(&theme);
         let mut variables = HashMap::new();
@@ -4650,7 +4909,7 @@ mod tests {
     fn numeric_theme_token_resolution_beats_string_roundtrip() {
         let mut theme = mesh_core_theme::default_theme();
         theme
-            .tokens
+            .tokens_mut()
             .insert("spacing.large".into(), TokenValue::Number(18.0));
         let resolver = StyleResolver::new(&theme);
         let variables = HashMap::new();
@@ -4687,7 +4946,7 @@ mod tests {
     #[ignore = "release-only time token resolution microbenchmark"]
     fn time_theme_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "animation.duration.fast".into(),
             TokenValue::String("120ms".into()),
         );
@@ -4730,7 +4989,7 @@ mod tests {
     #[ignore = "release-only transition property token resolution microbenchmark"]
     fn transition_property_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "transition.properties.common".into(),
             TokenValue::String("opacity, transform, width".into()),
         );
@@ -4785,7 +5044,7 @@ mod tests {
     #[ignore = "release-only filter token resolution microbenchmark"]
     fn filter_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "filter.blur.medium".into(),
             TokenValue::String("blur(12px)".into()),
         );
@@ -4827,7 +5086,7 @@ mod tests {
     #[ignore = "release-only background-image token resolution microbenchmark"]
     fn background_image_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "background.gradient.accent".into(),
             TokenValue::String("linear-gradient(#112233, #445566)".into()),
         );
@@ -4882,7 +5141,7 @@ mod tests {
     #[ignore = "release-only edge shorthand token resolution microbenchmark"]
     fn edge_shorthand_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "spacing.inset.panel".into(),
             TokenValue::String("4px 8px 12px 16px".into()),
         );
@@ -4928,7 +5187,7 @@ mod tests {
     #[ignore = "release-only corner shorthand token resolution microbenchmark"]
     fn corner_shorthand_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "radius.panel".into(),
             TokenValue::String("4px 8px 12px 16px".into()),
         );
@@ -4975,7 +5234,7 @@ mod tests {
     #[ignore = "release-only border token resolution microbenchmark"]
     fn border_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "border.panel".into(),
             TokenValue::String("2px solid #112233".into()),
         );
@@ -5023,7 +5282,7 @@ mod tests {
     #[ignore = "release-only transform-origin token resolution microbenchmark"]
     fn transform_origin_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "transform.origin.panel".into(),
             TokenValue::String("25% 75%".into()),
         );
@@ -5075,7 +5334,7 @@ mod tests {
     #[ignore = "release-only transform token resolution microbenchmark"]
     fn transform_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "transform.panel".into(),
             TokenValue::String("translate(12px, 8px) scale(1.2) rotate(15deg)".into()),
         );
@@ -5125,7 +5384,7 @@ mod tests {
     #[ignore = "release-only box-shadow token resolution microbenchmark"]
     fn box_shadow_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "shadow.panel".into(),
             TokenValue::String("2px 4px 8px 1px #112233".into()),
         );
@@ -5196,7 +5455,7 @@ mod tests {
 
         let mut theme = mesh_core_theme::default_theme();
         theme
-            .tokens
+            .tokens_mut()
             .insert("flex.panel".into(), TokenValue::String("2 1 240px".into()));
         let resolver = StyleResolver::new(&theme);
         let variables = HashMap::new();
@@ -5245,19 +5504,19 @@ mod tests {
     #[test]
     fn animation_keyword_properties_resolve_borrowed_tokens() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "animation.easing".into(),
             TokenValue::String("ease-in-out".into()),
         );
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "animation.direction".into(),
             TokenValue::String("reverse".into()),
         );
         theme
-            .tokens
+            .tokens_mut()
             .insert("animation.fill".into(), TokenValue::String("both".into()));
         theme
-            .tokens
+            .tokens_mut()
             .insert("animation.play".into(), TokenValue::String("paused".into()));
         let resolver = StyleResolver::new(&theme);
         let variables = HashMap::new();
@@ -5315,7 +5574,7 @@ mod tests {
     #[ignore = "release-only animation keyword token resolution microbenchmark"]
     fn animation_keyword_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "animation.easing".into(),
             TokenValue::String("ease-in-out".into()),
         );
@@ -5372,7 +5631,7 @@ mod tests {
     #[ignore = "release-only overflow token resolution microbenchmark"]
     fn overflow_theme_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.tokens.insert(
+        theme.tokens_mut().insert(
             "overflow.panel".into(),
             TokenValue::String("hidden auto".into()),
         );
@@ -5429,7 +5688,7 @@ mod tests {
     fn dimension_theme_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
         theme
-            .tokens
+            .tokens_mut()
             .insert("size.panel".into(), TokenValue::String("320px".into()));
         let resolver = StyleResolver::new(&theme);
         let variables = HashMap::new();
@@ -5474,7 +5733,7 @@ mod tests {
     fn keyword_theme_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
         theme
-            .tokens
+            .tokens_mut()
             .insert("display.hidden".into(), TokenValue::String("none".into()));
         let resolver = StyleResolver::new(&theme);
         let variables = HashMap::new();
@@ -5528,7 +5787,7 @@ mod tests {
     fn color_theme_token_resolution_beats_string_clone() {
         let mut theme = mesh_core_theme::default_theme();
         theme
-            .tokens
+            .tokens_mut()
             .insert("color.primary".into(), TokenValue::String("#112233".into()));
         let resolver = StyleResolver::new(&theme);
         let variables = HashMap::new();
@@ -5642,7 +5901,7 @@ mod tests {
     #[ignore = "release-only theme default prototype microbenchmark"]
     fn cached_theme_default_prototype_beats_reapplying_string_map() {
         let mut theme = mesh_core_theme::default_theme();
-        theme.defaults.components.insert(
+        theme.defaults_mut().components.insert(
             "benchmark-card".into(),
             [
                 ("background-color".into(), "#112233".into()),
@@ -5731,7 +5990,7 @@ mod tests {
         }
 
         let mut theme = mesh_core_theme::default_theme();
-        theme.defaults.components.insert(
+        theme.defaults_mut().components.insert(
             "benchmark-card".into(),
             [
                 ("background-color".into(), "#112233".into()),
@@ -6123,7 +6382,7 @@ mod tests {
     #[ignore = "release-only module theme variable cache microbenchmark"]
     fn cached_module_theme_variables_beat_reformatting() {
         let mut theme = mesh_core_theme::default_theme();
-        let module = theme.modules.entry("benchmark".into()).or_default();
+        let module = theme.modules_mut().entry("benchmark".into()).or_default();
         for index in 0..32 {
             module.tokens.insert(
                 format!("palette.group{index}.accent"),
@@ -6140,7 +6399,7 @@ mod tests {
         let mut old_variables = HashMap::new();
         for _ in 0..iterations {
             old_variables.clear();
-            for (name, value) in &theme.modules["benchmark"].tokens {
+            for (name, value) in &theme.modules()["benchmark"].tokens {
                 old_variables.insert(
                     format!("--{}", name.replace('.', "-")),
                     StyleValue::Literal(match value {

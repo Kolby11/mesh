@@ -156,10 +156,13 @@ text {
         .input_values
         .insert("root/0/0".into(), "typed-text".into());
     component.slider_values.insert("root/0/1".into(), 88.0);
-    component.checked_values.insert("root/0/2".into(), true);
     component
-        .scroll_offsets
-        .insert("root/0/3".into(), ScrollOffsetState { x: 0.0, y: 10.0 });
+        .checked_values
+        .insert(runtime_node_id_for_key("root/0/2"), true);
+    component.scroll_offsets.insert(
+        runtime_node_id_for_key("root/0/3"),
+        ScrollOffsetState { x: 0.0, y: 10.0 },
+    );
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 300);
@@ -203,7 +206,9 @@ text {
     // Scroll offset raw map entry must survive (the annotated _mesh_scroll_y is
     // clamp-bounded by annotate_overflow_tree to the actual overflow range).
     assert!(
-        component.scroll_offsets.contains_key("root/0/3"),
+        component
+            .scroll_offsets
+            .contains_key(&runtime_node_id_for_key("root/0/3")),
         "scroll_offsets map must retain the entry for root/0/3 across focus restyle"
     );
 }

@@ -1,13 +1,14 @@
 use super::*;
+use mesh_core_elements::NodeId;
 use std::collections::HashMap;
 
-pub fn find_scrollable_at(node: &WidgetNode, x: f32, y: f32) -> Option<String> {
-    find_scrollable_at_with_limits(node, x, y).map(|hit| hit.key)
+pub fn find_scrollable_at(node: &WidgetNode, x: f32, y: f32) -> Option<NodeId> {
+    find_scrollable_at_with_limits(node, x, y).map(|hit| hit.node_id)
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScrollableHit {
-    pub key: String,
+    pub node_id: NodeId,
     pub max_x: f32,
     pub max_y: f32,
 }
@@ -45,7 +46,7 @@ fn node_path_by_key<'a>(node: &'a WidgetNode, target_key: &str) -> Option<Vec<&'
 /// can lag a frame).
 fn path_screen_offsets(
     path: &[&WidgetNode],
-    offsets: &HashMap<String, ScrollOffsetState>,
+    offsets: &HashMap<NodeId, ScrollOffsetState>,
 ) -> Vec<(f32, f32)> {
     let mut incoming = (0.0_f32, 0.0_f32);
     let mut result = Vec::with_capacity(path.len());
@@ -53,11 +54,7 @@ fn path_screen_offsets(
         let t = node.computed_style.transform;
         let screen = (incoming.0 + t.translate_x, incoming.1 + t.translate_y);
         result.push(screen);
-        let scroll = node
-            .mesh_key()
-            .and_then(|key| offsets.get(key))
-            .copied()
-            .unwrap_or_default();
+        let scroll = offsets.get(&node.id).copied().unwrap_or_default();
         incoming = (screen.0 - scroll.x, screen.1 - scroll.y);
     }
     result
@@ -78,8 +75,8 @@ fn path_screen_offsets(
 pub fn scroll_into_view_offsets(
     root: &WidgetNode,
     target_key: &str,
-    current_offsets: &HashMap<String, ScrollOffsetState>,
-) -> Vec<(String, ScrollOffsetState)> {
+    current_offsets: &HashMap<NodeId, ScrollOffsetState>,
+) -> Vec<(NodeId, ScrollOffsetState)> {
     let Some(path) = node_path_by_key(root, target_key) else {
         return Vec::new();
     };
@@ -102,9 +99,7 @@ pub fn scroll_into_view_offsets(
 
     for i in scrollable {
         let container = path[i];
-        let Some(key) = container.mesh_key().map(str::to_owned) else {
-            continue;
-        };
+        let node_id = container.id;
 
         let screens = path_screen_offsets(&path, &offsets);
         let (cox, coy) = screens[i];
@@ -128,14 +123,14 @@ pub fn scroll_into_view_offsets(
         let dy = edge_delta(t_top - view_top, (t_top + t_h) - (view_top + view_h));
 
         let (max_x, max_y) = scroll_limits(container);
-        let mut offset = offsets.get(&key).copied().unwrap_or_default();
+        let mut offset = offsets.get(&node_id).copied().unwrap_or_default();
         let next_x = (offset.x + dx).clamp(0.0, max_x);
         let next_y = (offset.y + dy).clamp(0.0, max_y);
         if (next_x - offset.x).abs() > f32::EPSILON || (next_y - offset.y).abs() > f32::EPSILON {
             offset.x = next_x;
             offset.y = next_y;
-            offsets.insert(key.clone(), offset);
-            changed.push((key, offset));
+            offsets.insert(node_id, offset);
+            changed.push((node_id, offset));
         }
     }
 
@@ -185,13 +180,11 @@ fn find_scrollable_at_with_offset(
     }
 
     if inside_self && node_is_scrollable(node) {
-        return node.mesh_key().map(|key| {
-            let (max_x, max_y) = scroll_limits(node);
-            ScrollableHit {
-                key: key.to_owned(),
-                max_x,
-                max_y,
-            }
+        let (max_x, max_y) = scroll_limits(node);
+        return Some(ScrollableHit {
+            node_id: node.id,
+            max_x,
+            max_y,
         });
     }
 
@@ -252,38 +245,18 @@ pub fn measure_content_size(
 
 pub fn annotate_overflow_tree(
     node: &mut WidgetNode,
-    key: &str,
-    scroll_offsets: &mut HashMap<String, ScrollOffsetState>,
-) -> Option<ContentBounds> {
-    // Descendant indices are appended in place. Reserve a small path budget
-    // up front so common shallow trees do not grow the String repeatedly.
-    let mut key_path = String::with_capacity(key.len() + 64);
-    key_path.push_str(key);
-    annotate_overflow_tree_with_path(node, &mut key_path, scroll_offsets)
-}
-
-fn annotate_overflow_tree_with_path(
-    node: &mut WidgetNode,
-    key_path: &mut String,
-    scroll_offsets: &mut HashMap<String, ScrollOffsetState>,
+    scroll_offsets: &mut HashMap<NodeId, ScrollOffsetState>,
 ) -> Option<ContentBounds> {
     let mut children_bounds: Option<ContentBounds> = None;
 
-    for (index, child) in node.children.iter_mut().enumerate() {
-        let restore_len = key_path.len();
-        use std::fmt::Write as _;
-        write!(key_path, "/{index}").expect("writing to String cannot fail");
-        if let Some(child_bounds) =
-            annotate_overflow_tree_with_path(child, key_path, scroll_offsets)
-        {
+    for child in &mut node.children {
+        if let Some(child_bounds) = annotate_overflow_tree(child, scroll_offsets) {
             children_bounds = Some(union_bounds(children_bounds, child_bounds));
         }
-        key_path.truncate(restore_len);
     }
 
     Some(annotate_overflow_node(
         node,
-        key_path,
         scroll_offsets,
         children_bounds,
     ))
@@ -295,8 +268,7 @@ fn annotate_overflow_tree_with_path(
 /// fold overflow's post-order work into the same traversal.
 pub fn annotate_overflow_node(
     node: &mut WidgetNode,
-    key: &str,
-    scroll_offsets: &mut HashMap<String, ScrollOffsetState>,
+    scroll_offsets: &mut HashMap<NodeId, ScrollOffsetState>,
     children_bounds: Option<ContentBounds>,
 ) -> ContentBounds {
     let content_origin_x = node.layout.x + node.computed_style.padding.left;
@@ -325,18 +297,12 @@ pub fn annotate_overflow_node(
     };
 
     // A node that scrolls on neither axis always settles at offset (0, 0)
-    // (there's nothing to clamp against), so skip allocating a `key.to_string()`
-    // map entry for it. Non-scrollable nodes vastly outnumber scrollable
-    // containers in most trees, and every reader of `scroll_offsets` already
-    // treats a missing entry as the default zero offset.
+    // (there's nothing to clamp against), so skip allocating a map entry for it.
+    // Non-scrollable nodes vastly outnumber scrollable containers in most
+    // trees, and every reader of `scroll_offsets` already treats a missing
+    // entry as the default zero offset.
     let (offset_x, offset_y) = if scrollable_x || scrollable_y {
-        let offset = if scroll_offsets.contains_key(key) {
-            scroll_offsets
-                .get_mut(key)
-                .expect("scroll offset key was just checked")
-        } else {
-            scroll_offsets.entry(key.to_string()).or_default()
-        };
+        let offset = scroll_offsets.entry(node.id).or_default();
         offset.x = offset.x.clamp(0.0, max_x);
         offset.y = offset.y.clamp(0.0, max_y);
         (offset.x, offset.y)
@@ -404,8 +370,8 @@ mod scroll_into_view_tests {
         let tree = list_tree();
         let updates = scroll_into_view_offsets(&tree, "root/0/0", &HashMap::new());
         assert_eq!(updates.len(), 1);
-        let (key, offset) = &updates[0];
-        assert_eq!(key, "root/0");
+        let (node_id, offset) = &updates[0];
+        assert_eq!(*node_id, tree.children[0].id);
         // Item bottom is at 450; viewport is 200 tall, so scroll to 250 to align
         // the trailing edge.
         assert!((offset.y - 250.0).abs() < 0.01, "got {}", offset.y);
@@ -418,7 +384,7 @@ mod scroll_into_view_tests {
         let mut current = HashMap::new();
         // Scrolled past the item: at offset 500 the item (abs y 400) sits at screen
         // y -100, above the viewport top.
-        current.insert("root/0".to_string(), ScrollOffsetState { x: 0.0, y: 500.0 });
+        current.insert(tree.children[0].id, ScrollOffsetState { x: 0.0, y: 500.0 });
         let updates = scroll_into_view_offsets(&tree, "root/0/0", &current);
         assert_eq!(updates.len(), 1);
         // Reveal the leading edge → offset aligns the item top to the viewport top
@@ -435,7 +401,7 @@ mod scroll_into_view_tests {
         let tree = list_tree();
         let mut current = HashMap::new();
         // Item [400,450] sits inside viewport window [300,500].
-        current.insert("root/0".to_string(), ScrollOffsetState { x: 0.0, y: 300.0 });
+        current.insert(tree.children[0].id, ScrollOffsetState { x: 0.0, y: 300.0 });
         let updates = scroll_into_view_offsets(&tree, "root/0/0", &current);
         assert!(updates.is_empty());
     }
@@ -482,42 +448,44 @@ mod scroll_into_view_tests {
         let mut root = node("root", "box", 0.0, 0.0, 100.0, 200.0);
         root.children.push(outer);
 
+        let outer_id = root.children[0].id;
+        let inner_id = root.children[0].children[0].id;
         let updates = scroll_into_view_offsets(&root, "root/0/0/0", &HashMap::new());
-        let by_key: HashMap<_, _> = updates.into_iter().collect();
+        let by_id: HashMap<_, _> = updates.into_iter().collect();
         // Inner: item [380,400] fits its viewport [300,400] → no inner scroll. Outer:
         // item screen-top 380 is below the 200-tall outer viewport → outer scrolls by
         // 200 to align the trailing edge.
         assert!(
-            !by_key.contains_key("root/0/0"),
-            "inner should not move: {by_key:?}"
+            !by_id.contains_key(&inner_id),
+            "inner should not move: {by_id:?}"
         );
-        let outer = by_key.get("root/0").expect("outer should scroll");
+        let outer = by_id.get(&outer_id).expect("outer should scroll");
         assert!((outer.y - 200.0).abs() < 0.01, "got {}", outer.y);
     }
 
     #[test]
-    fn scrollable_hit_with_limits_matches_legacy_key_lookup() {
+    fn scrollable_hit_with_limits_matches_node_id_lookup() {
         let tree = list_tree();
 
         let legacy = find_scrollable_at(&tree, 10.0, 10.0);
         let fused = find_scrollable_at_with_limits(&tree, 10.0, 10.0).expect("scrollable hit");
 
-        assert_eq!(legacy.as_deref(), Some(fused.key.as_str()));
-        assert_eq!(fused.key, "root/0");
+        assert_eq!(legacy, Some(fused.node_id));
+        assert_eq!(fused.node_id, tree.children[0].id);
         assert_eq!(fused.max_x, 0.0);
         assert_eq!(fused.max_y, 400.0);
     }
 
     #[test]
-    fn annotate_overflow_tree_preserves_keyed_scroll_offsets() {
+    fn annotate_overflow_tree_preserves_node_scroll_offsets() {
         let mut tree = list_tree();
         tree.children[0].computed_style.overflow_y = mesh_core_elements::style::Overflow::Auto;
-        let mut offsets =
-            HashMap::from([("root/0".to_string(), ScrollOffsetState { x: 0.0, y: 999.0 })]);
+        let scroll_id = tree.children[0].id;
+        let mut offsets = HashMap::from([(scroll_id, ScrollOffsetState { x: 0.0, y: 999.0 })]);
 
-        annotate_overflow_tree(&mut tree, "root", &mut offsets);
+        annotate_overflow_tree(&mut tree, &mut offsets);
 
-        let offset = offsets.get("root/0").expect("existing offset key");
+        let offset = offsets.get(&scroll_id).expect("existing offset node");
         assert_eq!(offset.x, 0.0);
         assert_eq!(offset.y, 250.0);
         let metrics = tree.children[0].scroll_metrics.expect("scroll metrics");
@@ -563,12 +531,20 @@ mod scroll_into_view_tests {
             })
             .collect();
         let iterations = 200_000;
+        fn find_node_by_id(node: &WidgetNode, node_id: NodeId) -> Option<&WidgetNode> {
+            if node.id == node_id {
+                return Some(node);
+            }
+            node.children
+                .iter()
+                .find_map(|child| find_node_by_id(child, node_id))
+        }
 
         let old_started = std::time::Instant::now();
         let mut old_total = 0.0f32;
         for _ in 0..iterations {
-            if let Some(key) = find_scrollable_at(std::hint::black_box(&root), 10.0, 10.0)
-                && let Some(node) = crate::find_node_by_key(std::hint::black_box(&root), &key)
+            if let Some(node_id) = find_scrollable_at(std::hint::black_box(&root), 10.0, 10.0)
+                && let Some(node) = find_node_by_id(std::hint::black_box(&root), node_id)
             {
                 let (_, max_y) = scroll_limits(node);
                 old_total += std::hint::black_box(max_y);
@@ -595,10 +571,10 @@ mod scroll_into_view_tests {
         assert!(fused_time < old_time);
     }
 
-    // cargo test -p mesh-core-interaction --release -- annotate_overflow_tree_path_buffer_beats_format_keys --ignored --nocapture
+    // cargo test -p mesh-core-interaction --release -- node_id_scroll_offsets_beat_string_key_paths --ignored --nocapture
     #[test]
-    #[ignore = "release-only scroll annotation key-path microbenchmark"]
-    fn annotate_overflow_tree_path_buffer_beats_format_keys() {
+    #[ignore = "release-only NodeId scroll-state microbenchmark"]
+    fn node_id_scroll_offsets_beat_string_key_paths() {
         fn build_tree(width: usize, depth: usize, key: &str) -> WidgetNode {
             let mut node = node(key, "column", 0.0, 0.0, 120.0, 120.0);
             node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Auto;
@@ -618,6 +594,13 @@ mod scroll_into_view_tests {
             }
             for child in &node.children {
                 collect_keys(child, keys);
+            }
+        }
+
+        fn collect_ids(node: &WidgetNode, ids: &mut Vec<NodeId>) {
+            ids.push(node.id);
+            for child in &node.children {
+                collect_ids(child, ids);
             }
         }
 
@@ -688,16 +671,22 @@ mod scroll_into_view_tests {
         let tree = build_tree(5, 4, "root");
         let mut keys = Vec::new();
         collect_keys(&tree, &mut keys);
-        let offsets = keys
+        let old_offsets = keys
             .into_iter()
             .map(|key| (key, ScrollOffsetState { x: 0.0, y: 8.0 }))
+            .collect::<HashMap<_, _>>();
+        let mut ids = Vec::new();
+        collect_ids(&tree, &mut ids);
+        let new_offsets = ids
+            .into_iter()
+            .map(|node_id| (node_id, ScrollOffsetState { x: 0.0, y: 8.0 }))
             .collect::<HashMap<_, _>>();
         let iterations = 20_000;
 
         let old_started = std::time::Instant::now();
         let mut old_total = 0.0f32;
         let mut old_tree = tree.clone();
-        let mut old_offsets = offsets.clone();
+        let mut old_offsets = old_offsets;
         for _ in 0..iterations {
             old_annotate_overflow_tree(
                 std::hint::black_box(&mut old_tree),
@@ -711,11 +700,10 @@ mod scroll_into_view_tests {
         let new_started = std::time::Instant::now();
         let mut new_total = 0.0f32;
         let mut new_tree = tree;
-        let mut new_offsets = offsets;
+        let mut new_offsets = new_offsets;
         for _ in 0..iterations {
             annotate_overflow_tree(
                 std::hint::black_box(&mut new_tree),
-                "root",
                 std::hint::black_box(&mut new_offsets),
             );
             new_total += std::hint::black_box(new_tree.scroll_metrics.unwrap().content_height);
@@ -723,7 +711,11 @@ mod scroll_into_view_tests {
         let new_time = new_started.elapsed();
 
         eprintln!(
-            "scroll annotation key paths: format recursion {old_time:?}; path buffer {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            "scroll annotation over {iterations} 781-node trees: string key paths {old_time:?}; NodeId state {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        println!(
+            "MESH_PERF metric=node_id_scroll_offsets_speedup value={:.6}",
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_total, new_total);
@@ -840,11 +832,10 @@ mod scroll_into_view_tests {
 
         let new_started = std::time::Instant::now();
         let mut new_tree = tree;
-        let mut new_offsets: HashMap<String, ScrollOffsetState> = HashMap::new();
+        let mut new_offsets: HashMap<NodeId, ScrollOffsetState> = HashMap::new();
         for _ in 0..iterations {
             annotate_overflow_tree(
                 std::hint::black_box(&mut new_tree),
-                "root",
                 std::hint::black_box(&mut new_offsets),
             );
         }
@@ -862,76 +853,6 @@ mod scroll_into_view_tests {
         );
         assert_eq!(new_offsets.len(), 1);
         assert!(old_offsets.len() > new_offsets.len());
-        assert!(new_time < old_time);
-    }
-
-    // cargo test -p mesh-core-interaction --release -- annotate_overflow_tree_reserved_path_beats_unreserved --ignored --nocapture
-    #[test]
-    #[ignore = "release-only reserved scroll key-path microbenchmark"]
-    fn annotate_overflow_tree_reserved_path_beats_unreserved() {
-        fn unreserved(
-            node: &mut WidgetNode,
-            key: &str,
-            scroll_offsets: &mut HashMap<String, ScrollOffsetState>,
-        ) -> Option<ContentBounds> {
-            let mut key_path = key.to_string();
-            annotate_overflow_tree_with_path(node, &mut key_path, scroll_offsets)
-        }
-
-        let tree = {
-            fn build(width: usize, depth: usize, key: &str) -> WidgetNode {
-                let mut node = node(key, "column", 0.0, 0.0, 120.0, 120.0);
-                node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Auto;
-                if depth > 0 {
-                    node.children = (0..width)
-                        .map(|index| build(width, depth - 1, &format!("{key}/{index}")))
-                        .collect();
-                }
-                node
-            }
-            build(5, 4, "root")
-        };
-        fn collect_keys(node: &WidgetNode, keys: &mut Vec<String>) {
-            if let Some(key) = node.mesh_key() {
-                keys.push(key.to_string());
-            }
-            for child in &node.children {
-                collect_keys(child, keys);
-            }
-        }
-        let mut keys = Vec::new();
-        collect_keys(&tree, &mut keys);
-        let offsets = keys
-            .into_iter()
-            .map(|key| (key, ScrollOffsetState::default()))
-            .collect::<HashMap<_, _>>();
-        let iterations = 20_000;
-
-        let old_started = std::time::Instant::now();
-        let mut old_tree = tree.clone();
-        let mut old_offsets = offsets.clone();
-        let mut old_total = 0.0;
-        for _ in 0..iterations {
-            unreserved(&mut old_tree, "root", &mut old_offsets);
-            old_total += std::hint::black_box(old_tree.layout.width);
-        }
-        let old_time = old_started.elapsed();
-
-        let new_started = std::time::Instant::now();
-        let mut new_tree = tree;
-        let mut new_offsets = offsets;
-        let mut new_total = 0.0;
-        for _ in 0..iterations {
-            annotate_overflow_tree(&mut new_tree, "root", &mut new_offsets);
-            new_total += std::hint::black_box(new_tree.layout.width);
-        }
-        let new_time = new_started.elapsed();
-
-        assert_eq!(old_total, new_total);
-        eprintln!(
-            "scroll key-path capacity: unreserved {old_time:?}; reserved {new_time:?}; ratio {:.2}x",
-            old_time.as_secs_f64() / new_time.as_secs_f64()
-        );
         assert!(new_time < old_time);
     }
 }

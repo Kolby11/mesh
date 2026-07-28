@@ -1151,8 +1151,8 @@ pub(super) struct RuntimeAnnotationContext<'a> {
     input_values: &'a HashMap<String, String>,
     slider_values: &'a mut HashMap<String, f32>,
     slider_script_values: &'a mut HashMap<String, f32>,
-    checked_values: &'a HashMap<String, bool>,
-    scroll_offsets: &'a mut HashMap<String, ScrollOffsetState>,
+    checked_values: &'a HashMap<NodeId, bool>,
+    scroll_offsets: &'a mut HashMap<NodeId, ScrollOffsetState>,
 }
 
 impl<'a> RuntimeAnnotationContext<'a> {
@@ -1165,8 +1165,8 @@ impl<'a> RuntimeAnnotationContext<'a> {
         input_values: &'a HashMap<String, String>,
         slider_values: &'a mut HashMap<String, f32>,
         slider_script_values: &'a mut HashMap<String, f32>,
-        checked_values: &'a HashMap<String, bool>,
-        scroll_offsets: &'a mut HashMap<String, ScrollOffsetState>,
+        checked_values: &'a HashMap<NodeId, bool>,
+        scroll_offsets: &'a mut HashMap<NodeId, ScrollOffsetState>,
     ) -> Self {
         Self {
             focused_key,
@@ -1225,7 +1225,7 @@ fn annotate_runtime_tree_inner(
             .is_some_and(|value| truthy_attribute(value));
     let checked = context
         .checked_values
-        .get(key_str)
+        .get(&node_id)
         .copied()
         .or_else(|| {
             node.attributes
@@ -1317,7 +1317,7 @@ fn annotate_runtime_tree_inner(
 
     let offset = context
         .scroll_offsets
-        .get(key_str)
+        .get(&node_id)
         .copied()
         .unwrap_or_default();
     let scroll = node.scroll_metrics.get_or_insert_default();
@@ -1353,12 +1353,7 @@ fn annotate_runtime_tree_inner(
     }
 
     annotate_overflow.then(|| {
-        mesh_core_interaction::annotate_overflow_node(
-            node,
-            key,
-            context.scroll_offsets,
-            children_bounds,
-        )
+        mesh_core_interaction::annotate_overflow_node(node, context.scroll_offsets, children_bounds)
     })
 }
 
@@ -3173,7 +3168,7 @@ mod tests {
     fn fused_runtime_overflow_annotation_beats_two_tree_walks() {
         fn annotate(
             tree: &mut WidgetNode,
-            scroll_offsets: &mut HashMap<String, ScrollOffsetState>,
+            scroll_offsets: &mut HashMap<NodeId, ScrollOffsetState>,
             fused: bool,
         ) {
             let input_values = HashMap::new();
@@ -3197,7 +3192,7 @@ mod tests {
             } else {
                 annotate_runtime_tree(tree, "root".to_string(), &mut context);
                 drop(context);
-                mesh_core_interaction::annotate_overflow_tree(tree, "root", scroll_offsets);
+                mesh_core_interaction::annotate_overflow_tree(tree, scroll_offsets);
             }
         }
 

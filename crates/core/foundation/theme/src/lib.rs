@@ -9,8 +9,14 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const LEGACY_DEFAULT_SHELL_ANIMATION_PREFIX: &str = "animation.default.";
+static NEXT_THEME_REVISION: AtomicU64 = AtomicU64::new(1);
+
+fn next_theme_revision() -> u64 {
+    NEXT_THEME_REVISION.fetch_add(1, Ordering::Relaxed)
+}
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ComponentDefaults {
@@ -198,16 +204,68 @@ pub struct Theme {
     pub id: String,
     pub name: String,
     #[serde(default)]
-    pub tokens: HashMap<String, TokenValue>,
+    tokens: HashMap<String, TokenValue>,
     #[serde(default)]
-    pub defaults: ThemeDefaults,
+    defaults: ThemeDefaults,
     #[serde(default)]
     pub keyframes: HashMap<String, Vec<ThemeKeyframeStop>>,
     #[serde(default)]
-    pub modules: HashMap<String, ThemeModule>,
+    modules: HashMap<String, ThemeModule>,
+    /// Monotonic identity for the style-bearing theme data.
+    ///
+    /// Clones retain the revision so consumers can safely share derived style
+    /// caches. Every public mutable accessor advances it before exposing the
+    /// corresponding data, preventing an in-place theme edit from reusing
+    /// values lowered from the previous contents.
+    #[serde(skip, default = "next_theme_revision")]
+    revision: u64,
 }
 
 impl Theme {
+    pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            tokens: HashMap::new(),
+            defaults: ThemeDefaults::default(),
+            keyframes: HashMap::new(),
+            modules: HashMap::new(),
+            revision: next_theme_revision(),
+        }
+    }
+
+    /// Identity of the current style-bearing theme contents.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn tokens(&self) -> &HashMap<String, TokenValue> {
+        &self.tokens
+    }
+
+    pub fn tokens_mut(&mut self) -> &mut HashMap<String, TokenValue> {
+        self.revision = next_theme_revision();
+        &mut self.tokens
+    }
+
+    pub fn defaults(&self) -> &ThemeDefaults {
+        &self.defaults
+    }
+
+    pub fn defaults_mut(&mut self) -> &mut ThemeDefaults {
+        self.revision = next_theme_revision();
+        &mut self.defaults
+    }
+
+    pub fn modules(&self) -> &HashMap<String, ThemeModule> {
+        &self.modules
+    }
+
+    pub fn modules_mut(&mut self) -> &mut HashMap<String, ThemeModule> {
+        self.revision = next_theme_revision();
+        &mut self.modules
+    }
+
     /// Look up a single token by dotted name (e.g. "color.primary").
     pub fn token(&self, name: &str) -> Option<&TokenValue> {
         self.tokens
@@ -275,6 +333,7 @@ impl From<RawTheme> for Theme {
             defaults: raw.defaults,
             keyframes: HashMap::new(),
             modules: raw.modules,
+            revision: next_theme_revision(),
         };
         normalize_legacy_default_shell_animations(
             &mut theme,
@@ -568,6 +627,7 @@ fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String>
         defaults: ThemeDefaults::default(),
         keyframes: HashMap::new(),
         modules: HashMap::new(),
+        revision: next_theme_revision(),
     };
 
     parse_theme_css_blocks(content.as_str(), &mut theme)?;
@@ -1241,5 +1301,30 @@ mod tests {
             button.get("background").map(String::as_str),
             Some("#2b2633")
         );
+    }
+
+    #[test]
+    fn style_revision_is_shared_by_clones_and_advanced_by_mutation() {
+        let mut theme = Theme::new("revision-test", "Revision test");
+        let initial = theme.revision();
+        assert_eq!(theme.clone().revision(), initial);
+
+        theme
+            .tokens_mut()
+            .insert("color.primary".into(), TokenValue::String("#112233".into()));
+        let after_tokens = theme.revision();
+        assert_ne!(after_tokens, initial);
+
+        theme
+            .defaults_mut()
+            .components
+            .insert("button".into(), ComponentDefaults::new());
+        let after_defaults = theme.revision();
+        assert_ne!(after_defaults, after_tokens);
+
+        theme
+            .modules_mut()
+            .insert("@mesh/example".into(), ThemeModule::default());
+        assert_ne!(theme.revision(), after_defaults);
     }
 }

@@ -626,15 +626,15 @@ pub(super) struct FrontendSurfaceComponent {
     input_values: HashMap<String, String>,
     slider_values: HashMap<String, f32>,
     slider_script_values: HashMap<String, f32>,
-    checked_values: HashMap<String, bool>,
+    checked_values: HashMap<NodeId, bool>,
     render_hooks_pending: bool,
-    pub(super) scroll_offsets: HashMap<String, ScrollOffsetState>,
+    pub(super) scroll_offsets: HashMap<NodeId, ScrollOffsetState>,
     scheduled_handlers: HashMap<String, ScheduledHandler>,
-    /// In-flight smooth-scroll animations keyed by scroll-container node key.
+    /// In-flight smooth-scroll animations keyed by scroll-container node ID.
     /// Ticked at the top of `finalize_tree`; each writes an eased offset into
     /// `scroll_offsets` until it settles, then is dropped. Started by
     /// `refs.x:scroll_to(.., { smooth = true })` / `:scroll_into_view({ smooth })`.
-    pub(super) scroll_animations: HashMap<String, ScrollAnimation>,
+    pub(super) scroll_animations: HashMap<NodeId, ScrollAnimation>,
     // Hover tracking for CSS :hover and tooltip system.
     hovered_key: Option<String>,
     hovered_path: Vec<String>,
@@ -650,7 +650,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// interaction restyle complete for every supported dynamic pseudo-state.
     previous_focus_visible_key: Option<String>,
     previous_active_key: Option<String>,
-    previous_checked_values: HashMap<String, bool>,
+    previous_checked_values: HashMap<NodeId, bool>,
     interaction_snapshot_valid: bool,
     hovered_pos: (f32, f32),
     hover_start: Option<std::time::Instant>,

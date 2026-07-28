@@ -150,7 +150,7 @@ fn refs_scroll_into_view_scrolls_the_container_to_reveal_the_target() {
         r#"
 <style>
 scroll { height: 60px; overflow-y: auto; }
-.content { height: 240px; }
+.content { height: 240px; flex-shrink: 0; }
 .spacer { height: 200px; }
 .target { height: 40px; }
 </style>
@@ -201,7 +201,7 @@ fn refs_scroll_to_sets_offset_and_scroll_top_reads_it_back() {
         r#"
 <style>
 scroll { height: 60px; overflow-y: auto; }
-.content { height: 240px; }
+.content { height: 240px; flex-shrink: 0; }
 </style>
 <template>
     <scroll ref="list">
@@ -226,11 +226,11 @@ end
 
     // Set the offset through the live reference.
     component.call_namespaced_handler("jump", &[]).unwrap();
+    let list_id = runtime_node_id_for_key("root/0");
     let list_offset = component
         .scroll_offsets
-        .iter()
-        .find(|(key, _)| key.as_str() == "root/0")
-        .map(|(_, offset)| offset.y)
+        .get(&list_id)
+        .map(|offset| offset.y)
         .unwrap_or(0.0);
     assert!(
         (list_offset - 100.0).abs() < 0.01,
@@ -258,7 +258,7 @@ fn refs_scroll_to_smooth_eases_the_offset_over_time() {
         r#"
 <style>
 scroll { height: 60px; overflow-y: auto; }
-.content { height: 240px; }
+.content { height: 240px; flex-shrink: 0; }
 </style>
 <template>
     <scroll ref="list">
@@ -284,12 +284,12 @@ end
     // Smooth scroll registers an animation and does NOT snap the offset.
     let animation = *component
         .scroll_animations
-        .get("root/0")
+        .get(&runtime_node_id_for_key("root/0"))
         .expect("smooth scroll_to should register a ScrollAnimation");
     assert!((animation.target.y - 100.0).abs() < 0.01);
     let offset_now = component
         .scroll_offsets
-        .get("root/0")
+        .get(&runtime_node_id_for_key("root/0"))
         .map(|o| o.y)
         .unwrap_or(0.0);
     assert!(offset_now < 1.0, "offset should not snap, got {offset_now}");
@@ -297,7 +297,11 @@ end
     // Halfway through, the eased offset is partway to the target (ease-out is
     // past the midpoint at t=0.5).
     component.advance_scroll_animations(animation.start_time + animation.duration / 2);
-    let mid = component.scroll_offsets.get("root/0").unwrap().y;
+    let mid = component
+        .scroll_offsets
+        .get(&runtime_node_id_for_key("root/0"))
+        .unwrap()
+        .y;
     assert!(
         mid > 50.0 && mid < 100.0,
         "mid-animation offset should be eased between 50 and 100, got {mid}"
@@ -306,7 +310,11 @@ end
 
     // At/after the full duration, it lands exactly on the target and is dropped.
     component.advance_scroll_animations(animation.start_time + animation.duration);
-    let end = component.scroll_offsets.get("root/0").unwrap().y;
+    let end = component
+        .scroll_offsets
+        .get(&runtime_node_id_for_key("root/0"))
+        .unwrap()
+        .y;
     assert!(
         (end - 100.0).abs() < 0.01,
         "should settle at 100, got {end}"

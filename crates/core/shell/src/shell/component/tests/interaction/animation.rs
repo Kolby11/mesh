@@ -500,7 +500,7 @@ fn smooth_scroll_animation_uses_scoped_retained_fingerprinting() {
     component.paint(&theme, 80, 40, &mut buffer, 1.0).unwrap();
 
     component.scroll_animations.insert(
-        "root/0".into(),
+        runtime_node_id_for_key("root/0"),
         ScrollAnimation {
             start: ScrollOffsetState::default(),
             target: ScrollOffsetState { x: 0.0, y: 80.0 },

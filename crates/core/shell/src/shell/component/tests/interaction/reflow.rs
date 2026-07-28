@@ -151,7 +151,9 @@ end
     component
         .input_values
         .insert("root/0/0".into(), "local".into());
-    component.checked_values.insert("root/0/1".into(), true);
+    component
+        .checked_values
+        .insert(runtime_node_id_for_key("root/0/1"), true);
     component.focused_key = Some("root/0/0".into());
 
     let theme = default_theme();
@@ -241,10 +243,13 @@ end
         .input_values
         .insert("root/0/0".into(), "local".into());
     component.slider_values.insert("root/0/1".into(), 73.0);
-    component.checked_values.insert("root/0/2".into(), true);
     component
-        .scroll_offsets
-        .insert("root/0/3".into(), ScrollOffsetState { x: 3.0, y: 14.0 });
+        .checked_values
+        .insert(runtime_node_id_for_key("root/0/2"), true);
+    component.scroll_offsets.insert(
+        runtime_node_id_for_key("root/0/3"),
+        ScrollOffsetState { x: 3.0, y: 14.0 },
+    );
 
     let theme = default_theme();
     let mut wide_buffer = PixelBuffer::new(420, 160);
@@ -688,11 +693,11 @@ fn real_navigation_bar_repaints_when_theme_changes() {
     let mut light = default_theme();
     light.id = "mesh-default-light".into();
     light.name = "mesh-default-light".into();
-    light.tokens.insert(
+    light.tokens_mut().insert(
         "color.surface-container".into(),
         mesh_core_theme::TokenValue::String("#f0f0f0".into()),
     );
-    light.tokens.insert(
+    light.tokens_mut().insert(
         "color.on-surface".into(),
         mesh_core_theme::TokenValue::String("#111111".into()),
     );
