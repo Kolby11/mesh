@@ -1,18 +1,8 @@
 use super::*;
+use mesh_core_elements::namespace_embedded_handler;
 
 fn scheduled_handler_name(instance_key: &str, handler: &str) -> String {
-    if handler.starts_with("__mesh_embed__::") {
-        handler.to_string()
-    } else {
-        let mut namespaced = String::with_capacity(
-            "__mesh_embed__::".len() + instance_key.len() + "::".len() + handler.len(),
-        );
-        namespaced.push_str("__mesh_embed__::");
-        namespaced.push_str(instance_key);
-        namespaced.push_str("::");
-        namespaced.push_str(handler);
-        namespaced
-    }
+    namespace_embedded_handler(instance_key, handler)
 }
 
 fn render_stack_contains_cycle(stack: &[String], module_id: &str) -> bool {

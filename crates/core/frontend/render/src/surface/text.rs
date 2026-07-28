@@ -13,10 +13,12 @@ use skia_safe::{
 };
 use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 512;
 const GLYPH_ATLAS_CAPACITY: usize = 2048;
+const NAMED_FONT_AVAILABILITY_CACHE_CAPACITY: usize = 128;
 
 struct GlyphAtlasEntry {
     image: skia_safe::Image,
@@ -32,6 +34,8 @@ thread_local! {
     /// nothing" (e.g. spaces) so we skip the swash lookup next time.
     static GLYPH_ATLAS: RefCell<LruCache<CacheKey, Option<GlyphAtlasEntry>>> =
         RefCell::new(LruCache::new(GLYPH_ATLAS_CAPACITY));
+    static NAMED_FONT_AVAILABILITY: RefCell<HashMap<String, bool>> =
+        RefCell::new(HashMap::new());
 }
 
 pub struct TextRenderer {
@@ -291,6 +295,7 @@ impl TextRenderer {
     ) {
         let mut engine = self.engine.borrow_mut();
         let (_, metrics, width, text_align) = text_config(
+            &engine.font_system,
             font_family,
             font_size,
             font_weight,
@@ -350,6 +355,7 @@ impl TextRenderer {
     ) -> (f32, f32) {
         let mut engine = self.engine.borrow_mut();
         let (_, metrics, width, _) = text_config(
+            &engine.font_system,
             font_family,
             font_size,
             font_weight,
@@ -403,6 +409,7 @@ impl TextRenderer {
 
         let mut engine = self.engine.borrow_mut();
         let (_, metrics, width, align) = text_config(
+            &engine.font_system,
             font_family,
             font_size,
             font_weight,
@@ -483,6 +490,7 @@ impl TextRenderer {
     ) -> Option<TextSelectionGeometry> {
         let mut engine = self.engine.borrow_mut();
         let (_, metrics, width, text_align) = text_config(
+            &engine.font_system,
             font_family,
             font_size,
             font_weight,
@@ -672,6 +680,7 @@ impl TextEngine {
         self.metrics.layout_misses = self.metrics.layout_misses.saturating_add(1);
         let shaping_started = std::time::Instant::now();
         let (attrs, _, _, _) = text_config(
+            &self.font_system,
             params.font_family,
             f32::from_bits(params.font_size),
             params.font_weight,
@@ -916,15 +925,16 @@ impl SharedTextMeasurer {
     }
 }
 
-fn text_config(
-    font_family: &str,
+fn text_config<'a>(
+    font_system: &FontSystem,
+    font_family: &'a str,
     font_size: f32,
     font_weight: u16,
     line_height: f32,
     max_width: Option<f32>,
     align: TextAlign,
-) -> (Attrs<'_>, Metrics, Option<f32>, Align) {
-    let family = primary_family(font_family);
+) -> (Attrs<'a>, Metrics, Option<f32>, Align) {
+    let family = primary_family(font_system, font_family);
     let attrs = Attrs::new()
         .family(family)
         .style(CosmicStyle::Normal)
@@ -942,20 +952,78 @@ fn text_config(
     (attrs, metrics, width, align)
 }
 
-fn primary_family(font_family: &str) -> Family<'_> {
-    let family = font_family
+fn primary_family<'a>(font_system: &FontSystem, font_family: &'a str) -> Family<'a> {
+    for family in font_family
         .split(',')
         .map(|part| part.trim().trim_matches('"').trim_matches('\''))
-        .find(|part| !part.is_empty())
-        .unwrap_or("sans-serif");
+        .filter(|part| !part.is_empty())
+    {
+        match family.to_ascii_lowercase().as_str() {
+            "serif" => return Family::Serif,
+            "sans-serif" | "sans" | "system-ui" => return Family::SansSerif,
+            "monospace" | "mono" => return Family::Monospace,
+            "cursive" => return Family::Cursive,
+            "fantasy" => return Family::Fantasy,
+            _ if named_family_is_available(font_system, family) => return Family::Name(family),
+            _ => {}
+        }
+    }
 
-    match family.to_ascii_lowercase().as_str() {
-        "serif" => Family::Serif,
-        "sans-serif" | "sans" | "system-ui" => Family::SansSerif,
-        "monospace" | "mono" => Family::Monospace,
-        "cursive" => Family::Cursive,
-        "fantasy" => Family::Fantasy,
-        _ => Family::Name(family),
+    fallback_text_family(font_system)
+}
+
+fn fallback_text_family(font_system: &FontSystem) -> Family<'static> {
+    // cosmic-text maps generic sans-serif to Open Sans. When Open Sans is
+    // absent, fontdb can pick an arbitrary installed face, including an icon
+    // font. Prefer a verified ordinary text family first.
+    const TEXT_FALLBACKS: &[&str] = &[
+        "Inter",
+        "Noto Sans",
+        "DejaVu Sans",
+        "Liberation Sans",
+        "Ubuntu",
+        "Arial",
+    ];
+
+    TEXT_FALLBACKS
+        .iter()
+        .copied()
+        .find(|family| named_family_is_available(font_system, family))
+        .map(Family::Name)
+        .unwrap_or(Family::SansSerif)
+}
+
+fn named_family_is_available(font_system: &FontSystem, family: &str) -> bool {
+    NAMED_FONT_AVAILABILITY.with(|cache| {
+        if let Some(available) = cache.borrow().get(family).copied() {
+            return available;
+        }
+        let available = font_system.db().faces().any(|face| {
+            face.families
+                .iter()
+                .any(|(candidate, _)| candidate.eq_ignore_ascii_case(family))
+        });
+        let mut cache = cache.borrow_mut();
+        if cache.len() == NAMED_FONT_AVAILABILITY_CACHE_CAPACITY {
+            cache.clear();
+        }
+        cache.insert(family.to_owned(), available);
+        available
+    })
+}
+
+#[cfg(test)]
+mod font_family_tests {
+    use super::{Family, FontSystem, primary_family};
+
+    #[test]
+    fn unavailable_named_family_does_not_remain_the_selected_face() {
+        let font_system = FontSystem::new();
+        match primary_family(&font_system, "__mesh_missing_font__") {
+            Family::Name(family) => assert_ne!(family, "__mesh_missing_font__"),
+            Family::SansSerif => {}
+            other => panic!("expected a sans-serif fallback, got {other:?}"),
+        }
     }
 }
 

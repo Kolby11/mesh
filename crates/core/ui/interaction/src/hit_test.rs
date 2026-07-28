@@ -1,5 +1,9 @@
 use super::*;
 use mesh_core_elements::style::TooltipAnchor;
+use mesh_core_elements::{
+    embedded_handler_prefix, is_embedded_handler, namespace_embedded_handler_with_prefix,
+    parse_embedded_handler,
+};
 use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq)]
 pub struct PointerHit {
@@ -676,52 +680,33 @@ pub fn find_event_handler(tree: &WidgetNode, key: &str, event_name: &str) -> Opt
 }
 
 pub fn namespace_event_handlers(node: &mut WidgetNode, instance_key: &str) {
-    let mut namespace_prefix = None;
-    namespace_event_handlers_with_prefix(node, instance_key, &mut namespace_prefix);
+    let prefix = embedded_handler_prefix(instance_key);
+    namespace_event_handlers_with_prefix(node, &prefix);
 }
 
-fn namespace_event_handlers_with_prefix(
-    node: &mut WidgetNode,
-    instance_key: &str,
-    namespace_prefix: &mut Option<String>,
-) {
+fn namespace_event_handlers_with_prefix(node: &mut WidgetNode, prefix: &str) {
     for handler in node.event_handlers.values_mut() {
-        if !handler.starts_with("__mesh_embed__::") {
-            namespace_handler(handler, instance_key, namespace_prefix);
+        if !is_embedded_handler(handler) {
+            namespace_handler(handler, prefix);
         }
     }
     for call in node.event_handler_calls.values_mut() {
-        if !call.handler.starts_with("__mesh_embed__::") {
-            namespace_handler(&mut call.handler, instance_key, namespace_prefix);
+        if !is_embedded_handler(&call.handler) {
+            namespace_handler(&mut call.handler, prefix);
         }
     }
 
     for child in &mut node.children {
-        namespace_event_handlers_with_prefix(child, instance_key, namespace_prefix);
+        namespace_event_handlers_with_prefix(child, prefix);
     }
 }
 
-fn namespace_handler(
-    handler: &mut String,
-    instance_key: &str,
-    namespace_prefix: &mut Option<String>,
-) {
-    let prefix = namespace_prefix.get_or_insert_with(|| {
-        let mut prefix = String::with_capacity("__mesh_embed__::".len() + instance_key.len() + 2);
-        prefix.push_str("__mesh_embed__::");
-        prefix.push_str(instance_key);
-        prefix.push_str("::");
-        prefix
-    });
-    let mut namespaced = String::with_capacity(prefix.len() + handler.len());
-    namespaced.push_str(prefix);
-    namespaced.push_str(handler);
-    *handler = namespaced;
+fn namespace_handler(handler: &mut String, prefix: &str) {
+    *handler = namespace_embedded_handler_with_prefix(prefix, handler);
 }
 
 pub fn parse_namespaced_handler(handler: &str) -> Option<(&str, &str)> {
-    let rest = handler.strip_prefix("__mesh_embed__::")?;
-    rest.rsplit_once("::")
+    parse_embedded_handler(handler)
 }
 
 #[cfg(test)]

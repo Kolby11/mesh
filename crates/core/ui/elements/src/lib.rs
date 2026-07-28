@@ -1,5 +1,6 @@
 pub mod accessibility;
 pub mod attributes;
+pub mod composition;
 pub mod element;
 pub mod events;
 pub mod layout;
@@ -25,6 +26,12 @@ pub use accessibility::{
     AccessibilityTreeNode,
 };
 pub use attributes::{AttrKey, AttributeMap};
+pub use composition::{
+    COMPONENT_BIND_THIS_ATTRIBUTE, COMPONENT_BINDING_PREFIX, EMBEDDED_HANDLER_PREFIX,
+    component_binding_attribute, embedded_handler_prefix, is_composition_protocol_attribute,
+    is_embedded_handler, namespace_embedded_handler, namespace_embedded_handler_with_prefix,
+    parse_embedded_handler,
+};
 pub use element::{
     BASE_ELEMENT_FIELDS, ELEMENT_CONTRACT_DEFS, ELEMENT_TYPE_DEFS, ElementAttributeDef,
     ElementAttributeType, ElementContractDef, ElementDiagnostic, ElementDiagnosticKind,

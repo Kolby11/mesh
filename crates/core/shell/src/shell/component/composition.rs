@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
 
 use mesh_core_elements::style::Dimension;
-use mesh_core_elements::{AttributeMap, EventHandlerCall, WidgetNode};
+use mesh_core_elements::{
+    AttributeMap, COMPONENT_BIND_THIS_ATTRIBUTE, EventHandlerCall, WidgetNode,
+    component_binding_attribute, is_composition_protocol_attribute,
+};
 use mesh_core_frontend::FrontendCompositionResolver;
 use mesh_core_interaction::source_element_tag;
 use mesh_core_module::ModuleType;
@@ -138,7 +141,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 }
                 let marks_before = self.memo_effect_marks();
                 let build_started = self.profiling_enabled.then(std::time::Instant::now);
-                let bind_this = props.get("__mesh_bind_this").cloned();
+                let bind_this = props.get(COMPONENT_BIND_THIS_ATTRIBUTE).cloned();
                 let props_json = runtime_props_json(props);
                 let mut node = self.render_local_component(
                     &entry.compiled.manifest,
@@ -200,8 +203,9 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 .get("hidden")
                 .map(|v| v == "true" || v == "True")
                 .unwrap_or(false);
+            let hidden_binding = component_binding_attribute("hidden");
             if let Some(binding) = props
-                .get("__mesh_binding_hidden")
+                .get(&hidden_binding)
                 .and_then(|binding| simple_state_binding(binding))
             {
                 self.portal_hidden_bindings.borrow_mut().insert(
@@ -248,7 +252,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         let marks_before = self.memo_effect_marks();
         let build_started = self.profiling_enabled.then(std::time::Instant::now);
         let props_json = runtime_props_json(props);
-        let bind_this = props.get("__mesh_bind_this").cloned();
+        let bind_this = props.get(COMPONENT_BIND_THIS_ATTRIBUTE).cloned();
         let mut node = self.render_embedded_instance(
             &instance_key,
             &module_id,
@@ -474,7 +478,7 @@ fn decode_prop_value(value: &str) -> serde_json::Value {
 }
 
 fn runtime_prop_is_public(key: &str) -> bool {
-    !key.starts_with("__mesh_binding_") && key != "__mesh_bind_this"
+    !is_composition_protocol_attribute(key)
 }
 
 fn apply_prop_handler_calls(

@@ -17,7 +17,6 @@
 //! `<popover anchor="bottom" gravity="bottom" offset-y="4" grab="hover">`.
 
 use crate::tree::WidgetNode;
-use std::collections::BTreeMap;
 
 /// Edge/corner of the anchor rectangle the popup is positioned against.
 ///

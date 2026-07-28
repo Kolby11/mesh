@@ -144,7 +144,7 @@ surface.
       `<popover anchor={refs.language_button} open={open}>`. Keep `mesh.popover.*`
       as the imperative escape hatch. Progress 2026-06-24: shell now owns a
       hover-bridge controller for promoted popovers through `HidePopover {
-    defer_for_hover_bridge }`, `pending_popover_hides`, scheduler deadlines,
+defer_for_hover_bridge }`, `pending_popover_hides`, scheduler deadlines,
       pointer-enter cancellation, and pointer-leave scheduling from promoted popup
       surfaces. `mesh.popover.hide(id, { bridge = true })` emits the new request,
       and `quick-settings` no longer carries popover-side `onpointerenter` /
@@ -381,6 +381,7 @@ reference it. The historical subsystem map is
       because it required per-node traversal/lookups. The retained baseline was
       restored and remeasured at 459.8ms; the next design must let replay consume
       segments directly instead of eagerly re-flattening them.
+
 ### P1 — threading (K)
 
 - [ ] Parallelize paint across surfaces: phase-split `render_components` into
@@ -560,7 +561,7 @@ reference it. The historical subsystem map is
       every ~900-byte `WidgetNode` pushed so far (600-node release benchmark:
       167.3–174.0ms growing versus 142.8–153.5ms reserved, 1.10–1.22x, gated
       as `for_children_capacity_speedup`). Added 2026-07-27: widget-tree
-      *attributes* are now interned and flat.
+      _attributes_ are now interned and flat.
       `WidgetNode::attributes` (and the component-prop maps that share its
       shape) moved from `BTreeMap<String, String>` to a purpose-built
       `AttributeMap` (`crates/core/ui/elements/src/attributes.rs`) whose keys
@@ -595,7 +596,7 @@ reference it. The historical subsystem map is
       `accessibility_empty_attribute_guard_speedup` was rebaselined from 1.60 to
       1.15 as a consequence: the empty-map lookup chain it is measured against
       got cheaper (47.4ms → 30.1–31.4ms per 2M nodes) while the guarded path was
-      unchanged. Widget-tree *tags*, attribute *values*, and the broader symbol
+      unchanged. Widget-tree _tags_, attribute _values_, and the broader symbol
       types remain open; the same profile now puts the dominant remaining cost
       in style resolution (~45% of the build: theme-default clones,
       `apply_indexed_declaration`, and token→number resolution), i.e. the typed
@@ -618,7 +619,7 @@ reference it. The historical subsystem map is
       resolver's `(module_id, tag)` default caches now hold
       `Rc<ThemeComponentDefaults>`, so a node clones one `ComputedStyle` (the
       mutable base its own rules are applied to) and bumps a refcount instead of
-      also deep-copying the default *variables* map; the variables are read
+      also deep-copying the default _variables_ map; the variables are read
       through, and the per-node `VARIABLE_SCRATCH` is only seeded when a theme
       actually declares default custom properties (the shipped theme declares
       none, so the common path seeds nothing). In front of the hashed maps sits
@@ -654,7 +655,19 @@ reference it. The historical subsystem map is
       performance gate. The representative 456-node tree build measured
       0.390–0.397ms after this checkpoint versus 0.416–0.424ms before it
       (1.05–1.09x end to end). Typed property values and one-time token lowering
-      remain open.
+      remain open. Added 2026-07-28: indexed stylesheet declarations and
+      theme-default maps now pre-lower static literals into typed colors,
+      numbers, edges, corners, and dimensions. Applying those common values
+      writes directly to `ComputedStyle`; `var()`/`prop()` values and all
+      diagnostics deliberately retain the dynamic string path. Theme-default
+      declaration arrays are shared by immutable theme revision and default-map
+      identity, avoiding repeated temporary `Declaration` construction during
+      cold resolver setup. Parity coverage compares typed application with the
+      former string lowering across geometry, typography, color, and dimension
+      properties; cache coverage proves reuse and revision invalidation. A
+      release measurement and canonical gate remain pending because the local
+      Rust linker wrapper is unavailable.
+
 - [x] Typed template-expression attribute storage (A). Internal evaluation was
       already typed, but results still stringified into attributes. Progress
       2026-07-15: boolean, nil, number, string, and compound JSON values remain
@@ -672,7 +685,7 @@ reference it. The historical subsystem map is
       both empty and populated attribute maps, and the relative speedup is
       now checked by the canonical performance gate
       (`accessibility_empty_attribute_guard_speedup`). Added 2026-07-26:
-      elements that *do* carry attributes no longer probe the map once per
+      elements that _do_ carry attributes no longer probe the map once per
       accessibility field either. The ~19 remaining `BTreeMap` descents (each a
       tree walk with string comparisons, for keys that are almost always
       absent) became one ordered pass over the node's own attributes with a
@@ -701,6 +714,92 @@ reference it. The historical subsystem map is
       stringify-plus-parse took 139.6–143.9ms versus 84.6–88.0ms for typed
       storage (1.64–1.68x); the relative speedup is checked by the canonical
       performance gate (`typed_attribute_storage_speedup`).
+      [ ] Remaining interaction identity is string-keyed end to end
+      (`hovered_path`, `focused_key`, `slider_values`);
+      migrate to `NodeId` together with metrics/refs publication so
+      `_mesh_key` strings lose their last hot consumers (Q); runtime key-path
+      strings are still allocated for interaction/refs (J). The earlier scroll
+      overflow annotation reserved its reusable root key-path buffer; a
+      20,000-pass release benchmark measured 796.1ms unreserved versus 769.5ms
+      reserved (1.03x). That intermediate optimization was superseded by the
+      NodeId scroll-state checkpoint below. Added 2026-07-23: pointer and keyed
+      tooltip traversal carry
+      borrowed owner/text references and allocate only the final API result
+      instead of allocating at every tooltip-bearing ancestor. A 64-node,
+      100,000-lookup release benchmark measured 331.61–342.17ms eager versus
+      171.52–173.52ms borrowed across three final runs (1.93–1.99x faster); the
+      canonical fused pointer-motion workload moved from a 700.51ms baseline
+      to 627.77–669.92ms across three final runs (1.05–1.12x faster).
+      Follow-up 2026-07-23: visible-tooltip rendering now resolves inherited
+      text, the owner node, and transformed owner bounds in one allocation-free
+      traversal instead of separate tooltip, node, and bounds walks. Across
+      three release runs of 20,000 deep lookups in a 2,601-node tree, separate
+      walks took 3.96–4.56s versus 2.86–2.89s fused (1.38–1.58x faster for the
+      per-frame lookup portion). Added later 2026-07-23: the resolved tooltip
+      render target is cached by retained-tree generation plus hovered key, so
+      stable fade and paint-only frames skip the tree entirely; hover changes
+      clear it and any retained layout/style/attribute/state/structure change
+      refreshes it. Across three release runs of 20,000 stable deep-tree frames,
+      repeated fused resolution took 3.04–3.39s versus 243–265µs for guarded
+      cache hits (11,693–13,929x faster for the eliminated lookup). The cached
+      text and frame-local paint tuple now share `Arc<str>` ownership instead
+      of deep-cloning a `String` so later mutable shell work can outlive the
+      cache borrow. Across three release runs of one million representative
+      504-byte tooltip handoffs, `String` cloning took 9.45–16.02ms versus
+      2.77–6.79ms for `Arc` cloning (2.25–3.41x faster).
+      Hover-transition path differences now use the shared root-to-leaf prefix
+      instead of two pairwise membership scans and temporary vectors. Across
+      three release runs of 200,000 deep sibling transitions on 2026-07-24,
+      pairwise scans took 4.667–4.799s versus 36.0–37.8ms for prefix slices
+      (123.5–132.1x faster). The fused multi-key node lookup now returns keys
+      borrowed from the retained tree instead of cloning every matched key.
+      Across three release runs of 20,000 dense lookups on 2026-07-24, owned
+      results took 427.3–432.4ms versus 284.8–287.4ms borrowed
+      (1.498–1.518x faster). Keyboard navigation key paths and candidate lists
+      now borrow retained-tree keys and allocate only the selected result.
+      Three release runs of 200,000 64-node key-path lookups measured
+      238.0–247.5ms with owned strings versus 124.7–126.5ms borrowed
+      (1.881–1.985x faster). All three relative improvements are checked by the
+      canonical performance gate. Added 2026-07-26: overflow annotation
+      (`crates/core/ui/interaction/src/scroll.rs`) allocated a `key.to_string()`
+      `scroll_offsets` entry for every node in the tree, scrollable or not, so
+      the map grew to roughly one permanent entry per node ever rendered
+      instead of one per actual scroll container; every other reader of
+      `scroll_offsets` already treats a missing key as the default zero offset,
+      so non-scrollable nodes (the common case) now skip the map entirely and
+      report a local zero offset. A release benchmark over a 781-node tree
+      with only the root scrollable measured 335.4ms unconditional touching
+      (781 map entries) versus 93.6ms scrollable-gated (1 map entry) — 3.46–
+      3.58x faster across two runs, gated as
+      `scroll_offset_scrollable_gate_speedup`. Completed scroll-state
+      checkpoint 2026-07-28: wheel/two-finger hit results, live offsets,
+      smooth-scroll animations, overflow annotation, and scroll-into-view
+      updates now carry stable `NodeId` values end to end. String key paths
+      remain only at the imperative ref lookup boundary, and standalone
+      overflow annotation no longer constructs or formats structural paths.
+      Across three release runs annotating 20,000 781-node trees, string-keyed
+      state took 1.101–1.111s versus 237.8–253.0ms for NodeId state
+      (4.39–4.66x faster), gated as `node_id_scroll_offsets_speedup`.
+      Scroll action regressions now use explicitly non-shrinking overflow
+      content so they exercise real scrolling rather than a flex-shrunk child.
+      Completed checked-state checkpoint 2026-07-28: checkbox, switch, radio,
+      and option selection state plus its previous-frame restyle snapshot now
+      use stable `NodeId` keys. Runtime annotation no longer hashes structural
+      strings for every checked-state lookup, and checked-state diffs pass IDs
+      directly into targeted restyling instead of reconstructing them from
+      paths. Script handlers retain readable string keys only at their dispatch
+      boundary. Across three release runs of 40,000 1,024-node annotation
+      passes, string-keyed state took 419.5–421.0ms versus 247.7–253.4ms for
+      NodeId state (1.66–1.69x faster), gated as
+      `node_id_checked_state_speedup`. Completed input-value checkpoint
+      2026-07-28: text inputs, selects, and radio groups now store their live
+      values by stable `NodeId`; character and keyboard edits, imperative ref
+      writes, choice activation, runtime attribute annotation, and
+      accessibility publication carry the ID without changing readable
+      script-facing dispatch keys. Across three release runs of 40,000
+      1,024-node annotation lookup passes, string-keyed state took
+      421.9–425.5ms versus 252.1–252.7ms for NodeId state (1.67–1.68x faster),
+      gated as `node_id_input_values_speedup`.
 - [x] Allocator-level profile mode (allocation counts per render pass) →
       v1.23. Added 2026-07-24: the opt-in `allocation-profiling` build wraps
       the system allocator with allocation-free thread-local counters and
@@ -717,7 +816,16 @@ reference it. The historical subsystem map is
       bounded by the canonical performance gate.
 - [ ] Magic-string protocol at the composition boundary (`__mesh_embed__::`,
       `__mesh_binding_*`, `__mesh_bind_this`, promoted-popover marker) —
-      typed channels between compiler and shell (M).
+      typed channels between compiler and shell (M). Progress 2026-07-28:
+      the shared element IR now owns the embedded-handler and component-prop
+      wire protocol (`composition.rs`): typed helper functions construct,
+      parse, and identify handler targets; binding attributes and `bind:this`
+      use shared protocol constants. The compiler, interaction subtree
+      namespacing, and shell scheduling/prop filtering all consume that API,
+      retaining the existing reusable subtree-prefix allocation behavior.
+      Direct string storage remains at the serialized `WidgetNode` boundary;
+      migrate event-handler and component-prop payload fields to protocol types
+      before this item can be closed.
 
 ### P2 — composition correctness & structure (M)
 
@@ -752,6 +860,7 @@ reference it. The historical subsystem map is
       needs a fragment/transparent-container concept.
 - [ ] No keyed list diffing; `{#for}` identity is positional — add `key=`
       (pairs with component memoization and v1.27).
+
 ### P2 — presentation & memory (H/U)
 
 - [ ] Direct Skia paint into the mapped SHM canvas for full-present frames,
@@ -849,7 +958,7 @@ reference it. The historical subsystem map is
       `style_single_bucket_speedup` and gates the 1.20x checkpoint.
       Added 2026-07-26: the inherited-text-style mask
       (`crates/core/frontend/compiler/src/style.rs`) kept its own cached
-      candidate list but still scanned *every* rule carrying an inheritable
+      candidate list but still scanned _every_ rule carrying an inheritable
       declaration for every node. Candidates are now bucketed by a selector key
       that is necessary for a match (tag, class, id; universal and `*`-state
       selectors stay unkeyed and are visited by all nodes), and compound

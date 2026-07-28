@@ -18,7 +18,7 @@
         "mesh.device": ">=1.0"
       },
       "resources": {
-        "icons": ["@mesh/icons-default"]
+        "icons": ["@mesh/icons-material-symbols"]
       },
       "capabilities": [
         "shell.surface",

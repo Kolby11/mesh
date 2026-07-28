@@ -26,11 +26,14 @@ thread_local! {
         RefCell::new(HashMap::new());
     static SHARED_THEME_DEFAULT_CACHE: RefCell<HashMap<u64, SharedThemeDefaultCache>> =
         RefCell::new(HashMap::new());
+    static THEME_DEFAULT_DECLARATION_CACHE: RefCell<HashMap<(u64, usize), Arc<[IndexedDeclaration]>>> =
+        RefCell::new(HashMap::new());
 }
 
 const MAX_INLINE_STYLE_CACHE_ENTRIES: usize = 256;
 const MAX_SHARED_THEME_REVISIONS: usize = 16;
 const MAX_SHARED_THEME_DEFAULTS_PER_REVISION: usize = 256;
+const MAX_THEME_DEFAULT_DECLARATION_CACHE_ENTRIES: usize = 512;
 
 /// The five CSS-inherited fields from a parent node. Used instead of cloning
 /// the full `ComputedStyle` (~60 fields) when passing parent context into
@@ -613,6 +616,20 @@ impl StyleRuleIndex {
 struct IndexedDeclaration {
     property: IndexedProperty,
     value: StyleValue,
+    literal: Option<TypedLiteralValue>,
+}
+
+/// A static declaration value parsed once when a stylesheet or theme default
+/// is indexed. Values containing `var()` or `prop()` stay on the dynamic
+/// resolver path; these variants are therefore safe to copy directly into a
+/// node's computed style.
+#[derive(Debug, Clone, Copy)]
+enum TypedLiteralValue {
+    Color(Color),
+    Number(f32),
+    Edges(Edges),
+    Corners(Corners),
+    Dimension(Dimension),
 }
 
 #[derive(Debug, Clone)]
@@ -687,8 +704,139 @@ impl IndexedDeclaration {
         Self {
             property: IndexedProperty::from_property(&decl.property, &decl.value),
             value: decl.value.clone(),
+            literal: typed_literal_value(&decl.property, &decl.value),
         }
     }
+}
+
+fn typed_literal_value(property: &str, value: &StyleValue) -> Option<TypedLiteralValue> {
+    let StyleValue::Literal(value) = value else {
+        return None;
+    };
+    if references_style_function(value) {
+        return None;
+    }
+
+    match property {
+        "background" | "background-color" | "color" => {
+            Color::from_css(value).map(TypedLiteralValue::Color)
+        }
+        "font-size"
+        | "font-weight"
+        | "letter-spacing"
+        | "line-height"
+        | "gap"
+        | "column-gap"
+        | "row-gap"
+        | "gap-x"
+        | "opacity"
+        | "padding-top"
+        | "padding-right"
+        | "padding-bottom"
+        | "padding-left"
+        | "margin-top"
+        | "margin-right"
+        | "margin-bottom"
+        | "margin-left"
+        | "border-top-width"
+        | "border-right-width"
+        | "border-bottom-width"
+        | "border-left-width" => Some(TypedLiteralValue::Number(parse_px(value))),
+        "padding" | "margin" | "border-width" => {
+            Some(TypedLiteralValue::Edges(parse_edges_shorthand(value)))
+        }
+        "border-radius" => Some(TypedLiteralValue::Corners(parse_corners_shorthand(value))),
+        "width" | "height" | "flex-basis" => {
+            Some(TypedLiteralValue::Dimension(parse_dimension(value)))
+        }
+        _ => None,
+    }
+}
+
+fn apply_typed_literal(
+    style: &mut ComputedStyle,
+    property: &str,
+    value: TypedLiteralValue,
+) -> bool {
+    match (property, value) {
+        ("background" | "background-color", TypedLiteralValue::Color(value)) => {
+            style.background_color = value
+        }
+        ("color", TypedLiteralValue::Color(value)) => style.color = value,
+        ("font-size", TypedLiteralValue::Number(value)) => style.font_size = value,
+        ("font-weight", TypedLiteralValue::Number(value)) => style.font_weight = value as u16,
+        ("letter-spacing", TypedLiteralValue::Number(value)) => style.letter_spacing = value,
+        ("line-height", TypedLiteralValue::Number(value)) => style.line_height = value,
+        ("gap" | "column-gap" | "row-gap" | "gap-x", TypedLiteralValue::Number(value)) => {
+            style.gap = value
+        }
+        ("opacity", TypedLiteralValue::Number(value)) => style.opacity = value,
+        ("padding-top", TypedLiteralValue::Number(value)) => style.padding.top = value,
+        ("padding-right", TypedLiteralValue::Number(value)) => style.padding.right = value,
+        ("padding-bottom", TypedLiteralValue::Number(value)) => style.padding.bottom = value,
+        ("padding-left", TypedLiteralValue::Number(value)) => style.padding.left = value,
+        ("margin-top", TypedLiteralValue::Number(value)) => style.margin.top = value,
+        ("margin-right", TypedLiteralValue::Number(value)) => style.margin.right = value,
+        ("margin-bottom", TypedLiteralValue::Number(value)) => style.margin.bottom = value,
+        ("margin-left", TypedLiteralValue::Number(value)) => style.margin.left = value,
+        ("border-top-width", TypedLiteralValue::Number(value)) => style.border_width.top = value,
+        ("border-right-width", TypedLiteralValue::Number(value)) => {
+            style.border_width.right = value
+        }
+        ("border-bottom-width", TypedLiteralValue::Number(value)) => {
+            style.border_width.bottom = value
+        }
+        ("border-left-width", TypedLiteralValue::Number(value)) => style.border_width.left = value,
+        ("padding", TypedLiteralValue::Edges(value)) => style.padding = value,
+        ("margin", TypedLiteralValue::Edges(value)) => style.margin = value,
+        ("border-width", TypedLiteralValue::Edges(value)) => style.border_width = value,
+        ("border-radius", TypedLiteralValue::Corners(value)) => style.border_radius = value,
+        ("width", TypedLiteralValue::Dimension(value)) => style.width = value,
+        ("height", TypedLiteralValue::Dimension(value)) => style.height = value,
+        ("flex-basis", TypedLiteralValue::Dimension(value)) => style.flex_basis = value,
+        _ => return false,
+    }
+    true
+}
+
+/// Lower theme defaults once per immutable theme revision. Theme defaults are
+/// represented as string maps at the theme boundary, but style resolution
+/// needs their indexed property and classified value forms. Rebuilding those
+/// temporary declarations for each resolver cold path needlessly allocates.
+///
+/// The theme revision changes before mutable theme data is exposed, and a
+/// component-default map has a stable address for the lifetime of that theme,
+/// so the pair safely identifies this lowered representation.
+fn indexed_theme_defaults(
+    revision: u64,
+    defaults: &mesh_core_theme::ComponentDefaults,
+) -> Arc<[IndexedDeclaration]> {
+    let key = (revision, std::ptr::from_ref(defaults).cast::<()>() as usize);
+    THEME_DEFAULT_DECLARATION_CACHE.with(|cache| {
+        if let Some(declarations) = cache.borrow().get(&key) {
+            return Arc::clone(declarations);
+        }
+
+        let declarations: Arc<[IndexedDeclaration]> = defaults
+            .iter()
+            .map(|(property, value)| {
+                let value = classify_theme_style_value(value);
+                IndexedDeclaration {
+                    property: IndexedProperty::from_property(property, &value),
+                    literal: typed_literal_value(property, &value),
+                    value,
+                }
+            })
+            .collect::<Vec<_>>()
+            .into();
+
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= MAX_THEME_DEFAULT_DECLARATION_CACHE_ENTRIES {
+            cache.clear();
+        }
+        cache.insert(key, Arc::clone(&declarations));
+        declarations
+    })
 }
 
 impl IndexedProperty {
@@ -2035,12 +2183,8 @@ impl<'a> StyleResolver<'a> {
         let selector = diagnostics
             .as_ref()
             .map(|_| format!("@theme:{component_name}"));
-        for (property, value) in defaults {
-            let declaration = Declaration {
-                property: property.clone(),
-                value: classify_theme_style_value(value),
-            };
-            let declaration = IndexedDeclaration::from_declaration(&declaration);
+        let declarations = indexed_theme_defaults(self.theme.revision(), defaults);
+        for declaration in declarations.iter() {
             let diagnostic_sink = diagnostics.as_mut().and_then(|diagnostics| {
                 selector
                     .as_deref()
@@ -2079,6 +2223,11 @@ impl<'a> StyleResolver<'a> {
                 strict_animation,
                 background_image,
             } => {
+                if let Some(literal) = decl.literal
+                    && apply_typed_literal(style, name, literal)
+                {
+                    return;
+                }
                 if let StyleValue::Var(variable_name) = &decl.value
                     && !*strict_animation
                     && !variables.contains_key(variable_name)
@@ -3100,6 +3249,69 @@ fn canonicalize_suffixed(value: &str, suffixes: &[&str]) -> String {
 mod tests {
     use super::*;
     use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
+
+    #[test]
+    fn indexed_theme_defaults_reuse_lowered_declarations_per_revision() {
+        let mut defaults = mesh_core_theme::ComponentDefaults::new();
+        defaults.insert("font-size".into(), "var(--spacing-md)".into());
+        defaults.insert("--local-accent".into(), "#445566".into());
+
+        let first = indexed_theme_defaults(u64::MAX - 1, &defaults);
+        let second = indexed_theme_defaults(u64::MAX - 1, &defaults);
+        assert!(Arc::ptr_eq(&first, &second));
+        assert!(matches!(&first[0].property, IndexedProperty::Custom(_)));
+        assert!(matches!(&first[1].value, StyleValue::Var(_)));
+
+        let changed_revision = indexed_theme_defaults(u64::MAX, &defaults);
+        assert!(!Arc::ptr_eq(&first, &changed_revision));
+    }
+
+    #[test]
+    fn typed_static_declarations_match_string_lowering() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let declarations = [
+            ("background-color", "#112233"),
+            ("color", "rgba(255, 255, 255, 0.75)"),
+            ("font-size", "15px"),
+            ("font-weight", "600"),
+            ("line-height", "1.4"),
+            ("padding", "4px 8px 12px 16px"),
+            ("margin", "3px 6px"),
+            ("border-width", "2px 1px"),
+            ("border-radius", "2px 4px 6px 8px"),
+            ("width", "75%"),
+            ("height", "fit-content"),
+            ("flex-basis", "24px"),
+        ];
+        let mut old_style = ComputedStyle::default();
+        let mut typed_style = ComputedStyle::default();
+        let mut old_variables = HashMap::new();
+        let mut typed_variables = HashMap::new();
+
+        for (property, value) in declarations {
+            let declaration = Declaration {
+                property: property.into(),
+                value: StyleValue::Literal(value.into()),
+            };
+            resolver.apply_declaration_no_diagnostics(
+                &mut old_style,
+                &declaration,
+                &mut old_variables,
+            );
+            let indexed = IndexedDeclaration::from_declaration(&declaration);
+            assert!(indexed.literal.is_some(), "{property} should lower once");
+            resolver.apply_indexed_declaration(
+                &mut typed_style,
+                &indexed,
+                None,
+                &mut typed_variables,
+            );
+        }
+
+        assert_eq!(typed_style, old_style);
+        assert_eq!(typed_variables, old_variables);
+    }
 
     // cargo test -p mesh-core-elements --release -- style_function_scan_beats_contains_pair --ignored --nocapture
     #[test]

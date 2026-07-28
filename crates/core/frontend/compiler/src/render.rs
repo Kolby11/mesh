@@ -13,8 +13,10 @@ use mesh_core_component::template::{
 use mesh_core_component::{PropValue, PropsBlock};
 use mesh_core_elements::accessibility::AccessibilityInfo;
 use mesh_core_elements::{
-    AttrKey, AttributeMap, ComputedStyle, EventHandlerCall, StyleContext, StyleResolver,
-    StyleRuleIndex, VariableStore, WidgetNode, element_contract_for_tag,
+    AttrKey, AttributeMap, COMPONENT_BIND_THIS_ATTRIBUTE, ComputedStyle, EventHandlerCall,
+    StyleContext, StyleResolver, StyleRuleIndex, VariableStore, WidgetNode,
+    component_binding_attribute, element_contract_for_tag, is_embedded_handler,
+    namespace_embedded_handler,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
@@ -1059,11 +1061,11 @@ fn build_component_ref(
             }
         } else if let AttributeValue::Binding(binding) = &attr.value {
             props.insert(
-                AttrKey::new(&format!("__mesh_binding_{}", attr.name)),
+                AttrKey::new(&component_binding_attribute(&attr.name)),
                 binding.clone(),
             );
         } else if let AttributeValue::InstanceBinding(binding) = &attr.value {
-            props.insert(AttrKey::new("__mesh_bind_this"), binding.clone());
+            props.insert(AttrKey::new(COMPONENT_BIND_THIS_ATTRIBUTE), binding.clone());
         }
     }
     if let Some(composition) = composition {
@@ -1300,7 +1302,7 @@ fn resolve_component_prop_handler_value(
     handler: &str,
 ) -> String {
     let resolved = resolve_event_handler_value(state, handler);
-    if resolved.starts_with("__mesh_embed__::") {
+    if is_embedded_handler(&resolved) {
         resolved
     } else {
         namespaced_handler(host_instance_key, &resolved)
@@ -1308,18 +1310,7 @@ fn resolve_component_prop_handler_value(
 }
 
 fn namespaced_handler(host_instance_key: &str, handler: &str) -> String {
-    if handler.starts_with("__mesh_embed__::") {
-        handler.to_string()
-    } else {
-        let mut namespaced = String::with_capacity(
-            "__mesh_embed__::".len() + host_instance_key.len() + "::".len() + handler.len(),
-        );
-        namespaced.push_str("__mesh_embed__::");
-        namespaced.push_str(host_instance_key);
-        namespaced.push_str("::");
-        namespaced.push_str(handler);
-        namespaced
-    }
+    namespace_embedded_handler(host_instance_key, handler)
 }
 
 fn normalize_event_handler_name(name: &str) -> String {

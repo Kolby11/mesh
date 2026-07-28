@@ -6,7 +6,6 @@
 use crate::{AccessibilityRole, ElementState, WidgetNode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -1804,7 +1803,6 @@ mod tests {
     use super::*;
     use crate::{Dimension, Edges, WidgetScrollMetrics};
     use serde_json::json;
-    use std::collections::BTreeMap;
     use std::time::Instant;
 
     /// Pre-index behavior: scan every definition comparing tags.
