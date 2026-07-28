@@ -438,6 +438,100 @@ pub fn paint_selected_display_list_for_module_with_profiling_metrics_and_attribu
     })
 }
 
+/// Paint a selected display list through several damage clips while sharing
+/// one profiling reset and raster canvas session.
+///
+/// The one-clip case deliberately uses the established single-region path.
+/// Disjoint clips use the command-major fast path. Overlapping clips preserve
+/// the established region-major replay order while still sharing the session.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution(
+    commands: &SelectedDisplayListPaint<'_>,
+    buffer: &mut PixelBuffer,
+    scale: f32,
+    clips: &[(u32, u32, u32, u32)],
+    paint_nodes: Option<&HashSet<NodeId>>,
+    tooltip: Option<(&str, f32, f32)>,
+    module_id: Option<&str>,
+    collect_command_attribution: bool,
+) -> PaintProfilingMetrics {
+    if clips.len() == 1 {
+        return paint_selected_display_list_for_module_with_profiling_metrics_and_attribution(
+            commands,
+            buffer,
+            scale,
+            clips.first().copied(),
+            paint_nodes,
+            tooltip,
+            module_id,
+            collect_command_attribution,
+        );
+    }
+    if clips.is_empty() {
+        return PaintProfilingMetrics::default();
+    }
+
+    FRONTEND_RENDERER.with(|engine| {
+        let engine = engine.borrow();
+        profiling::reset_raster_metrics();
+        engine.reset_text_cache_metrics();
+        let traversal_started = std::time::Instant::now();
+        let command_attribution = if collect_command_attribution {
+            engine.render_selected_display_list_regions_for_module_with_attribution(
+                commands,
+                buffer,
+                scale,
+                clips,
+                paint_nodes,
+                module_id,
+            )
+        } else {
+            engine.render_selected_display_list_regions_for_module(
+                commands,
+                buffer,
+                scale,
+                clips,
+                paint_nodes,
+                module_id,
+            );
+            PaintCommandAttribution::default()
+        };
+        let traversal_micros = traversal_started
+            .elapsed()
+            .as_micros()
+            .min(u128::from(u64::MAX)) as u64;
+        if let Some((tooltip_text, x, y)) = tooltip {
+            for &clip in clips {
+                engine.render_tooltip_clipped(tooltip_text, x, y, buffer, scale, Some(clip));
+            }
+        }
+        let raster = profiling::raster_metrics();
+        PaintProfilingMetrics {
+            text: engine.text_cache_metrics(),
+            command_attribution,
+            traversal_micros,
+            icon_image_raster_micros: raster.icon_image_raster_micros,
+            glyph_cache_hits: raster.glyph_cache_hits,
+            glyph_cache_misses: raster.glyph_cache_misses,
+            glyph_cache_entries: raster.glyph_cache_entries,
+            glyph_cache_capacity: raster.glyph_cache_capacity,
+            font_bytes_cache_hits: raster.font_bytes_cache_hits,
+            font_bytes_cache_misses: raster.font_bytes_cache_misses,
+            font_bytes_cache_entries: raster.font_bytes_cache_entries,
+            font_bytes_cache_capacity: raster.font_bytes_cache_capacity,
+            skia_glyph_cache_hits: raster.skia_glyph_cache_hits,
+            skia_glyph_cache_misses: raster.skia_glyph_cache_misses,
+            skia_glyph_cache_entries: raster.skia_glyph_cache_entries,
+            skia_glyph_cache_capacity: raster.skia_glyph_cache_capacity,
+            raster_cache_hits: raster.raster_cache_hits,
+            raster_cache_misses: raster.raster_cache_misses,
+            raster_cache_bypasses: raster.raster_cache_bypasses,
+            raster_cache_opaque_hits: raster.raster_cache_opaque_hits,
+            raster_cache_translucent_hits: raster.raster_cache_translucent_hits,
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -142,12 +142,6 @@ gate where the win is structural.
       identity only through `debug_assert_ne!`; release builds can silently
       alias retained snapshots. Add checked allocation or a secondary-key
       fallback, plus a forced-collision test.
-- [ ] Batch multi-rectangle damage into one raster session.
-      `paint_pixel_regions` calls `paint_selected_pixels` per damage rect,
-      repeating session setup and command traversal. Benchmark one, four, and
-      sixteen disjoint rects.
-- [ ] Evict child display lists individually — `shell_component.rs` clears the
-      whole 64-entry map at the cap, cold-starting every retained popup.
 - [ ] Reuse retained-update scratch storage.
       `RetainedWidgetTree::update_for_dirty_roots_collect` builds a fresh
       `update_nodes` `Vec` per scoped update though the tree retains other
@@ -174,8 +168,6 @@ gate where the win is structural.
       re-resolution. Drive it from existing dirty generations, and measure the
       diagnostic-enabled rebuild separately so instrumentation cannot hide its
       own cost.
-- [ ] Stop cloning the complete CSS-prop map per restyle — borrow it, hold it
-      behind `Arc`, or cache the resolver by prop/theme generation.
 - [ ] Replace flush-all style caches with bounded eviction. Inline-style,
       shared-theme, and declaration caches `clear()` at their caps, producing
       periodic cold-cache latency cliffs. Compare p95 frame time, not

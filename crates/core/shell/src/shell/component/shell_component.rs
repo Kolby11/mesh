@@ -1236,13 +1236,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             .subtree_generation(node.id)
             .unwrap_or_default();
         let mut child_display_lists = self.child_display_lists.borrow_mut();
-        const MAX_RETAINED_CHILD_DISPLAY_LISTS: usize = 64;
-        if !child_display_lists.contains_key(&node.id)
-            && child_display_lists.len() >= MAX_RETAINED_CHILD_DISPLAY_LISTS
-        {
-            child_display_lists.clear();
-        }
-        let display_list = child_display_lists.entry(node.id).or_default();
+        let display_list = child_display_lists.get_or_insert(node.id);
         display_list.update_at_for_retained_generation_with_dirty_nodes(
             node,
             retained_generation,
@@ -1306,7 +1300,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn child_surface_present_damage(&self, node_key: &str) -> Option<Vec<DamageRect>> {
         let node = find_node_by_key(self.last_tree.as_ref()?, node_key)?;
         let child_display_lists = self.child_display_lists.borrow();
-        let display_list = child_display_lists.get(&node.id)?;
+        let display_list = child_display_lists.get(node.id)?;
         if display_list.damage_rects().is_empty() {
             return None;
         }
@@ -1323,7 +1317,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             return Vec::new();
         };
         let child_display_lists = self.child_display_lists.borrow();
-        let Some(display_list) = child_display_lists.get(&node.id) else {
+        let Some(display_list) = child_display_lists.get(node.id) else {
             return Vec::new();
         };
         // Stable full-tree regions: deriving these from `paint_commands` would
@@ -1833,19 +1827,45 @@ impl FrontendSurfaceComponent {
             );
         }
 
-        let mut paint_metrics = mesh_core_render::PaintProfilingMetrics::default();
+        let mut physical_regions: smallvec::SmallVec<[(u32, u32, u32, u32); MAX_DAMAGE_RECTS]> =
+            smallvec::SmallVec::with_capacity(effective_damage.rects.len());
         for &damage in &effective_damage.rects {
-            let damage_metrics = self.paint_damage_rect(
-                buffer,
-                scale,
-                selected_paint,
-                damage,
-                tooltip,
-                current_tooltip_damage,
+            let physical_damage =
+                scale_damage_rect_to_buffer(damage, scale, buffer.width, buffer.height);
+            buffer.clear_rect(
+                physical_damage.x,
+                physical_damage.y,
+                physical_damage.width,
+                physical_damage.height,
+                mesh_core_elements::style::Color::TRANSPARENT,
             );
-            merge_paint_metrics(&mut paint_metrics, damage_metrics);
+            physical_regions.push((
+                physical_damage.x,
+                physical_damage.y,
+                physical_damage.width,
+                physical_damage.height,
+            ));
         }
-        paint_metrics
+        let tooltip_for_regions = tooltip.and_then(|(text, cx, cy)| {
+            current_tooltip_damage
+                .filter(|tooltip_rect| {
+                    effective_damage
+                        .rects
+                        .iter()
+                        .any(|damage| tooltip_rect.intersects(*damage))
+                })
+                .map(|_| (text.as_ref(), *cx, *cy))
+        });
+        mesh_core_render::paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution(
+            selected_paint,
+            buffer,
+            scale,
+            physical_regions.as_slice(),
+            None,
+            tooltip_for_regions,
+            Some(self.compiled.manifest.package.id.as_str()),
+            self.profiling_enabled,
+        )
     }
 
     fn paint_damage_rect(
@@ -2619,77 +2639,6 @@ fn bounding_damage_rect(rects: &[DamageRect], surface: DamageRect) -> Option<Dam
 
 fn damage_rects_area(rects: &[DamageRect]) -> u64 {
     rects.iter().map(|rect| rect.area()).sum()
-}
-
-fn merge_paint_metrics(
-    total: &mut mesh_core_render::PaintProfilingMetrics,
-    next: mesh_core_render::PaintProfilingMetrics,
-) {
-    total.command_attribution.merge(next.command_attribution);
-    total.text.layout_hits = total.text.layout_hits.saturating_add(next.text.layout_hits);
-    total.text.layout_misses = total
-        .text
-        .layout_misses
-        .saturating_add(next.text.layout_misses);
-    total.text.layout_invalidations = total
-        .text
-        .layout_invalidations
-        .saturating_add(next.text.layout_invalidations);
-    total.text.shaped_entries = total.text.shaped_entries.max(next.text.shaped_entries);
-    total.text.glyph_cache_active |= next.text.glyph_cache_active;
-    total.text.shaping_micros = total
-        .text
-        .shaping_micros
-        .saturating_add(next.text.shaping_micros);
-    total.traversal_micros = total.traversal_micros.saturating_add(next.traversal_micros);
-    total.icon_image_raster_micros = total
-        .icon_image_raster_micros
-        .saturating_add(next.icon_image_raster_micros);
-    total.raster_cache_hits = total
-        .raster_cache_hits
-        .saturating_add(next.raster_cache_hits);
-    total.raster_cache_misses = total
-        .raster_cache_misses
-        .saturating_add(next.raster_cache_misses);
-    total.raster_cache_bypasses = total
-        .raster_cache_bypasses
-        .saturating_add(next.raster_cache_bypasses);
-    total.raster_cache_opaque_hits = total
-        .raster_cache_opaque_hits
-        .saturating_add(next.raster_cache_opaque_hits);
-    total.raster_cache_translucent_hits = total
-        .raster_cache_translucent_hits
-        .saturating_add(next.raster_cache_translucent_hits);
-    total.glyph_cache_hits = total.glyph_cache_hits.saturating_add(next.glyph_cache_hits);
-    total.glyph_cache_misses = total
-        .glyph_cache_misses
-        .saturating_add(next.glyph_cache_misses);
-    total.glyph_cache_entries = total.glyph_cache_entries.max(next.glyph_cache_entries);
-    total.glyph_cache_capacity = total.glyph_cache_capacity.max(next.glyph_cache_capacity);
-    total.font_bytes_cache_hits = total
-        .font_bytes_cache_hits
-        .saturating_add(next.font_bytes_cache_hits);
-    total.font_bytes_cache_misses = total
-        .font_bytes_cache_misses
-        .saturating_add(next.font_bytes_cache_misses);
-    total.font_bytes_cache_entries = total
-        .font_bytes_cache_entries
-        .max(next.font_bytes_cache_entries);
-    total.font_bytes_cache_capacity = total
-        .font_bytes_cache_capacity
-        .max(next.font_bytes_cache_capacity);
-    total.skia_glyph_cache_hits = total
-        .skia_glyph_cache_hits
-        .saturating_add(next.skia_glyph_cache_hits);
-    total.skia_glyph_cache_misses = total
-        .skia_glyph_cache_misses
-        .saturating_add(next.skia_glyph_cache_misses);
-    total.skia_glyph_cache_entries = total
-        .skia_glyph_cache_entries
-        .max(next.skia_glyph_cache_entries);
-    total.skia_glyph_cache_capacity = total
-        .skia_glyph_cache_capacity
-        .max(next.skia_glyph_cache_capacity);
 }
 
 fn union_damage(current: DamageRect, next: DamageRect) -> DamageRect {

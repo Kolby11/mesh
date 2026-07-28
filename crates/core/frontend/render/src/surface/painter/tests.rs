@@ -46,6 +46,266 @@ fn pixel(buffer: &PixelBuffer, x: u32, y: u32) -> Color {
     buffer.get_pixel(x, y)
 }
 
+fn multi_region_fixture() -> (RetainedDisplayList, Vec<(u32, u32, u32, u32)>) {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 512.0,
+            height: 512.0,
+        },
+        Color {
+            r: 12,
+            g: 18,
+            b: 24,
+            a: 255,
+        },
+    );
+    root.id = 1;
+    let mut clips = Vec::with_capacity(16);
+    for row in 0..16 {
+        for column in 0..16 {
+            let x = (column * 32) as f32;
+            let y = (row * 32) as f32;
+            let mut child = node(
+                "box",
+                LayoutRect {
+                    x,
+                    y,
+                    width: 24.0,
+                    height: 24.0,
+                },
+                Color {
+                    r: 40 + row as u8 * 3,
+                    g: 60 + column as u8 * 2,
+                    b: 90,
+                    a: 220,
+                },
+            );
+            child.id = 2 + (row * 16 + column) as u64;
+            root.children.push(child);
+        }
+        clips.push(((row * 32 + 4) as u32, (row * 32 + 4) as u32, 12, 12));
+    }
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 512, 512, true, true);
+    (list, clips)
+}
+
+fn clear_regions(buffer: &mut PixelBuffer, clips: &[(u32, u32, u32, u32)]) {
+    for &(x, y, width, height) in clips {
+        buffer.clear_rect(x, y, width, height, Color::TRANSPARENT);
+    }
+}
+
+fn paint_regions_repeated(
+    selected: &crate::SelectedDisplayListPaint<'_>,
+    buffer: &mut PixelBuffer,
+    clips: &[(u32, u32, u32, u32)],
+) {
+    clear_regions(buffer, clips);
+    for &clip in clips {
+        let _ = crate::surface::paint_selected_display_list_for_module_with_profiling_metrics(
+            selected,
+            buffer,
+            1.0,
+            Some(clip),
+            None,
+            None,
+            None,
+        );
+    }
+}
+
+fn paint_regions_batched(
+    selected: &crate::SelectedDisplayListPaint<'_>,
+    buffer: &mut PixelBuffer,
+    clips: &[(u32, u32, u32, u32)],
+) {
+    clear_regions(buffer, clips);
+    let _ = crate::surface::paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution(
+        selected,
+        buffer,
+        1.0,
+        clips,
+        None,
+        None,
+        None,
+        false,
+    );
+}
+
+#[test]
+fn multi_region_selected_paint_matches_repeated_single_region_replay() {
+    let (list, clips) = multi_region_fixture();
+    let damages: Vec<_> = clips
+        .iter()
+        .map(|&(x, y, width, height)| DamageRect {
+            x,
+            y,
+            width,
+            height,
+        })
+        .collect();
+    let selected =
+        list.select_paint_commands_for_rects(&damages, DisplayListRepaintPolicy::MinimalDamage);
+    let engine = FrontendRenderEngine::new();
+    let mut repeated = PixelBuffer::new(512, 512);
+    let mut batched = PixelBuffer::new(512, 512);
+    let mut attributed = PixelBuffer::new(512, 512);
+
+    for &clip in &clips {
+        engine.render_selected_display_list_for_module(
+            &selected,
+            &mut repeated,
+            1.0,
+            Some(clip),
+            None,
+            None,
+        );
+    }
+    engine.render_selected_display_list_regions_for_module(
+        &selected,
+        &mut batched,
+        1.0,
+        &clips,
+        None,
+        None,
+    );
+    let attribution = engine.render_selected_display_list_regions_for_module_with_attribution(
+        &selected,
+        &mut attributed,
+        1.0,
+        &clips,
+        None,
+        None,
+    );
+
+    assert_eq!(batched.data, repeated.data);
+    assert_eq!(attributed.data, repeated.data);
+    assert!(attribution.get(PaintCommandClass::Primitive).command_count > 0);
+}
+
+#[test]
+fn overlapping_multi_region_paint_preserves_region_major_replay() {
+    let (list, _) = multi_region_fixture();
+    let clips = [(0, 0, 48, 32), (24, 0, 48, 32)];
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 72,
+            height: 32,
+        }),
+        DisplayListRepaintPolicy::MinimalDamage,
+    );
+    let engine = FrontendRenderEngine::new();
+    let mut repeated = PixelBuffer::new(512, 512);
+    let mut batched = PixelBuffer::new(512, 512);
+
+    for &clip in &clips {
+        engine.render_selected_display_list_for_module(
+            &selected,
+            &mut repeated,
+            1.0,
+            Some(clip),
+            None,
+            None,
+        );
+    }
+    engine.render_selected_display_list_regions_for_module(
+        &selected,
+        &mut batched,
+        1.0,
+        &clips,
+        None,
+        None,
+    );
+
+    assert_eq!(batched.data, repeated.data);
+}
+
+#[test]
+#[ignore = "release-only multi-rectangle raster-session benchmark"]
+fn batched_damage_regions_beat_repeated_raster_sessions() {
+    use std::hint::black_box;
+    use std::time::{Duration, Instant};
+
+    let (list, all_clips) = multi_region_fixture();
+    let all_damages: Vec<_> = all_clips
+        .iter()
+        .map(|&(x, y, width, height)| DamageRect {
+            x,
+            y,
+            width,
+            height,
+        })
+        .collect();
+    let selected =
+        list.select_paint_commands_for_rects(&all_damages, DisplayListRepaintPolicy::MinimalDamage);
+
+    for region_count in [1_usize, 4, 16] {
+        let clips = &all_clips[..region_count];
+        let mut repeated_total = Duration::ZERO;
+        let mut batched_total = Duration::ZERO;
+        let mut repeated = PixelBuffer::new(512, 512);
+        let mut batched = PixelBuffer::new(512, 512);
+
+        for _ in 0..40 {
+            paint_regions_repeated(&selected, &mut repeated, clips);
+            paint_regions_batched(&selected, &mut batched, clips);
+        }
+
+        for sample in 0..6 {
+            if sample % 2 == 0 {
+                let started = Instant::now();
+                for _ in 0..250 {
+                    paint_regions_repeated(&selected, &mut repeated, clips);
+                }
+                repeated_total += started.elapsed();
+
+                let started = Instant::now();
+                for _ in 0..250 {
+                    paint_regions_batched(&selected, &mut batched, clips);
+                }
+                batched_total += started.elapsed();
+            } else {
+                let started = Instant::now();
+                for _ in 0..250 {
+                    paint_regions_batched(&selected, &mut batched, clips);
+                }
+                batched_total += started.elapsed();
+
+                let started = Instant::now();
+                for _ in 0..250 {
+                    paint_regions_repeated(&selected, &mut repeated, clips);
+                }
+                repeated_total += started.elapsed();
+            }
+        }
+
+        assert_eq!(batched.data, repeated.data);
+        black_box(batched.get_pixel(4, 4));
+        let speedup = repeated_total.as_secs_f64() / batched_total.as_secs_f64();
+        eprintln!(
+            "multi-region raster ({region_count} rects): repeated={repeated_total:?} batched={batched_total:?} speedup={speedup:.3}x"
+        );
+        eprintln!("MESH_PERF metric=multi_damage_{region_count}_rect_speedup value={speedup:.6}");
+        match region_count {
+            4 => assert!(
+                speedup >= 2.805,
+                "four-region batching must retain the checked 3.30x baseline within 15%"
+            ),
+            16 => assert!(
+                speedup >= 4.7175,
+                "sixteen-region batching must retain the checked 5.55x baseline within 15%"
+            ),
+            _ => {}
+        }
+    }
+}
+
 #[test]
 fn attributed_selected_paint_preserves_pixels_and_classifies_commands() {
     let mut root = node(

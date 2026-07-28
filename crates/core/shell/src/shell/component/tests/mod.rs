@@ -155,6 +155,163 @@ fn service_capabilities_cache_reuses_the_global_entry() {
     assert_eq!(second.service_name, "audio");
 }
 
+#[test]
+fn child_display_list_cache_evicts_only_the_least_recently_used_entry() {
+    let mut cache = ChildDisplayListCache::default();
+    for node_id in 1..=MAX_RETAINED_CHILD_DISPLAY_LISTS as NodeId {
+        cache.get_or_insert(node_id);
+    }
+
+    cache.get_or_insert(1);
+    cache.get_or_insert(MAX_RETAINED_CHILD_DISPLAY_LISTS as NodeId + 1);
+
+    assert_eq!(cache.entries.len(), MAX_RETAINED_CHILD_DISPLAY_LISTS);
+    assert!(
+        cache.get(1).is_some(),
+        "recently touched entry must survive"
+    );
+    assert!(
+        cache.get(2).is_none(),
+        "oldest untouched entry should be evicted"
+    );
+    for node_id in 3..=MAX_RETAINED_CHILD_DISPLAY_LISTS as NodeId + 1 {
+        assert!(
+            cache.get(node_id).is_some(),
+            "inserting at the cap must preserve every non-evicted entry"
+        );
+    }
+}
+
+// cargo test -p mesh-core-shell --release -- child_display_list_lru_beats_flush_all --ignored --nocapture
+#[test]
+#[ignore = "release-only child display-list cache benchmark"]
+fn child_display_list_lru_beats_flush_all() {
+    fn popup_tree(index: usize) -> WidgetNode {
+        let mut root = WidgetNode::new("popover");
+        root.layout.width = 240.0;
+        root.layout.height = 160.0;
+        root.computed_style.background_color = mesh_core_elements::style::Color {
+            r: 24,
+            g: 28,
+            b: 36,
+            a: 248,
+        };
+        for child_index in 0..24 {
+            let mut child = WidgetNode::new("box");
+            child.layout.x = (child_index % 4) as f32 * 58.0;
+            child.layout.y = (child_index / 4) as f32 * 26.0;
+            child.layout.width = 54.0;
+            child.layout.height = 22.0;
+            child.computed_style.background_color = mesh_core_elements::style::Color {
+                r: 40 + (index % 80) as u8,
+                g: 64 + (child_index % 64) as u8,
+                b: 96,
+                a: 255,
+            };
+            root.children.push(child);
+        }
+        root
+    }
+
+    fn update_display_list(display_list: &mut RetainedDisplayList, tree: &WidgetNode) {
+        display_list.update_at_for_retained_generation(
+            std::hint::black_box(tree),
+            1,
+            0.0,
+            0.0,
+            240,
+            160,
+            false,
+            true,
+        );
+    }
+
+    fn run_flush_all(trees: &[WidgetNode], cycles: usize) -> (std::time::Duration, usize) {
+        let started = std::time::Instant::now();
+        let mut misses = 0usize;
+        let mut cache = HashMap::<NodeId, RetainedDisplayList>::new();
+        for cycle in 0..cycles {
+            for tree in &trees[..48] {
+                if !cache.contains_key(&tree.id) {
+                    if cache.len() >= MAX_RETAINED_CHILD_DISPLAY_LISTS {
+                        cache.clear();
+                    }
+                    misses += 1;
+                }
+                update_display_list(cache.entry(tree.id).or_default(), tree);
+            }
+            let transient = &trees[48 + cycle % (trees.len() - 48)];
+            if !cache.contains_key(&transient.id) {
+                if cache.len() >= MAX_RETAINED_CHILD_DISPLAY_LISTS {
+                    cache.clear();
+                }
+                misses += 1;
+            }
+            update_display_list(cache.entry(transient.id).or_default(), transient);
+        }
+        (started.elapsed(), misses)
+    }
+
+    fn run_lru(trees: &[WidgetNode], cycles: usize) -> (std::time::Duration, usize) {
+        let started = std::time::Instant::now();
+        let mut misses = 0usize;
+        let mut cache = ChildDisplayListCache::default();
+        for cycle in 0..cycles {
+            for tree in &trees[..48] {
+                misses += usize::from(cache.get(tree.id).is_none());
+                update_display_list(cache.get_or_insert(tree.id), tree);
+            }
+            let transient = &trees[48 + cycle % (trees.len() - 48)];
+            misses += usize::from(cache.get(transient.id).is_none());
+            update_display_list(cache.get_or_insert(transient.id), transient);
+        }
+        (started.elapsed(), misses)
+    }
+
+    const CYCLES: usize = 2_000;
+    let trees: Vec<_> = (0..96).map(popup_tree).collect();
+    let mut flush_samples = Vec::new();
+    let mut lru_samples = Vec::new();
+    let mut flush_misses = 0usize;
+    let mut lru_misses = 0usize;
+    for sample in 0..5 {
+        let ((flush_time, measured_flush_misses), (lru_time, measured_lru_misses)) =
+            if sample % 2 == 0 {
+                (run_flush_all(&trees, CYCLES), run_lru(&trees, CYCLES))
+            } else {
+                let lru = run_lru(&trees, CYCLES);
+                let flush = run_flush_all(&trees, CYCLES);
+                (flush, lru)
+            };
+        flush_samples.push(flush_time);
+        lru_samples.push(lru_time);
+        flush_misses = measured_flush_misses;
+        lru_misses = measured_lru_misses;
+    }
+
+    flush_samples.sort_unstable();
+    lru_samples.sort_unstable();
+    let flush_median = flush_samples[flush_samples.len() / 2];
+    let lru_median = lru_samples[lru_samples.len() / 2];
+    let speedup = flush_median.as_secs_f64() / lru_median.as_secs_f64();
+    eprintln!(
+        "child display-list cache over {CYCLES} frames with 48 hot and 48 rotating popup trees: flush-all {:?}..{:?} (median {flush_median:?}, {flush_misses} misses); LRU {:?}..{:?} (median {lru_median:?}, {lru_misses} misses); ratio {speedup:.2}x",
+        flush_samples[0],
+        flush_samples[flush_samples.len() - 1],
+        lru_samples[0],
+        lru_samples[lru_samples.len() - 1],
+    );
+    eprintln!("MESH_PERF metric=child_display_list_lru_speedup value={speedup:.3}");
+    assert!(
+        lru_misses * 2 < flush_misses,
+        "individual eviction should avoid at least half of flush-all cold starts"
+    );
+    assert!(
+        lru_median * 5 < flush_median * 4,
+        "individual eviction should improve median cache-and-lowering time by at least 20%"
+    );
+}
+
 // cargo test -p mesh-core-shell --release -- local_service_capability_cache_beats_global_lookup --ignored --nocapture
 #[test]
 #[ignore = "release-only service capability lookup microbenchmark"]

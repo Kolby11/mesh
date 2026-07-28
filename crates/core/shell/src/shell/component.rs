@@ -147,6 +147,84 @@ struct InstanceKeyInterner {
     scratch: String,
 }
 
+const MAX_RETAINED_CHILD_DISPLAY_LISTS: usize = 64;
+
+#[derive(Debug)]
+struct ChildDisplayListCacheEntry {
+    display_list: RetainedDisplayList,
+    last_used: u64,
+}
+
+/// Bounded popup-local display-list cache.
+///
+/// Cache misses are uncommon, so hits only update a timestamp while misses
+/// scan the bounded set for the least-recently-used entry. This avoids the
+/// previous flush-all cliff, where adding one popup at the cap discarded every
+/// still-hot popup display list.
+#[derive(Debug)]
+struct ChildDisplayListCache {
+    entries: HashMap<NodeId, ChildDisplayListCacheEntry>,
+    clock: u64,
+}
+
+impl Default for ChildDisplayListCache {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::with_capacity(MAX_RETAINED_CHILD_DISPLAY_LISTS),
+            clock: 0,
+        }
+    }
+}
+
+impl ChildDisplayListCache {
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.clock = 0;
+    }
+
+    fn get(&self, node_id: NodeId) -> Option<&RetainedDisplayList> {
+        self.entries.get(&node_id).map(|entry| &entry.display_list)
+    }
+
+    fn get_or_insert(&mut self, node_id: NodeId) -> &mut RetainedDisplayList {
+        self.clock = self.clock.saturating_add(1);
+        if self.clock == u64::MAX {
+            for entry in self.entries.values_mut() {
+                entry.last_used = 0;
+            }
+            self.clock = 1;
+        }
+        let last_used = self.clock;
+
+        if self.entries.contains_key(&node_id) {
+            let entry = self
+                .entries
+                .get_mut(&node_id)
+                .expect("child display-list entry checked above");
+            entry.last_used = last_used;
+            return &mut entry.display_list;
+        }
+
+        if self.entries.len() >= MAX_RETAINED_CHILD_DISPLAY_LISTS
+            && let Some(evicted) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_used)
+                .map(|(node_id, _)| *node_id)
+        {
+            self.entries.remove(&evicted);
+        }
+        &mut self
+            .entries
+            .entry(node_id)
+            .or_insert_with(|| ChildDisplayListCacheEntry {
+                display_list: RetainedDisplayList::default(),
+                last_used,
+            })
+            .display_list
+    }
+}
+
 impl InstanceKeyInterner {
     fn intern(&mut self, key: &str) -> Arc<str> {
         if let Some(key) = self.keys.get(key) {
@@ -713,7 +791,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// These retain the expensive tree-to-paint-command lowering between child
     /// rasters; the shell's per-child generation cache decides when raster is
     /// needed, while this cache makes that raster a command replay.
-    child_display_lists: RefCell<HashMap<NodeId, RetainedDisplayList>>,
+    child_display_lists: RefCell<ChildDisplayListCache>,
     diagnostics: Option<Diagnostics>,
     /// Desired visibility for surface portals (`<ImportedSurface hidden={...} />`).
     /// Updated during build_tree; compared to last_surface_states in tick().
@@ -980,7 +1058,7 @@ impl FrontendSurfaceComponent {
             node_service_field_deps: NodeServiceFieldDependencies::default(),
             retained_render_objects: RenderObjectTree::default(),
             retained_display_list: RetainedDisplayList::default(),
-            child_display_lists: RefCell::new(HashMap::new()),
+            child_display_lists: RefCell::new(ChildDisplayListCache::default()),
             diagnostics: None,
             pending_surface_states: RefCell::new(HashMap::new()),
             last_surface_states: HashMap::new(),

@@ -5,6 +5,7 @@ use crate::display_list::{
     DisplayPaintCommandKind, DisplayPaintContent, DisplayPaintNode, SelectedDisplayListPaint,
 };
 use mesh_core_elements::style::Edges;
+use smallvec::SmallVec;
 
 use super::*;
 use crate::surface::{PaintCommandAttribution, PaintCommandClass};
@@ -240,6 +241,123 @@ impl FrontendRenderEngine {
         }
     }
 
+    /// Paint one selected command stream through several disjoint damage
+    /// clips. The command stream is traversed once and the Skia canvas session
+    /// is shared across every region; commands spanning more than one region
+    /// are replayed only for the clips they intersect.
+    pub fn render_selected_display_list_regions_for_module(
+        &self,
+        commands: &SelectedDisplayListPaint<'_>,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        clips: &[(u32, u32, u32, u32)],
+        paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
+        module_id: Option<&str>,
+    ) {
+        let surface_clip = ClipRect {
+            x: 0,
+            y: 0,
+            width: buffer.width as i32,
+            height: buffer.height as i32,
+        };
+        let paint_clips = clipped_paint_regions(surface_clip, clips);
+        if paint_clips.is_empty() {
+            return;
+        }
+
+        let mut scratch = self.render_scratch.borrow_mut();
+        scratch.prepare(
+            commands
+                .len()
+                .saturating_mul(paint_clips.len())
+                .min(MAX_RETAINED_BATCH_COMMANDS),
+        );
+        let mut session = PixelCanvasSession::new(buffer);
+        if paint_regions_overlap(&paint_clips) {
+            for &paint_clip in &paint_clips {
+                for (command, kind) in commands.iter_with_kinds() {
+                    if self.try_append_display_self_paint_batch(
+                        command,
+                        kind,
+                        scale,
+                        paint_clip,
+                        paint_nodes,
+                        &mut scratch.batched_commands,
+                    ) {
+                        continue;
+                    }
+                    if !scratch.batched_commands.is_empty() {
+                        self.execute_painter_commands_in_session(
+                            &mut session,
+                            &scratch.batched_commands,
+                        );
+                        scratch.batched_commands.clear();
+                    }
+                    self.render_display_command(
+                        command,
+                        kind,
+                        &mut session,
+                        scale,
+                        paint_clip,
+                        paint_nodes,
+                        module_id,
+                        &mut scratch.node_commands,
+                    );
+                }
+                if !scratch.batched_commands.is_empty() {
+                    self.execute_painter_commands_in_session(
+                        &mut session,
+                        &scratch.batched_commands,
+                    );
+                    scratch.batched_commands.clear();
+                }
+            }
+            return;
+        }
+        for (command, kind) in commands.iter_with_kinds() {
+            if paint_nodes.is_some_and(|nodes| !nodes.contains(&command.node.id)) {
+                continue;
+            }
+            let command_clip = scaled_display_clip(command.clip, scale);
+            for &paint_clip in &paint_clips {
+                let effective_clip = intersect_clip(paint_clip, command_clip);
+                if effective_clip.width <= 0 || effective_clip.height <= 0 {
+                    continue;
+                }
+                if self.try_append_display_self_paint_batch(
+                    command,
+                    kind,
+                    scale,
+                    paint_clip,
+                    paint_nodes,
+                    &mut scratch.batched_commands,
+                ) {
+                    continue;
+                }
+                if !scratch.batched_commands.is_empty() {
+                    self.execute_painter_commands_in_session(
+                        &mut session,
+                        &scratch.batched_commands,
+                    );
+                    scratch.batched_commands.clear();
+                }
+                self.render_display_command(
+                    command,
+                    kind,
+                    &mut session,
+                    scale,
+                    paint_clip,
+                    paint_nodes,
+                    module_id,
+                    &mut scratch.node_commands,
+                );
+            }
+        }
+        if !scratch.batched_commands.is_empty() {
+            self.execute_painter_commands_in_session(&mut session, &scratch.batched_commands);
+        }
+    }
+
     /// Paint a selected display list while attributing raster time to a small,
     /// fixed set of command classes. Kept as a separate hot loop so normal
     /// painting pays no per-command clock or profiling branch cost.
@@ -313,6 +431,161 @@ impl FrontendRenderEngine {
                 &mut scratch.node_commands,
             );
             attribution.record(class, 1, started.elapsed());
+        }
+        if !scratch.batched_commands.is_empty() {
+            let started = std::time::Instant::now();
+            self.execute_painter_commands_in_session(&mut session, &scratch.batched_commands);
+            attribution.record(
+                PaintCommandClass::Primitive,
+                batched_command_count,
+                started.elapsed(),
+            );
+        }
+        attribution
+    }
+
+    /// Multi-region counterpart to
+    /// [`Self::render_selected_display_list_for_module_with_attribution`].
+    /// Attribution counts actual command/clip replays, matching the sum that
+    /// callers previously produced by painting each region independently.
+    pub fn render_selected_display_list_regions_for_module_with_attribution(
+        &self,
+        commands: &SelectedDisplayListPaint<'_>,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        clips: &[(u32, u32, u32, u32)],
+        paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
+        module_id: Option<&str>,
+    ) -> PaintCommandAttribution {
+        let surface_clip = ClipRect {
+            x: 0,
+            y: 0,
+            width: buffer.width as i32,
+            height: buffer.height as i32,
+        };
+        let paint_clips = clipped_paint_regions(surface_clip, clips);
+        if paint_clips.is_empty() {
+            return PaintCommandAttribution::default();
+        }
+
+        let mut attribution = PaintCommandAttribution::default();
+        let mut scratch = self.render_scratch.borrow_mut();
+        scratch.prepare(
+            commands
+                .len()
+                .saturating_mul(paint_clips.len())
+                .min(MAX_RETAINED_BATCH_COMMANDS),
+        );
+        let mut session = PixelCanvasSession::new(buffer);
+        let mut batched_command_count = 0_u64;
+        if paint_regions_overlap(&paint_clips) {
+            for &paint_clip in &paint_clips {
+                for (command, kind) in commands.iter_with_kinds() {
+                    if self.try_append_display_self_paint_batch(
+                        command,
+                        kind,
+                        scale,
+                        paint_clip,
+                        paint_nodes,
+                        &mut scratch.batched_commands,
+                    ) {
+                        batched_command_count = batched_command_count.saturating_add(1);
+                        continue;
+                    }
+                    if !scratch.batched_commands.is_empty() {
+                        let started = std::time::Instant::now();
+                        self.execute_painter_commands_in_session(
+                            &mut session,
+                            &scratch.batched_commands,
+                        );
+                        attribution.record(
+                            PaintCommandClass::Primitive,
+                            batched_command_count,
+                            started.elapsed(),
+                        );
+                        scratch.batched_commands.clear();
+                        batched_command_count = 0;
+                    }
+                    let class = paint_command_class(command, kind);
+                    let started = std::time::Instant::now();
+                    self.render_display_command(
+                        command,
+                        kind,
+                        &mut session,
+                        scale,
+                        paint_clip,
+                        paint_nodes,
+                        module_id,
+                        &mut scratch.node_commands,
+                    );
+                    attribution.record(class, 1, started.elapsed());
+                }
+                if !scratch.batched_commands.is_empty() {
+                    let started = std::time::Instant::now();
+                    self.execute_painter_commands_in_session(
+                        &mut session,
+                        &scratch.batched_commands,
+                    );
+                    attribution.record(
+                        PaintCommandClass::Primitive,
+                        batched_command_count,
+                        started.elapsed(),
+                    );
+                    scratch.batched_commands.clear();
+                    batched_command_count = 0;
+                }
+            }
+            return attribution;
+        }
+        for (command, kind) in commands.iter_with_kinds() {
+            if paint_nodes.is_some_and(|nodes| !nodes.contains(&command.node.id)) {
+                continue;
+            }
+            let command_clip = scaled_display_clip(command.clip, scale);
+            for &paint_clip in &paint_clips {
+                let effective_clip = intersect_clip(paint_clip, command_clip);
+                if effective_clip.width <= 0 || effective_clip.height <= 0 {
+                    continue;
+                }
+                if self.try_append_display_self_paint_batch(
+                    command,
+                    kind,
+                    scale,
+                    paint_clip,
+                    paint_nodes,
+                    &mut scratch.batched_commands,
+                ) {
+                    batched_command_count = batched_command_count.saturating_add(1);
+                    continue;
+                }
+                if !scratch.batched_commands.is_empty() {
+                    let started = std::time::Instant::now();
+                    self.execute_painter_commands_in_session(
+                        &mut session,
+                        &scratch.batched_commands,
+                    );
+                    attribution.record(
+                        PaintCommandClass::Primitive,
+                        batched_command_count,
+                        started.elapsed(),
+                    );
+                    scratch.batched_commands.clear();
+                    batched_command_count = 0;
+                }
+                let class = paint_command_class(command, kind);
+                let started = std::time::Instant::now();
+                self.render_display_command(
+                    command,
+                    kind,
+                    &mut session,
+                    scale,
+                    paint_clip,
+                    paint_nodes,
+                    module_id,
+                    &mut scratch.node_commands,
+                );
+                attribution.record(class, 1, started.elapsed());
+            }
         }
         if !scratch.batched_commands.is_empty() {
             let started = std::time::Instant::now();
@@ -945,6 +1218,36 @@ impl FrontendRenderEngine {
             clip,
         );
     }
+}
+
+fn clipped_paint_regions(
+    surface_clip: ClipRect,
+    clips: &[(u32, u32, u32, u32)],
+) -> SmallVec<[ClipRect; 16]> {
+    clips
+        .iter()
+        .filter_map(|&(x, y, width, height)| {
+            let clip = intersect_clip(
+                surface_clip,
+                ClipRect {
+                    x: x.min(i32::MAX as u32) as i32,
+                    y: y.min(i32::MAX as u32) as i32,
+                    width: width.min(i32::MAX as u32) as i32,
+                    height: height.min(i32::MAX as u32) as i32,
+                },
+            );
+            (clip.width > 0 && clip.height > 0).then_some(clip)
+        })
+        .collect()
+}
+
+fn paint_regions_overlap(clips: &[ClipRect]) -> bool {
+    clips.iter().enumerate().any(|(index, left)| {
+        clips[index + 1..].iter().any(|right| {
+            let overlap = intersect_clip(*left, *right);
+            overlap.width > 0 && overlap.height > 0
+        })
+    })
 }
 
 fn paint_command_class(

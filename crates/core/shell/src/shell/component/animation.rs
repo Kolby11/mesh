@@ -135,7 +135,7 @@ impl FrontendSurfaceComponent {
         let mut has_active_keyframe_animation = false;
         let mut active_keyframe_bucket = AnimationPropertyBucket::None;
         let theme = self.active_theme.borrow().clone();
-        let resolver = StyleResolver::new(&theme).with_props(surface_css_props.clone());
+        let resolver = StyleResolver::new(&theme).with_borrowed_props(surface_css_props);
 
         self.apply_style_animations_to_node(
             tree,

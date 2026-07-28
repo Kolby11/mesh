@@ -33,6 +33,7 @@ section noted.
 | 2026-07-12 | `tree.style(id) == new_style` equality guard before Taffy `set_style` | T | Slower than unconditional `set_style` (51.642ms vs 46.115ms); needed the retained dirty-bit feed, which landed 2026-07-12 |
 | 2026-07-15 | Rust recursive detached-Lua-table cache for nested storage reads | I | Regressed 1.221s current to 1.815s cached over 100k reads (0.67x); deep-copy construction outweighed saved conversion/locking |
 | 2026-07-15 | Luau `table.clone` plus recursive array replacement for nested storage reads | I | Regressed 1.237s current to 1.611s cached over 100k reads (0.77x); exact detached-value semantics still require too much table reconstruction |
+| 2026-07-28 | `SmallVec<[&WidgetNode; 8]>` for scoped retained-update candidates | N | Removed one allocation per sparse update, but the complete 40-node path improved only 1.005x (63.918ms → 63.631ms/50k); prototype reverted |
 
 ## 2026-07-16 — completed performance checkpoints archived from `todo.md`
 
@@ -2554,3 +2555,122 @@ shared generation and every lookup misses — correct but unaccelerated until
 per-occurrence instance identity lands. `render_slot` instances are not yet
 memoized. Only public script members are reactive (unchanged contract):
 template expressions over private locals were never guaranteed to re-render.
+
+---
+
+## 2026-07-28 — child display-list cache evicts individually
+
+area: retained rendering, promoted child surfaces
+
+The promoted-child display-list cache keeps its 64-entry bound but now evicts
+only the least-recently-used entry on a miss at capacity. The previous policy
+cleared the entire map, so introducing one new popup could cold-start every
+still-active popup even though only one slot was needed. Hits update a monotonic
+recency stamp; misses scan at most 64 entries, remove one, and retain all other
+lowered command streams.
+
+**Measured.** Release under `nix develop`, five interleaved before/after runs
+over 2,000 frames with 48 hot and 48 rotating 25-node popup trees:
+flush-all took 118.756–127.112ms versus 30.694–31.272ms with individual LRU
+eviction. Median time improved 3.86x, and cold display-list rebuilds fell from
+8,000 to 2,048. The benchmark itself requires at least a 1.25x median
+improvement and at least a 2x reduction in cold starts. The checked
+`child_display_list_lru_speedup` CI baseline is 3.50x with 20% tolerance,
+requiring at least 2.80x on other runners.
+
+**Correctness.** The eviction regression fills the production-sized cache,
+refreshes one entry, inserts at capacity, and verifies that only the oldest
+entry leaves. The shell crate compiles in the Nix development environment; all
+13 non-ignored `child_surface` tests pass. The broader shell suite reported 556
+passing, 18 failing, and 123 ignored; none of those failures exercises the
+64-entry cap or eviction path, so that result is recorded as the current shell
+baseline rather than attributed to this checkpoint.
+
+**Aggregate gate run.** `tools/check-performance` remeasured this checkpoint at
+4.164x, passing its 2.80x threshold. The aggregate command exited nonzero only
+because the existing `shared_theme_revision_cache_speedup` gate measured 3.175x
+against its 4.40x threshold; that separate baseline was left unchanged.
+
+---
+
+## 2026-07-28 — shell restyles borrow stable CSS props
+
+area: style resolution, interaction and animation restyles
+
+`StyleResolver` now accepts either owned or borrowed component-prop maps. The
+compiler paths that construct temporary prop maps retain owned semantics, while
+shell restyles and animation passes borrow the `SurfaceCssProps` map that
+already lives for the complete cascade. This removes a full `HashMap<String,
+StyleValue>` clone, including every key and value allocation, from each
+restyle-resolver setup without changing prop lookup, fingerprinting, or shared
+theme-default cache identity.
+
+**Measured.** Release under `nix develop` (rustc/cargo 1.94.0), five
+interleaved before/after samples of 50,000 targeted-restyle resolver setups and
+one live prop lookup with 32 component props: owned cloning took
+120.079–121.414ms versus 42.551–43.847ms borrowed. Medians were 120.455ms and
+42.979ms, a 2.80x improvement. The checked
+`borrowed_style_props_speedup` baseline is 2.50x with 20% tolerance, requiring
+at least 2.00x; the aggregate gate run measured 2.803x and passed.
+
+**Correctness.** Owned and borrowed resolvers have direct fingerprint and
+resolved-value parity coverage. `cargo check -p mesh-core-shell` passes; all 30
+non-ignored animation-filtered shell tests pass. The restyle-filtered shell
+slice reported 26 passing and the same two unrelated interaction failures
+already present in the recorded 556/18 shell baseline. The elements suite
+reported 197 passing and one unrelated order-sensitive assertion in
+`indexed_theme_defaults_reuse_lowered_declarations_per_revision`.
+
+**Aggregate gate run.** Every gate except the previously recorded
+`shared_theme_revision_cache_speedup` passed. That unrelated gate measured
+3.021x against its existing 4.40x threshold; its baseline was not weakened.
+
+---
+
+## 2026-07-28 — multi-rectangle damage shares one raster session
+
+area: retained display-list replay, sparse damage raster
+
+`FrontendSurfaceComponent::paint_pixel_regions` now clears every physical
+damage rectangle and submits the complete region set through one renderer
+entrypoint. For disjoint regions, the renderer traverses the selected display
+commands once, shares one `PixelCanvasSession`, and replays each command only
+for the clips it intersects. The existing single-region path is unchanged.
+Physical clips that overlap after fractional scaling retain the old
+region-major replay order, but still share the session and profiling reset, so
+translucent compositing remains byte-for-byte compatible. Per-frame text,
+raster-cache, and command-attribution metrics now come from one reset instead
+of merging independently reset samples.
+
+**Measured.** Release under `nix develop` (rustc/cargo 1.94.0) on an AMD Ryzen
+7 7840HS. The workload is a retained 512×512 surface with 256 translucent
+primitive nodes; each result totals six alternating samples of 250 frames for
+the repeated-session control and batched path. Three complete runs measured:
+
+| Disjoint regions | Repeated sessions | One session | Relative |
+| --- | --- | --- | --- |
+| 1 | 9.737–10.416ms | 9.601–10.172ms | 0.957–1.082x |
+| 4 | 38.596–41.601ms | 11.668–11.948ms | 3.308–3.482x |
+| 16 | 155.264–159.446ms | 27.524–27.844ms | 5.576–5.793x |
+
+The checked `multi_damage_4_rect_speedup` baseline is 3.30x and
+`multi_damage_16_rect_speedup` is 5.55x, both with 15% tolerance (minimums
+2.805x and 4.7175x). The ignored release benchmark asserts those thresholds
+directly and is also registered in `tools/check-performance`.
+
+**Correctness.** Pixel-parity tests cover disjoint command-major replay,
+attributed replay, and overlapping region-major fallback. The complete render
+library suite reports 191 passing and 36 ignored; the shell damage-filtered
+slice reports 18 passing and one ignored. `cargo check -p mesh-core-render
+-p mesh-core-shell` passes under the Nix development environment.
+
+**Aggregate gate run.** The aggregate command could not reach its final
+baseline comparison because the unrelated pre-existing
+`stable_child_id_reuse_beats_rewriting_slots` benchmark self-asserted at
+1.051x against its 1.25x requirement and aborted the script before this new
+entry in command order. The focused new benchmark passes both checked
+thresholds; the existing baseline was not weakened. The previously recorded
+`shared_theme_revision_cache_speedup` aggregate failure also remains open.
+
+Focused gate confirmation after the final formatting pass measured 3.476x for
+four regions and 5.662x for sixteen; both direct assertions passed.

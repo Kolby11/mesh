@@ -3,6 +3,7 @@ use super::*;
 use crate::tree::ElementState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue, prop_variable_key};
 use mesh_core_theme::{Theme, TokenValue};
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
@@ -65,7 +66,7 @@ pub struct StyleResolver<'a> {
     /// Per-instance resolved component-prop values, keyed by `prop_variable_key`
     /// (`--mesh-prop-<name>`). Consulted as a read-only fallback after the
     /// per-node custom-variable scratch. Empty without a `<props>` block.
-    props: HashMap<String, StyleValue>,
+    props: Cow<'a, HashMap<String, StyleValue>>,
     props_fingerprint: u64,
     module_variable_cache: RefCell<HashMap<String, Vec<(String, StyleValue)>>>,
     /// Comparison-keyed front cache for the shared theme-default cache.
@@ -916,7 +917,7 @@ impl<'a> StyleResolver<'a> {
     pub fn new(theme: &'a Theme) -> Self {
         Self {
             theme,
-            props: HashMap::new(),
+            props: Cow::Owned(HashMap::new()),
             props_fingerprint: style_props_fingerprint(&HashMap::new()),
             module_variable_cache: RefCell::new(HashMap::new()),
             theme_default_recent: RefCell::new(Vec::new()),
@@ -931,7 +932,16 @@ impl<'a> StyleResolver<'a> {
     /// `prop_variable_key(name)` and holds the resolved value for each prop.
     pub fn with_props(mut self, props: HashMap<String, StyleValue>) -> Self {
         self.props_fingerprint = style_props_fingerprint(&props);
-        self.props = props;
+        self.props = Cow::Owned(props);
+        self
+    }
+
+    /// Borrow per-instance component props when their owner outlives this
+    /// resolver. Shell restyles already retain the map for the full cascade,
+    /// so borrowing avoids cloning every key and value on each frame.
+    pub fn with_borrowed_props(mut self, props: &'a HashMap<String, StyleValue>) -> Self {
+        self.props_fingerprint = style_props_fingerprint(props);
+        self.props = Cow::Borrowed(props);
         self
     }
 
@@ -4205,6 +4215,98 @@ mod tests {
         assert_eq!(large.style.font_size, 28.0);
         assert!(Rc::ptr_eq(&small, &small_again));
         assert!(!Rc::ptr_eq(&small, &large));
+    }
+
+    #[test]
+    fn borrowed_props_match_owned_resolver_semantics() {
+        let theme = mesh_core_theme::default_theme();
+        let prop_name = prop_variable_key("panel_width");
+        let props = HashMap::from([(prop_name.clone(), StyleValue::Literal("320px".to_string()))]);
+        let value = StyleValue::Prop("panel_width".to_string());
+
+        let owned = StyleResolver::new(&theme).with_props(props.clone());
+        let borrowed = StyleResolver::new(&theme).with_borrowed_props(&props);
+
+        assert_eq!(borrowed.props_fingerprint, owned.props_fingerprint);
+        assert_eq!(borrowed.resolve_value(&value), owned.resolve_value(&value));
+        assert!(matches!(borrowed.props, Cow::Borrowed(_)));
+        assert!(matches!(owned.props, Cow::Owned(_)));
+    }
+
+    // cargo test -p mesh-core-elements --release -- borrowed_style_props_beat_per_resolver_clone --ignored --nocapture
+    #[test]
+    #[ignore = "release-only borrowed style-prop resolver benchmark"]
+    fn borrowed_style_props_beat_per_resolver_clone() {
+        fn run(
+            theme: &Theme,
+            props: &HashMap<String, StyleValue>,
+            value: &StyleValue,
+            borrow: bool,
+            iterations: usize,
+        ) -> std::time::Duration {
+            let started = std::time::Instant::now();
+            let mut checksum = 0usize;
+            for _ in 0..iterations {
+                let resolver = if borrow {
+                    StyleResolver::new(std::hint::black_box(theme))
+                        .with_borrowed_props(std::hint::black_box(props))
+                } else {
+                    StyleResolver::new(std::hint::black_box(theme))
+                        .with_props(std::hint::black_box(props.clone()))
+                };
+                checksum = checksum.wrapping_add(std::hint::black_box(
+                    resolver.resolve_value(std::hint::black_box(value)).len(),
+                ));
+            }
+            assert_eq!(checksum, iterations * 4);
+            started.elapsed()
+        }
+
+        const ITERATIONS: usize = 50_000;
+        let theme = mesh_core_theme::default_theme();
+        let props = (0..32)
+            .map(|index| {
+                (
+                    prop_variable_key(&format!("setting_{index}")),
+                    StyleValue::Literal(format!("{index}px")),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let value = StyleValue::Prop("setting_31".to_string());
+        let mut owned_samples = Vec::new();
+        let mut borrowed_samples = Vec::new();
+        for sample in 0..5 {
+            let (owned, borrowed) = if sample % 2 == 0 {
+                (
+                    run(&theme, &props, &value, false, ITERATIONS),
+                    run(&theme, &props, &value, true, ITERATIONS),
+                )
+            } else {
+                let borrowed = run(&theme, &props, &value, true, ITERATIONS);
+                let owned = run(&theme, &props, &value, false, ITERATIONS);
+                (owned, borrowed)
+            };
+            owned_samples.push(owned);
+            borrowed_samples.push(borrowed);
+        }
+        owned_samples.sort_unstable();
+        borrowed_samples.sort_unstable();
+        let owned_median = owned_samples[owned_samples.len() / 2];
+        let borrowed_median = borrowed_samples[borrowed_samples.len() / 2];
+        let speedup = owned_median.as_secs_f64() / borrowed_median.as_secs_f64();
+
+        eprintln!(
+            "style resolver setup + prop lookup over {ITERATIONS} targeted restyles with 32 props: owned clone {:?}..{:?} (median {owned_median:?}); borrowed {:?}..{:?} (median {borrowed_median:?}); ratio {speedup:.2}x",
+            owned_samples[0],
+            owned_samples[owned_samples.len() - 1],
+            borrowed_samples[0],
+            borrowed_samples[borrowed_samples.len() - 1],
+        );
+        eprintln!("MESH_PERF metric=borrowed_style_props_speedup value={speedup:.3}");
+        assert!(
+            borrowed_median * 2 < owned_median,
+            "borrowing stable style props should at least halve resolver setup and lookup time"
+        );
     }
 
     // cargo test -p mesh-core-elements --release -- shared_theme_revision_cache_beats_per_resolver_lowering --ignored --nocapture

@@ -371,7 +371,7 @@ impl FrontendSurfaceComponent {
         // The cache survives across paints — we only pay the clone cost on
         // source reload (when `cached_restyle_rules` is reset).
         self.module_restyle_rules();
-        let resolver = StyleResolver::new(theme).with_props(surface_css_props.clone());
+        let resolver = StyleResolver::new(theme).with_borrowed_props(surface_css_props);
         let context = StyleContext {
             container_width: width as f32,
             container_height: height as f32,
