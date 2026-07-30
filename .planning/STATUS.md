@@ -7,6 +7,22 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Live frontend catalogs are one atomic snapshot.** `Shell` owns the versioned
+catalog generation used by every surface (2026-07-30). Enabling or disabling a
+surface, component, or widget now publishes one generation and rebinds existing
+hosts; source reload uses the same path. Reverse import/slot dependency tracking
+invalidates only affected surfaces, drops changed embedded runtimes and prepared
+styles, and keeps unrelated Lua state. Slot contributions follow the installed
+graph's enabled state. Record: [`log/2026-07.md`](log/2026-07.md).
+
+**Component host globals are isolated.** Every frontend component still shares
+one thread-local Luau realm, but module- and instance-specific values now live
+in that component's `_ENV` (2026-07-30). Creating a second module can no longer
+replace the `this` descriptor seen by an already-live module's template
+expressions or handlers. The regression creates both contexts concurrently and
+checks both execution paths after the second descriptor is installed. Record:
+[`log/2026-07.md`](log/2026-07.md).
+
 **Settings are one file.** `config/settings.json` is the single store for every
 user decision — `shell` for core preferences, a namespace per module or
 interface for everything else (2026-07-30). It replaced `shell-settings.json`,
@@ -83,13 +99,8 @@ and checked gates are in
 From the attack order at the end of
 [`docs/BACKLOG.md`](../docs/BACKLOG.md):
 
-1. The two **P0 correctness risks** found in the 2026-07-28 subsystem scan —
-   shared-Lua `this` isolation, and atomic live frontend-catalog propagation.
-   Both are cross-component correctness, not performance, and both can silently
-   corrupt state in release builds.
-2. Nonblocking Wayland configure — removes a 500ms shell-thread stall. (The
-   paired keyboard-settings half of this item is done: see *Now*.)
-3. Retained text-measure state and subscriber-proportional service delivery.
+1. Nonblocking Wayland configure — removes a 500ms shell-thread stall.
+2. Retained text-measure state and subscriber-proportional service delivery.
 
 ## Blocked
 
@@ -121,15 +132,30 @@ no recorded release measurement is:
 | --- | --- |
 | typed declaration application | typed style declarations |
 
-**Full shell suite re-established.** On 2026-07-30 the shell suite reports 569
+**Full shell suite re-established.** On 2026-07-30 the shell suite reports 570
 passing, 18 failing, 122 ignored — the same 18 failures as the 2026-07-28
 baseline of 556/18/123, with 12 more tests passing after the settings-store
-work and one more from settings validation. On 2026-07-28,
+work, one more from settings validation, and one catalog-generation regression.
+On 2026-07-28,
 `cargo test -p mesh-core-shell --lib` under `nix develop` reported 556 passing,
 18 failing, and 123 ignored. The child-display-list checkpoint's complete
 13-test `child_surface` slice passes; none of the 18 broader failures exercises
-the 64-entry cap or eviction path. Treat 556/18 as the current shell baseline
+the 64-entry cap or eviction path. Treat 570/18 as the current shell baseline
 until those failures are triaged.
+
+**Shared-Lua isolation is covered at both boundaries.** The complete
+`mesh-core-scripting` suite reports 179 passing / 27 ignored, including a new
+two-module regression that failed before the fix because the first module read
+the second module's `this`. The focused real-shell descriptor slice passes 2/2,
+and the full shell suite remains exactly 569 passing / 18 failing / 122 ignored
+with the same baseline failures by name.
+
+**Live catalog propagation is covered through composition and lifecycle.** The
+catalog-generation regression proves a slot host retains its root Lua runtime,
+drops the removed widget runtime, and rebuilds without the stale contribution.
+The shipped live frontend activation/deactivation tests pass 2/2. The full
+shell suite is 570 passing / 18 failing / 122 ignored, with exactly the same 18
+baseline failures by name.
 
 **Performance gate suite has unrelated failures.** The multi-damage benchmark
 passes its direct checked thresholds: at least 2.805x for four regions and

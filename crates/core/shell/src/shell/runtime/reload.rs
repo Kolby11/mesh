@@ -17,56 +17,54 @@ impl Shell {
                 FRONTEND_RELOAD_POLL_INTERVAL
             };
 
-        for runtime in &mut self.components {
-            if runtime.source_paths.is_empty() {
-                continue;
-            }
-
-            let mut changed_path_index: Option<usize> = None;
-            for (index, (path, last_mtime)) in runtime.source_paths.iter().enumerate() {
-                let Ok(metadata) = std::fs::metadata(path) else {
+        for component_index in 0..self.components.len() {
+            let reloaded = {
+                let runtime = &mut self.components[component_index];
+                if runtime.source_paths.is_empty() {
                     continue;
-                };
-                let Ok(modified_at) = metadata.modified() else {
-                    continue;
-                };
-                if *last_mtime != Some(modified_at) {
-                    changed_path_index = Some(index);
-                    break;
                 }
-            }
 
-            let Some(trigger_index) = changed_path_index else {
-                continue;
+                let changed_path_index =
+                    runtime.source_paths.iter().position(|(path, last_mtime)| {
+                        std::fs::metadata(path)
+                            .and_then(|metadata| metadata.modified())
+                            .is_ok_and(|modified_at| *last_mtime != Some(modified_at))
+                    });
+                let Some(trigger_index) = changed_path_index else {
+                    continue;
+                };
+                let trigger_display = runtime.source_paths[trigger_index].0.display().to_string();
+                let reloaded = runtime
+                    .component
+                    .reload_source()
+                    .map_err(ShellRunError::Component)?;
+
+                // Re-read the watched-paths list from the component because
+                // imports may have changed between compilations, and refresh
+                // every entry's mtime so we don't immediately reload again.
+                runtime.source_paths = runtime
+                    .component
+                    .watched_source_paths()
+                    .into_iter()
+                    .map(|path| {
+                        let mtime = std::fs::metadata(&path)
+                            .ok()
+                            .and_then(|m| m.modified().ok());
+                        (path, mtime)
+                    })
+                    .collect();
+
+                if reloaded {
+                    tracing::info!(
+                        "recompiled frontend component '{}' (triggered by change in {})",
+                        runtime.component.id(),
+                        trigger_display
+                    );
+                }
+                reloaded
             };
-            let trigger_display = runtime.source_paths[trigger_index].0.display().to_string();
-
-            let reloaded = runtime
-                .component
-                .reload_source()
-                .map_err(ShellRunError::Component)?;
-
-            // Re-read the watched-paths list from the component because
-            // imports may have changed between compilations, and refresh
-            // every entry's mtime so we don't immediately reload again.
-            runtime.source_paths = runtime
-                .component
-                .watched_source_paths()
-                .into_iter()
-                .map(|path| {
-                    let mtime = std::fs::metadata(&path)
-                        .ok()
-                        .and_then(|m| m.modified().ok());
-                    (path, mtime)
-                })
-                .collect();
-
             if reloaded {
-                tracing::info!(
-                    "recompiled frontend component '{}' (triggered by change in {})",
-                    runtime.component.id(),
-                    trigger_display
-                );
+                self.sync_frontend_catalog_components();
             }
         }
 

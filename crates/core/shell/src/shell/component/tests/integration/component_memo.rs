@@ -372,6 +372,76 @@ fn unchanged_slot_contribution_reuses_memoized_subtree() {
     assert!(node_with_content(component.last_tree.as_ref().unwrap(), "static slot 0").is_some());
 }
 
+#[test]
+fn catalog_generation_rebinds_affected_slot_host_and_keeps_root_runtime() {
+    let mut component = memo_slot_surface(1);
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 60);
+    component.paint(&theme, 160, 60, &mut buffer, 1.0).unwrap();
+
+    let root_runtime_generation = component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(PARENT_ID)
+        .unwrap()
+        .script_ctx
+        .state()
+        .mutation_generation();
+    assert!(
+        component
+            .runtimes
+            .lock()
+            .unwrap()
+            .values()
+            .any(|runtime| runtime.script_ctx.module_id == "@test/memo-slot-widget")
+    );
+
+    let mut next_catalog = (*component.frontend_catalog).clone();
+    next_catalog.slot_contributions.clear();
+    component
+        .frontend_catalog_handle
+        .replace(next_catalog, None);
+
+    assert_eq!(
+        component
+            .frontend_catalog
+            .slot_contributions_for(&format!("{PARENT_ID}:main"))
+            .len(),
+        1,
+        "the surface keeps its coherent old snapshot until notification"
+    );
+    assert!(component.frontend_catalog_changed());
+    assert!(
+        component
+            .frontend_catalog
+            .slot_contributions_for(&format!("{PARENT_ID}:main"))
+            .is_empty()
+    );
+
+    let runtimes = component.runtimes.lock().unwrap();
+    assert_eq!(
+        runtimes
+            .get(PARENT_ID)
+            .unwrap()
+            .script_ctx
+            .state()
+            .mutation_generation(),
+        root_runtime_generation,
+        "an unchanged root runtime must keep its Lua state"
+    );
+    assert!(
+        runtimes
+            .values()
+            .all(|runtime| runtime.script_ctx.module_id != "@test/memo-slot-widget"),
+        "the removed slot widget runtime must be invalidated"
+    );
+    drop(runtimes);
+
+    component.paint(&theme, 160, 60, &mut buffer, 1.0).unwrap();
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "static slot 0").is_none());
+}
+
 // cargo test -p mesh-core-shell --release -- slot_memoized_rebuild_beats_full_reeval --ignored --nocapture
 #[test]
 #[ignore = "release-only slot contribution render memoization benchmark"]

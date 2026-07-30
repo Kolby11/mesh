@@ -30,7 +30,7 @@ mod runtime_tree;
 mod shell_component;
 mod tooltip;
 
-pub(in crate::shell) use catalog::FrontendCatalog;
+pub(in crate::shell) use catalog::{FrontendCatalog, FrontendCatalogHandle};
 #[cfg(test)]
 pub(crate) use input::KeybindResolutionSource;
 use input::ResolvedSurfaceShortcut;
@@ -642,6 +642,8 @@ pub(super) struct FrontendSurfaceComponent {
     /// noisy. Set/cleared alongside the wrapper's `popup_config`.
     pub(super) popup_promoted: bool,
     pub(super) frontend_catalog: Arc<FrontendCatalog>,
+    frontend_catalog_handle: FrontendCatalogHandle,
+    frontend_catalog_version: u64,
     graph_i18n_catalogs: Vec<(String, String, PathBuf)>,
     pub(super) visible: bool,
     surface_exiting: bool,
@@ -955,7 +957,7 @@ impl FrontendSurfaceComponent {
     pub(super) fn new(
         compiled: CompiledFrontendModule,
         module_dir: PathBuf,
-        frontend_catalog: impl Into<Arc<FrontendCatalog>>,
+        frontend_catalog: impl Into<FrontendCatalogHandle>,
         interface_catalog: impl Into<Arc<mesh_core_service::InterfaceCatalog>>,
         settings: impl Into<Arc<SettingsStore>>,
     ) -> Self {
@@ -970,7 +972,9 @@ impl FrontendSurfaceComponent {
         let service_payload_capacity = service_payload_cache_capacity(&compiled.manifest);
         let element_metric_usage = element_metric_usage(&compiled);
         let has_animatable_style_rules = compiled_module_has_animatable_style_rules(&compiled);
-        let frontend_catalog = frontend_catalog.into();
+        let frontend_catalog_handle = frontend_catalog.into();
+        let frontend_catalog_state = frontend_catalog_handle.snapshot();
+        let frontend_catalog = frontend_catalog_state.catalog;
         let declared_service_names = declared_service_names(&compiled, &frontend_catalog);
         Self {
             compiled,
@@ -983,6 +987,8 @@ impl FrontendSurfaceComponent {
             keyboard_mode_override: None,
             popup_promoted: false,
             frontend_catalog,
+            frontend_catalog_handle,
+            frontend_catalog_version: frontend_catalog_state.version,
             graph_i18n_catalogs: Vec::new(),
             visible: settings_state.layout.visible_on_start,
             surface_exiting: false,

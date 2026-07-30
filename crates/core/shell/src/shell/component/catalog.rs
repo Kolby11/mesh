@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
 use mesh_core_frontend::{CompiledFrontendModule, compile_frontend_module};
 use mesh_core_module::ModuleType;
@@ -10,7 +11,7 @@ use rayon::prelude::*;
 use super::memo;
 use crate::shell::ShellRunError;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(in crate::shell) struct FrontendCatalog {
     pub(super) modules: HashMap<String, FrontendCatalogEntry>,
     pub(super) slot_contributions: HashMap<String, Vec<ResolvedSlotContribution>>,
@@ -22,7 +23,7 @@ pub(in crate::shell) struct FrontendCatalogEntry {
     pub(in crate::shell) compiled: CompiledFrontendModule,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct ResolvedSlotContribution {
     pub(super) source_module_id: String,
     pub(super) widget_id: String,
@@ -30,6 +31,157 @@ pub(super) struct ResolvedSlotContribution {
     pub(super) order: i64,
     pub(super) props_fingerprint: u64,
     pub(super) props: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::shell) struct FrontendCatalogHandle {
+    state: Arc<RwLock<FrontendCatalogState>>,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::shell) struct FrontendCatalogState {
+    pub(in crate::shell) version: u64,
+    pub(in crate::shell) catalog: Arc<FrontendCatalog>,
+    pub(in crate::shell) changed_modules: Arc<HashSet<String>>,
+    pub(in crate::shell) affected_modules: Arc<HashSet<String>>,
+}
+
+impl Default for FrontendCatalogHandle {
+    fn default() -> Self {
+        Self::from(FrontendCatalog::default())
+    }
+}
+
+impl From<FrontendCatalog> for FrontendCatalogHandle {
+    fn from(catalog: FrontendCatalog) -> Self {
+        Self::from(Arc::new(catalog))
+    }
+}
+
+impl From<Arc<FrontendCatalog>> for FrontendCatalogHandle {
+    fn from(catalog: Arc<FrontendCatalog>) -> Self {
+        Self {
+            state: Arc::new(RwLock::new(FrontendCatalogState {
+                version: 0,
+                catalog,
+                changed_modules: Arc::new(HashSet::new()),
+                affected_modules: Arc::new(HashSet::new()),
+            })),
+        }
+    }
+}
+
+impl FrontendCatalogHandle {
+    pub(in crate::shell) fn snapshot(&self) -> FrontendCatalogState {
+        self.state.read().unwrap().clone()
+    }
+
+    /// Atomically publish one catalog generation. The returned state can be
+    /// restored if the caller fails before any component adopts the update.
+    pub(in crate::shell) fn replace(
+        &self,
+        catalog: FrontendCatalog,
+        changed_module: Option<&str>,
+    ) -> FrontendCatalogState {
+        let mut state = self.state.write().unwrap();
+        let previous = state.clone();
+        let catalog = Arc::new(catalog);
+        let (changed_modules, affected_modules) =
+            catalog_changes(&state.catalog, &catalog, changed_module);
+        *state = FrontendCatalogState {
+            version: state.version.wrapping_add(1),
+            catalog,
+            changed_modules: Arc::new(changed_modules),
+            affected_modules: Arc::new(affected_modules),
+        };
+        previous
+    }
+
+    pub(in crate::shell) fn restore(&self, state: FrontendCatalogState) {
+        *self.state.write().unwrap() = state;
+    }
+
+    pub(in crate::shell) fn update_compiled_module(
+        &self,
+        module_id: &str,
+        compiled: CompiledFrontendModule,
+    ) {
+        let mut catalog = (*self.snapshot().catalog).clone();
+        if let Some(entry) = catalog.modules.get_mut(module_id) {
+            entry.compiled = compiled;
+        }
+        self.replace(catalog, Some(module_id));
+    }
+}
+
+fn catalog_changes(
+    previous: &FrontendCatalog,
+    next: &FrontendCatalog,
+    changed_module: Option<&str>,
+) -> (HashSet<String>, HashSet<String>) {
+    let mut changed = HashSet::new();
+    if let Some(module_id) = changed_module {
+        changed.insert(module_id.to_string());
+    }
+
+    for module_id in previous.modules.keys().chain(next.modules.keys()) {
+        if previous.modules.contains_key(module_id) != next.modules.contains_key(module_id) {
+            changed.insert(module_id.clone());
+        }
+    }
+
+    let mut changed_slots = HashSet::new();
+    for slot_id in previous
+        .slot_contributions
+        .keys()
+        .chain(next.slot_contributions.keys())
+    {
+        if previous.slot_contributions.get(slot_id) != next.slot_contributions.get(slot_id) {
+            changed_slots.insert(slot_id.clone());
+            for catalog in [previous, next] {
+                if let Some(contributions) = catalog.slot_contributions.get(slot_id) {
+                    for contribution in contributions {
+                        changed.insert(contribution.source_module_id.clone());
+                        changed.insert(contribution.widget_id.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // Walk the reverse composition graph. A module is affected when it imports
+    // an affected component, or when one of the slots it hosts changed.
+    let mut affected = changed.clone();
+    loop {
+        let mut discovered = Vec::new();
+        for catalog in [previous, next] {
+            for (module_id, entry) in &catalog.modules {
+                if affected.contains(module_id) {
+                    continue;
+                }
+                let imports_affected = entry
+                    .compiled
+                    .module_component_imports
+                    .values()
+                    .any(|dependency| affected.contains(dependency));
+                let slot_affected = entry
+                    .compiled
+                    .manifest
+                    .provides_slots
+                    .keys()
+                    .any(|name| changed_slots.contains(&format!("{module_id}:{name}")));
+                if imports_affected || slot_affected {
+                    discovered.push(module_id.clone());
+                }
+            }
+        }
+        if discovered.is_empty() {
+            break;
+        }
+        affected.extend(discovered);
+    }
+
+    (changed, affected)
 }
 
 impl FrontendCatalog {
@@ -74,6 +226,12 @@ impl FrontendCatalog {
         };
 
         for (module_id, entry) in &catalog.modules {
+            if graph
+                .and_then(|graph| graph.module(module_id))
+                .is_some_and(|module| !module.enabled)
+            {
+                continue;
+            }
             for (slot_id, contributions) in &entry.compiled.manifest.slot_contributions {
                 let bucket = catalog
                     .slot_contributions

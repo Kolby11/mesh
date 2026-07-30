@@ -1146,12 +1146,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         let component_id = self.id().to_string();
         self.compiled = recompiled;
         self.element_metric_usage = element_metric_usage(&self.compiled);
-        if let Some(entry) = Arc::make_mut(&mut self.frontend_catalog)
-            .modules
-            .get_mut(&component_id)
-        {
-            entry.compiled = self.compiled.clone();
-        }
+        self.frontend_catalog_handle
+            .update_compiled_module(&component_id, self.compiled.clone());
+        self.frontend_catalog_changed();
         self.runtimes.lock().unwrap().clear();
         self.init_root_runtime()?;
         self.render_hooks_pending = true;
@@ -1166,6 +1163,44 @@ impl ShellComponent for FrontendSurfaceComponent {
         // diffing against the stale tree from the previous source version.
         self.reset_render_caches();
         Ok(true)
+    }
+
+    fn frontend_catalog_changed(&mut self) -> bool {
+        let state = self.frontend_catalog_handle.snapshot();
+        if state.version == self.frontend_catalog_version {
+            return false;
+        }
+
+        self.frontend_catalog = state.catalog;
+        self.frontend_catalog_version = state.version;
+        if !state.affected_modules.contains(self.id()) {
+            return false;
+        }
+
+        self.runtimes.lock().unwrap().retain(|_, runtime| {
+            !state
+                .changed_modules
+                .contains(&runtime.script_ctx.module_id)
+        });
+        self.prepared_component_styles
+            .get_mut()
+            .retain(|module_id, _| !state.changed_modules.contains(module_id));
+        self.declared_service_names =
+            declared_service_names(&self.compiled, &self.frontend_catalog);
+
+        // Instance-derived composition bookkeeping is rebuilt with the tree.
+        // Keeping any of it would leave dead slot/import identities reachable
+        // after a contribution or dependency changes.
+        self.composition_occurrences.get_mut().clear();
+        self.bound_children.get_mut().clear();
+        self.portal_hidden_bindings.get_mut().clear();
+        self.pending_surface_states.get_mut().clear();
+        self.ref_node_keys.get_mut().clear();
+        self.scheduled_handlers.clear();
+        self.render_hooks_pending = true;
+        self.reset_render_caches();
+        self.invalidate_script_state();
+        true
     }
 
     fn handle_input(

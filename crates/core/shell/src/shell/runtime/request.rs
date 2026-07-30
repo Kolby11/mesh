@@ -152,7 +152,7 @@ impl Shell {
             if enabled {
                 self.activate_frontend_module(module_id, &graph)
             } else {
-                self.deactivate_frontend_module(module_id)
+                self.deactivate_frontend_module(module_id, Some(&graph))
             }
         } else {
             Ok(VecDeque::new())

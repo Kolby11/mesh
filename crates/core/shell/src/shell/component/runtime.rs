@@ -300,7 +300,7 @@ impl FrontendSurfaceComponent {
         );
         seed_service_state(script_ctx.state_mut());
         script_ctx
-            .set_global_state("this", self.module_descriptor_from_manifest(manifest))
+            .seed_context_global("this", self.module_descriptor_from_manifest(manifest))
             .map_err(|source| ComponentError::Script {
                 component_id: component_id.clone(),
                 source,

@@ -608,7 +608,7 @@ fn unchanged_member_state_write_benchmark() {
 fn host_seeded_global_is_visible_before_script_runs() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
-    ctx.set_global_state("seeded", serde_json::json!("ready"))
+    ctx.seed_context_global("seeded", serde_json::json!("ready"))
         .unwrap();
     ctx.load_script(
         r#"
@@ -618,6 +618,71 @@ seed_seen = seeded
     .unwrap();
 
     assert_eq!(ctx.state.get("seed_seen"), Some(serde_json::json!("ready")));
+}
+
+#[test]
+fn shared_vm_keeps_host_seeded_globals_local_across_templates_and_handlers() {
+    let vm = SurfaceVm::new();
+    let expression = "this.package.id".to_string();
+
+    let mut first = ScriptContext::new("@mesh/first", CapabilitySet::new()).unwrap();
+    first.attach_shared_vm(&vm);
+    first
+        .seed_context_global(
+            "this",
+            serde_json::json!({ "package": { "id": "@mesh/first" } }),
+        )
+        .unwrap();
+    first
+        .compile_and_execute_component(
+            "handler_seen = ''\nfunction capture() handler_seen = this.package.id end",
+            &[],
+            std::slice::from_ref(&expression),
+        )
+        .unwrap();
+
+    let mut second = ScriptContext::new("@mesh/second", CapabilitySet::new()).unwrap();
+    second.attach_shared_vm(&vm);
+    second
+        .seed_context_global(
+            "this",
+            serde_json::json!({ "package": { "id": "@mesh/second" } }),
+        )
+        .unwrap();
+    second
+        .compile_and_execute_component(
+            "handler_seen = ''\nfunction capture() handler_seen = this.package.id end",
+            &[],
+            std::slice::from_ref(&expression),
+        )
+        .unwrap();
+
+    let empty_locals = serde_json::Map::new();
+    assert_eq!(
+        first
+            .evaluate_template_expression(&expression, &empty_locals)
+            .unwrap()
+            .0,
+        serde_json::json!("@mesh/first")
+    );
+    assert_eq!(
+        second
+            .evaluate_template_expression(&expression, &empty_locals)
+            .unwrap()
+            .0,
+        serde_json::json!("@mesh/second")
+    );
+
+    first.call_handler("capture", &[]).unwrap();
+    second.call_handler("capture", &[]).unwrap();
+    assert_eq!(
+        first.state.get("handler_seen"),
+        Some(serde_json::json!("@mesh/first"))
+    );
+    assert_eq!(
+        second.state.get("handler_seen"),
+        Some(serde_json::json!("@mesh/second"))
+    );
 }
 
 // cargo test -p mesh-core-scripting --release -- removed_legacy_module_state_mirror_avoids_proxy_snapshot_serialization --ignored --nocapture

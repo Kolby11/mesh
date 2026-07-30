@@ -8520,7 +8520,9 @@ fn frontend_module_deactivation_removes_runtime_and_destroys_surface() {
         Vec::new(),
     )))));
 
-    let requests = shell.deactivate_frontend_module("@test/recording").unwrap();
+    let requests = shell
+        .deactivate_frontend_module("@test/recording", None)
+        .unwrap();
 
     assert!(requests.is_empty());
     assert!(shell.components.is_empty());

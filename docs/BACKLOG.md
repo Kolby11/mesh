@@ -21,25 +21,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ---
 
-## P0 — correctness
-
-Both found in the 2026-07-28 subsystem scan. Each can corrupt state in a release
-build with no diagnostic.
-
-- [ ] **Isolate component globals in the shared Lua realm.**
-      `ScriptContext::set_global_state` writes to `lua.globals()` and component
-      environments fall through to it, so creating a component can replace the
-      `this` descriptor an already-live component observes. Split shared
-      immutable builtins from context-owned globals, write `this` into the
-      component `_ENV`, and regress two simultaneous modules across template
-      expressions and handlers.
-- [ ] **Propagate live frontend catalog changes atomically.**
-      `activate_frontend_module` builds a new `Arc<FrontendCatalog>` only for the
-      newly mounted surface; existing components keep stale snapshots, and
-      component-only or widget activation updates no host at all. Give `Shell`
-      one versioned snapshot, rebind every affected component, and invalidate
-      only affected imports, slots, memos, and runtimes.
-
 ## Shell features
 
 - [ ] Popups / overlays — transient surfaces with custom content and dismiss
@@ -334,17 +315,14 @@ gate where the win is structural.
 
 Updated 2026-07-28.
 
-1. **The two P0 correctness risks** — shared-Lua `this` isolation and atomic
-   live catalog propagation.
-2. **Nonblocking Wayland configure** and watcher-fed keyboard settings — remove
-   shell-thread stalls and input-path syscalls.
-3. **Retained text-measure state**, subscriber-proportional service delivery,
+1. **Nonblocking Wayland configure** — remove the shell-thread stall.
+2. **Retained text-measure state**, subscriber-proportional service delivery,
    and batched multi-rectangle raster — the remaining whole-tree and fan-out
    hot paths.
-4. **Structural-sharing memo hits**, narrow invalidation, and affected-subtree
+3. **Structural-sharing memo hits**, narrow invalidation, and affected-subtree
    re-evaluation.
-5. **Runtime style-diagnostic invalidation** and typed declarations.
-6. **Incremental shared frontend catalog**, single retained renderer, and the
+4. **Runtime style-diagnostic invalidation** and typed declarations.
+5. **Incremental shared frontend catalog**, single retained renderer, and the
    per-surface prepare/paint/present split with batched Wayland commits.
 7. **Direct SHM paint** and fractional-scale partial damage, re-tested with
    upload instrumentation (D).

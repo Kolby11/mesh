@@ -392,6 +392,7 @@ pub struct Shell {
     pub interfaces: InterfaceRegistry,
     installed_module_graph: Option<InstalledModuleGraph>,
     modules: HashMap<String, ModuleInstance>,
+    frontend_catalog: component::FrontendCatalogHandle,
     module_dirs: Vec<PathBuf>,
     core: ShellCoreState,
     components: Vec<ComponentRuntime>,

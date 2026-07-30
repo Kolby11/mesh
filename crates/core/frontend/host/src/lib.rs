@@ -475,6 +475,14 @@ pub trait ShellComponent: Send {
     fn reload_source(&mut self) -> Result<bool, ComponentError> {
         Ok(false)
     }
+    /// Adopt a newly published frontend-module catalog generation.
+    ///
+    /// Components that do not compose installable frontend modules can ignore
+    /// this notification. Returns whether the component invalidated render
+    /// state in response.
+    fn frontend_catalog_changed(&mut self) -> bool {
+        false
+    }
     /// Adopt a freshly loaded settings store.
     ///
     /// Every user decision lives in one file, so the shell reloads it once and

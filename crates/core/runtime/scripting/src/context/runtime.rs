@@ -1135,25 +1135,29 @@ impl ScriptContext {
         Ok(())
     }
 
-    pub fn set_global_state(&mut self, name: &str, value: Value) -> Result<(), ScriptError> {
+    /// Seed a host-owned global in this component's `_ENV`.
+    ///
+    /// Frontend contexts share one thread-local Luau realm, so module- or
+    /// instance-specific values must never be written to `lua.globals()`.
+    /// Registering the key as a builtin also keeps it out of reactive-global
+    /// discovery: the host owns the value, while scripts and template
+    /// expressions read it through their normal component environment.
+    pub fn seed_context_global(&mut self, name: &str, value: Value) -> Result<(), ScriptError> {
         self.ensure_initialized()?;
         let lua_value = self.lua().to_value(&value).map_err(lua_err)?;
-        self.lua()
-            .globals()
-            .set(name, lua_value)
-            .map_err(map_lua_error)?;
+        self.env().raw_set(name, lua_value).map_err(map_lua_error)?;
+        self.builtin_globals.insert(name.to_string());
         self.state.set(name.to_string(), value);
         Ok(())
     }
 
     /// Set a public script member on *this component's* `_ENV`, where the
-    /// script's own bare assignments live. A bare `foo = ...` in a component
-    /// shadows any `globals()` fallthrough, so writing back through
-    /// [`set_global_state`] would not be observed by the script's own handlers
-    /// or `render`. Use this when the shell needs to push a value into a member
-    /// the component declared itself — e.g. syncing a portal `hidden={...}`
-    /// binding back to `false`/`true` after the shell shows/hides the bound
-    /// surface through a path the trigger script never ran.
+    /// script's own bare assignments live. Unlike [`seed_context_global`],
+    /// this participates in reactive state synchronization. Use it when the
+    /// shell needs to push a value into a member the component declared itself
+    /// — e.g. syncing a portal `hidden={...}` binding back to `false`/`true`
+    /// after the shell shows/hides the bound surface through a path the trigger
+    /// script never ran.
     pub fn set_member_state(&mut self, name: &str, value: Value) -> Result<(), ScriptError> {
         self.ensure_initialized()?;
         let lua_value = self.lua().to_value(&value).map_err(lua_err)?;

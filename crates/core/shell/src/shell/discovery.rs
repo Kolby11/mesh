@@ -1,4 +1,4 @@
-use super::component::{FrontendCatalog, FrontendSurfaceComponent};
+use super::component::{FrontendCatalog, FrontendCatalogHandle, FrontendSurfaceComponent};
 use super::*;
 use rayon::prelude::*;
 use std::collections::HashSet;
@@ -213,6 +213,7 @@ impl Shell {
             interfaces,
             installed_module_graph: None,
             modules: HashMap::new(),
+            frontend_catalog: FrontendCatalogHandle::default(),
             module_dirs,
             core: ShellCoreState::default(),
             components: Vec::new(),
@@ -411,10 +412,9 @@ impl Shell {
         }
 
         let graph = self.load_installed_module_graph_cached().ok().cloned();
-        let frontend_catalog = std::sync::Arc::new(FrontendCatalog::from_modules(
-            &self.modules,
-            graph.as_ref(),
-        )?);
+        let frontend_catalog = FrontendCatalog::from_modules(&self.modules, graph.as_ref())?;
+        self.frontend_catalog.replace(frontend_catalog, None);
+        let frontend_catalog = self.frontend_catalog.snapshot().catalog;
         let enabled_frontends = self.installed_enabled_frontend_ids();
         let graph_i18n_catalogs = self.graph_i18n_catalog_paths();
         let interface_catalog = std::sync::Arc::new(self.interfaces.catalog());
@@ -423,7 +423,7 @@ impl Shell {
                 FrontendSurfaceComponent::new(
                     entry.compiled,
                     entry.module_dir,
-                    frontend_catalog.clone(),
+                    self.frontend_catalog.clone(),
                     interface_catalog.clone(),
                     self.settings_store.clone(),
                 )
@@ -439,66 +439,81 @@ impl Shell {
         module_id: &str,
         graph: &InstalledModuleGraph,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        if self
+        let already_mounted = self
             .components
             .iter()
-            .any(|runtime| runtime.component.id() == module_id)
-        {
-            return Ok(VecDeque::new());
-        }
-        let frontend_catalog =
-            std::sync::Arc::new(FrontendCatalog::from_modules(&self.modules, Some(graph))?);
-        let Some(entry) = frontend_catalog
+            .any(|runtime| runtime.component.id() == module_id);
+        let catalog = FrontendCatalog::from_modules(&self.modules, Some(graph))?;
+        let entry = catalog
             .top_level_surfaces()
             .into_iter()
-            .find(|entry| entry.compiled.manifest.package.id == module_id)
-        else {
+            .find(|entry| entry.compiled.manifest.package.id == module_id);
+        let previous_catalog = self.frontend_catalog.replace(catalog, None);
+
+        if already_mounted {
+            self.sync_frontend_catalog_components();
+            return Ok(VecDeque::new());
+        }
+        let Some(entry) = entry else {
             // Widgets and component-only frontend packages own no surface.
+            self.sync_frontend_catalog_components();
             return Ok(VecDeque::new());
         };
-        let interface_catalog = std::sync::Arc::new(self.interfaces.catalog());
-        let mut component = FrontendSurfaceComponent::new(
-            entry.compiled,
-            entry.module_dir,
-            frontend_catalog,
-            interface_catalog,
-            self.settings_store.clone(),
-        )
-        .with_graph_i18n_catalogs(self.graph_i18n_catalog_paths());
-        let surface_id = component.surface_id().to_string();
-        let diagnostics = self.diagnostics.register(module_id.to_string());
-        let mut requests = VecDeque::from(
+
+        let mounted = (|| {
+            let interface_catalog = std::sync::Arc::new(self.interfaces.catalog());
+            let mut component = FrontendSurfaceComponent::new(
+                entry.compiled,
+                entry.module_dir,
+                self.frontend_catalog.clone(),
+                interface_catalog,
+                self.settings_store.clone(),
+            )
+            .with_graph_i18n_catalogs(self.graph_i18n_catalog_paths());
+            let surface_id = component.surface_id().to_string();
+            let diagnostics = self.diagnostics.register(module_id.to_string());
+            let mut requests = VecDeque::from(
+                component
+                    .mount(ComponentContext {
+                        component_id: module_id.to_string(),
+                        surface_id,
+                        diagnostics,
+                    })
+                    .map_err(ShellRunError::Component)?,
+            );
             component
-                .mount(ComponentContext {
-                    component_id: module_id.to_string(),
-                    surface_id,
-                    diagnostics,
-                })
-                .map_err(ShellRunError::Component)?,
-        );
-        component
-            .locale_changed(&self.locale)
-            .map_err(ShellRunError::Component)?;
-        let latest = self
-            .latest_service_state
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        for state in latest {
-            let event = ServiceEvent::Updated {
-                service: state.interface,
-                source_module: state.provider_id,
-                payload: state.state,
-            };
-            if component.observes_service_event(&event) {
-                requests.extend(
-                    component
-                        .handle_service_event(&event)
-                        .map_err(ShellRunError::Component)?,
-                );
+                .locale_changed(&self.locale)
+                .map_err(ShellRunError::Component)?;
+            let latest = self
+                .latest_service_state
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            for state in latest {
+                let event = ServiceEvent::Updated {
+                    service: state.interface,
+                    source_module: state.provider_id,
+                    payload: state.state,
+                };
+                if component.observes_service_event(&event) {
+                    requests.extend(
+                        component
+                            .handle_service_event(&event)
+                            .map_err(ShellRunError::Component)?,
+                    );
+                }
             }
-        }
+            Ok::<_, ShellRunError>((component, requests))
+        })();
+        let (component, requests) = match mounted {
+            Ok(mounted) => mounted,
+            Err(error) => {
+                self.frontend_catalog.restore(previous_catalog);
+                return Err(error);
+            }
+        };
         self.register_component(Box::new(component));
+        self.sync_frontend_catalog_components();
         tracing::info!(module_id, "activated frontend module live");
         Ok(requests)
     }
@@ -506,7 +521,12 @@ impl Shell {
     pub(in crate::shell) fn deactivate_frontend_module(
         &mut self,
         module_id: &str,
+        graph: Option<&InstalledModuleGraph>,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let catalog = FrontendCatalog::from_modules(&self.modules, graph)?;
+        self.frontend_catalog.replace(catalog, None);
+        self.sync_frontend_catalog_components();
+
         let Some(index) = self
             .components
             .iter()
@@ -541,6 +561,18 @@ impl Shell {
                 Ok(VecDeque::new())
             }
         }
+    }
+
+    pub(in crate::shell) fn sync_frontend_catalog_components(&mut self) -> bool {
+        let mut invalidated = false;
+        for runtime in &mut self.components {
+            invalidated |= runtime.component.frontend_catalog_changed();
+        }
+        if invalidated {
+            self.service_delivery_index.mark_dirty();
+            self.components_want_render = true;
+        }
+        invalidated
     }
 
     fn graph_i18n_catalog_paths(&self) -> Vec<(String, String, PathBuf)> {
