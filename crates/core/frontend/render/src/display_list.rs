@@ -204,6 +204,14 @@ pub struct RetainedDisplayList {
     /// updates, yielding an empty region set that flips the compositor to
     /// whole-surface blur.
     blur_regions: Vec<DamageRect>,
+    /// Extent of every element `filter: blur()` layer in the current list,
+    /// inflated by the blur kernel reach. Damage inside one has to grow to
+    /// cover it, and the layer's command range is replayed as a whole.
+    filter_layer_regions: Vec<DamageRect>,
+    /// Command ranges `[start, end)` opened by `PushFilterLayer` and closed by
+    /// `PopFilterLayer`, in paint order. A selection that touches part of a
+    /// range is widened to all of it.
+    layer_scopes: Vec<(usize, usize)>,
     last_metrics: DisplayListMetrics,
     last_damage_rects: Vec<DamageRect>,
 }
@@ -229,6 +237,8 @@ impl Default for RetainedDisplayList {
             command_kinds: Vec::new().into(),
             backdrop_regions: Vec::new(),
             blur_regions: Vec::new(),
+            filter_layer_regions: Vec::new(),
+            layer_scopes: Vec::new(),
             last_metrics: DisplayListMetrics::default(),
             last_damage_rects: Vec::new(),
         }
@@ -395,6 +405,20 @@ pub struct DisplayScrollbars {
 pub enum DisplayPaintCommandKind {
     Node,
     Scrollbars,
+    /// Opens an offscreen layer that every following command paints into,
+    /// until the matching [`DisplayPaintCommandKind::PopFilterLayer`]. Carries
+    /// the blurred node, whose `style.filter` is the filter to apply, and a
+    /// `clip` already inflated to the subtree's blurred extent.
+    PushFilterLayer,
+    /// Composites the open filter layer onto its parent.
+    PopFilterLayer,
+}
+
+impl DisplayPaintCommandKind {
+    /// Whether this command draws content rather than managing layer scope.
+    pub fn draws_content(self) -> bool {
+        matches!(self, Self::Node | Self::Scrollbars)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -591,6 +615,9 @@ struct RetainedPaintSubtree {
     pruning: PruningMetrics,
     command_span: Option<RetainedSubtreeSpan>,
     child_order: Option<Arc<[usize]>>,
+    /// This subtree's commands open and close a blur layer, so its command
+    /// range is atomic: a partial repaint may not replay part of it.
+    filter_layer: bool,
 }
 
 impl Default for RetainedPaintSubtree {
@@ -603,6 +630,7 @@ impl Default for RetainedPaintSubtree {
             pruning: PruningMetrics::default(),
             command_span: None,
             child_order: None,
+            filter_layer: false,
         }
     }
 }
@@ -623,6 +651,10 @@ struct PaintSubtreeBuilder {
     pruning: PruningMetrics,
     bounds: DamageRect,
     local_bounds: DamageRect,
+    /// Union of the children's bounds only. A blur layer inflates this — and
+    /// not the node's own bounds, which `visual_clip_for` already padded — to
+    /// find the region the layer composites.
+    child_bounds: DamageRect,
     includes_scrollbars: bool,
     local_command_count: usize,
     child_order: Option<Arc<[usize]>>,
@@ -661,6 +693,11 @@ impl PaintSubtreeBuilder {
             } else {
                 self.bounds.union(span.bounds)
             };
+            self.child_bounds = if self.child_bounds.width == 0 || self.child_bounds.height == 0 {
+                span.bounds
+            } else {
+                self.child_bounds.union(span.bounds)
+            };
             self.includes_scrollbars |= span.includes_scrollbars;
         }
 
@@ -689,7 +726,49 @@ impl PaintSubtreeBuilder {
             .saturating_add(child_subtree.pruning.preclipped_descendants);
     }
 
-    fn into_retained(self, generation: u64) -> RetainedPaintSubtree {
+    /// Widens the open filter layer's push clip to the region the layer
+    /// composites: this node's own visual bounds (already padded by
+    /// `visual_clip_for`) unioned with its descendants' bounds grown by the
+    /// blur kernel's reach, clipped to what the node was allowed to paint
+    /// into. The subtree's extent is only known once its children have been
+    /// appended, so the push command is emitted first and patched here.
+    fn grow_filter_layer_bounds(&mut self, clip: DisplayListClip, blur_pad: f32) {
+        let pad = blur_pad.ceil() as i32;
+        let mut region = DisplayListClip {
+            x: self.local_bounds.x as i32,
+            y: self.local_bounds.y as i32,
+            width: self.local_bounds.width as i32,
+            height: self.local_bounds.height as i32,
+        };
+        if self.child_bounds.width > 0 && self.child_bounds.height > 0 {
+            let padded_children = DisplayListClip {
+                x: self.child_bounds.x as i32 - pad,
+                y: self.child_bounds.y as i32 - pad,
+                width: self.child_bounds.width as i32 + pad * 2,
+                height: self.child_bounds.height as i32 + pad * 2,
+            };
+            region = union_display_clip(region, padded_children);
+        }
+        let region = intersect_display_clip(clip, region);
+        let Some(push) = self.commands.first_mut() else {
+            return;
+        };
+        debug_assert_eq!(push.kind, DisplayPaintCommandKind::PushFilterLayer);
+        push.clip = region;
+        // The layer composites the whole padded region, so the subtree's
+        // damage bounds have to cover it or a repaint would leave a stale
+        // blur ring behind.
+        let padded = DamageRect {
+            x: region.x.max(0) as u32,
+            y: region.y.max(0) as u32,
+            width: region.width.max(0) as u32,
+            height: region.height.max(0) as u32,
+        };
+        self.bounds = self.bounds.union(padded);
+        self.local_bounds = self.local_bounds.union(padded);
+    }
+
+    fn into_retained(self, generation: u64, filter_layer: bool) -> RetainedPaintSubtree {
         let command_count = self.local_command_count;
         let command_span = if command_count == 0 {
             None
@@ -709,6 +788,7 @@ impl PaintSubtreeBuilder {
             pruning: self.pruning,
             command_span,
             child_order: self.child_order,
+            filter_layer,
         }
     }
 }
@@ -1160,6 +1240,9 @@ impl RetainedDisplayList {
         self.command_spans = command_spans;
         self.paint_commands = paint_commands;
         self.command_kinds = command_kinds;
+        self.layer_scopes = collect_layer_scopes(self.paint_commands.as_ref());
+        self.filter_layer_regions =
+            filter_layer_regions(self.paint_commands.as_ref(), &self.layer_scopes, surface);
         if let Some((backdrop_regions, blur_regions)) = updated_blur_metadata {
             self.backdrop_regions = backdrop_regions;
             self.blur_regions = blur_regions;
@@ -1388,19 +1471,34 @@ impl RetainedDisplayList {
         &self.backdrop_regions
     }
 
-    /// Expands every damage rect that intersects an active backdrop-filter
-    /// region to cover that whole region, so the blur re-reads freshly painted
-    /// backdrop pixels instead of mixing pixels from different frames. Runs to
-    /// a fixpoint so chained/overlapping blur regions cascade. Returns whether
-    /// any rect grew.
-    pub fn expand_damage_for_backdrop_filters(&self, rects: &mut [DamageRect]) -> bool {
-        if self.backdrop_regions.is_empty() || rects.is_empty() {
+    /// Regions covered by an element `filter: blur()` layer — the blurred
+    /// subtree's extent inflated by the blur kernel reach. Every pixel of a
+    /// blur layer is a function of every other, so partial damage inside one
+    /// has to grow to the whole region.
+    pub fn filter_layer_regions(&self) -> &[DamageRect] {
+        &self.filter_layer_regions
+    }
+
+    /// Expands every damage rect that intersects an active blur region — the
+    /// read region of a `backdrop-filter` node or the extent of a
+    /// `filter: blur()` layer — to cover that whole region, so a blur re-reads
+    /// freshly painted pixels instead of mixing pixels from different frames.
+    /// Runs to a fixpoint so chained/overlapping regions cascade. Returns
+    /// whether any rect grew.
+    pub fn expand_damage_for_blur_regions(&self, rects: &mut [DamageRect]) -> bool {
+        if (self.backdrop_regions.is_empty() && self.filter_layer_regions.is_empty())
+            || rects.is_empty()
+        {
             return false;
         }
         let mut expanded = false;
         loop {
             let mut changed = false;
-            for region in &self.backdrop_regions {
+            for region in self
+                .backdrop_regions
+                .iter()
+                .chain(self.filter_layer_regions.iter())
+            {
                 for rect in rects.iter_mut() {
                     if !rect.intersects(*region) {
                         continue;
@@ -1524,6 +1622,7 @@ impl RetainedDisplayList {
                 }
             }
         }
+        self.widen_selection_to_layer_scopes(&mut selected_spans);
         let selected_command_count = selected_spans
             .iter()
             .map(|span| span.end.saturating_sub(span.start))
@@ -1630,6 +1729,7 @@ impl RetainedDisplayList {
             }
         }
 
+        self.widen_selection_to_layer_scopes(&mut selected_spans);
         let selected_command_count = selected_spans
             .iter()
             .map(|span| span.end.saturating_sub(span.start))
@@ -1648,6 +1748,36 @@ impl RetainedDisplayList {
                 command_count: selected_command_count,
             },
             metrics,
+        }
+    }
+
+    /// Grows every selected range that overlaps a blur layer's command range
+    /// to cover the whole layer. Replaying half of a layer would either drop
+    /// its push (painting the subtree unblurred) or drop its pop (leaking the
+    /// layer into later commands).
+    fn widen_selection_to_layer_scopes(&self, selected: &mut Vec<SelectedCommandSpan>) {
+        if self.layer_scopes.is_empty() || selected.is_empty() {
+            return;
+        }
+        loop {
+            let mut widened = None;
+            for &(start, end) in &self.layer_scopes {
+                if let Some(span) = selected
+                    .iter()
+                    .find(|span| span.start < end && start < span.end)
+                    .filter(|span| span.start > start || span.end < end)
+                {
+                    widened = Some(SelectedCommandSpan {
+                        start: span.start.min(start),
+                        end: span.end.max(end),
+                    });
+                    break;
+                }
+            }
+            let Some(span) = widened else {
+                return;
+            };
+            insert_selected_command_span(selected, span);
         }
     }
 
@@ -2042,6 +2172,19 @@ fn build_paint_subtree(
     }
 
     let mut subtree = PaintSubtreeBuilder::default();
+    // `filter: blur()` blurs the element *and its descendants*, so it lowers
+    // into a layer scope around the whole subtree rather than a filtered paint
+    // on this node's own shape. The push clip starts at this node's blurred
+    // extent and grows to the subtree's once the children are known.
+    let filter_layer = paint_node.style.filter.blur_radius > 0.0;
+    if filter_layer {
+        subtree.push_command(DisplayPaintCommand {
+            node: Arc::clone(&paint_node),
+            clip: intersect_display_clip(clip, visual_bounds),
+            kind: DisplayPaintCommandKind::PushFilterLayer,
+        });
+        metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
+    }
     subtree.push_command(DisplayPaintCommand {
         node: Arc::clone(&paint_node),
         clip: node_clip,
@@ -2088,13 +2231,23 @@ fn build_paint_subtree(
 
     if display_node_may_show_scrollbars(&paint_node) {
         subtree.push_command(DisplayPaintCommand {
-            node: paint_node,
+            node: Arc::clone(&paint_node),
             clip: node_clip,
             kind: DisplayPaintCommandKind::Scrollbars,
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
-    let subtree = Arc::new(subtree.into_retained(generation));
+    if filter_layer {
+        let blur_pad = paint_node.style.filter.blur_radius * 3.0;
+        subtree.grow_filter_layer_bounds(clip, blur_pad);
+        subtree.push_command(DisplayPaintCommand {
+            node: paint_node,
+            clip: node_clip,
+            kind: DisplayPaintCommandKind::PopFilterLayer,
+        });
+        metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
+    }
+    let subtree = Arc::new(subtree.into_retained(generation, filter_layer));
     next_subtrees.insert(node.id, Arc::clone(&subtree));
     subtree
 }
@@ -2612,6 +2765,10 @@ fn backdrop_read_region(node: &DisplayPaintNode, surface: DamageRect) -> Option<
 /// backdrop-filter node actually has in-surface content beneath it.
 /// Conservative: over-reporting only costs an identity blur pass.
 fn display_command_paints_pixels(command: &DisplayPaintCommand) -> bool {
+    if !command.kind.draws_content() {
+        // The node's own Node command already accounts for its pixels.
+        return false;
+    }
     if command.kind == DisplayPaintCommandKind::Scrollbars {
         return true;
     }
@@ -2649,6 +2806,51 @@ fn compute_backdrop_regions(
         }
     }
     regions
+}
+
+/// Pairs each `PushFilterLayer` with its `PopFilterLayer`, yielding the
+/// half-open command range the layer covers. Ranges nest but never interleave,
+/// because they come from a tree walk.
+fn collect_layer_scopes(commands: &[DisplayPaintCommand]) -> Vec<(usize, usize)> {
+    let mut scopes = Vec::new();
+    let mut open: Vec<usize> = Vec::new();
+    for (index, command) in commands.iter().enumerate() {
+        match command.kind {
+            DisplayPaintCommandKind::PushFilterLayer => open.push(index),
+            DisplayPaintCommandKind::PopFilterLayer => {
+                if let Some(start) = open.pop() {
+                    scopes.push((start, index.saturating_add(1)));
+                }
+            }
+            _ => {}
+        }
+    }
+    scopes.sort_unstable();
+    scopes
+}
+
+/// The surface-clipped extent of each blur layer, taken from the push
+/// command's clip (already inflated by the blur kernel reach).
+fn filter_layer_regions(
+    commands: &[DisplayPaintCommand],
+    scopes: &[(usize, usize)],
+    surface: DamageRect,
+) -> Vec<DamageRect> {
+    scopes
+        .iter()
+        .filter_map(|&(start, _)| {
+            let push = commands.get(start)?;
+            clip_rect(
+                DamageRect {
+                    x: push.clip.x.max(0) as u32,
+                    y: push.clip.y.max(0) as u32,
+                    width: push.clip.width.max(0) as u32,
+                    height: push.clip.height.max(0) as u32,
+                },
+                surface,
+            )
+        })
+        .collect()
 }
 
 fn command_has_effect_overflow(command: &DisplayPaintCommand) -> bool {
@@ -2726,6 +2928,24 @@ fn collect_command_spans(
     };
     let subtree_end = command_start.saturating_add(subtree.commands.len());
 
+    // A blurred subtree is one indivisible span: its commands only produce the
+    // right pixels when replayed between their own layer push and pop, so no
+    // descendant may be selected on its own. The span's bounds are the whole
+    // subtree's, already inflated by the blur reach.
+    if subtree.filter_layer {
+        if let Some(span) = subtree.command_span {
+            spans.push(RetainedCommandSpan {
+                owner: node.id,
+                start: command_start,
+                end: subtree_end,
+                bounds: span.bounds,
+                command_count: subtree_end.saturating_sub(command_start),
+                includes_scrollbars: span.includes_scrollbars,
+            });
+        }
+        return subtree_end;
+    }
+
     if let Some(span) = subtree.command_span {
         let owned = span.command_count;
         let has_children = subtree_end > command_start.saturating_add(owned);
@@ -2789,6 +3009,20 @@ fn build_command_spans_with_ancestor_copying(
         };
         let subtree_end = command_start.saturating_add(subtree.commands.len());
         let mut spans = Vec::new();
+
+        if subtree.filter_layer {
+            if let Some(span) = subtree.command_span {
+                spans.push(RetainedCommandSpan {
+                    owner: node.id,
+                    start: command_start,
+                    end: subtree_end,
+                    bounds: span.bounds,
+                    command_count: subtree_end.saturating_sub(command_start),
+                    includes_scrollbars: span.includes_scrollbars,
+                });
+            }
+            return (spans, subtree_end);
+        }
 
         if let Some(span) = subtree.command_span {
             let owned = span.command_count;
@@ -3114,6 +3348,25 @@ fn attr_f32_with_default(node: &WidgetNode, key: &str, default: f32) -> f32 {
         .get(key)
         .and_then(|value| value.parse::<f32>().ok())
         .unwrap_or(default)
+}
+
+fn union_display_clip(a: DisplayListClip, b: DisplayListClip) -> DisplayListClip {
+    if a.width <= 0 || a.height <= 0 {
+        return b;
+    }
+    if b.width <= 0 || b.height <= 0 {
+        return a;
+    }
+    let x = a.x.min(b.x);
+    let y = a.y.min(b.y);
+    let right = (a.x + a.width).max(b.x + b.width);
+    let bottom = (a.y + a.height).max(b.y + b.height);
+    DisplayListClip {
+        x,
+        y,
+        width: right - x,
+        height: bottom - y,
+    }
 }
 
 fn intersect_display_clip(a: DisplayListClip, b: DisplayListClip) -> DisplayListClip {
@@ -3971,6 +4224,7 @@ mod tests {
     fn retained_subtree_handle_beats_fieldwise_clone() {
         let subtree = RetainedPaintSubtree {
             generation: 1,
+            filter_layer: false,
             commands: vec![DisplayPaintCommand {
                 node: Arc::new(build_paint_node(
                     &node(1, "box", 0.0, 0.0, 20.0, 20.0),
@@ -6865,7 +7119,7 @@ mod tests {
     }
 
     #[test]
-    fn expand_damage_for_backdrop_filters_grows_intersecting_rects() {
+    fn expand_damage_for_blur_regions_grows_intersecting_rects() {
         let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
         root.computed_style.background_color = Color::TRANSPARENT;
         root.children.push(node(2, "box", 0.0, 0.0, 50.0, 100.0));
@@ -6880,7 +7134,7 @@ mod tests {
             width: 10,
             height: 10,
         }];
-        assert!(!list.expand_damage_for_backdrop_filters(&mut disjoint));
+        assert!(!list.expand_damage_for_blur_regions(&mut disjoint));
         assert_eq!(
             disjoint[0],
             DamageRect {
@@ -6899,7 +7153,7 @@ mod tests {
             width: 10,
             height: 10,
         }];
-        assert!(list.expand_damage_for_backdrop_filters(&mut touching));
+        assert!(list.expand_damage_for_blur_regions(&mut touching));
         assert_eq!(
             touching[0],
             DamageRect {
@@ -6909,6 +7163,130 @@ mod tests {
                 height: 64,
             },
             "expanded damage must union the backdrop read region"
+        );
+    }
+
+    fn blurred_node(id: NodeId, x: f32, y: f32, w: f32, h: f32, radius: f32) -> WidgetNode {
+        let mut node = node(id, "box", x, y, w, h);
+        node.computed_style.filter = VisualFilter {
+            blur_radius: radius,
+        };
+        node
+    }
+
+    #[test]
+    fn filtered_node_wraps_its_whole_subtree_in_a_layer_scope() {
+        let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+        let mut blurred = blurred_node(2, 20.0, 20.0, 40.0, 40.0, 4.0);
+        blurred.children.push(node(3, "box", 24.0, 24.0, 8.0, 8.0));
+        root.children.push(blurred);
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 100, 100, true, true);
+
+        let kinds: Vec<_> = list.paint_commands().iter().map(|c| c.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                DisplayPaintCommandKind::Node,
+                DisplayPaintCommandKind::PushFilterLayer,
+                DisplayPaintCommandKind::Node,
+                DisplayPaintCommandKind::Node,
+                DisplayPaintCommandKind::PopFilterLayer,
+            ],
+            "the child's commands must fall inside the blurred node's layer scope"
+        );
+
+        // The push carries the region the layer composites: the subtree grown
+        // by the blur kernel's reach, clipped to the surface.
+        let push = &list.paint_commands()[1];
+        assert_eq!(
+            (push.clip.x, push.clip.y),
+            (8, 8),
+            "layer bounds must include the blur pad, not just the element box"
+        );
+        assert!(
+            push.clip.width >= 40 + 24 && push.clip.height >= 40 + 24,
+            "layer bounds {}x{} must cover the padded subtree",
+            push.clip.width,
+            push.clip.height
+        );
+    }
+
+    #[test]
+    fn unfiltered_tree_emits_no_layer_scopes() {
+        let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+        root.children.push(node(2, "box", 10.0, 10.0, 20.0, 20.0));
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 100, 100, true, true);
+
+        assert!(
+            list.paint_commands()
+                .iter()
+                .all(|command| command.kind.draws_content())
+        );
+        assert!(list.filter_layer_regions().is_empty());
+    }
+
+    #[test]
+    fn damage_inside_a_blur_layer_selects_the_whole_scope() {
+        let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+        let mut blurred = blurred_node(2, 20.0, 20.0, 40.0, 40.0, 4.0);
+        blurred.children.push(node(3, "box", 24.0, 24.0, 8.0, 8.0));
+        root.children.push(blurred);
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 100, 100, true, true);
+
+        // Damage covering only the inner child: replaying it alone would paint
+        // the child outside the layer, unblurred.
+        let selected = list.select_paint_commands(
+            Some(DamageRect {
+                x: 25,
+                y: 25,
+                width: 4,
+                height: 4,
+            }),
+            DisplayListRepaintPolicy::MinimalDamage,
+        );
+        let kinds: Vec<_> = selected.iter_with_kinds().map(|(_, kind)| kind).collect();
+        let push = kinds
+            .iter()
+            .position(|kind| *kind == DisplayPaintCommandKind::PushFilterLayer)
+            .unwrap_or_else(|| panic!("selection must replay the layer push, got {kinds:?}"));
+        let pop = kinds
+            .iter()
+            .position(|kind| *kind == DisplayPaintCommandKind::PopFilterLayer)
+            .unwrap_or_else(|| panic!("selection must replay the layer pop, got {kinds:?}"));
+        assert_eq!(
+            pop - push,
+            3,
+            "the layer's own node, its child, and nothing else belong between \
+             the push and the pop, got {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn damage_inside_a_blur_layer_grows_to_the_layer_region() {
+        let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+        root.children
+            .push(blurred_node(2, 20.0, 20.0, 40.0, 40.0, 4.0));
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 100, 100, true, true);
+
+        let region = *list
+            .filter_layer_regions()
+            .first()
+            .expect("a blurred node contributes one layer region");
+        let mut damage = [DamageRect {
+            x: 30,
+            y: 30,
+            width: 4,
+            height: 4,
+        }];
+        assert!(list.expand_damage_for_blur_regions(&mut damage));
+        assert_eq!(
+            damage[0], region,
+            "every pixel of a blur layer depends on the rest, so partial damage \
+             inside it has to grow to the whole layer"
         );
     }
 }

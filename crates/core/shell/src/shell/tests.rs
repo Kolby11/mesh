@@ -2,7 +2,7 @@ use super::{
     BackendLaunchCandidate, BackendRuntimeSlot, BackendRuntimeStatus, ComponentInput, CoreRequest,
     InterfaceProvider, InterfaceRegistry, KeyModifiers, ServiceCommandMsg, ServiceEvent,
     ServiceInterfaceEventSubscription, ServiceObservationSummary, Shell, TabFocusTarget,
-    backend_launch_candidates_from_graph, component_key_pressed_input,
+    backend_launch_candidates_from_graph, blur_quality_from_settings, component_key_pressed_input,
     component_key_released_input,
     discovery::{
         discover_shell_module_manifest_dirs, load_shell_module_manifests,
@@ -9338,4 +9338,20 @@ fn unique_test_file(prefix: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     std::env::temp_dir().join(format!("mesh-{prefix}-{nanos}.json"))
+}
+
+#[test]
+fn blur_settings_clamp_into_painter_quality() {
+    let defaults = blur_quality_from_settings(&mesh_core_config::BlurSettings::default());
+    assert_eq!(defaults.passes, 1);
+    assert_eq!(defaults.max_radius, 96.0);
+
+    // A hand-edited settings file is the point of the store, so out-of-range
+    // values clamp to what the painter supports rather than disabling blur.
+    let extreme = blur_quality_from_settings(&mesh_core_config::BlurSettings {
+        passes: 9,
+        max_radius: -4.0,
+    });
+    assert_eq!(extreme.passes, mesh_core_render::MAX_BLUR_PASSES);
+    assert_eq!(extreme.max_radius, 0.0);
 }

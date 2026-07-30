@@ -40,6 +40,8 @@ pub struct ShellSettings {
     pub icons: IconSettings,
     #[serde(default)]
     pub tooltip: TooltipSettings,
+    #[serde(default)]
+    pub render: RenderSettings,
 }
 
 /// The `"shell"` namespace's schema, as the store validates it.
@@ -93,6 +95,16 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
     FieldSpec::new(
         "icons",
         FieldKind::Section(&[FieldSpec::new("default_pack", FieldKind::Str)]),
+    ),
+    FieldSpec::new(
+        "render",
+        FieldKind::Section(&[FieldSpec::new(
+            "blur",
+            FieldKind::Section(&[
+                FieldSpec::new("passes", FieldKind::UInt),
+                FieldSpec::new("max_radius", FieldKind::Float),
+            ]),
+        )]),
     ),
     FieldSpec::new(
         "tooltip",
@@ -260,6 +272,51 @@ impl Default for I18nSettings {
             fallback_locale: default_fallback_locale(),
         }
     }
+}
+
+/// Shell-wide rendering settings.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct RenderSettings {
+    #[serde(default)]
+    pub blur: BlurSettings,
+}
+
+/// How much work a blur may cost.
+///
+/// `filter: blur()` and `backdrop-filter: blur()` are the only styles whose
+/// cost scales with the *area* they cover rather than with the number of
+/// elements, so they are the one part of painting worth a user-facing dial —
+/// a weak machine can trade blur fidelity for frame time without giving up
+/// the frosted look.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BlurSettings {
+    /// Blur passes per filtered layer (1–3). Each pass runs at the reduced
+    /// sigma that keeps the total blur constant, so more passes buy a smoother
+    /// falloff rather than a stronger blur — and cost roughly linearly.
+    #[serde(default = "default_blur_passes")]
+    pub passes: u8,
+
+    /// Blur radii larger than this are dropped with a diagnostic instead of
+    /// rasterized, bounding the worst frame a stylesheet can ask for.
+    #[serde(default = "default_blur_max_radius")]
+    pub max_radius: f32,
+}
+
+impl Default for BlurSettings {
+    fn default() -> Self {
+        Self {
+            passes: default_blur_passes(),
+            max_radius: default_blur_max_radius(),
+        }
+    }
+}
+
+fn default_blur_passes() -> u8 {
+    1
+}
+
+fn default_blur_max_radius() -> f32 {
+    96.0
 }
 
 /// Global tooltip behavior settings.

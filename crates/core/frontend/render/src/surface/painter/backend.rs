@@ -8,13 +8,53 @@ use skia_safe::{
 };
 use smallvec::SmallVec;
 
-pub(crate) const MAX_EFFECT_BLUR_RADIUS: f32 = 96.0;
 use mesh_core_elements::lru::LruCache;
 use skia_safe::SamplingOptions;
 use std::cell::RefCell;
 use std::sync::Arc;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+pub(crate) const MAX_EFFECT_BLUR_RADIUS: f32 = 96.0;
+
+/// How the painter spends its budget on one blur.
+///
+/// The one lever that measurably changes cost here is how many times the
+/// kernel runs. Resampling the layer to a lower resolution first — the usual
+/// trick — is *not* one: Skia's raster blur already downsamples internally for
+/// wide kernels, so an explicit resample chain only adds passes (measured at
+/// roughly 2x slower; see the rejected-experiments table in
+/// `.planning/log/performance-log.md`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BlurQuality {
+    /// Number of chained blur passes. Each pass runs at
+    /// `sigma / sqrt(passes)` so the total blur matches a single-pass blur of
+    /// the requested radius: more passes buy a smoother falloff, not a wider
+    /// one. Clamped to `1..=MAX_BLUR_PASSES`.
+    pub passes: u8,
+    /// Blur radii above this are dropped with a diagnostic rather than
+    /// rasterized, bounding the worst frame a stylesheet can ask for.
+    pub max_radius: f32,
+}
+
+/// Upper bound on [`BlurQuality::passes`]. Beyond three passes the visual
+/// difference stops being measurable while the cost keeps growing.
+pub const MAX_BLUR_PASSES: u8 = 3;
+
+impl Default for BlurQuality {
+    fn default() -> Self {
+        Self {
+            passes: 1,
+            max_radius: MAX_EFFECT_BLUR_RADIUS,
+        }
+    }
+}
+
+impl BlurQuality {
+    pub(crate) fn resolved_passes(self) -> u8 {
+        self.passes.clamp(1, MAX_BLUR_PASSES)
+    }
+}
 
 const SKIA_IMAGE_CACHE_CAPACITY: usize = 128;
 const GRADIENT_SHADER_CACHE_CAPACITY: usize = 64;
@@ -81,6 +121,45 @@ pub(crate) trait PaintBackend: Send + Sync {
         });
     }
 
+    /// Execute commands within a session whose layer stack outlives this call.
+    ///
+    /// A filtered subtree opens a layer in the command buffer that starts it
+    /// and closes it in a later one, so the open layers cannot live in a local
+    /// of the execute loop the way clips do.
+    fn execute_commands_in_session_with_layers(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        commands: &[PainterCommand],
+        _layers: &mut PainterLayerStack,
+        diagnostics: &mut Vec<PainterDiagnostic>,
+    ) {
+        self.execute_commands_in_session(session, commands, diagnostics);
+    }
+
+    /// Close any layers left open by an unbalanced command stream, restoring
+    /// the canvas to the state it had before the outermost push.
+    fn close_open_layers(
+        &self,
+        _session: &mut PixelCanvasSession<'_>,
+        layers: &mut PainterLayerStack,
+    ) {
+        layers.clear();
+    }
+
+    /// Draw `source` onto `buffer` at `at`, blurred by `filter`. Used by the
+    /// immediate painter, which rasterizes a filtered subtree into its own
+    /// buffer instead of opening a canvas layer.
+    fn composite_blurred_buffer(
+        &self,
+        _buffer: &mut PixelBuffer,
+        _source: &PixelBuffer,
+        _at: (i32, i32),
+        _filter: VisualFilter,
+        _quality: BlurQuality,
+        _clip: ClipRect,
+    ) {
+    }
+
     fn fill_rect(&self, buffer: &mut PixelBuffer, rect: ClipRect, color: Color, clip: ClipRect) {
         let mut diagnostics = Vec::new();
         self.execute_commands(
@@ -88,26 +167,6 @@ pub(crate) trait PaintBackend: Send + Sync {
             &[PainterCommand::DrawRect {
                 rect,
                 paint: PainterPaint::fill(color),
-                clip,
-            }],
-            &mut diagnostics,
-        );
-    }
-
-    fn fill_rect_with_filter(
-        &self,
-        buffer: &mut PixelBuffer,
-        rect: ClipRect,
-        color: Color,
-        clip: ClipRect,
-        filter: VisualFilter,
-    ) {
-        let mut diagnostics = Vec::new();
-        self.execute_commands(
-            buffer,
-            &[PainterCommand::DrawRect {
-                rect,
-                paint: PainterPaint::fill(color).with_filter(filter),
                 clip,
             }],
             &mut diagnostics,
@@ -129,28 +188,6 @@ pub(crate) trait PaintBackend: Send + Sync {
                 rect,
                 radius,
                 paint: PainterPaint::fill(color),
-                clip,
-            }],
-            &mut diagnostics,
-        );
-    }
-
-    fn fill_rounded_rect_with_filter(
-        &self,
-        buffer: &mut PixelBuffer,
-        rect: ClipRect,
-        radius: f32,
-        color: Color,
-        clip: ClipRect,
-        filter: VisualFilter,
-    ) {
-        let mut diagnostics = Vec::new();
-        self.execute_commands(
-            buffer,
-            &[PainterCommand::DrawRoundedRect {
-                rect,
-                radius,
-                paint: PainterPaint::fill(color).with_filter(filter),
                 clip,
             }],
             &mut diagnostics,
@@ -284,19 +321,91 @@ pub(crate) struct PainterLayer {
     pub opacity: f32,
     pub blend_mode: PainterBlendMode,
     pub filter: PainterFilter,
+    pub blur_quality: BlurQuality,
+}
+
+impl PainterLayer {
+    /// An unfiltered layer used for opacity/blend isolation.
+    pub(crate) fn isolated(bounds: ClipRect, opacity: f32, blend_mode: PainterBlendMode) -> Self {
+        Self {
+            bounds,
+            opacity,
+            blend_mode,
+            filter: PainterFilter::None,
+            blur_quality: BlurQuality::default(),
+        }
+    }
+
+    /// A layer that blurs everything drawn into it before compositing.
+    pub(crate) fn blurred(
+        bounds: ClipRect,
+        filter: VisualFilter,
+        blur_quality: BlurQuality,
+    ) -> Self {
+        Self {
+            bounds,
+            opacity: 1.0,
+            blend_mode: PainterBlendMode::SrcOver,
+            filter: PainterFilter::Blur(filter),
+            blur_quality,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct ActivePainterLayer {
-    save_count: usize,
+pub(crate) struct ActivePainterLayer {
+    /// `None` for a push the backend declined (degenerate bounds, nesting cap).
+    /// The entry is still recorded so the matching pop stays balanced.
+    save_count: Option<usize>,
 }
+
+/// Layers opened by `PushLayer` and not yet closed by `PopLayer`.
+///
+/// Owned by the render engine for the length of a paint pass because a
+/// filtered subtree spans many command buffers.
+#[derive(Debug, Default)]
+pub(crate) struct PainterLayerStack {
+    layers: SmallVec<[ActivePainterLayer; 4]>,
+}
+
+impl PainterLayerStack {
+    pub(crate) fn depth(&self) -> usize {
+        self.layers.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.layers.is_empty()
+    }
+
+    fn push(&mut self, layer: ActivePainterLayer) {
+        self.layers.push(layer);
+    }
+
+    fn pop(&mut self) -> Option<ActivePainterLayer> {
+        self.layers.pop()
+    }
+
+    /// Save count of the outermost open layer, which restores every open layer
+    /// at once.
+    fn outermost_save_count(&self) -> Option<usize> {
+        self.layers.iter().find_map(|layer| layer.save_count)
+    }
+
+    fn clear(&mut self) {
+        self.layers.clear();
+    }
+}
+
+/// How deep filtered subtrees may nest before the painter stops opening
+/// layers. Each level is a full offscreen allocation plus a blur pass over it,
+/// so a runaway nest is a frame-time cliff rather than a visual improvement.
+pub(crate) const MAX_BLUR_LAYER_DEPTH: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PainterPaint {
     pub color: Color,
     pub style: PainterPaintStyle,
     pub blend_mode: PainterBlendMode,
-    pub filter: VisualFilter,
 }
 
 impl PainterPaint {
@@ -305,7 +414,6 @@ impl PainterPaint {
             color,
             style: PainterPaintStyle::Fill,
             blend_mode: PainterBlendMode::SrcOver,
-            filter: VisualFilter::NONE,
         }
     }
 
@@ -314,13 +422,7 @@ impl PainterPaint {
             color,
             style: PainterPaintStyle::Stroke(PainterStroke { width }),
             blend_mode: PainterBlendMode::SrcOver,
-            filter: VisualFilter::NONE,
         }
-    }
-
-    pub(crate) fn with_filter(mut self, filter: VisualFilter) -> Self {
-        self.filter = filter;
-        self
     }
 
     pub(crate) fn with_blend_mode(mut self, blend_mode: PainterBlendMode) -> Self {
@@ -469,8 +571,10 @@ impl PaintBackend for SkiaPaintBackend {
         commands: &[PainterCommand],
         diagnostics: &mut Vec<PainterDiagnostic>,
     ) {
+        let mut layers = PainterLayerStack::default();
         let _ = buffer.with_skia_canvas(|canvas| {
-            self.execute_commands_on_canvas(canvas, commands, diagnostics);
+            self.execute_commands_on_canvas(canvas, commands, &mut layers, diagnostics);
+            close_open_layers_on_canvas(canvas, &mut layers);
         });
     }
 
@@ -480,10 +584,93 @@ impl PaintBackend for SkiaPaintBackend {
         commands: &[PainterCommand],
         diagnostics: &mut Vec<PainterDiagnostic>,
     ) {
+        let mut layers = PainterLayerStack::default();
         let _ = session.with_canvas(|canvas| {
-            self.execute_commands_on_canvas(canvas, commands, diagnostics);
+            self.execute_commands_on_canvas(canvas, commands, &mut layers, diagnostics);
+            close_open_layers_on_canvas(canvas, &mut layers);
         });
     }
+
+    fn execute_commands_in_session_with_layers(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        commands: &[PainterCommand],
+        layers: &mut PainterLayerStack,
+        diagnostics: &mut Vec<PainterDiagnostic>,
+    ) {
+        let _ = session.with_canvas(|canvas| {
+            self.execute_commands_on_canvas(canvas, commands, layers, diagnostics);
+        });
+    }
+
+    fn close_open_layers(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        layers: &mut PainterLayerStack,
+    ) {
+        if layers.is_empty() {
+            return;
+        }
+        let _ = session.with_canvas(|canvas| {
+            close_open_layers_on_canvas(canvas, layers);
+        });
+    }
+
+    fn composite_blurred_buffer(
+        &self,
+        buffer: &mut PixelBuffer,
+        source: &PixelBuffer,
+        at: (i32, i32),
+        filter: VisualFilter,
+        quality: BlurQuality,
+        clip: ClipRect,
+    ) {
+        if source.width == 0 || source.height == 0 || clip.width <= 0 || clip.height <= 0 {
+            return;
+        }
+        let info = ImageInfo::new(
+            (source.width as i32, source.height as i32),
+            skia_safe::ColorType::BGRA8888,
+            skia_safe::AlphaType::Premul,
+            None,
+        );
+        let Some(image) =
+            images::raster_from_data(&info, Data::new_copy(&source.data), source.stride as usize)
+        else {
+            return;
+        };
+        let mut paint = skia_safe::Paint::default();
+        if let Some(image_filter) = blur_image_filter(filter.blur_radius, quality) {
+            paint.set_image_filter(image_filter);
+        }
+        let _ = buffer.with_skia_canvas(|canvas| {
+            let save_count = canvas.save();
+            canvas.clip_rect(
+                Rect::from_xywh(
+                    clip.x as f32,
+                    clip.y as f32,
+                    clip.width as f32,
+                    clip.height as f32,
+                ),
+                None,
+                false,
+            );
+            canvas.draw_image_with_sampling_options(
+                &image,
+                (at.0 as f32, at.1 as f32),
+                SamplingOptions::from(skia_safe::FilterMode::Linear),
+                Some(&paint),
+            );
+            canvas.restore_to_count(save_count);
+        });
+    }
+}
+
+fn close_open_layers_on_canvas(canvas: &Canvas, layers: &mut PainterLayerStack) {
+    if let Some(save_count) = layers.outermost_save_count() {
+        canvas.restore_to_count(save_count);
+    }
+    layers.clear();
 }
 
 impl SkiaPaintBackend {
@@ -491,10 +678,10 @@ impl SkiaPaintBackend {
         &self,
         canvas: &Canvas,
         commands: &[PainterCommand],
+        layer_stack: &mut PainterLayerStack,
         diagnostics: &mut Vec<PainterDiagnostic>,
     ) {
         let mut clip_stack: SmallVec<[ClipRect; 8]> = SmallVec::new();
-        let mut layer_stack: SmallVec<[ActivePainterLayer; 4]> = SmallVec::new();
         for command in commands {
             match command {
                 PainterCommand::PushClip(clip) => {
@@ -509,25 +696,51 @@ impl SkiaPaintBackend {
                     clip_stack.pop();
                 }
                 PainterCommand::PushLayer(layer) => {
-                    if let PainterFilter::Blur(filter) = layer.filter
-                        && self.diagnose_excessive_blur(filter, diagnostics)
-                    {
-                        continue;
+                    let blur_radius = match layer.filter {
+                        PainterFilter::Blur(filter) => filter.blur_radius,
+                        _ => 0.0,
+                    };
+                    let over_budget = matches!(layer.filter, PainterFilter::Blur(filter)
+                    if self.diagnose_blur_over_budget(
+                        filter,
+                        layer.blur_quality.max_radius,
+                        diagnostics,
+                    ));
+                    let too_deep = blur_radius > 0.0 && layer_stack.depth() >= MAX_BLUR_LAYER_DEPTH;
+                    if too_deep {
+                        diagnostics.push(PainterDiagnostic {
+                            backend_id: self.id(),
+                            feature: UnsupportedPainterFeature::Filter,
+                            message: format!(
+                                "blur layers nested deeper than {MAX_BLUR_LAYER_DEPTH}; \
+                                 painting subtree unblurred"
+                            ),
+                            source: None,
+                        });
                     }
-                    if let Some(active) =
-                        self.push_layer_command(canvas, *layer, clip_stack.last().copied())
-                    {
-                        layer_stack.push(active);
-                    }
+                    let layer = if over_budget || too_deep {
+                        PainterLayer {
+                            filter: PainterFilter::None,
+                            ..*layer
+                        }
+                    } else {
+                        *layer
+                    };
+                    layer_stack.push(self.push_layer_command(
+                        canvas,
+                        layer,
+                        clip_stack.last().copied(),
+                    ));
                 }
                 PainterCommand::PopLayer => {
-                    if let Some(layer) = layer_stack.pop() {
-                        canvas.restore_to_count(layer.save_count);
+                    if let Some(layer) = layer_stack.pop()
+                        && let Some(save_count) = layer.save_count
+                    {
+                        canvas.restore_to_count(save_count);
                     }
                 }
                 PainterCommand::DrawRect { rect, paint, clip } => {
                     let paint = *paint;
-                    self.diagnose_unsupported_paint(paint, diagnostics);
                     self.draw_rect_command(
                         canvas,
                         *rect,
@@ -542,7 +755,6 @@ impl SkiaPaintBackend {
                     clip,
                 } => {
                     let paint = *paint;
-                    self.diagnose_unsupported_paint(paint, diagnostics);
                     self.draw_rounded_rect_command(
                         canvas,
                         *rect,
@@ -553,7 +765,6 @@ impl SkiaPaintBackend {
                 }
                 PainterCommand::DrawPath { path, paint, clip } => {
                     let paint = *paint;
-                    self.diagnose_unsupported_paint(paint, diagnostics);
                     self.draw_path_command(canvas, path, paint, effective_clip(*clip, &clip_stack));
                 }
                 PainterCommand::DrawImage {
@@ -615,17 +826,19 @@ impl SkiaPaintBackend {
                     clip,
                 } => match filter {
                     PainterFilter::None => {}
+                    // A blurred element is lowered into PushLayer/PopLayer
+                    // around its whole subtree, which is the only lowering that
+                    // blurs descendants rather than just the node's own shape.
                     PainterFilter::Blur(filter) => {
-                        if !self.diagnose_excessive_blur(*filter, diagnostics) {
-                            diagnostics.push(PainterDiagnostic {
-                                backend_id: self.id(),
-                                feature: UnsupportedPainterFeature::Filter,
-                                message:
-                                    "standalone blur filter commands are deferred to layer migration"
-                                        .into(),
-                                source: None,
-                            });
-                        }
+                        diagnostics.push(PainterDiagnostic {
+                            backend_id: self.id(),
+                            feature: UnsupportedPainterFeature::Filter,
+                            message: format!(
+                                "blur filter of radius {} must be lowered into a layer scope",
+                                filter.blur_radius
+                            ),
+                            source: None,
+                        });
                     }
                     PainterFilter::Backdrop(filter) => {
                         if self.diagnose_excessive_blur(*filter, diagnostics) {
@@ -649,12 +862,12 @@ impl SkiaPaintBackend {
         canvas: &Canvas,
         layer: PainterLayer,
         current_clip: Option<ClipRect>,
-    ) -> Option<ActivePainterLayer> {
+    ) -> ActivePainterLayer {
         let bounds = current_clip
             .map(|clip| intersect_clip(layer.bounds, clip))
             .unwrap_or(layer.bounds);
         if bounds.width <= 0 || bounds.height <= 0 {
-            return None;
+            return ActivePainterLayer { save_count: None };
         }
 
         let mut paint = skia_safe::Paint::default();
@@ -662,16 +875,7 @@ impl SkiaPaintBackend {
         paint.set_blend_mode(blend_mode_to_skia(layer.blend_mode));
 
         if let PainterFilter::Blur(filter) = layer.filter
-            && filter.blur_radius > 0.0
-            && let Some(image_filter) = image_filters::blur(
-                (
-                    blur_radius_to_sigma(filter.blur_radius),
-                    blur_radius_to_sigma(filter.blur_radius),
-                ),
-                Some(TileMode::Decal),
-                None,
-                None,
-            )
+            && let Some(image_filter) = blur_image_filter(filter.blur_radius, layer.blur_quality)
         {
             paint.set_image_filter(image_filter);
         }
@@ -683,15 +887,9 @@ impl SkiaPaintBackend {
             bounds.height as f32,
         );
         let save_count = canvas.save_layer(&SaveLayerRec::default().bounds(&bounds).paint(&paint));
-        Some(ActivePainterLayer { save_count })
-    }
-
-    fn diagnose_unsupported_paint(
-        &self,
-        paint: PainterPaint,
-        diagnostics: &mut Vec<PainterDiagnostic>,
-    ) {
-        self.diagnose_excessive_blur(paint.filter, diagnostics);
+        ActivePainterLayer {
+            save_count: Some(save_count),
+        }
     }
 
     fn diagnose_excessive_blur(
@@ -699,15 +897,27 @@ impl SkiaPaintBackend {
         filter: VisualFilter,
         diagnostics: &mut Vec<PainterDiagnostic>,
     ) -> bool {
-        if filter.blur_radius <= MAX_EFFECT_BLUR_RADIUS {
+        self.diagnose_blur_over_budget(filter, MAX_EFFECT_BLUR_RADIUS, diagnostics)
+    }
+
+    /// Reports and rejects a blur wider than the caller's budget. Filtered
+    /// layers carry the user's configured cap; shadows and backdrops use the
+    /// built-in one.
+    fn diagnose_blur_over_budget(
+        &self,
+        filter: VisualFilter,
+        max_radius: f32,
+        diagnostics: &mut Vec<PainterDiagnostic>,
+    ) -> bool {
+        if filter.blur_radius <= max_radius {
             return false;
         }
         diagnostics.push(PainterDiagnostic {
             backend_id: self.id(),
             feature: UnsupportedPainterFeature::Filter,
             message: format!(
-                "excessive blur radius {} exceeds max {}",
-                filter.blur_radius, MAX_EFFECT_BLUR_RADIUS
+                "excessive blur radius {} exceeds max {max_radius}",
+                filter.blur_radius
             ),
             source: None,
         });
@@ -1068,9 +1278,7 @@ impl SkiaPaintBackend {
             rect,
             clip,
             |this, canvas| match paint.style {
-                PainterPaintStyle::Fill => {
-                    this.fill_shape(canvas, rect, 0.0, paint.color, clip, paint.filter)
-                }
+                PainterPaintStyle::Fill => this.fill_shape(canvas, rect, 0.0, paint.color, clip),
                 PainterPaintStyle::Stroke(stroke) => {
                     this.stroke_rect_impl(
                         canvas,
@@ -1098,9 +1306,7 @@ impl SkiaPaintBackend {
             rect,
             clip,
             |this, canvas| match paint.style {
-                PainterPaintStyle::Fill => {
-                    this.fill_shape(canvas, rect, radius, paint.color, clip, paint.filter)
-                }
+                PainterPaintStyle::Fill => this.fill_shape(canvas, rect, radius, paint.color, clip),
                 PainterPaintStyle::Stroke(stroke) => {
                     this.stroke_rounded_rect_impl(
                         canvas,
@@ -1363,58 +1569,12 @@ impl SkiaPaintBackend {
         radius: f32,
         color: Color,
         clip: ClipRect,
-        filter: VisualFilter,
     ) {
-        if filter.is_none() {
-            if radius > 0.5 {
-                self.fill_rounded_rect_impl(canvas, rect, radius, color, clip);
-            } else {
-                self.fill_rect_impl(canvas, rect, color, clip);
-            }
-            return;
-        }
-
-        let blur_pad = (filter.blur_radius * 3.0).ceil() as i32;
-        let paint_bounds = ClipRect {
-            x: rect.x - blur_pad,
-            y: rect.y - blur_pad,
-            width: rect.width + blur_pad * 2,
-            height: rect.height + blur_pad * 2,
-        };
-        let clipped = intersect_clip(paint_bounds, clip);
-        if clipped.width <= 0 || clipped.height <= 0 {
-            return;
-        }
-        let save_count = canvas.save();
-        canvas.clip_rect(
-            Rect::from_xywh(
-                clipped.x as f32,
-                clipped.y as f32,
-                clipped.width as f32,
-                clipped.height as f32,
-            ),
-            None,
-            false,
-        );
-        let mut paint = skia_paint(color, true);
-        paint.set_style(PaintStyle::Fill);
-        paint.set_mask_filter(MaskFilter::blur(
-            BlurStyle::Normal,
-            blur_radius_to_sigma(filter.blur_radius),
-            Some(false),
-        ));
-        let rect = Rect::from_xywh(
-            rect.x as f32,
-            rect.y as f32,
-            rect.width as f32,
-            rect.height as f32,
-        );
         if radius > 0.5 {
-            canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
+            self.fill_rounded_rect_impl(canvas, rect, radius, color, clip);
         } else {
-            canvas.draw_rect(rect, &paint);
+            self.fill_rect_impl(canvas, rect, color, clip);
         }
-        canvas.restore_to_count(save_count);
     }
 }
 
@@ -1462,6 +1622,25 @@ fn blur_radius_to_sigma(radius: f32) -> f32 {
     (radius.max(0.0) * 0.57735 + 0.5).max(0.01)
 }
 
+/// Builds the image filter that realizes `radius` under `quality`.
+///
+/// `passes` blurs of `sigma / sqrt(passes)` compose to one blur of `sigma`,
+/// which is what keeps a quality change from also changing how blurred the
+/// result looks.
+fn blur_image_filter(radius: f32, quality: BlurQuality) -> Option<skia_safe::ImageFilter> {
+    if radius <= 0.0 {
+        return None;
+    }
+    let passes = quality.resolved_passes();
+    let sigma = blur_radius_to_sigma(radius) / f32::from(passes).sqrt();
+    let mut filter = None;
+    for _ in 0..passes {
+        filter = image_filters::blur((sigma, sigma), Some(TileMode::Decal), filter, None);
+        filter.as_ref()?;
+    }
+    filter
+}
+
 fn skia_paint(color: Color, anti_alias: bool) -> skia_safe::Paint {
     let mut paint = skia_safe::Paint::default();
     paint.set_anti_alias(anti_alias);
@@ -1488,7 +1667,9 @@ mod tests {
             });
         }
         for save_count in 0..4 {
-            layer_stack.push(ActivePainterLayer { save_count });
+            layer_stack.push(ActivePainterLayer {
+                save_count: Some(save_count),
+            });
         }
 
         assert!(!clip_stack.spilled());
@@ -1516,7 +1697,9 @@ mod tests {
                 clip_stack.push(clip);
             }
             for save_count in 0..2 {
-                layer_stack.push(ActivePainterLayer { save_count });
+                layer_stack.push(ActivePainterLayer {
+                    save_count: Some(save_count),
+                });
             }
             old_total += clip_stack.len() + layer_stack.len();
             layer_stack.pop();
@@ -1533,7 +1716,9 @@ mod tests {
                 clip_stack.push(clip);
             }
             for save_count in 0..2 {
-                layer_stack.push(ActivePainterLayer { save_count });
+                layer_stack.push(ActivePainterLayer {
+                    save_count: Some(save_count),
+                });
             }
             new_total += clip_stack.len() + layer_stack.len();
             layer_stack.pop();

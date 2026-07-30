@@ -34,6 +34,35 @@ section noted.
 | 2026-07-15 | Rust recursive detached-Lua-table cache for nested storage reads | I | Regressed 1.221s current to 1.815s cached over 100k reads (0.67x); deep-copy construction outweighed saved conversion/locking |
 | 2026-07-15 | Luau `table.clone` plus recursive array replacement for nested storage reads | I | Regressed 1.237s current to 1.611s cached over 100k reads (0.77x); exact detached-value semantics still require too much table reconstruction |
 | 2026-07-28 | `SmallVec<[&WidgetNode; 8]>` for scoped retained-update candidates | N | Removed one allocation per sparse update, but the complete 40-node path improved only 1.005x (63.918ms → 63.631ms/50k); prototype reverted |
+| 2026-07-30 | Downsample → blur → upsample image-filter chain for `filter: blur()` layers | P | Slower at every radius (512x512 layer, 200 frames: r8 254ms full-res vs 562ms quarter-res; r32 287ms vs 479ms; r64 310ms vs 488ms). Skia's raster blur already resamples internally for wide kernels, so an explicit chain only adds two transforms and an intermediate. The `downscale` setting was removed rather than shipped as a slower default |
+
+## 2026-07-30 — element `filter: blur()` subtree layers
+
+Workload: release `cargo test -p mesh-core-render --release -- blur_layer_pass_cost
+--ignored`; a 512x512 surface whose 420x420 blurred subtree holds 16 children,
+200 repaints of the full retained command list per sample.
+
+| Configuration | 200 frames | Per frame |
+| --- | --- | --- |
+| Same tree, no `filter` | 9.049ms | 0.045ms |
+| radius 8, 1 pass (shipped default) | 253.841ms | 1.269ms |
+| radius 32, 1 pass | 335.039ms | 1.675ms |
+| radius 64, 1 pass | 327.557ms | 1.638ms |
+| radius 8, 2 passes | 704.624ms | 3.523ms |
+| radius 32, 2 passes | 963.720ms | 4.819ms |
+| radius 64, 2 passes | 1.142s | 5.711ms |
+
+Two things this pins down. **Radius is nearly free, layers are not**: going
+from an 8px to a 64px kernel costs 1.3x, while adding the layer at all costs
+28x over the unfiltered tree — the offscreen allocation and composite dominate,
+not the convolution. That is why the cap that matters is on nesting depth
+(four) and why damage is expanded to the whole layer rather than subdivided.
+**Passes cost what they say**: a second pass is 2.8-3.5x, so the shipped
+default is one and `shell.render.blur.passes` is an opt-in for smoother
+falloff, not a default worth carrying.
+
+The gate `blur_layer_pass_cost` asserts the shipped default stays the cheapest
+configuration at each radius.
 
 ## 2026-07-16 — completed performance checkpoints archived from `todo.md`
 

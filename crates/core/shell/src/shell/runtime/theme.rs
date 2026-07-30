@@ -258,6 +258,7 @@ impl Shell {
             requests.extend(self.sync_locale_service_state()?);
         }
 
+        mesh_core_render::set_blur_quality(blur_quality_from_settings(&new_settings.render.blur));
         self.settings = new_settings;
         self.settings_store = store;
         self.apply_settings_to_components()?;

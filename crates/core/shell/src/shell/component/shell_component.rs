@@ -797,13 +797,14 @@ impl ShellComponent for FrontendSurfaceComponent {
             &tooltip_damage_rects,
             effective_damage_rects,
         );
-        // In-surface backdrop-filter nodes re-read the pixels beneath them, so
-        // damage touching a blur read region must repaint that whole region or
-        // the blur would mix freshly painted and stale-frame backdrop pixels.
+        // Blur regions are all-or-nothing: a backdrop-filter node re-reads the
+        // pixels beneath it and a `filter: blur()` layer resolves as one image,
+        // so damage touching either must repaint the whole region or the blur
+        // would mix freshly painted and stale-frame pixels.
         if !effective_damage.full_surface
             && self
                 .retained_display_list
-                .expand_damage_for_backdrop_filters(&mut effective_damage.rects)
+                .expand_damage_for_blur_regions(&mut effective_damage.rects)
         {
             effective_damage.rect = bounding_damage_rect(&effective_damage.rects, surface_damage);
         }
@@ -1371,7 +1372,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 height: logical_height.max(1),
             });
         }
-        display_list.expand_damage_for_backdrop_filters(&mut damage_rects);
+        display_list.expand_damage_for_blur_regions(&mut damage_rects);
         let selected = display_list.select_paint_commands_for_rects(
             &damage_rects,
             DisplayListRepaintPolicy::MinimalDamage,
@@ -1412,7 +1413,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             return None;
         }
         let mut damage = display_list.damage_rects().to_vec();
-        display_list.expand_damage_for_backdrop_filters(&mut damage);
+        display_list.expand_damage_for_blur_regions(&mut damage);
         Some(damage)
     }
 

@@ -145,6 +145,7 @@ impl Shell {
             }
         }
         mesh_core_icon::set_default_shell_pack(settings.icons.default_pack.clone());
+        mesh_core_render::set_blur_quality(blur_quality_from_settings(&settings.render.blur));
         let (theme, theme_watch) = load_active_theme(&settings);
         let locale = LocaleEngine::with_fallback_locale(
             settings.i18n.locale.clone(),

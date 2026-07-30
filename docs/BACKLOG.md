@@ -289,12 +289,6 @@ gate where the win is structural.
       [`gpu-rendering-backend`](../.planning/todos/pending/2026-07-15-gpu-rendering-backend.md).
       Skia-GL (Ganesh) first — same Canvas API as the shipped raster backend,
       and EGL buffer-age partial present preserves the damage pipeline.
-- [ ] Full subtree blur. Element `filter: blur()` currently blurs only the
-      node's own painted shape; real subtree blur needs layer push/pop command
-      kinds in the retained display list. Plan:
-      [`in-surface-blur`](../.planning/todos/pending/2026-07-15-in-surface-blur.md).
-      In-surface `backdrop-filter` already executes with blur-aware damage.
-
 ---
 
 ## Attack order

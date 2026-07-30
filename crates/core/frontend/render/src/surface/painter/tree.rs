@@ -176,6 +176,7 @@ impl FrontendRenderEngine {
         if !scratch.batched_commands.is_empty() {
             self.execute_painter_commands_in_session(&mut session, &scratch.batched_commands);
         }
+        self.close_painter_layers(&mut session);
     }
 
     pub fn render_selected_display_list_for_module(
@@ -239,6 +240,7 @@ impl FrontendRenderEngine {
         if !scratch.batched_commands.is_empty() {
             self.execute_painter_commands_in_session(&mut session, &scratch.batched_commands);
         }
+        self.close_painter_layers(&mut session);
     }
 
     /// Paint one selected command stream through several disjoint damage
@@ -273,7 +275,7 @@ impl FrontendRenderEngine {
                 .min(MAX_RETAINED_BATCH_COMMANDS),
         );
         let mut session = PixelCanvasSession::new(buffer);
-        if paint_regions_overlap(&paint_clips) {
+        if paint_regions_overlap(&paint_clips) || selection_has_layer_scopes(commands) {
             for &paint_clip in &paint_clips {
                 for (command, kind) in commands.iter_with_kinds() {
                     if self.try_append_display_self_paint_batch(
@@ -311,6 +313,7 @@ impl FrontendRenderEngine {
                     );
                     scratch.batched_commands.clear();
                 }
+                self.close_painter_layers(&mut session);
             }
             return;
         }
@@ -356,6 +359,7 @@ impl FrontendRenderEngine {
         if !scratch.batched_commands.is_empty() {
             self.execute_painter_commands_in_session(&mut session, &scratch.batched_commands);
         }
+        self.close_painter_layers(&mut session);
     }
 
     /// Paint a selected display list while attributing raster time to a small,
@@ -441,6 +445,7 @@ impl FrontendRenderEngine {
                 started.elapsed(),
             );
         }
+        self.close_painter_layers(&mut session);
         attribution
     }
 
@@ -478,7 +483,7 @@ impl FrontendRenderEngine {
         );
         let mut session = PixelCanvasSession::new(buffer);
         let mut batched_command_count = 0_u64;
-        if paint_regions_overlap(&paint_clips) {
+        if paint_regions_overlap(&paint_clips) || selection_has_layer_scopes(commands) {
             for &paint_clip in &paint_clips {
                 for (command, kind) in commands.iter_with_kinds() {
                     if self.try_append_display_self_paint_batch(
@@ -534,6 +539,7 @@ impl FrontendRenderEngine {
                     scratch.batched_commands.clear();
                     batched_command_count = 0;
                 }
+                self.close_painter_layers(&mut session);
             }
             return attribution;
         }
@@ -596,6 +602,7 @@ impl FrontendRenderEngine {
                 started.elapsed(),
             );
         }
+        self.close_painter_layers(&mut session);
         attribution
     }
 
@@ -643,6 +650,30 @@ impl FrontendRenderEngine {
         module_id: Option<&str>,
         node_commands: &mut Vec<PainterCommand>,
     ) {
+        // Layer scope commands are bookkeeping, not drawing: a push runs even
+        // when its region is outside the damage clip or its node is filtered
+        // out of this pass, because dropping it would either leave the pop
+        // restoring a layer that was never opened or paint the subtree
+        // unblurred.
+        match kind {
+            DisplayPaintCommandKind::PushFilterLayer => {
+                let bounds = intersect_clip(paint_clip, scaled_display_clip(command.clip, scale));
+                self.execute_painter_commands_in_session(
+                    session,
+                    &[PainterCommand::PushLayer(PainterLayer::blurred(
+                        bounds,
+                        scaled_visual_filter(command.node.style.filter, scale),
+                        self.blur_quality(),
+                    ))],
+                );
+                return;
+            }
+            DisplayPaintCommandKind::PopFilterLayer => {
+                self.execute_painter_commands_in_session(session, &[PainterCommand::PopLayer]);
+                return;
+            }
+            _ => {}
+        }
         if paint_nodes.is_some_and(|nodes| !nodes.contains(&command.node.id)) {
             return;
         }
@@ -671,6 +702,7 @@ impl FrontendRenderEngine {
                     self.render_display_scrollbars(node, buffer, scale, bounds, clip);
                 });
             }
+            DisplayPaintCommandKind::PushFilterLayer | DisplayPaintCommandKind::PopFilterLayer => {}
         }
     }
 
@@ -701,12 +733,58 @@ impl FrontendRenderEngine {
         paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
         module_id: Option<&str>,
     ) {
+        self.render_node_subtree(
+            node,
+            buffer,
+            scale,
+            offset_x,
+            offset_y,
+            clip,
+            paint_nodes,
+            module_id,
+            true,
+        );
+    }
+
+    /// Renders `node` and its descendants. `apply_filter` is false only for the
+    /// re-entry from [`Self::render_node_blurred`], which has already taken
+    /// this node's `filter` into account by redirecting the subtree into an
+    /// offscreen buffer.
+    #[allow(clippy::too_many_arguments)]
+    fn render_node_subtree(
+        &self,
+        node: &WidgetNode,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        offset_x: f32,
+        offset_y: f32,
+        clip: ClipRect,
+        paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
+        module_id: Option<&str>,
+        apply_filter: bool,
+    ) {
         if paint_nodes.is_some_and(|nodes| !nodes.contains(&node.id)) {
             return;
         }
 
         let style = &node.computed_style;
         if node_is_explicitly_hidden(node) {
+            return;
+        }
+
+        // `filter: blur()` covers the element and everything under it, so the
+        // subtree is rasterized on its own and blurred as one image.
+        if apply_filter && style.filter.blur_radius > 0.0 {
+            self.render_node_blurred(
+                node,
+                buffer,
+                scale,
+                offset_x,
+                offset_y,
+                clip,
+                paint_nodes,
+                module_id,
+            );
             return;
         }
 
@@ -933,6 +1011,61 @@ impl FrontendRenderEngine {
         self.render_scrollbars(node, buffer, scale, bounds, clip);
     }
 
+    /// Rasterizes a `filter: blur()` subtree into its own buffer and composites
+    /// it back blurred. The offscreen covers the subtree's extent grown by the
+    /// blur kernel's reach, so the blur can spill past the element's own box
+    /// the way it does in a browser.
+    #[allow(clippy::too_many_arguments)]
+    fn render_node_blurred(
+        &self,
+        node: &WidgetNode,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        offset_x: f32,
+        offset_y: f32,
+        clip: ClipRect,
+        paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
+        module_id: Option<&str>,
+    ) {
+        let filter = scaled_visual_filter(node.computed_style.filter, scale);
+        let Some(subtree) = subtree_device_bounds(node, scale, offset_x, offset_y) else {
+            return;
+        };
+        let pad = (filter.blur_radius * 3.0).ceil() as i32;
+        let region = intersect_clip(
+            clip,
+            ClipRect {
+                x: subtree.x - pad,
+                y: subtree.y - pad,
+                width: subtree.width + pad * 2,
+                height: subtree.height + pad * 2,
+            },
+        );
+        if region.width <= 0 || region.height <= 0 {
+            return;
+        }
+
+        let mut layer = PixelBuffer::new(region.width as u32, region.height as u32);
+        let layer_clip = ClipRect {
+            x: 0,
+            y: 0,
+            width: region.width,
+            height: region.height,
+        };
+        self.render_node_subtree(
+            node,
+            &mut layer,
+            scale,
+            offset_x - region.x as f32 / scale,
+            offset_y - region.y as f32 / scale,
+            layer_clip,
+            paint_nodes,
+            module_id,
+            false,
+        );
+        self.composite_blurred_buffer(buffer, &layer, (region.x, region.y), filter, clip);
+    }
+
     fn render_node_self(
         &self,
         node: &WidgetNode,
@@ -967,38 +1100,12 @@ impl FrontendRenderEngine {
             style.box_shadow,
             clip,
         );
-        self.apply_backdrop_filter(
-            buffer,
-            bounds,
-            style.border_radius.top_left * scale,
-            style.backdrop_filter,
-            node_clip,
-        );
-
         if background_color.a > 0 {
             let radius = style.border_radius.top_left * scale;
-            let paint_clip = if style.filter.is_none() {
-                node_clip
-            } else {
-                clip
-            };
             if radius > 0.5 {
-                self.fill_rounded_rect_clipped_with_filter(
-                    buffer,
-                    bounds,
-                    radius,
-                    background_color,
-                    paint_clip,
-                    style.filter,
-                );
+                self.fill_rounded_rect_clipped(buffer, bounds, radius, background_color, node_clip);
             } else {
-                self.fill_rect_clipped_with_filter(
-                    buffer,
-                    bounds,
-                    background_color,
-                    paint_clip,
-                    style.filter,
-                );
+                self.fill_rect_clipped(buffer, bounds, background_color, node_clip);
             }
         }
         self.draw_background_paint(
@@ -1068,28 +1175,13 @@ impl FrontendRenderEngine {
             style.box_shadow,
             clip,
         );
-        push_backdrop_filter_command(
-            node_commands,
-            bounds,
-            style.border_radius * scale,
-            style.backdrop_filter,
-            node_clip,
-        );
-
         if style.background_color.a > 0 {
-            let radius = style.border_radius * scale;
-            let paint_clip = if style.filter.is_none() {
-                node_clip
-            } else {
-                clip
-            };
             push_fill_shape_command(
                 node_commands,
                 bounds,
-                radius,
+                style.border_radius * scale,
                 style.background_color,
-                paint_clip,
-                style.filter,
+                node_clip,
                 PainterBlendMode::from_style(style.mix_blend_mode),
             );
         }
@@ -1241,6 +1333,15 @@ fn clipped_paint_regions(
         .collect()
 }
 
+/// Whether the selected stream opens any layer scope. Layers span many
+/// commands, so a per-command region walk cannot replay them correctly; the
+/// caller falls back to one full pass per region.
+fn selection_has_layer_scopes(commands: &SelectedDisplayListPaint<'_>) -> bool {
+    commands
+        .iter_with_kinds()
+        .any(|(_, kind)| !kind.draws_content())
+}
+
 fn paint_regions_overlap(clips: &[ClipRect]) -> bool {
     clips.iter().enumerate().any(|(index, left)| {
         clips[index + 1..].iter().any(|right| {
@@ -1288,28 +1389,13 @@ fn append_display_node_self_paint_commands(
         style.box_shadow,
         clip,
     );
-    push_backdrop_filter_command(
-        commands,
-        bounds,
-        style.border_radius * scale,
-        style.backdrop_filter,
-        node_clip,
-    );
-
     if style.background_color.a > 0 {
-        let radius = style.border_radius * scale;
-        let paint_clip = if style.filter.is_none() {
-            node_clip
-        } else {
-            clip
-        };
         push_fill_shape_command(
             commands,
             bounds,
-            radius,
+            style.border_radius * scale,
             style.background_color,
-            paint_clip,
-            style.filter,
+            node_clip,
             PainterBlendMode::from_style(style.mix_blend_mode),
         );
     }
@@ -1349,21 +1435,6 @@ fn push_box_shadow_command(
         shadow,
         clip,
     });
-}
-
-fn push_backdrop_filter_command(
-    _commands: &mut Vec<PainterCommand>,
-    _rect: ClipRect,
-    _radius: f32,
-    filter: VisualFilter,
-    _clip: ClipRect,
-) {
-    // The compositor owns backdrop blur. CPU rendering only has this
-    // surface's SHM pixels, so applying Skia's backdrop filter here cannot
-    // blur the desktop and stalls interaction on large frosted surfaces.
-    if filter.is_none() {
-        return;
-    }
 }
 
 /// Builds the vector-path draw command for a `checkbox` tick or `radio` dot
@@ -1425,12 +1496,9 @@ fn push_fill_shape_command(
     radius: f32,
     color: Color,
     clip: ClipRect,
-    filter: VisualFilter,
     blend: PainterBlendMode,
 ) {
-    let paint = PainterPaint::fill(color)
-        .with_filter(filter)
-        .with_blend_mode(blend);
+    let paint = PainterPaint::fill(color).with_blend_mode(blend);
     if radius > 0.5 {
         commands.push(PainterCommand::DrawRoundedRect {
             rect,
@@ -1493,6 +1561,82 @@ fn push_border_commands(
         paint: PainterPaint::stroke(color, border_width),
         clip,
     });
+}
+
+/// Blur radii are authored in layout units; the painter works in device
+/// pixels, so a surface at 2x scale blurs twice as far.
+/// Device-pixel extent of `node` and its descendants, including the reach of
+/// their shadows and blurs. Mirrors the offset accumulation of
+/// `render_node_subtree` (translation and scroll), which is what keeps the
+/// offscreen aligned with where the subtree would have painted.
+fn subtree_device_bounds(
+    node: &WidgetNode,
+    scale: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<ClipRect> {
+    if node_is_explicitly_hidden(node) {
+        return None;
+    }
+    let style = &node.computed_style;
+    let offset_x = offset_x + style.transform.translate_x;
+    let offset_y = offset_y + style.transform.translate_y;
+    let layout = &node.layout;
+    let mut left = (layout.x + offset_x) * scale;
+    let mut top = (layout.y + offset_y) * scale;
+    let mut right = left + layout.width * scale;
+    let mut bottom = top + layout.height * scale;
+
+    let shadow = style.box_shadow;
+    if !shadow.is_none() && !shadow.inset {
+        let reach = (shadow.spread_radius + shadow.blur_radius * 3.0) * scale;
+        left = left.min(left + shadow.offset_x * scale - reach);
+        top = top.min(top + shadow.offset_y * scale - reach);
+        right = right.max(right + shadow.offset_x * scale + reach);
+        bottom = bottom.max(bottom + shadow.offset_y * scale + reach);
+    }
+    let filter_reach = style
+        .filter
+        .blur_radius
+        .max(style.backdrop_filter.blur_radius)
+        * 3.0
+        * scale;
+    left -= filter_reach;
+    top -= filter_reach;
+    right += filter_reach;
+    bottom += filter_reach;
+
+    let scroll = node.resolved_scroll_metrics();
+    let child_offset_x = offset_x - scroll.x;
+    let child_offset_y = offset_y - scroll.y;
+    for child in &node.children {
+        let (cox, coy) = if child.computed_style.position == Position::Fixed {
+            (0.0, 0.0)
+        } else {
+            (child_offset_x, child_offset_y)
+        };
+        let Some(child_bounds) = subtree_device_bounds(child, scale, cox, coy) else {
+            continue;
+        };
+        left = left.min(child_bounds.x as f32);
+        top = top.min(child_bounds.y as f32);
+        right = right.max((child_bounds.x + child_bounds.width) as f32);
+        bottom = bottom.max((child_bounds.y + child_bounds.height) as f32);
+    }
+
+    let rect = ClipRect {
+        x: left.floor() as i32,
+        y: top.floor() as i32,
+        width: (right - left).ceil().max(0.0) as i32,
+        height: (bottom - top).ceil().max(0.0) as i32,
+    };
+    (rect.width > 0 && rect.height > 0).then_some(rect)
+}
+
+fn scaled_visual_filter(filter: VisualFilter, scale: f32) -> VisualFilter {
+    VisualFilter {
+        blur_radius: filter.blur_radius * scale,
+    }
 }
 
 fn scaled_display_node_bounds(node: &DisplayPaintNode, scale: f32) -> ClipRect {

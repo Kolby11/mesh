@@ -259,7 +259,46 @@ mesh themes tokens [group]        # dump effective (composed) tokens
 mesh themes which <token-name>    # which cascade layer supplied the value
 ```
 
-## 9. Compositor background blur
+## 9. Element blur (`filter`)
+
+**Status: shipped.**
+
+`filter: blur(<len>)` blurs the element **and its whole subtree**, exactly like
+a browser: the element, its background, its text, and every descendant are
+rasterized into one offscreen layer, blurred as a unit, and composited back.
+The blur spills past the element's own box by roughly three times the radius,
+so a blurred card fades out into what is behind it instead of stopping at a
+hard edge.
+
+```css
+.card.is-dismissing {
+  filter: blur(6px);
+}
+```
+
+What follows from the layer semantics:
+
+- **Descendants blur with the parent.** There is no way for a child to opt out;
+  paint order inside the layer is unchanged.
+- **Nesting is capped.** Filters nested more than four deep paint their subtree
+  unblurred and report a painter diagnostic. Each level is an offscreen plus a
+  blur pass over it.
+- **Radius is capped** by `shell.render.blur.max_radius` (default 96px).
+  A larger radius is dropped with a diagnostic rather than rasterized.
+- **Damage is layer-shaped.** Every pixel of a blurred layer depends on all the
+  others, so a change anywhere inside it repaints the whole layer region, and a
+  partial repaint always replays the layer's commands as a whole.
+
+It is the most expensive style MESH can paint, because its cost scales with the
+*area* covered rather than the number of elements: a 420×420 blurred subtree
+costs roughly 1.3 ms per repaint on the software painter, against 0.05 ms for
+the same tree unblurred. Prefer it for transient states (a dismissing card, a
+modal backdrop) over permanently blurred chrome, and see
+`shell.render.blur` in [08](08-settings.md) for the quality dial.
+
+In-surface `backdrop-filter` remains compositor-owned — see below.
+
+## 10. Compositor background blur
 
 **Status: shipped (namespace opt-in) + target (`org_kde_kwin_blur`).**
 

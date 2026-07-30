@@ -73,6 +73,19 @@ use service::{service_capabilities, service_name_from_interface};
 /// assets via candidates like `<module_id>:<name>` in `icons.toml`. No-op
 /// when the manifest doesn't ship icons. Failures log but don't abort
 /// module discovery — a module with bad icons should still load.
+/// Translates the user's blur settings into the painter's quality knobs.
+/// Values outside the painter's supported range are clamped rather than
+/// rejected: a settings file asking for eight passes gets the most the painter
+/// offers, not an unpainted blur.
+fn blur_quality_from_settings(
+    settings: &mesh_core_config::BlurSettings,
+) -> mesh_core_render::BlurQuality {
+    mesh_core_render::BlurQuality {
+        passes: settings.passes.clamp(1, mesh_core_render::MAX_BLUR_PASSES),
+        max_radius: settings.max_radius.max(0.0),
+    }
+}
+
 fn register_module_icon_pack(
     module_id: &str,
     module_dir: &Path,

@@ -672,12 +672,7 @@ fn painter_command_contract_constructs_required_command_set() {
     let commands = vec![
         PainterCommand::PushClip(PainterClip { rect, radius: 2.0 }),
         PainterCommand::PopClip,
-        PainterCommand::PushLayer(PainterLayer {
-            bounds: clip,
-            opacity: 0.5,
-            blend_mode: PainterBlendMode::SrcOver,
-            filter: PainterFilter::None,
-        }),
+        PainterCommand::PushLayer(PainterLayer::isolated(clip, 0.5, PainterBlendMode::SrcOver)),
         PainterCommand::PopLayer,
         PainterCommand::DrawRect { rect, paint, clip },
         PainterCommand::DrawRoundedRect {
@@ -752,12 +747,7 @@ fn painter_primitive_command_classes_record_helper_backed_rects() {
     let commands = vec![
         PainterCommand::PushClip(PainterClip { rect, radius: 2.0 }),
         PainterCommand::PopClip,
-        PainterCommand::PushLayer(PainterLayer {
-            bounds: clip,
-            opacity: 0.5,
-            blend_mode: PainterBlendMode::SrcOver,
-            filter: PainterFilter::None,
-        }),
+        PainterCommand::PushLayer(PainterLayer::isolated(clip, 0.5, PainterBlendMode::SrcOver)),
         PainterCommand::PopLayer,
         PainterCommand::DrawRect { rect, paint, clip },
         PainterCommand::DrawRoundedRect {
@@ -977,7 +967,7 @@ fn painter_primitive_text_selection_highlight_uses_draw_rect_command() {
         .insert("_mesh_selection_text_x".into(), "0.00".into());
     text.attributes
         .insert("_mesh_selection_text_y".into(), "0.00".into());
-    root.children = vec![text];
+    root.children = vec![text].into();
 
     let backend = RecordingPaintBackend::default();
     let recorded = backend.clone();
@@ -1012,7 +1002,8 @@ fn painter_primitive_debug_overlay_bounds_use_draw_rect_commands() {
             height: 4.0,
         },
         Color::TRANSPARENT,
-    )];
+    )]
+    .into();
 
     let backend = RecordingPaintBackend::default();
     let recorded = backend.clone();
@@ -1403,7 +1394,7 @@ fn display_list_primitive_mixed_tree_preserves_node_order_and_command_classes() 
     icon.attributes.insert("size".into(), "20".into());
 
     let expected_node_order = vec![root.id, text.id, input.id, slider.id, icon.id];
-    root.children = vec![text, input, slider, icon];
+    root.children = vec![text, input, slider, icon].into();
 
     let mut list = RetainedDisplayList::default();
     list.update(&root, 240, 140, true, true);
@@ -1523,13 +1514,21 @@ fn painter_effect_diagnostic_reports_excessive_blur() {
 
     SkiaPaintBackend.execute_commands(
         &mut buffer,
-        &[PainterCommand::DrawRect {
-            rect: full_clip(8, 8),
-            paint: PainterPaint::fill(Color::WHITE).with_filter(VisualFilter {
-                blur_radius: MAX_EFFECT_BLUR_RADIUS + 1.0,
-            }),
-            clip: full_clip(16, 16),
-        }],
+        &[
+            PainterCommand::PushLayer(PainterLayer::blurred(
+                full_clip(16, 16),
+                VisualFilter {
+                    blur_radius: MAX_EFFECT_BLUR_RADIUS + 1.0,
+                },
+                BlurQuality::default(),
+            )),
+            PainterCommand::DrawRect {
+                rect: full_clip(8, 8),
+                paint: PainterPaint::fill(Color::WHITE),
+                clip: full_clip(16, 16),
+            },
+            PainterCommand::PopLayer,
+        ],
         &mut diagnostics,
     );
 
@@ -1573,12 +1572,11 @@ fn painter_layer_blend_mode_is_supported_without_diagnostics() {
     SkiaPaintBackend.execute_commands(
         &mut buffer,
         &[
-            PainterCommand::PushLayer(PainterLayer {
-                bounds: full_clip(16, 16),
-                opacity: 1.0,
-                blend_mode: PainterBlendMode::Multiply,
-                filter: PainterFilter::None,
-            }),
+            PainterCommand::PushLayer(PainterLayer::isolated(
+                full_clip(16, 16),
+                1.0,
+                PainterBlendMode::Multiply,
+            )),
             PainterCommand::PopLayer,
         ],
         &mut diagnostics,
@@ -1665,12 +1663,11 @@ fn skia_effect_layer_opacity_isolates_child_pixels() {
     SkiaPaintBackend.execute_commands(
         &mut buffer,
         &[
-            PainterCommand::PushLayer(PainterLayer {
-                bounds: full_clip(12, 12),
-                opacity: 0.5,
-                blend_mode: PainterBlendMode::SrcOver,
-                filter: PainterFilter::None,
-            }),
+            PainterCommand::PushLayer(PainterLayer::isolated(
+                full_clip(12, 12),
+                0.5,
+                PainterBlendMode::SrcOver,
+            )),
             PainterCommand::DrawRect {
                 rect: ClipRect {
                     x: 2,
@@ -1700,12 +1697,11 @@ fn skia_effect_layer_blur_expands_painted_pixels() {
     SkiaPaintBackend.execute_commands(
         &mut buffer,
         &[
-            PainterCommand::PushLayer(PainterLayer {
-                bounds: full_clip(24, 24),
-                opacity: 1.0,
-                blend_mode: PainterBlendMode::SrcOver,
-                filter: PainterFilter::Blur(VisualFilter { blur_radius: 3.0 }),
-            }),
+            PainterCommand::PushLayer(PainterLayer::blurred(
+                full_clip(24, 24),
+                VisualFilter { blur_radius: 3.0 },
+                BlurQuality::default(),
+            )),
             PainterCommand::DrawRect {
                 rect: ClipRect {
                     x: 8,
@@ -2277,7 +2273,7 @@ fn skia_text_highlight_selection_background_uses_theme_color() {
         .insert("_mesh_selection_text_x".into(), "0.00".into());
     text.attributes
         .insert("_mesh_selection_text_y".into(), "0.00".into());
-    root.children = vec![text];
+    root.children = vec![text].into();
 
     let mut buffer = PixelBuffer::new(180, 80);
     FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
@@ -2329,7 +2325,7 @@ fn skia_text_highlight_does_not_change_glyph_handoff() {
         .insert("_mesh_selection_text_x".into(), "0.00".into());
     text.attributes
         .insert("_mesh_selection_text_y".into(), "0.00".into());
-    root.children = vec![text];
+    root.children = vec![text].into();
 
     let backend = RecordingPaintBackend::default();
     let recorded = backend.clone();
@@ -2398,14 +2394,7 @@ fn painter_helper_lowering_routes_effect_helpers_through_command_backend() {
     };
     let clip = full_clip(32, 32);
 
-    engine.fill_rounded_rect_clipped_with_filter(
-        &mut buffer,
-        rect,
-        6.0,
-        Color::WHITE,
-        clip,
-        VisualFilter { blur_radius: 2.0 },
-    );
+    engine.fill_rounded_rect_clipped(&mut buffer, rect, 6.0, Color::WHITE, clip);
     engine.draw_box_shadow(
         &mut buffer,
         rect,
@@ -2420,27 +2409,12 @@ fn painter_helper_lowering_routes_effect_helpers_through_command_backend() {
         },
         clip,
     );
-    engine.apply_backdrop_filter(
-        &mut buffer,
-        rect,
-        6.0,
-        VisualFilter { blur_radius: 3.0 },
-        clip,
-    );
 
-    // Backdrop blur is compositor-owned: a SHM client cannot sample pixels
-    // behind its surface. Only fill and shadow reach the CPU backend.
     let commands = recorded.recorded_commands();
     assert_eq!(commands.len(), 2);
     assert!(matches!(
         commands[0],
-        PainterCommand::DrawRoundedRect {
-            paint: PainterPaint {
-                filter: VisualFilter { blur_radius: 2.0 },
-                ..
-            },
-            ..
-        }
+        PainterCommand::DrawRoundedRect { .. }
     ));
     assert!(matches!(commands[1], PainterCommand::DrawShadow { .. }));
 }
@@ -2692,7 +2666,8 @@ fn painter_clips_children_when_overflow_hidden() {
             height: 10.0,
         },
         Color::from_hex("#00ff00").unwrap(),
-    )];
+    )]
+    .into();
 
     let mut buffer = PixelBuffer::new(20, 12);
     FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
@@ -2767,7 +2742,7 @@ fn painter_orders_children_by_z_index() {
         Color::from_hex("#0000ff").unwrap(),
     );
     top.computed_style.z_index = 1;
-    root.children = vec![top, bottom];
+    root.children = vec![top, bottom].into();
 
     let mut buffer = PixelBuffer::new(20, 20);
     FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
@@ -2811,7 +2786,7 @@ fn selection_paint_uses_selection_colors() {
         .insert("_mesh_selection_text_x".into(), "0.00".into());
     text.attributes
         .insert("_mesh_selection_text_y".into(), "0.00".into());
-    root.children = vec![text];
+    root.children = vec![text].into();
 
     let mut buffer = PixelBuffer::new(180, 80);
     FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
@@ -2870,7 +2845,7 @@ fn phase44_selection_paint_and_proof_use_theme_colors() {
         .insert("_mesh_selection_text_x".into(), "0.00".into());
     text.attributes
         .insert("_mesh_selection_text_y".into(), "0.00".into());
-    root.children = vec![text];
+    root.children = vec![text].into();
 
     let mut list = RetainedDisplayList::default();
     let metrics = list.update(&root, 180, 80, true, true);
@@ -2978,7 +2953,7 @@ fn selection_paint_does_not_bleed_into_neighbors() {
         40.0,
         Color::from_hex("#111111").unwrap(),
     );
-    root.children = vec![selected, neighbor];
+    root.children = vec![selected, neighbor].into();
 
     let mut buffer = PixelBuffer::new(240, 80);
     FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
@@ -3056,7 +3031,8 @@ fn retained_replay_batches_adjacent_non_content_nodes() {
             12.0,
             Color::from_hex("#f0f0f0").unwrap(),
         ),
-    ];
+    ]
+    .into();
 
     let mut list = RetainedDisplayList::default();
     list.update(&root, 80, 40, true, true);
@@ -3243,7 +3219,7 @@ fn sparse_repaint_with_backdrop_damage_expansion_matches_full_repaint() {
         "left-half color change must produce damage"
     );
     assert!(
-        list.expand_damage_for_backdrop_filters(&mut damage),
+        list.expand_damage_for_blur_regions(&mut damage),
         "damage touching the frosted panel's read region must expand"
     );
     let selected =
@@ -3350,7 +3326,7 @@ fn sparse_hover_repaint_under_frosted_root_matches_full_repaint() {
     list.update(&frosted_root_bar(hover), 64, 24, false, true);
     let mut damage: Vec<DamageRect> = list.damage_rects().to_vec();
     assert!(!damage.is_empty(), "hover change must produce damage");
-    list.expand_damage_for_backdrop_filters(&mut damage);
+    list.expand_damage_for_blur_regions(&mut damage);
     let selected =
         list.select_paint_commands_for_rects(&damage, DisplayListRepaintPolicy::MinimalDamage);
     for rect in &damage {
@@ -3386,5 +3362,303 @@ fn sparse_hover_repaint_under_frosted_root_matches_full_repaint() {
                 "sparse hover repaint diverged from full repaint at ({x},{y})"
             );
         }
+    }
+}
+
+/// A red parent with `filter: blur()` and an opaque blue child inside it.
+fn blurred_parent_with_child(blur_radius: f32) -> WidgetNode {
+    let mut parent = node(
+        "box",
+        LayoutRect {
+            x: 20.0,
+            y: 20.0,
+            width: 40.0,
+            height: 40.0,
+        },
+        Color::from_hex("#ff0000").unwrap(),
+    );
+    parent.computed_style.filter = VisualFilter { blur_radius };
+    parent.children = vec![node(
+        "box",
+        LayoutRect {
+            x: 30.0,
+            y: 30.0,
+            width: 20.0,
+            height: 20.0,
+        },
+        Color::from_hex("#0000ff").unwrap(),
+    )]
+    .into();
+    parent
+}
+
+fn painted_display_list(root: &WidgetNode, size: u32) -> PixelBuffer {
+    let mut list = RetainedDisplayList::default();
+    list.update(root, size, size, true, true);
+    let engine = FrontendRenderEngine::new();
+    let mut buffer = PixelBuffer::new(size, size);
+    engine.render_display_list_for_module(
+        list.paint_commands(),
+        &mut buffer,
+        1.0,
+        None,
+        None,
+        None,
+    );
+    buffer
+}
+
+#[test]
+fn filter_blur_softens_descendants_not_only_the_filtered_element() {
+    let sharp = painted_display_list(&blurred_parent_with_child(0.0), 80);
+    let blurred = painted_display_list(&blurred_parent_with_child(6.0), 80);
+
+    // Inside the child, away from every edge, the sharp render is pure blue.
+    let sharp_center = sharp.get_pixel(40, 40);
+    assert_eq!(
+        (sharp_center.r, sharp_center.g, sharp_center.b),
+        (0, 0, 255)
+    );
+
+    // The child's own edge must soften: a subtree blur mixes the child's blue
+    // with its parent's red across the boundary, which a blur applied only to
+    // the filtered element's own shape cannot do.
+    let sharp_edge = sharp.get_pixel(29, 40);
+    let blurred_edge = blurred.get_pixel(29, 40);
+    assert_eq!(
+        (sharp_edge.r, sharp_edge.b),
+        (255, 0),
+        "without a filter the pixel left of the child is the parent's flat red"
+    );
+    assert!(
+        blurred_edge.b > 20 && blurred_edge.r > 20,
+        "blurred child edge must mix child blue into parent red, got {blurred_edge:?}"
+    );
+}
+
+#[test]
+fn filter_blur_spills_past_the_filtered_element_box() {
+    let sharp = painted_display_list(&blurred_parent_with_child(6.0), 80);
+    // Just outside the parent's 20..60 box: unfiltered content stops dead at
+    // the edge, a blurred layer fades out past it.
+    let outside = sharp.get_pixel(17, 40);
+    assert!(
+        outside.a > 0,
+        "blur must spill outside the element box, got {outside:?}"
+    );
+}
+
+#[test]
+fn blur_quality_passes_are_configurable_and_clamped() {
+    assert_eq!(BlurQuality::default().resolved_passes(), 1);
+    assert_eq!(
+        BlurQuality {
+            passes: 2,
+            max_radius: 96.0,
+        }
+        .resolved_passes(),
+        2
+    );
+    // An out-of-range setting clamps instead of disabling the blur.
+    assert_eq!(
+        BlurQuality {
+            passes: 9,
+            max_radius: 96.0,
+        }
+        .resolved_passes(),
+        MAX_BLUR_PASSES
+    );
+}
+
+#[test]
+fn configured_blur_quality_still_blurs_the_subtree() {
+    let root = blurred_parent_with_child(6.0);
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 80, 80, true, true);
+
+    let mut painted = Vec::new();
+    for quality in [
+        BlurQuality {
+            passes: 1,
+            max_radius: 96.0,
+        },
+        BlurQuality {
+            passes: 3,
+            max_radius: 96.0,
+        },
+    ] {
+        let engine = FrontendRenderEngine::new();
+        engine.set_blur_quality(quality);
+        let mut buffer = PixelBuffer::new(80, 80);
+        engine.render_display_list_for_module(
+            list.paint_commands(),
+            &mut buffer,
+            1.0,
+            None,
+            None,
+            None,
+        );
+        painted.push(buffer);
+    }
+
+    // Both qualities blur the same subtree by the same requested radius, so
+    // the softened child edge stays comparable — the setting buys frame time,
+    // not a different look.
+    for buffer in &painted {
+        let edge = buffer.get_pixel(29, 40);
+        assert!(
+            edge.b > 10 && edge.r > 10,
+            "every quality must still blur the child edge, got {edge:?}"
+        );
+    }
+}
+
+#[test]
+fn blur_layers_deeper_than_the_cap_paint_unblurred_with_a_diagnostic() {
+    let mut commands = Vec::new();
+    for _ in 0..(MAX_BLUR_LAYER_DEPTH + 1) {
+        commands.push(PainterCommand::PushLayer(PainterLayer::blurred(
+            full_clip(32, 32),
+            VisualFilter { blur_radius: 4.0 },
+            BlurQuality::default(),
+        )));
+    }
+    commands.push(PainterCommand::DrawRect {
+        rect: full_clip(8, 8),
+        paint: PainterPaint::fill(Color::WHITE),
+        clip: full_clip(32, 32),
+    });
+    for _ in 0..(MAX_BLUR_LAYER_DEPTH + 1) {
+        commands.push(PainterCommand::PopLayer);
+    }
+
+    let mut buffer = PixelBuffer::new(32, 32);
+    let mut diagnostics = Vec::new();
+    SkiaPaintBackend.execute_commands(&mut buffer, &commands, &mut diagnostics);
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("nested deeper than")),
+        "a runaway nest must be reported, got {diagnostics:?}"
+    );
+    assert!(
+        buffer.get_pixel(4, 4).a > 0,
+        "the capped nest must still paint its content"
+    );
+}
+
+// cargo test -p mesh-core-render --release -- blur_layer_pass_cost --ignored --nocapture
+#[test]
+#[ignore = "release-only blur quality microbenchmark"]
+fn blur_layer_pass_cost() {
+    let iterations = 200;
+    let size = 512;
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: size as f32,
+            height: size as f32,
+        },
+        Color::from_hex("#202020").unwrap(),
+    );
+    let mut blurred = node(
+        "box",
+        LayoutRect {
+            x: 40.0,
+            y: 40.0,
+            width: 420.0,
+            height: 420.0,
+        },
+        Color::from_hex("#ff0000").unwrap(),
+    );
+    blurred.computed_style.filter = VisualFilter { blur_radius: 32.0 };
+    blurred.children = (0..16)
+        .map(|index| {
+            node(
+                "box",
+                LayoutRect {
+                    x: 60.0 + (index % 4) as f32 * 100.0,
+                    y: 60.0 + (index / 4) as f32 * 100.0,
+                    width: 80.0,
+                    height: 80.0,
+                },
+                Color::from_hex("#0000ff").unwrap(),
+            )
+        })
+        .collect::<Vec<_>>()
+        .into();
+    root.children = vec![blurred].into();
+
+    let measure = |radius: f32, quality: BlurQuality| {
+        let mut root = root.clone();
+        let mut children = root.children.to_vec();
+        children[0].computed_style.filter = VisualFilter {
+            blur_radius: radius,
+        };
+        root.children = children.into();
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, size, size, true, true);
+
+        let engine = FrontendRenderEngine::new();
+        engine.set_blur_quality(quality);
+        let mut buffer = PixelBuffer::new(size, size);
+        // Warm the first-frame allocations out of the measurement.
+        engine.render_display_list_for_module(
+            list.paint_commands(),
+            &mut buffer,
+            1.0,
+            None,
+            None,
+            None,
+        );
+        let started = std::time::Instant::now();
+        for _ in 0..iterations {
+            engine.render_display_list_for_module(
+                std::hint::black_box(list.paint_commands()),
+                &mut buffer,
+                1.0,
+                None,
+                None,
+                None,
+            );
+        }
+        started.elapsed()
+    };
+
+    let unfiltered = measure(
+        0.0,
+        BlurQuality {
+            passes: 1,
+            max_radius: 96.0,
+        },
+    );
+    eprintln!("same tree with no filter, {iterations} frames: {unfiltered:?}");
+    for radius in [8.0_f32, 32.0, 64.0] {
+        let single = measure(
+            radius,
+            BlurQuality {
+                passes: 1,
+                max_radius: 96.0,
+            },
+        );
+        let double = measure(
+            radius,
+            BlurQuality {
+                passes: 2,
+                max_radius: 96.0,
+            },
+        );
+        eprintln!(
+            "blur layer {size}x{size} radius {radius}, {iterations} frames: \
+             1 pass {single:?}; 2 passes {double:?}; ratio {:.2}x",
+            double.as_secs_f64() / single.as_secs_f64()
+        );
+        assert!(
+            single < double,
+            "the shipped default must be the cheapest option"
+        );
     }
 }

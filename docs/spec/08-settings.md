@@ -117,6 +117,30 @@ the service contract explicitly declares another scope.
 | Host/runtime knobs | host prop declarations | `shell.*` |
 | Keybinds | `mesh.keybinds` triggers | `shell.keyboard.surface_shortcuts` |
 
+### 2.1 Blur quality (`shell.render.blur`)
+
+Element `filter: blur()` ([04 §9](04-styling.md)) is the one style whose cost
+scales with the area it covers rather than with the number of elements, so it
+gets a user-facing dial:
+
+```json
+{
+  "shell": {
+    "render": {
+      "blur": { "passes": 1, "max_radius": 96 }
+    }
+  }
+}
+```
+
+- `passes` (1–3, default 1) — blur passes per filtered layer. Each pass runs at
+  the reduced sigma that keeps the total blur constant, so more passes buy a
+  smoother falloff, not a wider one, and cost roughly proportionally
+  (measured ~2.8x for two passes). Out-of-range values clamp.
+- `max_radius` (default 96) — radii above this are dropped with a painter
+  diagnostic instead of rasterized, bounding the worst frame a stylesheet can
+  ask for.
+
 ## 3. Precedence
 
 The full ladder is defined once, in [03 §4](03-components.md): author default

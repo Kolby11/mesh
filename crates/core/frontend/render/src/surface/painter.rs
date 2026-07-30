@@ -10,14 +10,16 @@ use std::sync::Mutex;
 use super::icon;
 use super::text::{SharedTextMeasurer, TextCacheMetrics, TextRenderer, TextSelectionGeometry};
 use super::{PixelBuffer, PixelCanvasSession};
+pub use backend::{BlurQuality, MAX_BLUR_PASSES};
 #[allow(unused_imports)]
 pub(crate) use backend::{
-    MAX_EFFECT_BLUR_RADIUS, PaintBackend, PainterBackendCapabilities, PainterBlendMode,
-    PainterClip, PainterCommand, PainterDiagnostic, PainterDiagnosticSource, PainterFilter,
-    PainterImage, PainterImageSource, PainterLayer, PainterLinearGradient, PainterPaint,
-    PainterPaintStyle, PainterPath, PainterPathElement, PainterStroke, SkiaPaintBackend,
-    UnsupportedPainterFeature,
+    MAX_BLUR_LAYER_DEPTH, MAX_EFFECT_BLUR_RADIUS, PaintBackend, PainterBackendCapabilities,
+    PainterBlendMode, PainterClip, PainterCommand, PainterDiagnostic, PainterDiagnosticSource,
+    PainterFilter, PainterImage, PainterImageSource, PainterLayer, PainterLayerStack,
+    PainterLinearGradient, PainterPaint, PainterPaintStyle, PainterPath, PainterPathElement,
+    PainterStroke, SkiaPaintBackend, UnsupportedPainterFeature,
 };
+
 use mesh_core_elements::style::{
     BackgroundPaint, Color, Display, Overflow, Position, TextAlign, TextDirection, TextOverflow,
     Visibility,
@@ -135,6 +137,11 @@ pub struct FrontendRenderEngine {
     /// drawn centered inside its final rect so it grows outward.
     tooltip_scale: Cell<f32>,
     render_scratch: RefCell<RenderScratch>,
+    /// Layers opened by the command stream and not yet closed. Lives on the
+    /// engine because a blurred subtree pushes its layer in one command buffer
+    /// and pops it several buffers later.
+    painter_layers: RefCell<PainterLayerStack>,
+    blur_quality: Cell<BlurQuality>,
     /// Full-surface clip set at the start of each render pass. Used to give
     /// `position: fixed` children the viewport clip rather than their parent's.
     viewport_clip: Cell<ClipRect>,
@@ -184,6 +191,8 @@ impl FrontendRenderEngine {
             tooltip_center_x: Cell::new(false),
             tooltip_scale: Cell::new(1.0),
             render_scratch: RefCell::new(RenderScratch::default()),
+            painter_layers: RefCell::new(PainterLayerStack::default()),
+            blur_quality: Cell::new(BlurQuality::default()),
             viewport_clip: Cell::new(ClipRect {
                 x: 0,
                 y: 0,
@@ -204,6 +213,8 @@ impl FrontendRenderEngine {
             tooltip_center_x: Cell::new(false),
             tooltip_scale: Cell::new(1.0),
             render_scratch: RefCell::new(RenderScratch::default()),
+            painter_layers: RefCell::new(PainterLayerStack::default()),
+            blur_quality: Cell::new(BlurQuality::default()),
             viewport_clip: Cell::new(ClipRect {
                 x: 0,
                 y: 0,
@@ -211,6 +222,16 @@ impl FrontendRenderEngine {
                 height: 0,
             }),
         }
+    }
+
+    /// Set how the painter spends its blur budget (passes, resample factor,
+    /// radius cap). Applies to every subsequent paint on this thread.
+    pub fn set_blur_quality(&self, quality: BlurQuality) {
+        self.blur_quality.set(quality);
+    }
+
+    pub(super) fn blur_quality(&self) -> BlurQuality {
+        self.blur_quality.get()
     }
 
     pub fn set_tooltip_colors(&self, colors: TooltipPaintColors) {
@@ -299,6 +320,36 @@ impl FrontendRenderEngine {
         }
     }
 
+    /// Composites an already-rasterized subtree buffer back onto `buffer`,
+    /// blurred at the engine's configured quality.
+    pub(super) fn composite_blurred_buffer(
+        &self,
+        buffer: &mut PixelBuffer,
+        source: &PixelBuffer,
+        at: (i32, i32),
+        filter: VisualFilter,
+        clip: ClipRect,
+    ) {
+        self.paint_backend.composite_blurred_buffer(
+            buffer,
+            source,
+            at,
+            filter,
+            self.blur_quality.get(),
+            clip,
+        );
+    }
+
+    /// Close any layers the command stream left open, so a clipped or
+    /// truncated replay cannot leak an open `save_layer` into the next pass.
+    pub(super) fn close_painter_layers(&self, session: &mut PixelCanvasSession<'_>) {
+        let mut layers = self.painter_layers.borrow_mut();
+        if layers.is_empty() {
+            return;
+        }
+        self.paint_backend.close_open_layers(session, &mut layers);
+    }
+
     pub(super) fn execute_painter_commands_in_session(
         &self,
         session: &mut PixelCanvasSession<'_>,
@@ -308,8 +359,14 @@ impl FrontendRenderEngine {
             return;
         }
         let mut local = Vec::new();
-        self.paint_backend
-            .execute_commands_in_session(session, commands, &mut local);
+        let mut layers = self.painter_layers.borrow_mut();
+        self.paint_backend.execute_commands_in_session_with_layers(
+            session,
+            commands,
+            &mut layers,
+            &mut local,
+        );
+        drop(layers);
         if !local.is_empty()
             && let Ok(mut diagnostics) = self.painter_diagnostics.lock()
         {
@@ -389,44 +446,6 @@ impl FrontendRenderEngine {
         );
     }
 
-    pub(super) fn fill_rect_clipped_with_filter(
-        &self,
-        buffer: &mut PixelBuffer,
-        rect: ClipRect,
-        color: Color,
-        clip: ClipRect,
-        filter: VisualFilter,
-    ) {
-        self.execute_painter_commands(
-            buffer,
-            &[PainterCommand::DrawRect {
-                rect,
-                paint: PainterPaint::fill(color).with_filter(filter),
-                clip,
-            }],
-        );
-    }
-
-    pub(super) fn fill_rounded_rect_clipped_with_filter(
-        &self,
-        buffer: &mut PixelBuffer,
-        rect: ClipRect,
-        radius: f32,
-        color: Color,
-        clip: ClipRect,
-        filter: VisualFilter,
-    ) {
-        self.execute_painter_commands(
-            buffer,
-            &[PainterCommand::DrawRoundedRect {
-                rect,
-                radius,
-                paint: PainterPaint::fill(color).with_filter(filter),
-                clip,
-            }],
-        );
-    }
-
     pub(super) fn stroke_rounded_rect_clipped(
         &self,
         buffer: &mut PixelBuffer,
@@ -469,22 +488,6 @@ impl FrontendRenderEngine {
                 clip,
             }],
         );
-    }
-
-    pub(super) fn apply_backdrop_filter(
-        &self,
-        _buffer: &mut PixelBuffer,
-        _rect: ClipRect,
-        _radius: f32,
-        filter: VisualFilter,
-        _clip: ClipRect,
-    ) {
-        // A client-side SHM painter cannot sample pixels behind its Wayland
-        // surface. Keep backdrop-filter as compositor metadata and avoid an
-        // expensive Skia save_layer pass over the surface's own pixels.
-        if filter.is_none() {
-            return;
-        }
     }
 
     pub(super) fn draw_background_paint(

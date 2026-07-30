@@ -787,12 +787,11 @@ impl FrontendRenderEngine {
         self.execute_painter_commands(
             buffer,
             &[
-                PainterCommand::PushLayer(PainterLayer {
-                    bounds: clipped_layer_bounds,
-                    opacity: 1.0,
-                    blend_mode: PainterBlendMode::SrcOver,
-                    filter: PainterFilter::None,
-                }),
+                PainterCommand::PushLayer(PainterLayer::isolated(
+                    clipped_layer_bounds,
+                    1.0,
+                    PainterBlendMode::SrcOver,
+                )),
                 PainterCommand::DrawRoundedRect {
                     rect: layer_bounds,
                     radius: radius + 1.0,

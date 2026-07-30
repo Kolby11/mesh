@@ -27,7 +27,7 @@ Unsupported properties produce style diagnostics or parser errors instead of hid
 | transform | implemented | `transform` parses the supported MESH transform subset. Translation is the current reliable visual/hit-test path; broader transform painting remains bounded by later painter work. |
 | transform | deferred | `transform-origin` is tracked in the matrix because it is accepted by the current support list, but full origin-aware painting is not a Phase 52 promise. |
 | shadow | implemented | `box-shadow` parses and resolves into backend-neutral shadow data. Skia-backed shadow execution belongs to a later painter phase. |
-| filter | implemented | `filter` and `backdrop-filter` parse and resolve into backend-neutral filter data. Skia-backed layer/filter execution belongs to a later painter phase. |
+| filter | implemented | `filter: blur()` executes as a real subtree layer: the element and its descendants rasterize into one offscreen, blur as a unit, and spill past the element box ([spec 04 §9](spec/04-styling.md)). Quality is `shell.render.blur`. `backdrop-filter` parses and resolves, but in-surface execution stays compositor-owned ([spec 04 §10](spec/04-styling.md)). |
 | compositing | implemented | `mix-blend-mode` (`normal`, `multiply`, `screen`) resolves into `ComputedStyle` and is applied by the Skia painter when compositing an element's background fill with the backdrop. |
 | image | implemented | `background-image: url(...)` resolves module-relative image paths and lowers them to painter image commands; unsupported forms diagnose. |
 | gradient | implemented | Compact two-color `linear-gradient(...)` values resolve into backend-neutral gradient data and painter commands. |

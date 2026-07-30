@@ -636,7 +636,7 @@ fn paint_bounds_recursive(
         return;
     }
 
-    // Mirror the real painter's offset accumulation (`render_node_with_filter`
+    // Mirror the real painter's offset accumulation (`render_node_subtree`
     // in painter/tree.rs): a node's own CSS `transform.translate_*` shifts
     // where it (and its subtree) actually paints, so the debug box must
     // apply the same shift — otherwise it's drawn at the pre-transform layout

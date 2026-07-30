@@ -17,8 +17,8 @@ pub use buffer::{PixelBuffer, PixelCanvasSession};
 pub use debug_overlay::{DebugOverlay, DebugOverlayRestore, DebugPerfHudSnapshot};
 pub use glyph::GlyphAxes;
 pub use painter::{
-    FrontendRenderEngine, PainterBackendSnapshot, PainterCapabilitySnapshot,
-    PainterDiagnosticSnapshot, TooltipPaintColors,
+    BlurQuality, FrontendRenderEngine, MAX_BLUR_PASSES, PainterBackendSnapshot,
+    PainterCapabilitySnapshot, PainterDiagnosticSnapshot, TooltipPaintColors,
 };
 pub use profiling::RasterMetrics;
 pub use text::{SharedTextMeasurer, TextCacheMetrics, TextRenderer};
@@ -119,6 +119,20 @@ pub struct PaintProfilingMetrics {
 
 thread_local! {
     static FRONTEND_RENDERER: RefCell<FrontendRenderEngine> = RefCell::new(FrontendRenderEngine::new());
+}
+
+/// Set how the painter spends its blur budget on this thread's renderer.
+/// The shell calls this when settings load or change, so `filter: blur()`
+/// layers and blurred shadows follow the user's quality choice.
+pub fn set_blur_quality(quality: BlurQuality) {
+    FRONTEND_RENDERER.with(|engine| {
+        engine.borrow().set_blur_quality(quality);
+    });
+}
+
+/// The blur quality the next paint on this thread will use.
+pub fn blur_quality() -> BlurQuality {
+    FRONTEND_RENDERER.with(|engine| engine.borrow().blur_quality())
 }
 
 /// Set the colors used by the next tooltip paint on this thread's renderer.

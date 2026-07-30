@@ -7,6 +7,16 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Element blur covers the subtree.** `filter: blur()` lowers into
+`PushFilterLayer`/`PopFilterLayer` around the element and its descendants, so
+the whole subtree blurs as one image and spills past the element box
+(2026-07-30). Blur layers are atomic for partial repaint and expand damage to
+their whole region; nesting is capped at four; quality is
+`shell.render.blur.{passes,max_radius}`. A blurred 420x420 subtree costs
+~1.3ms/repaint against 0.05ms unblurred. Records:
+[`log/2026-07.md`](log/2026-07.md),
+[`log/performance-log.md`](log/performance-log.md).
+
 **Bubble rings window three of N.** Both the language ring (18 locales, flag
 emoji) and the theme ring (7 themes) show three options and scroll the rest
 through, turning along the arc; wheel and two-finger trackpad both drive it
