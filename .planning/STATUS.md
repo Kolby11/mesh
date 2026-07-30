@@ -7,6 +7,28 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Settings scrollbars are conditional.** The settings page uses `overflow-y:
+auto`, so its scrollbar is rendered only when the page content exceeds its
+viewport (2026-07-30). Regression:
+`settings_scrollbar_is_conditional_on_overflow`.
+
+**Spanning layer surfaces stay spanning after CSS measurement.** Top/bottom
+surfaces now keep protocol width zero, preserving layer-shell's edge-to-edge
+semantics instead of feeding a content width back to compositors that center
+it. Left/right surfaces retain their measured height unless they are docked
+rails with a positive exclusive zone (2026-07-30). Regressions:
+`navigation_bar_keeps_layer_width_dynamic_after_css_measurement` and
+`floating_side_surface_keeps_its_measured_height`.
+
+**Wayland surface configure is nonblocking.** Presentation no longer polls for
+up to 500ms when a layer surface or window is waiting for its compositor
+configure (2026-07-30). Size resolution dispatches only already-available
+events, and present returns a typed `NotReady` result. The shell retains the
+painted buffer damage, excludes the surface from ready render work so the main
+loop sleeps on the Wayland fd instead of spinning, and commits the retained
+frame after configure arrives. Record:
+[`log/performance-log.md`](log/performance-log.md).
+
 **Live frontend catalogs are one atomic snapshot.** `Shell` owns the versioned
 catalog generation used by every surface (2026-07-30). Enabling or disabling a
 surface, component, or widget now publishes one generation and rebinds existing
@@ -99,8 +121,8 @@ and checked gates are in
 From the attack order at the end of
 [`docs/BACKLOG.md`](../docs/BACKLOG.md):
 
-1. Nonblocking Wayland configure — removes a 500ms shell-thread stall.
-2. Retained text-measure state and subscriber-proportional service delivery.
+1. Retained text-measure state.
+2. Subscriber-proportional service delivery.
 
 ## Blocked
 
@@ -142,6 +164,15 @@ On 2026-07-28,
 13-test `child_surface` slice passes; none of the 18 broader failures exercises
 the 64-entry cap or eviction path. Treat 570/18 as the current shell baseline
 until those failures are triaged.
+
+**Nonblocking configure is covered at both boundaries.** The presentation
+suite reports 58 passed / 12 ignored, including the typed `NotReady` result and
+configured retry. The shell regression proves pending damage survives while
+the surface is unconfigured, the scheduler does not treat it as ready work,
+and the retained frame presents after configure. The full shell suite reports
+572 passed / 17 failed / 122 ignored; the 17 failures are in the existing
+style, shipped-surface, interaction, and debug-snapshot baseline areas, while
+the new regression passes.
 
 **Shared-Lua isolation is covered at both boundaries.** The complete
 `mesh-core-scripting` suite reports 179 passing / 27 ignored, including a new

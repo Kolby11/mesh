@@ -3,7 +3,8 @@ use crate::shell::types::{ChildSurface, ChildSurfaceKind, SurfaceTarget};
 use mesh_core_elements::style::BackgroundPaint;
 use mesh_core_elements::{PopoverAnchor, PopoverConstraintAdjustment, PopoverGrab, PopoverGravity};
 use mesh_core_presentation::{
-    LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement,
+    LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity,
+    PopupPlacement, PresentStatus,
 };
 use mesh_core_render::{DamageRect, DisplayPaintCommand};
 use mesh_core_wayland::SurfaceRole;
@@ -59,6 +60,14 @@ impl Shell {
                 && self
                     .presentation_engine
                     .surface_waiting_for_frame_callback(&surface_id)
+            {
+                components_want_render_after_frame = true;
+                continue;
+            }
+            if visible
+                && !self
+                    .presentation_engine
+                    .surface_ready_to_present(&surface_id)
             {
                 components_want_render_after_frame = true;
                 continue;
@@ -1139,6 +1148,11 @@ impl Shell {
                 &mut self.components[index].children[child_index].pending_present_damage,
             ),
         };
+        present_damage.extend(std::mem::take(
+            &mut self.components[index]
+                .target_mut(target)
+                .pending_present_damage,
+        ));
         // Scale change or explicit force-full triggers full-buffer present (per HDPI-04)
         let mut force_full = false;
         let mut hud_restore = None;
@@ -1280,8 +1294,15 @@ impl Shell {
                         .expect("paint buffer initialised"),
                 );
             }
-            present_result.map_err(ShellRunError::Presentation)?;
-            presented = true;
+            match present_result.map_err(ShellRunError::Presentation)? {
+                PresentStatus::Presented => presented = true,
+                PresentStatus::NotReady => {
+                    self.components[index]
+                        .target_mut(target)
+                        .pending_present_damage = present_damage;
+                    self.components[index].component.request_paint();
+                }
+            }
         }
         let allocation_counters = allocation_started
             .map(|started| mesh_core_debug::allocation::snapshot().saturating_delta(started));

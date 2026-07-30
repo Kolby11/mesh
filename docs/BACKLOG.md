@@ -22,7 +22,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 ---
 
 ## Shell features
-
 - [ ] Popups / overlays — transient surfaces with custom content and dismiss
       behavior → v1.22.
 - [ ] Per-widget promotion — promote a widget *embedded in another surface* into
@@ -271,11 +270,6 @@ gate where the win is structural.
       reconciliation.
 
 ### Presentation
-
-- [ ] Make surface configure waiting nonblocking. `wait_for_surface_configure`
-      polls for up to 500ms inside presentation, so one unconfigured surface
-      stalls every surface on the shell thread. Retain the pending frame, return
-      a typed not-ready result, and retry on configure.
 - [ ] Batch Wayland commits and event-queue progress per shell frame — the
       per-surface path flushes the queue each time, repeating connection work
       and obstructing the planned parallel present split.
@@ -313,16 +307,15 @@ gate where the win is structural.
 
 ## Attack order
 
-Updated 2026-07-28.
+Updated 2026-07-30.
 
-1. **Nonblocking Wayland configure** — remove the shell-thread stall.
-2. **Retained text-measure state**, subscriber-proportional service delivery,
+1. **Retained text-measure state**, subscriber-proportional service delivery,
    and batched multi-rectangle raster — the remaining whole-tree and fan-out
    hot paths.
-3. **Structural-sharing memo hits**, narrow invalidation, and affected-subtree
+2. **Structural-sharing memo hits**, narrow invalidation, and affected-subtree
    re-evaluation.
-4. **Runtime style-diagnostic invalidation** and typed declarations.
-5. **Incremental shared frontend catalog**, single retained renderer, and the
+3. **Runtime style-diagnostic invalidation** and typed declarations.
+4. **Incremental shared frontend catalog**, single retained renderer, and the
    per-surface prepare/paint/present split with batched Wayland commits.
-7. **Direct SHM paint** and fractional-scale partial damage, re-tested with
+5. **Direct SHM paint** and fractional-scale partial damage, re-tested with
    upload instrumentation (D).

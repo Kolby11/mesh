@@ -1,5 +1,37 @@
 use super::*;
 use mesh_core_interaction::find_tooltip_text_by_key;
+use mesh_core_wayland::{Edge, KeyboardMode, Layer, ShellSurface};
+
+#[derive(Default)]
+struct LayoutRecordingSurface {
+    size: Option<(u32, u32)>,
+}
+
+impl ShellSurface for LayoutRecordingSurface {
+    fn anchor(&mut self, _edge: Edge) {}
+
+    fn set_size(&mut self, width: u32, height: u32) {
+        self.size = Some((width, height));
+    }
+
+    fn set_exclusive_zone(&mut self, _zone: i32) {}
+
+    fn set_layer(&mut self, _layer: Layer) {}
+
+    fn set_keyboard_interactivity(&mut self, _mode: KeyboardMode) {}
+
+    fn set_margin(&mut self, _top: i32, _right: i32, _bottom: i32, _left: i32) {}
+
+    fn set_blur(&mut self, _blur: bool) {}
+
+    fn set_role(&mut self, _role: mesh_core_wayland::SurfaceRole) {}
+
+    fn set_window_options(&mut self, _options: mesh_core_wayland::WindowOptions) {}
+
+    fn show(&mut self) {}
+
+    fn hide(&mut self) {}
+}
 
 fn assert_phase44_focused_proof_snapshot(component: &FrontendSurfaceComponent, label: &str) {
     let snapshot = component
@@ -207,6 +239,24 @@ fn settings_tab_switch_resets_scroll_and_replaces_the_visible_page() {
 }
 
 #[test]
+fn settings_scrollbar_is_conditional_on_overflow() {
+    let theme = default_theme();
+    let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+
+    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+
+    let tree = settings.last_tree.as_ref().expect("rendered settings tree");
+    let scroll =
+        first_node_with_attr(tree, "ref", "settings_scroll").expect("settings scroll container");
+    assert_eq!(
+        scroll.computed_style.overflow_y,
+        mesh_core_elements::style::Overflow::Auto,
+        "the settings scrollbar should appear only when its content overflows"
+    );
+}
+
+#[test]
 fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
     let theme = default_theme();
 
@@ -327,6 +377,28 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
     assert!(
         !audio.take_present_damage().is_empty(),
         "phase47 audio repaint should retain damage proof"
+    );
+}
+
+#[test]
+fn navigation_bar_keeps_layer_width_dynamic_after_css_measurement() {
+    let theme = default_theme();
+    let mut navigation =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    let mut buffer = PixelBuffer::new(960, 80);
+    navigation.paint(&theme, 960, 80, &mut buffer, 1.0).unwrap();
+
+    let mut surface = LayoutRecordingSurface::default();
+    navigation.render_layout(&mut surface);
+
+    let (width, height) = surface.size.expect("navigation layout sets a surface size");
+    assert_eq!(
+        width, 0,
+        "a top navigation bar must keep its layer-shell width dynamic so left+right anchors span the output"
+    );
+    assert!(
+        height > 0,
+        "the bar must retain its measured cross-axis height"
     );
 }
 

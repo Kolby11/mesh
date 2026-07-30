@@ -2674,3 +2674,33 @@ thresholds; the existing baseline was not weakened. The previously recorded
 
 Focused gate confirmation after the final formatting pass measured 3.476x for
 four regions and 5.662x for sixteen; both direct assertions passed.
+
+---
+
+## 2026-07-30 — compositor configure waiting leaves the shell thread
+
+area: Wayland presentation, shell scheduler
+
+`present_with_damage` and `surface_size` no longer enter the former
+`wait_for_surface_configure` poll, whose deadline allowed one unconfigured
+surface to occupy the shell thread for up to 500ms. Both paths dispatch only
+events already available. Presentation returns the typed `PresentStatus::NotReady`
+outcome when the compositor has not configured the surface yet.
+
+The shell keeps damage for the already-painted buffer on its `SurfaceTarget`,
+requests a retry, and excludes unconfigured surfaces from ready render work.
+The main loop therefore waits on the Wayland connection fd instead of spinning;
+after configure arrives, the retained damage is combined with any new damage
+and committed. Missing surfaces remain renderable so the first pass can create
+and configure them, and hidden surfaces preserve their existing detach/destroy
+lifecycle.
+
+**Structural gate.** `unconfigured_surface_returns_typed_not_ready_without_recording_present`
+checks the presentation boundary, and
+`unconfigured_surface_keeps_pending_frame_until_configure_retry` checks retained
+damage, scheduler readiness, and the configured retry. The complete
+presentation suite reports 58 passed / 12 ignored. The full shell suite reports
+572 passed / 17 failed / 122 ignored; all 17 failures are in the pre-existing
+style, shipped-surface, interaction, and debug-snapshot baseline areas, while
+the new regression passes. `cargo check -p mesh-core-shell --tests` also passes
+under `nix develop` with rustc/cargo 1.94.0.

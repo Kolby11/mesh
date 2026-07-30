@@ -9011,6 +9011,65 @@ fn wayland_parent_input_uses_content_size_not_tooltip_inflated_surface_size() {
 }
 
 #[test]
+fn unconfigured_surface_keeps_pending_frame_until_configure_retry() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
+        "@test/configure-retry",
+        (80, 40),
+        (80, 40),
+    )));
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@test/configure-retry".into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+
+    let pending = mesh_core_render::DamageRect {
+        x: 3,
+        y: 4,
+        width: 10,
+        height: 8,
+    };
+    shell.components[0].parent.pending_present_damage = vec![pending];
+    shell
+        .presentation_engine
+        .testing_set_surface_configured("@test/configure-retry", false);
+
+    shell.render_components().unwrap();
+
+    assert_eq!(
+        shell.components[0].parent.pending_present_damage,
+        [pending],
+        "an unconfigured surface must retain its already-painted frame"
+    );
+    assert!(
+        shell
+            .presentation_engine
+            .testing_presented_surfaces()
+            .is_empty()
+    );
+    assert!(
+        !shell.components_have_ready_render_work(),
+        "pending configure work must wait for the Wayland fd instead of spinning"
+    );
+
+    shell
+        .presentation_engine
+        .testing_set_surface_configured("@test/configure-retry", true);
+    assert!(shell.components_have_ready_render_work());
+    shell.render_components().unwrap();
+
+    assert!(shell.components[0].parent.pending_present_damage.is_empty());
+    assert_eq!(
+        shell.presentation_engine.testing_presented_surfaces(),
+        ["@test/configure-retry"]
+    );
+}
+
+#[test]
 fn service_update_populates_frontend_state() {
     let mut state = ScriptState::new();
     seed_service_state(&mut state);

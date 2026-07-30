@@ -92,15 +92,6 @@ const SHM_BUFFER_POOL_MAX: usize = 3;
 /// content-measured surfaces without changing their visible geometry.
 const SHM_SIZE_CLASS_STEP: u32 = 64;
 const MAX_FRAME_CALLBACK_WAIT: Duration = Duration::from_millis(50);
-// This wait only runs between a surface's creation and its first configure
-// event, so a generous deadline costs nothing in steady state. It must be long
-// enough for the compositor to actually answer: `surface_size()` callers size
-// spanning bars from the first configure, and if the deadline expires before
-// it arrives the shell falls back to a 1px available width, measures the root
-// at fit-content, and pins the surface to that small fixed size permanently
-// (a 2ms deadline shipped exactly that bug — a bar shrunk to a centered box).
-const SURFACE_CONFIGURE_WAIT_DEADLINE: Duration = Duration::from_millis(500);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ShmPoolConfig {
     width: u32,
@@ -1610,7 +1601,7 @@ impl WaylandSurfaceBackend {
         visible: bool,
         buffer: &PixelBuffer,
         damage_rects: &[DamageRect],
-    ) -> Result<(), PresentationError> {
+    ) -> Result<PresentStatus, PresentationError> {
         if !visible {
             self.state.release_surface_focus_grab(surface_id);
             // A hidden window is *destroyed*, not detached. Detaching a buffer
@@ -1630,7 +1621,7 @@ impl WaylandSurfaceBackend {
             {
                 self.destroy_surface(surface_id);
                 self.dispatch_pending()?;
-                return Ok(());
+                return Ok(PresentStatus::Presented);
             }
             // Only detach a buffer (to hide) if the compositor has already configured this
             // surface. Before the first configure event the surface has no buffer attached
@@ -1655,14 +1646,17 @@ impl WaylandSurfaceBackend {
                 entry.hide();
             }
             self.dispatch_pending()?;
-            return Ok(());
+            return Ok(PresentStatus::Presented);
         }
 
         if !self.state.surfaces.contains_key(surface_id) {
             // present() called before configure() — nothing to do.
-            return Ok(());
+            return Ok(PresentStatus::Presented);
         }
-        self.wait_for_surface_configure(surface_id)?;
+        self.dispatch_available()?;
+        if !self.surface_ready_to_present(surface_id) {
+            return Ok(PresentStatus::NotReady);
+        }
 
         if self
             .state
@@ -1686,10 +1680,10 @@ impl WaylandSurfaceBackend {
             .as_mut()
             .ok_or_else(|| PresentationError::BufferAlloc("shm pool not initialised".into()))?;
         let Some(entry) = state.surfaces.get_mut(surface_id) else {
-            return Ok(());
+            return Ok(PresentStatus::Presented);
         };
         if !entry.configured {
-            return Ok(());
+            return Ok(PresentStatus::NotReady);
         }
 
         // Get the logical dimensions from compositor-configured size
@@ -1815,7 +1809,7 @@ impl WaylandSurfaceBackend {
         );
 
         self.dispatch_pending()?;
-        Ok(())
+        Ok(PresentStatus::Presented)
     }
 
     pub(crate) fn update_opaque_region(
@@ -1890,9 +1884,13 @@ impl WaylandSurfaceBackend {
         &mut self,
         surface_id: &str,
     ) -> Result<Option<(u32, u32)>, PresentationError> {
-        self.wait_for_surface_configure(surface_id)?;
+        self.dispatch_available()?;
 
         Ok(self.surface_size_if_known(surface_id))
+    }
+
+    pub fn surface_ready_to_present(&self, surface_id: &str) -> bool {
+        surface_is_configured_or_missing(&self.state, surface_id)
     }
 
     pub fn surface_size_if_known(&self, surface_id: &str) -> Option<(u32, u32)> {
@@ -1970,80 +1968,6 @@ impl WaylandSurfaceBackend {
             .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;
         self.release_expired_surface_focus_grab()?;
         Ok(())
-    }
-
-    fn wait_for_surface_configure(&mut self, surface_id: &str) -> Result<(), PresentationError> {
-        if surface_is_configured_or_missing(&self.state, surface_id) {
-            return Ok(());
-        }
-
-        let deadline = Instant::now() + SURFACE_CONFIGURE_WAIT_DEADLINE;
-        loop {
-            self.event_queue
-                .flush()
-                .map_err(|e| PresentationError::SurfaceCreate(format!("flush: {e}")))?;
-            self.event_queue
-                .dispatch_pending(&mut self.state)
-                .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;
-            if surface_is_configured_or_missing(&self.state, surface_id) {
-                return Ok(());
-            }
-
-            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-                tracing::warn!(
-                    surface_id,
-                    "surface configure wait deadline expired; proceeding with unconfigured size"
-                );
-                return Ok(());
-            };
-            let Some(read_guard) = self.event_queue.prepare_read() else {
-                continue;
-            };
-
-            let fd = read_guard.connection_fd();
-            let timeout_ms = remaining.as_millis().min(i32::MAX as u128) as i32;
-            let mut fds = [PollFd::new(
-                &fd,
-                PollFlags::IN | PollFlags::ERR | PollFlags::HUP,
-            )];
-
-            match poll(&mut fds, timeout_ms) {
-                Ok(0) => {
-                    drop(read_guard);
-                    tracing::warn!(
-                        surface_id,
-                        "surface configure wait deadline expired; proceeding with unconfigured size"
-                    );
-                    return Ok(());
-                }
-                Ok(_) => {
-                    if !fds[0]
-                        .revents()
-                        .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP)
-                    {
-                        drop(read_guard);
-                        continue;
-                    }
-                    match read_guard.read() {
-                        Ok(_) => {}
-                        Err(WaylandError::Io(err)) if err.kind() == ErrorKind::WouldBlock => {
-                            continue;
-                        }
-                        Err(err) => {
-                            return Err(PresentationError::SurfaceCreate(format!("read: {err}")));
-                        }
-                    }
-                }
-                Err(rustix::io::Errno::INTR) => {
-                    drop(read_guard);
-                    continue;
-                }
-                Err(err) => {
-                    drop(read_guard);
-                    return Err(PresentationError::SurfaceCreate(format!("poll: {err}")));
-                }
-            }
-        }
     }
 
     fn dispatch_available(&mut self) -> Result<(), PresentationError> {

@@ -450,7 +450,7 @@ end
         width: 100%;
         min-height: 0;
         flex-grow: 1;
-        overflow-y: scroll;
+        overflow-y: auto;
         overflow-x: hidden;
     }
 

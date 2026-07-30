@@ -1,7 +1,7 @@
 mod dev_window;
 mod wayland_surface;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::io::BorrowedFd;
 
 use mesh_core_render::{DamageRect, PixelBuffer};
@@ -52,6 +52,16 @@ impl WaitResult {
     }
 }
 
+/// Outcome of attempting to commit a surface buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresentStatus {
+    /// The backend accepted the frame (or the surface was intentionally hidden).
+    Presented,
+    /// The compositor has not configured the surface yet. The caller must keep
+    /// the frame and retry after presentation events are dispatched.
+    NotReady,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PresentationError {
     #[error("failed to connect to Wayland: {0}")]
@@ -92,6 +102,7 @@ struct TestingBackend {
     presented: Vec<String>,
     presented_damage: Vec<(String, Vec<DamageRect>)>,
     window_states: HashMap<String, WindowStates>,
+    unconfigured_surfaces: HashSet<String>,
 }
 
 impl PresentationEngine {
@@ -139,6 +150,18 @@ impl PresentationEngine {
     pub fn testing_set_window_states(&mut self, surface_id: &str, states: WindowStates) {
         if let Backend::Testing(backend) = &mut self.backend {
             backend.window_states.insert(surface_id.to_string(), states);
+        }
+    }
+
+    /// Stand in for the configure lifecycle in shell/presentation tests.
+    #[doc(hidden)]
+    pub fn testing_set_surface_configured(&mut self, surface_id: &str, configured: bool) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            if configured {
+                backend.unconfigured_surfaces.remove(surface_id);
+            } else {
+                backend.unconfigured_surfaces.insert(surface_id.to_string());
+            }
         }
     }
 
@@ -365,7 +388,7 @@ impl PresentationEngine {
         title: &str,
         visible: bool,
         buffer: &PixelBuffer,
-    ) -> Result<(), PresentationError> {
+    ) -> Result<PresentStatus, PresentationError> {
         // `present()` is only used by DevWindow callers. Pass a full-damage
         // slice so the Wayland path would get a complete upload if ever
         // reached, but in practice this only hits Backend::DevWindow.
@@ -385,7 +408,7 @@ impl PresentationEngine {
         visible: bool,
         buffer: &PixelBuffer,
         damage: &[DamageRect],
-    ) -> Result<(), PresentationError> {
+    ) -> Result<PresentStatus, PresentationError> {
         let _span =
             tracing::debug_span!("present_with_damage", surface_id, rects = damage.len()).entered();
         match &mut self.backend {
@@ -394,14 +417,28 @@ impl PresentationEngine {
             }
             Backend::DevWindow(bridge) => bridge.present(surface_id, title, visible, buffer),
             Backend::Testing(backend) => {
+                if visible && backend.unconfigured_surfaces.contains(surface_id) {
+                    return Ok(PresentStatus::NotReady);
+                }
                 if visible {
                     backend.presented.push(surface_id.to_string());
                     backend
                         .presented_damage
                         .push((surface_id.to_string(), damage.to_vec()));
                 }
-                Ok(())
+                Ok(PresentStatus::Presented)
             }
+        }
+    }
+
+    /// Whether a surface can accept a buffer without waiting for a compositor
+    /// configure. Missing surfaces return true so the shell can run the first
+    /// render pass that creates/configures them.
+    pub fn surface_ready_to_present(&self, surface_id: &str) -> bool {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.surface_ready_to_present(surface_id),
+            Backend::DevWindow(_) => true,
+            Backend::Testing(backend) => !backend.unconfigured_surfaces.contains(surface_id),
         }
     }
 
@@ -866,6 +903,36 @@ pub fn event_surface_id(event: &WindowEvent) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unconfigured_surface_returns_typed_not_ready_without_recording_present() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        engine.testing_set_surface_configured("panel", false);
+        let buffer = PixelBuffer::new(32, 16);
+        let damage = [DamageRect {
+            x: 0,
+            y: 0,
+            width: 32,
+            height: 16,
+        }];
+
+        let status = engine
+            .present_with_damage("panel", "Panel", true, &buffer, &damage)
+            .expect("not-ready is a normal presentation outcome");
+
+        assert_eq!(status, PresentStatus::NotReady);
+        assert!(!engine.surface_ready_to_present("panel"));
+        assert!(engine.testing_presented_surfaces().is_empty());
+
+        engine.testing_set_surface_configured("panel", true);
+        assert_eq!(
+            engine
+                .present_with_damage("panel", "Panel", true, &buffer, &damage)
+                .expect("configured surface should present"),
+            PresentStatus::Presented
+        );
+        assert_eq!(engine.testing_presented_surfaces(), ["panel"]);
+    }
 
     fn pointer_move(surface_id: &str, x: f32, y: f32) -> WindowEvent {
         WindowEvent::PointerMove {

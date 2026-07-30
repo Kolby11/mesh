@@ -148,7 +148,7 @@ impl Shell {
         sleep_for
     }
 
-    fn components_have_ready_render_work(&self) -> bool {
+    pub(in crate::shell) fn components_have_ready_render_work(&self) -> bool {
         self.components.iter().any(|runtime| {
             if !runtime.component.wants_render() {
                 return false;
@@ -161,6 +161,9 @@ impl Shell {
                     && !self
                         .presentation_engine
                         .surface_waiting_for_frame_callback(surface_id)
+                    && self
+                        .presentation_engine
+                        .surface_ready_to_present(surface_id)
             })
         })
     }

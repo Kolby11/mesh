@@ -12,8 +12,8 @@ mod state;
 pub use backend::{LayerSurfaceSizePolicy, SurfaceConfig, WaylandSurfaceBackend};
 pub use popup::{PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement};
 
-use crate::PresentationError;
 use crate::dev_window::{DevWindowEvent, DevWindowKeyEvent, KeyMods};
+use crate::{PresentStatus, PresentationError};
 use mesh_core_render::PixelBuffer;
 use mesh_core_wayland::{
     Edge, KeyboardMode, Layer as MeshLayer, SurfaceRole, WindowDecorations, WindowOptions,

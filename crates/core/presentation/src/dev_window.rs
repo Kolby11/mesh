@@ -1,4 +1,4 @@
-use crate::PresentationError;
+use crate::{PresentStatus, PresentationError};
 use mesh_core_render::PixelBuffer;
 use minifb::{InputCallback, Key, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
 use std::collections::HashMap;
@@ -158,10 +158,10 @@ impl DevWindowBackend {
         title: &str,
         visible: bool,
         buffer: &PixelBuffer,
-    ) -> Result<(), PresentationError> {
+    ) -> Result<PresentStatus, PresentationError> {
         if !visible {
             self.windows.remove(surface_id);
-            return Ok(());
+            return Ok(PresentStatus::Presented);
         }
 
         let width = buffer.width.max(1);
@@ -190,7 +190,7 @@ impl DevWindowBackend {
             .update_with_buffer(&surface.frame, width as usize, height as usize)
             .map_err(|err: minifb::Error| PresentationError::SurfaceCreate(format!("{err:?}")))?;
 
-        Ok(())
+        Ok(PresentStatus::Presented)
     }
 
     pub fn pump(&mut self) {

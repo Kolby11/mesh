@@ -138,7 +138,20 @@ impl FrontendSurfaceComponent {
         }
         surface.anchor(self.surface_layout.edge);
         surface.set_layer(self.surface_layout.layer);
-        let (width, height) = self.requested_layout_size();
+        let (measured_width, measured_height) = self.requested_layout_size();
+        // In layer-shell, zero is the protocol spelling for "span the output"
+        // when the surface is anchored to both opposing edges. A CSS root can
+        // correctly measure its own content width after the first paint, but
+        // feeding that measurement back as a top/bottom surface's protocol
+        // width turns a spanning bar into a fixed-width surface. Some
+        // compositors center that fixed-width surface, leaving gaps on both
+        // sides. Keep the spanning axis dynamic; the cross axis remains
+        // content-measured.
+        let (width, height) = layer_surface_request_size(
+            self.surface_layout.edge,
+            self.surface_layout.exclusive_zone,
+            (measured_width, measured_height),
+        );
         // Content size only — the tooltip overlay reserve is added at the
         // presentation boundary in `render_components`, never to the shell
         // surface record the component reads back.
@@ -924,6 +937,37 @@ impl FrontendSurfaceComponent {
         for child in &mut node.children {
             self.record_runtime_style_diagnostics_for_node(child, rules, index, resolver, context);
         }
+    }
+}
+
+fn layer_surface_request_size(
+    edge: mesh_core_wayland::Edge,
+    exclusive_zone: i32,
+    measured_size: (u32, u32),
+) -> (u32, u32) {
+    match edge {
+        mesh_core_wayland::Edge::Top | mesh_core_wayland::Edge::Bottom => (0, measured_size.1),
+        // Only a docked side rail is anchored to both vertical edges. A
+        // floating left/right surface needs its measured height; sending zero
+        // would turn it into a full-height input surface.
+        mesh_core_wayland::Edge::Left | mesh_core_wayland::Edge::Right if exclusive_zone > 0 => {
+            (measured_size.0, 0)
+        }
+        mesh_core_wayland::Edge::Left | mesh_core_wayland::Edge::Right => measured_size,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::layer_surface_request_size;
+    use mesh_core_wayland::Edge;
+
+    #[test]
+    fn floating_side_surface_keeps_its_measured_height() {
+        assert_eq!(
+            layer_surface_request_size(Edge::Right, 0, (380, 220)),
+            (380, 220)
+        );
     }
 }
 
