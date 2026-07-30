@@ -259,11 +259,6 @@ gate where the win is structural.
 
 ### Layout
 
-- [ ] Retain text measurement contexts by `NodeId`.
-      `update_retained_node_styles` walks the complete tree on any layout-dirty
-      frame and `update_text_context` rebuilds `Arc<str>` content even for clean
-      text. Extend `PerSurfaceLayoutState` and let the Taffy measure callback
-      borrow it.
 - [ ] Make the retained Taffy mapping authoritative — incremental layout still
       rebuilds whole-tree `node_id_to_taffy` and `text_nodes` maps before
       compute. Complete fragment/unkeyed handling and maintain it during

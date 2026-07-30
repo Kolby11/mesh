@@ -131,9 +131,13 @@ pub(super) struct ComponentRuntime {
 #[derive(Debug)]
 pub(super) struct ServiceDeliveryIndex {
     pub(super) dirty: bool,
+    pub(super) component_summaries: Vec<Option<ServiceObservationSummary>>,
     pub(super) fallback_components: Vec<usize>,
     pub(super) update_services: HashMap<String, Vec<usize>>,
+    pub(super) cached_update_services: HashMap<String, Vec<usize>>,
     pub(super) interface_events: HashMap<String, HashMap<String, Vec<usize>>>,
+    pub(super) delivery_epoch: u64,
+    pub(super) component_epochs: Vec<u64>,
 }
 
 impl Default for ServiceDeliveryIndex {
@@ -143,9 +147,13 @@ impl Default for ServiceDeliveryIndex {
             // the index lazily from that initial component set instead of
             // treating an empty index as authoritative.
             dirty: true,
+            component_summaries: Vec::new(),
             fallback_components: Vec::new(),
             update_services: HashMap::new(),
+            cached_update_services: HashMap::new(),
             interface_events: HashMap::new(),
+            delivery_epoch: 0,
+            component_epochs: Vec::new(),
         }
     }
 }
@@ -153,6 +161,32 @@ impl Default for ServiceDeliveryIndex {
 impl ServiceDeliveryIndex {
     pub(super) fn mark_dirty(&mut self) {
         self.dirty = true;
+    }
+
+    /// Rendering is where frontend runtimes discover field reads and event
+    /// subscriptions. Only rebuild the shell index when that summary changes;
+    /// a paint that merely redraws a surface must not turn the next service
+    /// update back into a full-component scan.
+    pub(super) fn mark_dirty_if_summary_changed(
+        &mut self,
+        component_index: usize,
+        summary: Option<ServiceObservationSummary>,
+    ) {
+        if self.component_summaries.get(component_index) != Some(&summary) {
+            self.dirty = true;
+        }
+    }
+
+    pub(super) fn begin_delivery_epoch(&mut self, component_count: usize) -> u64 {
+        self.delivery_epoch = self.delivery_epoch.wrapping_add(1);
+        if self.delivery_epoch == 0 {
+            self.component_epochs.fill(0);
+            self.delivery_epoch = 1;
+        }
+        if self.component_epochs.len() < component_count {
+            self.component_epochs.resize(component_count, 0);
+        }
+        self.delivery_epoch
     }
 }
 

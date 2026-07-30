@@ -145,6 +145,10 @@ pub struct PerSurfaceLayoutState {
     /// here as `_mesh_key` strings, so retained lookup no longer hashes or
     /// clones long ancestor paths.
     pub node_map: HashMap<NodeId, TaffyNodeId>,
+    /// Text measurement inputs keyed by stable node identity. Keeping these
+    /// alongside the retained Taffy nodes avoids rebuilding text content and
+    /// style contexts on every layout-dirty frame.
+    text_nodes: HashMap<NodeId, TextMeasureData>,
     /// `(width, height)` used in the last `compute_layout` call.
     pub last_available: (f32, f32),
     /// `false` after theme/locale/source-reload resets; forces a
@@ -164,6 +168,7 @@ impl PerSurfaceLayoutState {
         Self {
             tree: TaffyTree::new(),
             node_map: HashMap::new(),
+            text_nodes: HashMap::new(),
             last_available: (0.0, 0.0),
             valid: false,
         }
@@ -385,20 +390,19 @@ impl LayoutEngine {
 
         let mut report = TaffyLayoutReport::default();
         let mut node_map = HashMap::new();
-        let mut text_nodes = HashMap::new();
         update_retained_node_styles(
             root,
             state,
             dirty_layout,
             dirty_node_ids,
             &mut node_map,
-            &mut text_nodes,
             &mut report,
         );
 
         if available_changed || dirty_layout {
             let available_space = taffy_available_space(available_width, available_height);
-            if let Err(error) = state.tree.compute_layout_with_measure(
+            let (tree, text_nodes) = (&mut state.tree, &state.text_nodes);
+            if let Err(error) = tree.compute_layout_with_measure(
                 root_id,
                 available_space,
                 |known_dimensions, available_space, _node_id, context, _style| {
@@ -406,7 +410,7 @@ impl LayoutEngine {
                         known_dimensions,
                         available_space,
                         context.map(|node_id| *node_id),
-                        &text_nodes,
+                        text_nodes,
                         intrinsic_cache,
                         measurer,
                     )
@@ -442,6 +446,23 @@ struct TextMeasureData {
     font_weight: u16,
     line_height: f32,
     nowrap: bool,
+}
+
+impl TextMeasureData {
+    fn from_node(node: &WidgetNode) -> Self {
+        Self {
+            content: node
+                .attributes
+                .get("content")
+                .map(|content| Arc::<str>::from(content.as_str()))
+                .unwrap_or_default(),
+            font_family: node.computed_style.font_family.clone(),
+            font_size: node.computed_style.font_size,
+            font_weight: node.computed_style.font_weight,
+            line_height: node.computed_style.line_height,
+            nowrap: node.computed_style.white_space == crate::WhiteSpace::Nowrap,
+        }
+    }
 }
 
 fn taffy_dimension(dimension: Dimension) -> taffy_style::Dimension {
@@ -609,21 +630,7 @@ fn build_taffy_tree(
     let style = taffy_style_for_node(node, report);
     let taffy_node = if node.children.is_empty() {
         if node.tag == "text" {
-            text_nodes.insert(
-                node.id,
-                TextMeasureData {
-                    content: node
-                        .attributes
-                        .get("content")
-                        .map(|content| Arc::<str>::from(content.as_str()))
-                        .unwrap_or_default(),
-                    font_family: node.computed_style.font_family.clone(),
-                    font_size: node.computed_style.font_size,
-                    font_weight: node.computed_style.font_weight,
-                    line_height: node.computed_style.line_height,
-                    nowrap: node.computed_style.white_space == crate::WhiteSpace::Nowrap,
-                },
-            );
+            text_nodes.insert(node.id, TextMeasureData::from_node(node));
         }
         tree.new_leaf_with_context(style, node.id)?
     } else {
@@ -649,22 +656,23 @@ fn compute_fresh_retained_layout(
 ) {
     let mut report = TaffyLayoutReport::default();
     let mut node_id_to_taffy = HashMap::new();
-    let mut text_nodes = HashMap::new();
 
     state.tree = TaffyTree::<NodeId>::new();
     state.node_map.clear();
+    state.text_nodes.clear();
 
     match build_taffy_tree(
         root,
         &mut state.tree,
         &mut node_id_to_taffy,
-        &mut text_nodes,
+        &mut state.text_nodes,
         &mut report,
     ) {
         Ok(root_id) => {
             collect_stable_taffy_map(root, &node_id_to_taffy, &mut state.node_map);
             let available_space = taffy_available_space(available_width, available_height);
-            if let Err(error) = state.tree.compute_layout_with_measure(
+            let (tree, text_nodes) = (&mut state.tree, &state.text_nodes);
+            if let Err(error) = tree.compute_layout_with_measure(
                 root_id,
                 available_space,
                 |known_dimensions, available_space, _node_id, context, _style| {
@@ -672,7 +680,7 @@ fn compute_fresh_retained_layout(
                         known_dimensions,
                         available_space,
                         context.map(|node_id| *node_id),
-                        &text_nodes,
+                        text_nodes,
                         intrinsic_cache,
                         measurer,
                     )
@@ -721,17 +729,10 @@ fn compute_structural_retained_layout(
 ) {
     let mut report = TaffyLayoutReport::default();
     let mut node_id_to_taffy = HashMap::new();
-    let mut text_nodes = HashMap::new();
     let mut present_ids = HashSet::new();
     collect_retained_node_ids(root, &mut present_ids);
 
-    match reconcile_retained_taffy_node(
-        root,
-        state,
-        &mut node_id_to_taffy,
-        &mut text_nodes,
-        &mut report,
-    ) {
+    match reconcile_retained_taffy_node(root, state, &mut node_id_to_taffy, &mut report) {
         Ok(root_id) => {
             let stale_nodes = state
                 .node_map
@@ -766,9 +767,13 @@ fn compute_structural_retained_layout(
             state
                 .node_map
                 .retain(|node_id, _| present_ids.contains(node_id));
+            state
+                .text_nodes
+                .retain(|node_id, _| node_id_to_taffy.contains_key(node_id));
 
             let available_space = taffy_available_space(available_width, available_height);
-            if let Err(error) = state.tree.compute_layout_with_measure(
+            let (tree, text_nodes) = (&mut state.tree, &state.text_nodes);
+            if let Err(error) = tree.compute_layout_with_measure(
                 root_id,
                 available_space,
                 |known_dimensions, available_space, _node_id, context, _style| {
@@ -776,7 +781,7 @@ fn compute_structural_retained_layout(
                         known_dimensions,
                         available_space,
                         context.map(|node_id| *node_id),
-                        &text_nodes,
+                        text_nodes,
                         intrinsic_cache,
                         measurer,
                     )
@@ -819,7 +824,6 @@ fn reconcile_retained_taffy_node(
     node: &WidgetNode,
     state: &mut PerSurfaceLayoutState,
     node_id_to_taffy: &mut HashMap<NodeId, TaffyNodeId>,
-    text_nodes: &mut HashMap<NodeId, TextMeasureData>,
     report: &mut TaffyLayoutReport,
 ) -> Result<TaffyNodeId, taffy::TaffyError> {
     let style = taffy_style_for_node(node, report);
@@ -841,15 +845,13 @@ fn reconcile_retained_taffy_node(
         state.tree.new_leaf(style)?
     };
 
-    update_text_context(node, &mut state.tree, taffy_id, text_nodes)?;
+    update_text_context(node, &mut state.tree, taffy_id, &mut state.text_nodes)?;
     node_id_to_taffy.insert(node.id, taffy_id);
 
     let child_ids = node
         .children
         .iter()
-        .map(|child| {
-            reconcile_retained_taffy_node(child, state, node_id_to_taffy, text_nodes, report)
-        })
+        .map(|child| reconcile_retained_taffy_node(child, state, node_id_to_taffy, report))
         .collect::<Result<Vec<_>, _>>()?;
     if state.tree.children(taffy_id)? != child_ids {
         state.tree.set_children(taffy_id, &child_ids)?;
@@ -863,7 +865,6 @@ fn update_retained_node_styles(
     mark_dirty: bool,
     dirty_node_ids: Option<&HashSet<NodeId>>,
     node_id_to_taffy: &mut HashMap<NodeId, TaffyNodeId>,
-    text_nodes: &mut HashMap<NodeId, TextMeasureData>,
     report: &mut TaffyLayoutReport,
 ) {
     if let Some(taffy_id) = retained_taffy_id(node, state) {
@@ -885,7 +886,9 @@ fn update_retained_node_styles(
                 );
             }
         }
-        if let Err(error) = update_text_context(node, &mut state.tree, taffy_id, text_nodes) {
+        if let Err(error) =
+            update_text_context(node, &mut state.tree, taffy_id, &mut state.text_nodes)
+        {
             tracing::warn!(
                 target: "mesh::layout",
                 error = %error,
@@ -902,7 +905,6 @@ fn update_retained_node_styles(
             mark_dirty,
             dirty_node_ids,
             node_id_to_taffy,
-            text_nodes,
             report,
         );
     }
@@ -915,21 +917,32 @@ fn update_text_context(
     text_nodes: &mut HashMap<NodeId, TextMeasureData>,
 ) -> Result<(), taffy::TaffyError> {
     if node.tag == "text" {
-        text_nodes.insert(
-            node.id,
-            TextMeasureData {
-                content: node
-                    .attributes
-                    .get("content")
-                    .map(|content| Arc::<str>::from(content.as_str()))
-                    .unwrap_or_default(),
-                font_family: node.computed_style.font_family.clone(),
-                font_size: node.computed_style.font_size,
-                font_weight: node.computed_style.font_weight,
-                line_height: node.computed_style.line_height,
-                nowrap: node.computed_style.white_space == crate::WhiteSpace::Nowrap,
-            },
-        );
+        let content = node
+            .attributes
+            .get("content")
+            .map(String::as_str)
+            .unwrap_or_default();
+        let unchanged = text_nodes.get(&node.id).is_some_and(|existing| {
+            existing.content.as_ref() == content
+                && existing.font_family == node.computed_style.font_family
+                && existing.font_size == node.computed_style.font_size
+                && existing.font_weight == node.computed_style.font_weight
+                && existing.line_height == node.computed_style.line_height
+                && existing.nowrap == (node.computed_style.white_space == crate::WhiteSpace::Nowrap)
+        });
+        if !unchanged {
+            text_nodes.insert(
+                node.id,
+                TextMeasureData {
+                    content: Arc::from(content),
+                    font_family: node.computed_style.font_family.clone(),
+                    font_size: node.computed_style.font_size,
+                    font_weight: node.computed_style.font_weight,
+                    line_height: node.computed_style.line_height,
+                    nowrap: node.computed_style.white_space == crate::WhiteSpace::Nowrap,
+                },
+            );
+        }
         if tree.get_node_context(taffy_id) != Some(&node.id) {
             tree.set_node_context(taffy_id, Some(node.id))?;
         }
@@ -1584,6 +1597,148 @@ mod tests {
     }
 
     #[test]
+    fn retained_text_context_keeps_clean_content_and_replaces_changed_content() {
+        let mut root = keyed_node("root", "row", Dimension::Content, Dimension::Auto);
+        let mut text = keyed_node("root/text", "text", Dimension::Auto, Dimension::Auto);
+        text.attributes.insert("content".into(), "hello".into());
+        let text_id = text.id;
+        root.children.push(text);
+
+        let measurer = CountingMeasurer::default();
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut root,
+            &mut state,
+            300.0,
+            40.0,
+            false,
+            false,
+            &mut cache,
+            Some(&measurer),
+        );
+        let first_content = Arc::clone(&state.text_nodes[&text_id].content);
+
+        LayoutEngine::compute_incremental(
+            &mut root,
+            &mut state,
+            300.0,
+            40.0,
+            true,
+            false,
+            &mut cache,
+            Some(&measurer),
+        );
+        assert!(Arc::ptr_eq(
+            &first_content,
+            &state.text_nodes[&text_id].content
+        ));
+
+        root.children[0]
+            .attributes
+            .insert("content".into(), "hello world".into());
+        LayoutEngine::compute_incremental(
+            &mut root,
+            &mut state,
+            300.0,
+            40.0,
+            true,
+            false,
+            &mut cache,
+            Some(&measurer),
+        );
+
+        assert!(!Arc::ptr_eq(
+            &first_content,
+            &state.text_nodes[&text_id].content
+        ));
+        assert_eq!(state.text_nodes[&text_id].content.as_ref(), "hello world");
+    }
+
+    #[test]
+    fn structural_layout_keeps_unkeyed_text_measurement_contexts() {
+        let mut root = make_node("row", Dimension::Content, Dimension::Auto);
+        let mut text = make_node("text", Dimension::Auto, Dimension::Auto);
+        text.attributes
+            .insert("content".into(), "unkeyed text".into());
+        let text_id = text.id;
+        root.children.push(text);
+
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, 300.0, 40.0, false, false, &mut cache, None,
+        );
+        assert!(state.text_nodes.contains_key(&text_id));
+
+        root.children
+            .push(make_node("spacer", Dimension::Px(1.0), Dimension::Px(1.0)));
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, 300.0, 40.0, false, true, &mut cache, None,
+        );
+
+        assert!(state.text_nodes.contains_key(&text_id));
+    }
+
+    // cargo test -p mesh-core-elements --release -- retained_text_context_reuse_beats_rebuilding_inputs --ignored --nocapture
+    #[test]
+    #[ignore = "release-only retained text-context benchmark"]
+    fn retained_text_context_reuse_beats_rebuilding_inputs() {
+        use std::time::Instant;
+
+        let mut root = keyed_node("root", "row", Dimension::Px(1200.0), Dimension::Auto);
+        let content = "performance-sensitive text measurement content ".repeat(8);
+        root.children = (0..512)
+            .map(|index| {
+                let mut text = keyed_node(
+                    &format!("root/text/{index}"),
+                    "text",
+                    Dimension::Auto,
+                    Dimension::Auto,
+                );
+                text.attributes.insert("content".into(), content.clone());
+                text
+            })
+            .collect();
+
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, 1200.0, 800.0, false, false, &mut cache, None,
+        );
+        let iterations = 2_000usize;
+
+        let rebuild_started = Instant::now();
+        for _ in 0..iterations {
+            let mut text_nodes = HashMap::new();
+            for text in &root.children {
+                text_nodes.insert(text.id, TextMeasureData::from_node(text));
+            }
+            std::hint::black_box(text_nodes);
+        }
+        let rebuild_time = rebuild_started.elapsed();
+
+        let retained_started = Instant::now();
+        for _ in 0..iterations {
+            for text in &root.children {
+                let taffy_id = state.node_map[&text.id];
+                update_text_context(text, &mut state.tree, taffy_id, &mut state.text_nodes)
+                    .expect("existing retained text node accepts a context refresh");
+            }
+        }
+        let retained_time = retained_started.elapsed();
+
+        let speedup = rebuild_time.as_secs_f64() / retained_time.as_secs_f64();
+        eprintln!(
+            "retained text contexts: rebuild {rebuild_time:?}; reuse {retained_time:?}; ratio {speedup:.2}x"
+        );
+        assert!(
+            speedup >= 1.25,
+            "retained text-context reuse regressed: {speedup:.2}x"
+        );
+    }
+
+    #[test]
     fn rtl_row_reverses_child_order() {
         use crate::style::TextDirection;
 
@@ -1923,7 +2078,6 @@ mod tests {
         let old_started = Instant::now();
         for _ in 0..iterations {
             let mut node_map = HashMap::new();
-            let mut text_nodes = HashMap::new();
             let mut report = TaffyLayoutReport::default();
             update_retained_node_styles(
                 std::hint::black_box(&root),
@@ -1931,10 +2085,9 @@ mod tests {
                 false,
                 None,
                 &mut node_map,
-                &mut text_nodes,
                 &mut report,
             );
-            std::hint::black_box((node_map, text_nodes, report));
+            std::hint::black_box((node_map, report));
         }
         let old_time = old_started.elapsed();
 

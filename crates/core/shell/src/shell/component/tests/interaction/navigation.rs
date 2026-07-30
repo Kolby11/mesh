@@ -3202,9 +3202,20 @@ fn navigation_bar_real_surface_keeps_status_copy_non_selectable() {
 }
 
 #[test]
-fn navigation_bar_keyboard_activation_opens_volume_surface_on_real_surface() {
+fn navigation_bar_keyboard_activation_toggles_volume_mute_on_real_surface() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -3245,17 +3256,33 @@ fn navigation_bar_keyboard_activation_opens_volume_surface_on_real_surface() {
     assert!(
         requests.iter().any(|request| matches!(
             request,
-            CoreRequest::ActivatePopover { surface_id, focus, .. }
-                if surface_id == "@mesh/audio-popover" && *focus
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.audio"
+                    && command == "set_muted"
+                    && payload == &serde_json::json!({
+                        "device_id": "default",
+                        "muted": true
+                    })
         )),
-        "Enter on the focused volume button should activate the audio popover: {requests:?}"
+        "Enter on the focused volume button should toggle mute: {requests:?}"
     );
 }
 
 #[test]
-fn navigation_bar_pointer_activation_opens_volume_surface_without_stealing_focus() {
+fn navigation_bar_pointer_activation_toggles_volume_mute() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -3310,17 +3337,33 @@ fn navigation_bar_pointer_activation_opens_volume_surface_without_stealing_focus
     assert!(
         requests.iter().any(|request| matches!(
             request,
-            CoreRequest::ActivatePopover { surface_id, focus, .. }
-                if surface_id == "@mesh/audio-popover" && !*focus
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.audio"
+                    && command == "set_muted"
+                    && payload == &serde_json::json!({
+                        "device_id": "default",
+                        "muted": true
+                    })
         )),
-        "pointer click should show/register the popover without transferring focus: {requests:?}"
+        "pointer click should toggle mute: {requests:?}"
     );
 }
 
 #[test]
-fn navigation_bar_same_hover_volume_trigger_closes_popover_immediately() {
+fn navigation_bar_volume_scroll_changes_level_immediately() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -3347,183 +3390,81 @@ fn navigation_bar_same_hover_volume_trigger_closes_popover_immediately() {
     let x = (left + right) * 0.5;
     let y = (top + bottom) * 0.5;
 
-    component
+    let down_requests = component
         .handle_input(
             &theme,
             width,
             height,
-            ComponentInput::PointerButton {
+            ComponentInput::Scroll {
                 x,
                 y,
-                pressed: true,
-            },
-        )
-        .unwrap();
-    let open_requests = component
-        .handle_input(
-            &theme,
-            width,
-            height,
-            ComponentInput::PointerButton {
-                x,
-                y,
-                pressed: false,
+                dx: 0.0,
+                dy: -1.0,
             },
         )
         .unwrap();
     assert!(
-        open_requests.iter().any(|request| matches!(
+        down_requests.iter().any(|request| matches!(
             request,
-            CoreRequest::ActivatePopover { surface_id, .. }
-                if surface_id == "@mesh/audio-popover"
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.audio"
+                    && command == "set_volume"
+                    && payload["device_id"] == serde_json::json!("default")
+                    && payload["percent"] == serde_json::json!(45)
         )),
-        "first click should open the audio popover: {open_requests:?}"
+        "scrolling down should lower volume by the default step: {down_requests:?}"
     );
 
-    component
+    let up_requests = component
         .handle_input(
             &theme,
             width,
             height,
-            ComponentInput::PointerButton {
+            ComponentInput::TwoFingerScroll {
                 x,
                 y,
-                pressed: true,
-            },
-        )
-        .unwrap();
-    let close_requests = component
-        .handle_input(
-            &theme,
-            width,
-            height,
-            ComponentInput::PointerButton {
-                x,
-                y,
-                pressed: false,
+                dx: 0.0,
+                dy: 1.0,
             },
         )
         .unwrap();
     assert!(
-        close_requests.iter().any(|request| matches!(
+        up_requests.iter().any(|request| matches!(
             request,
-            CoreRequest::HidePopover {
-                surface_id,
-                defer_for_hover_bridge: false,
-            } if surface_id == "@mesh/audio-popover"
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.audio"
+                    && command == "set_volume"
+                    && payload["device_id"] == serde_json::json!("default")
+                    && payload["percent"] == serde_json::json!(50)
         )),
-        "second click at the same hovered coordinates should hide immediately: {close_requests:?}"
+        "two-finger scroll up should raise volume by the default step: {up_requests:?}"
     );
 }
 
 #[test]
-fn navigation_bar_volume_trigger_reopens_after_rapid_toggle_cycle() {
+fn navigation_bar_volume_scroll_respects_instance_sensitivity() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
-    let theme = default_theme();
-    let width = 960;
-    let height = 80;
-    let mut buffer = PixelBuffer::new(width, height);
-    component
-        .paint(&theme, width, height, &mut buffer, 1.0)
-        .unwrap();
-
-    let tree = component
-        .last_tree
-        .as_ref()
-        .expect("rendered navigation tree");
-    let volume_button = first_node_with_click_handler(
-        tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
-    )
-    .expect("rendered volume button");
-    let volume_key = volume_button
-        .mesh_key()
-        .expect("volume button mesh key")
-        .to_owned();
-    let (left, top, right, bottom) =
-        find_node_bounds_by_key(tree, &volume_key, 0.0, 0.0).expect("volume bounds");
-    let x = (left + right) * 0.5;
-    let y = (top + bottom) * 0.5;
-
-    for expected_open in [true, false, true] {
-        component
-            .handle_input(
-                &theme,
-                width,
-                height,
-                ComponentInput::PointerButton {
-                    x,
-                    y,
-                    pressed: true,
-                },
-            )
-            .unwrap();
-        let requests = component
-            .handle_input(
-                &theme,
-                width,
-                height,
-                ComponentInput::PointerButton {
-                    x,
-                    y,
-                    pressed: false,
-                },
-            )
-            .unwrap();
-
-        if expected_open {
-            assert!(
-                requests.iter().any(|request| matches!(
-                    request,
-                    CoreRequest::ActivatePopover { surface_id, .. }
-                        if surface_id == "@mesh/audio-popover"
-                )),
-                "expected rapid click to open the audio popover: {requests:?}"
-            );
-            component
-                .handle_core_event(&CoreEvent::SurfaceVisibilityChanged {
-                    surface_id: "@mesh/audio-popover".into(),
-                    visible: true,
-                })
-                .unwrap();
-        } else {
-            assert!(
-                requests.iter().any(|request| matches!(
-                    request,
-                    CoreRequest::HidePopover {
-                        surface_id,
-                        defer_for_hover_bridge: false,
-                    } if surface_id == "@mesh/audio-popover"
-                )),
-                "expected rapid click to hide the audio popover: {requests:?}"
-            );
-            component
-                .handle_core_event(&CoreEvent::SurfaceVisibilityChanged {
-                    surface_id: "@mesh/audio-popover".into(),
-                    visible: false,
-                })
-                .unwrap();
+    component.settings_json = serde_json::json!({
+        "props": {
+            "instances": {
+                "@mesh/navigation-bar/local:VolumeButton": {
+                    "scroll_sensitivity": 12
+                }
+            }
         }
-
-        component
-            .paint(&theme, width, height, &mut buffer, 1.0)
-            .unwrap();
-    }
-}
-
-/// A popover opened from a nested child-component trigger can be dismissed by
-/// a route that never runs the trigger's own close handler — selecting an
-/// option inside the popover, clicking away, or the compositor dismissing the
-/// xdg_popup. In all those cases the shell emits `SurfaceVisibilityChanged`
-/// with `visible = false`, and the trigger's `*_surface_hidden` portal binding
-/// must be written back into the *child* component's runtime (not the surface
-/// root's), or the next click hits the dead hide-branch and the popover only
-/// re-opens on the click after that. Regression test for that desync.
-#[test]
-fn navigation_bar_volume_trigger_reopens_after_external_close() {
-    let mut component =
-        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    });
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -3550,74 +3491,29 @@ fn navigation_bar_volume_trigger_reopens_after_external_close() {
     let x = (left + right) * 0.5;
     let y = (top + bottom) * 0.5;
 
-    let click = |component: &mut FrontendSurfaceComponent| {
-        component
-            .handle_input(
-                &theme,
-                width,
-                height,
-                ComponentInput::PointerButton {
-                    x,
-                    y,
-                    pressed: true,
-                },
-            )
-            .unwrap();
-        component
-            .handle_input(
-                &theme,
-                width,
-                height,
-                ComponentInput::PointerButton {
-                    x,
-                    y,
-                    pressed: false,
-                },
-            )
-            .unwrap()
-    };
-
-    // First click opens the popover.
-    let requests = click(&mut component);
+    let requests = component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::Scroll {
+                x,
+                y,
+                dx: 0.0,
+                dy: 1.0,
+            },
+        )
+        .unwrap();
     assert!(
         requests.iter().any(|request| matches!(
             request,
-            CoreRequest::ActivatePopover { surface_id, .. }
-                if surface_id == "@mesh/audio-popover"
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.audio"
+                    && command == "set_volume"
+                    && payload["device_id"] == serde_json::json!("default")
+                    && payload["percent"] == serde_json::json!(62)
         )),
-        "expected first click to open the audio popover: {requests:?}"
-    );
-    component
-        .handle_core_event(&CoreEvent::SurfaceVisibilityChanged {
-            surface_id: "@mesh/audio-popover".into(),
-            visible: true,
-        })
-        .unwrap();
-    component
-        .paint(&theme, width, height, &mut buffer, 1.0)
-        .unwrap();
-
-    // Popover is dismissed externally (option select / click-away / popup
-    // dismiss) — the trigger's own close handler never ran.
-    component
-        .handle_core_event(&CoreEvent::SurfaceVisibilityChanged {
-            surface_id: "@mesh/audio-popover".into(),
-            visible: false,
-        })
-        .unwrap();
-    component
-        .paint(&theme, width, height, &mut buffer, 1.0)
-        .unwrap();
-
-    // The very next click must re-open, not no-op on a stale "open" flag.
-    let requests = click(&mut component);
-    assert!(
-        requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::ActivatePopover { surface_id, .. }
-                if surface_id == "@mesh/audio-popover"
-        )),
-        "expected click after external close to re-open the popover, got: {requests:?}"
+        "configured volume scroll sensitivity should apply to wheel input: {requests:?}"
     );
 }
 
@@ -3625,6 +3521,17 @@ fn navigation_bar_volume_trigger_reopens_after_external_close() {
 fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -3682,8 +3589,13 @@ fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
     assert!(
         requests.iter().any(|request| matches!(
             request,
-            CoreRequest::ActivatePopover { surface_id, .. }
-                if surface_id == "@mesh/audio-popover"
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.audio"
+                    && command == "set_muted"
+                    && payload == &serde_json::json!({
+                        "device_id": "default",
+                        "muted": true
+                    })
         )),
         "release at the original press point should still click while the active animation changes visual bounds: {requests:?}"
     );

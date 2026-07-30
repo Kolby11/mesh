@@ -1694,10 +1694,12 @@ fn latest_service_state_is_keyed_by_interface() {
 fn service_delivery_index_routes_updates_without_scanning_unrelated_components() {
     let audio_summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
         update_services: vec!["audio".to_string()],
+        cached_update_services: Vec::new(),
         interface_events: Vec::new(),
     })));
     let power_summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
         update_services: vec!["power".to_string()],
+        cached_update_services: Vec::new(),
         interface_events: Vec::new(),
     })));
     let fallback_summary = Arc::new(Mutex::new(None));
@@ -1730,7 +1732,11 @@ fn service_delivery_index_routes_updates_without_scanning_unrelated_components()
         ))
         .unwrap();
 
-    assert_eq!(audio_state.lock().unwrap().observed, 1);
+    assert_eq!(
+        audio_state.lock().unwrap().observed,
+        0,
+        "indexed subscribers dispatch without repeating the observation gate"
+    );
     assert_eq!(audio_state.lock().unwrap().handled.len(), 1);
     assert_eq!(
         power_state.lock().unwrap().observed,
@@ -1750,9 +1756,13 @@ fn service_delivery_index_routes_updates_without_scanning_unrelated_components()
 fn service_updates_are_cached_by_components_that_do_not_observe_them() {
     let audio_summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
         update_services: vec!["audio".to_string()],
+        cached_update_services: Vec::new(),
         interface_events: Vec::new(),
     })));
-    let idle_summary = Arc::new(Mutex::new(Some(ServiceObservationSummary::default())));
+    let idle_summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
+        cached_update_services: vec!["audio".to_string()],
+        ..Default::default()
+    })));
     let audio_state = Arc::new(Mutex::new(IndexedRecordingState::default()));
     let idle_state = Arc::new(Mutex::new(IndexedRecordingState::default()));
 
@@ -1796,6 +1806,7 @@ fn service_updates_are_cached_by_components_that_do_not_observe_them() {
 fn service_delivery_index_routes_interface_events_by_name() {
     let summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
         update_services: Vec::new(),
+        cached_update_services: Vec::new(),
         interface_events: vec![ServiceInterfaceEventSubscription {
             service: "audio".to_string(),
             event: "volume_changed".to_string(),
@@ -1827,7 +1838,7 @@ fn service_delivery_index_routes_interface_events_by_name() {
         .unwrap();
 
     let state = state.lock().unwrap();
-    assert_eq!(state.observed, 1);
+    assert_eq!(state.observed, 0);
     assert_eq!(state.handled.len(), 1);
     assert!(matches!(
         &state.handled[0],
@@ -1839,6 +1850,7 @@ fn service_delivery_index_routes_interface_events_by_name() {
 fn service_delivery_index_rebuilds_when_marked_dirty() {
     let summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
         update_services: vec!["audio".to_string()],
+        cached_update_services: Vec::new(),
         interface_events: Vec::new(),
     })));
     let state = Arc::new(Mutex::new(IndexedRecordingState::default()));
@@ -1858,6 +1870,7 @@ fn service_delivery_index_rebuilds_when_marked_dirty() {
         .unwrap();
     *summary.lock().unwrap() = Some(ServiceObservationSummary {
         update_services: vec!["power".to_string()],
+        cached_update_services: Vec::new(),
         interface_events: Vec::new(),
     });
     shell.service_delivery_index.mark_dirty();
@@ -1877,7 +1890,7 @@ fn service_delivery_index_rebuilds_when_marked_dirty() {
         .unwrap();
 
     let state = state.lock().unwrap();
-    assert_eq!(state.observed, 2);
+    assert_eq!(state.observed, 0);
     assert_eq!(state.handled.len(), 2);
     assert!(matches!(
         &state.handled[1],
@@ -1897,6 +1910,7 @@ fn service_delivery_index_beats_full_component_scan_benchmark() {
         let service = if index == 17 { "audio" } else { "power" };
         let summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
             update_services: vec![service.to_string()],
+            cached_update_services: Vec::new(),
             interface_events: Vec::new(),
         })));
         let state = Arc::new(Mutex::new(IndexedRecordingState::default()));
@@ -4045,6 +4059,7 @@ fn set_volume_updates_canonical_audio_percent_until_backend_confirms() {
             id,
             Arc::new(Mutex::new(Some(ServiceObservationSummary {
                 update_services: vec!["audio".to_string()],
+                cached_update_services: Vec::new(),
                 interface_events: Vec::new(),
             }))),
             state,

@@ -7,7 +7,6 @@
     "kind": "frontend",
     "uses": {
       "modules": {
-        "@mesh/audio-popover": ">=0.1.0",
         "@mesh/language-popover": ">=0.1.0",
         "@mesh/theme-selector": ">=0.1.0",
         "@mesh/quick-settings": ">=0.1.0"

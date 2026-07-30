@@ -3,7 +3,7 @@ This module has been split into smaller presentational components inside `src/co
 `battery-button.mesh` — passive battery-status helper mounted on the shipped bar without adding a popover or expanded power surface.
 `settings-button.mesh` — settings trigger that owns the quick-settings surface mount and toggle behavior locally.
 `theme-button.mesh` — compact theme trigger that owns the theme-selector popover toggle from inside the component.
-`volume-button.mesh` — volume trigger that owns the audio-popover surface mount and toggle behavior while reusing reactive audio globals.
+`volume-button.mesh` — volume trigger that reuses reactive audio globals, toggles mute on click, and adjusts volume directly on wheel/two-finger scroll.
 `language-button.mesh` — language trigger that owns the language-popover surface mount and toggle behavior locally.
 `meta-label.mesh` — compact status label used inside the passive status cluster.
 `meta-pill.mesh` — compact accent pill used for the bounded status-motion proof.

@@ -18,6 +18,9 @@ pub type SurfaceId = String;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServiceObservationSummary {
     pub update_services: Vec<String>,
+    /// Services whose payload must be retained even before a live runtime has
+    /// observed a field, so lazily-created runtimes can start from real state.
+    pub cached_update_services: Vec<String>,
     pub interface_events: Vec<ServiceInterfaceEventSubscription>,
 }
 

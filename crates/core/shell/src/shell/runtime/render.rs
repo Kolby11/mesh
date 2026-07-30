@@ -479,6 +479,11 @@ impl Shell {
 
             // Component(VM)-level profiling + invalidation are recorded once,
             // regardless of how many surface targets the component drives.
+            let observation_summary = self.components[index]
+                .component
+                .service_observation_summary();
+            self.service_delivery_index
+                .mark_dirty_if_summary_changed(index, observation_summary);
             for record in component_stage_records {
                 let module_id = record
                     .module_id
@@ -532,7 +537,6 @@ impl Shell {
         }
         self.components_want_render = components_want_render_after_frame;
         self.presented_last_frame = any_component_presented;
-        self.service_delivery_index.mark_dirty();
         Ok(())
     }
 

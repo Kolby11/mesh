@@ -229,34 +229,113 @@ impl Shell {
         event: &ServiceEvent,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         self.rebuild_service_delivery_index_if_needed();
-        let target_indices = self.service_delivery_targets(event);
-        // Components outside the delivery set still cache payloads for the
-        // services they declare. Without this a surface that has not rendered
-        // yet reads no service field, so it observes nothing and later seeds
-        // its child runtimes from an empty cache.
-        if matches!(event, ServiceEvent::Updated { .. }) {
-            for (index, runtime) in self.components.iter_mut().enumerate() {
-                if target_indices.contains(&index) {
-                    continue;
-                }
-                runtime.component.cache_service_payload(event);
-            }
-        }
         let mut requests = VecDeque::new();
-        for index in target_indices {
-            let Some(runtime) = self.components.get_mut(index) else {
-                continue;
-            };
-            if !runtime.component.observes_service_event(event) {
-                runtime.component.cache_service_payload(event);
-                continue;
+        match event {
+            ServiceEvent::Updated { service, .. } => {
+                let service_name = crate::shell::service::service_name_from_interface_cow(service);
+                let epoch = self
+                    .service_delivery_index
+                    .begin_delivery_epoch(self.components.len());
+                let (index, components) = (&mut self.service_delivery_index, &mut self.components);
+                let (
+                    fallback_components,
+                    update_services,
+                    cached_update_services,
+                    component_epochs,
+                ) = (
+                    &index.fallback_components,
+                    &index.update_services,
+                    &index.cached_update_services,
+                    &mut index.component_epochs,
+                );
+
+                // Summaries with no safe snapshot retain the legacy gate.
+                // Indexed members were recorded from a current summary, so
+                // they can dispatch without re-locking every runtime.
+                for &component_index in fallback_components {
+                    let Some(runtime) = components.get_mut(component_index) else {
+                        continue;
+                    };
+                    if component_epochs[component_index] == epoch {
+                        continue;
+                    }
+                    component_epochs[component_index] = epoch;
+                    if runtime.component.observes_service_event(event) {
+                        requests.extend(
+                            runtime
+                                .component
+                                .handle_service_event(event)
+                                .map_err(ShellRunError::Component)?,
+                        );
+                    } else {
+                        runtime.component.cache_service_payload(event);
+                    }
+                }
+                if let Some(subscribers) = update_services.get(service_name.as_ref()) {
+                    for &component_index in subscribers {
+                        let Some(runtime) = components.get_mut(component_index) else {
+                            continue;
+                        };
+                        if component_epochs[component_index] != epoch {
+                            component_epochs[component_index] = epoch;
+                            requests.extend(
+                                runtime
+                                    .component
+                                    .handle_service_event(event)
+                                    .map_err(ShellRunError::Component)?,
+                            );
+                        }
+                    }
+                }
+                // Keep declared-service caches warm without visiting unrelated
+                // components. The epoch marker avoids a duplicate cache write
+                // for a component that already handled this update.
+                if let Some(cached) = cached_update_services.get(service_name.as_ref()) {
+                    for &component_index in cached {
+                        let Some(runtime) = components.get_mut(component_index) else {
+                            continue;
+                        };
+                        if component_epochs[component_index] != epoch {
+                            component_epochs[component_index] = epoch;
+                            runtime.component.cache_service_payload(event);
+                        }
+                    }
+                }
             }
-            requests.extend(
-                runtime
-                    .component
-                    .handle_service_event(event)
-                    .map_err(ShellRunError::Component)?,
-            );
+            ServiceEvent::InterfaceEvent { service, name, .. } => {
+                let service_name = crate::shell::service::service_name_from_interface_cow(service);
+                let (index, components) = (&self.service_delivery_index, &mut self.components);
+                for &component_index in &index.fallback_components {
+                    let Some(runtime) = components.get_mut(component_index) else {
+                        continue;
+                    };
+                    if runtime.component.observes_service_event(event) {
+                        requests.extend(
+                            runtime
+                                .component
+                                .handle_service_event(event)
+                                .map_err(ShellRunError::Component)?,
+                        );
+                    }
+                }
+                if let Some(subscribers) = index
+                    .interface_events
+                    .get(service_name.as_ref())
+                    .and_then(|events| events.get(name))
+                {
+                    for &component_index in subscribers {
+                        let Some(runtime) = components.get_mut(component_index) else {
+                            continue;
+                        };
+                        requests.extend(
+                            runtime
+                                .component
+                                .handle_service_event(event)
+                                .map_err(ShellRunError::Component)?,
+                        );
+                    }
+                }
+            }
         }
         Ok(requests)
     }
@@ -268,13 +347,22 @@ impl Shell {
 
         let mut index = ServiceDeliveryIndex::default();
         for (component_index, runtime) in self.components.iter().enumerate() {
-            let Some(summary) = runtime.component.service_observation_summary() else {
+            let summary = runtime.component.service_observation_summary();
+            index.component_summaries.push(summary.clone());
+            let Some(summary) = summary else {
                 index.fallback_components.push(component_index);
                 continue;
             };
             for service in summary.update_services {
                 index
                     .update_services
+                    .entry(service)
+                    .or_default()
+                    .push(component_index);
+            }
+            for service in summary.cached_update_services {
+                index
+                    .cached_update_services
                     .entry(service)
                     .or_default()
                     .push(component_index);
@@ -291,36 +379,6 @@ impl Shell {
         }
         index.dirty = false;
         self.service_delivery_index = index;
-    }
-
-    fn service_delivery_targets(&self, event: &ServiceEvent) -> Vec<usize> {
-        let mut targets = self.service_delivery_index.fallback_components.clone();
-        match event {
-            ServiceEvent::Updated { service, .. } => {
-                let service_name = crate::shell::service::service_name_from_interface_cow(service);
-                if let Some(indices) = self
-                    .service_delivery_index
-                    .update_services
-                    .get(service_name.as_ref())
-                {
-                    targets.extend(indices.iter().copied());
-                }
-            }
-            ServiceEvent::InterfaceEvent { service, name, .. } => {
-                let service_name = crate::shell::service::service_name_from_interface_cow(service);
-                if let Some(indices) = self
-                    .service_delivery_index
-                    .interface_events
-                    .get(service_name.as_ref())
-                    .and_then(|events| events.get(name))
-                {
-                    targets.extend(indices.iter().copied());
-                }
-            }
-        }
-        targets.sort_unstable();
-        targets.dedup();
-        targets
     }
 
     pub(in crate::shell) fn broadcast_backend_interface_event(

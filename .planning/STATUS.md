@@ -29,6 +29,13 @@ loop sleeps on the Wayland fd instead of spinning, and commits the retained
 frame after configure arrives. Record:
 [`log/performance-log.md`](log/performance-log.md).
 
+**Text measurement contexts are retained by node.** `PerSurfaceLayoutState`
+now owns clean text inputs for the retained Taffy tree, updating an entry only
+when content or measurement-affecting style changes (2026-07-30). The focused
+512-text-node release gate is 1.58–1.72x faster than rebuilding the contexts;
+the earlier scratch-map rejection predated dirty-node style scoping. Record:
+[`log/performance-log.md`](log/performance-log.md).
+
 **Live frontend catalogs are one atomic snapshot.** `Shell` owns the versioned
 catalog generation used by every surface (2026-07-30). Enabling or disabling a
 surface, component, or widget now publishes one generation and rebinds existing
@@ -121,8 +128,7 @@ and checked gates are in
 From the attack order at the end of
 [`docs/BACKLOG.md`](../docs/BACKLOG.md):
 
-1. Retained text-measure state.
-2. Subscriber-proportional service delivery.
+1. Subscriber-proportional service delivery.
 
 ## Blocked
 

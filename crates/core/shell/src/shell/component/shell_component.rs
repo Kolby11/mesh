@@ -342,6 +342,12 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
         let mut update_services = update_services.into_iter().collect::<Vec<_>>();
         update_services.sort();
+        let mut cached_update_services = self
+            .declared_service_names
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        cached_update_services.sort();
         let mut interface_events = interface_events.into_iter().collect::<Vec<_>>();
         interface_events.sort_by(|a, b| {
             a.service
@@ -350,6 +356,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         });
         Some(ServiceObservationSummary {
             update_services,
+            cached_update_services,
             interface_events,
         })
     }

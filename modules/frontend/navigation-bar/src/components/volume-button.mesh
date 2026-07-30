@@ -1,3 +1,7 @@
+<props>
+    scroll_sensitivity: { type: "number", default: 5, min: 1, max: 100, step: 1 }
+</props>
+
 <template>
     <stack class="nav-button-shell">
         <button
@@ -5,38 +9,65 @@
             class="nav-button"
             keybind="mute"
             onclick={onAudioToggle}
-            onpointerenter={onAudioEnter}
-            onpointerleave={onAudioLeave}
+            onscroll={onVolumeScroll}
+            ontwofingerscroll={onVolumeScroll}
             onkeybind={onMuteKeybind}
-            title={t(audio_tooltip_key) .. audio_tooltip_value}
-            aria-label={t('nav.open_audio')}
+            title="{audio_tooltip}"
+            aria-label="{audio_aria_label}"
         >
             <icon class="nav-button-glyph" name="{icon_name}" size="18" />
         </button>
-        <AudioPopover hidden={audio_surface_hidden} />
     </stack>
 </template>
 
 <script lang="luau">
 local t = import("mesh.i18n", "t")
 local audio = require("mesh.audio")
-local AudioPopover = require("@mesh/audio-popover")
 
 icon_name = "audio-volume-muted"
 audio_tooltip_key = "nav.volume_unavailable"
 audio_tooltip_value = ""
+audio_tooltip = "Volume unavailable"
+audio_aria_label = "Volume"
 audio_percent = 0
-audio_surface_id = "@mesh/audio-popover"
-audio_surface_hidden = true
+
+local function normalized_scroll_sensitivity()
+    local amount = tonumber(props and props.scroll_sensitivity)
+    if amount == nil or amount ~= amount or amount == math.huge or amount == -math.huge or amount <= 0 then
+        return 5
+    end
+    return math.max(1, math.min(100, amount))
+end
+
+local function sync_audio_text()
+    if audio_tooltip_value == nil or audio_tooltip_value == "" then
+        audio_tooltip = t(audio_tooltip_key)
+    else
+        audio_tooltip = t(audio_tooltip_key) .. " " .. audio_tooltip_value
+    end
+
+    if audio_tooltip_value == nil or audio_tooltip_value == "" then
+        audio_aria_label = t("nav.volume")
+    else
+        audio_aria_label = t("nav.volume") .. " " .. audio_tooltip_value
+    end
+end
 
 local function update_audio_copy(percent, muted)
-    audio_percent = percent
+    local safe = math.floor(tonumber(percent) or 0)
+    if safe < 0 then
+        safe = 0
+    end
+    if safe > 100 then
+        safe = 100
+    end
+    audio_percent = safe
 
-    if muted or percent == 0 then
+    if muted or safe == 0 then
         icon_name = "audio-volume-muted"
-    elseif percent < 34 then
+    elseif safe < 34 then
         icon_name = "audio-volume-low"
-    elseif percent < 67 then
+    elseif safe < 67 then
         icon_name = "audio-volume-medium"
     else
         icon_name = "audio-volume-high"
@@ -47,7 +78,8 @@ local function update_audio_copy(percent, muted)
     else
         audio_tooltip_key = "nav.volume_level"
     end
-    audio_tooltip_value = string.format(" %d%%", percent)
+    audio_tooltip_value = string.format("%d%%", safe)
+    sync_audio_text()
 end
 
 if audio and audio.VolumeChanged then
@@ -69,6 +101,7 @@ function render(self)
         icon_name = "audio-volume-muted"
         audio_tooltip_key = "nav.audio_service_unavailable"
         audio_tooltip_value = ""
+        sync_audio_text()
         audio_percent = 0
         return
     end
@@ -84,43 +117,37 @@ function render(self)
     update_audio_copy(percent, muted)
 end
 
-local function show_audio_selector(event)
-    if audio_surface_hidden then
-        mesh.events.publish("shell.position-surface", {
-            surface_id = audio_surface_id,
-            margin_top = 0,
-            margin_left = tonumber((event.current_target.position or {}).margin_left) or 0,
-        })
-        local focus = event.trigger ~= nil and event.trigger.type == "keyboard"
-        mesh.popover.activate(audio_surface_id, event, { focus = focus })
-        audio_surface_hidden = false
+function onAudioToggle()
+    if not audio or audio.available == false then
+        return
+    end
+
+    if type(audio.set_muted) == "function" then
+        audio.set_muted("default", not (audio.muted or false))
+    elseif type(audio.toggle_mute) == "function" then
+        audio.toggle_mute()
     end
 end
 
-local function hide_audio_selector()
-    if not audio_surface_hidden then
-        mesh.popover.hide(audio_surface_id)
-        audio_surface_hidden = true
+function onVolumeScroll(event)
+    if not audio or audio.available == false or type(audio.set_volume) ~= "function" then
+        return
     end
-end
 
-function onAudioToggle(event)
-    if audio_surface_hidden then
-        show_audio_selector(event)
+    local delta = event and event.delta or {}
+    local dy = tonumber(delta.y) or 0
+    if dy == 0 then
+        return
+    end
+
+    local amount = normalized_scroll_sensitivity()
+    if dy > 0 then
+        update_audio_copy(audio_percent + amount, false)
+        audio.set_volume("default", audio_percent)
     else
-        hide_audio_selector()
+        update_audio_copy(audio_percent - amount, false)
+        audio.set_volume("default", audio_percent)
     end
-end
-
--- Hover opens the audio popover; leaving the trigger starts its close. The
--- popover keeps itself open while hovered and the hide transition bridges the
--- gap between the button and the popover surface.
-function onAudioEnter(event)
-    show_audio_selector(event)
-end
-
-function onAudioLeave()
-    hide_audio_selector()
 end
 </script>
 
@@ -141,7 +168,6 @@ end
         align-items: center;
         padding: var(--spacing-xs);
         border-radius: var(--radius-full);
-        transform: translateY(0px) scale(1);
         background: var(--color-surface-container);
         color: var(--color-on-surface);
         border-width: 2px;
@@ -157,21 +183,18 @@ end
     .nav-button:hover {
         background: var(--color-secondary-container);
         color: var(--color-on-secondary-container);
-        transform: translateY(-1px) scale(1.04);
     }
 
     .nav-button:focus,
     .nav-button:focus-visible {
         background: var(--color-tertiary-container);
         color: var(--color-on-tertiary-container);
-        transform: translateY(-1px) scale(1.03);
     }
 
     .nav-button:active {
         background: var(--color-primary);
         color: var(--color-on-primary);
         border-color: var(--color-primary);
-        transform: translateY(0px) scale(0.94);
     }
 
     .nav-button-glyph {

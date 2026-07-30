@@ -1154,9 +1154,20 @@ end
 }
 
 #[test]
-fn shipped_navigation_volume_button_publishes_immediate_audio_popover_show() {
+fn shipped_navigation_volume_button_click_toggles_mute() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
     component.visible = true;
 
     let theme = default_theme();
@@ -1212,24 +1223,16 @@ fn shipped_navigation_volume_button_publishes_immediate_audio_popover_show() {
     assert!(
         requests.iter().any(|request| matches!(
             request,
-            CoreRequest::PositionSurface {
-                surface_id,
-                margin_top: 0,
-                margin_left: 32
-            } if surface_id == "@mesh/audio-popover"
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.audio"
+                    && command == "set_muted"
+                    && payload == &serde_json::json!({
+                        "device_id": "default",
+                        "muted": true
+                    })
         )),
-        "click should position the audio popover before showing it: {requests:?}"
+        "click should toggle mute through the audio service path: {requests:?}"
     );
-    assert!(
-        requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::ActivatePopover { surface_id, .. } if surface_id == "@mesh/audio-popover"
-        )),
-        "click should register popover activation through the shell request path: {requests:?}"
-    );
-    // `audio_surface_hidden` now lives inside the VolumeButton child component
-    // and is not observable on the top-level surface. The PositionSurface +
-    // ActivatePopover requests above already prove the popover was shown.
 }
 
 #[test]
@@ -1262,9 +1265,20 @@ fn shipped_navigation_audio_popover_transition_delay_stays_bounded() {
 }
 
 #[test]
-fn shipped_navigation_audio_popover_transition_does_not_consume_first_input() {
+fn shipped_navigation_volume_scroll_reaches_audio_service_on_first_input() {
     let mut navigation =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    navigation
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
     navigation.visible = true;
 
     let theme = default_theme();
@@ -1281,72 +1295,31 @@ fn shipped_navigation_audio_popover_transition_does_not_consume_first_input() {
         "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
     )
     .expect("volume button");
-    let click_handler = button.event_handlers.get("click").unwrap().clone();
-    let button_key = button.mesh_key().expect("button mesh key").to_owned();
-    let open_requests = navigation
-        .call_namespaced_handler(
-            &click_handler,
-            &[serde_json::json!({
-                "trigger": { "type": "pointer" },
-                "current": { "key": button_key },
-                "current_target": {
-                    "key": button_key,
-                    "position": {
-                        "margin_left": 32,
-                        "margin_bottom": 40
-                    }
-                }
-            })],
-        )
-        .unwrap();
-    assert!(
-        open_requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::ActivatePopover { surface_id, focus, .. }
-                if surface_id == "@mesh/audio-popover" && !*focus
-        )),
-        "first pointer click should open the audio popover without stealing focus: {open_requests:?}"
-    );
-
-    let mut audio = real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
-    audio
-        .handle_service_event(&ServiceEvent::Updated {
-            service: "mesh.audio".into(),
-            source_module: "@mesh/pipewire-audio".into(),
-            payload: serde_json::json!({
-                "available": true,
-                "percent": 50,
-                "muted": false
-            }),
-        })
-        .unwrap();
-    let mut audio_buffer = PixelBuffer::new(320, 220);
-    audio
-        .paint(&theme, 320, 220, &mut audio_buffer, 1.0)
-        .unwrap();
-    let audio_tree = audio.last_tree.as_ref().expect("rendered audio popover");
-    let slider = first_node_by_tag(audio_tree, "slider").expect("slider node");
-    let slider_key = slider.mesh_key().expect("slider key").to_owned();
-    audio.focused_key = Some(slider_key);
-
-    let requests = audio
+    let button_x = button.layout.x + button.layout.width / 2.0;
+    let button_y = button.layout.y + button.layout.height / 2.0;
+    let requests = navigation
         .handle_input(
             &theme,
-            320,
-            220,
-            ComponentInput::KeyPressed {
-                key: "ArrowRight".into(),
-                modifiers: KeyModifiers::default(),
+            960,
+            80,
+            ComponentInput::Scroll {
+                x: button_x,
+                y: button_y,
+                dx: 0.0,
+                dy: 1.0,
             },
         )
         .unwrap();
     assert!(
         requests.iter().any(|request| matches!(
             request,
-            CoreRequest::ServiceCommand { interface, command, .. }
-                if interface == "mesh.audio" && command == "set_volume"
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.audio"
+                    && command == "set_volume"
+                    && payload["device_id"] == serde_json::json!("default")
+                    && payload["percent"] == serde_json::json!(55)
         )),
-        "first audio popover input should reach the service command path: {requests:?}"
+        "first scroll input should reach the volume service command path: {requests:?}"
     );
 }
 
@@ -1407,19 +1380,12 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
         "volume tooltip should update when the shell locale changes"
     );
 
-    // NOTE: the shipped VolumeButton now opens the audio popover on
-    // `onpointerenter` (hover-to-open), so hovering the icon no longer arms a
-    // tooltip-reveal timer the way the old static button did. The inheritance
-    // *lookup* asserted above (icon resolves the button's title) is the durable
-    // behavior; the hover-timer choreography is exercised by generic tooltip
-    // unit tests rather than this shipped-surface integration test.
-
     // The icon carries no click handler of its own; a click on it bubbles up to
     // the enclosing VolumeButton. Pointer routing resolves a leaf coordinate to
     // its nearest click-handling ancestor by walking the node path, so verify
     // the structural relationship (icon nested under the button that owns the
     // handler) independent of the bar's painted geometry, then dispatch the
-    // handler and confirm it activates the audio popover.
+    // handler and confirm it toggles mute.
     let tree = component
         .last_tree
         .as_ref()
@@ -1455,7 +1421,13 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     assert!(
         requests.iter().any(|request| matches!(
             request,
-            CoreRequest::ActivatePopover { surface_id, .. } if surface_id == "@mesh/audio-popover"
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.audio"
+                    && command == "set_muted"
+                    && payload == &serde_json::json!({
+                        "device_id": "default",
+                        "muted": true
+                    })
         )),
         "clicking directly on the icon should bubble to the button click handler: {requests:?}"
     );

@@ -2704,3 +2704,33 @@ presentation suite reports 58 passed / 12 ignored. The full shell suite reports
 style, shipped-surface, interaction, and debug-snapshot baseline areas, while
 the new regression passes. `cargo check -p mesh-core-shell --tests` also passes
 under `nix develop` with rustc/cargo 1.94.0.
+
+---
+
+## 2026-07-30 — retained text-measure contexts
+
+area: layout, retained Taffy state
+
+`PerSurfaceLayoutState` now retains text measurement inputs by `NodeId`, and
+the retained Taffy measure callback borrows that map directly. Incremental
+layout updates keep a clean entry's `Arc<str>` content and font inputs intact;
+they replace it only when text content or a measurement-affecting style input
+changes. Fresh and structural rebuilds populate the same state, while removing
+a structural subtree removes its text entry as well.
+
+This intentionally revisits the 2026-07-04 rejected scratch-map experiment:
+that full-style-sync workload was 0.99x. Dirty-node style scoping since then
+leaves clean text-context rebuilding as independently measurable work.
+
+**Measured.** Release build (rustc 1.95.0, cargo 1.95.0) on the local
+development host. The gate refreshes 512 stable text nodes containing 376-byte
+strings for 2,000 passes after an initial retained layout. Rebuilding all text
+inputs took 413.843–436.431ms; retaining and refreshing the contexts took
+240.291–275.849ms, a 1.58–1.72x improvement. The checked ignored gate
+`retained_text_context_reuse_beats_rebuilding_inputs` requires at least 1.25x.
+
+**Verified.** `retained_text_context_keeps_clean_content_and_replaces_changed_content`
+proves pointer reuse for clean content and replacement after a content change.
+The focused retained-layout suite passes 6 tests (1 release-only benchmark
+ignored); the new focused context slice passes 2 tests (1 release-only benchmark
+ignored). All three release gate samples passed.
