@@ -205,13 +205,21 @@ impl Shell {
 
         self.settings_watch.modified_at = Some(modified_at);
 
-        let new_settings = match load_shell_settings() {
-            Ok(s) => s,
+        let store = match SettingsStore::load() {
+            Ok(store) => Arc::new(store),
             Err(e) => {
-                tracing::warn!("failed to reload shell settings: {e}");
+                tracing::warn!("failed to reload settings: {e}");
                 return Ok(requests);
             }
         };
+        mesh_core_config::log_settings_diagnostics(
+            "settings reload",
+            &mesh_core_config::new_settings_diagnostics(
+                self.settings_store.diagnostics(),
+                store.diagnostics(),
+            ),
+        );
+        let new_settings = store.shell().clone();
 
         let old_theme = self.settings.theme.clone();
         let old_i18n = self.settings.i18n.clone();
@@ -251,8 +259,32 @@ impl Shell {
         }
 
         self.settings = new_settings;
+        self.settings_store = store;
+        self.apply_settings_to_components()?;
 
         Ok(requests)
+    }
+
+    /// Hand the reloaded store to every component.
+    ///
+    /// One file holds every namespace, so a single reload here replaces what
+    /// used to be a per-component stat-and-parse poll: components adopt the
+    /// same snapshot the shell just read.
+    fn apply_settings_to_components(&mut self) -> Result<(), ShellRunError> {
+        let store = self.settings_store.clone();
+        for runtime in &mut self.components {
+            let changed = runtime
+                .component
+                .apply_settings(&store)
+                .map_err(ShellRunError::Component)?;
+            if changed {
+                tracing::info!(
+                    "settings changed for component '{}'",
+                    runtime.component.id()
+                );
+            }
+        }
+        Ok(())
     }
 
     pub(in crate::shell) fn mark_components_locale_changed(&mut self) -> Result<(), ShellRunError> {

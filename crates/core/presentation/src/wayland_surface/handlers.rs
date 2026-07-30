@@ -1,3 +1,4 @@
+use super::backend::WaylandRole;
 use super::*;
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -164,6 +165,80 @@ impl LayerShellHandler for State {
             }
             entry.configured = true;
         }
+    }
+}
+
+impl WindowHandler for State {
+    /// The user asked to close the window (title-bar button, compositor
+    /// keybind). Per xdg-shell this is a *request*, not a destruction: the
+    /// surface stays alive until the client drops it. Record it and let the
+    /// shell decide — a module may want to run teardown, or keep the surface
+    /// mapped. Dropping the `Window` here would destroy a live component's
+    /// compositor object behind its back.
+    fn request_close(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, window: &Window) {
+        if let Some(id) = self.surface_id_for_wl_surface(window.wl_surface()) {
+            tracing::debug!("layer_shell: close requested for window surface_id={id}");
+            self.close_requests.push(id.to_string());
+        }
+    }
+
+    fn configure(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        window: &Window,
+        configure: WindowConfigure,
+        _serial: u32,
+    ) {
+        let target = window.wl_surface().clone();
+        let Some((surface_id, entry)) = self
+            .surfaces
+            .iter_mut()
+            .find(|(_, entry)| entry.wl_surface() == &target)
+        else {
+            return;
+        };
+
+        // A toplevel configure with no size means "pick your own", which is the
+        // usual first configure — leave the CSS-measured size in place. A sized
+        // configure is binding: the compositor (tiling layout, maximize,
+        // fullscreen, interactive resize) has decided, and content must lay out
+        // into it. This is the inverse of the layer-shell direction, where the
+        // client's measured size is the request.
+        let (width, height) = configure.new_size;
+        let size = match (width, height) {
+            (Some(width), Some(height)) => Some((width.get(), height.get())),
+            _ => None,
+        };
+        if let Some((width, height)) = size {
+            entry.width = width;
+            entry.height = height;
+        }
+        // The states are the compositor's answer to "what is this window now" —
+        // they arrive on every configure, including ones with no size. The shell
+        // projects them onto the surface tree as CSS state so a module can lay
+        // out differently when it fills the output than when it floats.
+        let states = WindowStates {
+            maximized: configure.is_maximized(),
+            fullscreen: configure.is_fullscreen(),
+            activated: configure.is_activated(),
+            tiled: configure.is_tiled_top()
+                || configure.is_tiled_bottom()
+                || configure.is_tiled_left()
+                || configure.is_tiled_right(),
+        };
+        if let WaylandRole::Window(role) = &mut entry.role {
+            role.compositor_size = size;
+            role.states = states;
+        }
+        entry.configured = true;
+        entry.needs_full_redraw = true;
+        tracing::debug!(
+            surface_id = surface_id.as_str(),
+            ?size,
+            ?states,
+            "layer_shell: window configure applied"
+        );
     }
 }
 
@@ -713,21 +788,27 @@ delegate_pointer!(State);
 delegate_keyboard!(State);
 delegate_registry!(State);
 delegate_xdg_popup!(State);
+// `xdg_surface` + `xdg_toplevel` for `role: "window"` surfaces.
+delegate_xdg_window!(State);
 
-// We use SCTK's `XdgShell` only for `xdg_wm_base` ping/pong and the
-// positioner/popup factory — not for toplevel windows. `delegate_xdg_shell!`
-// would also require a `WindowHandler` (for server-side window decorations),
-// so instead delegate just the two globals `XdgShell` needs to dispatch:
-// `xdg_wm_base` itself and the optional decoration manager bound by `bind()`.
+// SCTK's `XdgShell` backs three things here: `xdg_wm_base` ping/pong, the
+// positioner/popup factory, and the toplevel window factory. `delegate_xdg_shell!`
+// would cover `xdg_wm_base` and the decoration manager together; we delegate them
+// separately so the decoration-manager impl can stay documented in place.
 wayland_client::delegate_dispatch!(State: [
     smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_wm_base::XdgWmBase: smithay_client_toolkit::globals::GlobalData
 ] => smithay_client_toolkit::shell::xdg::XdgShell);
 
+// Per-toplevel decoration objects, created by `XdgShell::create_window` when the
+// compositor advertises the manager. `delegate_xdg_window!` does not cover them.
+wayland_client::delegate_dispatch!(State: [
+    wayland_protocols::xdg::decoration::zv1::client::zxdg_toplevel_decoration_v1::ZxdgToplevelDecorationV1: smithay_client_toolkit::shell::xdg::window::WindowData
+] => smithay_client_toolkit::shell::xdg::XdgShell);
+
 // `XdgShell::bind` also binds the optional `zxdg_decoration_manager_v1` global,
-// which requires `State: Dispatch<ZxdgDecorationManagerV1, GlobalData>`. We never
-// use server-side decorations, so rather than pull in `WindowHandler` via
-// `delegate_xdg_shell!`, handle the manager directly — it is a pure factory with
-// no events.
+// which requires `State: Dispatch<ZxdgDecorationManagerV1, GlobalData>`. The
+// manager itself is a pure factory with no events — the per-toplevel decoration
+// objects above carry the mode negotiation.
 impl Dispatch<ZxdgDecorationManagerV1, GlobalData> for State {
     fn event(
         _: &mut State,

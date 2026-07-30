@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mesh_core_capability::CapabilitySet;
@@ -10,7 +11,7 @@ use mesh_core_locale::LocaleEngine;
 use mesh_core_render::{DamageRect, DisplayPaintCommand, PixelBuffer};
 use mesh_core_scripting::ScriptError;
 use mesh_core_theme::Theme;
-use mesh_core_wayland::{KeyboardMode, ShellSurface};
+use mesh_core_wayland::{KeyboardMode, ShellSurface, WindowStates};
 
 pub type SurfaceId = String;
 
@@ -178,6 +179,21 @@ pub enum CoreRequest {
         surface_id: SurfaceId,
         defer_for_hover_bridge: bool,
     },
+    /// Move a live surface between shell chrome (`zwlr_layer_surface_v1`) and an
+    /// ordinary window (`xdg_toplevel`) without losing component state: the
+    /// component VM, retained tree, Lua state, and service subscriptions all
+    /// survive, only the compositor object is swapped.
+    SetSurfaceRole {
+        surface_id: SurfaceId,
+        role: mesh_core_wayland::SurfaceRole,
+    },
+    /// Flip a live surface to the other role. Separate from
+    /// [`Self::SetSurfaceRole`] because the current role lives in the shell, so
+    /// a component cannot compute the target itself — the same reason
+    /// [`Self::ToggleSurface`] exists alongside show/hide.
+    ToggleSurfaceRole {
+        surface_id: SurfaceId,
+    },
     /// Reposition a surface to appear below a trigger element.
     /// Uses top-left anchor; margin_left/top position the surface precisely.
     PositionSurface {
@@ -342,6 +358,29 @@ pub trait ShellComponent: Send {
     fn surface_size_changed(&mut self, _width: u32, _height: u32) -> bool {
         false
     }
+    /// The compositor changed the containing toplevel's states (fullscreen,
+    /// maximized, activated, tiled). Returns whether the change is visible to
+    /// this component, i.e. whether a restyle is owed. Only window surfaces
+    /// ever see anything but the default.
+    fn surface_window_states_changed(&mut self, _states: WindowStates) -> bool {
+        false
+    }
+    /// This surface is now realized under `role`. Returns whether the change is
+    /// visible to the component, i.e. whether a restyle is owed — the role is a
+    /// CSS state (`:windowed`) and it inverts how the surface is sized, so both
+    /// directions invalidate.
+    fn surface_role_changed(&mut self, _role: mesh_core_wayland::SurfaceRole) -> bool {
+        false
+    }
+    /// The role this component's surface is currently realized under.
+    fn surface_role(&self) -> mesh_core_wayland::SurfaceRole {
+        mesh_core_wayland::SurfaceRole::Layer
+    }
+    /// Whether this surface declared itself promotable, i.e. whether
+    /// [`CoreRequest::SetSurfaceRole`] applies to it at all.
+    fn surface_promotable(&self) -> bool {
+        false
+    }
     fn render(&mut self, surface: &mut dyn ShellSurface) -> Result<(), ComponentError>;
     fn paint(
         &mut self,
@@ -436,10 +475,16 @@ pub trait ShellComponent: Send {
     fn reload_source(&mut self) -> Result<bool, ComponentError> {
         Ok(false)
     }
-    fn module_settings_path(&self) -> Option<&Path> {
-        None
-    }
-    fn reload_module_settings(&mut self) -> Result<bool, ComponentError> {
+    /// Adopt a freshly loaded settings store.
+    ///
+    /// Every user decision lives in one file, so the shell reloads it once and
+    /// hands the same store to every component rather than each component
+    /// stat-ing and parsing its own file. Returns whether anything this
+    /// component actually reads changed.
+    fn apply_settings(
+        &mut self,
+        _settings: &Arc<mesh_core_config::SettingsStore>,
+    ) -> Result<bool, ComponentError> {
         Ok(false)
     }
     /// Return the retained display list paint commands from the most recent paint,

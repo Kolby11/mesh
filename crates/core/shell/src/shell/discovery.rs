@@ -120,10 +120,15 @@ impl Shell {
                 modules: HashMap::new(),
             }
         });
-        let settings = load_shell_settings().unwrap_or_else(|e| {
-            tracing::warn!("failed to load shell settings, using defaults: {e}");
-            ShellSettings::default()
-        });
+        let settings_store = Arc::new(SettingsStore::load().unwrap_or_else(|e| {
+            tracing::warn!("failed to load settings, using defaults: {e}");
+            SettingsStore::default()
+        }));
+        // A hand-edited file is the whole point of the store, so a bad value in
+        // it is reported and skipped, never fatal: the shell starts on declared
+        // defaults with the reason on stderr.
+        mesh_core_config::log_settings_diagnostics("settings", settings_store.diagnostics());
+        let settings = settings_store.shell().clone();
 
         // Discover and register XDG icon themes installed on the system.
         // Icon-pack binding modules reference them by name in their
@@ -147,7 +152,7 @@ impl Shell {
         );
         let module_dirs = resolve_default_module_dirs(&config);
         let settings_watch = {
-            let path = default_settings_path();
+            let path = settings_store.path().to_path_buf();
             let modified_at = std::fs::metadata(&path)
                 .ok()
                 .and_then(|m| m.modified().ok());
@@ -199,6 +204,7 @@ impl Shell {
         Self {
             config,
             settings,
+            settings_store,
             theme,
             locale,
             events: EventBus::new(),
@@ -223,7 +229,6 @@ impl Shell {
             next_theme_reload_check: now,
             next_shell_settings_reload_check: now,
             next_frontend_reload_check: now,
-            next_module_settings_reload_check: now,
             file_watcher_active: false,
             debug: DebugOverlayState::default(),
             debug_overlay: DebugOverlay::new(),
@@ -359,14 +364,11 @@ impl Shell {
         );
         register_module_icon_pack(&id, dir, loaded.manifest.assets.as_ref());
         register_icon_pack_module(&id, dir, loaded.manifest.icon_pack.as_ref());
-        register_frontend_icon_bindings(
-            &id,
-            &loaded.manifest,
-            self.settings
-                .modules
-                .get(&id)
-                .and_then(|m| m.icons.as_ref()),
-        );
+        // Per-module icon overrides live in the module's own settings
+        // namespace, alongside its surface and prop overrides.
+        let icon_overrides =
+            ModuleSettingsOverrides::from_namespace(&self.settings_store.namespace(&id));
+        register_frontend_icon_bindings(&id, &loaded.manifest, icon_overrides.icons.as_ref());
         self.modules.insert(
             id,
             ModuleInstance::new(
@@ -423,6 +425,7 @@ impl Shell {
                     entry.module_dir,
                     frontend_catalog.clone(),
                     interface_catalog.clone(),
+                    self.settings_store.clone(),
                 )
                 .with_graph_i18n_catalogs(graph_i18n_catalogs.clone()),
             ));
@@ -459,6 +462,7 @@ impl Shell {
             entry.module_dir,
             frontend_catalog,
             interface_catalog,
+            self.settings_store.clone(),
         )
         .with_graph_i18n_catalogs(self.graph_i18n_catalog_paths());
         let surface_id = component.surface_id().to_string();

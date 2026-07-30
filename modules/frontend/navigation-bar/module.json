@@ -91,7 +91,7 @@
       "anchor": "top",
       "layer": "top",
       "exclusive_zone": 56,
-      "keyboard_mode": "none",
+      "keyboard_mode": "on_demand",
       "visible_on_start": true,
       "blur": true
     },

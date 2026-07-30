@@ -8,16 +8,23 @@ stored overrides**
 props, manifest surface placement, and shell prop declarations. The store
 holds *only values the user changed*.
 
-**Status: target.** This replaces the previous multi-file model
-(`settings-default.json`, `shell-settings.json`, per-module
-`config/settings.json`, six-layer stack) — those files and their readers are
-deletion targets. Schemas no longer come from `mesh.provides.settings`
-(deleted); they derive from props ([03 §5](03-components.md)).
+**Status: shipped** for the store itself (§1–§4); **target** for the
+`mesh.settings` service contract, the generated settings UI (§5), and the CLI
+(§7). This replaced the previous multi-file model (`settings-default.json`,
+`shell-settings.json`, per-module `config/settings.json`, six-layer stack) —
+those files and their readers are deleted. Schemas no longer come from
+`mesh.provides.settings` (deleted); they derive from props
+([03 §5](03-components.md)).
 
 ## 1. The store
 
+**Shipped.** One JSON document — `config/settings.json` in a repo checkout,
+`$MESH_HOME/settings.json` otherwise, `MESH_SETTINGS_PATH` overriding both.
+Loaded once into `mesh_core_config::SettingsStore` and shared with every
+component; the shell watches the file and re-applies changes live.
+
 **Target storage representation.** The default settings-service provider may
-store JSON under the MESH dotfiles/state layout, but consumers use the
+store JSON under the MESH dotfiles/state layout, but consumers will use the
 `mesh.settings` service contract rather than depending on that file. Alternate
 providers may use another persistence implementation while preserving the same
 typed behavior. Every logical top-level key is a namespace:
@@ -61,10 +68,25 @@ Rules:
 
 - **Sparse.** A key exists only if the user changed it. `mesh settings unset`
   deletes the key; the declared default wins again. Nothing ever copies
-  defaults into the store.
-- **Validated.** Every write is validated against the owning props
+  defaults into the store — a module that changes its own defaults in an
+  update still reaches a user who never overrode them.
+- **Deep-merged, not replaced.** Setting one field in a namespace leaves its
+  siblings on their declared defaults. Arrays (pack chains, activation-key
+  lists) replace wholesale: a stored list is a complete ordered replacement by
+  intent, not something to append to.
+- **Ejectable.** Because the store is sparse, a module the user never
+  configured has no block to hand-edit. `mesh-shell config eject <module-id>`
+  materializes that module's *effective* surface placement into its namespace,
+  where it becomes an ordinary override — pinned from then on, like any other
+  stored value. *(Shipped for `surface`; props follow with
+  [03](03-components.md) Phase 1.)*
+- **Validated.** Every stored value is validated against the owning props
   declaration / core schema. Invalid values are rejected with a diagnostic
-  and the stored value is ignored (falls through to default).
+  naming the namespace, the key path, the value found, and what to do; the
+  stored value is ignored and the declared default applies. A bad settings file
+  is never fatal. *(Shipped for the `shell` namespace and `surface` blocks,
+  including unknown-key detection with a "did you mean" suggestion; `props`
+  values follow with [03](03-components.md) Phase 1.)*
 - **Service-written.** Modules read effective values and subscribe to changes;
   they never mutate another module's settings directly. Settings components,
   CLI adapters, and automation clients write through the selected
@@ -91,6 +113,7 @@ the service contract explicitly declares another scope.
 | Backend config | in-script `props {}` in `main.luau` | `<provider-module>.props.global` |
 | Interface shared config | `props` in the contract JSON (`module.json`) | `mesh.<interface>.props.global` |
 | Surface placement | `mesh.surface` in the manifest | `<module>.surface.*` |
+| Per-module icon chain/overrides | `mesh.uses.resources.icons` + `mesh.icons` | `<module>.icons.*` |
 | Host/runtime knobs | host prop declarations | `shell.*` |
 | Keybinds | `mesh.keybinds` triggers | `shell.keyboard.surface_shortcuts` |
 
@@ -153,12 +176,25 @@ hot. *(Proxy `props` access: target; component props tracking: with
 
 ## 7. CLI
 
+**Shipped** (`mesh-shell config`):
+
+```
+mesh-shell config path                   # the settings file path
+mesh-shell config show [namespace]       # whole document, or one namespace's overrides
+mesh-shell config doctor                 # report values MESH cannot use, and orphaned
+                                         # namespaces; exits non-zero on any error
+mesh-shell config eject <module-id>      # materialize effective surface placement (§1)
+mesh-shell config reset <namespace>      # drop a namespace's overrides
+```
+
+**Target** (`mesh settings`, through the settings service):
+
 ```
 mesh settings get <namespace>[.key]      # effective value + which layer supplied it
 mesh settings set <namespace>.<key> <v>  # validate + write the sparse override
 mesh settings unset <namespace>.<key>    # delete override; default wins
 mesh settings reset <namespace>          # remove all overrides in a namespace
-mesh settings doctor                     # orphaned namespaces, invalid values, unknown keys
+mesh settings doctor                     # as `config doctor`, through the service
 ```
 
 Orphaned namespaces (module uninstalled) are reported, not auto-deleted —

@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 mesh-core-capability = { workspace = true }
+mesh-core-config = { workspace = true }
 mesh-core-debug = { workspace = true }
 mesh-core-diagnostics = { workspace = true }
 mesh-core-elements = { workspace = true }

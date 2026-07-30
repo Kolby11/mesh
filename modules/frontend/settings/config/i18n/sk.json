@@ -6,6 +6,8 @@
   "settings.backend_aware.copy": "Ovládacie prvky sa zobrazia iba vtedy, keď je dostupná kompatibilná služba.",
   "settings.eyebrow": "NASTAVENIA",
   "settings.close": "Zavrieť nastavenia",
+  "settings.pop_out": "Otvoriť nastavenia ako okno",
+  "settings.dock_back": "Pripojiť nastavenia späť k okraju",
   "nav.wifi": "Wi-Fi",
   "nav.wifi.subtitle": "Siete a pripojenie",
   "nav.audio": "Zvuk",

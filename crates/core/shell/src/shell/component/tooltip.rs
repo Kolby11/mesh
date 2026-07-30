@@ -645,6 +645,31 @@ mod tests {
     }
 
     #[test]
+    fn every_accepted_tooltip_position_resolves_to_a_real_anchor() {
+        // `mesh_core_config::TOOLTIP_POSITIONS` is what settings validation
+        // accepts and what a diagnostic tells the user to type; this match is
+        // what actually honors it. A value in the list that fell through to
+        // `Auto` here would be advice that silently does nothing — the exact
+        // failure the validation exists to remove.
+        for position in mesh_core_config::TOOLTIP_POSITIONS {
+            let settings = TooltipSettings {
+                position: (*position).into(),
+                ..TooltipSettings::default()
+            };
+            let resolved = effective_anchor(TooltipAnchor::Auto, &settings);
+            if *position == "auto" {
+                assert_eq!(resolved, ResolvedAnchor::Auto);
+            } else {
+                assert_ne!(
+                    resolved,
+                    ResolvedAnchor::Auto,
+                    "accepted tooltip position '{position}' is not honored"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn configured_cursor_position_uses_cursor_offsets() {
         let settings = TooltipSettings {
             position: "cursor".into(),

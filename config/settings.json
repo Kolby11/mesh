@@ -1,0 +1,16 @@
+{
+  "@mesh/navigation-bar": {
+    "i18n": {
+      "default_locale": "sk"
+    }
+  },
+  "schemaVersion": 1,
+  "shell": {
+    "icons": {
+      "default_pack": "@mesh/icons-material-symbols"
+    },
+    "theme": {
+      "active": "gruvbox-dark"
+    }
+  }
+}

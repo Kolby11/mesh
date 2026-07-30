@@ -8,7 +8,8 @@ This workspace keeps browser-like concerns split by crate:
 - `mesh-core-interaction` queries `WidgetNode` trees for hit testing, focus, tooltip, and scroll behavior.
 - `mesh-core-render` paints `WidgetNode` trees into `PixelBuffer`s.
 - `mesh-core-presentation` presents `PixelBuffer`s and normalizes surface input events.
-- `mesh-core-surface-config` resolves manifest/settings surface layout policy.
+- `mesh-core-surface-config` resolves manifest/settings surface layout policy and
+  validates stored `surface` blocks against the placement vocabulary it owns.
 - `mesh-core-frontend-host` owns frontend component host contract types.
 - `mesh-core-shell` glues these crates to modules, services, theme, locale, diagnostics, and the event loop.
 
@@ -21,7 +22,7 @@ frontend -> component + elements + module + theme
 frontend-host -> capability + elements + locale + render + theme + wayland
 animation -> elements
 interaction -> elements + module
-surface-config -> module + wayland
+surface-config -> module + wayland + config
 shell -> all boundary crates as orchestration glue
 ```
 

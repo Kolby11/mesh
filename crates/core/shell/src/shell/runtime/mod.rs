@@ -86,7 +86,6 @@ impl Shell {
 
         let now = std::time::Instant::now();
         if now >= self.next_frontend_reload_check
-            || now >= self.next_module_settings_reload_check
             || now >= self.next_theme_reload_check
             || now >= self.next_shell_settings_reload_check
         {
@@ -95,7 +94,6 @@ impl Shell {
 
         let mut next_deadline = self
             .next_frontend_reload_check
-            .min(self.next_module_settings_reload_check)
             .min(self.next_theme_reload_check)
             .min(self.next_shell_settings_reload_check);
 
@@ -222,7 +220,6 @@ impl Shell {
         while !self.core.shutting_down {
             pending.extend(self.reload_theme_if_changed()?);
             pending.extend(self.reload_locale_if_settings_changed()?);
-            self.reload_module_settings_if_changed()?;
             self.reload_frontend_components_if_changed()?;
             self.dispatch_wayland()?;
 
@@ -390,9 +387,6 @@ impl Shell {
         paths.push(self.settings_watch.path.clone());
         for runtime in &self.components {
             paths.extend(runtime.source_paths.iter().map(|(path, _)| path.clone()));
-            if let Some(path) = &runtime.module_settings_path {
-                paths.push(path.clone());
-            }
         }
         paths
     }
@@ -402,7 +396,6 @@ impl Shell {
         self.next_theme_reload_check = now;
         self.next_shell_settings_reload_check = now;
         self.next_frontend_reload_check = now;
-        self.next_module_settings_reload_check = now;
     }
 }
 

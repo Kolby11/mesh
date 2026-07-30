@@ -72,7 +72,13 @@
                         <text class="page-title">{t(page_title)}</text>
                         <text class="page-subtitle">{t(page_subtitle)}</text>
                     </column>
-                    <button class="close-button" onclick={onClose} aria-label={t('settings.close')}>
+                    <button class="header-button pop-out-button" onclick={onPopOut} aria-label={t('settings.pop_out')}>
+                        <icon name="window-new" size="18" />
+                    </button>
+                    <button class="header-button dock-back-button" onclick={onDockBack} aria-label={t('settings.dock_back')}>
+                        <icon name="window-restore" size="18" />
+                    </button>
+                    <button class="header-button close-button" onclick={onClose} aria-label={t('settings.close')}>
                         <icon name="window-close" size="18" />
                     </button>
                 </row>
@@ -178,21 +184,75 @@ function showAdvanced() activate("advanced") end
 function onClose()
     mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/settings" })
 end
+
+-- Move this surface between shell chrome and an ordinary compositor window.
+-- The component keeps running across the change: same VM, same page selection,
+-- same scroll position and service subscriptions — only the Wayland object is
+-- swapped, so these handlers state the target role and nothing else.
+function onPopOut()
+    mesh.events.publish("shell.set-surface-role", {
+        surface_id = "@mesh/settings",
+        role = "window",
+    })
+end
+
+function onDockBack()
+    mesh.events.publish("shell.set-surface-role", {
+        surface_id = "@mesh/settings",
+        role = "layer",
+    })
+end
 </script>
 
 <style>
+    /* This surface is `promotable`: it starts as shell chrome anchored to the
+       right edge and can be popped out into an ordinary window. The size below
+       means different things in the two roles — as a layer surface MESH tells
+       the compositor this size; as a window it is only the initial request,
+       which the compositor answers and may override (fullscreen, maximize,
+       tiling, interactive resize). The state rules further down handle the
+       cases where it does. */
     .settings-shell {
         width: 920px;
         height: 700px;
         min-width: 920px;
-        max-width: 920px;
         min-height: 700px;
-        max-height: 700px;
         background: var(--color-surface);
         color: var(--color-on-surface);
         border-width: 1px;
         border-style: solid;
         border-color: var(--color-outline-variant);
+        border-radius: var(--radius-lg);
+    }
+
+    /* Popped out into a window: square off the corners. A floating layer
+       surface reads as chrome sitting over the desktop, but a window with
+       client-side decorations owns its whole rectangle, and rounded corners
+       there fight whatever the compositor draws around it. */
+    .settings-shell:windowed {
+        border-radius: 0;
+    }
+
+    /* Filling the output: take the compositor's size, and drop the border and
+       corner treatment that only make sense on a floating window. */
+    .settings-shell:fullscreen,
+    .settings-shell:maximized {
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        border-width: 0;
+        border-radius: 0;
+    }
+
+    /* Tiled edges abut a neighbour: take the tile, and drop the floating
+       minimum so a narrow tile is not overflowed by it. */
+    .settings-shell:tiled {
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        border-radius: 0;
     }
 
     .settings-layout {
@@ -349,7 +409,7 @@ end
         font-weight: 750;
     }
 
-    .close-button {
+    .header-button {
         width: 38px;
         height: 38px;
         flex-shrink: 0;
@@ -361,9 +421,29 @@ end
         color: var(--color-on-surface-variant);
     }
 
+    .header-button:hover {
+        background: var(--color-surface-container-high);
+        color: var(--color-on-surface);
+    }
+
     .close-button:hover {
         background: var(--color-error-container);
         color: var(--color-on-error-container);
+    }
+
+    /* The role controls which of the two is present. `display: none` takes the
+       hidden one out of layout entirely, so it is not clickable either — the
+       header always offers exactly the move that is available. */
+    .dock-back-button {
+        display: none;
+    }
+
+    .pop-out-button:windowed {
+        display: none;
+    }
+
+    .dock-back-button:windowed {
+        display: flex;
     }
 
     .settings-scroll {

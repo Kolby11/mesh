@@ -296,7 +296,7 @@ impl Shell {
         let mut candidate = match crate::shell::backend::launch_candidate_for_provider(
             &graph,
             &self.modules,
-            &self.config,
+            &self.settings_store,
             &self.interfaces,
             &provider,
         ) {
@@ -422,8 +422,19 @@ impl Shell {
             None => return,
         };
 
+        // Keyboard interactivity is a layer-shell request; a toplevel receives
+        // keyboard focus by activation instead, so there is nothing to apply.
+        // Skipping also protects the window from the synthetic 1x1 hidden
+        // geometry below, which on a non-resizable window would be sent to the
+        // compositor as a 1x1 min *and* max size.
+        if surface.role == mesh_core_wayland::SurfaceRole::Window {
+            return;
+        }
+
         let cfg = if visible {
-            LayerSurfaceConfig {
+            SurfaceConfig {
+                role: surface.role,
+                window: surface.window.clone(),
                 edge: surface.edge,
                 layer: surface.layer.unwrap_or(Layer::Top),
                 size_policy,
@@ -439,7 +450,9 @@ impl Shell {
                 blur: surface.blur,
             }
         } else {
-            LayerSurfaceConfig {
+            SurfaceConfig {
+                role: surface.role,
+                window: surface.window.clone(),
                 edge: surface.edge,
                 layer: surface.layer.unwrap_or(Layer::Top),
                 size_policy: LayerSurfaceSizePolicy::Fixed,
@@ -574,6 +587,27 @@ impl Shell {
                 surface_id,
                 defer_for_hover_bridge,
             } => self.hide_popover(surface_id, defer_for_hover_bridge),
+            CoreRequest::SetSurfaceRole { surface_id, role } => {
+                self.set_surface_role(surface_id, role)
+            }
+            CoreRequest::ToggleSurfaceRole { surface_id } => {
+                let role = match self
+                    .component_index_for_surface(&surface_id)
+                    .map(|index| self.components[index].component.surface_role())
+                {
+                    Some(mesh_core_wayland::SurfaceRole::Window) => {
+                        mesh_core_wayland::SurfaceRole::Layer
+                    }
+                    Some(mesh_core_wayland::SurfaceRole::Layer) => {
+                        mesh_core_wayland::SurfaceRole::Window
+                    }
+                    None => {
+                        tracing::warn!(%surface_id, "cannot toggle surface role: no such surface");
+                        return Ok(VecDeque::new());
+                    }
+                };
+                self.set_surface_role(surface_id, role)
+            }
             CoreRequest::PublishDiagnostics { message } => {
                 tracing::info!("diagnostic: {message}");
                 Ok(VecDeque::new())
@@ -1214,6 +1248,114 @@ impl Shell {
             .is_some_and(|method| method.coalesce)
     }
 
+    /// Move a live surface between shell chrome and a window.
+    ///
+    /// Everything above the presentation layer survives: the component runtime,
+    /// its Lua VM, retained tree, and service subscriptions are all kept, and
+    /// only the compositor object is swapped (`PresentationEngine::configure`
+    /// destroys and recreates it when the role in the config differs). What this
+    /// function owns is the shell-side bookkeeping that would otherwise describe
+    /// the surface that no longer exists: the cached surface config, the cached
+    /// size, and any popovers parented to the old object.
+    fn set_surface_role(
+        &mut self,
+        surface_id: SurfaceId,
+        role: mesh_core_wayland::SurfaceRole,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let Some(index) = self.component_index_for_surface(&surface_id) else {
+            tracing::warn!(%surface_id, "cannot change surface role: no such surface");
+            return Ok(VecDeque::new());
+        };
+
+        if self.components[index].component.surface_role() == role {
+            return Ok(VecDeque::new());
+        }
+
+        // Opt-in: a component laid out as a 32px-tall panel widget is not
+        // automatically a sensible window, so the author declares that both
+        // roles were designed for.
+        if !self.components[index].component.surface_promotable() {
+            tracing::warn!(
+                %surface_id,
+                "cannot change surface role: surface does not declare mesh.surface.promotable"
+            );
+            return Ok(VecDeque::new());
+        }
+
+        // A promoted `<popover>` is an xdg_popup positioned against its parent;
+        // it has no independent placement to become a window's, and demoting it
+        // would leave the trigger pointing at a destroyed surface.
+        if self.components[index].parent.popup_parent_surface.is_some() {
+            tracing::warn!(
+                %surface_id,
+                "cannot change surface role: surface is realized as a popover"
+            );
+            return Ok(VecDeque::new());
+        }
+
+        // Checked before anything is torn down: window creation failure happens
+        // inside `configure`, after the old layer surface is already gone, which
+        // would leave the surface unmapped with no way back.
+        if role == mesh_core_wayland::SurfaceRole::Window
+            && !self.presentation_engine.window_role_supported()
+        {
+            tracing::warn!(
+                %surface_id,
+                "cannot promote surface to a window: the compositor does not expose xdg_wm_base"
+            );
+            return Ok(VecDeque::new());
+        }
+
+        tracing::info!(%surface_id, ?role, "changing surface role");
+
+        // Tear the old compositor object down *now*, not lazily inside the next
+        // `configure`. `configure` would swap it too, but it runs partway through
+        // the render frame — after the loop has already read
+        // `window_configured_size` and laid content out against it. Destroying
+        // here makes that query report `None` from this point on, so the frame
+        // that installs the new role sizes it like a first-ever show (unmeasured
+        // configure, then the corrective retry once paint has built the tree)
+        // instead of measuring against the size the *other* role was given. A
+        // demotion left to the lazy path lays out against the old window's size,
+        // finds its measurement already agrees with it, skips the corrective
+        // configure, and strands the new layer surface at the 1x1 the layer-shell
+        // backend clamped its 0x0 request to.
+        //
+        // `destroy_surface` also drops every popup parented to it; the shell's own
+        // child bookkeeping is dropped alongside so a reopened popover is created
+        // against the new object.
+        self.destroy_all_child_surfaces(index);
+        self.presentation_engine.destroy_surface(&surface_id);
+
+        // Keyboard interactivity is a layer-shell request that a toplevel has no
+        // equivalent for — it is focused by activation instead. Drop any override
+        // the old role accumulated so the new one starts from its manifest value.
+        if role == mesh_core_wayland::SurfaceRole::Window {
+            self.components[index]
+                .component
+                .set_keyboard_mode_override(None);
+            self.transfer_owned_keyboard_modes.remove(&surface_id);
+            if self.keyboard_focus_surface.as_deref() == Some(surface_id.as_str()) {
+                self.keyboard_focus_surface = None;
+            }
+        }
+
+        self.components[index].component.surface_role_changed(role);
+
+        // `last_surface_config` describes the destroyed object, and
+        // `known_surface_size` is the size it was configured at. Left in place,
+        // the render loop would compare against them and skip the configure that
+        // creates the replacement. Sizing also inverts with the role, so the new
+        // surface must go through a first-configure pass rather than inherit a
+        // size measured under the old one.
+        let target = &mut self.components[index].parent;
+        target.last_surface_config = None;
+        target.known_surface_size = None;
+        target.force_full_present = true;
+
+        Ok(VecDeque::new())
+    }
+
     fn set_surface_visibility(
         &mut self,
         surface_id: SurfaceId,
@@ -1575,6 +1717,8 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
     match request {
         CoreRequest::PositionSurface { .. } => "position_surface",
         CoreRequest::ToggleSurface { .. } => "toggle_surface",
+        CoreRequest::SetSurfaceRole { .. } => "set_surface_role",
+        CoreRequest::ToggleSurfaceRole { .. } => "toggle_surface_role",
         CoreRequest::ShowSurface { .. } => "show_surface",
         CoreRequest::HideSurface { .. } => "hide_surface",
         CoreRequest::HidePopover { .. } => "hide_popover",

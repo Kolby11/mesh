@@ -35,6 +35,7 @@ fn bind_live_surface(parent_src: &str, child_src: &str) -> FrontendSurfaceCompon
         PathBuf::from("."),
         catalog,
         InterfaceCatalog::default(),
+        test_settings_store(),
     );
     component
         .mount(ComponentContext {

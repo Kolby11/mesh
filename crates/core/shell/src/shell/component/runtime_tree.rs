@@ -3,7 +3,9 @@ use std::hash::{Hash, Hasher};
 
 use bitflags::bitflags;
 use mesh_core_elements::style::{Color, ComputedStyle, Corners, Dimension, Edges, Transform2D};
-use mesh_core_elements::{ElementState, NodeId, WidgetNode, element_snapshot_json};
+use mesh_core_elements::{
+    ElementState, NodeId, WidgetNode, WindowSurfaceState, element_snapshot_json,
+};
 #[cfg(test)]
 use mesh_core_interaction::node_is_source;
 use mesh_core_interaction::{ScrollOffsetState, source_element_tag};
@@ -1153,6 +1155,7 @@ pub(super) struct RuntimeAnnotationContext<'a> {
     slider_script_values: &'a mut HashMap<NodeId, f32>,
     checked_values: &'a HashMap<NodeId, bool>,
     scroll_offsets: &'a mut HashMap<NodeId, ScrollOffsetState>,
+    window: WindowSurfaceState,
 }
 
 impl<'a> RuntimeAnnotationContext<'a> {
@@ -1179,7 +1182,17 @@ impl<'a> RuntimeAnnotationContext<'a> {
             slider_script_values,
             checked_values,
             scroll_offsets,
+            window: WindowSurfaceState::default(),
         }
+    }
+
+    /// Ambient toplevel state for this surface, projected onto every annotated
+    /// node so `:windowed`, `:fullscreen` and friends are reachable from any
+    /// selector. Popups and layer surfaces that were never promoted leave it at
+    /// the default (all false).
+    pub(super) fn with_window_state(mut self, window: WindowSurfaceState) -> Self {
+        self.window = window;
+        self
     }
 }
 
@@ -1244,6 +1257,7 @@ fn annotate_runtime_tree_inner(
         active: context.active_key.as_deref() == Some(key_str),
         disabled,
         checked,
+        window: context.window,
         ..ElementState::default()
     };
     if node.state.hovered {

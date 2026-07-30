@@ -3,12 +3,13 @@ use super::service::{
     apply_service_update_with_name_and_fingerprint, script_events_to_requests, seed_service_state,
     service_capabilities,
 };
-use super::surface_layout::{SurfaceLayoutSettings, load_frontend_module_settings};
+use super::surface_layout::{SurfaceLayoutSettings, resolve_frontend_module_settings};
 use super::types::{
     ChildSurfaceKind, ChildSurfaceRequest, ComponentContext, ComponentError, ComponentInput,
     ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers, ServiceEvent, ShellComponent,
     TabFocusTarget,
 };
+use mesh_core_config::SettingsStore;
 use mesh_core_interaction::{
     collect_focus_traversal, find_click_handler, find_event_handler, find_node_bounds_by_key,
     find_node_by_key, find_node_path_at, find_node_with_bounds_by_key, find_nodes_by_keys,
@@ -49,7 +50,8 @@ use mesh_core_config::TooltipSettings;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::{
     IntrinsicLayoutCache, LayoutEngine, NodeId, PerSurfaceLayoutState, PopoverPlacement,
-    StyleContext, StyleResolver, VariableStore, WidgetNode, element_snapshot_json,
+    StyleContext, StyleResolver, VariableStore, WidgetNode, WindowSurfaceState,
+    element_snapshot_json,
 };
 use mesh_core_frontend::{
     CompiledFrontendModule, FrontendRenderMode, compile_frontend_module, root_accessibility_role,
@@ -59,7 +61,7 @@ use mesh_core_scripting::{
     LocaleBoundState, PublishedEvent, ScriptContext, ScriptInterfaceImport, ScriptState, SurfaceVm,
 };
 use mesh_core_theme::{Theme, default_theme};
-use mesh_core_wayland::{Edge, KeyboardMode, ShellSurface};
+use mesh_core_wayland::{Edge, KeyboardMode, ShellSurface, WindowStates};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -613,8 +615,19 @@ pub(super) struct TapRecord {
 pub(super) struct FrontendSurfaceComponent {
     pub(super) compiled: CompiledFrontendModule,
     pub(super) module_dir: PathBuf,
-    module_settings_file: PathBuf,
+    /// The one settings store, shared with the shell and every sibling
+    /// component. Swapped wholesale when the file changes.
+    settings: Arc<SettingsStore>,
+    /// This component's namespace in the store — the module id today, an
+    /// instance key (`@scope/name#instance`) once profiles land.
+    settings_namespace: String,
+    /// This component's resolved overrides: `settings.namespace(&namespace)`.
+    /// Cached because it is handed to Luau on every runtime creation.
     settings_json: serde_json::Value,
+    /// What the last resolution of this namespace rejected. Kept so a live
+    /// reload can report only what is new: the file is re-validated on every
+    /// save, and a user fixing one of five mistakes should hear about four.
+    settings_diagnostics: Vec<mesh_core_config::SettingsDiagnostic>,
     pub(super) surface_layout: SurfaceLayoutSettings,
     /// Runtime override for `surface_layout.keyboard_mode`. Used during
     /// cross-surface Tab transfer to force `Exclusive` on the popover
@@ -768,6 +781,10 @@ pub(super) struct FrontendSurfaceComponent {
     active_theme_stale: Cell<bool>,
     measured_size: Option<(u32, u32)>,
     last_surface_size: Option<(u32, u32)>,
+    /// The compositor's toplevel states for this surface, projected onto every
+    /// node at annotation time so `:fullscreen`, `:maximized`, `:activated`,
+    /// and `:tiled` can be styled. Stays default for layer surfaces.
+    window_states: WindowSurfaceState,
     last_painted_buffer_size: Option<(u32, u32)>,
     surface_pixels_invalid: bool,
     locale: LocaleEngine,
@@ -896,25 +913,11 @@ pub(super) struct FrontendSurfaceComponent {
     /// snapshots costs meaningful interaction-frame time and is wasted on
     /// scripts that never read them. Recomputed on source reload.
     element_metric_usage: ElementMetricUsage,
-    /// Cache of the global `KeyboardSettings` (button/toggle/slider activation
-    /// keys, surface shortcut overrides) keyed by the mtimes of the two files
-    /// `load_shell_settings` reads. Every key press/release re-derives this,
-    /// so without a cache typing in a launcher input pays a file read + JSON
-    /// parse + merge per keystroke. Invalidated by re-stat, not a full
-    /// re-parse, so it stays correct across live settings edits.
-    keyboard_settings_cache: RefCell<Option<KeyboardSettingsCache>>,
     /// Cache of resolved surface shortcuts keyed by the already-cached
     /// `KeyboardSettings` plus active locale. Resolution clones manifest
     /// declarations, checks overrides, and localizes triggers, so avoid doing
     /// that again for every key event when neither input changed.
     resolved_surface_shortcuts_cache: RefCell<Option<ResolvedSurfaceShortcutsCache>>,
-}
-
-#[derive(Debug, Clone)]
-struct KeyboardSettingsCache {
-    defaults_mtime: Option<std::time::SystemTime>,
-    user_mtime: Option<std::time::SystemTime>,
-    settings: mesh_core_config::KeyboardSettings,
 }
 
 #[derive(Debug, Clone)]
@@ -954,10 +957,16 @@ impl FrontendSurfaceComponent {
         module_dir: PathBuf,
         frontend_catalog: impl Into<Arc<FrontendCatalog>>,
         interface_catalog: impl Into<Arc<mesh_core_service::InterfaceCatalog>>,
+        settings: impl Into<Arc<SettingsStore>>,
     ) -> Self {
-        let module_settings_file = module_dir.join("config/settings.json");
-        let settings_state =
-            load_frontend_module_settings(&module_settings_file, &compiled.manifest);
+        let settings = settings.into();
+        let settings_namespace = compiled.manifest.package.id.clone();
+        let settings_state = resolve_frontend_module_settings(
+            &settings_namespace,
+            settings.namespace(&settings_namespace),
+            &compiled.manifest,
+        );
+        mesh_core_config::log_settings_diagnostics("settings", &settings_state.diagnostics);
         let service_payload_capacity = service_payload_cache_capacity(&compiled.manifest);
         let element_metric_usage = element_metric_usage(&compiled);
         let has_animatable_style_rules = compiled_module_has_animatable_style_rules(&compiled);
@@ -966,8 +975,10 @@ impl FrontendSurfaceComponent {
         Self {
             compiled,
             module_dir,
-            module_settings_file,
+            settings,
+            settings_namespace,
             settings_json: settings_state.raw,
+            settings_diagnostics: settings_state.diagnostics,
             surface_layout: settings_state.layout.clone(),
             keyboard_mode_override: None,
             popup_promoted: false,
@@ -1043,6 +1054,7 @@ impl FrontendSurfaceComponent {
             active_theme_stale: Cell::new(true),
             measured_size: None,
             last_surface_size: None,
+            window_states: WindowSurfaceState::default(),
             last_painted_buffer_size: None,
             surface_pixels_invalid: true,
             locale: LocaleEngine::new("en"),
@@ -1102,7 +1114,6 @@ impl FrontendSurfaceComponent {
             style_rules_generation: 0,
             runtime_style_diagnostic_fingerprint: None,
             element_metric_usage,
-            keyboard_settings_cache: RefCell::new(None),
             resolved_surface_shortcuts_cache: RefCell::new(None),
         }
     }

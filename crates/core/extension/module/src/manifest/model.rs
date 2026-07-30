@@ -749,6 +749,30 @@ pub struct SlotContribution {
 /// `docs/spec/03-components.md` §2.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SurfaceLayoutSection {
+    /// Which compositor shell protocol realizes this surface:
+    /// `"layer"` (default, `zwlr_layer_shell_v1` shell chrome) or `"window"`
+    /// (`xdg_toplevel`, an ordinary application window).
+    ///
+    /// The layer-shell placement fields below (`anchor`, `layer`,
+    /// `exclusive_zone`, `margins`, `keyboard_mode`) have no meaning for a
+    /// window and are rejected as manifest diagnostics rather than ignored —
+    /// the compositor, not MESH, places a toplevel. The window fields
+    /// (`title`, `app_id`, `resizable`, `decorations`) are likewise rejected
+    /// on a layer surface.
+    #[serde(default)]
+    pub role: Option<String>,
+    /// Whether this surface may be moved between roles while it is running
+    /// ("pop out" a panel widget into a window and dock it back).
+    ///
+    /// A promotable surface holds both roles over its life, so it is the one
+    /// case where declaring *both* field sets is meaningful and the
+    /// role-mismatch diagnostic does not apply: `anchor`/`layer`/`margins`
+    /// describe it as chrome, `title`/`appId` describe it as a window, and
+    /// [`Self::role`] says which it starts as. Runtime role changes are refused
+    /// for surfaces that do not declare this — a component laid out for one role
+    /// can look wrong in the other, so the author opts in.
+    #[serde(default)]
+    pub promotable: Option<bool>,
     /// Screen edge: "top" | "bottom" | "left" | "right"
     #[serde(default)]
     pub anchor: Option<String>,
@@ -774,6 +798,53 @@ pub struct SurfaceLayoutSection {
     /// compositor rule can target (Hyprland: `layerrule = blur, :blur$`).
     #[serde(default)]
     pub blur: Option<bool>,
+    /// Window title (`role: "window"` only). Localizable.
+    #[serde(default)]
+    pub title: Option<LocalizedText>,
+    /// `xdg_toplevel.set_app_id` (`role: "window"` only). Defaults to the
+    /// module id so compositor window rules have something stable to match.
+    #[serde(default, rename = "appId")]
+    pub app_id: Option<String>,
+    /// Whether the user may resize the window (`role: "window"` only).
+    /// Defaults to true; false pins the window to its CSS-measured size.
+    #[serde(default)]
+    pub resizable: Option<bool>,
+    /// `"client"` (default, MESH draws its own chrome) or `"server"`
+    /// (`role: "window"` only).
+    #[serde(default)]
+    pub decorations: Option<String>,
+}
+
+impl SurfaceLayoutSection {
+    /// Author-facing fields that only apply to `role: "layer"`, and were set.
+    /// Drives the manifest diagnostic that rejects layer placement on a window
+    /// rather than silently dropping it.
+    pub fn layer_only_fields(&self) -> Vec<&'static str> {
+        [
+            ("anchor", self.anchor.is_some()),
+            ("layer", self.layer.is_some()),
+            ("exclusiveZone", self.exclusive_zone.is_some()),
+            ("margins", self.margins.is_some()),
+            ("keyboardMode", self.keyboard_mode.is_some()),
+        ]
+        .into_iter()
+        .filter_map(|(name, present)| present.then_some(name))
+        .collect()
+    }
+
+    /// The mirror of [`Self::layer_only_fields`]: set fields that only apply
+    /// to `role: "window"`.
+    pub fn window_only_fields(&self) -> Vec<&'static str> {
+        [
+            ("title", self.title.is_some()),
+            ("appId", self.app_id.is_some()),
+            ("resizable", self.resizable.is_some()),
+            ("decorations", self.decorations.is_some()),
+        ]
+        .into_iter()
+        .filter_map(|(name, present)| present.then_some(name))
+        .collect()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]

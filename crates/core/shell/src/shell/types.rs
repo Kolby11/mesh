@@ -4,7 +4,7 @@ pub use mesh_core_frontend_host::{
     ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent, SurfaceId,
     TabFocusTarget,
 };
-use mesh_core_presentation::{LayerSurfaceConfig, LayerSurfaceSizePolicy, PopupConfig};
+use mesh_core_presentation::{LayerSurfaceSizePolicy, PopupConfig, SurfaceConfig};
 use mesh_core_render::PixelBuffer;
 use mesh_core_service::{InterfaceContract, TypeExpr};
 use std::collections::{HashMap, HashSet};
@@ -28,7 +28,7 @@ pub(super) enum TargetRef {
 pub(super) struct SurfaceTarget {
     pub(super) surface_id: SurfaceId,
     pub(super) paint_buffer: Option<PixelBuffer>,
-    pub(super) last_surface_config: Option<LayerSurfaceConfig>,
+    pub(super) last_surface_config: Option<SurfaceConfig>,
     pub(super) surface_size_policy: LayerSurfaceSizePolicy,
     /// Last surface size resolved by shell/presentation without requiring a
     /// compositor roundtrip on every render or input event.
@@ -110,8 +110,6 @@ pub(super) struct ComponentRuntime {
     /// these changes — editing a sub-component triggers a reload even
     /// though the entrypoint mtime is unchanged.
     pub(super) source_paths: Vec<(PathBuf, Option<SystemTime>)>,
-    pub(super) module_settings_path: Option<PathBuf>,
-    pub(super) module_settings_modified_at: Option<SystemTime>,
     /// Render state for the component's primary (parent) surface.
     pub(super) parent: SurfaceTarget,
     /// Auto-derived child surfaces (xdg_popups), reconciled from the painted
@@ -186,7 +184,6 @@ impl ComponentRuntime {
                 (path, mtime)
             })
             .collect();
-        let module_settings_path = component.module_settings_path().map(PathBuf::from);
         Self {
             parent: SurfaceTarget::new(surface_id.clone(), surface_size_policy),
             children: Vec::new(),
@@ -195,8 +192,6 @@ impl ComponentRuntime {
             surface_id,
             component,
             source_paths,
-            module_settings_path,
-            module_settings_modified_at: None,
         }
     }
 

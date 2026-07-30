@@ -108,8 +108,26 @@ Thin wrappers over the declared shell channels
 
 ```
 surface.show / hide / toggle { surface }
+surface.promote / demote / toggle_role { surface }
 shell.publish { channel, payload }     # declared shell.* channels only
 ```
+
+`promote` / `demote` move a **promotable** surface between shell chrome and an
+`xdg_toplevel` window without losing its state
+([01 §Promotable surfaces](01-module-system.md)); they are refused for a surface
+that did not declare itself promotable. These exist on the *external* surface
+specifically because MESH keybinds are focused-surface semantic actions and
+cannot grab a compositor-global hotkey ([10 §2](10-keyboard.md)) — the user binds
+the CLI instead:
+
+```
+bind = SUPER, S, exec, mesh surface toggle-role @mesh/settings
+```
+
+**Status: shipped** on the raw IPC line protocol
+(`shell:promote_surface:<id>`, `shell:demote_surface:<id>`,
+`shell:toggle_surface_role:<id>`); the typed `surface.*` envelope and the `mesh`
+CLI subcommand land with the rest of this document.
 
 `shell.publish` validates the channel against the declared shell-owned list;
 interface-domain commands are *not* exposed as raw publishes — drive UI or

@@ -170,11 +170,68 @@ token read still returns the theme value.
 
 Component `<style>` blocks support a deliberate selector subset: tag, `.class`,
 `#id`, `*`, pseudo-states (`:hover`, `:focus`, `:focus-visible`, `:active`,
-`:disabled`, `:checked`, …), and compounds of those (`button.primary:hover`).
+`:disabled`, `:checked`, the window states below, …), and compounds of those
+(`button.primary:hover`).
 Descendant/child combinators (`.parent .child`, `a > b`) and relational
 pseudo-classes (`:has()`) are **not** supported and are rejected at compile
 time with a diagnostic — scope styles with classes on the target elements
 instead.
+
+### Window-state pseudo-classes
+
+**Status: shipped.** A `role: "window"` surface ([01 §Surfaces](01-module-system.md))
+is *told* its size by the compositor, so the same component may be a 920x700
+floating window one moment and a fullscreen one the next. The compositor's
+`xdg_toplevel` states are projected onto the surface tree as pseudo-states,
+alongside `:windowed` for the role itself:
+
+| Selector | True when |
+| --- | --- |
+| `:windowed` | The surface is realized as an `xdg_toplevel` rather than shell chrome. |
+| `:fullscreen` | The window covers a whole output. |
+| `:maximized` | The window fills its work area. |
+| `:activated` | The compositor considers the window focused. |
+| `:tiled` | Any edge abuts a neighbour or a screen edge. |
+
+These are **ambient**: they describe the surface, and because this selector
+subset has no descendant combinators, every node in the tree carries them. So
+`.sidebar:fullscreen` works directly — a nested element does not need its root
+to pass the state down. A layer surface that was never promoted, and every
+popup, matches none of them.
+
+`:windowed` differs in kind from the other four: it is MESH's own decision, not
+the compositor's, and it is the one that is true of a merely *floating* window.
+The four below it are only ever true when it is. It is what a **promotable**
+surface ([01 §Promotable surfaces](01-module-system.md)) restyles against to
+draw its own chrome for the role it is currently in:
+
+```css
+/* One header, two controls; the role decides which is present. */
+.dock-back-button { display: none; }
+.pop-out-button:windowed { display: none; }
+.dock-back-button:windowed { display: flex; }
+```
+
+`display: none` takes the hidden control out of layout entirely, so it is not
+clickable either — preferable to hiding it visually and leaving a live target.
+
+Driving this from CSS rather than from script state is deliberate: the role can
+change from outside the component (a settings override, a compositor keybind
+over the automation IPC), and a component that tracked the role in a Lua
+variable would disagree with reality the moment it did.
+
+The idiom is to declare the floating size on the base rule and let the filling
+states override it:
+
+```css
+.window { width: 920px; height: 700px; min-width: 920px; min-height: 700px; }
+.window:fullscreen,
+.window:maximized { width: 100%; height: 100%; min-width: 0; min-height: 0; }
+```
+
+`min-width`/`max-width` take lengths only, not percentages, so a floating
+minimum must be cleared explicitly in the filling rules rather than capped
+with `max-width: 100%`.
 
 There is **no CSS specificity**. Matching rules apply in source order and the
 last declaration wins, regardless of selector shape (`#id` does not beat

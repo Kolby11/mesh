@@ -1,5 +1,5 @@
 use mesh_core_config::{
-    ShellConfig, ShellSettings, default_settings_path, load_config, load_shell_settings,
+    ModuleSettingsOverrides, SettingsStore, ShellConfig, ShellSettings, load_config,
     resolve_discovery_paths,
 };
 use mesh_core_debug::{
@@ -23,6 +23,7 @@ use mesh_core_wayland::{ClipboardWriter, Layer, StubSurface, WaylandClipboard};
 use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::runtime::Runtime;
@@ -47,7 +48,7 @@ use backend::{BackendRuntimeStatus, BackendRuntimeStatusEntry};
 use ipc::spawn_ipc_server;
 use mesh_core_backend::{BackendServiceEvent, spawn_backend_service};
 use mesh_core_presentation::{
-    LayerSurfaceConfig, PresentationEngine, WindowEvent, WindowKeyEvent, coalesce_input_events,
+    PresentationEngine, SurfaceConfig, WindowEvent, WindowKeyEvent, coalesce_input_events,
 };
 use mesh_core_render::{DebugOverlay, PixelBuffer};
 use sounds::{SoundKind, play_shell_sound};
@@ -377,7 +378,12 @@ fn update_modifiers_for_key_release(modifiers: &mut KeyModifiers, key: &str) {
 
 pub struct Shell {
     pub config: ShellConfig,
+    /// Core shell preferences, resolved from [`Self::settings_store`]. Kept
+    /// alongside the store because most readers want only this.
     pub settings: ShellSettings,
+    /// Every user decision in the shell, in one document. Shared with each
+    /// component so they read the same snapshot the shell does.
+    pub settings_store: Arc<SettingsStore>,
     pub theme: ThemeEngine,
     pub locale: LocaleEngine,
     pub events: EventBus,
@@ -405,7 +411,6 @@ pub struct Shell {
     next_theme_reload_check: std::time::Instant,
     next_shell_settings_reload_check: std::time::Instant,
     next_frontend_reload_check: std::time::Instant,
-    next_module_settings_reload_check: std::time::Instant,
     file_watcher_active: bool,
     debug: DebugOverlayState,
     debug_overlay: DebugOverlay,

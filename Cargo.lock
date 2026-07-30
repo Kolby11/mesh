@@ -1737,6 +1737,7 @@ name = "mesh-core-frontend-host"
 version = "0.1.0"
 dependencies = [
  "mesh-core-capability",
+ "mesh-core-config",
  "mesh-core-debug",
  "mesh-core-diagnostics",
  "mesh-core-elements",
@@ -1926,6 +1927,7 @@ dependencies = [
 name = "mesh-core-surface-config"
 version = "0.1.0"
 dependencies = [
+ "mesh-core-config",
  "mesh-core-module",
  "mesh-core-wayland",
  "serde_json",
@@ -1959,6 +1961,8 @@ dependencies = [
  "mesh-core-diagnostics",
  "mesh-core-module",
  "mesh-core-shell",
+ "mesh-core-surface-config",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

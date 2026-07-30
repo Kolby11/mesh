@@ -7,12 +7,56 @@ The checked-in shell currently uses these files:
 | File | Purpose |
 | --- | --- |
 | `config/module.json` | Installed module directory, disabled modules, provider choices, and root layout |
-| `config/shell-settings.json` | Development user overrides for theme, locale, and icons |
-| `config/settings-default.json` | Bundled shell setting defaults |
+| `config/settings.json` | Every user setting, in one namespaced document |
 | `config/icons.toml` | Current semantic icon profiles and fallback candidates |
 
 The root graph is also a canonical `module.json`; `mesh.schemaVersion`
 distinguishes it from an installable module manifest.
+
+The two split them: the **root graph** decides which modules exist and which
+provider implements each interface; the **settings file** holds preference
+values for the modules that do. See [Settings](../spec/08-settings.md).
+
+## The settings file
+
+One document, keyed by namespace. `shell` holds core preferences; every other
+top-level key is a module id (`@scope/name`) or an interface id (`mesh.audio`):
+
+```json
+{
+  "schemaVersion": 1,
+  "shell": {
+    "theme": { "active": "gruvbox-dark" },
+    "icons": { "default_pack": "@mesh/icons-material-symbols" }
+  },
+  "@mesh/navigation-bar": {
+    "surface": { "anchor": "bottom" },
+    "props": { "global": { "density": "compact" } }
+  }
+}
+```
+
+It is **sparse**: a key exists only where the user changed something. Defaults
+come from the module's own `module.json` (`mesh.surface`) and its `<props>`
+declarations, never from a copy in this file — so a module that changes its
+defaults in an update still reaches a user who never overrode them. Deleting a
+key restores the declared default.
+
+Because the file is sparse, a module you have never configured has no entry to
+edit. `mesh-shell config eject <module-id>` writes that module's *current,
+effective* surface placement in, ready to hand-edit:
+
+```console
+$ mesh-shell config eject @mesh/quick-settings
+$ mesh-shell config show @mesh/quick-settings
+$ mesh-shell config reset @mesh/quick-settings   # back to declared defaults
+```
+
+Ejected values are pinned by definition — they are now user overrides, so later
+changes to the module's own defaults no longer reach them.
+
+Settings are watched: editing the file re-applies theme, locale, surface
+placement, and module props to the running shell without a restart.
 
 ## Current user paths
 
@@ -35,20 +79,22 @@ yet wired through the shell entrypoint.
 
 Frontend modules declare editable visual knobs in their root `<props>` block.
 Author defaults may reference theme tokens; user overrides are stored in that
-module's `config/settings.json` under `props.global`, or under
+module's namespace in `config/settings.json` under `props.global`, or under
 `props.instances` for one component instance. For example:
 
 ```json
 {
-  "props": {
-    "global": {
-      "blur_enabled": true,
-      "blur_radius": "18px",
-      "blur_background": "rgba(24, 26, 34, 0.28)"
-    },
-    "instances": {
-      "@mesh/navigation-bar/import:audio": {
-        "blur_radius": "24px"
+  "@mesh/navigation-bar": {
+    "props": {
+      "global": {
+        "blur_enabled": true,
+        "blur_radius": "18px",
+        "blur_background": "rgba(24, 26, 34, 0.28)"
+      },
+      "instances": {
+        "@mesh/navigation-bar/import:audio": {
+          "blur_radius": "24px"
+        }
       }
     }
   }
@@ -66,8 +112,7 @@ the Wayland blur protocol carries regions but no per-surface kernel settings.
 | Variable | Current use |
 | --- | --- |
 | `MESH_HOME` | Overrides the module/configuration home; the module loader requires an absolute path |
-| `MESH_SETTINGS_PATH` | Overrides the user shell settings JSON |
-| `MESH_SETTINGS_DEFAULTS_PATH` | Overrides bundled defaults JSON |
+| `MESH_SETTINGS_PATH` | Overrides the settings file path |
 | `MESH_THEME_DIR` | Overrides the theme directory |
 | `MESH_IPC_SOCKET` | Overrides the Unix IPC socket path |
 | `MESH_BACKEND` | Forces a presentation backend where supported |

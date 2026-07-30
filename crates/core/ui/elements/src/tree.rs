@@ -26,6 +26,36 @@ pub struct ElementState {
     pub pressed: bool,
     pub invalid: bool,
     pub value: bool,
+    /// Ambient state of the surface the node lives on, not of the node itself:
+    /// the compositor's `xdg_toplevel` states, projected onto every node in the
+    /// tree. This CSS engine has no descendant combinators, so a window state
+    /// carried only on the root would be unreachable from the elements that
+    /// need to restyle for it — a sidebar cannot say
+    /// `.window:fullscreen .sidebar`. Carrying it on every node lets any
+    /// element write `.sidebar:fullscreen` directly.
+    ///
+    /// Always false on layer surfaces and popups, which have no such states.
+    pub window: WindowSurfaceState,
+}
+
+/// The compositor's view of the containing toplevel, projected onto every node
+/// of that surface's tree as CSS state. See [`ElementState::window`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WindowSurfaceState {
+    /// `:windowed` — the surface is realized as an `xdg_toplevel` rather than
+    /// shell chrome. Unlike the flags below this is MESH's own decision, not the
+    /// compositor's, and it is the one a component restyles against to draw its
+    /// own window chrome (a "dock back" control instead of a "pop out" one).
+    /// The four compositor states are only ever true when this is.
+    pub windowed: bool,
+    /// `:fullscreen` — the window covers a whole output.
+    pub fullscreen: bool,
+    /// `:maximized` — the window fills its work area.
+    pub maximized: bool,
+    /// `:activated` — the compositor considers the window focused.
+    pub activated: bool,
+    /// `:tiled` — some edge abuts a neighbour or screen edge.
+    pub tiled: bool,
 }
 
 /// Unique identifier for a node in the widget tree.

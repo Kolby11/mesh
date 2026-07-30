@@ -41,7 +41,9 @@
         "bluetooth": "hicolor/bluetooth",
         "computer": "hicolor/computer",
         "close": "hicolor/window-close",
-        "window-close": "hicolor/window-close"
+        "window-close": "hicolor/window-close",
+        "window-new": "hicolor/window-new",
+        "window-restore": "hicolor/view-restore"
       }
     }
   }

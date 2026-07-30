@@ -4,6 +4,18 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+pub mod settings;
+pub mod validate;
+
+pub use settings::{
+    SETTINGS_SCHEMA_VERSION, SHELL_NAMESPACE, SettingsStore, default_settings_path,
+    load_shell_settings, merge_json,
+};
+pub use validate::{
+    FieldKind, FieldSpec, SettingsDiagnostic, SettingsDiagnosticSeverity, log_settings_diagnostics,
+    new_settings_diagnostics, validate_object,
+};
+
 /// Top-level MESH shell configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShellConfig {
@@ -28,9 +40,86 @@ pub struct ShellSettings {
     pub icons: IconSettings,
     #[serde(default)]
     pub tooltip: TooltipSettings,
-    /// Per-module user-side overrides (icons, etc.). Keyed by module id.
-    #[serde(default)]
-    pub modules: HashMap<String, ModuleSettingsOverrides>,
+}
+
+/// The `"shell"` namespace's schema, as the store validates it.
+///
+/// One entry per field of [`ShellSettings`] and its sections: the struct's serde
+/// defaults define what a valid value falls back to, and this table defines
+/// what is valid in the first place. A field added to [`ShellSettings`] without
+/// a line here is reported as an unknown key, which is the failure mode that
+/// gets noticed rather than the one that goes silent.
+pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
+    FieldSpec::new(
+        "theme",
+        FieldKind::Section(&[FieldSpec::new("active", FieldKind::Str)]),
+    ),
+    FieldSpec::new(
+        "i18n",
+        FieldKind::Section(&[
+            FieldSpec::new("locale", FieldKind::Str),
+            FieldSpec::new("fallback_locale", FieldKind::Str),
+        ]),
+    ),
+    FieldSpec::new(
+        "sounds",
+        FieldKind::Section(&[
+            FieldSpec::new("startup", FieldKind::Str),
+            FieldSpec::new("shutdown", FieldKind::Str),
+            FieldSpec::new("device_connected", FieldKind::Str),
+            FieldSpec::new("device_disconnected", FieldKind::Str),
+            FieldSpec::new("error", FieldKind::Str),
+            FieldSpec::new("notification", FieldKind::Str),
+        ]),
+    ),
+    FieldSpec::new(
+        "keyboard",
+        FieldKind::Section(&[
+            FieldSpec::new("button_activation_keys", FieldKind::StrArray),
+            FieldSpec::new("toggle_activation_keys", FieldKind::StrArray),
+            FieldSpec::new("slider_decrement_keys", FieldKind::StrArray),
+            FieldSpec::new("slider_increment_keys", FieldKind::StrArray),
+            // module id -> action name -> { key }. Both levels are the user's
+            // own vocabulary, so only the leaf shape is checked.
+            FieldSpec::new(
+                "surface_shortcuts",
+                FieldKind::Map(&FieldKind::Map(&FieldKind::Section(&[FieldSpec::new(
+                    "key",
+                    FieldKind::Str,
+                )]))),
+            ),
+        ]),
+    ),
+    FieldSpec::new(
+        "icons",
+        FieldKind::Section(&[FieldSpec::new("default_pack", FieldKind::Str)]),
+    ),
+    FieldSpec::new(
+        "tooltip",
+        FieldKind::Section(&[
+            FieldSpec::new(
+                "position",
+                FieldKind::Enum {
+                    accepts: tooltip_position_is_valid,
+                    values: TOOLTIP_POSITIONS,
+                },
+            ),
+            FieldSpec::new("delay_ms", FieldKind::UInt),
+            FieldSpec::new("gap", FieldKind::Float),
+            FieldSpec::new("cursor_offset_x", FieldKind::Float),
+            FieldSpec::new("cursor_offset_y", FieldKind::Float),
+        ]),
+    ),
+];
+
+/// Accepted values for [`TooltipSettings::position`].
+///
+/// The shell's anchor resolution matches these strings; a `mesh-core-shell`
+/// test walks this list to keep the two from drifting apart.
+pub const TOOLTIP_POSITIONS: &[&str] = &["auto", "bottom", "top", "left", "right", "cursor"];
+
+fn tooltip_position_is_valid(value: &str) -> bool {
+    TOOLTIP_POSITIONS.contains(&value.trim())
 }
 
 /// Shell-wide icon configuration. `default_pack` is the user's preferred
@@ -45,10 +134,26 @@ pub struct IconSettings {
 
 /// Per-module user-side overrides applied on top of values declared in the
 /// frontend's manifest.
+///
+/// Read from the module's own namespace in the settings store
+/// (`"@scope/name": { "icons": { … } }`), not from a shell-wide map — the
+/// namespace is the module's, so its overrides live with the rest of them.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ModuleSettingsOverrides {
     #[serde(default)]
     pub icons: Option<ModuleIconOverrides>,
+}
+
+impl ModuleSettingsOverrides {
+    /// Parse the icon-relevant part of a module namespace. Unknown keys in the
+    /// namespace (surface, props, keyboard) are ignored rather than rejected —
+    /// each consumer reads only what it owns.
+    pub fn from_namespace(namespace: &JsonValue) -> Self {
+        let icons = namespace
+            .get("icons")
+            .and_then(|icons| serde_json::from_value(icons.clone()).ok());
+        Self { icons }
+    }
 }
 
 /// User-side per-module icon overrides.
@@ -370,56 +475,6 @@ pub fn default_config_path() -> PathBuf {
     dirs_path("config").join("mesh/config.toml")
 }
 
-/// Load shell settings from the standard settings path, merging user settings over defaults.
-pub fn load_shell_settings() -> Result<ShellSettings, ConfigError> {
-    let defaults_path = default_settings_defaults_path();
-    let settings_path = default_settings_path();
-
-    let mut settings = if defaults_path.exists() {
-        load_json_settings_file(&defaults_path)?
-    } else {
-        ShellSettings::default()
-    };
-
-    if settings_path.exists() {
-        let user_settings = load_json_settings_file(&settings_path)?;
-        merge_shell_settings(&mut settings, user_settings);
-    }
-
-    Ok(settings)
-}
-
-/// Standard user shell settings path.
-pub fn default_settings_path() -> PathBuf {
-    if let Ok(path) = std::env::var("MESH_SETTINGS_PATH") {
-        if !path.trim().is_empty() {
-            return PathBuf::from(path);
-        }
-    }
-
-    let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../..")
-        .join("config/shell-settings.json");
-    if repo_path.exists() {
-        return repo_path;
-    }
-
-    mesh_home_path().join("settings.json")
-}
-
-/// Bundled default settings file path.
-pub fn default_settings_defaults_path() -> PathBuf {
-    if let Ok(path) = std::env::var("MESH_SETTINGS_DEFAULTS_PATH") {
-        if !path.trim().is_empty() {
-            return PathBuf::from(path);
-        }
-    }
-
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../..")
-        .join("config/settings-default.json")
-}
-
 /// Load shell configuration from a file.
 pub fn load_config(path: &Path) -> Result<ShellConfig, ConfigError> {
     if !path.exists() {
@@ -431,90 +486,6 @@ pub fn load_config(path: &Path) -> Result<ShellConfig, ConfigError> {
     let content = std::fs::read_to_string(path)?;
     let config: ShellConfig = toml::from_str(&content)?;
     Ok(config)
-}
-
-fn load_json_settings_file(path: &Path) -> Result<ShellSettings, ConfigError> {
-    let content = std::fs::read_to_string(path)?;
-    let settings: ShellSettings = serde_json::from_str(&content)?;
-    Ok(settings)
-}
-
-fn merge_shell_settings(base: &mut ShellSettings, overrides: ShellSettings) {
-    base.theme = overrides.theme;
-    base.i18n = overrides.i18n;
-    base.sounds = overrides.sounds;
-    base.keyboard = overrides.keyboard;
-    base.tooltip = overrides.tooltip;
-    if overrides.icons != IconSettings::default() {
-        base.icons = overrides.icons;
-    }
-    if !overrides.modules.is_empty() {
-        for (id, module_overrides) in overrides.modules {
-            base.modules.insert(id, module_overrides);
-        }
-    }
-}
-
-/// Write a per-module overrides file under XDG config (~/..../mesh/modules/<scope>/<name>.json).
-pub fn module_override_path(module_id: &str) -> PathBuf {
-    let mut parts = module_id.splitn(2, '/');
-    let scope = parts.next().unwrap_or(module_id);
-    let name = parts.next().unwrap_or("");
-
-    let mut path = dirs_path("config").join("mesh").join("modules");
-    if !name.is_empty() {
-        path = path.join(scope).join(format!("{}.json", name));
-    } else {
-        // fallback: write as a single file named after the scope
-        path = path.join(format!("{}.json", scope));
-    }
-    path
-}
-
-/// Persist per-module overrides atomically.
-pub fn save_module_overrides(module_id: &str, overrides: &JsonValue) -> Result<(), ConfigError> {
-    let path = module_override_path(module_id);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let tmp = path.with_extension("json.tmp");
-    let content = serde_json::to_string_pretty(overrides)?;
-    std::fs::write(&tmp, content)?;
-    std::fs::rename(&tmp, &path)?;
-    Ok(())
-}
-
-/// Remove a single key from a module overrides file. If the file becomes empty it is removed.
-pub fn remove_module_override(module_id: &str, key: &str) -> Result<(), ConfigError> {
-    let path = module_override_path(module_id);
-    if !path.exists() {
-        return Ok(());
-    }
-
-    let content = std::fs::read_to_string(&path)?;
-    let mut doc: JsonValue = serde_json::from_str(&content)?;
-    if let Some(obj) = doc.as_object_mut() {
-        obj.remove(key);
-        if obj.is_empty() {
-            let _ = std::fs::remove_file(&path);
-            return Ok(());
-        }
-    }
-
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(&doc)?)?;
-    std::fs::rename(&tmp, &path)?;
-    Ok(())
-}
-
-/// Reset (remove) the per-module overrides file entirely.
-pub fn reset_module_overrides(module_id: &str) -> Result<(), ConfigError> {
-    let path = module_override_path(module_id);
-    if path.exists() {
-        std::fs::remove_file(path)?;
-    }
-    Ok(())
 }
 
 /// Validate a JSON value against a simple SettingsSchema. This performs basic
@@ -786,50 +757,6 @@ mod tests {
     }
 
     #[test]
-    fn test_module_override_path_formats() {
-        let path1 = module_override_path("@mesh/system-panel");
-        assert!(path1.ends_with("mesh/modules/@mesh/system-panel.json"));
-
-        let path2 = module_override_path("generic-module");
-        assert!(path2.ends_with("mesh/modules/generic-module.json"));
-    }
-
-    #[test]
-    fn keyboard_settings_defaults_and_overrides_merge_deterministically() {
-        let mut base = ShellSettings::default();
-        let overrides = ShellSettings {
-            keyboard: KeyboardSettings {
-                surface_shortcuts: HashMap::from([(
-                    "@mesh/navigation-bar".into(),
-                    HashMap::from([(
-                        "mute".into(),
-                        SurfaceShortcutOverride {
-                            key: Some("u".into()),
-                        },
-                    )]),
-                )]),
-                ..KeyboardSettings::default()
-            },
-            ..ShellSettings::default()
-        };
-
-        merge_shell_settings(&mut base, overrides);
-
-        assert_eq!(
-            base.keyboard.button_activation_keys,
-            vec!["Enter".to_string(), "Space".to_string()]
-        );
-        assert_eq!(
-            base.keyboard
-                .surface_shortcuts
-                .get("@mesh/navigation-bar")
-                .and_then(|shortcuts| shortcuts.get("mute"))
-                .and_then(|shortcut| shortcut.key.as_deref()),
-            Some("u")
-        );
-    }
-
-    #[test]
     fn keyboard_settings_default_shortcuts_remain_available_without_user_overrides() {
         let settings = ShellSettings::default();
         assert_eq!(
@@ -843,25 +770,34 @@ mod tests {
     }
 
     #[test]
-    fn tooltip_settings_overrides_merge_into_shell_settings() {
-        let mut base = ShellSettings::default();
-        let overrides = ShellSettings {
-            tooltip: TooltipSettings {
-                position: "cursor".into(),
-                delay_ms: 25,
-                gap: 10.0,
-                cursor_offset_x: 3.0,
-                cursor_offset_y: 4.0,
-            },
-            ..ShellSettings::default()
-        };
+    fn module_icon_overrides_read_from_the_modules_own_namespace() {
+        let namespace = json!({
+            "surface": { "anchor": "bottom" },
+            "icons": {
+                "use_packs": ["@mesh/user-icons"],
+                "overrides": { "settings": "lucide/settings" },
+                "ignore_shell_default": true
+            }
+        });
 
-        merge_shell_settings(&mut base, overrides);
+        let overrides = ModuleSettingsOverrides::from_namespace(&namespace);
+        let icons = overrides.icons.expect("icon overrides parsed");
 
-        assert_eq!(base.tooltip.position, "cursor");
-        assert_eq!(base.tooltip.delay_ms, 25);
-        assert_eq!(base.tooltip.gap, 10.0);
-        assert_eq!(base.tooltip.cursor_offset_x, 3.0);
-        assert_eq!(base.tooltip.cursor_offset_y, 4.0);
+        assert_eq!(
+            icons.use_packs.as_deref(),
+            Some(&["@mesh/user-icons".to_string()][..])
+        );
+        assert_eq!(
+            icons.overrides.get("settings").map(String::as_str),
+            Some("lucide/settings")
+        );
+        assert!(icons.ignore_shell_default);
+    }
+
+    #[test]
+    fn a_module_namespace_without_icons_yields_no_overrides() {
+        let overrides =
+            ModuleSettingsOverrides::from_namespace(&json!({ "surface": { "anchor": "top" } }));
+        assert!(overrides.icons.is_none());
     }
 }

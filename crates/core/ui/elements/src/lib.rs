@@ -55,7 +55,7 @@ pub use style::{
     VisualFilter, WhiteSpace,
 };
 pub use tree::EventHandlerCall;
-pub use tree::{ElementState, NodeId, WidgetNode, WidgetScrollMetrics};
+pub use tree::{ElementState, NodeId, WidgetNode, WidgetScrollMetrics, WindowSurfaceState};
 
 /// Abstraction over the source of variable values for template evaluation.
 ///

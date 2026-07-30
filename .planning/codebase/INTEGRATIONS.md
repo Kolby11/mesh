@@ -14,7 +14,7 @@
 - Local Unix socket IPC - CLI commands control a running shell instance.
   - SDK/Client: Rust standard library `std::os::unix::net::UnixStream` in `crates/tools/cli/src/main.rs`; Tokio `UnixListener` in `crates/core/shell/src/shell/ipc.rs`.
   - Auth: Local filesystem/socket permissions only; socket path is controlled by `MESH_IPC_SOCKET`, `XDG_RUNTIME_DIR`, or `/tmp/mesh-<uid>.sock` in `crates/core/shell/src/shell/mod.rs`.
-  - Commands: `shell:debug_overlay`, `shell:debug_cycle_tab`, `shell:shutdown`, `shell:show_surface:<id>`, `shell:hide_surface:<id>`, and `shell:toggle_surface:<id>` in `crates/core/shell/src/shell/ipc.rs`.
+  - Commands: `shell:debug_overlay`, `shell:debug_cycle_tab`, `shell:shutdown`, `shell:show_surface:<id>`, `shell:hide_surface:<id>`, `shell:toggle_surface:<id>`, and the surface-role verbs `shell:promote_surface:<id>` / `shell:demote_surface:<id>` / `shell:toggle_surface_role:<id>` in `crates/core/shell/src/shell/ipc.rs`.
 
 **System Command Host API:**
 - Generic `mesh.exec` host API - Backend Luau modules call external programs through `std::process::Command`.
@@ -68,7 +68,7 @@
   - Root module graph: `config/package.json` in repo; default user root `~/.mesh/package.json` via `crates/core/extension/plugin/src/package.rs`.
   - Module directories: repo `modules/`, `~/.mesh/modules`, and `/usr/share/mesh/modules` via `crates/core/foundation/config/src/lib.rs`.
   - Shell config: `~/.config/mesh/config.toml` via `crates/core/foundation/config/src/lib.rs`.
-  - Settings: `config/settings-default.json`, `config/shell-settings.json`, optional `MESH_SETTINGS_PATH`, and fallback `~/.mesh/settings.json` via `crates/core/foundation/config/src/lib.rs`.
+  - Settings: `config/settings.json`, optional `MESH_SETTINGS_PATH`, and fallback `~/.mesh/settings.json` via `crates/core/foundation/config/src/settings.rs`.
   - Per-module overrides: legacy XDG config path under `mesh/plugins/<scope>/<name>.json` via `crates/core/foundation/config/src/lib.rs`.
   - Themes: `config/themes/*.json` and theme loading paths used by `mesh-core-theme`.
   - Icons/assets: `config/icons.toml`, bundled Material SVG assets under `crates/core/ui/icon/assets/material/`, and XDG/system icon lookup in `crates/core/ui/icon/src/lib.rs`.
@@ -139,7 +139,6 @@
 **Optional env vars:**
 - `MESH_HOME` - Override root module/config home in `crates/core/extension/plugin/src/package.rs` and `crates/core/foundation/config/src/lib.rs`.
 - `MESH_SETTINGS_PATH` - Override user settings JSON in `crates/core/foundation/config/src/lib.rs`.
-- `MESH_SETTINGS_DEFAULTS_PATH` - Override default settings JSON in `crates/core/foundation/config/src/lib.rs`.
 - `MESH_IPC_SOCKET` - Override Unix IPC socket path in `crates/core/shell/src/shell/mod.rs`.
 - `XDG_CONFIG_HOME` - Override XDG config root for `mesh/config.toml` and legacy module override files in `crates/core/foundation/config/src/lib.rs`.
 - `XDG_DATA_HOME` - Override XDG data root helper in `crates/core/foundation/config/src/lib.rs`.

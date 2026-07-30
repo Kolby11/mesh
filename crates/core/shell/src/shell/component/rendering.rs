@@ -132,6 +132,10 @@ impl FrontendSurfaceComponent {
         if self.popup_promoted {
             return;
         }
+        surface.set_role(self.surface_layout.role);
+        if self.surface_layout.role == mesh_core_wayland::SurfaceRole::Window {
+            surface.set_window_options(self.resolved_window_options());
+        }
         surface.anchor(self.surface_layout.edge);
         surface.set_layer(self.surface_layout.layer);
         let (width, height) = self.requested_layout_size();
@@ -151,6 +155,37 @@ impl FrontendSurfaceComponent {
             self.surface_layout.margin_left,
         );
         surface.set_blur(self.surface_layout.blur);
+    }
+
+    /// Resolve the toplevel-only settings against this component's locale and
+    /// module identity.
+    ///
+    /// The title is localized here rather than at settings-load time because
+    /// that is where the locale lives; an unset title falls back to the module
+    /// id so a window is never nameless in a task switcher. The app id defaults
+    /// to the module id too — it is what compositor window rules match on, so
+    /// it must be stable and predictable rather than derived from a title the
+    /// user can change.
+    fn resolved_window_options(&self) -> mesh_core_wayland::WindowOptions {
+        let module_id = self.compiled.manifest.package.id.clone();
+        let title = match &self.surface_layout.window.title {
+            Some(text) => {
+                self.resolve_manifest_text(&module_id, "mesh.surface.title", text)
+                    .text
+            }
+            None => module_id.clone(),
+        };
+        mesh_core_wayland::WindowOptions {
+            title,
+            app_id: self
+                .surface_layout
+                .window
+                .app_id
+                .clone()
+                .unwrap_or(module_id),
+            resizable: self.surface_layout.window.resizable,
+            decorations: self.surface_layout.window.decorations,
+        }
     }
 
     /// Capture the paint-time theme into `active_theme` if it changed since
@@ -336,7 +371,8 @@ impl FrontendSurfaceComponent {
             &mut self.slider_script_values,
             &self.checked_values,
             &mut self.scroll_offsets,
-        );
+        )
+        .with_window_state(self.window_states);
         annotate_runtime_and_overflow_tree(tree, "root".to_string(), &mut annotation_context);
         if self.surface_exiting {
             append_class_recursive(tree, "mesh-surface-exiting");
@@ -778,6 +814,29 @@ impl FrontendSurfaceComponent {
         true
     }
 
+    /// Adopt the compositor's toplevel states for this surface.
+    ///
+    /// Unlike interaction pseudo-states, this changes ambient state on every
+    /// node at once, so there is no targeted-restyle path worth taking: a
+    /// fullscreen or tiling transition happens at human frequency, and it
+    /// changes what the whole tree measures against. Invalidate the same way a
+    /// resize does and let the next paint rebuild.
+    pub(super) fn observe_window_states(&mut self, states: WindowSurfaceState) -> bool {
+        if self.window_states == states {
+            return false;
+        }
+        self.window_states = states;
+        self.measured_size = None;
+        self.surface_pixels_invalid = true;
+        self.invalidate(
+            ComponentDirtyFlags::STYLE
+                | ComponentDirtyFlags::LAYOUT
+                | ComponentDirtyFlags::PAINT
+                | ComponentDirtyFlags::METRICS,
+        );
+        true
+    }
+
     fn annotate_selection_tree(&self, tree: &mut WidgetNode, theme: &Theme) {
         let Some(selection) = &self.selection else {
             return;
@@ -934,19 +993,24 @@ fn runtime_style_diagnostic_tree_fingerprint(tree: &WidgetNode) -> u64 {
         diagnostic_hash_optional_bytes(hash, node.mesh_key().map(str::as_bytes));
         diagnostic_hash_optional_bytes(hash, node.module_id().map(str::as_bytes));
         let state = node.state;
-        let state_bits = u16::from(state.hovered)
-            | (u16::from(state.active) << 1)
-            | (u16::from(state.focused) << 2)
-            | (u16::from(state.focus_visible) << 3)
-            | (u16::from(state.disabled) << 4)
-            | (u16::from(state.read_only) << 5)
-            | (u16::from(state.required) << 6)
-            | (u16::from(state.selected) << 7)
-            | (u16::from(state.checked) << 8)
-            | (u16::from(state.expanded) << 9)
-            | (u16::from(state.pressed) << 10)
-            | (u16::from(state.invalid) << 11)
-            | (u16::from(state.value) << 12);
+        let state_bits = u32::from(state.hovered)
+            | (u32::from(state.active) << 1)
+            | (u32::from(state.focused) << 2)
+            | (u32::from(state.focus_visible) << 3)
+            | (u32::from(state.disabled) << 4)
+            | (u32::from(state.read_only) << 5)
+            | (u32::from(state.required) << 6)
+            | (u32::from(state.selected) << 7)
+            | (u32::from(state.checked) << 8)
+            | (u32::from(state.expanded) << 9)
+            | (u32::from(state.pressed) << 10)
+            | (u32::from(state.invalid) << 11)
+            | (u32::from(state.value) << 12)
+            | (u32::from(state.window.fullscreen) << 13)
+            | (u32::from(state.window.maximized) << 14)
+            | (u32::from(state.window.activated) << 15)
+            | (u32::from(state.window.tiled) << 16)
+            | (u32::from(state.window.windowed) << 17);
         diagnostic_hash_bytes(hash, &state_bits.to_le_bytes());
         diagnostic_hash_bytes(hash, &(node.children.len() as u64).to_le_bytes());
         for child in &node.children {
@@ -2194,6 +2258,10 @@ fn collect_selector_state_dependencies(
                 "active" => dependencies.active = true,
                 "disabled" => dependencies.disabled = true,
                 "checked" => dependencies.checked = true,
+                // Window states are ambient and change through
+                // `observe_window_states`, which invalidates the whole surface;
+                // they never take the targeted interaction-restyle path, so
+                // only `any` matters here.
                 _ => {}
             }
         }

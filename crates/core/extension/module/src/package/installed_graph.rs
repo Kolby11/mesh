@@ -1635,6 +1635,45 @@ fn diagnose_frontend_surfaces(
                 ),
             });
         }
+        // Placement fields that belong to the other role are rejected, not
+        // ignored: a `mesh.surface` block that names both an anchor and
+        // `role: "window"` has two incompatible intents in it, and silently
+        // dropping one leaves the author debugging a surface that ignores half
+        // its own manifest.
+        // A promotable surface is realized under both roles at different points
+        // in its life, so both field sets apply to it and neither is a mismatch.
+        if let Some(layout) = &surface.surface_layout
+            && layout.promotable != Some(true)
+        {
+            let is_window = layout.role.as_deref().is_some_and(|role| {
+                matches!(
+                    role.trim().to_ascii_lowercase().as_str(),
+                    "window" | "toplevel"
+                )
+            });
+            let (rejected, role_name) = if is_window {
+                (layout.layer_only_fields(), "window")
+            } else {
+                (layout.window_only_fields(), "layer")
+            };
+            if !rejected.is_empty() {
+                diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: surface.module_id.clone(),
+                    contribution_id: Some(surface.source.scoped_id.clone()),
+                    status: "surface_role_field_mismatch".into(),
+                    message: format!(
+                        "frontend module {} declares mesh.surface.role \"{role_name}\" but also sets {} — {}",
+                        surface.module_id,
+                        rejected.join(", "),
+                        if is_window {
+                            "a window is placed by the compositor, not by layer-shell anchoring"
+                        } else {
+                            "these fields only apply to a window surface"
+                        }
+                    ),
+                });
+            }
+        }
         if surface.accessibility.is_none() {
             diagnostics.push(ModuleGraphDiagnostic {
                 module_id: surface.module_id.clone(),

@@ -14,9 +14,8 @@ use super::{
         service_name_from_interface,
     },
     shell_global_shortcut_request,
-    surface_layout::{load_active_theme, load_frontend_module_settings},
+    surface_layout::{load_active_theme, resolve_frontend_module_settings},
 };
-use mesh_core_config::ShellConfig;
 use mesh_core_debug::{
     ComponentInvalidationCounts, DisplayBatchBarrierSnapshot, ProfilingBackendStage,
     ProfilingInvalidationSnapshot, ProfilingStage, RepaintPolicySnapshot,
@@ -28,7 +27,6 @@ use mesh_core_module::ModuleInstance;
 use mesh_core_module::manifest::{
     CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
     ExportsSection, Manifest, ManifestSource, ModuleSection, ModuleType, ProvidedInterface,
-    SurfaceLayoutSection,
 };
 use mesh_core_module::package::{
     InstalledModuleGraph, LoadedModuleManifest, ModuleManifest, ModuleManifestSource,
@@ -273,11 +271,10 @@ fn shell_module_manifest_parallel_loading_beats_serial_benchmark() {
     );
 }
 
-fn test_config() -> ShellConfig {
-    ShellConfig {
-        shell: Default::default(),
-        modules: HashMap::new(),
-    }
+/// A settings store with no stored overrides — backend candidates then carry
+/// exactly the props their own manifests declare.
+fn test_settings() -> mesh_core_config::SettingsStore {
+    mesh_core_config::SettingsStore::default()
 }
 
 fn loaded_module(json: &str) -> LoadedModuleManifest {
@@ -639,12 +636,17 @@ struct FocusRecordingState {
     registered_popovers: Vec<(String, String)>,
     received_focus: Vec<(TabFocusTarget, Option<(String, String)>, bool)>,
     keyboard_mode_overrides: Vec<Option<mesh_core_wayland::KeyboardMode>>,
+    window_states: Vec<mesh_core_wayland::WindowStates>,
+    /// Every role this surface was told it had been realized under, in order.
+    applied_roles: Vec<mesh_core_wayland::SurfaceRole>,
 }
 
 struct FocusRecordingComponent {
     surface_id: String,
     state: Arc<Mutex<FocusRecordingState>>,
     popover_margin_left: i32,
+    role: mesh_core_wayland::SurfaceRole,
+    promotable: bool,
 }
 
 impl FocusRecordingComponent {
@@ -653,6 +655,17 @@ impl FocusRecordingComponent {
             surface_id: surface_id.to_string(),
             state,
             popover_margin_left: 0,
+            role: mesh_core_wayland::SurfaceRole::Layer,
+            promotable: false,
+        }
+    }
+
+    /// A surface that declared `mesh.surface.promotable`, i.e. one the shell
+    /// will move between chrome and a window at runtime.
+    fn promotable(surface_id: &str, state: Arc<Mutex<FocusRecordingState>>) -> Self {
+        Self {
+            promotable: true,
+            ..Self::new(surface_id, state)
         }
     }
 
@@ -662,14 +675,22 @@ impl FocusRecordingComponent {
         popover_margin_left: i32,
     ) -> Self {
         Self {
-            surface_id: surface_id.to_string(),
-            state,
             popover_margin_left,
+            ..Self::new(surface_id, state)
         }
     }
 }
 
 impl super::types::ShellComponent for FocusRecordingComponent {
+    fn surface_window_states_changed(&mut self, states: mesh_core_wayland::WindowStates) -> bool {
+        let mut state = self.state.lock().unwrap();
+        if state.window_states.last() == Some(&states) {
+            return false;
+        }
+        state.window_states.push(states);
+        true
+    }
+
     fn id(&self) -> &str {
         &self.surface_id
     }
@@ -768,6 +789,20 @@ impl super::types::ShellComponent for FocusRecordingComponent {
 
     fn popover_margin_left(&self) -> i32 {
         self.popover_margin_left
+    }
+
+    fn surface_role(&self) -> mesh_core_wayland::SurfaceRole {
+        self.role
+    }
+
+    fn surface_promotable(&self) -> bool {
+        self.promotable
+    }
+
+    fn surface_role_changed(&mut self, role: mesh_core_wayland::SurfaceRole) -> bool {
+        self.role = role;
+        self.state.lock().unwrap().applied_roles.push(role);
+        true
     }
 }
 
@@ -1524,7 +1559,6 @@ fn park_reload_deadlines(shell: &mut Shell) {
     shell.next_theme_reload_check = later;
     shell.next_shell_settings_reload_check = later;
     shell.next_frontend_reload_check = later;
-    shell.next_module_settings_reload_check = later;
 }
 
 #[test]
@@ -5507,6 +5541,282 @@ fn activating_popover_closes_promoted_sibling_from_same_trigger_surface() {
 }
 
 #[test]
+fn window_close_request_hides_the_surface_and_keeps_the_component() {
+    // xdg-shell's close is a request, not a destruction. Closing a window
+    // surface must hide it — leaving the component, its services, and its Lua
+    // state alive so reopening is the same cheap show as reopening a panel.
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/settings",
+        state,
+    )));
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@mesh/settings".into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    assert!(
+        shell
+            .core
+            .surfaces
+            .get("@mesh/settings")
+            .is_some_and(|state| state.visible)
+    );
+
+    shell
+        .presentation_engine
+        .testing_push_close_request("@mesh/settings");
+    shell.render_components().unwrap();
+
+    assert!(
+        shell
+            .core
+            .surfaces
+            .get("@mesh/settings")
+            .is_some_and(|state| !state.visible),
+        "a close request must hide the window surface"
+    );
+    assert!(
+        shell
+            .components
+            .iter()
+            .any(|runtime| runtime.surface_id == "@mesh/settings"),
+        "closing a window must not tear down its component"
+    );
+}
+
+/// Register a shown, promotable surface and give it one configured frame, so a
+/// role change afterwards is exercised against real cached shell state rather
+/// than against a surface that was never configured.
+fn promotable_surface_shell(surface_id: &str) -> (Shell, Arc<Mutex<FocusRecordingState>>) {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::promotable(
+        surface_id,
+        Arc::clone(&state),
+    )));
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: surface_id.into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    if let Some(runtime) = shell
+        .components
+        .iter_mut()
+        .find(|runtime| runtime.surface_id == surface_id)
+    {
+        runtime.parent.known_surface_size = Some((920, 700));
+        runtime.parent.last_surface_config = Some(mesh_core_presentation::SurfaceConfig::default());
+    }
+    (shell, state)
+}
+
+#[test]
+fn promoting_a_surface_keeps_its_component_and_invalidates_the_cached_config() {
+    // Runtime promotion is a presentation-layer swap: the component runtime is
+    // the whole point of it surviving. What the shell must drop is the state
+    // that describes the destroyed compositor object, or the render loop
+    // compares against it and never sends the configure that creates the
+    // replacement.
+    let (mut shell, state) = promotable_surface_shell("@mesh/settings");
+
+    shell
+        .apply_request(CoreRequest::SetSurfaceRole {
+            surface_id: "@mesh/settings".into(),
+            role: mesh_core_wayland::SurfaceRole::Window,
+        })
+        .unwrap();
+
+    assert_eq!(
+        state.lock().unwrap().applied_roles,
+        vec![mesh_core_wayland::SurfaceRole::Window]
+    );
+    let runtime = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.surface_id == "@mesh/settings")
+        .expect("promotion must not tear down the component");
+    assert!(
+        runtime.parent.last_surface_config.is_none(),
+        "the cached config describes the surface that was just destroyed"
+    );
+    assert!(
+        runtime.parent.known_surface_size.is_none(),
+        "sizing inverts with the role, so the new surface must be measured afresh"
+    );
+    assert!(runtime.parent.force_full_present);
+    // The old compositor object must be gone *before* the next render frame
+    // reads any size from it. Leaving it for `configure` to swap lazily —
+    // partway through that frame, after the loop has already read
+    // `window_configured_size` — makes the surface lay out against the size the
+    // other role was given, which strands a demoted surface at the 1x1 its
+    // unmeasured 0x0 request gets clamped to. Found against a live compositor.
+    assert_eq!(
+        shell.presentation_engine.testing_destroyed_surfaces(),
+        ["@mesh/settings"]
+    );
+}
+
+#[test]
+fn toggling_a_surface_role_alternates_between_chrome_and_window() {
+    let (mut shell, state) = promotable_surface_shell("@mesh/settings");
+
+    for _ in 0..2 {
+        shell
+            .apply_request(CoreRequest::ToggleSurfaceRole {
+                surface_id: "@mesh/settings".into(),
+            })
+            .unwrap();
+    }
+
+    assert_eq!(
+        state.lock().unwrap().applied_roles,
+        vec![
+            mesh_core_wayland::SurfaceRole::Window,
+            mesh_core_wayland::SurfaceRole::Layer
+        ],
+        "docking back must return the surface to chrome, not leave it a window"
+    );
+}
+
+#[test]
+fn setting_the_role_a_surface_already_has_is_not_a_change() {
+    let (mut shell, state) = promotable_surface_shell("@mesh/settings");
+
+    shell
+        .apply_request(CoreRequest::SetSurfaceRole {
+            surface_id: "@mesh/settings".into(),
+            role: mesh_core_wayland::SurfaceRole::Layer,
+        })
+        .unwrap();
+
+    assert!(
+        state.lock().unwrap().applied_roles.is_empty(),
+        "a no-op role request must not destroy and recreate the compositor object"
+    );
+    assert!(
+        shell
+            .components
+            .iter()
+            .find(|runtime| runtime.surface_id == "@mesh/settings")
+            .is_some_and(|runtime| runtime.parent.last_surface_config.is_some()),
+        "a no-op must leave the cached config in place"
+    );
+}
+
+#[test]
+fn a_surface_that_is_not_promotable_refuses_a_role_change() {
+    // The opt-in is the point: a component laid out for one role is not
+    // automatically usable in the other, so the author declares that both were
+    // designed for.
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/navigation-bar",
+        Arc::clone(&state),
+    )));
+
+    shell
+        .apply_request(CoreRequest::SetSurfaceRole {
+            surface_id: "@mesh/navigation-bar".into(),
+            role: mesh_core_wayland::SurfaceRole::Window,
+        })
+        .unwrap();
+
+    assert!(state.lock().unwrap().applied_roles.is_empty());
+}
+
+#[test]
+fn a_role_change_for_an_unknown_surface_is_ignored() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleSurfaceRole {
+            surface_id: "@mesh/not-installed".into(),
+        })
+        .unwrap();
+}
+
+#[test]
+fn compositor_window_states_reach_the_component_each_render() {
+    // Fullscreen, maximize, and tiling are compositor decisions that arrive on
+    // the toplevel configure. The render loop must hand them to the component
+    // before it resolves a size, so the surface can restyle (and re-measure)
+    // for the size it was given rather than the one it asked for.
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/settings",
+        Arc::clone(&state),
+    )));
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@mesh/settings".into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    // A real frontend sets its role from `mesh.surface.role` on its first
+    // render; the recording component paints nothing, so declare it here.
+    shell
+        .surfaces
+        .get_mut("@mesh/settings")
+        .expect("surface registered")
+        .role = mesh_core_wayland::SurfaceRole::Window;
+    shell.render_components().unwrap();
+    assert_eq!(
+        state.lock().unwrap().window_states,
+        vec![mesh_core_wayland::WindowStates::default()],
+        "a window with no configure yet is neither fullscreen nor activated"
+    );
+
+    let fullscreen = mesh_core_wayland::WindowStates {
+        fullscreen: true,
+        activated: true,
+        ..mesh_core_wayland::WindowStates::default()
+    };
+    shell
+        .presentation_engine
+        .testing_set_window_states("@mesh/settings", fullscreen);
+    shell.render_components().unwrap();
+    shell.render_components().unwrap();
+
+    assert_eq!(
+        state.lock().unwrap().window_states,
+        vec![mesh_core_wayland::WindowStates::default(), fullscreen],
+        "states must be delivered once per change, not once per frame"
+    );
+}
+
+#[test]
+fn window_close_request_for_an_unknown_surface_is_ignored() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+
+    shell
+        .presentation_engine
+        .testing_push_close_request("@mesh/never-registered");
+
+    shell.render_components().unwrap();
+    assert!(
+        shell.core.surfaces.get("@mesh/never-registered").is_none(),
+        "a close request for an unknown surface must not invent surface state"
+    );
+}
+
+#[test]
 fn dismissed_legacy_promoted_popover_hides_surface_state() {
     let mut shell = Shell::new();
     shell.presentation_engine =
@@ -6327,10 +6637,10 @@ fn settings_theme_reload_syncs_theme_service_state() {
     let _env_lock = SETTINGS_ENV_LOCK.lock().unwrap();
     let runtime = Runtime::new().unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let settings_path = dir.path().join("shell-settings.json");
+    let settings_path = dir.path().join("settings.json");
     fs::write(
         &settings_path,
-        r#"{"theme":{"active":"mesh-default-dark"}}"#,
+        r#"{"shell":{"theme":{"active":"mesh-default-dark"}}}"#,
     )
     .unwrap();
     let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
@@ -6346,7 +6656,7 @@ fn settings_theme_reload_syncs_theme_service_state() {
 
     fs::write(
         &settings_path,
-        r#"{"theme":{"active":"mesh-default-light"}}"#,
+        r#"{"shell":{"theme":{"active":"mesh-default-light"}}}"#,
     )
     .unwrap();
     shell.settings_watch.modified_at = None;
@@ -6986,10 +7296,10 @@ fn settings_theme_reload_publishes_resolved_fallback_theme_state() {
     let _env_lock = SETTINGS_ENV_LOCK.lock().unwrap();
     let runtime = Runtime::new().unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let settings_path = dir.path().join("shell-settings.json");
+    let settings_path = dir.path().join("settings.json");
     fs::write(
         &settings_path,
-        r#"{"theme":{"active":"mesh-default-dark"}}"#,
+        r#"{"shell":{"theme":{"active":"mesh-default-dark"}}}"#,
     )
     .unwrap();
     let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
@@ -7003,7 +7313,11 @@ fn settings_theme_reload_publishes_resolved_fallback_theme_state() {
     let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.theme", "@mesh/shell-theme");
     shell.replace_backend_runtime("mesh.theme".to_string(), slot);
 
-    fs::write(&settings_path, r#"{"theme":{"active":"missing-theme"}}"#).unwrap();
+    fs::write(
+        &settings_path,
+        r#"{"shell":{"theme":{"active":"missing-theme"}}}"#,
+    )
+    .unwrap();
     shell.settings_watch.modified_at = None;
     shell.reload_locale_if_settings_changed().unwrap();
 
@@ -7026,10 +7340,10 @@ fn theme_file_recovery_syncs_mesh_theme_latest_state_and_components() {
     let dir = tempfile::tempdir().unwrap();
     let theme_dir = dir.path().join("themes");
     fs::create_dir_all(&theme_dir).unwrap();
-    let settings_path = dir.path().join("shell-settings.json");
+    let settings_path = dir.path().join("settings.json");
     fs::write(
         &settings_path,
-        r#"{"theme":{"active":"mesh-recovered-light"}}"#,
+        r#"{"shell":{"theme":{"active":"mesh-recovered-light"}}}"#,
     )
     .unwrap();
     let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
@@ -7129,7 +7443,7 @@ fn service_contract_provider_declaration_requires_provider_pair() {
     interfaces.register_contract(test_contract("mesh.audio"));
 
     let (candidates, statuses) =
-        backend_launch_candidates_from_graph(&graph, &modules, &test_config(), &interfaces);
+        backend_launch_candidates_from_graph(&graph, &modules, &test_settings(), &interfaces);
 
     assert!(candidates.is_empty());
     assert!(statuses.iter().any(|status| {
@@ -7140,7 +7454,7 @@ fn service_contract_provider_declaration_requires_provider_pair() {
 
     register_test_provider(&interfaces, "mesh.audio", "@mesh/backend");
     let (candidates, statuses) =
-        backend_launch_candidates_from_graph(&graph, &modules, &test_config(), &interfaces);
+        backend_launch_candidates_from_graph(&graph, &modules, &test_settings(), &interfaces);
 
     assert_eq!(candidates.len(), 1);
     assert!(
@@ -7183,7 +7497,7 @@ fn backend_lifecycle_accepts_provider_without_consumer_capabilities() {
     register_test_provider(&interfaces, "mesh.example", "@mesh/backend");
 
     let (candidates, statuses) =
-        backend_launch_candidates_from_graph(&graph, &modules, &test_config(), &interfaces);
+        backend_launch_candidates_from_graph(&graph, &modules, &test_settings(), &interfaces);
 
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].interface, "mesh.example");
@@ -7229,7 +7543,7 @@ fn backend_lifecycle_accepts_valid_provider_with_contract() {
     register_test_provider(&interfaces, "mesh.example", "@mesh/backend");
 
     let (candidates, statuses) =
-        backend_launch_candidates_from_graph(&graph, &modules, &test_config(), &interfaces);
+        backend_launch_candidates_from_graph(&graph, &modules, &test_settings(), &interfaces);
 
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].interface, "mesh.example");
@@ -7709,7 +8023,7 @@ fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
     let (candidates, statuses) = backend_launch_candidates_from_graph(
         &graph,
         &modules,
-        &test_config(),
+        &test_settings(),
         &InterfaceRegistry::new(),
     );
 
@@ -7796,7 +8110,7 @@ fn backend_lifecycle_never_falls_back_to_an_unselected_discovered_provider() {
     register_test_provider(&interfaces, "mesh.example", "@mesh/fallback");
 
     let (candidates, statuses) =
-        backend_launch_candidates_from_graph(&graph, &modules, &test_config(), &interfaces);
+        backend_launch_candidates_from_graph(&graph, &modules, &test_settings(), &interfaces);
 
     assert!(candidates.is_empty());
     assert!(statuses.iter().any(|status| {
@@ -7841,7 +8155,7 @@ fn backend_lifecycle_rejects_missing_backend_entrypoint_before_launch() {
     let (candidates, statuses) = backend_launch_candidates_from_graph(
         &graph,
         &modules,
-        &test_config(),
+        &test_settings(),
         &InterfaceRegistry::new(),
     );
 
@@ -7892,7 +8206,7 @@ fn backend_lifecycle_excludes_disabled_backend_modules() {
     let (candidates, statuses) = backend_launch_candidates_from_graph(
         &graph,
         &modules,
-        &test_config(),
+        &test_settings(),
         &InterfaceRegistry::new(),
     );
 
@@ -7942,7 +8256,7 @@ fn backend_lifecycle_reports_frontend_requirement_without_active_provider() {
     let (candidates, statuses) = backend_launch_candidates_from_graph(
         &graph,
         &modules,
-        &test_config(),
+        &test_settings(),
         &InterfaceRegistry::new(),
     );
 
@@ -7982,7 +8296,7 @@ fn backend_lifecycle_reports_frontend_requirement_without_installed_provider() {
     let (candidates, statuses) = backend_launch_candidates_from_graph(
         &graph,
         &HashMap::new(),
-        &test_config(),
+        &test_settings(),
         &InterfaceRegistry::new(),
     );
 
@@ -8286,7 +8600,14 @@ fn frontend_module_activation_mounts_shipped_surface_live() {
         .as_ref()
         .expect("settings surface should be configured through the shell renderer");
     assert_eq!(config.width, 920);
+    // `@mesh/settings` is `promotable` and *starts* as chrome, so this is the
+    // layer-surface shape: the 700px CSS-measured root plus the 200px tooltip
+    // overlay reserve. Popping it out into a window drops that reserve, because
+    // a toplevel's size is its content size — the compositor pins, decorates,
+    // and tiles by it, so a padded buffer would make the window measurably
+    // larger than the UI inside it.
     assert_eq!(config.height, 900);
+    assert_eq!(config.role, mesh_core_wayland::SurfaceRole::Layer);
 }
 
 #[test]
@@ -8563,24 +8884,26 @@ fn stale_provider_failure_does_not_clear_new_provider_state() {
 
 #[test]
 fn frontend_settings_override_surface_layout_defaults() {
-    let path = unique_test_file("surface-layout");
-    fs::write(
-        &path,
-        r#"{
-  "surface": {
-    "anchor": "left",
-    "layer": "overlay",
-    "exclusive_zone": 12,
-    "keyboard_mode": "exclusive",
-    "visible_on_start": true
-  }
-}"#,
-    )
-    .unwrap();
-
     let manifest = minimal_manifest("@mesh/base-surface");
-    let settings = load_frontend_module_settings(&path, &manifest);
-    fs::remove_file(&path).ok();
+    let mut store = mesh_core_config::SettingsStore::default();
+    store.set_namespace(
+        &manifest.package.id,
+        serde_json::json!({
+            "surface": {
+                "anchor": "left",
+                "layer": "overlay",
+                "exclusive_zone": 12,
+                "keyboard_mode": "exclusive",
+                "visible_on_start": true
+            }
+        }),
+    );
+
+    let settings = resolve_frontend_module_settings(
+        &manifest.package.id,
+        store.namespace(&manifest.package.id),
+        &manifest,
+    );
 
     assert_eq!(settings.layout.edge, mesh_core_wayland::Edge::Left);
     assert_eq!(settings.layout.layer, mesh_core_wayland::Layer::Overlay);

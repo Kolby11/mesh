@@ -14,8 +14,7 @@ mesh/
 ├── TEXT_RENDERING_TODO.md        # Text rendering work notes
 ├── config/                       # Local runtime config, package graph, themes, catalog manifests
 │   ├── package.json              # Root installed-module graph
-│   ├── shell-settings.json       # User-facing shell settings used in repo/dev runs
-│   ├── settings-default.json     # Bundled default shell settings
+│   ├── settings.json             # The one settings store (shell + per-module namespaces)
 │   ├── icons.toml                # Icon configuration
 │   ├── themes/                   # Theme token JSON files
 │   └── modules/@mesh/*/          # Package-shaped bundled/catalog module manifests
@@ -129,7 +128,7 @@ mesh/
 **`modules/frontend`:**
 - Purpose: Source frontend surface/widget modules used by local discovery and root graph.
 - Contains: `navigation-bar` surface module with settings, translations, components, `.mesh` entrypoint.
-- Key files: `modules/frontend/navigation-bar/package.json`, `modules/frontend/navigation-bar/src/main.mesh`, `modules/frontend/navigation-bar/src/components/*.mesh`, `modules/frontend/navigation-bar/config/settings.json`.
+- Key files: `modules/frontend/navigation-bar/package.json`, `modules/frontend/navigation-bar/src/main.mesh`, `modules/frontend/navigation-bar/src/components/*.mesh`.
 
 **`modules/interfaces`:**
 - Purpose: Interface contract TOML files for service APIs.
@@ -139,7 +138,7 @@ mesh/
 **`config`:**
 - Purpose: Runtime config and bundled package/catalog data for local runs.
 - Contains: Root module graph, shell settings, default settings, themes, icon config, package-shaped catalog manifests.
-- Key files: `config/package.json`, `config/shell-settings.json`, `config/settings-default.json`, `config/themes/mesh-default-dark.json`, `config/themes/mesh-default-light.json`, `config/modules/@mesh/*/package.json`.
+- Key files: `config/package.json`, `config/settings.json`, `config/themes/mesh-default-dark.json`, `config/themes/mesh-default-light.json`, `config/modules/@mesh/*/package.json`.
 
 **`docs`:**
 - Purpose: Human-facing architecture and authoring documentation.
@@ -165,12 +164,10 @@ mesh/
 **Configuration:**
 - `Cargo.toml`: Workspace members, workspace package metadata, shared dependencies.
 - `config/package.json`: Root installed-module graph loaded by backend provider launch.
-- `config/shell-settings.json`: Repo-local shell settings path used by `default_settings_path()` when present.
-- `config/settings-default.json`: Default shell settings loaded before user overrides.
+- `config/settings.json`: The one settings store, used by `default_settings_path()` when present. Sparse — declared defaults live in code and module manifests.
 - `config/icons.toml`: Icon configuration.
 - `config/themes/mesh-default-dark.json`: Dark theme tokens.
 - `config/themes/mesh-default-light.json`: Light theme tokens.
-- `modules/frontend/navigation-bar/config/settings.json`: Frontend surface settings for navigation bar.
 - `flake.nix`: Nix development shell/package setup.
 
 **Core Logic:**
@@ -266,7 +263,7 @@ mesh/
 - Implementation: `modules/frontend/<module-name>/package.json` for target package shape, or `modules/frontend/<module-name>/package.json` only when compatibility with existing runtime fields is required.
 - Entrypoint: `modules/frontend/<module-name>/src/main.mesh`.
 - Local components: `modules/frontend/<module-name>/src/components/*.mesh`.
-- Settings: `modules/frontend/<module-name>/config/settings.json`.
+- Settings: the module's namespace in `config/settings.json` (module directories hold defaults only, never user overrides).
 - Root graph entry: add to `config/package.json` under `mesh.modules`; select `mesh.layout.entrypoint` for a top-level layout when applicable.
 
 **New `.mesh` Parser Or Renderer Capability:**

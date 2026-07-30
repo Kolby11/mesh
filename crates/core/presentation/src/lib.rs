@@ -5,15 +5,16 @@ use std::collections::HashMap;
 use std::os::unix::io::BorrowedFd;
 
 use mesh_core_render::{DamageRect, PixelBuffer};
+use mesh_core_wayland::WindowStates;
 
 pub use dev_window::{DevWindowEvent as WindowEvent, DevWindowKeyEvent as WindowKeyEvent, KeyMods};
 pub use wayland_surface::{
-    LayerSurfaceConfig, LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint,
-    PopupGravity, PopupPlacement,
+    LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity,
+    PopupPlacement, SurfaceConfig,
 };
 
 use dev_window::DevWindowBackend;
-use wayland_surface::LayerShellBackend;
+use wayland_surface::WaylandSurfaceBackend;
 
 /// Why a blocking wait returned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,9 +72,12 @@ pub struct PresentationEngine {
 }
 
 enum Backend {
-    WaylandSurface(Box<LayerShellBackend>),
+    WaylandSurface(Box<WaylandSurfaceBackend>),
     DevWindow(DevWindowBackend),
-    Testing(TestingBackend),
+    // Boxed for the same reason as the Wayland backend: the testing backend's
+    // recording vectors and maps would otherwise set the size of every
+    // `PresentationEngine`.
+    Testing(Box<TestingBackend>),
 }
 
 #[derive(Default)]
@@ -83,9 +87,11 @@ struct TestingBackend {
     destroyed_popups: Vec<String>,
     destroyed_surfaces: Vec<String>,
     dismissed_popups: Vec<String>,
+    close_requests: Vec<String>,
     events: Vec<WindowEvent>,
     presented: Vec<String>,
     presented_damage: Vec<(String, Vec<DamageRect>)>,
+    window_states: HashMap<String, WindowStates>,
 }
 
 impl PresentationEngine {
@@ -96,7 +102,7 @@ impl PresentationEngine {
         let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
 
         let backend = if !want_dev && (want_wayland || wayland) {
-            match LayerShellBackend::new() {
+            match WaylandSurfaceBackend::new() {
                 Ok(bridge) => {
                     tracing::info!("using wayland surface bridge");
                     Backend::WaylandSurface(Box::new(bridge))
@@ -120,10 +126,19 @@ impl PresentationEngine {
     #[doc(hidden)]
     pub fn testing_with_popup_support(popup_supported: bool) -> Self {
         Self {
-            backend: Backend::Testing(TestingBackend {
+            backend: Backend::Testing(Box::new(TestingBackend {
                 popup_supported,
                 ..TestingBackend::default()
-            }),
+            })),
+        }
+    }
+
+    /// Stand in for a compositor configure that put a window into the given
+    /// states, so shell-side projection can be tested without a compositor.
+    #[doc(hidden)]
+    pub fn testing_set_window_states(&mut self, surface_id: &str, states: WindowStates) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            backend.window_states.insert(surface_id.to_string(), states);
         }
     }
 
@@ -168,6 +183,13 @@ impl PresentationEngine {
     }
 
     #[doc(hidden)]
+    pub fn testing_push_close_request(&mut self, surface_id: impl Into<String>) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            backend.close_requests.push(surface_id.into());
+        }
+    }
+
+    #[doc(hidden)]
     pub fn testing_push_dismissed_popup(&mut self, surface_id: impl Into<String>) {
         if let Backend::Testing(backend) = &mut self.backend {
             backend.dismissed_popups.push(surface_id.into());
@@ -181,9 +203,65 @@ impl PresentationEngine {
         }
     }
 
-    pub fn configure(&mut self, surface_id: &str, cfg: LayerSurfaceConfig) {
+    pub fn configure(&mut self, surface_id: &str, cfg: SurfaceConfig) {
         if let Backend::WaylandSurface(bridge) = &mut self.backend {
             bridge.configure(surface_id, cfg);
+        }
+    }
+
+    /// The size the compositor last configured for a `role: "window"` surface,
+    /// when it named one. `None` means the client's CSS-measured size still
+    /// governs — either the surface is not a window, or its compositor has not
+    /// yet decided a size (the usual state of a freshly mapped toplevel).
+    pub fn window_configured_size(&self, surface_id: &str) -> Option<(u32, u32)> {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.window_configured_size(surface_id),
+            _ => None,
+        }
+    }
+
+    /// The `xdg_toplevel` states the compositor last configured for a
+    /// `role: "window"` surface. Everything false for a layer surface, a popup,
+    /// or a window whose first configure has not arrived — a window that has
+    /// not been told it is fullscreen is not fullscreen.
+    pub fn window_states(&self, surface_id: &str) -> WindowStates {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.window_states(surface_id),
+            Backend::Testing(backend) => backend
+                .window_states
+                .get(surface_id)
+                .copied()
+                .unwrap_or_default(),
+            Backend::DevWindow(_) => WindowStates::default(),
+        }
+    }
+
+    /// Drain the ids of window surfaces the user asked to close. xdg-shell's
+    /// close is a request, not a destruction: the surface stays mapped until
+    /// the shell acts on it.
+    pub fn take_close_requests(&mut self) -> Vec<String> {
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.take_close_requests(),
+            Backend::DevWindow(_) => Vec::new(),
+            Backend::Testing(backend) => std::mem::take(&mut backend.close_requests),
+        }
+    }
+
+    /// True when the active backend can realize a surface as an `xdg_toplevel`.
+    /// Same requirement as [`Self::popup_supported`] — `xdg_wm_base` — but a
+    /// distinct question, so that a caller refusing to promote a surface says
+    /// which capability it was missing.
+    ///
+    /// Callers must check this *before* flipping a surface's role: creating the
+    /// toplevel fails inside `configure`, by which point the old layer surface
+    /// has already been destroyed and the surface would be left unmapped.
+    pub fn window_role_supported(&self) -> bool {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.window_role_supported(),
+            Backend::DevWindow(_) => false,
+            // The testing backend records configures without creating compositor
+            // objects, so role changes are always exercisable there.
+            Backend::Testing(_) => true,
         }
     }
 

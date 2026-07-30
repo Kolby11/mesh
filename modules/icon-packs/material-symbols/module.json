@@ -43,6 +43,8 @@
         "computer": "ms/computer",
         "close": "ms/close",
         "window-close": "ms/close",
+        "window-new": "ms/open_in_new",
+        "window-restore": "ms/close_fullscreen",
         "language": "ms/language",
         "weather-clear": "ms/wb_sunny",
         "weather-clear-night": "ms/clear_night",

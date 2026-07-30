@@ -6,6 +6,8 @@
   "settings.backend_aware.copy": "Controls appear only when a compatible service is available.",
   "settings.eyebrow": "SETTINGS",
   "settings.close": "Close settings",
+  "settings.pop_out": "Open settings as a window",
+  "settings.dock_back": "Dock settings back to the edge",
   "nav.wifi": "Wi-Fi",
   "nav.wifi.subtitle": "Networks and connectivity",
   "nav.audio": "Audio",

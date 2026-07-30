@@ -6,6 +6,7 @@ use mesh_core_presentation::{
     LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement,
 };
 use mesh_core_render::{DamageRect, DisplayPaintCommand};
+use mesh_core_wayland::SurfaceRole;
 use smallvec::SmallVec;
 
 const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
@@ -13,6 +14,7 @@ const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
         self.drain_dismissed_popups()?;
+        self.drain_window_close_requests()?;
 
         if self.debug.enabled {
             let mut debug_requests = self.publish_debug_snapshot()?;
@@ -22,10 +24,30 @@ impl Shell {
         let mut components_want_render_after_frame = false;
         let mut any_component_presented = false;
         for index in 0..self.components.len() {
+            let surface_id = self.components[index].surface_id.clone();
+            // Ahead of the `wants_render` gate: a compositor state change is
+            // precisely what makes an otherwise-quiet window want to render.
+            // Asking behind the gate would strand a fullscreened surface at its
+            // floating style until something else happened to dirty it.
+            // Keyed off the shell-surface record — what has actually been
+            // applied — not the component's requested role. A promotion is
+            // applied by `render_layout` further down this same frame, so the
+            // record catches up before the compositor has any states to report.
+            // Demotion needs no delivery here at all: `surface_role_changed`
+            // clears the states itself, because a layer surface has none.
+            if self
+                .surfaces
+                .get(&surface_id)
+                .is_some_and(|surface| surface.role == SurfaceRole::Window)
+            {
+                let states = self.presentation_engine.window_states(&surface_id);
+                self.components[index]
+                    .component
+                    .surface_window_states_changed(states);
+            }
             if !self.components[index].component.wants_render() {
                 continue;
             }
-            let surface_id = self.components[index].surface_id.clone();
             let visible = self.surface_is_effectively_visible(&surface_id);
             if !visible
                 && self.components[index].parent.last_surface_config.is_none()
@@ -95,6 +117,13 @@ impl Shell {
                 } else {
                     (requested_width.max(1), requested_height.max(1))
                 };
+                // See the in-loop override below: for a window the compositor's
+                // configured size wins over CSS measurement.
+                let (width, height) = self
+                    .presentation_engine
+                    .window_configured_size(&surface_id)
+                    .map(|(w, h)| (w.max(1), h.max(1)))
+                    .unwrap_or((width, height));
                 let scale = self.presentation_engine.surface_scale(&surface_id);
                 (width, height, scale)
             };
@@ -171,8 +200,12 @@ impl Shell {
                 // content box. `surface.width/height` (and everything the
                 // component sees) stay content-sized; pointer input is
                 // confined back to content in `present_surface_target`.
-                let (tooltip_extra_w, tooltip_extra_h) =
-                    tooltip_overlay_extra_for_surface(&surface_id, surface.width, surface.height);
+                let (tooltip_extra_w, tooltip_extra_h) = tooltip_overlay_extra_for_surface(
+                    &surface_id,
+                    surface.role,
+                    surface.width,
+                    surface.height,
+                );
                 let configured_width = surface.width.saturating_add(tooltip_extra_w);
                 let configured_height = surface.height.saturating_add(tooltip_extra_h);
                 let config_changed = self.components[index]
@@ -192,9 +225,13 @@ impl Shell {
                             || last.margin_bottom != surface.margin_bottom
                             || last.margin_left != surface.margin_left
                             || last.blur != surface.blur
+                            || last.role != surface.role
+                            || last.window != surface.window
                     });
                 if config_changed && !is_popup {
-                    let cfg = LayerSurfaceConfig {
+                    let cfg = SurfaceConfig {
+                        role: surface.role,
+                        window: surface.window.clone(),
                         edge: surface.edge,
                         layer,
                         size_policy,
@@ -291,6 +328,17 @@ impl Shell {
                         inner_requested_height.max(1)
                     };
                 }
+                // A window surface sizes in the opposite direction to a layer
+                // surface: once the compositor has decided a size (tiling
+                // layout, maximize, interactive resize) that decision is
+                // binding and the content lays out into it, rather than the
+                // CSS-measured size being sent as a request.
+                if let Some((window_width, window_height)) =
+                    self.presentation_engine.window_configured_size(&surface_id)
+                {
+                    width = window_width.max(1);
+                    height = window_height.max(1);
+                }
                 let resolved_size = (width, height);
                 if self.components[index].parent.known_surface_size != Some(resolved_size) {
                     self.components[index].parent.known_surface_size = Some(resolved_size);
@@ -334,8 +382,15 @@ impl Shell {
                 (paint_width, paint_height) = if is_popup {
                     (width, height)
                 } else {
-                    let (extra_w, extra_h) =
-                        tooltip_overlay_extra_for_surface(&surface_id, width, height);
+                    let (extra_w, extra_h) = tooltip_overlay_extra_for_surface(
+                        &surface_id,
+                        self.surfaces
+                            .get(&surface_id)
+                            .map(|surface| surface.role)
+                            .unwrap_or_default(),
+                        width,
+                        height,
+                    );
                     (
                         width.saturating_add(extra_w),
                         height.saturating_add(extra_h),
@@ -948,6 +1003,27 @@ impl Shell {
         }
     }
 
+    /// Act on close requests from window surfaces (title-bar button, compositor
+    /// close binding).
+    ///
+    /// Closing hides the surface rather than destroying the component: the
+    /// module, its services, and its Lua state survive, so reopening the window
+    /// is the same cheap show that reopening a hidden panel is. Nothing here
+    /// unmaps the toplevel directly — `set_surface_visibility_now` runs the
+    /// same hide path every other surface uses, including the CSS exit
+    /// transition.
+    fn drain_window_close_requests(&mut self) -> Result<(), ShellRunError> {
+        for surface_id in self.presentation_engine.take_close_requests() {
+            if self.component_index_for_surface(&surface_id).is_none() {
+                continue;
+            }
+            tracing::info!(surface_id, "window close requested; hiding surface");
+            let mut pending = self.set_surface_visibility_now(surface_id, false)?;
+            self.drain_requests(&mut pending)?;
+        }
+        Ok(())
+    }
+
     fn drain_dismissed_popups(&mut self) -> Result<(), ShellRunError> {
         for surface_id in self.presentation_engine.take_dismissed_popups() {
             match self.component_target_for_surface(&surface_id) {
@@ -1261,8 +1337,21 @@ impl Shell {
     }
 }
 
-fn tooltip_overlay_extra_for_surface(surface_id: &str, width: u32, height: u32) -> (u32, u32) {
-    if surface_id == DEBUG_INSPECTOR_SURFACE_ID {
+/// Extra buffer a parent surface reserves so tooltips can paint outside the
+/// content box.
+///
+/// Window surfaces get none. A toplevel's size *is* its content size — it is
+/// what the compositor pins, decorates, tiles, and reports — so padding the
+/// buffer would make the window measurably larger than the UI inside it. A
+/// tooltip that needs to escape a window's bounds is an `xdg_popup`, the same
+/// primitive `<popover>` already promotes to.
+fn tooltip_overlay_extra_for_surface(
+    surface_id: &str,
+    role: SurfaceRole,
+    width: u32,
+    height: u32,
+) -> (u32, u32) {
+    if surface_id == DEBUG_INSPECTOR_SURFACE_ID || role == SurfaceRole::Window {
         return (0, 0);
     }
     component::tooltip_overlay_extra_for_content(width, height)

@@ -89,6 +89,11 @@ pub(super) struct State {
     /// can drop the matching popup target. Entries are removed from `surfaces`
     /// immediately; this only carries the id outward.
     pub(super) dismissed_popups: Vec<String>,
+    /// `surface_id`s of windows whose close button (or compositor close
+    /// binding) was activated. Drained by the shell, which decides what closing
+    /// means; unlike `dismissed_popups` the surface is *not* removed here,
+    /// because xdg-shell's close is a request the client may decline.
+    pub(super) close_requests: Vec<String>,
 }
 
 impl State {

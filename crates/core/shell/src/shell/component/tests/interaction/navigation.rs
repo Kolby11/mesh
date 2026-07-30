@@ -3823,122 +3823,64 @@ fn assert_keybind_diagnostic(
     );
 }
 
-mod keyboard_settings_cache {
+mod keyboard_settings {
     use super::*;
 
-    struct EnvGuard {
-        key: &'static str,
-        old: Option<String>,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, value: &std::path::Path) -> Self {
-            let old = std::env::var(key).ok();
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            Self { key, old }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            unsafe {
-                match &self.old {
-                    Some(value) => std::env::set_var(self.key, value),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
-    }
-
-    // Serializes access to the process-global MESH_SETTINGS_PATH /
-    // MESH_SETTINGS_DEFAULTS_PATH env vars these tests mutate.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     #[test]
-    fn keyboard_settings_cache_reflects_file_changes() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let defaults_path = dir.path().join("defaults.json");
-        let user_path = dir.path().join("settings.json");
-        std::fs::write(&defaults_path, "{}").unwrap();
-
-        let _defaults_env = EnvGuard::set("MESH_SETTINGS_DEFAULTS_PATH", &defaults_path);
-        let _user_env = EnvGuard::set("MESH_SETTINGS_PATH", &user_path);
-
+    fn keyboard_settings_come_from_the_injected_store() {
+        // No file is read on the input path any more: the component answers
+        // from the store the shell handed it.
         let component = test_frontend_component("<template><box/></template>");
 
-        let initial = component.current_keyboard_settings();
+        let settings = component.current_keyboard_settings();
+
         assert!(
-            initial
+            settings
                 .button_activation_keys
                 .contains(&"Enter".to_string())
         );
-
-        // A brief pause guards against filesystems with coarse mtime
-        // resolution reporting an unchanged timestamp for the rewrite below.
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        std::fs::write(
-            &user_path,
-            r#"{"keyboard": {"button_activation_keys": ["KeyQ"]}}"#,
-        )
-        .unwrap();
-
-        let updated = component.current_keyboard_settings();
-        assert_eq!(updated.button_activation_keys, vec!["KeyQ".to_string()]);
-    }
-
-    // cargo test -p mesh-core-shell --release -- keyboard_settings_cache_beats_uncached_reload --ignored --nocapture
-    #[test]
-    #[ignore = "release-only keyboard settings cache microbenchmark"]
-    fn keyboard_settings_cache_beats_uncached_reload() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let defaults_path = dir.path().join("defaults.json");
-        let user_path = dir.path().join("settings.json");
-        std::fs::write(&defaults_path, "{}").unwrap();
-        std::fs::write(
-            &user_path,
-            r#"{"keyboard": {"button_activation_keys": ["Enter", "Space"]}}"#,
-        )
-        .unwrap();
-
-        let _defaults_env = EnvGuard::set("MESH_SETTINGS_DEFAULTS_PATH", &defaults_path);
-        let _user_env = EnvGuard::set("MESH_SETTINGS_PATH", &user_path);
-
-        let component = test_frontend_component("<template><box/></template>");
-        let iterations = 20_000usize;
-
-        let uncached_started = Instant::now();
-        let mut uncached_total = 0usize;
-        for _ in 0..iterations {
-            let settings = mesh_core_config::load_shell_settings()
-                .map(|settings| settings.keyboard)
-                .unwrap_or_default();
-            uncached_total = uncached_total
-                .saturating_add(std::hint::black_box(settings.button_activation_keys.len()));
-        }
-        let uncached_time = uncached_started.elapsed();
-
-        let cached_started = Instant::now();
-        let mut cached_total = 0usize;
-        for _ in 0..iterations {
-            let settings = component.current_keyboard_settings();
-            cached_total = cached_total
-                .saturating_add(std::hint::black_box(settings.button_activation_keys.len()));
-        }
-        let cached_time = cached_started.elapsed();
-
-        assert_eq!(uncached_total, cached_total);
-        eprintln!(
-            "keyboard settings over {iterations} calls: reload every call {uncached_time:?}; mtime-cached {cached_time:?}"
-        );
         assert!(
-            cached_time < uncached_time,
-            "mtime-cached settings lookup should beat reloading from disk every call"
+            settings
+                .button_activation_keys
+                .contains(&"Space".to_string())
         );
     }
+
+    #[test]
+    fn applying_a_reloaded_store_updates_keyboard_settings() {
+        let mut component = test_frontend_component("<template><box/></template>");
+
+        let reloaded = test_settings_store_with(
+            "shell",
+            serde_json::json!({ "keyboard": { "button_activation_keys": ["KeyQ"] } }),
+        );
+        component.apply_settings(&reloaded).unwrap();
+
+        assert_eq!(
+            component.current_keyboard_settings().button_activation_keys,
+            vec!["KeyQ".to_string()]
+        );
+    }
+
+    #[test]
+    fn an_unrelated_shell_override_leaves_activation_keys_at_their_defaults() {
+        let mut component = test_frontend_component("<template><box/></template>");
+
+        let reloaded = test_settings_store_with(
+            "shell",
+            serde_json::json!({ "tooltip": { "delay_ms": 10 } }),
+        );
+        component.apply_settings(&reloaded).unwrap();
+
+        assert_eq!(
+            component.current_keyboard_settings().button_activation_keys,
+            vec!["Enter".to_string(), "Space".to_string()]
+        );
+    }
+}
+
+mod resolved_surface_shortcuts_cache {
+    use super::*;
 
     // cargo test -p mesh-core-shell --release -- resolved_surface_shortcuts_cache_beats_rebuild --ignored --nocapture
     #[test]

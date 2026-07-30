@@ -1,8 +1,6 @@
 use super::super::*;
 
 const FRONTEND_RELOAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
-const MODULE_SETTINGS_RELOAD_POLL_INTERVAL: std::time::Duration =
-    std::time::Duration::from_millis(500);
 
 impl Shell {
     pub(in crate::shell) fn reload_frontend_components_if_changed(
@@ -72,59 +70,6 @@ impl Shell {
             }
         }
 
-        Ok(())
-    }
-
-    pub(in crate::shell) fn reload_module_settings_if_changed(
-        &mut self,
-    ) -> Result<(), ShellRunError> {
-        let now = std::time::Instant::now();
-        if now < self.next_module_settings_reload_check {
-            return Ok(());
-        }
-        self.next_module_settings_reload_check = now
-            + if self.file_watcher_active {
-                super::FILE_WATCHER_RELOAD_PARK
-            } else {
-                MODULE_SETTINGS_RELOAD_POLL_INTERVAL
-            };
-
-        for runtime in &mut self.components {
-            let current_settings_path = runtime.component.module_settings_path();
-            if runtime.module_settings_path.as_deref() != current_settings_path {
-                runtime.module_settings_path = current_settings_path.map(PathBuf::from);
-                runtime.module_settings_modified_at = None;
-            }
-
-            let Some(settings_path) = runtime.module_settings_path.as_ref() else {
-                continue;
-            };
-
-            let Ok(metadata) = std::fs::metadata(settings_path) else {
-                continue;
-            };
-            let Ok(modified_at) = metadata.modified() else {
-                continue;
-            };
-
-            if runtime.module_settings_modified_at == Some(modified_at) {
-                continue;
-            }
-
-            runtime.module_settings_modified_at = Some(modified_at);
-
-            let changed = runtime
-                .component
-                .reload_module_settings()
-                .map_err(ShellRunError::Component)?;
-
-            if changed {
-                tracing::info!(
-                    "module settings changed for component '{}'",
-                    runtime.component.id()
-                );
-            }
-        }
         Ok(())
     }
 

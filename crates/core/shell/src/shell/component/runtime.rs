@@ -325,17 +325,9 @@ impl FrontendSurfaceComponent {
         // Imported modules own their settings just like top-level surfaces do.
         // Falling back to the host surface's settings made an embedded audio,
         // language, or theme module accidentally inherit the navigation bar's
-        // global props and left its own config/settings.json unused.
+        // global props instead of reading its own namespace.
         let imported_settings = (manifest.package.id != self.compiled.manifest.package.id)
-            .then(|| self.frontend_catalog.modules.get(&manifest.package.id))
-            .flatten()
-            .map(|entry| {
-                load_frontend_module_settings(
-                    &entry.module_dir.join("config/settings.json"),
-                    manifest,
-                )
-                .raw
-            });
+            .then(|| self.settings.namespace(&manifest.package.id));
         let settings_json = imported_settings.as_ref().unwrap_or(&self.settings_json);
         publish_resolved_props(
             &mut script_ctx,

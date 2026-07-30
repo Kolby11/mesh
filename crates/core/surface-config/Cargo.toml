@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+mesh-core-config = { workspace = true }
 mesh-core-module = { workspace = true }
 mesh-core-wayland = { workspace = true }
 

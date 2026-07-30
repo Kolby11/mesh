@@ -10,7 +10,7 @@
 
 **Secondary:**
 - MESH single-file UI components (`.mesh`) - Frontend surface/component authoring with `<template>`, `<script lang="luau">`, and `<style>` blocks; shipped surface at `modules/frontend/navigation-bar/src/main.mesh`.
-- JSON - Module manifests, root module graph, settings, themes, and package metadata in `config/package.json`, `config/modules/@mesh/*/package.json`, `config/settings-default.json`, `config/shell-settings.json`, and `config/themes/*.json`.
+- JSON - Module manifests, root module graph, settings, themes, and package metadata in `config/package.json`, `config/modules/@mesh/*/package.json`, `config/settings.json`, and `config/themes/*.json`.
 - TOML - Rust manifests, interface contracts, legacy/config formats, icon registry config, and docs examples in `Cargo.toml`, `modules/interfaces/audio.toml`, `config/icons.toml`, and `docs/module-system.md`.
 - Nix - Development shell in `flake.nix`.
 
@@ -70,7 +70,6 @@
 **Environment:**
 - `MESH_HOME` - Overrides the module root used for root `package.json`, modules, themes, and settings in `crates/core/extension/plugin/src/package.rs` and `crates/core/foundation/config/src/lib.rs`.
 - `MESH_SETTINGS_PATH` - Overrides the user shell settings path in `crates/core/foundation/config/src/lib.rs`.
-- `MESH_SETTINGS_DEFAULTS_PATH` - Overrides bundled default settings path in `crates/core/foundation/config/src/lib.rs`.
 - `MESH_IPC_SOCKET` - Overrides the shell Unix IPC socket path in `crates/core/shell/src/shell/mod.rs`.
 - `XDG_CONFIG_HOME` / `XDG_DATA_HOME` - Control config/data roots for shell config and legacy module override files in `crates/core/foundation/config/src/lib.rs`.
 - `XDG_RUNTIME_DIR` - Preferred runtime directory for `mesh.sock` in `crates/core/shell/src/shell/mod.rs`.
@@ -90,8 +89,7 @@
 - `config/package.json` - Local installed-module graph. Use `mesh.schemaVersion`, `mesh.modulesDir`, `mesh.modules`, `mesh.providers`, and `mesh.layout` for active modules and provider pins.
 - `config/modules/@mesh/*/package.json` - Package-shaped module manifests for bundled/default module metadata and distribution examples.
 - `modules/**/package.json` and `modules/**/package.json` - Runtime module manifests loaded by the shell; new modules should use `package.json`, while the current compatibility loader still accepts legacy `package.json`.
-- `config/settings-default.json` - Bundled defaults for theme and i18n.
-- `config/shell-settings.json` - Repo-local shell settings loaded before falling back to `~/.mesh/settings.json`.
+- `config/settings.json` - The one settings store, namespaced by `shell`/module id; loaded before falling back to `~/.mesh/settings.json`. Defaults live in code and module manifests, not here.
 - `config/icons.toml` - Icon pack/profile fallback order for semantic icon names.
 - `config/themes/*.json` - Token themes loaded by the theme engine.
 

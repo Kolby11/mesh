@@ -189,6 +189,26 @@ pub(super) fn parse_ipc_command(command: &str) -> Option<CoreRequest> {
             surface_id: surface_id.to_string(),
         });
     }
+    // Role control over IPC is what makes a *compositor* keybind able to pop a
+    // surface out: MESH keybinds are focused-surface actions and cannot grab a
+    // global hotkey, so the user binds `mesh surface promote …` instead.
+    if let Some(surface_id) = command.strip_prefix("shell:promote_surface:") {
+        return Some(CoreRequest::SetSurfaceRole {
+            surface_id: surface_id.to_string(),
+            role: mesh_core_wayland::SurfaceRole::Window,
+        });
+    }
+    if let Some(surface_id) = command.strip_prefix("shell:demote_surface:") {
+        return Some(CoreRequest::SetSurfaceRole {
+            surface_id: surface_id.to_string(),
+            role: mesh_core_wayland::SurfaceRole::Layer,
+        });
+    }
+    if let Some(surface_id) = command.strip_prefix("shell:toggle_surface_role:") {
+        return Some(CoreRequest::ToggleSurfaceRole {
+            surface_id: surface_id.to_string(),
+        });
+    }
     if let Some(scenario_id) = command.strip_prefix("shell:debug_benchmark:") {
         return Some(CoreRequest::RunDebugBenchmark {
             scenario_id: scenario_id.to_string(),
@@ -343,5 +363,33 @@ mod tests {
 
             assert_eq!(response, "error command-too-long\n");
         });
+    }
+
+    #[test]
+    fn ipc_parses_surface_role_commands() {
+        assert!(matches!(
+            parse_ipc_command("shell:promote_surface:@mesh/settings"),
+            Some(CoreRequest::SetSurfaceRole { surface_id, role })
+                if surface_id == "@mesh/settings"
+                    && role == mesh_core_wayland::SurfaceRole::Window
+        ));
+        assert!(matches!(
+            parse_ipc_command("shell:demote_surface:@mesh/settings"),
+            Some(CoreRequest::SetSurfaceRole { surface_id, role })
+                if surface_id == "@mesh/settings"
+                    && role == mesh_core_wayland::SurfaceRole::Layer
+        ));
+        assert!(matches!(
+            parse_ipc_command("shell:toggle_surface_role:@mesh/settings"),
+            Some(CoreRequest::ToggleSurfaceRole { surface_id })
+                if surface_id == "@mesh/settings"
+        ));
+        // `shell:toggle_surface:` must keep meaning visibility, not role — the
+        // role verbs are a longer prefix and must not shadow it.
+        assert!(matches!(
+            parse_ipc_command("shell:toggle_surface:@mesh/settings"),
+            Some(CoreRequest::ToggleSurface { .. })
+        ));
+        assert!(parse_ipc_command("shell:promote_surface").is_none());
     }
 }

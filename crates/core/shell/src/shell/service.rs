@@ -170,6 +170,25 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                 defer_for_hover_bridge,
             })
         }
+        "shell.set-surface-role" => {
+            let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
+            let role = event
+                .payload
+                .get("role")
+                .and_then(|v| v.as_str())
+                .and_then(mesh_core_surface_config::parse_surface_role)?;
+            Some(CoreRequest::SetSurfaceRole {
+                surface_id: surface_id.to_string(),
+                role,
+            })
+        }
+        "shell.toggle-surface-role" => event
+            .payload
+            .get("surface_id")
+            .and_then(|v| v.as_str())
+            .map(|id| CoreRequest::ToggleSurfaceRole {
+                surface_id: id.to_string(),
+            }),
         "shell.toggle-surface" => event
             .payload
             .get("surface_id")

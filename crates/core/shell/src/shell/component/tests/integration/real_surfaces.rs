@@ -1020,6 +1020,7 @@ end
         PathBuf::from("."),
         catalog,
         InterfaceCatalog::default(),
+        test_settings_store(),
     );
     component
         .mount(ComponentContext {

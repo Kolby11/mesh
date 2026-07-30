@@ -1,14 +1,60 @@
 # Status
 
-**Updated:** 2026-07-28
+**Updated:** 2026-07-30
 
 This page describes the present and is meant to be overwritten. History lives in
 [`log/`](log/); open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
 
-Performance checkpoints across the retained UI pipeline, run as a series of
-measured, individually gated changes rather than a milestone.
+**Settings are one file.** `config/settings.json` is the single store for every
+user decision — `shell` for core preferences, a namespace per module or
+interface for everything else (2026-07-30). It replaced `shell-settings.json`,
+`settings-default.json`, and the per-module `config/settings.json` files that
+were writing user overrides into shipped module source. The store is sparse:
+defaults stay in code and module manifests, and `mesh-shell config eject
+<module-id>` materializes a module's effective surface placement when you want
+a block to hand-edit. Record: [`log/2026-07.md`](log/2026-07.md).
+
+Stored values are now **validated on the way in** (2026-07-30). A wrong type, a
+bad enum value, or a misspelled key used to change nothing and say nothing; each
+now produces a diagnostic naming the namespace, the key path, the value found,
+and what to do, while the shell keeps running on declared defaults — a bad
+settings file is never fatal. `mesh-shell config doctor` runs the same checks
+without starting a shell (exit 1 on any error) and reports namespaces whose
+module is gone. `props.*` stays unvalidated until `<props>` exists.
+
+Two side effects worth knowing: the old shell-settings merge was section-wise
+and therefore lossy (a user file naming only `theme` reset tooltip and keyboard);
+merging is now per key. And keyboard input no longer stats the filesystem —
+`current_keyboard_settings` reads the shared store, closing the backlog item
+under *Next* item 2 below.
+
+**Window surfaces are done through phase 4.** `mesh.surface.role: "window"`
+maps a frontend module as an `xdg_toplevel` (2026-07-29), the compositor's
+toplevel states arrive as `:fullscreen` / `:maximized` / `:activated` / `:tiled`
+(2026-07-29), and a `promotable` surface can now be moved between chrome and a
+window at runtime without losing component state (2026-07-30).
+
+`@mesh/settings` is the demonstration: it opens as chrome anchored to the right
+edge with a "pop out" control in its header, becomes an ordinary Hyprland window,
+and shows "dock back" instead — same VM, same page, same scroll position.
+Triggered from script (`shell.set-surface-role`), from IPC
+(`shell:toggle_surface_role:<id>`, for a compositor keybind), or by a user
+settings override. Records: [`log/2026-07.md`](log/2026-07.md).
+
+Verified against live Hyprland over IPC with `hyprctl` as the independent check —
+promote yields a real `mesh.settings` toplevel that Hyprland tiles, demote
+restores the 920×900 layer surface. The live run is also what found the one real
+bug (a demoted surface stranded at 1×1 because the old compositor object was torn
+down too late); fixed and regression-tested.
+
+Open remainder is phase 5, per-widget promotion, in `docs/BACKLOG.md` — it needs
+the shared surface VM first.
+
+The longer-running stream is performance checkpoints across the retained UI
+pipeline, run as a series of measured, individually gated changes rather than a
+milestone.
 
 The current stream has two threads:
 
@@ -41,8 +87,8 @@ From the attack order at the end of
    shared-Lua `this` isolation, and atomic live frontend-catalog propagation.
    Both are cross-component correctness, not performance, and both can silently
    corrupt state in release builds.
-2. Nonblocking Wayland configure, and watcher-fed keyboard settings — removes a
-   500ms shell-thread stall and two `fs::metadata` calls per keypress.
+2. Nonblocking Wayland configure — removes a 500ms shell-thread stall. (The
+   paired keyboard-settings half of this item is done: see *Now*.)
 3. Retained text-measure state and subscriber-proportional service delivery.
 
 ## Blocked
@@ -75,7 +121,10 @@ no recorded release measurement is:
 | --- | --- |
 | typed declaration application | typed style declarations |
 
-**Full shell suite re-established.** On 2026-07-28,
+**Full shell suite re-established.** On 2026-07-30 the shell suite reports 569
+passing, 18 failing, 122 ignored — the same 18 failures as the 2026-07-28
+baseline of 556/18/123, with 12 more tests passing after the settings-store
+work and one more from settings validation. On 2026-07-28,
 `cargo test -p mesh-core-shell --lib` under `nix develop` reported 556 passing,
 18 failing, and 123 ignored. The child-display-list checkpoint's complete
 13-test `child_surface` slice passes; none of the 18 broader failures exercises

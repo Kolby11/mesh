@@ -147,16 +147,119 @@ generations in `model.rs`) are deleted outright.
 
 **Status: shipped.**
 
-`mesh.surface` carries **placement only** — the layer-shell concerns CSS
-cannot express: `anchor`, `layer`, `exclusive_zone`, `keyboard_mode`,
-`visible_on_start`, `margins`. Declare only deltas; omitted fields fall back
-to core defaults.
+`mesh.surface` carries **placement only** — the compositor concerns CSS cannot
+express. Declare only deltas; omitted fields fall back to core defaults.
+
+`role` picks which compositor protocol realizes the surface, and thereby which
+of the other fields apply:
+
+| `role` | Protocol | Placement fields |
+| ------ | -------- | ---------------- |
+| `layer` (default) | `zwlr_layer_shell_v1` — shell chrome: panels, launchers, overlays | `anchor`, `layer`, `exclusive_zone`, `keyboard_mode`, `margins` |
+| `window` | `xdg_toplevel` — an ordinary application window that tiles, floats, moves between workspaces, and closes | `title`, `appId`, `resizable`, `decorations` |
+
+`visible_on_start` and `blur` apply to both.
+
+```json
+"surface": {
+  "role": "window",
+  "title": { "t": "settings.title", "fallback": "Settings" },
+  "appId": "mesh.settings",
+  "visible_on_start": false
+}
+```
+
+Fields belonging to the *other* role are a **graph diagnostic**
+(`surface_role_field_mismatch`), not a silently ignored key: a block that names
+both an anchor and `role: "window"` states two incompatible intents, and a
+compositor places a toplevel regardless of what the manifest asks.
+
+The user can move a surface between roles through the sparse settings store
+(`"surface": { "role": "window" }`, [08](08-settings.md)) — the author's `role`
+is a default like every other placement field.
+
+#### Promotable surfaces
+
+**Status: shipped.**
+
+`"promotable": true` says the surface may be moved between roles *while it is
+running* — popped out of the shell into a window, and docked back. `role` then
+names the role it **starts** as.
+
+```json
+"surface": {
+  "role": "layer", "promotable": true,
+  "anchor": "right", "layer": "overlay", "keyboard_mode": "on_demand",
+  "title": { "t": "settings.title", "fallback": "Settings" },
+  "appId": "mesh.settings"
+}
+```
+
+A promotable surface is the **one exemption** from the role-mismatch diagnostic
+above: it is realized under both protocols at different points in its life, so
+both field sets apply to it and declaring both is the only way to describe it.
+Each set takes effect in the role it belongs to.
+
+Promotion is opt-in because it is a claim about the component, not about the
+manifest: a root laid out as a 32px panel widget is not automatically a sensible
+window. A runtime role change is **refused** for a surface that does not declare
+it.
+
+The change is non-destructive. Only the compositor object is swapped — the
+component's Lua VM, retained tree, page selection, scroll offsets, focus, and
+service subscriptions all survive, because none of them is role-dependent. Three
+paths trigger it:
+
+| Trigger | Reaches |
+| ------- | ------- |
+| `mesh.events.publish("shell.set-surface-role", { surface_id, role })` | in-surface controls (a "pop out" button) |
+| `shell.toggle-surface-role` on the same channel | a control that flips whichever role is current |
+| `shell:promote_surface:<id>`, `shell:demote_surface:<id>`, `shell:toggle_surface_role:<id>` over the automation IPC | a *compositor* keybind, since MESH keybinds are focused-surface actions and cannot grab a global hotkey ([11](11-automation-ipc.md)) |
+
+A component tells the two apart in CSS with `:windowed`
+([04 §6.1](04-styling.md)) rather than in script state, so its chrome follows
+the surface's actual role even when the role was changed from outside it. That
+is how one header offers "pop out" as a layer surface and "dock back" as a
+window.
+
+Because the roles size in opposite directions (below), a promotable surface goes
+through a fresh first-configure pass on every change rather than carrying over a
+size measured under the other role.
 
 Surface **sizing is CSS**: the laid-out box of the component root
 (`width: 100%` spans the anchored edge, `fit-content` shrinks to content,
 `min-*`/`max-*` clamp), measured by `measure_content_size()`. The show/hide
 transition is a CSS `transition` on the root. There are no manifest sizing
 fields and no compatibility aliases. See [03 — Components](03-components.md).
+
+The two roles size in **opposite directions**, which is the one thing a
+component author must know before setting `role: "window"`:
+
+- A **layer surface** tells the compositor its CSS-measured size.
+- A **window** is *told* its size by the compositor's configure — tiling
+  layout, maximize, fullscreen, interactive resize — and content lays out into
+  it. The measured size is only the initial request. A component with a rigid
+  root (fixed `width`/`height`, or `min-*` equal to `max-*`) should declare
+  `"resizable": false`, which pins the window to that size by reporting it as
+  both the toplevel min and max; otherwise write a root that can absorb a size
+  it did not choose.
+
+  A root that absorbs it is written in CSS, not in the manifest: the
+  compositor's toplevel states arrive as the `:fullscreen`, `:maximized`,
+  `:activated`, and `:tiled` pseudo-states on every node of the surface
+  ([04 §6.1](04-styling.md)), so a floating size on the base rule and
+  `width: 100%` on the filling states is the whole mechanism. Note that
+  `"resizable": false` and a fullscreen-aware root are contradictory intents —
+  pinning min to max is what stops a compositor from resizing the window at
+  all.
+
+A window has no say in its position: xdg-shell gives the client none. Placement
+control comes from compositor window rules keyed on `appId`, which defaults to
+the module id.
+
+Closing a window (title-bar button or compositor binding) **hides** the
+surface; the module, its services, and its Lua state survive, so reopening it is
+the same cheap show as reopening a hidden panel.
 
 ### 3.4 What the manifest no longer carries
 

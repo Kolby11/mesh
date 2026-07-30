@@ -37,6 +37,7 @@ fn memo_surface(parent_src: &str, locals: &[(&str, &str)]) -> FrontendSurfaceCom
         PathBuf::from("."),
         catalog,
         InterfaceCatalog::default(),
+        test_settings_store(),
     );
     component
         .mount(ComponentContext {
@@ -342,6 +343,7 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
         PathBuf::from("."),
         catalog,
         InterfaceCatalog::default(),
+        test_settings_store(),
     );
     component
         .mount(ComponentContext {
@@ -616,6 +618,7 @@ import MenuPopover from "@mesh/menu-popover"
         PathBuf::from("."),
         catalog,
         InterfaceCatalog::default(),
+        test_settings_store(),
     );
     component
         .mount(ComponentContext {

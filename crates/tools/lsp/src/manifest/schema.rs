@@ -976,11 +976,74 @@ fn contract_node() -> Node {
 
 fn surface_layout_node() -> Node {
     obj(
-        "Surface placement for a frontend module: anchor, layer, exclusive_zone, \
-         keyboard_mode, visible_on_start, and margins. Surface sizing and the \
-         show/hide transition are CSS concerns on the component root, not manifest \
-         fields.",
+        "Surface placement for a frontend module. A `layer` surface is shell \
+         chrome placed by anchor/layer/exclusive_zone/margins; a `window` \
+         surface is an xdg_toplevel placed by the compositor and configured by \
+         title/appId/resizable/decorations. Fields belonging to the other role \
+         are rejected as graph diagnostics, unless `promotable` says the surface \
+         holds both roles over its life. Surface sizing and the show/hide \
+         transition are CSS concerns on the component root, not manifest fields.",
         vec![
+            field(
+                "role",
+                false,
+                Node {
+                    doc: "Which compositor protocol realizes the surface: shell \
+                          chrome (`layer`, the default) or an ordinary \
+                          application window (`window`).",
+                    type_hint: "enum",
+                    kind: Kind::Enum(&["layer", "window"]),
+                },
+            ),
+            field(
+                "promotable",
+                false,
+                scalar(
+                    "Whether the surface may be moved between roles while \
+                     running — popped out into a window and docked back. Such a \
+                     surface may declare both roles' fields, and `role` says \
+                     which it starts as. Runtime role changes are refused for \
+                     surfaces that do not set this.",
+                    "boolean",
+                ),
+            ),
+            field(
+                "title",
+                false,
+                scalar(
+                    "Window title (role `window`). Localizable: a string, or \
+                     `{ \"t\": key, \"fallback\": text }`. Defaults to the module id.",
+                    "string",
+                ),
+            ),
+            field(
+                "appId",
+                false,
+                scalar(
+                    "`xdg_toplevel` app id (role `window`) — what compositor \
+                     window rules match on. Defaults to the module id.",
+                    "string",
+                ),
+            ),
+            field(
+                "resizable",
+                false,
+                scalar(
+                    "Whether the user may resize the window (role `window`). \
+                     False pins it to its CSS-measured size.",
+                    "boolean",
+                ),
+            ),
+            field(
+                "decorations",
+                false,
+                Node {
+                    doc: "Who draws the window's title bar (role `window`). \
+                          MESH paints its own chrome, so `client` is the default.",
+                    type_hint: "enum",
+                    kind: Kind::Enum(&["client", "server"]),
+                },
+            ),
             field(
                 "anchor",
                 false,

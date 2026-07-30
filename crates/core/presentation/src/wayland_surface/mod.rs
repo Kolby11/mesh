@@ -9,20 +9,23 @@ mod handlers;
 mod popup;
 mod state;
 
-pub use backend::{LayerShellBackend, LayerSurfaceConfig, LayerSurfaceSizePolicy};
+pub use backend::{LayerSurfaceSizePolicy, SurfaceConfig, WaylandSurfaceBackend};
 pub use popup::{PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement};
 
 use crate::PresentationError;
 use crate::dev_window::{DevWindowEvent, DevWindowKeyEvent, KeyMods};
 use mesh_core_render::PixelBuffer;
-use mesh_core_wayland::{Edge, KeyboardMode, Layer as MeshLayer};
+use mesh_core_wayland::{
+    Edge, KeyboardMode, Layer as MeshLayer, SurfaceRole, WindowDecorations, WindowOptions,
+    WindowStates,
+};
 use rustix::event::{PollFd, PollFlags, poll};
 use smithay_client_toolkit::{
     activation::{ActivationHandler, ActivationState, RequestData},
     compositor::{CompositorHandler, CompositorState, Region, Surface},
     delegate_activation, delegate_compositor, delegate_keyboard, delegate_layer, delegate_output,
     delegate_pointer, delegate_registry, delegate_seat, delegate_shm, delegate_touch,
-    delegate_xdg_popup,
+    delegate_xdg_popup, delegate_xdg_window,
     globals::GlobalData,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
@@ -42,8 +45,11 @@ use smithay_client_toolkit::{
             LayerSurfaceConfigure,
         },
         xdg::{
-            XdgPositioner, XdgShell,
+            XdgPositioner, XdgShell, XdgSurface as XdgSurfaceExt,
             popup::{Popup, PopupConfigure, PopupHandler},
+            window::{
+                Window, WindowConfigure, WindowDecorations as SctkWindowDecorations, WindowHandler,
+            },
         },
     },
     shm::{
@@ -77,6 +83,7 @@ use wayland_protocols::wp::viewporter::client::{
 use wayland_protocols::xdg::decoration::zv1::client::zxdg_decoration_manager_v1::{
     self, ZxdgDecorationManagerV1,
 };
+use wayland_protocols::xdg::shell::client::xdg_surface;
 use wayland_protocols_hyprland::focus_grab::v1::client::{
     hyprland_focus_grab_manager_v1, hyprland_focus_grab_manager_v1::HyprlandFocusGrabManagerV1,
     hyprland_focus_grab_v1, hyprland_focus_grab_v1::HyprlandFocusGrabV1,

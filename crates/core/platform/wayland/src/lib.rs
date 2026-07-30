@@ -31,9 +31,107 @@ pub enum KeyboardMode {
     OnDemand,
 }
 
+/// Which compositor shell protocol realizes a surface.
+///
+/// `Layer` surfaces are shell chrome placed by the compositor
+/// (`zwlr_layer_shell_v1`): panels, launchers, overlays. `Window` surfaces are
+/// ordinary application windows (`xdg_toplevel`) that tile, float, move between
+/// workspaces, and close like any other app — settings, module browsers, and
+/// developer tools.
+///
+/// The two roles size in opposite directions. A layer surface tells the
+/// compositor its CSS-measured size; a window is *told* its size by the
+/// compositor's configure and lays content out into it. See
+/// `docs/spec/01-module-system.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SurfaceRole {
+    #[default]
+    Layer,
+    Window,
+}
+
+/// Who draws a window's title bar and borders.
+///
+/// MESH paints its own chrome, so `Client` is the default: the compositor is
+/// asked to leave decoration to the module. `Server` opts into the
+/// compositor's own decorations for users whose setup decorates uniformly.
+/// Either way the compositor has the final say — it may answer a request with
+/// the other mode, and [`WindowOptions::decorations`] records what was asked
+/// for, not what was granted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WindowDecorations {
+    #[default]
+    Client,
+    Server,
+}
+
+/// Toplevel-only surface properties, resolved (title already localized).
+///
+/// Meaningless for [`SurfaceRole::Layer`]; the manifest layer rejects them on
+/// layer surfaces rather than silently ignoring them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowOptions {
+    /// Toplevel title shown by the compositor / task switcher.
+    pub title: String,
+    /// `xdg_toplevel.set_app_id` — what compositor window rules key off.
+    pub app_id: String,
+    /// When false the window is pinned to its content-measured size by
+    /// reporting equal min and max sizes.
+    pub resizable: bool,
+    pub decorations: WindowDecorations,
+}
+
+impl Default for WindowOptions {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            app_id: String::new(),
+            resizable: true,
+            decorations: WindowDecorations::default(),
+        }
+    }
+}
+
+/// What the compositor last said a toplevel *is* — the `xdg_toplevel` states
+/// carried by every configure.
+///
+/// These are decisions, not requests: a window cannot put itself in them, it
+/// only learns about them and restyles. The shell projects each flag onto the
+/// surface tree as a CSS state (`:fullscreen`, `:maximized`, `:activated`,
+/// `:tiled`), so a module can size and decorate itself differently when it
+/// fills the output than when it floats.
+///
+/// Meaningless for [`SurfaceRole::Layer`], which has no such protocol states;
+/// a layer surface reports [`Self::default`] (everything false).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WindowStates {
+    pub maximized: bool,
+    pub fullscreen: bool,
+    /// The window has keyboard focus as far as the compositor is concerned.
+    pub activated: bool,
+    /// Any edge is tiled — the window abuts a screen edge or neighbour under a
+    /// tiling layout, so rounded corners and outer shadows are wrong.
+    pub tiled: bool,
+}
+
+impl WindowStates {
+    /// True when the window covers its whole allotment (fullscreen or
+    /// maximized) — the case where content should stretch rather than keep a
+    /// floating window's natural size.
+    pub fn is_filling(self) -> bool {
+        self.fullscreen || self.maximized
+    }
+}
+
 /// Abstracted shell surface that maps to compositor-specific protocols.
 pub trait ShellSurface {
     fn anchor(&mut self, edge: Edge);
+    /// Select the compositor protocol backing this surface. Applied before the
+    /// surface is created; changing it on a live surface re-creates the
+    /// compositor object (see the shell's role-change path).
+    fn set_role(&mut self, role: SurfaceRole);
+    /// Apply toplevel-only properties. Ignored for [`SurfaceRole::Layer`].
+    fn set_window_options(&mut self, options: WindowOptions);
     fn set_size(&mut self, width: u32, height: u32);
     fn set_exclusive_zone(&mut self, zone: i32);
     fn set_layer(&mut self, layer: Layer);
@@ -144,6 +242,8 @@ pub struct StubSurface {
     pub margin_bottom: i32,
     pub margin_left: i32,
     pub blur: bool,
+    pub role: SurfaceRole,
+    pub window: WindowOptions,
 }
 
 #[derive(Debug, Default)]
@@ -177,6 +277,8 @@ impl Default for StubSurface {
             margin_bottom: 0,
             margin_left: 0,
             blur: false,
+            role: SurfaceRole::Layer,
+            window: WindowOptions::default(),
         }
     }
 }
@@ -184,6 +286,14 @@ impl Default for StubSurface {
 impl ShellSurface for StubSurface {
     fn anchor(&mut self, edge: Edge) {
         self.edge = Some(edge);
+    }
+
+    fn set_role(&mut self, role: SurfaceRole) {
+        self.role = role;
+    }
+
+    fn set_window_options(&mut self, options: WindowOptions) {
+        self.window = options;
     }
 
     fn set_size(&mut self, width: u32, height: u32) {

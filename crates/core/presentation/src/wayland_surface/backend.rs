@@ -12,7 +12,13 @@ pub enum LayerSurfaceSizePolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LayerSurfaceConfig {
+pub struct SurfaceConfig {
+    /// Which compositor protocol realizes the surface. `Layer` uses every
+    /// placement field below; `Window` ignores them and uses [`Self::window`]
+    /// instead — a toplevel is placed by the compositor, not by the client.
+    pub role: SurfaceRole,
+    /// Toplevel-only properties, already localized. Ignored for `Layer`.
+    pub window: WindowOptions,
     pub edge: Option<Edge>,
     pub layer: MeshLayer,
     pub size_policy: LayerSurfaceSizePolicy,
@@ -27,13 +33,15 @@ pub struct LayerSurfaceConfig {
     pub margin_left: i32,
     /// When true the compositor-facing namespace is suffixed with `:blur` so a
     /// single compositor rule can blur every opted-in MESH surface (Hyprland:
-    /// `layerrule = blur, :blur$`). See [`LayerSurfaceConfig::wayland_namespace`].
+    /// `layerrule = blur, :blur$`). See [`SurfaceConfig::wayland_namespace`].
     pub blur: bool,
 }
 
-impl Default for LayerSurfaceConfig {
+impl Default for SurfaceConfig {
     fn default() -> Self {
         Self {
+            role: SurfaceRole::Layer,
+            window: WindowOptions::default(),
             edge: Some(Edge::Top),
             layer: MeshLayer::Top,
             size_policy: LayerSurfaceSizePolicy::Fixed,
@@ -51,7 +59,7 @@ impl Default for LayerSurfaceConfig {
     }
 }
 
-impl LayerSurfaceConfig {
+impl SurfaceConfig {
     pub(super) fn with_keyboard_mode(&self, keyboard_mode: KeyboardMode) -> Self {
         let mut cfg = self.clone();
         cfg.keyboard_mode = keyboard_mode;
@@ -71,7 +79,7 @@ impl LayerSurfaceConfig {
     }
 }
 
-pub struct LayerShellBackend {
+pub struct WaylandSurfaceBackend {
     _conn: Connection,
     event_queue: EventQueue<State>,
     state: State,
@@ -135,50 +143,112 @@ pub(super) struct SurfaceShmBuffer {
     pending_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]>,
 }
 
-/// The compositor-side role backing a [`SurfaceEntry`]. Layer surfaces own
-/// shell chrome (panels, launchers, overlays); popups are `xdg_popup` children
-/// promoted from a `<popover>`. Both expose a `wl_surface`, so the entire SHM
-/// buffer / present / scale / input path below is shared — only role creation,
-/// layer-shell config, and dismiss differ.
-pub(super) enum SurfaceRole {
+/// The compositor-side object backing a [`SurfaceEntry`]. Layer surfaces own
+/// shell chrome (panels, launchers, overlays); windows are `xdg_toplevel`s the
+/// compositor manages like any application window; popups are `xdg_popup`
+/// children promoted from a `<popover>`. All three expose a `wl_surface`, so the
+/// entire SHM buffer / present / scale / input path below is shared — only
+/// creation, configuration, and teardown differ.
+pub(super) enum WaylandRole {
     Layer(LayerSurface),
+    Window(WindowRole),
     Popup(PopupRole),
+}
+
+pub(super) struct WindowRole {
+    pub(super) window: Window,
+    /// Size the compositor last configured, when it named one. `None` until the
+    /// first sized configure arrives — a toplevel's initial configure usually
+    /// carries no size, meaning "pick your own", which is when the CSS-measured
+    /// content size is authoritative. After that the compositor's size wins;
+    /// this is the inverse of the layer-shell direction.
+    pub(super) compositor_size: Option<(u32, u32)>,
+    /// Last size hints handed to `xdg_toplevel`, so identical hints aren't
+    /// re-sent on every frame.
+    pub(super) applied_size_hints: Option<WindowSizeHints>,
+    /// Last window geometry committed via `xdg_surface.set_window_geometry`.
+    pub(super) applied_geometry: Option<(u32, u32)>,
+    /// `xdg_toplevel` states from the last configure, projected by the shell
+    /// onto the surface tree as CSS state.
+    pub(super) states: WindowStates,
+}
+
+/// The two kinds of surface a popup can be parented to, kept apart because
+/// each is attached by a different protocol call.
+enum PopupParent {
+    Layer(LayerSurface),
+    Window(xdg_surface::XdgSurface),
+}
+
+/// The `xdg_toplevel` min/max size pair. `None` on either side means "no
+/// constraint" — the compositor is free to pick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct WindowSizeHints {
+    min: Option<(u32, u32)>,
+    max: Option<(u32, u32)>,
 }
 
 pub(super) struct PopupRole {
     pub(super) popup: Popup,
-    /// `surface_id` of the parent (layer) surface this popup is a child of.
+    /// `surface_id` of the parent surface this popup is a child of. The parent
+    /// may be either a layer surface or a window.
     pub(super) parent_id: String,
 }
 
-impl SurfaceRole {
+impl WaylandRole {
     pub(super) fn wl_surface(&self) -> &wl_surface::WlSurface {
         match self {
-            SurfaceRole::Layer(layer) => layer.wl_surface(),
-            SurfaceRole::Popup(role) => role.popup.wl_surface(),
+            WaylandRole::Layer(layer) => layer.wl_surface(),
+            WaylandRole::Window(role) => role.window.wl_surface(),
+            WaylandRole::Popup(role) => role.popup.wl_surface(),
         }
     }
 
     pub(super) fn as_layer(&self) -> Option<&LayerSurface> {
         match self {
-            SurfaceRole::Layer(layer) => Some(layer),
-            SurfaceRole::Popup(_) => None,
+            WaylandRole::Layer(layer) => Some(layer),
+            _ => None,
+        }
+    }
+
+    pub(super) fn as_window(&self) -> Option<&Window> {
+        match self {
+            WaylandRole::Window(role) => Some(&role.window),
+            _ => None,
+        }
+    }
+
+    /// The `xdg_surface` a child popup can be parented to. Layer surfaces have
+    /// none (they use `zwlr_layer_surface_v1.get_popup` instead); a window
+    /// parents its popups the ordinary xdg-shell way.
+    pub(super) fn as_popup_parent_xdg_surface(&self) -> Option<&xdg_surface::XdgSurface> {
+        match self {
+            WaylandRole::Window(role) => Some(role.window.xdg_surface()),
+            _ => None,
         }
     }
 
     fn is_popup(&self) -> bool {
-        matches!(self, SurfaceRole::Popup(_))
+        matches!(self, WaylandRole::Popup(_))
+    }
+
+    fn is_window(&self) -> bool {
+        matches!(self, WaylandRole::Window(_))
     }
 }
 
 pub(super) struct SurfaceEntry {
-    pub(super) role: SurfaceRole,
-    pub(super) cfg: LayerSurfaceConfig,
+    pub(super) role: WaylandRole,
+    pub(super) cfg: SurfaceConfig,
     pub(super) applied_keyboard_mode: KeyboardMode,
     pub(super) width: u32,
     pub(super) height: u32,
     pub(super) configured: bool,
     pub(super) config_fingerprint: u64,
+    /// Set until title/app_id have been pushed to the toplevel once. The first
+    /// `apply_config` after creation sees a config equal to the one the entry
+    /// was constructed with, so identity would otherwise never be sent.
+    applied_window_identity_pending: bool,
     shm_buffers: Vec<SurfaceShmBuffer>,
     shm_pool_config: Option<ShmPoolConfig>,
     next_shm_buffer: usize,
@@ -242,11 +312,7 @@ impl Hasher for SurfaceConfigHasher {
 }
 
 impl SurfaceEntry {
-    fn new(
-        role: SurfaceRole,
-        cfg: LayerSurfaceConfig,
-        applied_keyboard_mode: KeyboardMode,
-    ) -> Self {
+    fn new(role: WaylandRole, cfg: SurfaceConfig, applied_keyboard_mode: KeyboardMode) -> Self {
         Self {
             role,
             width: cfg.width.max(1),
@@ -255,6 +321,7 @@ impl SurfaceEntry {
             cfg,
             applied_keyboard_mode,
             configured: false,
+            applied_window_identity_pending: true,
             shm_buffers: Vec::new(),
             shm_pool_config: None,
             next_shm_buffer: 0,
@@ -278,12 +345,21 @@ impl SurfaceEntry {
         self.role.wl_surface()
     }
 
-    fn needs_reconfigure(&self, cfg: &LayerSurfaceConfig, keyboard_mode: KeyboardMode) -> bool {
+    fn needs_reconfigure(&self, cfg: &SurfaceConfig, keyboard_mode: KeyboardMode) -> bool {
         !self.configured
             || self.config_fingerprint != surface_config_fingerprint(cfg, keyboard_mode)
     }
 
-    fn apply_config(&mut self, cfg: LayerSurfaceConfig, keyboard_mode: KeyboardMode) {
+    fn apply_config(&mut self, cfg: SurfaceConfig, keyboard_mode: KeyboardMode) {
+        // A toplevel takes title/app_id/size-hint requests instead of the
+        // layer-shell placement requests, and never invalidates `configured`
+        // for them: the compositor is not obliged to answer a title change with
+        // a fresh configure, and blocking presents until it does would freeze
+        // the window.
+        if self.role.is_window() {
+            self.apply_window_config(cfg, keyboard_mode);
+            return;
+        }
         // Layer-shell config (anchor/layer/size/margins) only applies to layer
         // surfaces. Popups are positioned by their `xdg_positioner`, never by
         // these requests, so there is nothing to apply for the popup role.
@@ -307,6 +383,83 @@ impl SurfaceEntry {
         if requires_fresh_configure {
             self.configured = false;
         }
+    }
+
+    /// Apply the toplevel-facing half of a [`SurfaceConfig`].
+    ///
+    /// `cfg.width`/`cfg.height` are the CSS-measured *content* size. For a
+    /// window they are a request, not a decision: they seed the initial size,
+    /// and nothing more — unless the surface is declared non-resizable, in
+    /// which case reporting them as both min and max pins the window to its
+    /// content.
+    ///
+    /// A resizable window deliberately sends *no* min size. The measured size
+    /// is a component's natural size, not its minimum; publishing it as
+    /// `set_min_size` would let the user grow a window but never shrink it, and
+    /// would fight a tiling compositor over every layout.
+    fn apply_window_config(&mut self, cfg: SurfaceConfig, keyboard_mode: KeyboardMode) {
+        let Some(window) = self.role.as_window() else {
+            return;
+        };
+        let window = window.clone();
+
+        if cfg.window.title != self.cfg.window.title || self.applied_window_identity_pending {
+            window.set_title(cfg.window.title.clone());
+        }
+        if cfg.window.app_id != self.cfg.window.app_id || self.applied_window_identity_pending {
+            window.set_app_id(cfg.window.app_id.clone());
+        }
+        self.applied_window_identity_pending = false;
+
+        let content = (cfg.width.max(1), cfg.height.max(1));
+        let pinned = (!cfg.window.resizable).then_some(content);
+        let hints = WindowSizeHints {
+            min: pinned,
+            max: pinned,
+        };
+        if let WaylandRole::Window(role) = &mut self.role
+            && role.applied_size_hints != Some(hints)
+        {
+            window.set_min_size(hints.min);
+            window.set_max_size(hints.max);
+            role.applied_size_hints = Some(hints);
+        }
+
+        self.config_fingerprint = surface_config_fingerprint(&cfg, keyboard_mode);
+        self.cfg = cfg;
+        self.applied_keyboard_mode = keyboard_mode;
+        window.commit();
+        tracing::debug!(
+            configured = self.configured,
+            width = self.cfg.width,
+            height = self.cfg.height,
+            "layer_shell: window config committed"
+        );
+    }
+
+    /// Tell the compositor which part of the buffer is the window proper.
+    ///
+    /// Without this the compositor measures a toplevel by its whole buffer,
+    /// which for MESH includes the transparent tooltip overlay reserve — the
+    /// window would be placed, snapped, and decorated as if it were larger than
+    /// it looks. The content rect is the same one the input region is confined
+    /// to, so a click landing outside the window and a compositor drawing
+    /// outside the window are ruled out by the same number.
+    fn apply_window_geometry(&mut self, content: DamageRect) {
+        let WaylandRole::Window(role) = &mut self.role else {
+            return;
+        };
+        let geometry = (content.width.max(1), content.height.max(1));
+        if role.applied_geometry == Some(geometry) {
+            return;
+        }
+        role.applied_geometry = Some(geometry);
+        role.window.xdg_surface().set_window_geometry(
+            content.x as i32,
+            content.y as i32,
+            geometry.0 as i32,
+            geometry.1 as i32,
+        );
     }
 
     fn hide(&mut self) {
@@ -490,11 +643,12 @@ impl SurfaceEntry {
     }
 }
 
-pub(super) fn surface_config_fingerprint(
-    cfg: &LayerSurfaceConfig,
-    keyboard_mode: KeyboardMode,
-) -> u64 {
+pub(super) fn surface_config_fingerprint(cfg: &SurfaceConfig, keyboard_mode: KeyboardMode) -> u64 {
     let mut hasher = SurfaceConfigHasher::default();
+    surface_role_slot(cfg.role).hash(&mut hasher);
+    cfg.window.title.hash(&mut hasher);
+    cfg.window.app_id.hash(&mut hasher);
+    cfg.window.resizable.hash(&mut hasher);
     surface_edge_slot(cfg.edge).hash(&mut hasher);
     surface_layer_slot(cfg.layer).hash(&mut hasher);
     cfg.exclusive_zone.hash(&mut hasher);
@@ -506,6 +660,13 @@ pub(super) fn surface_config_fingerprint(
     cfg.margin_bottom.hash(&mut hasher);
     cfg.margin_left.hash(&mut hasher);
     hasher.finish()
+}
+
+fn surface_role_slot(role: SurfaceRole) -> u8 {
+    match role {
+        SurfaceRole::Layer => 0,
+        SurfaceRole::Window => 1,
+    }
 }
 
 fn surface_edge_slot(edge: Option<Edge>) -> u8 {
@@ -536,8 +697,8 @@ fn keyboard_mode_slot(mode: KeyboardMode) -> u8 {
 }
 
 fn surface_change_requires_fresh_configure(
-    previous: &LayerSurfaceConfig,
-    next: &LayerSurfaceConfig,
+    previous: &SurfaceConfig,
+    next: &SurfaceConfig,
     configured: bool,
 ) -> bool {
     !configured
@@ -560,9 +721,17 @@ fn surface_change_requires_fresh_configure(
 /// centers the surface with dead space on both sides instead of spanning its
 /// real output edge-to-edge. See `output_logical_size_for_surface`.
 fn clamp_surface_config_to_output(
-    mut cfg: LayerSurfaceConfig,
+    mut cfg: SurfaceConfig,
     output_size: Option<(u32, u32)>,
-) -> LayerSurfaceConfig {
+) -> SurfaceConfig {
+    // Only layer surfaces are clamped to their output. A window is placed and
+    // sized by the compositor, which may legitimately make it larger than one
+    // output (or put it on a different one than the shell last saw); clamping
+    // would fight the window manager.
+    if cfg.role == SurfaceRole::Window {
+        return cfg;
+    }
+
     let Some((output_width, output_height)) = output_size else {
         return cfg;
     };
@@ -610,16 +779,17 @@ fn clamp_surface_config_to_output(
 }
 
 fn resolved_surface_size(entry: &SurfaceEntry, output_size: Option<(u32, u32)>) -> (u32, u32) {
-    // Popups are sized by their positioner / compositor configure, not by the
-    // layer-shell edge-stretch rules — report the configured size verbatim.
-    if entry.role.is_popup() {
+    // Popups are sized by their positioner / compositor configure and windows
+    // by their toplevel configure, not by the layer-shell edge-stretch rules —
+    // report the configured size verbatim for both.
+    if entry.role.is_popup() || entry.role.is_window() {
         return (entry.width.max(1), entry.height.max(1));
     }
     resolved_surface_size_for_config(&entry.cfg, entry.width, entry.height, output_size)
 }
 
 fn resolved_surface_size_for_config(
-    cfg: &LayerSurfaceConfig,
+    cfg: &SurfaceConfig,
     configured_width: u32,
     configured_height: u32,
     output_size: Option<(u32, u32)>,
@@ -861,7 +1031,7 @@ fn copy_bgra_damage_to_canvas(
     }
 }
 
-impl LayerShellBackend {
+impl WaylandSurfaceBackend {
     pub fn new() -> Result<Self, PresentationError> {
         let conn = Connection::connect_to_env()
             .map_err(|e| PresentationError::WaylandConnect(format!("connect_to_env: {e}")))?;
@@ -941,6 +1111,7 @@ impl LayerShellBackend {
             events: Vec::new(),
             xdg_shell,
             dismissed_popups: Vec::new(),
+            close_requests: Vec::new(),
         };
 
         Ok(Self {
@@ -968,8 +1139,16 @@ impl LayerShellBackend {
         }
     }
 
-    /// Apply a surface's desired config. Creates the layer surface lazily on first call.
-    pub fn configure(&mut self, surface_id: &str, cfg: LayerSurfaceConfig) {
+    /// Apply a surface's desired config. Creates the compositor object — a
+    /// layer surface or an `xdg_toplevel`, per [`SurfaceConfig::role`] — lazily
+    /// on first call.
+    ///
+    /// A role change on a live surface tears the old compositor object down and
+    /// recreates it under the same `surface_id`. Everything above the
+    /// presentation layer (component VM, retained tree, Lua state, service
+    /// subscriptions) is untouched: only the Wayland object is swapped, which is
+    /// what makes promoting a widget into a window non-destructive.
+    pub fn configure(&mut self, surface_id: &str, cfg: SurfaceConfig) {
         let cfg = self.clamp_surface_config(surface_id, cfg);
         if cfg.keyboard_mode != KeyboardMode::OnDemand {
             self.state.release_surface_focus_grab(surface_id);
@@ -978,6 +1157,18 @@ impl LayerShellBackend {
         let effective_keyboard_mode = self
             .state
             .effective_keyboard_mode_for(surface_id, cfg.keyboard_mode);
+
+        if let Some(entry) = self.state.surfaces.get(surface_id)
+            && entry.role.is_window() != (cfg.role == SurfaceRole::Window)
+        {
+            tracing::info!(
+                surface_id,
+                role = ?cfg.role,
+                "surface role changed; recreating the compositor surface"
+            );
+            self.destroy_surface(surface_id);
+        }
+
         match self.state.surfaces.get_mut(surface_id) {
             Some(entry) => {
                 if entry.needs_reconfigure(&cfg, effective_keyboard_mode) {
@@ -987,21 +1178,16 @@ impl LayerShellBackend {
                 }
             }
             None => {
-                let wl_surface = self.state.compositor_state.create_surface(&qh);
-                let layer_surface = self.state.layer_shell.create_layer_surface(
-                    &qh,
-                    wl_surface,
-                    map_layer(cfg.layer),
-                    Some(cfg.wayland_namespace()),
-                    None,
-                );
+                let role = match self.create_surface_role(&cfg, &qh) {
+                    Ok(role) => role,
+                    Err(error) => {
+                        tracing::error!(surface_id, "failed to create surface: {error}");
+                        return;
+                    }
+                };
                 self.state.insert_surface(
                     surface_id.to_string(),
-                    SurfaceEntry::new(
-                        SurfaceRole::Layer(layer_surface),
-                        cfg,
-                        effective_keyboard_mode,
-                    ),
+                    SurfaceEntry::new(role, cfg, effective_keyboard_mode),
                 );
                 if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
                     let cfg = entry.cfg.clone();
@@ -1040,9 +1226,97 @@ impl LayerShellBackend {
         }
     }
 
+    /// Create the compositor object backing a new surface.
+    ///
+    /// A layer surface can always be created — `zwlr_layer_shell_v1` is a hard
+    /// requirement of the backend. A window needs `xdg_wm_base`, which is
+    /// optional here (see [`WaylandSurfaceBackend::new`]), so a window request
+    /// on a compositor without it is a surface-creation error rather than a
+    /// silent downgrade to shell chrome: a settings window quietly reappearing
+    /// as a panel across the top of the screen is worse than a diagnostic.
+    fn create_surface_role(
+        &mut self,
+        cfg: &SurfaceConfig,
+        qh: &QueueHandle<State>,
+    ) -> Result<WaylandRole, PresentationError> {
+        if cfg.role == SurfaceRole::Window {
+            let xdg_shell = self.state.xdg_shell.as_ref().ok_or_else(|| {
+                PresentationError::ProtocolUnsupported(
+                    "xdg_wm_base unavailable; cannot create a window surface".into(),
+                )
+            })?;
+            let surface = Surface::new(&self.state.compositor_state, qh)
+                .map_err(|e| PresentationError::SurfaceCreate(format!("window surface: {e}")))?;
+            let window = xdg_shell.create_window(
+                surface,
+                map_window_decorations(cfg.window.decorations),
+                qh,
+            );
+            // The initial commit with no buffer maps the toplevel role and
+            // prompts the compositor's first configure. Until that arrives the
+            // present gate holds every frame back, exactly as for a layer
+            // surface.
+            window.commit();
+            return Ok(WaylandRole::Window(WindowRole {
+                window,
+                compositor_size: None,
+                applied_size_hints: None,
+                applied_geometry: None,
+                states: WindowStates::default(),
+            }));
+        }
+
+        let wl_surface = self.state.compositor_state.create_surface(qh);
+        Ok(WaylandRole::Layer(
+            self.state.layer_shell.create_layer_surface(
+                qh,
+                wl_surface,
+                map_layer(cfg.layer),
+                Some(cfg.wayland_namespace()),
+                None,
+            ),
+        ))
+    }
+
+    /// The size the compositor last configured for a window surface, when it
+    /// named one. `None` for layer surfaces and popups (whose sizes the client
+    /// or the positioner decides), and for a window that has not yet received a
+    /// sized configure.
+    pub fn window_configured_size(&self, surface_id: &str) -> Option<(u32, u32)> {
+        match &self.state.surfaces.get(surface_id)?.role {
+            WaylandRole::Window(role) => role.compositor_size,
+            _ => None,
+        }
+    }
+
+    /// The `xdg_toplevel` states from the window's last configure. Layer
+    /// surfaces and popups have no such states and report the default (all
+    /// false), which is also what a window reports before its first configure.
+    pub fn window_states(&self, surface_id: &str) -> WindowStates {
+        match self.state.surfaces.get(surface_id).map(|entry| &entry.role) {
+            Some(WaylandRole::Window(role)) => role.states,
+            _ => WindowStates::default(),
+        }
+    }
+
+    /// Drain the ids of windows the user asked to close (title-bar button,
+    /// compositor keybind). The shell decides what closing means — hiding the
+    /// surface, running a teardown handler — so this only reports the request.
+    pub fn take_close_requests(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.state.close_requests)
+    }
+
     /// True when the compositor exposes `xdg_wm_base`, i.e. `<popover>` surface
     /// promotion is available.
     pub fn popup_supported(&self) -> bool {
+        self.state.xdg_shell.is_some()
+    }
+
+    /// True when the compositor exposes `xdg_wm_base`, i.e. a surface can be
+    /// realized as an `xdg_toplevel`. Same global as [`Self::popup_supported`];
+    /// see `PresentationEngine::window_role_supported` for why it is asked
+    /// separately.
+    pub fn window_role_supported(&self) -> bool {
         self.state.xdg_shell.is_some()
     }
 
@@ -1072,14 +1346,21 @@ impl LayerShellBackend {
             ));
         }
 
-        // The popup's Wayland parent must be a layer surface owned by the
-        // backend. Nested popup-of-popup is not modeled yet.
-        let parent_layer = match self.state.surfaces.get(&config.parent_surface_id) {
-            Some(entry) => match entry.role.as_layer() {
-                Some(layer) => layer.clone(),
-                None => {
+        // The popup's Wayland parent is either a layer surface or a window, and
+        // the two are parented by different protocol calls: a layer surface
+        // adopts the popup afterwards via `zwlr_layer_surface_v1.get_popup`,
+        // while a toplevel is named as the parent up-front in
+        // `xdg_surface.get_popup`. Nested popup-of-popup is not modeled yet.
+        let parent = match self.state.surfaces.get(&config.parent_surface_id) {
+            Some(entry) => match (
+                entry.role.as_layer(),
+                entry.role.as_popup_parent_xdg_surface(),
+            ) {
+                (Some(layer), _) => PopupParent::Layer(layer.clone()),
+                (None, Some(xdg_surface)) => PopupParent::Window(xdg_surface.clone()),
+                (None, None) => {
                     return Err(PresentationError::SurfaceCreate(
-                        "popup parent must be a layer surface".into(),
+                        "popup parent must be a layer surface or a window".into(),
                     ));
                 }
             },
@@ -1104,11 +1385,18 @@ impl LayerShellBackend {
             let positioner = build_positioner(xdg_shell, &config.placement)?;
             let surface = Surface::new(&self.state.compositor_state, &qh)
                 .map_err(|e| PresentationError::SurfaceCreate(format!("popup surface: {e}")))?;
-            // Parent role is supplied below via `get_popup`, so the xdg_popup is
-            // created with no xdg parent (None) per the wlr-layer-shell contract.
-            let popup = Popup::from_surface(None, &positioner, &qh, surface, xdg_shell)
+            // For a layer parent the role is supplied below via `get_popup`, so
+            // the xdg_popup is created with no xdg parent (None) per the
+            // wlr-layer-shell contract. A window parent is named here instead.
+            let xdg_parent = match &parent {
+                PopupParent::Layer(_) => None,
+                PopupParent::Window(xdg_surface) => Some(xdg_surface),
+            };
+            let popup = Popup::from_surface(xdg_parent, &positioner, &qh, surface, xdg_shell)
                 .map_err(|e| PresentationError::SurfaceCreate(format!("xdg_popup: {e}")))?;
-            parent_layer.get_popup(popup.xdg_popup());
+            if let PopupParent::Layer(layer) = &parent {
+                layer.get_popup(popup.xdg_popup());
+            }
 
             // A grab is only valid in response to a recent input serial. Hover-open
             // popovers pass `grab = false` and rely on the core hover-bridge.
@@ -1130,13 +1418,13 @@ impl LayerShellBackend {
             popup
         };
 
-        let cfg = LayerSurfaceConfig {
+        let cfg = SurfaceConfig {
             width: config.placement.size.0,
             height: config.placement.size.1,
-            ..LayerSurfaceConfig::default()
+            ..SurfaceConfig::default()
         };
         let entry = SurfaceEntry::new(
-            SurfaceRole::Popup(PopupRole {
+            WaylandRole::Popup(PopupRole {
                 popup,
                 parent_id: config.parent_surface_id.clone(),
             }),
@@ -1176,7 +1464,7 @@ impl LayerShellBackend {
             return;
         };
         if let Some(entry) = self.state.surfaces.get(surface_id)
-            && let SurfaceRole::Popup(role) = &entry.role
+            && let WaylandRole::Popup(role) = &entry.role
         {
             // `xdg_popup.reposition` requires xdg_wm_base v3+. The token is
             // echoed back on the resulting reactive configure; 0 is fine since
@@ -1216,12 +1504,15 @@ impl LayerShellBackend {
     pub fn destroy_surface(&mut self, surface_id: &str) {
         self.destroy_popups_for_parent(surface_id);
         self.state.release_surface_focus_grab(surface_id);
-        let is_layer = self
+        // Popups own a separate teardown path (`destroy_popup`) with its own
+        // dismissal bookkeeping; parent surfaces — layer surfaces and windows —
+        // are torn down here.
+        let is_parent_surface = self
             .state
             .surfaces
             .get(surface_id)
-            .is_some_and(|entry| matches!(entry.role, SurfaceRole::Layer(_)));
-        if !is_layer {
+            .is_some_and(|entry| !entry.role.is_popup());
+        if !is_parent_surface {
             return;
         }
         if let Some(entry) = self.state.remove_surface(surface_id) {
@@ -1247,7 +1538,7 @@ impl LayerShellBackend {
             .surfaces
             .iter()
             .filter_map(|(id, entry)| match &entry.role {
-                SurfaceRole::Popup(role) if role.parent_id == parent_surface_id => Some(id.clone()),
+                WaylandRole::Popup(role) if role.parent_id == parent_surface_id => Some(id.clone()),
                 _ => None,
             })
             .collect();
@@ -1262,11 +1553,7 @@ impl LayerShellBackend {
         std::mem::take(&mut self.state.dismissed_popups)
     }
 
-    fn clamp_surface_config(
-        &self,
-        surface_id: &str,
-        cfg: LayerSurfaceConfig,
-    ) -> LayerSurfaceConfig {
+    fn clamp_surface_config(&self, surface_id: &str, cfg: SurfaceConfig) -> SurfaceConfig {
         clamp_surface_config_to_output(cfg, self.output_logical_size_for_surface(surface_id))
     }
 
@@ -1326,6 +1613,25 @@ impl LayerShellBackend {
     ) -> Result<(), PresentationError> {
         if !visible {
             self.state.release_surface_focus_grab(surface_id);
+            // A hidden window is *destroyed*, not detached. Detaching a buffer
+            // unmaps an `xdg_toplevel`, and remapping it requires a fresh
+            // configure the compositor is under no obligation to send for a
+            // commit that carries no new state — measured on Hyprland 0.56, a
+            // re-shown window waits out the configure deadline every frame and
+            // never reappears. Recreating on the next `configure()` is the same
+            // lifecycle promoted popovers already use, and it costs nothing
+            // above the presentation layer: the component VM, retained tree,
+            // and Lua state are untouched.
+            if self
+                .state
+                .surfaces
+                .get(surface_id)
+                .is_some_and(|entry| entry.role.is_window())
+            {
+                self.destroy_surface(surface_id);
+                self.dispatch_pending()?;
+                return Ok(());
+            }
             // Only detach a buffer (to hide) if the compositor has already configured this
             // surface. Before the first configure event the surface has no buffer attached
             // and is already invisible; committing a null buffer before configure arrives
@@ -1487,6 +1793,15 @@ impl LayerShellBackend {
                 }
             }
         }
+        // Window geometry rides the same commit as the buffer, so the
+        // compositor never sees a frame whose declared window rect disagrees
+        // with the pixels in it.
+        entry.apply_window_geometry(entry.input_region_rect.unwrap_or(DamageRect {
+            x: 0,
+            y: 0,
+            width: logical_w,
+            height: logical_h,
+        }));
         entry.attach_shm_buffer(
             &qh,
             buffer_index,
@@ -1937,7 +2252,7 @@ fn build_positioner(
     Ok(positioner)
 }
 
-pub(super) fn apply_config(layer_surface: &LayerSurface, cfg: &LayerSurfaceConfig) {
+pub(super) fn apply_config(layer_surface: &LayerSurface, cfg: &SurfaceConfig) {
     let (protocol_width, protocol_height) = layer_protocol_size(cfg);
     layer_surface.set_layer(map_layer(cfg.layer));
     layer_surface.set_anchor(map_anchor(cfg));
@@ -1952,6 +2267,19 @@ pub(super) fn apply_config(layer_surface: &LayerSurface, cfg: &LayerSurfaceConfi
     );
 }
 
+/// Map MESH's decoration preference onto SCTK's creation-time request.
+///
+/// `Client` asks the compositor to let the module draw its own chrome but
+/// still creates the decoration object, so a compositor that insists on
+/// server-side decorations can say so through `WindowConfigure` rather than
+/// being contradicted. `ClientOnly` would skip the negotiation entirely.
+fn map_window_decorations(decorations: WindowDecorations) -> SctkWindowDecorations {
+    match decorations {
+        WindowDecorations::Client => SctkWindowDecorations::RequestClient,
+        WindowDecorations::Server => SctkWindowDecorations::RequestServer,
+    }
+}
+
 fn map_layer(layer: MeshLayer) -> Layer {
     match layer {
         MeshLayer::Background => Layer::Background,
@@ -1961,7 +2289,7 @@ fn map_layer(layer: MeshLayer) -> Layer {
     }
 }
 
-fn map_anchor(cfg: &LayerSurfaceConfig) -> Anchor {
+fn map_anchor(cfg: &SurfaceConfig) -> Anchor {
     match cfg.edge {
         // Treat a single edge as a normal shell placement, not a centered popup.
         // Top/bottom bars stretch across the output width, and left/right rails
@@ -2016,7 +2344,7 @@ fn map_anchor(cfg: &LayerSurfaceConfig) -> Anchor {
 ///   twice: an invisible surface swallowing all pointer/keyboard input).
 ///   That case is clamped to 1x1 and logged as an error — a broken 1px
 ///   surface plus a log line beats a screen-wide input blackout.
-fn layer_protocol_size(cfg: &LayerSurfaceConfig) -> (u32, u32) {
+fn layer_protocol_size(cfg: &SurfaceConfig) -> (u32, u32) {
     let anchor = map_anchor(cfg);
     if cfg.width == 0
         && cfg.height == 0
@@ -2045,7 +2373,7 @@ fn layer_protocol_size(cfg: &LayerSurfaceConfig) -> (u32, u32) {
     (width, height)
 }
 
-fn layer_protocol_fallback_size(cfg: &LayerSurfaceConfig) -> u32 {
+fn layer_protocol_fallback_size(cfg: &SurfaceConfig) -> u32 {
     u32::try_from(cfg.exclusive_zone).unwrap_or(0).max(1)
 }
 
@@ -2265,8 +2593,10 @@ mod tests {
     // layer-surface config tests
     // ---------------------------------------------------------------------------
 
-    fn base_cfg() -> LayerSurfaceConfig {
-        LayerSurfaceConfig {
+    fn base_cfg() -> SurfaceConfig {
+        SurfaceConfig {
+            role: SurfaceRole::Layer,
+            window: WindowOptions::default(),
             edge: Some(Edge::Left),
             layer: MeshLayer::Overlay,
             size_policy: LayerSurfaceSizePolicy::Fixed,
@@ -2281,6 +2611,72 @@ mod tests {
             margin_left: 24,
             blur: false,
         }
+    }
+
+    fn window_cfg() -> SurfaceConfig {
+        SurfaceConfig {
+            role: SurfaceRole::Window,
+            window: WindowOptions {
+                title: "Settings".into(),
+                app_id: "mesh.settings".into(),
+                resizable: false,
+                decorations: WindowDecorations::Client,
+            },
+            width: 920,
+            height: 700,
+            namespace: "@mesh/settings".into(),
+            ..SurfaceConfig::default()
+        }
+    }
+
+    #[test]
+    fn window_config_is_not_clamped_to_an_output() {
+        // A window is placed by the compositor and may legitimately exceed one
+        // output's size or live on another; clamping it would fight the WM.
+        // The same numbers on a layer surface *are* clamped.
+        let mut layer = base_cfg();
+        layer.edge = Some(Edge::Top);
+        layer.width = 3000;
+        layer.height = 2000;
+        let clamped_layer = clamp_surface_config_to_output(layer, Some((1920, 1080)));
+        assert_eq!((clamped_layer.width, clamped_layer.height), (1920, 1080));
+
+        let window = window_cfg();
+        let clamped_window = clamp_surface_config_to_output(window, Some((640, 480)));
+        assert_eq!(
+            (clamped_window.width, clamped_window.height),
+            (920, 700),
+            "window surfaces must keep their requested size regardless of output geometry"
+        );
+    }
+
+    #[test]
+    fn window_identity_and_role_participate_in_the_config_fingerprint() {
+        let cfg = window_cfg();
+        let baseline = surface_config_fingerprint(&cfg, KeyboardMode::None);
+
+        let mut retitled = cfg.clone();
+        retitled.window.title = "Settings — Audio".into();
+        assert_ne!(
+            baseline,
+            surface_config_fingerprint(&retitled, KeyboardMode::None),
+            "a title change must reach the toplevel instead of being deduplicated away"
+        );
+
+        let mut resizable = cfg.clone();
+        resizable.window.resizable = true;
+        assert_ne!(
+            baseline,
+            surface_config_fingerprint(&resizable, KeyboardMode::None)
+        );
+
+        let mut as_layer = cfg.clone();
+        as_layer.role = SurfaceRole::Layer;
+        assert_ne!(
+            baseline,
+            surface_config_fingerprint(&as_layer, KeyboardMode::None),
+            "a role change must be visible to the reconfigure gate"
+        );
     }
 
     #[test]
@@ -2942,10 +3338,7 @@ mod tests {
             }
         }
 
-        fn old_surface_config_fingerprint(
-            cfg: &LayerSurfaceConfig,
-            keyboard_mode: KeyboardMode,
-        ) -> u64 {
+        fn old_surface_config_fingerprint(cfg: &SurfaceConfig, keyboard_mode: KeyboardMode) -> u64 {
             let mut hasher = OldHasher::default();
             surface_edge_slot(cfg.edge).hash(&mut hasher);
             surface_layer_slot(cfg.layer).hash(&mut hasher);
@@ -2960,7 +3353,9 @@ mod tests {
             hasher.finish()
         }
 
-        let cfg = LayerSurfaceConfig {
+        let cfg = SurfaceConfig {
+            role: SurfaceRole::Layer,
+            window: WindowOptions::default(),
             edge: Some(Edge::Top),
             layer: MeshLayer::Overlay,
             size_policy: LayerSurfaceSizePolicy::Fixed,

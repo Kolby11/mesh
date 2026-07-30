@@ -44,6 +44,11 @@ build with no diagnostic.
 
 - [ ] Popups / overlays — transient surfaces with custom content and dismiss
       behavior → v1.22.
+- [ ] Per-widget promotion — promote a widget *embedded in another surface* into
+      its own window, rather than a whole surface. Depends on the shared surface
+      VM (the widget does not own a VM today) and on multi-instance frontend
+      modules. Whole-surface promotion shipped 2026-07-30. Design:
+      [`.planning/todos/pending/2026-07-28-toplevel-window-surfaces.md`](../.planning/todos/pending/2026-07-28-toplevel-window-surfaces.md).
 
 ## Module system
 
@@ -63,8 +68,9 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 - [ ] Add external `contract.json` support with keyed state, method, event, and
       type objects; compile into `InterfaceContract` and generate strict
       Luau/LSP types.
-- [ ] Generate settings UI from contributed schemas by default, with an optional
-      `settings_ui` entrypoint for advanced modules.
+- [ ] Generate settings UI from props declarations by default, with an optional
+      `settings_ui` entrypoint for advanced modules. Writes go to the module's
+      namespace in the settings store. See [`spec/08-settings.md`](spec/08-settings.md) §5.
 - [ ] Eliminate the remaining service-specific Rust branches. The startup-sound
       path still calls the `mesh.audio` handler directly; debug and profiling
       paths also branch. *(detail: "Module system — remaining open follow-ups")*
@@ -79,6 +85,25 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
       parallel inline-interface path were both rejected: they trade conceptual
       simplicity for typing simplicity, which is the failure mode that redesign
       set out to avoid.
+
+## Settings
+
+The single sparse store shipped 2026-07-30: one `config/settings.json`
+namespaced by `shell` / module id / interface id, replacing `shell-settings.json`,
+`settings-default.json`, and the per-module `config/settings.json` files.
+Remaining:
+
+- [ ] Expose the store as the `mesh.settings` service so modules read effective
+      values and subscribe to changes, instead of the shell handing each
+      component a raw JSON namespace. Prerequisite for a replaceable settings
+      module. See [`spec/08-settings.md`](spec/08-settings.md) §1, §6.
+- [ ] Extend `mesh-shell config eject` to props once `<props>` lands — it
+      materializes only `surface` today, so a module's editable knobs still have
+      no discoverable block to hand-edit.
+- [ ] Validate stored `props.*` values once `<props>` lands. Settings validation
+      covers the `shell` namespace and `surface` blocks; prop values pass through
+      unchecked because there is no declaration to check them against yet
+      (`MODULE_NAMESPACE_FIELDS` marks them `Opaque`).
 
 ## Popovers
 
@@ -103,6 +128,11 @@ promotion")*
       script string-parsing as temporary migration code; move them to
       template-AST traversal as the icon, keybind, and i18n extractors already
       were.
+- [ ] `min-width`/`max-width`/`min-height`/`max-height` take lengths only —
+      `ComputedStyle` stores them as `Option<f32>` while `width`/`height` are
+      `Dimension`. So `max-width: 100%` cannot clamp a fixed root to its
+      surface, and a window that wants a floating minimum must clear it
+      explicitly in each `:fullscreen`/`:maximized`/`:tiled` rule.
 - [ ] Converge the immediate and retained renderers.
       `render/src/surface/painter/tree.rs` still holds a parallel
       widget-specific immediate renderer beside display-list replay. Route
@@ -239,10 +269,6 @@ gate where the win is structural.
 
 ### Input
 
-- [ ] Remove filesystem metadata calls from keyboard events.
-      `current_keyboard_settings` performs two `std::fs::metadata` calls per
-      press and release even on a warm cache. Feed a versioned snapshot from the
-      existing settings watcher and leave the input path syscall-free.
 - [ ] Resolve each keyboard target once. `build_keyboard_event` searches
       separately for node and bounds while a fused traversal already exists;
       return a borrowed `ResolvedInputTarget` and reuse it for payload,

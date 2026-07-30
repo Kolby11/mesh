@@ -439,7 +439,10 @@ mod inherited_mask_tests {
         let inheritable = ["color", "font-size", "font-weight", "font-family"];
         let mut rules = vec![
             rule(Selector::Universal, "font-family"),
-            rule(Selector::State("*".to_string(), "hover".to_string()), "color"),
+            rule(
+                Selector::State("*".to_string(), "hover".to_string()),
+                "color",
+            ),
         ];
         for (index, tag) in ["row", "column", "box", "button", "text", "icon", "input"]
             .into_iter()
@@ -472,7 +475,10 @@ mod inherited_mask_tests {
                 "font-weight",
             ));
         }
-        rules.push(container_rule(Selector::Tag("row".to_string()), "font-size"));
+        rules.push(container_rule(
+            Selector::Tag("row".to_string()),
+            "font-size",
+        ));
         rules.push(container_rule(
             Selector::Class("responsive".to_string()),
             "color",
@@ -497,9 +503,17 @@ mod inherited_mask_tests {
                 vec!["variant-2".to_string(), "class-11".to_string()],
                 None,
             ),
-            ("text", vec!["layout-7".to_string()], Some("id-4".to_string())),
+            (
+                "text",
+                vec!["layout-7".to_string()],
+                Some("id-4".to_string()),
+            ),
             ("box", vec!["responsive".to_string()], None),
-            ("icon", vec!["unmatched".to_string()], Some("absent".to_string())),
+            (
+                "icon",
+                vec!["unmatched".to_string()],
+                Some("absent".to_string()),
+            ),
             ("custom-element", vec![], None),
         ]
     }
@@ -518,8 +532,7 @@ mod inherited_mask_tests {
             },
         ] {
             for (tag, classes, id) in cases() {
-                let bucketed =
-                    inherited_style_mask(&rules, tag, &classes, id.as_deref(), context);
+                let bucketed = inherited_style_mask(&rules, tag, &classes, id.as_deref(), context);
                 let scanned =
                     inherited_style_mask_scan(&rules, tag, &classes, id.as_deref(), context);
                 assert!(

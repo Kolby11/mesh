@@ -2469,6 +2469,11 @@ fn selector_matches_attrs(selector: &Selector, attrs: &StyleNodeAttrs) -> bool {
                 "disabled" => attrs.state.disabled,
                 "checked" => attrs.state.checked,
                 "focus-visible" => attrs.state.focus_visible,
+                "windowed" => attrs.state.window.windowed,
+                "fullscreen" => attrs.state.window.fullscreen,
+                "maximized" => attrs.state.window.maximized,
+                "activated" => attrs.state.window.activated,
+                "tiled" => attrs.state.window.tiled,
                 _ => false,
             };
             tag_matches && state_matches
@@ -2543,6 +2548,11 @@ const STATE_PRESSED: u32 = 1 << 9;
 const STATE_INVALID: u32 = 1 << 10;
 const STATE_VALUE: u32 = 1 << 11;
 const STATE_FOCUS_VISIBLE: u32 = 1 << 12;
+const STATE_FULLSCREEN: u32 = 1 << 13;
+const STATE_MAXIMIZED: u32 = 1 << 14;
+const STATE_ACTIVATED: u32 = 1 << 15;
+const STATE_TILED: u32 = 1 << 16;
+const STATE_WINDOWED: u32 = 1 << 17;
 
 fn active_state_mask(state: ElementState) -> u32 {
     let mut mask = 0;
@@ -2585,6 +2595,21 @@ fn active_state_mask(state: ElementState) -> u32 {
     if state.focus_visible {
         mask |= STATE_FOCUS_VISIBLE;
     }
+    if state.window.windowed {
+        mask |= STATE_WINDOWED;
+    }
+    if state.window.fullscreen {
+        mask |= STATE_FULLSCREEN;
+    }
+    if state.window.maximized {
+        mask |= STATE_MAXIMIZED;
+    }
+    if state.window.activated {
+        mask |= STATE_ACTIVATED;
+    }
+    if state.window.tiled {
+        mask |= STATE_TILED;
+    }
     mask
 }
 
@@ -2603,6 +2628,11 @@ fn state_name_bit(state: &str) -> Option<u32> {
         "invalid" => Some(STATE_INVALID),
         "value" => Some(STATE_VALUE),
         "focus-visible" => Some(STATE_FOCUS_VISIBLE),
+        "windowed" => Some(STATE_WINDOWED),
+        "fullscreen" => Some(STATE_FULLSCREEN),
+        "maximized" => Some(STATE_MAXIMIZED),
+        "activated" => Some(STATE_ACTIVATED),
+        "tiled" => Some(STATE_TILED),
         _ => None,
     }
 }
@@ -3466,6 +3496,63 @@ mod tests {
         let index = StyleRuleIndex::new(&rules);
         let result = index.rules_for_state_bit(STATE_HOVERED);
         assert_eq!(result, &[0]);
+    }
+
+    #[test]
+    fn window_states_index_and_match_like_any_other_pseudo_state() {
+        // Window states run through the same bit index as `:hover`, so a
+        // fullscreen change reaches the candidate rules for a node without a
+        // separate matching path.
+        let rules = vec![
+            rule_with_state("fullscreen"),
+            rule_with_state("maximized"),
+            rule_with_state("activated"),
+            rule_with_state("tiled"),
+            rule_with_state("windowed"),
+        ];
+        let index = StyleRuleIndex::new(&rules);
+        assert_eq!(index.rules_for_state_bit(STATE_FULLSCREEN), &[0]);
+        assert_eq!(index.rules_for_state_bit(STATE_MAXIMIZED), &[1]);
+        assert_eq!(index.rules_for_state_bit(STATE_ACTIVATED), &[2]);
+        assert_eq!(index.rules_for_state_bit(STATE_TILED), &[3]);
+        assert_eq!(index.rules_for_state_bit(STATE_WINDOWED), &[4]);
+
+        let fullscreen = ElementState {
+            window: crate::WindowSurfaceState {
+                windowed: true,
+                fullscreen: true,
+                activated: true,
+                ..crate::WindowSurfaceState::default()
+            },
+            ..ElementState::default()
+        };
+        assert_eq!(
+            active_state_mask(fullscreen),
+            STATE_WINDOWED | STATE_FULLSCREEN | STATE_ACTIVATED
+        );
+        assert_eq!(active_state_mask(ElementState::default()), 0);
+    }
+
+    #[test]
+    fn windowed_state_is_independent_of_the_compositor_states() {
+        // `:windowed` says which protocol realizes the surface; the other four
+        // say what the compositor did with it. A popped-out window that is
+        // merely floating matches `:windowed` and nothing else, which is what
+        // lets a component draw a "dock back" control without also having to be
+        // fullscreen or tiled.
+        let floating_window = ElementState {
+            window: crate::WindowSurfaceState {
+                windowed: true,
+                ..crate::WindowSurfaceState::default()
+            },
+            ..ElementState::default()
+        };
+        assert_eq!(active_state_mask(floating_window), STATE_WINDOWED);
+        assert_eq!(state_name_bit("windowed"), Some(STATE_WINDOWED));
+
+        let attrs_rules = vec![rule_with_state("windowed")];
+        let index = StyleRuleIndex::new(&attrs_rules);
+        assert!(index.rules_for_state_bit(STATE_FULLSCREEN).is_empty());
     }
 
     #[test]

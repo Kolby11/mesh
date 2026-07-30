@@ -17,7 +17,7 @@ impl Shell {
                 let (candidates, statuses) = backend_launch_candidates_from_graph(
                     &graph,
                     &self.modules,
-                    &self.config,
+                    &self.settings_store,
                     &self.interfaces,
                 );
                 for status in statuses {

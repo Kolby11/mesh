@@ -953,3 +953,77 @@ function onEnterB(event) entered_bounds = event.current.bounds end
         Some(100.0)
     );
 }
+
+#[test]
+fn window_states_project_onto_the_tree_as_css_state() {
+    // The compositor's toplevel states are ambient: they belong to the surface,
+    // not to any node, but this CSS engine has no descendant combinators, so
+    // they are carried on every node. A module differentiates its filling size
+    // from its floating one by writing `:fullscreen` on the element that
+    // sizes.
+    let mut component = test_frontend_component(
+        r#"
+<style>
+.window {
+  width: 200px;
+  height: 100px;
+  background-color: #222222;
+}
+.window:fullscreen {
+  width: 100%;
+  height: 100%;
+  background-color: #eeeeee;
+}
+</style>
+<template>
+  <column class="window">
+    <text>Settings</text>
+  </column>
+</template>
+"#,
+    );
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(400, 300);
+    component.paint(&theme, 400, 300, &mut buffer, 1.0).unwrap();
+
+    let floating = node_by_mesh_key(component.last_tree.as_ref().unwrap(), "root/0");
+    assert!(!floating.state.window.fullscreen);
+    assert_eq!(
+        floating.computed_style.background_color,
+        Color::from_hex("#222222").unwrap()
+    );
+    assert_eq!(floating.layout.width, 200.0);
+
+    assert!(
+        component.surface_window_states_changed(WindowStates {
+            fullscreen: true,
+            activated: true,
+            ..WindowStates::default()
+        }),
+        "a new set of window states owes the surface a restyle"
+    );
+    assert!(component.wants_render());
+    component.paint(&theme, 400, 300, &mut buffer, 1.0).unwrap();
+
+    let filling = node_by_mesh_key(component.last_tree.as_ref().unwrap(), "root/0");
+    assert!(filling.state.window.fullscreen);
+    assert!(filling.state.window.activated);
+    assert_eq!(
+        filling.computed_style.background_color,
+        Color::from_hex("#eeeeee").unwrap()
+    );
+    assert_eq!(
+        filling.layout.width, 400.0,
+        "a fullscreen root must take the compositor's size, not its floating one"
+    );
+
+    assert!(
+        !component.surface_window_states_changed(WindowStates {
+            fullscreen: true,
+            activated: true,
+            ..WindowStates::default()
+        }),
+        "repeating the same states must not dirty the surface"
+    );
+}

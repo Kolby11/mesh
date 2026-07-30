@@ -5,7 +5,7 @@ use mesh_core_module::package::{BackendProviderNode, binary_available};
 pub(in crate::shell) fn backend_launch_candidates_from_graph(
     graph: &InstalledModuleGraph,
     modules: &HashMap<String, ModuleInstance>,
-    config: &ShellConfig,
+    settings: &SettingsStore,
     interfaces: &InterfaceRegistry,
 ) -> (
     Vec<BackendLaunchCandidate>,
@@ -32,7 +32,7 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph(
             continue;
         };
 
-        match launch_candidate_for_provider(graph, modules, config, interfaces, active_provider) {
+        match launch_candidate_for_provider(graph, modules, settings, interfaces, active_provider) {
             Ok(candidate) => candidates.push(candidate),
             Err(status) => statuses.push(status),
         }
@@ -47,7 +47,7 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph(
 pub(in crate::shell) fn launch_candidate_for_provider(
     graph: &InstalledModuleGraph,
     modules: &HashMap<String, ModuleInstance>,
-    config: &ShellConfig,
+    settings: &SettingsStore,
     interfaces: &InterfaceRegistry,
     provider: &BackendProviderNode,
 ) -> Result<BackendLaunchCandidate, BackendLifecycleStatusRecord> {
@@ -144,7 +144,7 @@ pub(in crate::shell) fn launch_candidate_for_provider(
         .chain(module.manifest.capabilities.optional.iter())
         .cloned()
         .collect::<Vec<_>>();
-    let settings = backend_module_settings_json(config, &provider.module_id);
+    let settings = settings.namespace(&provider.module_id);
     Ok(BackendLaunchCandidate {
         module_id: provider.module_id.clone(),
         service_name: service_name_from_interface(&interface),
@@ -287,22 +287,4 @@ fn validate_backend_provider_contract(
     }
 
     None
-}
-
-fn backend_module_settings_json(config: &ShellConfig, module_id: &str) -> serde_json::Value {
-    config
-        .modules
-        .get(module_id)
-        .map(|module| match serde_json::to_value(&module.values) {
-            Ok(serde_json::Value::Object(map)) => serde_json::Value::Object(map),
-            Ok(_) => serde_json::json!({}),
-            Err(err) => {
-                tracing::warn!(
-                    module_id = module_id,
-                    "failed to serialize backend module settings: {err}"
-                );
-                serde_json::json!({})
-            }
-        })
-        .unwrap_or_else(|| serde_json::json!({}))
 }

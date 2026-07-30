@@ -177,7 +177,7 @@ impl Shell {
         match launch_candidate_for_provider(
             &graph,
             &self.modules,
-            &self.config,
+            &self.settings_store,
             &self.interfaces,
             &provider,
         ) {

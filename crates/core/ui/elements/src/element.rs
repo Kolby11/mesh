@@ -2137,6 +2137,7 @@ mod tests {
             pressed: true,
             invalid: true,
             value: true,
+            window: crate::WindowSurfaceState::default(),
         };
 
         let snapshot = ElementStateSnapshot::from(state);

@@ -20,6 +20,26 @@ use mesh_core_service::{
 use mesh_core_theme::{Theme, default_theme};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+
+/// A settings store with no user overrides — the state of a fresh install.
+///
+/// Tests that need overrides build their own store with
+/// [`test_settings_store_with`] rather than writing files into a module
+/// directory, which no longer carries user settings.
+pub(in crate::shell) fn test_settings_store() -> Arc<mesh_core_config::SettingsStore> {
+    Arc::new(mesh_core_config::SettingsStore::default())
+}
+
+/// A settings store holding one namespace's overrides.
+pub(in crate::shell) fn test_settings_store_with(
+    namespace: &str,
+    overrides: serde_json::Value,
+) -> Arc<mesh_core_config::SettingsStore> {
+    let mut store = mesh_core_config::SettingsStore::default();
+    store.set_namespace(namespace, overrides);
+    Arc::new(store)
+}
 
 pub(super) fn audio_network_catalog() -> InterfaceCatalog {
     let mut catalog = InterfaceCatalog::default();
@@ -484,8 +504,13 @@ pub(super) fn test_frontend_component_with_local_components(
         )]),
         slot_contributions: HashMap::new(),
     };
-    let mut component =
-        FrontendSurfaceComponent::new(compiled, PathBuf::from("."), catalog, interface_catalog);
+    let mut component = FrontendSurfaceComponent::new(
+        compiled,
+        PathBuf::from("."),
+        catalog,
+        interface_catalog,
+        test_settings_store(),
+    );
     component
         .mount(ComponentContext {
             component_id: "@test/reactive-surface".into(),
@@ -519,6 +544,7 @@ pub(super) fn test_frontend_component_with_manifest(
         PathBuf::from("."),
         catalog,
         InterfaceCatalog::default(),
+        test_settings_store(),
     );
     component
         .mount(ComponentContext {
@@ -583,6 +609,7 @@ pub(super) fn test_frontend_component_with_required_icons(
         PathBuf::from("."),
         catalog,
         InterfaceCatalog::default(),
+        test_settings_store(),
     );
     component
         .mount(ComponentContext {
@@ -618,8 +645,13 @@ pub(super) fn test_frontend_component_with_catalog(
         modules: HashMap::new(),
         slot_contributions: HashMap::new(),
     };
-    let mut component =
-        FrontendSurfaceComponent::new(compiled, PathBuf::from("."), catalog, interface_catalog);
+    let mut component = FrontendSurfaceComponent::new(
+        compiled,
+        PathBuf::from("."),
+        catalog,
+        interface_catalog,
+        test_settings_store(),
+    );
     component
         .mount(ComponentContext {
             component_id: "@test/reactive-surface".into(),
@@ -986,9 +1018,14 @@ pub(super) fn real_frontend_module_component(
         (navigation_compiled, navigation_dir)
     };
 
-    let mut component =
-        FrontendSurfaceComponent::new(compiled, module_dir, catalog, interface_catalog)
-            .with_graph_i18n_catalogs(graph_i18n_catalogs);
+    let mut component = FrontendSurfaceComponent::new(
+        compiled,
+        module_dir,
+        catalog,
+        interface_catalog,
+        test_settings_store(),
+    )
+    .with_graph_i18n_catalogs(graph_i18n_catalogs);
     component
         .mount(ComponentContext {
             component_id: module_id.into(),

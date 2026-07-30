@@ -497,6 +497,48 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.observe_surface_size(width, height)
     }
 
+    fn surface_window_states_changed(&mut self, states: WindowStates) -> bool {
+        // `windowed` is MESH's own decision rather than one of the states the
+        // compositor sends, so it is carried over instead of being derived from
+        // `states` — a configure must not silently demote the surface.
+        self.observe_window_states(WindowSurfaceState {
+            windowed: self.window_states.windowed,
+            fullscreen: states.fullscreen,
+            maximized: states.maximized,
+            activated: states.activated,
+            tiled: states.tiled,
+        })
+    }
+
+    fn surface_role_changed(&mut self, role: mesh_core_wayland::SurfaceRole) -> bool {
+        let windowed = role == mesh_core_wayland::SurfaceRole::Window;
+        self.surface_layout.role = role;
+        // Leaving window role drops the compositor states with it: a layer
+        // surface is never fullscreen, maximized, activated, or tiled, and
+        // keeping the last window's flags would strand the component in its
+        // filling style. The fresh toplevel's real states arrive with its first
+        // configure.
+        let restyled = self.observe_window_states(WindowSurfaceState {
+            windowed,
+            ..WindowSurfaceState::default()
+        });
+        // `observe_window_states` invalidates style/layout/paint but not the
+        // surface config, and the config is the whole point here: without this
+        // flag `render` skips `render_layout`, the shell-surface record keeps the
+        // old role, and the presentation layer is never asked to swap the
+        // compositor object.
+        self.invalidate(ComponentDirtyFlags::SURFACE_CONFIG);
+        restyled
+    }
+
+    fn surface_role(&self) -> mesh_core_wayland::SurfaceRole {
+        self.surface_layout.role
+    }
+
+    fn surface_promotable(&self) -> bool {
+        self.surface_layout.promotable
+    }
+
     fn render(&mut self, surface: &mut dyn ShellSurface) -> Result<(), ComponentError> {
         if self.should_update_surface_config_on_render() {
             self.render_layout(surface);
@@ -1017,17 +1059,26 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.compiled.watched_paths.clone()
     }
 
-    fn module_settings_path(&self) -> Option<&Path> {
-        if self.module_settings_file.exists() {
-            Some(self.module_settings_file.as_path())
-        } else {
-            None
-        }
-    }
-
-    fn reload_module_settings(&mut self) -> Result<bool, ComponentError> {
-        let settings_state =
-            load_frontend_module_settings(&self.module_settings_file, &self.compiled.manifest);
+    fn apply_settings(
+        &mut self,
+        settings: &Arc<mesh_core_config::SettingsStore>,
+    ) -> Result<bool, ComponentError> {
+        self.settings = settings.clone();
+        let settings_state = resolve_frontend_module_settings(
+            &self.settings_namespace,
+            self.settings.namespace(&self.settings_namespace),
+            &self.compiled.manifest,
+        );
+        // Only what this save introduced: re-reporting the rest on every write
+        // would bury the one line the user is trying to fix.
+        mesh_core_config::log_settings_diagnostics(
+            "settings reload",
+            &mesh_core_config::new_settings_diagnostics(
+                &self.settings_diagnostics,
+                &settings_state.diagnostics,
+            ),
+        );
+        self.settings_diagnostics = settings_state.diagnostics;
         let layout_changed = self.surface_layout != settings_state.layout;
         let settings_changed = self.settings_json != settings_state.raw;
 

@@ -44,6 +44,14 @@ impl ShellSurface for CountingSurface {
         self.layout_calls += 1;
     }
 
+    fn set_role(&mut self, _role: mesh_core_wayland::SurfaceRole) {
+        self.layout_calls += 1;
+    }
+
+    fn set_window_options(&mut self, _options: mesh_core_wayland::WindowOptions) {
+        self.layout_calls += 1;
+    }
+
     fn show(&mut self) {
         self.visibility_calls += 1;
     }
@@ -1256,6 +1264,7 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
         module_dir.to_path_buf(),
         catalog,
         mesh_core_service::InterfaceCatalog::default(),
+        test_settings_store(),
     );
     component
         .mount(ComponentContext {
@@ -1352,6 +1361,7 @@ local Child = require("./components/child.mesh")
         module_dir.to_path_buf(),
         catalog,
         mesh_core_service::InterfaceCatalog::default(),
+        test_settings_store(),
     );
     component
         .mount(ComponentContext {
