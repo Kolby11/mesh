@@ -285,7 +285,14 @@ impl Shell {
             );
             let emitted = {
                 let runtime = &mut self.components[index];
-                if runtime.component.content_input_size() != Some(component_surface_size) {
+                // A child xdg_popup has its own surface dimensions. Feeding
+                // those dimensions into the shared component runtime resizes
+                // the parent tree to the popup-sized buffer until the next
+                // parent frame restores the real size. Only parent-surface
+                // input may update the component's authoritative layout size.
+                if matches!(target, TargetRef::Parent)
+                    && runtime.component.content_input_size() != Some(component_surface_size)
+                {
                     runtime
                         .component
                         .surface_size_changed(component_surface_size.0, component_surface_size.1);
@@ -299,11 +306,13 @@ impl Shell {
                     )?,
                     TargetRef::Child(child_index) => {
                         let node_key = runtime.children[child_index].node_key.clone();
+                        let content_padding = runtime.children[child_index].content_padding;
                         runtime.component.handle_child_surface_input(
                             &node_key,
                             self.theme.active(),
                             component_surface_size.0,
                             component_surface_size.1,
+                            (content_padding.0 as f32, content_padding.1 as f32),
                             input,
                         )?
                     }

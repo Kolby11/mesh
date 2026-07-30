@@ -1,0 +1,14 @@
+{
+  "name": "@mesh/nord",
+  "version": "0.1.0",
+  "description": "Nord theme.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "theme": {
+      "id": "nord",
+      "label": "Nord",
+      "entry": "theme.css"
+    }
+  }
+}

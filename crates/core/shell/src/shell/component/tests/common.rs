@@ -1112,7 +1112,7 @@ pub(super) fn root_with(children: Vec<WidgetNode>) -> WidgetNode {
     root.attributes.insert("_mesh_key".into(), "root".into());
     root.layout.width = 240.0;
     root.layout.height = 160.0;
-    root.children = children;
+    root.children = children.into();
     root
 }
 

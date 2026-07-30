@@ -377,6 +377,20 @@ impl Shell {
                     .push(component_index);
             }
         }
+        // Component indices are appended in ascending order, so duplicate
+        // declarations are adjacent. Normalize once when the index changes
+        // instead of cloning/sorting/deduplicating targets for every event.
+        for subscribers in index.update_services.values_mut() {
+            subscribers.dedup();
+        }
+        for subscribers in index.cached_update_services.values_mut() {
+            subscribers.dedup();
+        }
+        for events in index.interface_events.values_mut() {
+            for subscribers in events.values_mut() {
+                subscribers.dedup();
+            }
+        }
         index.dirty = false;
         self.service_delivery_index = index;
     }

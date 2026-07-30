@@ -1359,7 +1359,7 @@ box.card { padding: 3px; }
         btn.computed_style.width = Dimension::Px(100.0);
         btn.computed_style.height = Dimension::Px(50.0);
         let btn_id = btn.id;
-        root.children = vec![btn];
+        root.children = vec![btn].into();
         LayoutEngine::compute(&mut root, 200.0, 100.0);
 
         let mut input = InputState::new();

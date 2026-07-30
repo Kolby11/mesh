@@ -1,33 +1,33 @@
 <template>
-  <stack class="nav-button-shell">
-    <button
-      ref="languageButton"
-      class="{trigger_class}"
-      onclick={onLanguageToggle}
-      onpointerenter={onLanguageEnter}
-      onpointerleave={onLanguageLeave}
-      aria-haspopup="true"
-      aria-expanded="{language_aria_expanded}"
-      data-tooltip-disabled="{language_tooltip_disabled}"
-      title="{language_tooltip}"
-      aria-label="{t('nav.language_menu')}"
-    >
-      <label class="language-label">{current_locale_label}</label>
-    </button>
-    <LanguagePopover bind:this={lang_popover} />
-  </stack>
+    <stack class="nav-button-shell">
+        <button
+            ref="languageButton"
+            class={trigger_class}
+            onclick={onLanguageToggle}
+            onpointerenter={onLanguageEnter}
+            onpointerleave={onLanguageLeave}
+            aria-haspopup="true"
+            aria-expanded={language_aria_expanded}
+            data-tooltip-disabled={language_tooltip_disabled}
+            title={language_tooltip}
+            aria-label={t('nav.language_menu')}
+        >
+            <label class="language-label">{current_locale_label}</label>
+        </button>
+        <LanguagePopover bind:this={lang_popover} />
+    </stack>
 </template>
 
 <script lang="luau">
 local t = import("mesh.i18n", "t")
 local LanguagePopover = require("@mesh/language-popover")
 
-current_locale_label = "EN"
+current_locale_label = "🇬🇧"
 language_surface_hidden = true
 language_aria_expanded = "false"
 language_tooltip = ""
 language_tooltip_disabled = "false"
-trigger_class = "nav-button"
+trigger_class = "language-trigger"
 
 lang_popover = nil
 local lang_popover_connected = false
@@ -46,39 +46,22 @@ local function schedule_bridge_close()
     })
 end
 
-local function locale_code()
-    local locale = mesh.locale.current()
-    if type(locale) ~= "string" or locale == "" then
-        return "en"
+-- The flag shown on the trigger comes from the popover, which owns the locale
+-- table. Keeping a second copy here is what left the button reading "EN" for
+-- every locale except Slovak: it only knew two of them.
+local function popover_flag()
+    if lang_popover == nil then
+        return nil
     end
-    return locale
-end
-
-local function locale_label(locale)
-    if locale == "sk" or string.find(locale or "", "sk-", 1, true) == 1 then
-        return "SK"
+    local flag = lang_popover.current_flag
+    if type(flag) ~= "string" or flag == "" then
+        return nil
     end
-    return "EN"
-end
-
-local function stored_locale(storage)
-    local locale = storage and storage.language
-    if locale == "en" or locale == "sk" then
-        return locale
-    end
-    return nil
-end
-
-function init(self)
-    local locale = stored_locale(self.storage)
-    if locale ~= nil then
-        mesh.locale.set(locale)
-    end
-    current_locale_label = locale_label(locale or locale_code())
+    return flag
 end
 
 local function sync_trigger_state()
-    trigger_class = language_surface_hidden and "nav-button" or "nav-button nav-button-open"
+    trigger_class = language_surface_hidden and "language-trigger" or "language-trigger language-trigger-open"
     language_aria_expanded = language_surface_hidden and "false" or "true"
     if language_surface_hidden then
         language_tooltip = t("nav.language_menu")
@@ -108,7 +91,7 @@ local function do_close()
 end
 
 function render(self)
-    current_locale_label = locale_label(locale_code())
+    current_locale_label = popover_flag() or current_locale_label
     sync_trigger_state()
 
     -- Subscribe to popover events once the bound instance is available.
@@ -156,86 +139,87 @@ end
 </script>
 
 <style>
-.nav-button-shell {
-    width: 40px;
-    height: 40px;
-    position: relative;
-    flex-shrink: 0;
-    justify-content: center;
-    align-items: center;
-    overflow: visible;
-}
-
-.nav-button {
-    width: 40px;
-    height: 40px;
-    flex-shrink: 0;
-    justify-content: center;
-    align-items: center;
-    padding: var(--spacing-xs);
-    border-radius: var(--radius-full);
-    background: var(--color-surface-container);
-    color: var(--color-on-surface);
-    border-width: 2px;
-    border-style: solid;
-    border-color: transparent;
-    text-wrap: none;
-    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
-}
-
-.nav-button-open {
-    background: var(--color-surface-container);
-    color: var(--color-on-surface);
-    border-color: var(--color-primary);
-}
-
-.nav-button:hover {
-    background: var(--color-secondary-container);
-    color: var(--color-on-secondary-container);
-}
-
-.nav-button:focus,
-.nav-button:focus-visible {
-    background: var(--color-tertiary-container);
-    color: var(--color-on-tertiary-container);
-}
-
-.nav-button-open:hover,
-.nav-button-open:focus,
-.nav-button-open:focus-visible {
-    background: var(--color-surface-container);
-    color: var(--color-on-surface);
-    border-color: var(--color-primary);
-}
-
-.nav-button:active {
-    background: var(--color-primary);
-    color: var(--color-on-primary);
-    border-color: var(--color-primary);
-}
-
-.language-label {
-    color: inherit;
-    font-size: var(--typography-size-sm);
-    font-weight: 700;
-    line-height: 1;
-    letter-spacing: 0.05em;
-    user-select: none;
-    transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
-}
-
-@container (max-width: 720px) {
     .nav-button-shell {
-        width: 36px;
-        height: 36px;
+        width: 40px;
+        height: 40px;
+        position: relative;
+        flex-shrink: 0;
+        justify-content: center;
+        align-items: center;
+        overflow: visible;
     }
 
-    .nav-button {
-        width: 36px;
-        height: 36px;
+    .language-trigger {
+        width: 40px;
+        height: 40px;
+        flex-shrink: 0;
+        justify-content: center;
+        align-items: center;
+        padding: var(--spacing-xs);
+        border-radius: var(--radius-full);
+        background: var(--color-surface-container);
+        color: var(--color-on-surface);
+        border-width: 2px;
+        border-style: solid;
+        border-color: transparent;
+        text-wrap: none;
+        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+        color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+        border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+        transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
     }
-}
+
+    .language-trigger-open {
+        background: var(--color-surface-container);
+        color: var(--color-on-surface);
+        border-color: var(--color-primary);
+    }
+
+    .language-trigger:hover {
+        background: var(--color-secondary-container);
+        color: var(--color-on-secondary-container);
+    }
+
+    .language-trigger:focus,
+    .language-trigger:focus-visible {
+        background: var(--color-tertiary-container);
+        color: var(--color-on-tertiary-container);
+    }
+
+    .language-trigger-open:hover,
+    .language-trigger-open:focus,
+    .language-trigger-open:focus-visible {
+        background: var(--color-surface-container);
+        color: var(--color-on-surface);
+        border-color: var(--color-primary);
+    }
+
+    .language-trigger:active {
+        background: var(--color-primary);
+        color: var(--color-on-primary);
+        border-color: var(--color-primary);
+    }
+
+    .language-label {
+        color: inherit;
+        /* A flag emoji, not a two-letter code: no tracking to add after the
+        regional-indicator pair, and large enough to read at trigger size. */
+        font-size: var(--typography-size-lg);
+        font-weight: 700;
+        line-height: 1;
+        user-select: none;
+        transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    @container (max-width: 720px) {
+        .nav-button-shell {
+            width: 36px;
+            height: 36px;
+        }
+
+        .language-trigger {
+            width: 36px;
+            height: 36px;
+        }
+    }
 </style>

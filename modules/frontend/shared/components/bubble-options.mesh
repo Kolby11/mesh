@@ -10,11 +10,12 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
         style={bubbleStageStyle()}
         role="menu"
         onscroll={onscroll}
+        ontwofingerscroll={onscroll}
         aria-label={label}
     >
         {#for item in items}
             <button
-                class="bubble-option"
+                class={bubbleOptionClass(item.id)}
                 style={bubbleOptionStyle(item.id)}
                 role="menuitemradio"
                 aria-checked={item.active}
@@ -48,17 +49,33 @@ items = {}
 
 -- Called with the selected item's `id` (onselect(item.id)).
 onselect = nil
+-- Receives both the wheel's `scroll` and the trackpad's `twofingerscroll`.
+-- They are separate events with different delta scales — one event per notch
+-- versus a continuous pixel stream — so the caller reads `event.type` and
+-- notches the continuous one before stepping its ring.
 onscroll = nil
+-- Ring rotation feedback. Callers that cycle a window of options over a larger
+-- set pass a token that changes on every scroll step: "next-<tick>" when the
+-- ring turns one slot toward the end of the set, "prev-<tick>" toward the
+-- start. The tick makes the token differ between consecutive steps in the same
+-- direction, so the one-shot slide animation restarts instead of staying
+-- finished on its last keyframe.
+rotation = ""
 onoptionpointerenter = nil
 onoptionfocus = nil
 onoptionblur = nil
 onoptionkeydown = nil
 
 local ITEM_SIZE = 36
-local HORIZONTAL_STEP = 28
+-- Bubbles sit side by side with a hairline gap rather than overlapping: the
+-- arc is shallow enough now that overlap would read as a pile, not a curve.
+local HORIZONTAL_STEP = 38
 local HORIZONTAL_PADDING = 10
 local TOP_OFFSET = 8
-local ARC_DEPTH = 24
+-- How far the middle slot hangs below the outer ones. Kept small so the row
+-- reads as a line with a slight sag — a hint of a circle, not a half-moon.
+local ARC_DEPTH = 10
+local BOTTOM_SLACK = 6
 
 local function itemIndex(id)
     for index, item in items do
@@ -72,7 +89,8 @@ end
 function bubbleStageStyle()
     local count = math.max(#items, 1)
     local width = HORIZONTAL_PADDING * 2 + ITEM_SIZE + HORIZONTAL_STEP * (count - 1)
-    return "width: " .. width .. "px; height: 74px;"
+    local height = TOP_OFFSET + ARC_DEPTH + ITEM_SIZE + BOTTOM_SLACK
+    return "width: " .. width .. "px; height: " .. height .. "px;"
 end
 
 function bubbleOptionStyle(id)
@@ -89,12 +107,61 @@ function bubbleOptionStyle(id)
     return string.format("left: %.2fpx; top: %.2fpx;", left, top)
 end
 
+-- Decode the caller's rotation token into direction and replay phase. Two
+-- alternating phase names per variant is what makes the engine restart the
+-- animation when consecutive steps go the same way.
+local function rotationStep()
+    if type(rotation) ~= "string" or rotation == "" then
+        return nil
+    end
+    local direction, tick = string.match(rotation, "^(%a+)-(%d+)$")
+    if direction ~= "next" and direction ~= "prev" then
+        return nil
+    end
+    return direction, (tonumber(tick) or 0) % 2 == 0 and "a" or "b"
+end
+
+-- One step slides every bubble along the arc into the slot ahead of it, so the
+-- row reads as a ring turning rather than a conveyor: each bubble starts at the
+-- position of the neighbour it is replacing, which for the middle slot means
+-- coming from higher up and for the outer slots from lower down.
+--
+-- Turning "next" moves content left, so slot 1 inherits slot 2's bubble, slot 2
+-- inherits slot 3's, and slot 3 is where a new one appears; "prev" mirrors it.
+-- Slots 1 and 3 sit at the same height, so they share one travel variant and
+-- only the middle slot needs its own.
+local function rotationClass(index)
+    local direction, phase = rotationStep()
+    if direction == nil or #items ~= 3 then
+        return ""
+    end
+    local variant = index == 2 and "center" or "outer"
+    return " bubble-options-rotate-" .. direction .. "-" .. variant .. "-" .. phase
+end
+
 function bubbleMotionClass(id)
+    local index = itemIndex(id)
     if #items ~= 3 then
         return "bubble-options-motion"
     end
     local variants = { "left", "center", "right" }
-    return "bubble-options-motion bubble-options-motion-" .. variants[itemIndex(id)]
+    return "bubble-options-motion bubble-options-motion-" .. variants[index] .. rotationClass(index)
+end
+
+-- The bubble arriving from off the ring fades in; the one it displaced has
+-- already left the item list, so the pair reads as one appearing and one
+-- disappearing. The fade rides the button so the travel animation keeps the
+-- motion box and the idle float keeps the core.
+function bubbleOptionClass(id)
+    local direction, phase = rotationStep()
+    if direction == nil or #items ~= 3 then
+        return "bubble-option"
+    end
+    local entering = direction == "next" and 3 or 1
+    if itemIndex(id) ~= entering then
+        return "bubble-option"
+    end
+    return "bubble-option bubble-option-arriving-" .. phase
 end
 
 function blurCoreClass(core_class)
@@ -182,6 +249,75 @@ end
     .bubble-options-motion-right.mesh-surface-exiting {
         transform: translate(-10px, 4px) scale(0.12);
         opacity: 0;
+    }
+
+    /* Ring rotation. `ARC_DEPTH` (10px) and `HORIZONTAL_STEP` (38px) in the
+    script above set these offsets: one step moves a bubble one slot along the
+    arc, and the middle slot sits `ARC_DEPTH` lower than the outer two, so a
+    bubble entering the middle arrives from higher up while one entering an
+    outer slot arrives from lower down. That height difference is what reads as
+    rotation around a circle instead of a flat conveyor. */
+    .bubble-options-rotate-next-outer-a,
+    .bubble-options-rotate-next-outer-b,
+    .bubble-options-rotate-next-center-a,
+    .bubble-options-rotate-next-center-b,
+    .bubble-options-rotate-prev-outer-a,
+    .bubble-options-rotate-prev-outer-b,
+    .bubble-options-rotate-prev-center-a,
+    .bubble-options-rotate-prev-center-b {
+        animation-duration: 300ms;
+        animation-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+        animation-iteration-count: 1;
+        animation-fill-mode: none;
+    }
+
+    .bubble-options-rotate-next-outer-a {
+        animation-name: bubble-options-arc-next-outer-a;
+    }
+
+    .bubble-options-rotate-next-outer-b {
+        animation-name: bubble-options-arc-next-outer-b;
+    }
+
+    .bubble-options-rotate-next-center-a {
+        animation-name: bubble-options-arc-next-center-a;
+    }
+
+    .bubble-options-rotate-next-center-b {
+        animation-name: bubble-options-arc-next-center-b;
+    }
+
+    .bubble-options-rotate-prev-outer-a {
+        animation-name: bubble-options-arc-prev-outer-a;
+    }
+
+    .bubble-options-rotate-prev-outer-b {
+        animation-name: bubble-options-arc-prev-outer-b;
+    }
+
+    .bubble-options-rotate-prev-center-a {
+        animation-name: bubble-options-arc-prev-center-a;
+    }
+
+    .bubble-options-rotate-prev-center-b {
+        animation-name: bubble-options-arc-prev-center-b;
+    }
+
+    /* The bubble arriving from off the ring fades up as it travels. */
+    .bubble-option-arriving-a,
+    .bubble-option-arriving-b {
+        animation-duration: 300ms;
+        animation-timing-function: var(--animation-curves-bezier-standard);
+        animation-iteration-count: 1;
+        animation-fill-mode: none;
+    }
+
+    .bubble-option-arriving-a {
+        animation-name: bubble-option-arriving-a;
+    }
+
+    .bubble-option-arriving-b {
+        animation-name: bubble-option-arriving-b;
     }
 
     .bubble-options-motion.mesh-surface-exiting {
@@ -274,6 +410,70 @@ end
         border-color: #83a598;
     }
 
+    .bubble-option-core-nord {
+        background-color: #2e3440;
+        color: #88c0d0;
+        border-color: #4c566a;
+        animation-name: bubble-option-float-left;
+        animation-delay: 360ms;
+    }
+
+    .bubble-option-core-nord-active {
+        border-color: #ebcb8b;
+    }
+
+    .bubble-option-core-nord:hover {
+        border-color: #8fbcbb;
+    }
+
+    .bubble-option-core-mocha {
+        background-color: #1e1e2e;
+        color: #cba6f7;
+        border-color: #45475a;
+        animation-name: bubble-option-float-center;
+        animation-delay: 430ms;
+    }
+
+    .bubble-option-core-mocha-active {
+        border-color: #f9e2af;
+    }
+
+    .bubble-option-core-mocha:hover {
+        border-color: #89b4fa;
+    }
+
+    .bubble-option-core-tokyo {
+        background-color: #1a1b26;
+        color: #7aa2f7;
+        border-color: #414868;
+        animation-name: bubble-option-float-right;
+        animation-delay: 500ms;
+    }
+
+    .bubble-option-core-tokyo-active {
+        border-color: #e0af68;
+    }
+
+    .bubble-option-core-tokyo:hover {
+        border-color: #bb9af7;
+    }
+
+    .bubble-option-core-solarized {
+        background-color: #002b36;
+        color: #2aa198;
+        border-color: #17505d;
+        animation-name: bubble-option-float-center;
+        animation-delay: 400ms;
+    }
+
+    .bubble-option-core-solarized-active {
+        border-color: #b58900;
+    }
+
+    .bubble-option-core-solarized:hover {
+        border-color: #268bd2;
+    }
+
     .bubble-option-core-language {
         background-color: prop(blur_background);
         color: var(--color-on-surface);
@@ -304,7 +504,8 @@ end
 
     .bubble-option-text {
         color: inherit;
-        font-size: var(--typography-size-sm);
+        /* Sized for the language ring's flag emoji rather than a text label. */
+        font-size: var(--typography-size-lg);
         font-weight: 700;
         line-height: 1;
         text-wrap: none;
@@ -314,6 +515,102 @@ end
 
     .bubble-option-hidden {
         display: none;
+    }
+
+    @keyframes bubble-options-arc-next-outer-a {
+        0% {
+            transform: translate(38px, 10px) scale(0.88);
+        }
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
+    }
+
+    @keyframes bubble-options-arc-next-center-a {
+        0% {
+            transform: translate(38px, -10px) scale(0.88);
+        }
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
+    }
+
+    @keyframes bubble-options-arc-prev-outer-a {
+        0% {
+            transform: translate(-38px, 10px) scale(0.88);
+        }
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
+    }
+
+    @keyframes bubble-options-arc-prev-center-a {
+        0% {
+            transform: translate(-38px, -10px) scale(0.88);
+        }
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
+    }
+
+    @keyframes bubble-options-arc-next-outer-b {
+        0% {
+            transform: translate(38px, 10px) scale(0.88);
+        }
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
+    }
+
+    @keyframes bubble-options-arc-next-center-b {
+        0% {
+            transform: translate(38px, -10px) scale(0.88);
+        }
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
+    }
+
+    @keyframes bubble-options-arc-prev-outer-b {
+        0% {
+            transform: translate(-38px, 10px) scale(0.88);
+        }
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
+    }
+
+    @keyframes bubble-options-arc-prev-center-b {
+        0% {
+            transform: translate(-38px, -10px) scale(0.88);
+        }
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
+    }
+
+    @keyframes bubble-option-arriving-a {
+        0% {
+            opacity: 0;
+        }
+        55% {
+            opacity: 0.65;
+        }
+        100% {
+            opacity: 1;
+        }
+    }
+
+    @keyframes bubble-option-arriving-b {
+        0% {
+            opacity: 0;
+        }
+        55% {
+            opacity: 0.65;
+        }
+        100% {
+            opacity: 1;
+        }
     }
 
     @keyframes bubble-option-float-left {

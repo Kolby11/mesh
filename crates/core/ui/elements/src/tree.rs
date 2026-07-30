@@ -4,6 +4,7 @@ use crate::attributes::AttributeMap;
 use crate::layout::LayoutRect;
 use crate::style::ComputedStyle;
 use std::collections::BTreeMap;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -89,6 +90,114 @@ pub struct WidgetScrollMetrics {
     pub content_height: f32,
 }
 
+/// Copy-on-write child topology for a [`WidgetNode`].
+///
+/// Component memo entries and live trees share this allocation. A mutable tree
+/// walk copies only the immediate child-node overlays before descending; each
+/// child's authored payload and descendants remain shared until that level is
+/// actually mutated.
+#[derive(Clone, Default)]
+pub struct SharedWidgetChildren(Arc<Vec<WidgetNode>>);
+
+impl SharedWidgetChildren {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(Arc::new(Vec::with_capacity(capacity)))
+    }
+
+    #[doc(hidden)]
+    pub fn shares_allocation_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl std::fmt::Debug for SharedWidgetChildren {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl Deref for SharedWidgetChildren {
+    type Target = Vec<WidgetNode>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for SharedWidgetChildren {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        Arc::make_mut(&mut self.0)
+    }
+}
+
+impl From<Vec<WidgetNode>> for SharedWidgetChildren {
+    fn from(children: Vec<WidgetNode>) -> Self {
+        Self(Arc::new(children))
+    }
+}
+
+impl FromIterator<WidgetNode> for SharedWidgetChildren {
+    fn from_iter<T: IntoIterator<Item = WidgetNode>>(iter: T) -> Self {
+        Vec::from_iter(iter).into()
+    }
+}
+
+impl Extend<WidgetNode> for SharedWidgetChildren {
+    fn extend<T: IntoIterator<Item = WidgetNode>>(&mut self, iter: T) {
+        self.deref_mut().extend(iter);
+    }
+}
+
+impl<'a> IntoIterator for &'a SharedWidgetChildren {
+    type Item = &'a WidgetNode;
+    type IntoIter = std::slice::Iter<'a, WidgetNode>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut SharedWidgetChildren {
+    type Item = &'a mut WidgetNode;
+    type IntoIter = std::slice::IterMut<'a, WidgetNode>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
+impl IntoIterator for SharedWidgetChildren {
+    type Item = WidgetNode;
+    type IntoIter = std::vec::IntoIter<WidgetNode>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match Arc::try_unwrap(self.0) {
+            Ok(children) => children.into_iter(),
+            Err(children) => children.as_ref().clone().into_iter(),
+        }
+    }
+}
+
+/// Immutable template/build payload shared by memo entries and live nodes.
+///
+/// Public fields preserve the existing `WidgetNode` field API through its
+/// `Deref` implementation. Mutation is copy-on-write and is normally limited
+/// to the handful of nodes whose runtime attributes actually change.
+#[derive(Debug, Clone)]
+#[doc(hidden)]
+pub struct WidgetNodeAuthored {
+    pub tag: String,
+    pub attributes: AttributeMap,
+    pub event_handlers: BTreeMap<String, String>,
+    pub event_handler_calls: BTreeMap<String, EventHandlerCall>,
+    module_id: Option<Arc<str>>,
+    pub service_field_reads: Vec<(String, String)>,
+}
+
 /// A single node in the widget tree.
 ///
 /// Produced by evaluating a template against script state. Each node has
@@ -96,44 +205,38 @@ pub struct WidgetScrollMetrics {
 #[derive(Debug, Clone)]
 pub struct WidgetNode {
     pub id: NodeId,
-    /// Tag name: `row`, `column`, `text`, `button`, `image`, `icon`, etc.
-    pub tag: String,
-    /// Resolved attributes (after binding evaluation).
-    ///
-    /// Keyed by interned [`crate::attributes::AttrKey`]: names are template
-    /// vocabulary, so nodes share them instead of allocating one string per
-    /// attribute per build.
-    pub attributes: AttributeMap,
     /// Fully resolved style (theme tokens → concrete values).
     pub computed_style: ComputedStyle,
     /// Layout rectangle computed by the layout engine.
     pub layout: LayoutRect,
-    /// Child nodes.
-    pub children: Vec<WidgetNode>,
+    /// Child nodes, shared copy-on-write across component memo hits.
+    pub children: SharedWidgetChildren,
     /// Accessibility metadata.
     pub accessibility: AccessibilityInfo,
-    /// Event handler mappings: event name → script handler name.
-    pub event_handlers: BTreeMap<String, String>,
-    /// Event handler mappings with pre-bound arguments.
-    pub event_handler_calls: BTreeMap<String, EventHandlerCall>,
     /// Live interaction state (hover, focus, active, etc.).
     pub state: ElementState,
     /// Typed runtime scroll state, kept out of the string attribute map.
     pub scroll_metrics: Option<WidgetScrollMetrics>,
     /// Stable runtime identity for this node, kept out of the string attribute map.
     mesh_key: Option<String>,
-    /// Source module identity used for module-scoped theme defaults.
-    ///
-    /// Shared rather than owned per node: every node built from one module
-    /// carries the same identity, so the builder clones a pointer instead of
-    /// allocating and copying the id string once per node.
-    module_id: Option<Arc<str>>,
-    /// Service field reads captured during template evaluation.
-    /// Each entry is a (service_name, field_name) pair read by this node's expressions.
-    pub service_field_reads: Vec<(String, String)>,
     /// Cached split `class` tokens derived from the raw `class` attribute.
     cached_class_attr: Option<String>,
     cached_classes: Vec<String>,
+    authored: Arc<WidgetNodeAuthored>,
+}
+
+impl Deref for WidgetNode {
+    type Target = WidgetNodeAuthored;
+
+    fn deref(&self) -> &Self::Target {
+        &self.authored
+    }
+}
+
+impl DerefMut for WidgetNode {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        Arc::make_mut(&mut self.authored)
+    }
 }
 
 impl WidgetNode {
@@ -141,22 +244,47 @@ impl WidgetNode {
     pub fn new(tag: impl Into<String>) -> Self {
         Self {
             id: next_node_id(),
-            tag: tag.into(),
-            attributes: AttributeMap::new(),
             computed_style: ComputedStyle::default(),
             layout: LayoutRect::default(),
-            children: Vec::new(),
+            children: SharedWidgetChildren::new(),
             accessibility: AccessibilityInfo::default(),
-            event_handlers: BTreeMap::new(),
-            event_handler_calls: BTreeMap::new(),
             state: ElementState::default(),
             scroll_metrics: None,
             mesh_key: None,
-            module_id: None,
-            service_field_reads: Vec::new(),
             cached_class_attr: None,
             cached_classes: Vec::new(),
+            authored: Arc::new(WidgetNodeAuthored {
+                tag: tag.into(),
+                attributes: AttributeMap::new(),
+                event_handlers: BTreeMap::new(),
+                event_handler_calls: BTreeMap::new(),
+                module_id: None,
+                service_field_reads: Vec::new(),
+            }),
         }
+    }
+
+    #[doc(hidden)]
+    pub fn shares_authored_payload_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.authored, &other.authored)
+    }
+
+    /// Whether any node in this subtree shares authored template payload with
+    /// `other`. This is useful at composition boundaries where runtime
+    /// finalization may legitimately copy the root overlay while leaving clean
+    /// descendants shared with a memo entry.
+    #[doc(hidden)]
+    pub fn contains_shared_authored_payload_with(&self, other: &Self) -> bool {
+        self.shares_authored_payload_with(other)
+            || self
+                .children
+                .iter()
+                .any(|child| child.contains_shared_authored_payload_with(other))
+    }
+
+    #[doc(hidden)]
+    pub fn authored_payload(&self) -> &WidgetNodeAuthored {
+        &self.authored
     }
 
     pub fn set_mesh_key(&mut self, key: impl Into<String>) {
@@ -218,15 +346,16 @@ impl WidgetNode {
     }
 
     pub fn refresh_class_tokens_cache(&mut self) {
-        let class_attr = self.attributes.get("class").map(String::as_str);
-        if self.cached_class_attr.as_deref() != class_attr {
+        let class_attr = self.attributes.get("class").cloned();
+        if self.cached_class_attr != class_attr {
             self.cached_classes = class_attr
+                .as_deref()
                 .into_iter()
                 .flat_map(str::split_whitespace)
                 .filter(|class| !class.is_empty())
                 .map(str::to_owned)
                 .collect();
-            self.cached_class_attr = class_attr.map(str::to_owned);
+            self.cached_class_attr = class_attr;
         }
     }
 
@@ -270,9 +399,233 @@ impl WidgetNode {
 mod tests {
     use super::*;
 
+    fn representative_node(index: usize, depth: usize, width: usize) -> WidgetNode {
+        let mut node = WidgetNode::new(format!("component-node-{index}"));
+        node.attributes.insert(
+            "content".into(),
+            format!("node {index}: {}", "memoized component payload ".repeat(8)),
+        );
+        node.attributes
+            .insert("class".into(), "surface-card primary interactive".into());
+        node.event_handlers
+            .insert("click".into(), format!("instance/{index}:activate"));
+        node.event_handler_calls.insert(
+            "change".into(),
+            EventHandlerCall {
+                handler: format!("instance/{index}:change"),
+                args: vec![serde_json::json!({ "index": index, "enabled": true })],
+            },
+        );
+        node.service_field_reads
+            .push(("audio".into(), format!("field_{index}")));
+        if depth > 0 {
+            node.children = (0..width)
+                .map(|child| representative_node(index * width + child + 1, depth - 1, width))
+                .collect();
+        }
+        node
+    }
+
+    fn legacy_deep_clone(node: &WidgetNode) -> WidgetNode {
+        WidgetNode {
+            id: node.id,
+            computed_style: node.computed_style.clone(),
+            layout: node.layout,
+            children: node.children.iter().map(legacy_deep_clone).collect(),
+            accessibility: node.accessibility.clone(),
+            state: node.state,
+            scroll_metrics: node.scroll_metrics,
+            mesh_key: node.mesh_key.clone(),
+            cached_class_attr: node.cached_class_attr.clone(),
+            cached_classes: node.cached_classes.clone(),
+            authored: Arc::new((*node.authored).clone()),
+        }
+    }
+
+    fn dynamic_heap_bytes(node: &WidgetNode) -> usize {
+        node.computed_style.transitions.capacity()
+            * std::mem::size_of::<crate::style::TransitionStyle>()
+            + node.computed_style.animations.capacity()
+                * std::mem::size_of::<crate::style::AnimationStyle>()
+            + node
+                .accessibility
+                .label
+                .as_ref()
+                .map_or(0, String::capacity)
+            + node
+                .accessibility
+                .description
+                .as_ref()
+                .map_or(0, String::capacity)
+            + node
+                .accessibility
+                .keyboard_shortcut
+                .as_ref()
+                .map_or(0, String::capacity)
+            + node.mesh_key.as_ref().map_or(0, String::capacity)
+            + node.cached_class_attr.as_ref().map_or(0, String::capacity)
+            + node.cached_classes.capacity() * std::mem::size_of::<String>()
+            + node
+                .cached_classes
+                .iter()
+                .map(String::capacity)
+                .sum::<usize>()
+    }
+
+    fn authored_heap_bytes(node: &WidgetNode) -> usize {
+        node.tag.capacity()
+            + node
+                .attributes
+                .iter()
+                .map(|(key, value)| key.len() + value.capacity())
+                .sum::<usize>()
+            + node.event_handlers.len() * std::mem::size_of::<(String, String)>()
+            + node
+                .event_handlers
+                .iter()
+                .map(|(event, handler)| event.capacity() + handler.capacity())
+                .sum::<usize>()
+            + node.event_handler_calls.len() * std::mem::size_of::<(String, EventHandlerCall)>()
+            + node
+                .event_handler_calls
+                .iter()
+                .map(|(event, call)| {
+                    event.capacity()
+                        + call.handler.capacity()
+                        + call.args.capacity() * std::mem::size_of::<serde_json::Value>()
+                })
+                .sum::<usize>()
+            + node.service_field_reads.capacity() * std::mem::size_of::<(String, String)>()
+            + node
+                .service_field_reads
+                .iter()
+                .map(|(service, field)| service.capacity() + field.capacity())
+                .sum::<usize>()
+    }
+
+    /// Conservative heap payload owned only by this tree clone. Allocator
+    /// headers and allocations nested inside JSON values are intentionally
+    /// omitted, so the reported COW memory reduction is a lower bound.
+    fn exclusive_heap_bytes(node: &WidgetNode) -> usize {
+        let mut bytes = dynamic_heap_bytes(node);
+        if Arc::strong_count(&node.authored) == 1 {
+            bytes += std::mem::size_of::<WidgetNodeAuthored>() + authored_heap_bytes(node);
+        }
+        if Arc::strong_count(&node.children.0) == 1 {
+            bytes += node.children.capacity() * std::mem::size_of::<WidgetNode>();
+            bytes += node
+                .children
+                .iter()
+                .map(exclusive_heap_bytes)
+                .sum::<usize>();
+        }
+        bytes
+    }
+
     #[test]
     fn new_widget_node_has_empty_service_field_reads() {
         assert!(WidgetNode::new("text").service_field_reads.is_empty());
+    }
+
+    #[test]
+    fn widget_node_clone_copies_only_the_mutated_cow_path() {
+        let mut root = representative_node(0, 2, 2);
+        let mut cloned = root.clone();
+
+        assert!(root.shares_authored_payload_with(&cloned));
+        assert!(root.children.shares_allocation_with(&cloned.children));
+        assert!(root.children[0].shares_authored_payload_with(&cloned.children[0]));
+        assert!(root.children[1].shares_authored_payload_with(&cloned.children[1]));
+
+        cloned.children[0]
+            .attributes
+            .insert("content".into(), "changed".into());
+
+        assert_ne!(
+            root.children[0].attributes.get("content"),
+            cloned.children[0].attributes.get("content")
+        );
+        assert!(!root.children[0].shares_authored_payload_with(&cloned.children[0]));
+        assert!(
+            root.children[1].shares_authored_payload_with(&cloned.children[1]),
+            "an untouched sibling should keep sharing its authored payload"
+        );
+        assert!(
+            root.shares_authored_payload_with(&cloned),
+            "mutating a descendant must not copy the root payload"
+        );
+
+        root.children[0]
+            .attributes
+            .insert("content".into(), "original changed separately".into());
+        assert_eq!(
+            cloned.children[0]
+                .attributes
+                .get("content")
+                .map(String::as_str),
+            Some("changed")
+        );
+    }
+
+    // cargo test --release -p mesh-core-elements --lib cow_widget_tree_clone_beats_legacy_deep_clone -- --ignored --nocapture
+    #[test]
+    #[ignore = "release-only component memo tree-clone benchmark"]
+    fn cow_widget_tree_clone_beats_legacy_deep_clone() {
+        const ITERATIONS: usize = 2_000;
+        let wide = representative_node(0, 2, 16);
+        let deep = representative_node(0, 96, 1);
+
+        fn measure(tree: &WidgetNode) -> (std::time::Duration, std::time::Duration, usize, usize) {
+            let legacy_started = std::time::Instant::now();
+            for _ in 0..ITERATIONS {
+                std::hint::black_box(legacy_deep_clone(std::hint::black_box(tree)));
+                std::hint::black_box(legacy_deep_clone(std::hint::black_box(tree)));
+            }
+            let legacy = legacy_started.elapsed();
+
+            let cow_started = std::time::Instant::now();
+            for _ in 0..ITERATIONS {
+                std::hint::black_box(std::hint::black_box(tree).clone());
+                std::hint::black_box(std::hint::black_box(tree).clone());
+            }
+            let cow = cow_started.elapsed();
+
+            let legacy_clone = legacy_deep_clone(tree);
+            let cow_clone = tree.clone();
+            (
+                legacy,
+                cow,
+                exclusive_heap_bytes(&legacy_clone),
+                exclusive_heap_bytes(&cow_clone),
+            )
+        }
+
+        let (wide_legacy, wide_cow, wide_legacy_bytes, wide_cow_bytes) = measure(&wide);
+        let (deep_legacy, deep_cow, deep_legacy_bytes, deep_cow_bytes) = measure(&deep);
+        let wide_speedup = wide_legacy.as_secs_f64() / wide_cow.as_secs_f64();
+        let deep_speedup = deep_legacy.as_secs_f64() / deep_cow.as_secs_f64();
+
+        eprintln!(
+            "component memo COW clone: wide_nodes={} legacy={wide_legacy:?} cow={wide_cow:?} speedup={wide_speedup:.2}x retained={wide_legacy_bytes}->{wide_cow_bytes}B; deep_nodes={} legacy={deep_legacy:?} cow={deep_cow:?} speedup={deep_speedup:.2}x retained={deep_legacy_bytes}->{deep_cow_bytes}B",
+            wide.node_count(),
+            deep.node_count(),
+        );
+        assert!(
+            wide_speedup >= 5.0,
+            "wide COW clone should be at least 5x faster, measured {wide_speedup:.2}x"
+        );
+        assert!(
+            deep_speedup >= 5.0,
+            "deep COW clone should be at least 5x faster, measured {deep_speedup:.2}x"
+        );
+        assert!(
+            wide_cow_bytes * 10 <= wide_legacy_bytes,
+            "wide COW clone should retain at least 10x fewer unique heap bytes"
+        );
+        assert!(
+            deep_cow_bytes * 10 <= deep_legacy_bytes,
+            "deep COW clone should retain at least 10x fewer unique heap bytes"
+        );
     }
 
     #[test]

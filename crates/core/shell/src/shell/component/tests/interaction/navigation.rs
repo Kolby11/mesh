@@ -2482,7 +2482,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         1,
         "keyboard activation should derive one promoted theme selector popup: {child_requests:?}"
     );
-    assert_eq!(child_requests[0].content_size, (112, 74));
+    assert_eq!(child_requests[0].content_size, (132, 60));
     assert!(
         rect_matches_bounds(child_requests[0].anchor_rect, theme_bounds),
         "theme selector popup should anchor to the theme trigger bounds {:?}, got {:?}",
@@ -2521,7 +2521,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     assert!(
         selection_requests.iter().any(|request| matches!(
             request,
-            CoreRequest::SetTheme { theme_id } if theme_id == "mesh-default-dark"
+            CoreRequest::SetTheme { theme_id } if theme_id == "solarized-dark"
         )),
         "Enter on a focused theme option should select it: {selection_requests:?}"
     );
@@ -2615,7 +2615,7 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         1,
         "keyboard activation should derive one promoted language popup: {child_requests:?}"
     );
-    assert_eq!(child_requests[0].content_size, (112, 74));
+    assert_eq!(child_requests[0].content_size, (132, 60));
     assert!(
         rect_matches_bounds(child_requests[0].anchor_rect, language_bounds),
         "language popup should anchor to the language trigger bounds {:?}, got {:?}",
@@ -2835,6 +2835,8 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
     );
     let node_key = child_requests[0].node_key.clone();
     let (cw, ch) = child_requests[0].content_size;
+    let (pad_left, pad_top, ..) = child_requests[0].content_padding;
+    let content_offset = (pad_left as f32, pad_top as f32);
 
     // Pointer moves into the promoted popup (cancels the trigger's close bridge).
     component
@@ -2843,9 +2845,10 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
             &theme,
             cw,
             ch,
+            content_offset,
             ComponentInput::PointerMove {
-                x: cw as f32 / 2.0,
-                y: ch as f32 / 2.0,
+                x: content_offset.0 + cw as f32 / 2.0,
+                y: content_offset.1 + ch as f32 / 2.0,
             },
         )
         .unwrap();
@@ -2862,7 +2865,14 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
     // window used in the trigger-to-popup direction, so crossing a transparent
     // gap or returning to the trigger cannot destroy it underneath the cursor.
     component
-        .handle_child_surface_input(&node_key, &theme, cw, ch, ComponentInput::PointerLeave)
+        .handle_child_surface_input(
+            &node_key,
+            &theme,
+            cw,
+            ch,
+            content_offset,
+            ComponentInput::PointerLeave,
+        )
         .unwrap();
     component
         .paint(&theme, width, height, &mut buffer, 1.0)
@@ -2917,8 +2927,18 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
     assert_eq!(requests.len(), 1, "language popover should open");
     let node_key = requests[0].node_key.clone();
     let (cw, ch) = requests[0].content_size;
+    // The popup buffer is padded for descendant overshoot, so the popover
+    // subtree starts at `content_padding` inside it and pointer coordinates
+    // arrive in that padded space.
+    let (pad_left, pad_top, ..) = requests[0].content_padding;
+    let content_offset = (pad_left as f32, pad_top as f32);
+    assert!(
+        pad_left > 0 && pad_top > 0,
+        "the bubble popover pads its buffer for blur/transform overshoot, which is \
+         exactly the offset child-surface hit testing has to account for"
+    );
     let child_tree = component
-        .child_surface_debug_tree(&node_key, (0.0, 0.0))
+        .child_surface_debug_tree(&node_key, content_offset)
         .expect("language child tree");
     let option =
         first_node_with_class_token(&child_tree, "bubble-option").expect("language bubble option");
@@ -2937,6 +2957,7 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
             &theme,
             cw,
             ch,
+            content_offset,
             ComponentInput::PointerMove {
                 x: option_x,
                 y: option_y,
@@ -2960,6 +2981,7 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
             &theme,
             cw,
             ch,
+            content_offset,
             ComponentInput::PointerButton {
                 x: option_x,
                 y: option_y,
@@ -2973,6 +2995,7 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
             &theme,
             cw,
             ch,
+            content_offset,
             ComponentInput::PointerButton {
                 x: option_x,
                 y: option_y,

@@ -101,6 +101,13 @@ promotion")*
 
 ## Tech debt
 
+- [ ] A child's `self.<Event>:fire()` into a parent's `bind:this` `:on` closure
+      mutates the parent's `_ENV` but never marks the parent for resync, so the
+      change never reaches its template. `resync_binding_neighbors` claims to
+      cover this direction but gates on `take_live_binding_external_accessed`,
+      which only the *parent touching the child* sets. Child→parent push is
+      therefore unusable; the language trigger pulls on its render hook instead.
+
 - [ ] Three hand-written `.mesh` / `.luau` source mini-parsers remain in
       `installed_graph.rs` (`extract_t_keys_from_mesh_source`,
       `extract_mesh_event_publish_channels`,
@@ -158,10 +165,6 @@ gate where the win is structural.
       frame-to-frame state. Keep a bounded reusable vector (or `SmallVec` for
       shallow roots), validate reentrancy and early returns, and keep it only if
       allocation *and* end-to-end frame benchmarks improve.
-- [ ] Component memo hits should share immutable tree structure. Both
-      `lookup_component_memo` and `store_component_memo` deep-clone the subtree,
-      so a clean embedded component clones its entire tree on insert *and* on
-      every hit. Account for retained bytes as well as rebuild time.
 - [ ] Replace all-runtime descendant-generation scans in memo stores with a
       parent/child runtime index carrying an aggregated subtree generation.
 
@@ -240,12 +243,6 @@ gate where the win is structural.
 - [ ] Delete `ChunkCache` or make it a real bounded compile cache. It inserts
       source by unchecked FNV-64 key then loads the original source anyway;
       production never reads cached entries, so it only retains memory.
-- [ ] Preserve subscriber-index complexity for service updates.
-      `deliver_service_event` visits every component on each `Updated` event and
-      uses `Vec::contains` for membership. Make steady-state delivery
-      proportional to subscribers with an epoch marker or bitset.
-- [ ] Stop cloning, sorting, and deduplicating service delivery targets per
-      event — keep subscriber lists sorted and unique when the index changes.
 
 ### Input
 
@@ -304,13 +301,10 @@ gate where the win is structural.
 
 Updated 2026-07-30.
 
-1. **Retained text-measure state**, subscriber-proportional service delivery,
-   and batched multi-rectangle raster — the remaining whole-tree and fan-out
-   hot paths.
-2. **Structural-sharing memo hits**, narrow invalidation, and affected-subtree
+1. **Structural-sharing memo hits**, narrow invalidation, and affected-subtree
    re-evaluation.
-3. **Runtime style-diagnostic invalidation** and typed declarations.
-4. **Incremental shared frontend catalog**, single retained renderer, and the
+2. **Runtime style-diagnostic invalidation** and typed declarations.
+3. **Incremental shared frontend catalog**, single retained renderer, and the
    per-surface prepare/paint/present split with batched Wayland commits.
-5. **Direct SHM paint** and fractional-scale partial damage, re-tested with
+4. **Direct SHM paint** and fractional-scale partial damage, re-tested with
    upload instrumentation (D).

@@ -124,9 +124,19 @@ label = ""
     let second = rebuild(&mut component, 160, 60);
     assert_eq!(component.component_memo_hit_count(), hits_before + 1);
     assert_eq!(first.data, second.data);
-    assert!(
-        node_with_content(component.last_tree.as_ref().unwrap(), "static").is_some(),
+    let memoized_child =
+        node_with_content(component.last_tree.as_ref().unwrap(), "static").unwrap();
+    assert_eq!(
+        memoized_child.attributes.get("content").map(String::as_str),
+        Some("static"),
         "memoized child subtree still renders its content"
+    );
+    assert!(
+        component.component_memo_shares_authored_payload(
+            "@test/memo-surface/local:Child",
+            memoized_child,
+        ),
+        "the live memo hit should share its immutable authored payload with the cache"
     );
 }
 

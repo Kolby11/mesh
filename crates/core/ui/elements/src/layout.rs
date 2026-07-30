@@ -1278,7 +1278,8 @@ mod tests {
         root.children = vec![
             keyed_node("root/0", "a", Dimension::Px(50.0), Dimension::Px(20.0)),
             keyed_node("root/1", "b", Dimension::Px(60.0), Dimension::Px(20.0)),
-        ];
+        ]
+        .into();
         root
     }
 
@@ -1385,7 +1386,7 @@ mod tests {
 
         let child1 = make_node("text", Dimension::Px(100.0), Dimension::Auto);
         let child2 = make_node("text", Dimension::Px(100.0), Dimension::Auto);
-        root.children = vec![child1, child2];
+        root.children = vec![child1, child2].into();
 
         LayoutEngine::compute(&mut root, 300.0, 50.0);
 
@@ -1404,7 +1405,7 @@ mod tests {
 
         let child1 = make_node("text", Dimension::Auto, Dimension::Px(50.0));
         let child2 = make_node("text", Dimension::Auto, Dimension::Px(50.0));
-        root.children = vec![child1, child2];
+        root.children = vec![child1, child2].into();
 
         LayoutEngine::compute(&mut root, 200.0, 300.0);
 
@@ -1423,7 +1424,7 @@ mod tests {
         child1.computed_style.flex_grow = 1.0;
         let mut child2 = make_node("b", Dimension::Auto, Dimension::Auto);
         child2.computed_style.flex_grow = 2.0;
-        root.children = vec![child1, child2];
+        root.children = vec![child1, child2].into();
 
         LayoutEngine::compute(&mut root, 300.0, 50.0);
 
@@ -1437,7 +1438,7 @@ mod tests {
         root.computed_style.padding = Edges::all(10.0);
 
         let child = make_node("text", Dimension::Px(50.0), Dimension::Auto);
-        root.children = vec![child];
+        root.children = vec![child].into();
 
         LayoutEngine::compute(&mut root, 200.0, 100.0);
 
@@ -1454,8 +1455,8 @@ mod tests {
         panel.computed_style.direction = FlexDirection::Column;
         panel.computed_style.align_self = AlignSelf::Start;
         panel.computed_style.padding = Edges::all(12.0);
-        panel.children = vec![make_node("text", Dimension::Px(80.0), Dimension::Px(20.0))];
-        root.children = vec![panel];
+        panel.children = vec![make_node("text", Dimension::Px(80.0), Dimension::Px(20.0))].into();
+        root.children = vec![panel].into();
 
         LayoutEngine::compute(&mut root, 200.0, 100.0);
 
@@ -1481,7 +1482,7 @@ mod tests {
         // A normal flow child that should not be displaced by the overlay.
         let flow = make_node("content", Dimension::Px(100.0), Dimension::Auto);
 
-        root.children = vec![flow, overlay];
+        root.children = vec![flow, overlay].into();
         LayoutEngine::compute(&mut root, 300.0, 200.0);
 
         // Flow child starts at origin.
@@ -1512,7 +1513,7 @@ mod tests {
         tooltip.computed_style.inset_top = Some(20.0);
         tooltip.computed_style.inset_left = Some(50.0);
 
-        root.children = vec![tooltip];
+        root.children = vec![tooltip].into();
         LayoutEngine::compute(&mut root, 400.0, 300.0);
 
         assert!((root.children[0].layout.x - 50.0).abs() < 0.5);
@@ -1531,7 +1532,7 @@ mod tests {
         panel.computed_style.inset_bottom = Some(25.0);
         panel.computed_style.inset_left = Some(20.0);
 
-        root.children = vec![panel];
+        root.children = vec![panel].into();
         LayoutEngine::compute(&mut root, 300.0, 200.0);
 
         assert_eq!(root.children[0].layout.x, 30.0);
@@ -1551,7 +1552,7 @@ mod tests {
         basis_child.computed_style.flex_basis = Dimension::Px(80.0);
         let fixed_child = make_node("fixed", Dimension::Px(40.0), Dimension::Auto);
 
-        root.children = vec![basis_child, fixed_child];
+        root.children = vec![basis_child, fixed_child].into();
         LayoutEngine::compute(&mut root, 200.0, 40.0);
 
         assert_eq!(root.children[0].layout.width, 160.0);
@@ -1568,7 +1569,7 @@ mod tests {
         hidden.computed_style.display = Display::None;
         let visible = make_node("visible", Dimension::Px(50.0), Dimension::Px(20.0));
 
-        root.children = vec![hidden, visible];
+        root.children = vec![hidden, visible].into();
         LayoutEngine::compute(&mut root, 300.0, 40.0);
 
         assert_eq!(root.children[0].layout.x, 0.0);
@@ -1586,7 +1587,7 @@ mod tests {
         root.computed_style.align_items = AlignItems::Start;
         let mut child = make_node("text", Dimension::Content, Dimension::Content);
         child.attributes.insert("content".into(), "hello".into());
-        root.children = vec![child];
+        root.children = vec![child].into();
 
         let measurer = CountingMeasurer::default();
         LayoutEngine::compute_with_measurer(&mut root, 100.0, 40.0, Some(&measurer));
@@ -1749,7 +1750,7 @@ mod tests {
 
         let a = make_node("a", Dimension::Px(100.0), Dimension::Auto);
         let b = make_node("b", Dimension::Px(100.0), Dimension::Auto);
-        root.children = vec![a, b];
+        root.children = vec![a, b].into();
         LayoutEngine::compute(&mut root, 300.0, 50.0);
 
         // In RTL the first child should be at x=200 (right side) and the second at x=100.
@@ -1775,7 +1776,7 @@ mod tests {
 
         let a = make_node("a", Dimension::Auto, Dimension::Px(40.0));
         let b = make_node("b", Dimension::Auto, Dimension::Px(40.0));
-        root.children = vec![a, b];
+        root.children = vec![a, b].into();
         LayoutEngine::compute(&mut root, 200.0, 200.0);
 
         // Column direction is not affected by RTL — children still stack top-to-bottom.
@@ -1798,7 +1799,7 @@ mod tests {
 
         let a = make_node("a", Dimension::Px(60.0), Dimension::Px(20.0));
         let b = make_node("b", Dimension::Px(60.0), Dimension::Px(20.0));
-        root.children = vec![a, b];
+        root.children = vec![a, b].into();
         LayoutEngine::compute(&mut root, 100.0, 100.0);
 
         // First line starts at y=60 (100 - 40 free space consumed at the start),
@@ -1859,7 +1860,8 @@ mod tests {
         row.children = vec![
             make_node("a", Dimension::Px(100.0), Dimension::Px(20.0)),
             make_node("b", Dimension::Px(100.0), Dimension::Px(20.0)),
-        ];
+        ]
+        .into();
         LayoutEngine::compute(&mut row, 300.0, 50.0);
         assert_eq!(row.children[0].layout.x, 0.0);
         assert_eq!(row.children[1].layout.x, 100.0);
@@ -1873,8 +1875,9 @@ mod tests {
             "nested-child",
             Dimension::Px(20.0),
             Dimension::Px(20.0),
-        )];
-        nested.children = vec![nested_parent];
+        )]
+        .into();
+        nested.children = vec![nested_parent].into();
         LayoutEngine::compute(&mut nested, 300.0, 80.0);
         assert_eq!(nested.children[0].layout.x, 30.0);
         assert_eq!(nested.children[0].children[0].layout.x, 30.0);
@@ -1885,7 +1888,8 @@ mod tests {
         column.children = vec![
             make_node("first", Dimension::Px(100.0), Dimension::Px(50.0)),
             make_node("second", Dimension::Px(100.0), Dimension::Px(50.0)),
-        ];
+        ]
+        .into();
         LayoutEngine::compute(&mut column, 200.0, 300.0);
         assert_eq!(column.children[0].layout.y, 0.0);
         assert_eq!(column.children[1].layout.y, 60.0);
@@ -1899,7 +1903,7 @@ mod tests {
         second.computed_style.position = Position::Absolute;
         second.computed_style.inset_left = Some(0.0);
         second.computed_style.inset_top = Some(0.0);
-        stack.children = vec![first, second];
+        stack.children = vec![first, second].into();
         LayoutEngine::compute(&mut stack, 120.0, 80.0);
         assert_eq!(stack.children[0].layout.x, 0.0);
         assert_eq!(stack.children[1].layout.x, 0.0);
@@ -1911,7 +1915,8 @@ mod tests {
             "fixed-child",
             Dimension::Px(75.0),
             Dimension::Px(25.0),
-        )];
+        )]
+        .into();
         LayoutEngine::compute(&mut fixed, 200.0, 100.0);
         assert_eq!(fixed.children[0].layout.width, 75.0);
         assert_eq!(fixed.children[0].layout.height, 25.0);
@@ -1922,7 +1927,8 @@ mod tests {
             "padded-child",
             Dimension::Px(50.0),
             Dimension::Px(20.0),
-        )];
+        )]
+        .into();
         LayoutEngine::compute(&mut padded, 200.0, 100.0);
         assert_eq!(padded.children[0].layout.x, 10.0);
         assert_eq!(padded.children[0].layout.y, 10.0);
@@ -1932,7 +1938,7 @@ mod tests {
         overlay.computed_style.position = Position::Absolute;
         overlay.computed_style.inset_right = Some(10.0);
         overlay.computed_style.inset_bottom = Some(10.0);
-        absolute.children = vec![overlay];
+        absolute.children = vec![overlay].into();
         LayoutEngine::compute(&mut absolute, 300.0, 200.0);
         assert!((absolute.children[0].layout.x - 210.0).abs() <= 0.5);
         assert!((absolute.children[0].layout.y - 150.0).abs() <= 0.5);
@@ -1942,7 +1948,8 @@ mod tests {
             "percent-child",
             Dimension::Percent(50.0),
             Dimension::Px(20.0),
-        )];
+        )]
+        .into();
         LayoutEngine::compute(&mut percent, 300.0, 60.0);
         assert_eq!(percent.children[0].layout.width, 150.0);
     }
@@ -1959,7 +1966,7 @@ mod tests {
         overlay.computed_style.inset_left = Some(0.0);
         overlay.computed_style.inset_top = Some(0.0);
         overlay.computed_style.z_index = 1;
-        stack.children = vec![base, overlay];
+        stack.children = vec![base, overlay].into();
         LayoutEngine::compute(&mut stack, 160.0, 90.0);
         assert_eq!(stack.children[0].layout.x, 0.0);
         assert_eq!(stack.children[1].layout.x, 0.0);
@@ -1975,7 +1982,7 @@ mod tests {
         let mut spacer = make_node("spacer", Dimension::Auto, Dimension::Px(24.0));
         spacer.computed_style.flex_grow = 1.0;
         let divider = make_node("divider", Dimension::Px(1.0), Dimension::Px(24.0));
-        row.children = vec![fixed, spacer, divider];
+        row.children = vec![fixed, spacer, divider].into();
         LayoutEngine::compute(&mut row, 240.0, 24.0);
         assert_eq!(row.children[0].layout.width, 40.0);
         assert!((row.children[1].layout.width - 199.0).abs() < 0.5);
@@ -1992,7 +1999,8 @@ mod tests {
             "content",
             Dimension::Px(120.0),
             Dimension::Px(180.0),
-        )];
+        )]
+        .into();
         LayoutEngine::compute(&mut scroll_area, 120.0, 60.0);
         assert_eq!(
             scroll_area
@@ -2549,8 +2557,8 @@ mod tests {
         overlay.computed_style.position = Position::Fixed;
         overlay.computed_style.inset_right = Some(10.0);
         overlay.computed_style.inset_bottom = Some(8.0);
-        inner.children = vec![overlay];
-        root.children = vec![inner];
+        inner.children = vec![overlay].into();
+        root.children = vec![inner].into();
         LayoutEngine::compute(&mut root, 960.0, 540.0);
         // Fixed: bottom-right corner of the 960x540 viewport
         assert!(
@@ -2574,8 +2582,8 @@ mod tests {
         tooltip.computed_style.position = Position::Fixed;
         tooltip.computed_style.inset_top = Some(50.0);
         tooltip.computed_style.inset_left = Some(100.0);
-        panel.children = vec![tooltip];
-        root.children = vec![panel];
+        panel.children = vec![tooltip].into();
+        root.children = vec![panel].into();
         LayoutEngine::compute(&mut root, 800.0, 600.0);
         let tooltip_layout = &root.children[0].children[0].layout;
         assert!(
@@ -2599,8 +2607,8 @@ mod tests {
         bar.computed_style.inset_top = Some(0.0);
         bar.computed_style.inset_left = Some(0.0);
         bar.computed_style.inset_right = Some(0.0);
-        inner.children = vec![bar];
-        root.children = vec![inner];
+        inner.children = vec![bar].into();
+        root.children = vec![inner].into();
         LayoutEngine::compute(&mut root, 1920.0, 1080.0);
         let bar_layout = &root.children[0].children[0].layout;
         assert!(

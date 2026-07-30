@@ -191,7 +191,9 @@
       "Read(//home/kolby/.local/share/mesh/**)",
       "Bash(grim -g \"1980,88 260x140\" .popover-shot.png)",
       "Read(//home/kolby/.claude/**)",
-      "Read(//home/kolby/.claude/plugins/**)"
+      "Read(//home/kolby/.claude/plugins/**)",
+      "Bash(echo \"fmt rc=$?\")",
+      "Bash(echo \"diffcheck rc=$?\")"
     ]
   }
 }

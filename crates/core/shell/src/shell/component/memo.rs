@@ -155,9 +155,11 @@ fn hash_json_value(value: &serde_json::Value, hasher: &mut impl Hasher) {
 }
 
 impl FrontendSurfaceComponent {
-    /// Returns a clone of the memoized subtree for `instance_key` when every
-    /// cached input still holds, replaying the presence-flag side effects the
-    /// cached subtree carries. Returns `None` on any mismatch.
+    /// Returns a copy-on-write clone of the memoized subtree for `instance_key`
+    /// when every cached input still holds, replaying the presence-flag side
+    /// effects the cached subtree carries. Authored payload and descendant
+    /// topology remain shared until runtime finalization mutates a specific
+    /// node or child list. Returns `None` on any mismatch.
     pub(super) fn lookup_component_memo(
         &self,
         instance_key: &str,
@@ -262,6 +264,18 @@ impl FrontendSurfaceComponent {
     #[cfg(test)]
     pub(super) fn component_memo_hit_count(&self) -> u64 {
         self.component_memo_hits.get()
+    }
+
+    #[cfg(test)]
+    pub(super) fn component_memo_shares_authored_payload(
+        &self,
+        instance_key: &str,
+        node: &WidgetNode,
+    ) -> bool {
+        self.component_memo
+            .borrow()
+            .get(instance_key)
+            .is_some_and(|entry| entry.node.contains_shared_authored_payload_with(node))
     }
 }
 

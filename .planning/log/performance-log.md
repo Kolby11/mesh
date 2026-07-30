@@ -2734,3 +2734,73 @@ proves pointer reuse for clean content and replacement after a content change.
 The focused retained-layout suite passes 6 tests (1 release-only benchmark
 ignored); the new focused context slice passes 2 tests (1 release-only benchmark
 ignored). All three release gate samples passed.
+
+---
+
+## 2026-07-30 — subscriber-proportional service delivery completed
+
+area: service event routing
+
+The shell-side delivery index now owns the complete event hot path. State
+updates visit only fallback components, subscribers, and declared cache
+consumers; named interface events visit only fallback components and the exact
+service/event subscriber list. A per-delivery epoch prevents overlap from
+dispatching or caching an update twice, without cloning or normalizing a target
+vector per event.
+
+Subscriber lists are normalized once when observation summaries change.
+Component indices are appended in order, so rebuild-time `dedup` handles
+duplicate update, cache, and named-event declarations without a sort. The
+named-event case is correctness-significant: unlike state updates, it has no
+epoch pass and previously could dispatch twice if a summary repeated the same
+subscription.
+
+**Measured.** Release build under `nix develop` (rustc/cargo 1.94.0), local
+development host, three runs. The workload delivers 20,000 audio updates
+through 256 components with one audio subscriber. A full component scan took
+230.086–238.769ms; indexed delivery took 14.229–18.797ms, a 12.24–16.78x
+improvement. The checked ignored gate
+`service_delivery_index_beats_full_component_scan_benchmark` requires at least
+5x.
+
+**Verified.** The focused index slice passes four correctness tests (one
+release-only benchmark ignored), including duplicate update/cache/event
+normalization. The cache-warming regression passes separately. All three
+release gate samples passed. The broader `service_` slice reports 63 passing,
+14 ignored, and the existing
+`raw_service_state_update_schedules_repaint_without_proxy_tracking` failure
+from the retained-layout baseline; all delivery-index tests pass in that run.
+
+---
+
+## 2026-07-30 — structural-sharing component memo hits completed
+
+area: component composition and memoization
+
+`WidgetNode` now separates immutable authored payload (tag, attributes,
+handlers, module identity, and service reads) from live runtime overlays. Both
+payload and child topology use copy-on-write `Arc`s, so storing and reading a
+component memo shares a clean subtree rather than deep-cloning it twice. Style,
+layout, accessibility, interaction, scroll, and identity data remain local to
+the live tree; a mutation copies only the branch it changes.
+
+The tree regression proves a child mutation does not affect the cached source
+and leaves untouched siblings shared. The component-memo integration regression
+proves a real cache hit retains shared authored payload after runtime
+finalization. Existing prop, descendant-generation, repeated-alias, loop, slot,
+and popover memo regressions remain covered.
+
+**Measured.** Release build under `nix develop` (rustc/cargo 1.94.0), local
+development host, three runs of the checked
+`cow_widget_tree_clone_beats_legacy_deep_clone` gate. Each run clones twice for
+2,000 iterations. The 273-node wide shape took 674.353–686.963ms with the
+legacy deep clone versus 245.772–271.893µs with COW (2,526.59–2,776.85x), and
+its exclusive retained heap payload fell from 418,323 to 120 bytes. The
+97-node deep shape took 211.857–214.085ms versus 256.457–263.581µs
+(803.27–826.09x), falling from 147,826 to 120 exclusive bytes. The gate requires
+at least 5x in both shapes and at least 10x less exclusive retained payload.
+
+**Verified.** The focused debug component-memo suite passes 8 correctness
+tests (3 release benchmarks ignored). Its three release end-to-end gates also
+pass: distinct-child memoization 1.4x, repeated aliases 1.16x, and slots 1.2x
+against forced misses in this run.

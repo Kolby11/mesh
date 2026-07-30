@@ -1226,6 +1226,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         theme: &Theme,
         width: u32,
         height: u32,
+        content_offset: (f32, f32),
         input: ComponentInput,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let Some(tree) = self.last_tree.as_ref() else {
@@ -1246,8 +1247,21 @@ impl ShellComponent for FrontendSurfaceComponent {
         // tree, so the hover state and dispatched handlers (`onpointerenter` /
         // `onpointerleave`, option clicks) stay consistent after the real tree is
         // restored.
+        //
+        // The child buffer is padded so descendant shadow/transform overshoot
+        // has pixels to paint into, and `paint_child_surface` places the
+        // subtree at `content_offset` inside it. Pointer coordinates arrive in
+        // that same padded buffer space, so the identical offset has to be
+        // baked in here — otherwise every hit test is skewed by the padding,
+        // and because the bubble float animation makes the padding oscillate,
+        // a stationary cursor over an option drifts in and out of the subtree
+        // and spuriously fires `pointerleave` on the popover.
         let mut subtree = node.clone();
-        offset_widget_tree_layout(&mut subtree, -bounds.0, -bounds.1);
+        offset_widget_tree_layout(
+            &mut subtree,
+            -bounds.0 + content_offset.0,
+            -bounds.1 + content_offset.1,
+        );
         let saved_tree = self.last_tree.replace(subtree);
         let result = self.handle_component_input(theme, width, height, input);
         self.last_tree = saved_tree;

@@ -1,7 +1,7 @@
 <props>
-    blur_enabled:    { type: "bool", default: true, label: "Backdrop blur" }
-    blur_radius:     { type: "size", default: "var(--effect-backdrop-blur-popup-radius)", label: "Blur radius" }
-    blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-background)", label: "Frosted background" }
+blur_enabled:    { type: "bool", default: true, label: "Backdrop blur" }
+blur_radius:     { type: "size", default: "var(--effect-backdrop-blur-popup-radius)", label: "Blur radius" }
+blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-background)", label: "Frosted background" }
 </props>
 
 <template>
@@ -18,6 +18,7 @@
         <BubbleOptions
             label="Select theme"
             items={items}
+            rotation={rotation}
             onselect={onSelectTheme}
             onscroll={onThemeScroll}
             onoptionpointerenter={onOptionPointerEnter}
@@ -51,21 +52,84 @@ end
 -- One descriptor per visible slot; BubbleOptions owns its structural classes.
 items = {}
 
+-- Ring rotation token handed to BubbleOptions; see its `rotation` prop.
+rotation = ""
+local rotation_tick = 0
+-- Index of the leftmost theme on screen. Three of the installed themes are
+-- visible at a time and scrolling turns the rest through, so adding a theme
+-- costs nothing in popover width.
+local VISIBLE_SLOTS = 3
+local window_start = 1
+local window_centred = false
+-- Whether the pointer is currently over the popover, so focus loss can tell a
+-- keyboard dismissal apart from a click that merely moved focus between bubbles.
+local pointer_inside = false
+-- Optimistic selection: the theme this popover asked for, and the theme the
+-- service was reporting when it asked. See `active_theme`.
+local pending_theme = nil
+local pending_theme_replaced = nil
+
 local THEME_DARK = "mesh-default-dark"
 local THEME_LIGHT = "mesh-default-light"
 local THEME_GRUVBOX = "gruvbox-dark"
+local THEME_NORD = "nord"
+local THEME_MOCHA = "catppuccin-mocha"
+local THEME_TOKYO = "tokyo-night"
+local THEME_SOLARIZED = "solarized-dark"
 
+-- Every installed theme, in ring order. Three of them fit on screen at once and
+-- scrolling turns the rest through; each `core` class carries that theme's own
+-- swatch colours so a bubble previews the palette it applies.
 local THEME_OPTIONS = {
     { id = THEME_DARK, core = "bubble-option-core-dark", icon = "weather-clear-night" },
     { id = THEME_LIGHT, core = "bubble-option-core-light", icon = "weather-clear" },
     { id = THEME_GRUVBOX, core = "bubble-option-core-gruvbox", icon = "palette" },
+    { id = THEME_NORD, core = "bubble-option-core-nord", icon = "weather-snow" },
+    { id = THEME_MOCHA, core = "bubble-option-core-mocha", icon = "palette" },
+    { id = THEME_TOKYO, core = "bubble-option-core-tokyo", icon = "weather-clear-night" },
+    { id = THEME_SOLARIZED, core = "bubble-option-core-solarized", icon = "weather-clear" },
 }
 
 local THEME_LABELS = {
     [THEME_DARK] = "Default Dark",
     [THEME_LIGHT] = "Default Light",
     [THEME_GRUVBOX] = "Gruvbox",
+    [THEME_NORD] = "Nord",
+    [THEME_MOCHA] = "Catppuccin Mocha",
+    [THEME_TOKYO] = "Tokyo Night",
+    [THEME_SOLARIZED] = "Solarized Dark",
 }
+
+-- The bubble stage routes both the wheel's `scroll` and the trackpad's
+-- `twofingerscroll` here. A wheel sends one event per notch, but a trackpad
+-- sends a continuous stream of small pixel deltas, so stepping the ring per
+-- event would spin it. Trackpad travel accumulates and only spends a notch at
+-- a time; the wheel keeps its one-step-per-event behaviour.
+local TWO_FINGER_NOTCH = 40
+local two_finger_travel = 0
+
+local function scroll_step(event)
+    local delta = event and event.delta or {}
+    local dy = tonumber(delta.y) or 0
+    if event ~= nil and event.type == "twofingerscroll" then
+        if dy == 0 then
+            return 0
+        end
+        -- Reversing direction should not first have to pay off travel banked
+        -- the other way, or the ring stalls when the user changes their mind.
+        if (dy > 0) ~= (two_finger_travel > 0) then
+            two_finger_travel = 0
+        end
+        two_finger_travel += dy
+        if math.abs(two_finger_travel) < TWO_FINGER_NOTCH then
+            return 0
+        end
+        local step = two_finger_travel > 0 and 1 or -1
+        two_finger_travel -= step * TWO_FINGER_NOTCH
+        return step
+    end
+    return dy >= 0 and 1 or -1
+end
 
 local function build_option(option, current)
     local core_class = "bubble-option-core " .. option.core
@@ -85,39 +149,103 @@ local function build_option(option, current)
     }
 end
 
+local function normalize_index(index)
+    local count = #THEME_OPTIONS
+    return ((index - 1) % count) + 1
+end
+
 local function sync_options(current)
     local next_items = {}
-    for index, option in THEME_OPTIONS do
-        next_items[index] = build_option(option, current)
+    for slot = 1, VISIBLE_SLOTS do
+        local option = THEME_OPTIONS[normalize_index(window_start + slot - 1)]
+        next_items[slot] = build_option(option, current)
     end
     items = next_items
 end
 
-function render(self)
-    if theme then
-        local current = theme.current or theme.theme_id or THEME_DARK
-        sync_options(current)
+-- Put the active theme in the middle slot. Called when the ring is not being
+-- browsed: on first paint and once the popover has closed, so the next open
+-- starts centred rather than wherever the last scroll left it.
+local function centre_window_on(theme_id)
+    for index, option in THEME_OPTIONS do
+        if option.id == theme_id then
+            window_start = normalize_index(index - 1)
+            rotation = ""
+            return
+        end
     end
+end
+
+local function service_theme()
+    if not theme then
+        return THEME_DARK
+    end
+    return theme.current or theme.theme_id or THEME_DARK
+end
+
+-- Which theme the ring marks as active. Applying a theme is a round trip
+-- through the shell, so a click marks the picked bubble immediately and holds
+-- that mark until the service reports something other than the theme that was
+-- active when the click happened — that is either our own theme arriving or a
+-- change made elsewhere, and both are reasons to stop overriding.
+local function active_theme()
+    if pending_theme == nil then
+        return service_theme()
+    end
+    if service_theme() ~= pending_theme_replaced then
+        pending_theme = nil
+        pending_theme_replaced = nil
+        return service_theme()
+    end
+    return pending_theme
+end
+
+function render(self)
+    local current = active_theme()
+    if not window_centred then
+        window_centred = true
+        centre_window_on(current)
+    end
+    sync_options(current)
 end
 
 -- Selecting a theme does not close the popover: it stays open so the user can
 -- keep choosing. It closes on pointer leave (onPopoverLeave) or, for keyboard
 -- activation, on focus leave.
 function onSelectTheme(theme_id)
+    pending_theme_replaced = service_theme()
+    pending_theme = theme_id
+    sync_options(theme_id)
     mesh.events.publish("shell.set-theme", { theme_id = theme_id })
 end
 
-function onThemeScroll(_event)
-    -- Theme currently has exactly three options, but the shared bubble control
-    -- supports scroll cycling for callers with larger option sets.
+-- Scrolling turns the ring one theme at a time, and keeps the popover alive:
+-- browsing the bubbles is a way of choosing, not of leaving.
+function onThemeScroll(event)
+    cancel_bridge_close()
+    local step = scroll_step(event)
+    if step == 0 then
+        return
+    end
+    rotation_tick += 1
+    if step > 0 then
+        window_start = normalize_index(window_start + 1)
+        rotation = "next-" .. rotation_tick
+    else
+        window_start = normalize_index(window_start - 1)
+        rotation = "prev-" .. rotation_tick
+    end
+    sync_options(active_theme())
 end
 
 function onPopoverEnter(event)
+    pointer_inside = true
     cancel_bridge_close()
     self.PopoverEnter:fire(event)
 end
 
 function onPopoverLeave()
+    pointer_inside = false
     schedule_bridge_close()
     self.PopoverLeave:fire()
 end
@@ -128,11 +256,18 @@ function onOptionFocus(event)
 end
 
 function onOptionPointerEnter(event)
+    pointer_inside = true
     cancel_bridge_close()
     self.PopoverEnter:fire(event)
 end
 
+-- Focus leaving an option is only a dismissal for keyboard users. Clicking a
+-- second bubble also blurs the first one, and closing on that would shut the
+-- popover 400ms after the very click meant to keep browsing.
 function onOptionBlur(_event)
+    if pointer_inside then
+        return
+    end
     schedule_bridge_close()
 end
 
@@ -145,7 +280,11 @@ function onOptionKeyDown(event)
 end
 
 function closeThemePopoverBridge()
+    pointer_inside = false
     open = false
+    -- Closed: the next open starts from the active theme again.
+    centre_window_on(active_theme())
+    sync_options(active_theme())
     self.CloseRequested:fire()
 end
 </script>

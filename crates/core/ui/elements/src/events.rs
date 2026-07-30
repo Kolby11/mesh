@@ -452,7 +452,7 @@ mod tests {
         child.computed_style.height = Dimension::Px(50.0);
         let child_id = child.id;
 
-        root.children = vec![child];
+        root.children = vec![child].into();
         LayoutEngine::compute(&mut root, 200.0, 100.0);
 
         // Inside the child.

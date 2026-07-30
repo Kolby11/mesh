@@ -1228,23 +1228,40 @@ fn annotate_runtime_tree_inner(
     node.set_mesh_key(key.clone());
 
     let key_str = key.as_str();
-    let disabled = node
+    let authored = node.authored_payload();
+    let disabled = authored
         .attributes
         .get("disabled")
         .is_some_and(|value| truthy_attribute(value))
-        || node
+        || authored
             .attributes
             .get("aria-disabled")
             .is_some_and(|value| truthy_attribute(value));
+    let authored_checked = authored
+        .attributes
+        .get("checked")
+        .map(|value| matches!(value.as_str(), "true" | "1" | "checked"));
+    let is_input = authored.tag == "input";
+    let is_slider = authored.tag == "slider";
+    let is_switch_or_checkbox = matches!(authored.tag.as_str(), "switch" | "checkbox");
+    let authored_value = authored.attributes.get("value").cloned();
+    let source_tag = authored
+        .attributes
+        .get("data-mesh-element")
+        .map(String::as_str)
+        .unwrap_or(authored.tag.as_str());
+    let checkable_choice = matches!(source_tag, "switch" | "checkbox" | "radio" | "option");
+    let selects_choice = matches!(source_tag, "radio" | "option");
+    let selectable_group = matches!(source_tag, "select" | "radio-group");
+    let trace_tag = context
+        .hovered_ids
+        .contains(&node_id)
+        .then(|| authored.tag.clone());
     let checked = context
         .checked_values
         .get(&node_id)
         .copied()
-        .or_else(|| {
-            node.attributes
-                .get("checked")
-                .map(|value| matches!(value.as_str(), "true" | "1" | "checked"))
-        })
+        .or(authored_checked)
         .unwrap_or(false);
 
     node.state = ElementState {
@@ -1252,7 +1269,7 @@ fn annotate_runtime_tree_inner(
         focus_visible: context.focus_visible_id == Some(node_id)
             || (context.focus_visible_id.is_none()
                 && context.focused_id == Some(node_id)
-                && node.tag == "input"),
+                && is_input),
         hovered: context.hovered_ids.contains(&node_id),
         active: context.active_key.as_deref() == Some(key_str),
         disabled,
@@ -1263,7 +1280,7 @@ fn annotate_runtime_tree_inner(
     if node.state.hovered {
         tracing::trace!(
             "[hover] annotate: key={key} tag={} set hovered=true",
-            node.tag
+            trace_tag.as_deref().unwrap_or_default()
         );
     }
 
@@ -1273,32 +1290,22 @@ fn annotate_runtime_tree_inner(
     }
     node.accessibility.focused = node.state.focused;
 
-    match node.tag.as_str() {
-        "input" => {
-            let value = context
-                .input_values
-                .get(&node_id)
-                .cloned()
-                .or_else(|| node.attributes.get("value").cloned())
-                .unwrap_or_default();
-            node.attributes.insert("value".into(), value);
-        }
-        "slider" => {
-            annotate_slider_node(node, node_id, key_str, context);
-        }
-        "switch" | "checkbox" => {
-            node.attributes.insert(
-                "checked".into(),
-                if checked { "true" } else { "false" }.into(),
-            );
-        }
-        _ => {}
+    if is_input {
+        let value = context
+            .input_values
+            .get(&node_id)
+            .cloned()
+            .or(authored_value.clone())
+            .unwrap_or_default();
+        node.attributes.insert("value".into(), value);
+    } else if is_slider {
+        annotate_slider_node(node, node_id, key_str, context);
+    } else if is_switch_or_checkbox {
+        node.attributes.insert(
+            "checked".into(),
+            if checked { "true" } else { "false" }.into(),
+        );
     }
-
-    let source_tag = source_element_tag(node);
-    let checkable_choice = matches!(source_tag, "switch" | "checkbox" | "radio" | "option");
-    let selects_choice = matches!(source_tag, "radio" | "option");
-    let selectable_group = matches!(source_tag, "select" | "radio-group");
 
     if checkable_choice {
         node.attributes.insert(
@@ -1322,7 +1329,7 @@ fn annotate_runtime_tree_inner(
             .input_values
             .get(&node_id)
             .cloned()
-            .or_else(|| node.attributes.get("value").cloned())
+            .or(authored_value)
     {
         node.attributes.insert("value".into(), value.clone());
         node.state.value = true;

@@ -18,6 +18,7 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
         <BubbleOptions
             label={t('language.choose')}
             items={items}
+            rotation={rotation}
             onselect={onSelectOption}
             onscroll={onOptionScroll}
             onoptionpointerenter={onOptionPointerEnter}
@@ -32,7 +33,40 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
 local t = import("mesh.i18n", "t")
 local BubbleOptions = require("../../shared/components/bubble-options.mesh")
 
-locales = { "en", "sk", "de", "fr", "es", "ja", "zh", "ko", "ar", "hi" }
+-- The ring's contents, in order. Flags are regional-indicator pairs, so they
+-- need a colour emoji font (Noto Color Emoji ships one); without it they fall
+-- back to the two boxed letters of the country code, which still reads.
+local LOCALES = {
+    { code = "en", flag = "🇬🇧" },
+    { code = "sk", flag = "🇸🇰" },
+    { code = "cs", flag = "🇨🇿" },
+    { code = "de", flag = "🇩🇪" },
+    { code = "pl", flag = "🇵🇱" },
+    { code = "fr", flag = "🇫🇷" },
+    { code = "es", flag = "🇪🇸" },
+    { code = "it", flag = "🇮🇹" },
+    { code = "pt", flag = "🇵🇹" },
+    { code = "nl", flag = "🇳🇱" },
+    { code = "sv", flag = "🇸🇪" },
+    { code = "uk", flag = "🇺🇦" },
+    { code = "tr", flag = "🇹🇷" },
+    { code = "ar", flag = "🇸🇦" },
+    { code = "hi", flag = "🇮🇳" },
+    { code = "zh", flag = "🇨🇳" },
+    { code = "ja", flag = "🇯🇵" },
+    { code = "ko", flag = "🇰🇷" },
+}
+
+locales = {}
+local FLAGS = {}
+for _, entry in LOCALES do
+    table.insert(locales, entry.code)
+    FLAGS[entry.code] = entry.flag
+end
+
+-- The flag for the active locale. The language button reads this off its
+-- `bind:this` reference instead of keeping a second copy of the table.
+current_flag = FLAGS["en"]
 
 open = false
 local CLOSE_BRIDGE_KEY = "language-popover-close"
@@ -52,6 +86,16 @@ end
 
 selected_locale = "en"
 window_start = 1
+-- Ring rotation token handed to BubbleOptions; see its `rotation` prop.
+rotation = ""
+local rotation_tick = 0
+-- Whether the pointer is currently over the popover, so focus loss can tell a
+-- keyboard dismissal apart from a click that merely moved focus between bubbles.
+local pointer_inside = false
+-- Optimistic selection: the locale this popover asked for, and the locale it
+-- replaced. See `select_locale` and `render`.
+local pending_locale = nil
+local pending_locale_replaced = nil
 
 -- One struct per visible slot (left/center/right); BubbleOptions only
 -- iterates this array, so position and active-state classes are baked in here.
@@ -68,13 +112,14 @@ end
 
 local function locale_label(locale)
     if type(locale) ~= "string" or locale == "" then
-        return "??"
+        return "🏳"
     end
-    return string.upper(string.sub(locale, 1, 2))
+    return FLAGS[locale] or string.upper(string.sub(locale, 1, 2))
 end
 
 local function apply_selection(locale)
     selected_locale = locale
+    current_flag = locale_label(locale)
 end
 
 local function current_locale()
@@ -102,6 +147,37 @@ local function sync_window_to_locale(locale)
             return
         end
     end
+end
+
+-- The bubble stage routes both the wheel's `scroll` and the trackpad's
+-- `twofingerscroll` here. A wheel sends one event per notch, but a trackpad
+-- sends a continuous stream of small pixel deltas, so stepping the ring per
+-- event would spin it. Trackpad travel accumulates and only spends a notch at
+-- a time; the wheel keeps its one-step-per-event behaviour.
+local TWO_FINGER_NOTCH = 40
+local two_finger_travel = 0
+
+local function scroll_step(event)
+    local delta = event and event.delta or {}
+    local dy = tonumber(delta.y) or 0
+    if event ~= nil and event.type == "twofingerscroll" then
+        if dy == 0 then
+            return 0
+        end
+        -- Reversing direction should not first have to pay off travel banked
+        -- the other way, or the ring stalls when the user changes their mind.
+        if (dy > 0) ~= (two_finger_travel > 0) then
+            two_finger_travel = 0
+        end
+        two_finger_travel += dy
+        if math.abs(two_finger_travel) < TWO_FINGER_NOTCH then
+            return 0
+        end
+        local step = two_finger_travel > 0 and 1 or -1
+        two_finger_travel -= step * TWO_FINGER_NOTCH
+        return step
+    end
+    return dy >= 0 and 1 or -1
 end
 
 local SLOTS = {
@@ -139,11 +215,25 @@ end
 -- Selecting a locale does not close the popover: it stays open so the user can
 -- keep choosing. It closes on pointer leave (onPopoverLeave) or, for keyboard
 -- activation, on focus leave.
+-- The ring deliberately stays where the user scrolled it: re-centring on the
+-- picked locale would slide the bubbles out from under the cursor mid-choice.
+-- The mark moves to the picked bubble immediately and `pending_locale` holds it
+-- there until the service catches up, so a lagging round trip cannot snap the
+-- active ring back to the previous locale.
 local function select_locale(locale)
+    pending_locale = locale
+    pending_locale_replaced = selected_locale
     apply_selection(locale)
-    sync_window_to_locale(locale)
     sync_options()
     mesh.locale.set(locale)
+end
+
+-- Put the selected locale back in the middle slot. Called when the ring is not
+-- being browsed: at startup, when the locale changes elsewhere, and once the
+-- popover has closed, so the next open starts centred.
+local function recenter_ring()
+    sync_window_to_locale(selected_locale)
+    rotation = ""
 end
 
 function init(self)
@@ -151,11 +241,27 @@ function init(self)
     if locale ~= nil then
         mesh.locale.set(locale)
     end
+    apply_selection(locale or current_locale())
+    recenter_ring()
 end
 
 function render(self)
-    apply_selection(stored_locale(self.storage) or current_locale())
-    sync_window_to_locale(selected_locale)
+    -- Re-centre only when the locale changed underneath us. Doing it every
+    -- frame would undo `onOptionScroll` before the scrolled window was ever
+    -- painted, which is why scrolling the bubbles used to do nothing.
+    local locale = stored_locale(self.storage) or current_locale()
+    if pending_locale ~= nil then
+        -- Hold our own pick until the service reports anything other than the
+        -- locale it replaced: that is either the pick landing or a change made
+        -- elsewhere, and both end the override.
+        if locale ~= pending_locale_replaced then
+            pending_locale = nil
+            pending_locale_replaced = nil
+        end
+    elseif locale ~= selected_locale then
+        apply_selection(locale)
+        recenter_ring()
+    end
     sync_options()
 end
 
@@ -164,22 +270,32 @@ function onSelectOption(locale)
 end
 
 function onOptionScroll(event)
-    local delta = event and event.delta or {}
-    local dy = tonumber(delta.y) or 0
-    if dy >= 0 then
+    -- Scrolling over the bubbles keeps the popover alive: it is a way of
+    -- browsing the set, not of leaving it.
+    cancel_bridge_close()
+    local step = scroll_step(event)
+    if step == 0 then
+        return
+    end
+    rotation_tick += 1
+    if step > 0 then
         window_start = normalize_index(window_start + 1)
+        rotation = "next-" .. rotation_tick
     else
         window_start = normalize_index(window_start - 1)
+        rotation = "prev-" .. rotation_tick
     end
     sync_options()
 end
 
 function onPopoverEnter(event)
+    pointer_inside = true
     cancel_bridge_close()
     self.PopoverEnter:fire(event)
 end
 
 function onPopoverLeave()
+    pointer_inside = false
     schedule_bridge_close()
     self.PopoverLeave:fire()
 end
@@ -190,11 +306,18 @@ function onOptionFocus(event)
 end
 
 function onOptionPointerEnter(event)
+    pointer_inside = true
     cancel_bridge_close()
     self.PopoverEnter:fire(event)
 end
 
+-- Focus leaving an option is only a dismissal for keyboard users. Clicking a
+-- second bubble also blurs the first one, and closing on that would shut the
+-- popover 400ms after the very click meant to keep browsing.
 function onOptionBlur(_event)
+    if pointer_inside then
+        return
+    end
     schedule_bridge_close()
 end
 
@@ -202,12 +325,18 @@ function onOptionKeyDown(event)
     if event and event.key == "Escape" then
         cancel_bridge_close()
         open = false
+        recenter_ring()
+        sync_options()
         self.KeyboardDismissRequested:fire()
     end
 end
 
 function closeLanguagePopoverBridge()
+    pointer_inside = false
     open = false
+    -- Closed: the next open starts from the selected locale again.
+    recenter_ring()
+    sync_options()
     self.CloseRequested:fire()
 end
 </script>

@@ -1,0 +1,14 @@
+{
+  "name": "@mesh/tokyo-night",
+  "version": "0.1.0",
+  "description": "Tokyo Night theme.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "theme": {
+      "id": "tokyo-night",
+      "label": "Tokyo Night",
+      "entry": "theme.css"
+    }
+  }
+}

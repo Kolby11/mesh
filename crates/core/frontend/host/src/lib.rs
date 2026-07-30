@@ -409,13 +409,16 @@ pub trait ShellComponent: Send {
     /// Handle input delivered to a promoted child surface using coordinates
     /// local to that child surface. Implementations that paint keyed subtrees
     /// into child surfaces can translate the local input back into their
-    /// retained tree before dispatch.
+    /// retained tree before dispatch. `content_offset` is where the subtree's
+    /// own box starts inside the padded child buffer and must match the offset
+    /// used to paint it, otherwise hit testing is skewed by the padding.
     fn handle_child_surface_input(
         &mut self,
         _node_key: &str,
         theme: &Theme,
         width: u32,
         height: u32,
+        _content_offset: (f32, f32),
         input: ComponentInput,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         self.handle_input(theme, width, height, input)

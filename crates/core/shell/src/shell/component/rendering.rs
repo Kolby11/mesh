@@ -1104,13 +1104,14 @@ fn apply_runtime_attribute_state(node: &mut WidgetNode) {
 }
 
 fn apply_hidden_attribute_layout(node: &mut WidgetNode) {
-    let hidden = node.attributes.get("hidden").is_some_and(|value| {
+    let authored = node.authored_payload();
+    let hidden = authored.attributes.get("hidden").is_some_and(|value| {
         matches!(
             value.as_str(),
             "" | "true" | "1" | "hidden" | "disabled" | "checked"
         )
     });
-    if hidden && !node.attributes.contains_key(PROMOTED_POPOVER_MARKER) {
+    if hidden && !authored.attributes.contains_key(PROMOTED_POPOVER_MARKER) {
         node.computed_style.display = mesh_core_elements::style::Display::None;
     }
 }
@@ -1140,7 +1141,11 @@ fn apply_runtime_attribute_state_for_ids(
 /// subtree's layout coordinates, breaking that translation.) See
 /// [`PROMOTED_POPOVER_MARKER`].
 fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
-    if node.attributes.contains_key(PROMOTED_POPOVER_MARKER) {
+    if node
+        .authored_payload()
+        .attributes
+        .contains_key(PROMOTED_POPOVER_MARKER)
+    {
         node.computed_style.width = mesh_core_elements::Dimension::Px(0.0);
         node.computed_style.height = mesh_core_elements::Dimension::Px(0.0);
         node.computed_style.min_width = Some(0.0);
@@ -1157,7 +1162,11 @@ fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
 /// These constraints are shell-owned and must be restored after CSS restyling,
 /// just like promoted-popover geometry above.
 pub(super) fn constrain_error_placeholders(node: &mut WidgetNode) {
-    if node.attributes.contains_key(ERROR_PLACEHOLDER_MARKER) {
+    if node
+        .authored_payload()
+        .attributes
+        .contains_key(ERROR_PLACEHOLDER_MARKER)
+    {
         node.computed_style.min_width = Some(0.0);
         node.computed_style.max_width = Some(ERROR_PLACEHOLDER_MAX_WIDTH);
         node.computed_style.flex_shrink = 1.0;
@@ -1196,7 +1205,7 @@ mod interaction_changed_key_tests {
         let mut node = WidgetNode::new("box");
         node.id = crate::shell::component::runtime_tree::stable_runtime_node_id(key);
         node.attributes.insert("_mesh_key".into(), key.into());
-        node.children = children;
+        node.children = children.into();
         node
     }
 
@@ -2387,14 +2396,12 @@ fn annotate_selected_text_node(
             "_mesh_selection_focus_y".into(),
             format!("{:.2}", selection.focus.y),
         );
-        node.attributes.insert(
-            "_mesh_selection_text_x".into(),
-            format!("{:.2}", node.layout.x + node.computed_style.padding.left),
-        );
-        node.attributes.insert(
-            "_mesh_selection_text_y".into(),
-            format!("{:.2}", node.layout.y + node.computed_style.padding.top),
-        );
+        let text_x = node.layout.x + node.computed_style.padding.left;
+        let text_y = node.layout.y + node.computed_style.padding.top;
+        node.attributes
+            .insert("_mesh_selection_text_x".into(), format!("{text_x:.2}"));
+        node.attributes
+            .insert("_mesh_selection_text_y".into(), format!("{text_y:.2}"));
         return true;
     }
 

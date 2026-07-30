@@ -815,6 +815,7 @@ struct PopoverHarnessState {
     painted_nodes: Vec<String>,
     exiting_paints: Vec<bool>,
     child_inputs: Vec<(String, ComponentInput)>,
+    surface_sizes: Vec<(u32, u32)>,
     profiling_enabled: Vec<bool>,
     hide_transition_ms: u64,
     paint_generation: Option<u64>,
@@ -831,6 +832,7 @@ impl Default for PopoverHarnessState {
             painted_nodes: Vec::new(),
             exiting_paints: Vec::new(),
             child_inputs: Vec::new(),
+            surface_sizes: Vec::new(),
             profiling_enabled: Vec::new(),
             hide_transition_ms: 0,
             paint_generation: None,
@@ -984,6 +986,7 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
         _theme: &mesh_core_theme::Theme,
         _width: u32,
         _height: u32,
+        _content_offset: (f32, f32),
         input: ComponentInput,
     ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
         self.state
@@ -992,6 +995,15 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
             .child_inputs
             .push((node_key.to_string(), input));
         Ok(Vec::new())
+    }
+
+    fn surface_size_changed(&mut self, width: u32, height: u32) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .surface_sizes
+            .push((width, height));
+        true
     }
 
     fn set_profiling_enabled(&mut self, enabled: bool) {
@@ -1847,6 +1859,70 @@ fn service_delivery_index_routes_interface_events_by_name() {
 }
 
 #[test]
+fn service_delivery_index_deduplicates_component_subscriptions_when_rebuilt() {
+    let summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
+        update_services: vec!["audio".to_string(), "audio".to_string()],
+        cached_update_services: vec!["power".to_string(), "power".to_string()],
+        interface_events: vec![
+            ServiceInterfaceEventSubscription {
+                service: "audio".to_string(),
+                event: "volume_changed".to_string(),
+            },
+            ServiceInterfaceEventSubscription {
+                service: "audio".to_string(),
+                event: "volume_changed".to_string(),
+            },
+        ],
+    })));
+    let state = Arc::new(Mutex::new(IndexedRecordingState::default()));
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(IndexedRecordingComponent::new(
+        "@test/duplicate-observer",
+        summary,
+        Arc::clone(&state),
+    )));
+
+    shell.rebuild_service_delivery_index_if_needed();
+
+    assert_eq!(
+        shell.service_delivery_index.update_services["audio"],
+        vec![0]
+    );
+    assert_eq!(
+        shell.service_delivery_index.cached_update_services["power"],
+        vec![0]
+    );
+    assert_eq!(
+        shell.service_delivery_index.interface_events["audio"]["volume_changed"],
+        vec![0]
+    );
+
+    shell
+        .deliver_service_event(&service_update(
+            "mesh.audio",
+            "@mesh/pipewire-audio",
+            serde_json::json!({ "available": true, "percent": 70.0 }),
+        ))
+        .unwrap();
+    shell
+        .deliver_service_event(&ServiceEvent::InterfaceEvent {
+            service: "mesh.audio".to_string(),
+            source_module: "@mesh/pipewire-audio".to_string(),
+            name: "volume_changed".to_string(),
+            payload: serde_json::json!({ "percent": 70.0 }),
+        })
+        .unwrap();
+
+    let state = state.lock().unwrap();
+    assert_eq!(state.observed, 0);
+    assert_eq!(
+        state.handled.len(),
+        2,
+        "each indexed event kind should be delivered exactly once"
+    );
+}
+
+#[test]
 fn service_delivery_index_rebuilds_when_marked_dirty() {
     let summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
         update_services: vec!["audio".to_string()],
@@ -1951,19 +2027,20 @@ fn service_delivery_index_beats_full_component_scan_benchmark() {
             .unwrap();
     }
     let new_elapsed = new_started.elapsed();
+    let speedup = old_elapsed.as_secs_f64() / new_elapsed.as_secs_f64();
     let delivered_total: usize = states
         .iter()
         .map(|state| state.lock().unwrap().handled.len())
         .sum();
 
     eprintln!(
-        "service delivery scan: old={old_elapsed:?} indexed={new_elapsed:?} old_hits={old_hits} delivered_total={delivered_total}"
+        "service delivery scan: old={old_elapsed:?} indexed={new_elapsed:?} speedup={speedup:.3}x old_hits={old_hits} delivered_total={delivered_total}"
     );
     assert_eq!(old_hits, ITERATIONS);
     assert_eq!(delivered_total, ITERATIONS * 2);
     assert!(
-        new_elapsed < old_elapsed,
-        "indexed delivery should beat full component scan"
+        speedup >= 5.0,
+        "indexed delivery should be at least 5x faster than a full component scan, measured {speedup:.3}x"
     );
 }
 
@@ -7141,6 +7218,47 @@ fn parent_pointer_leave_defers_child_popover_close() {
         !shell.pending_popover_hides.contains_key(&child_id),
         "entering the promoted child popup should cancel the bridge hide"
     );
+}
+
+#[test]
+fn parent_to_child_pointer_crossing_keeps_parent_surface_size() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+
+    render_components_until_child_popup(&mut shell);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    state.lock().unwrap().surface_sizes.clear();
+    shell.presentation_engine.testing_push_event(
+        mesh_core_presentation::WindowEvent::PointerLeave {
+            surface_id: "@test/popover-host".into(),
+        },
+    );
+    shell.presentation_engine.testing_push_event(
+        mesh_core_presentation::WindowEvent::PointerMove {
+            surface_id: child_id.clone().into(),
+            x: 4.0,
+            y: 4.0,
+        },
+    );
+
+    shell.dispatch_wayland().unwrap();
+
+    let state = state.lock().unwrap();
+    assert!(
+        state
+            .child_inputs
+            .iter()
+            .any(|(_, input)| matches!(input, ComponentInput::PointerMove { .. }))
+    );
+    assert_eq!(
+        state.surface_sizes,
+        vec![(120, 36)],
+        "child popup input must not resize the parent component to the child surface"
+    );
+    assert!(!shell.pending_popover_hides.contains_key(&child_id));
 }
 
 #[test]

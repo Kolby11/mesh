@@ -7,6 +7,18 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Bubble rings window three of N.** Both the language ring (18 locales, flag
+emoji) and the theme ring (7 themes) show three options and scroll the rest
+through, turning along the arc; wheel and two-finger trackpad both drive it
+(2026-07-30). Record: [`log/2026-07.md`](log/2026-07.md).
+
+**Promoted popovers are selectable again.** Child-surface input now applies the
+same padded `content_offset` as paint, so pointer coordinates in a popup buffer
+are no longer skewed by the blur/transform padding (~50px for the bubble
+popovers) into spurious `pointerleave` dismissals (2026-07-30). Bubble options
+sit in a shallower arc, and scrolling turns the ring instead of being reverted
+by the next render. Record: [`log/2026-07.md`](log/2026-07.md).
+
 **Settings scrollbars are conditional.** The settings page uses `overflow-y:
 auto`, so its scrollbar is rendered only when the page content exceeds its
 viewport (2026-07-30). Regression:
@@ -34,6 +46,33 @@ now owns clean text inputs for the retained Taffy tree, updating an entry only
 when content or measurement-affecting style changes (2026-07-30). The focused
 512-text-node release gate is 1.58–1.72x faster than rebuilding the contexts;
 the earlier scratch-map rejection predated dirty-node style scoping. Record:
+[`log/performance-log.md`](log/performance-log.md).
+
+**Component memo hits now share immutable build payloads.** A memo cache entry
+and its live hit share each node's authored attributes, handlers, service reads,
+and child topology through copy-on-write `Arc`s (2026-07-30). Runtime style,
+layout, interaction, and accessibility overlays remain independently mutable;
+only the changed branch is copied. The 273-node wide release gate measured
+2,527–2,777x faster clone time and 418,323→120 exclusive retained heap bytes;
+the 97-node deep shape measured 803–826x and 147,826→120 bytes. Record:
+[`log/performance-log.md`](log/performance-log.md).
+
+**Navigation volume localization and popover hover are stable.** The volume
+tooltip now translates its dynamic key in the template, rather than preserving
+the key from Luau. Language and theme triggers use component-specific style
+classes, so they do not inherit the settings button's hover lift/scale.
+Child-popup pointer input also preserves the parent surface's authoritative
+dimensions instead of temporarily relaying the popup's size into the navigation
+layout (2026-07-30). Record: [`log/2026-07.md`](log/2026-07.md).
+
+**Service delivery is subscriber-proportional.** The shell refreshes sorted,
+unique service subscriber lists only when component observation summaries
+change, then routes updates and named interface events directly through those
+lists (2026-07-30). An epoch marker prevents overlapping update/cache lists
+from delivering twice without per-event target cloning or normalization.
+Duplicate declarations are collapsed during index rebuild, including named
+events. The 20,000-event/256-component release gate measured 12.24–16.78x
+against a full component scan. Record:
 [`log/performance-log.md`](log/performance-log.md).
 
 **Live frontend catalogs are one atomic snapshot.** `Shell` owns the versioned
@@ -128,7 +167,7 @@ and checked gates are in
 From the attack order at the end of
 [`docs/BACKLOG.md`](../docs/BACKLOG.md):
 
-1. Subscriber-proportional service delivery.
+1. Narrow invalidation and affected-subtree template re-evaluation.
 
 ## Blocked
 

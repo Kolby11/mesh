@@ -1562,6 +1562,7 @@ impl Shell {
         let node_key = self.components[index].children[child_index]
             .node_key
             .clone();
+        let content_padding = self.components[index].children[child_index].content_padding;
         let target_surface_size = self.components[index].children[child_index]
             .target
             .known_surface_size
@@ -1594,6 +1595,7 @@ impl Shell {
                 self.theme.active(),
                 component_surface_size.0,
                 component_surface_size.1,
+                (content_padding.0 as f32, content_padding.1 as f32),
                 ComponentInput::PointerLeave,
             )
             .map_err(ShellRunError::Component)?;

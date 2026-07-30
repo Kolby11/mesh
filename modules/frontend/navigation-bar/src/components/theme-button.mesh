@@ -2,17 +2,17 @@
     <stack class="nav-button-shell">
         <button
             ref="themeButton"
-            class="{trigger_class}"
+            class={trigger_class}
             onclick={onThemeToggle}
             onpointerenter={onThemeEnter}
             onpointerleave={onThemeLeave}
             aria-haspopup="true"
-            aria-expanded="{theme_aria_expanded}"
-            data-tooltip-disabled="{theme_tooltip_disabled}"
-            title="{theme_tooltip}"
+            aria-expanded={theme_aria_expanded}
+            data-tooltip-disabled={theme_tooltip_disabled}
+            title={theme_tooltip}
             aria-label={t(theme_tooltip_key)}
         >
-            <icon class="nav-button-glyph" name="{theme_icon}" size="18" />
+            <icon class="theme-trigger-glyph" name={theme_icon} size="18" />
         </button>
         <ThemeSelector bind:this={theme_popover} />
     </stack>
@@ -30,7 +30,7 @@ theme_tooltip_disabled = "false"
 theme_is_dark = true
 theme_surface_hidden = true
 theme_aria_expanded = "false"
-trigger_class = "nav-button"
+trigger_class = "theme-trigger"
 
 theme_popover = nil
 local theme_popover_connected = false
@@ -71,7 +71,7 @@ local function read_theme_is_dark()
 end
 
 local function sync_trigger_state()
-    trigger_class = theme_surface_hidden and "nav-button" or "nav-button nav-button-open"
+    trigger_class = theme_surface_hidden and "theme-trigger" or "theme-trigger theme-trigger-open"
     theme_aria_expanded = theme_surface_hidden and "false" or "true"
     if theme_surface_hidden then
         theme_tooltip = t(theme_tooltip_key)
@@ -165,7 +165,7 @@ end
         overflow: visible;
     }
 
-    .nav-button {
+    .theme-trigger {
         width: 40px;
         height: 40px;
         position: relative;
@@ -187,38 +187,38 @@ end
         transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
     }
 
-    .nav-button-open {
+    .theme-trigger-open {
         background: var(--color-surface-container);
         color: var(--color-on-surface);
         border-color: var(--color-primary);
     }
 
-    .nav-button:hover {
+    .theme-trigger:hover {
         background: var(--color-secondary-container);
         color: var(--color-on-secondary-container);
     }
 
-    .nav-button:focus,
-    .nav-button:focus-visible {
+    .theme-trigger:focus,
+    .theme-trigger:focus-visible {
         background: var(--color-tertiary-container);
         color: var(--color-on-tertiary-container);
     }
 
-    .nav-button-open:hover,
-    .nav-button-open:focus,
-    .nav-button-open:focus-visible {
+    .theme-trigger-open:hover,
+    .theme-trigger-open:focus,
+    .theme-trigger-open:focus-visible {
         background: var(--color-surface-container);
         color: var(--color-on-surface);
         border-color: var(--color-primary);
     }
 
-    .nav-button:active {
+    .theme-trigger:active {
         background: var(--color-primary);
         color: var(--color-on-primary);
         border-color: var(--color-primary);
     }
 
-    .nav-button-glyph {
+    .theme-trigger-glyph {
         width: 24px;
         height: 24px;
         flex-shrink: 0;
@@ -234,7 +234,7 @@ end
             height: 36px;
         }
 
-        .nav-button {
+        .theme-trigger {
             width: 36px;
             height: 36px;
         }

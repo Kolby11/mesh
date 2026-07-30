@@ -797,66 +797,264 @@ fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
 #[test]
 fn shipped_language_popover_cycles_three_bubble_options_on_scroll() {
     let theme = default_theme();
-    let mut language =
-        real_frontend_module_component("@mesh/language-popover", audio_network_catalog());
-    language.visible = true;
-    language.set_surface_exiting(false);
-    language
+    let width = 1280;
+    let height = 80;
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    component.visible = true;
+    component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.locale".into(),
             source_module: "@mesh/shell".into(),
-            payload: serde_json::json!({
-                "locale": "en",
-                "current": "en"
-            }),
+            payload: serde_json::json!({ "locale": "en", "current": "en" }),
         })
         .unwrap();
+    let mut buffer = PixelBuffer::new(width, height);
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
-    let mut buffer = PixelBuffer::new(112, 92);
-    language.paint(&theme, 112, 92, &mut buffer, 1.0).unwrap();
-    let tree = language
-        .last_tree
-        .as_ref()
-        .expect("rendered language bubble selector");
-    let mut labels = Vec::new();
-    collect_text_content(tree, &mut labels);
-    assert!(
-        labels.iter().any(|label| label == "HI"),
-        "initial centered English window should include previous locale"
+    component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageEnter",
+            &[],
+        )
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    let requests = component.child_surface_requests();
+    assert_eq!(
+        requests.len(),
+        1,
+        "language popover should open: {requests:?}"
     );
-    assert!(
-        labels.iter().any(|label| label == "EN"),
-        "initial centered English window should include current locale"
-    );
-    assert!(
-        labels.iter().any(|label| label == "SK"),
-        "initial centered English window should include next locale"
+    let node_key = requests[0].node_key.clone();
+    let (cw, ch) = requests[0].content_size;
+    let (pad_left, pad_top, ..) = requests[0].content_padding;
+    let content_offset = (pad_left as f32, pad_top as f32);
+
+    let labels = bubble_option_labels(&component, &node_key, content_offset);
+    assert_eq!(
+        labels,
+        vec![
+            "\u{1f1f0}\u{1f1f7}".to_string(),
+            "\u{1f1ec}\u{1f1e7}".to_string(),
+            "\u{1f1f8}\u{1f1f0}".to_string()
+        ],
+        "the ring opens centred on the current locale, showing locale flags"
     );
 
-    language
-        .handle_input(
+    // Scrolling over the bubbles advances the window *and* keeps it advanced:
+    // re-centring on every render used to revert the step before it painted.
+    component
+        .handle_child_surface_input(
+            &node_key,
             &theme,
-            112,
-            92,
+            cw,
+            ch,
+            content_offset,
             ComponentInput::Scroll {
-                x: 56.0,
-                y: 46.0,
+                x: content_offset.0 + cw as f32 / 2.0,
+                y: content_offset.1 + ch as f32 / 2.0,
                 dx: 0.0,
                 dy: 1.0,
             },
         )
         .unwrap();
-    language.paint(&theme, 112, 92, &mut buffer, 1.0).unwrap();
-    let tree = language
-        .last_tree
-        .as_ref()
-        .expect("rendered scrolled language bubble selector");
-    let mut labels = Vec::new();
-    collect_text_content(tree, &mut labels);
-    assert!(
-        labels.iter().any(|label| label == "DE"),
-        "scrolling over the bubble selector should advance the three visible options"
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    let labels = bubble_option_labels(&component, &node_key, content_offset);
+    assert_eq!(
+        labels,
+        vec![
+            "\u{1f1ec}\u{1f1e7}".to_string(),
+            "\u{1f1f8}\u{1f1f0}".to_string(),
+            "\u{1f1e8}\u{1f1ff}".to_string()
+        ],
+        "one scroll step turns the ring by exactly one slot"
     );
+
+    let rotating = component
+        .child_surface_debug_tree(&node_key, content_offset)
+        .expect("language child tree");
+    // Every bubble travels, and the middle slot travels along a different arc
+    // leg than the outer two — that height difference is the rotation.
+    let mut motions = Vec::new();
+    collect_class_token_nodes(&rotating, "bubble-options-motion", &mut motions);
+    let arc_variants: Vec<String> = motions
+        .iter()
+        .filter_map(|node| node.attributes.get("class"))
+        .filter_map(|class| {
+            class
+                .split_whitespace()
+                .find(|token| token.starts_with("bubble-options-rotate-"))
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(
+        arc_variants.len(),
+        3,
+        "a scroll step should arm the arc travel on every bubble: {arc_variants:?}"
+    );
+    assert!(
+        arc_variants[1].contains("-center-"),
+        "the middle slot travels its own arc leg: {arc_variants:?}"
+    );
+    assert!(
+        arc_variants[0].contains("-outer-") && arc_variants[2].contains("-outer-"),
+        "the outer slots share one arc leg: {arc_variants:?}"
+    );
+    // The classes have to reach real keyframes, not just be present in markup.
+    let resolved: Vec<String> = motions
+        .iter()
+        .filter_map(|node| node.computed_style.animations.first())
+        .filter_map(|animation| animation.name.clone())
+        .collect();
+    assert_eq!(
+        resolved,
+        vec![
+            "bubble-options-arc-next-outer-b".to_string(),
+            "bubble-options-arc-next-center-b".to_string(),
+            "bubble-options-arc-next-outer-b".to_string(),
+        ],
+        "each travel class should resolve to its arc keyframes"
+    );
+
+    // The bubble that appeared at the trailing edge fades in.
+    let mut buttons = Vec::new();
+    collect_class_token_nodes(&rotating, "bubble-option", &mut buttons);
+    let arriving: Vec<usize> = buttons
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| {
+            node.attributes.get("class").is_some_and(|class| {
+                class
+                    .split_whitespace()
+                    .any(|token| token.starts_with("bubble-option-arriving-"))
+            })
+        })
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(
+        arriving,
+        vec![2],
+        "turning the ring forward makes exactly the trailing bubble appear"
+    );
+}
+
+// A trackpad reports continuous pixel deltas through `ontwofingerscroll`, a
+// different event from the wheel's `onscroll`. The stage has to bind both, and
+// accumulate the continuous stream into discrete ring steps.
+#[test]
+fn shipped_language_popover_rotates_on_two_finger_trackpad_scroll() {
+    let theme = default_theme();
+    let width = 1280;
+    let height = 80;
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    component.visible = true;
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.locale".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({ "locale": "en", "current": "en" }),
+        })
+        .unwrap();
+    let mut buffer = PixelBuffer::new(width, height);
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageEnter",
+            &[],
+        )
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    let requests = component.child_surface_requests();
+    let node_key = requests[0].node_key.clone();
+    let (cw, ch) = requests[0].content_size;
+    let (pad_left, pad_top, ..) = requests[0].content_padding;
+    let content_offset = (pad_left as f32, pad_top as f32);
+    let x = content_offset.0 + cw as f32 / 2.0;
+    let y = content_offset.1 + ch as f32 / 2.0;
+
+    let before = bubble_option_labels(&component, &node_key, content_offset);
+
+    // A few small deltas stay inside one notch: the ring must not spin.
+    for _ in 0..3 {
+        component
+            .handle_child_surface_input(
+                &node_key,
+                &theme,
+                cw,
+                ch,
+                content_offset,
+                ComponentInput::TwoFingerScroll {
+                    x,
+                    y,
+                    dx: 0.0,
+                    dy: 9.0,
+                },
+            )
+            .unwrap();
+    }
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    assert_eq!(
+        bubble_option_labels(&component, &node_key, content_offset),
+        before,
+        "27px of trackpad travel is less than one notch and must not step the ring"
+    );
+
+    // Crossing the notch spends exactly one step.
+    component
+        .handle_child_surface_input(
+            &node_key,
+            &theme,
+            cw,
+            ch,
+            content_offset,
+            ComponentInput::TwoFingerScroll {
+                x,
+                y,
+                dx: 0.0,
+                dy: 20.0,
+            },
+        )
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    let after = bubble_option_labels(&component, &node_key, content_offset);
+    assert_ne!(
+        after, before,
+        "crossing the notch should turn the ring one slot"
+    );
+    assert_eq!(
+        after[0], before[1],
+        "one notch turns the ring by exactly one slot: {before:?} -> {after:?}"
+    );
+}
+
+fn bubble_option_labels(
+    component: &FrontendSurfaceComponent,
+    node_key: &str,
+    content_offset: (f32, f32),
+) -> Vec<String> {
+    let tree = component
+        .child_surface_debug_tree(node_key, content_offset)
+        .expect("language child tree");
+    let mut labels = Vec::new();
+    collect_text_content(&tree, &mut labels);
+    labels
 }
 
 #[test]
@@ -1910,7 +2108,7 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
         1,
         "hover-opened theme selector should be promoted to one child popup request: {requests:?}"
     );
-    assert_eq!(requests[0].content_size, (112, 74));
+    assert_eq!(requests[0].content_size, (132, 60));
     assert_eq!(
         requests[0].anchor_rect,
         i32_rect((theme_left, theme_top, theme_right, theme_bottom)),
@@ -1965,15 +2163,15 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
     for (handler, expected_size, expected_core_class, expected_text) in [
         (
             "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeToggle",
-            (112, 74),
+            (132, 60),
             "bubble-option-core-dark",
             None,
         ),
         (
             "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageToggle",
-            (112, 74),
+            (132, 60),
             "bubble-option-core-language",
-            Some("EN"),
+            Some("\u{1f1ec}\u{1f1e7}"),
         ),
     ] {
         let mut component =
@@ -1996,6 +2194,36 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             .last_tree
             .as_ref()
             .expect("rendered navigation bar");
+        let nav_before = first_node_by_class(tree, "nav-shell")
+            .expect("navigation shell before hover")
+            .layout;
+        let cluster_before_node =
+            first_node_by_class(tree, "right-cluster").expect("navigation controls before hover");
+        let cluster_before = cluster_before_node.layout;
+        let nav_bounds_before = (
+            nav_before.x,
+            nav_before.y,
+            nav_before.width,
+            nav_before.height,
+        );
+        let cluster_bounds_before = (
+            cluster_before.x,
+            cluster_before.y,
+            cluster_before.width,
+            cluster_before.height,
+        );
+        let controls_before: Vec<_> = cluster_before_node
+            .children
+            .iter()
+            .map(|child| {
+                (
+                    child.layout.x,
+                    child.layout.y,
+                    child.layout.width,
+                    child.layout.height,
+                )
+            })
+            .collect();
         let button = first_node_with_click_handler(tree, handler).expect("hover trigger button");
         let button_key = button.mesh_key().expect("button mesh key").to_owned();
         let (left, top, right, bottom) =
@@ -2015,6 +2243,58 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
         component
             .paint(&theme, width, height, &mut buffer, 1.0)
             .unwrap();
+
+        let tree = component
+            .last_tree
+            .as_ref()
+            .expect("rendered navigation bar after hover");
+        let hovered_trigger = first_node_with_click_handler(tree, handler)
+            .expect("hovered theme or language trigger");
+        let nav_after = first_node_by_class(tree, "nav-shell")
+            .expect("navigation shell after hover")
+            .layout;
+        let cluster_after_node =
+            first_node_by_class(tree, "right-cluster").expect("navigation controls after hover");
+        let cluster_after = cluster_after_node.layout;
+        assert_eq!(
+            (nav_after.x, nav_after.y, nav_after.width, nav_after.height),
+            nav_bounds_before,
+            "{handler} must not move or resize the navigation shell"
+        );
+        assert_eq!(
+            (
+                cluster_after.x,
+                cluster_after.y,
+                cluster_after.width,
+                cluster_after.height
+            ),
+            cluster_bounds_before,
+            "{handler} must not move or resize the navigation controls"
+        );
+        assert_eq!(
+            cluster_after_node
+                .children
+                .iter()
+                .map(|child| {
+                    (
+                        child.layout.x,
+                        child.layout.y,
+                        child.layout.width,
+                        child.layout.height,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            controls_before,
+            "{handler} must not move or resize individual navigation controls"
+        );
+        assert_eq!(
+            hovered_trigger.computed_style.transform.translate_y, 0.0,
+            "{handler} must not inherit another navigation control's hover lift"
+        );
+        assert_eq!(
+            hovered_trigger.computed_style.transform.scale_x, 1.0,
+            "{handler} must not inherit another navigation control's hover scale"
+        );
 
         let requests = component.child_surface_requests();
         assert_eq!(
@@ -2071,6 +2351,38 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             painted > 0,
             "{handler} promoted popup should paint visible option pixels"
         );
+
+        component
+            .handle_input(&theme, width, height, ComponentInput::PointerLeave)
+            .unwrap();
+        component
+            .paint(&theme, width, height, &mut buffer, 1.0)
+            .unwrap();
+        let cluster_after_leave = first_node_by_class(
+            component
+                .last_tree
+                .as_ref()
+                .expect("tree after pointer leave"),
+            "right-cluster",
+        )
+        .expect("navigation controls after pointer leave");
+        assert_eq!(
+            cluster_after_leave
+                .children
+                .iter()
+                .map(|child| {
+                    (
+                        child.layout.x,
+                        child.layout.y,
+                        child.layout.width,
+                        child.layout.height,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            controls_before,
+            "{handler} must not move controls while crossing into its popover"
+        );
+
         let (popup_width, popup_height) = requests[0].content_size;
         for (x, y) in [
             (0, 0),
@@ -2633,4 +2945,366 @@ fn debug_dump_language_popover_fit_sizes() {
     }
     dump(tree, 0);
     panic!("dump above");
+}
+
+/// Which bubble carries the active mark, as its index in the ring.
+fn active_bubble_index(
+    component: &FrontendSurfaceComponent,
+    node_key: &str,
+    content_offset: (f32, f32),
+) -> Option<usize> {
+    let tree = component
+        .child_surface_debug_tree(node_key, content_offset)
+        .expect("bubble popover child tree");
+    let mut cores = Vec::new();
+    collect_class_token_nodes(&tree, "bubble-option-core", &mut cores);
+    cores.iter().position(|node| {
+        node.attributes.get("class").is_some_and(|class| {
+            class
+                .split_whitespace()
+                .any(|token| token == "bubble-option-core-active")
+        })
+    })
+}
+
+fn collect_class_token_nodes<'a>(node: &'a WidgetNode, token: &str, out: &mut Vec<&'a WidgetNode>) {
+    if node
+        .attributes
+        .get("class")
+        .is_some_and(|class| class.split_whitespace().any(|part| part == token))
+    {
+        out.push(node);
+    }
+    for child in &node.children {
+        collect_class_token_nodes(child, token, out);
+    }
+}
+
+/// Open a bubble popover from its navigation-bar trigger and click the bubble
+/// at `option_index`, returning the promoted child key, its content offset, and
+/// which bubble was marked active before and after the click.
+fn pick_bubble_option(enter_handler: &str, option_index: usize) -> (Option<usize>, Option<usize>) {
+    let theme = default_theme();
+    let width = 1280;
+    let height = 80;
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    component.visible = true;
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.locale".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({ "locale": "en", "current": "en" }),
+        })
+        .unwrap();
+    let mut buffer = PixelBuffer::new(width, height);
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    component
+        .call_namespaced_handler(enter_handler, &[])
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    let requests = component.child_surface_requests();
+    assert_eq!(requests.len(), 1, "popover should open: {requests:?}");
+    let node_key = requests[0].node_key.clone();
+    let (cw, ch) = requests[0].content_size;
+    let (pad_left, pad_top, ..) = requests[0].content_padding;
+    let content_offset = (pad_left as f32, pad_top as f32);
+
+    let before = active_bubble_index(&component, &node_key, content_offset);
+
+    let option_layout = {
+        let tree = component
+            .child_surface_debug_tree(&node_key, content_offset)
+            .expect("bubble popover child tree");
+        let mut options = Vec::new();
+        collect_class_token_nodes(&tree, "bubble-option", &mut options);
+        options[option_index].layout
+    };
+    let x = option_layout.x + option_layout.width / 2.0;
+    let y = option_layout.y + option_layout.height / 2.0;
+    for pressed in [true, false] {
+        component
+            .handle_child_surface_input(
+                &node_key,
+                &theme,
+                cw,
+                ch,
+                content_offset,
+                ComponentInput::PointerButton { x, y, pressed },
+            )
+            .unwrap();
+    }
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    (
+        before,
+        active_bubble_index(&component, &node_key, content_offset),
+    )
+}
+
+// Applying a theme is a round trip through the shell. Until the service reports
+// back, the popover has to mark the picked bubble itself, or the ring keeps
+// highlighting the theme the user just moved away from.
+#[test]
+fn shipped_theme_selector_marks_the_picked_bubble_active_immediately() {
+    let (before, after) = pick_bubble_option(
+        "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeEnter",
+        2,
+    );
+    assert_eq!(
+        before,
+        Some(1),
+        "the ring opens centred on the active theme"
+    );
+    assert_eq!(
+        after,
+        Some(2),
+        "clicking a theme bubble moves the mark to it"
+    );
+}
+
+#[test]
+fn shipped_language_popover_marks_the_picked_bubble_active_immediately() {
+    let (before, after) = pick_bubble_option(
+        "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageEnter",
+        2,
+    );
+    assert_eq!(
+        before,
+        Some(1),
+        "the ring opens centred on the active locale"
+    );
+    assert_eq!(
+        after,
+        Some(2),
+        "clicking a locale bubble moves the mark to it"
+    );
+}
+
+// The trigger used to keep its own two-entry locale table, so picking anything
+// other than Slovak left it reading "EN". It now takes the flag from the
+// popover, which owns the locale list.
+#[test]
+fn shipped_language_trigger_flag_follows_the_picked_locale() {
+    let theme = default_theme();
+    let width = 1280;
+    let height = 80;
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    component.visible = true;
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.locale".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({ "locale": "en", "current": "en" }),
+        })
+        .unwrap();
+    let mut buffer = PixelBuffer::new(width, height);
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    assert_eq!(
+        trigger_flag(&component),
+        Some("\u{1f1ec}\u{1f1e7}".to_string()),
+        "the trigger starts on the active locale's flag"
+    );
+
+    component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageEnter",
+            &[],
+        )
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    let requests = component.child_surface_requests();
+    let node_key = requests[0].node_key.clone();
+    let (cw, ch) = requests[0].content_size;
+    let (pad_left, pad_top, ..) = requests[0].content_padding;
+    let content_offset = (pad_left as f32, pad_top as f32);
+
+    // Scroll one step so the right bubble is Czech: a locale the trigger's old
+    // two-entry table did not know, and therefore used to render as "EN".
+    component
+        .handle_child_surface_input(
+            &node_key,
+            &theme,
+            cw,
+            ch,
+            content_offset,
+            ComponentInput::Scroll {
+                x: content_offset.0 + cw as f32 / 2.0,
+                y: content_offset.1 + ch as f32 / 2.0,
+                dx: 0.0,
+                dy: 1.0,
+            },
+        )
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    let option_layout = {
+        let tree = component
+            .child_surface_debug_tree(&node_key, content_offset)
+            .expect("language child tree");
+        let mut options = Vec::new();
+        collect_class_token_nodes(&tree, "bubble-option", &mut options);
+        options[2].layout
+    };
+    let x = option_layout.x + option_layout.width / 2.0;
+    let y = option_layout.y + option_layout.height / 2.0;
+    let mut select_requests = Vec::new();
+    for pressed in [true, false] {
+        select_requests.extend(
+            component
+                .handle_child_surface_input(
+                    &node_key,
+                    &theme,
+                    cw,
+                    ch,
+                    content_offset,
+                    ComponentInput::PointerButton { x, y, pressed },
+                )
+                .unwrap(),
+        );
+    }
+    assert!(
+        select_requests
+            .iter()
+            .any(|request| matches!(request, CoreRequest::SetLocale { locale } if locale == "cs")),
+        "clicking the bubble should request the locale: {select_requests:?}"
+    );
+    // Stand in for the shell applying `SetLocale`: `apply_set_locale` broadcasts
+    // this, and it is what re-runs the trigger's render hook.
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.locale".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({ "locale": "cs", "current": "cs" }),
+        })
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    assert_eq!(
+        trigger_flag(&component),
+        Some("\u{1f1e8}\u{1f1ff}".to_string()),
+        "picking a locale updates the trigger flag"
+    );
+}
+
+fn trigger_flag(component: &FrontendSurfaceComponent) -> Option<String> {
+    let tree = component.last_tree.as_ref()?;
+    let mut labels = Vec::new();
+    collect_class_token_nodes(tree, "language-label", &mut labels);
+    let mut text = Vec::new();
+    collect_text_content(labels.first()?, &mut text);
+    text.first().cloned()
+}
+
+// With every installed theme on screen at once, turning the ring could only
+// permute the same bubbles — "scrolling shows no other options". The ring now
+// windows three of the installed themes and scrolling brings in the rest.
+#[test]
+fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
+    let theme = default_theme();
+    let width = 1280;
+    let height = 80;
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    component.visible = true;
+    let mut buffer = PixelBuffer::new(width, height);
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeEnter",
+            &[],
+        )
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    let requests = component.child_surface_requests();
+    let node_key = requests[0].node_key.clone();
+    let (cw, ch) = requests[0].content_size;
+    let (pad_left, pad_top, ..) = requests[0].content_padding;
+    let content_offset = (pad_left as f32, pad_top as f32);
+
+    let swatches = |component: &FrontendSurfaceComponent| -> Vec<String> {
+        let tree = component
+            .child_surface_debug_tree(&node_key, content_offset)
+            .expect("theme child tree");
+        let mut cores = Vec::new();
+        collect_class_token_nodes(&tree, "bubble-option-core", &mut cores);
+        cores
+            .iter()
+            .filter_map(|node| node.attributes.get("class"))
+            .filter_map(|class| {
+                class
+                    .split_whitespace()
+                    .find(|token| {
+                        token.starts_with("bubble-option-core-")
+                            && !token.ends_with("-active")
+                            && !token.ends_with("-blur")
+                    })
+                    .map(str::to_owned)
+            })
+            .collect()
+    };
+
+    let before = swatches(&component);
+    assert_eq!(
+        before.len(),
+        3,
+        "only three themes are on screen: {before:?}"
+    );
+
+    let mut seen: Vec<String> = before.clone();
+    for _ in 0..4 {
+        component
+            .handle_child_surface_input(
+                &node_key,
+                &theme,
+                cw,
+                ch,
+                content_offset,
+                ComponentInput::Scroll {
+                    x: content_offset.0 + cw as f32 / 2.0,
+                    y: content_offset.1 + ch as f32 / 2.0,
+                    dx: 0.0,
+                    dy: 1.0,
+                },
+            )
+            .unwrap();
+        component
+            .paint(&theme, width, height, &mut buffer, 1.0)
+            .unwrap();
+        let now = swatches(&component);
+        assert_eq!(now.len(), 3, "the window stays three wide: {now:?}");
+        for swatch in now {
+            if !seen.contains(&swatch) {
+                seen.push(swatch);
+            }
+        }
+    }
+
+    assert_eq!(
+        seen.len(),
+        7,
+        "four scroll steps should have brought every installed theme into view: {seen:?}"
+    );
 }

@@ -978,7 +978,7 @@ mod shortcut_annotation_tests {
         if let Some(keybind) = keybind {
             node.attributes.insert("keybind".into(), keybind.into());
         }
-        node.children = children;
+        node.children = children.into();
         node
     }
 

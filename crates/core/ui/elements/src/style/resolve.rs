@@ -335,11 +335,12 @@ impl<'a> StyleNodeAttrs<'a> {
     pub fn from_node(node: &'a mut crate::tree::WidgetNode) -> Self {
         node.refresh_class_tokens_cache();
         let classes = ClassList::from_class_slice(node.class_tokens());
+        let authored = node.authored_payload();
         Self {
-            tag: node.tag.as_str(),
+            tag: authored.tag.as_str(),
             classes,
-            id: node.attributes.get("id").map(|value| value.as_str()),
-            inline_style: node.attributes.get("style").map(String::as_str),
+            id: authored.attributes.get("id").map(|value| value.as_str()),
+            inline_style: authored.attributes.get("style").map(String::as_str),
             key: node.mesh_key(),
             module_id: node.module_id(),
             state: node.state,

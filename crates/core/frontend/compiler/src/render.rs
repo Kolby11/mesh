@@ -509,7 +509,7 @@ fn build_widget_tree_from_component_inner(
             .collect();
         let mut container = WidgetNode::new("box");
         attach_module_id(&mut container, &host_manifest.package.id);
-        container.children = children;
+        container.children = children.into();
         container
     } else {
         let mut container = WidgetNode::new("box");
@@ -767,7 +767,7 @@ pub(crate) fn build_widget_node(
                 if let Some(max) = slot_definition.and_then(|definition| definition.max) {
                     children.truncate(max as usize);
                 }
-                node.children = children;
+                node.children = children.into();
             }
             if let Some(parent_style) = parent_style {
                 inherit_text_style(
