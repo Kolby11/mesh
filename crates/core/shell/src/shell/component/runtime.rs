@@ -289,6 +289,10 @@ impl FrontendSurfaceComponent {
         // live cross-component reference rather than a snapshot.
         script_ctx.attach_shared_vm(&self.surface_vm);
         script_ctx.set_interface_catalog(self.interface_catalog.clone());
+        script_ctx.set_i18n_translations(
+            self.locale
+                .effective_translations_for_module(&manifest.package.id),
+        );
         script_ctx.set_optional_interfaces(
             manifest
                 .dependencies

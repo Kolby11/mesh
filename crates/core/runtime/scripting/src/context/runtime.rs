@@ -245,6 +245,9 @@ pub struct ScriptContext {
     shared_element_metrics: Arc<Mutex<ElementMetricsStore>>,
     cached_self_table: Option<Table>,
     cached_service_payload_fingerprints: Option<Table>,
+    /// The module-scoped catalog currently visible to `mesh.i18n.t()`.
+    /// The shell replaces this snapshot when its locale changes.
+    i18n_translations: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl Drop for ScriptContext {
@@ -452,6 +455,7 @@ impl ScriptContext {
             shared_element_metrics: Arc::new(Mutex::new(ElementMetricsStore::default())),
             cached_self_table: None,
             cached_service_payload_fingerprints: None,
+            i18n_translations: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -461,6 +465,13 @@ impl ScriptContext {
 
     pub fn set_optional_interfaces(&mut self, interfaces: HashSet<String>) {
         self.optional_interfaces = Arc::new(interfaces);
+    }
+
+    /// Replace the effective module-scoped catalog used by `mesh.i18n.t()`.
+    /// Existing Luau function handles retain the shared map, so this takes
+    /// effect immediately after a locale switch.
+    pub fn set_i18n_translations(&mut self, translations: HashMap<String, String>) {
+        *self.i18n_translations.lock().unwrap() = translations;
     }
 
     /// Clone the thread VM, create a per-component `_ENV`, install host APIs,
@@ -1999,6 +2010,7 @@ impl ScriptContext {
         let diagnostics_for_require = Arc::clone(&self.shared_diagnostics);
         let pending_diagnostics_for_require = Arc::clone(&self.pending_side_channels);
         let optional_interfaces_for_require = Arc::clone(&self.optional_interfaces);
+        let i18n_translations = Arc::clone(&self.i18n_translations);
         // The per-instance _ENV is the channel-registry scope so interface event
         // channels stay private when components share one thread VM.
         let scope_for_require = globals.clone();
@@ -2007,7 +2019,8 @@ impl ScriptContext {
             .lua()
             .create_function(move |lua, module: String| {
                 if module == "@mesh/i18n" || module == "mesh.i18n" {
-                    return create_i18n_library(lua).map(LuaValue::Table);
+                    return create_i18n_library(lua, Arc::clone(&i18n_translations))
+                        .map(LuaValue::Table);
                 }
 
                 if let Some(host_api) = resolve_host_api(&mesh_for_require, &module)? {
@@ -2702,12 +2715,23 @@ fn parent_subscription_channel(
     Ok(wrapper)
 }
 
-fn create_i18n_library(lua: &Lua) -> mlua::Result<Table> {
+fn create_i18n_library(
+    lua: &Lua,
+    translations: Arc<Mutex<HashMap<String, String>>>,
+) -> mlua::Result<Table> {
     let exports = lua.create_table()?;
     exports.set(
         "t",
-        lua.create_function(|_lua, key: LuaValue| match key {
-            LuaValue::String(value) => Ok(value.to_str()?.to_string()),
+        lua.create_function(move |_lua, key: LuaValue| match key {
+            LuaValue::String(value) => {
+                let key = value.to_str()?.to_string();
+                Ok(translations
+                    .lock()
+                    .unwrap()
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or(key))
+            }
             other => Ok(lua_value_to_string(other)),
         })?,
     )?;

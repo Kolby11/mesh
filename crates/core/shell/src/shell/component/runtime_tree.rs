@@ -659,7 +659,7 @@ fn update_retained_node(
     match node_keys.get(&node.id).copied() {
         Some(previous_key) => match nodes.get_mut(previous_key) {
             Some(previous) => {
-                debug_assert_ne!(
+                assert_ne!(
                     previous.last_seen_epoch,
                     update_epoch,
                     "runtime NodeId collision while updating retained snapshots: id={} key={:?}",
@@ -739,21 +739,13 @@ fn collect_retained_snapshots(
     node: &WidgetNode,
     snapshots: &mut HashMap<NodeId, RetainedNodeSnapshot>,
 ) {
-    #[cfg(not(debug_assertions))]
-    snapshots.insert(node.id, retained_snapshot(node));
-
-    #[cfg(debug_assertions)]
     let previous = snapshots.insert(node.id, retained_snapshot(node));
-
-    #[cfg(debug_assertions)]
-    {
-        assert!(
-            previous.is_none(),
-            "runtime NodeId collision while collecting retained snapshots: id={} key={:?}",
-            node.id,
-            node.mesh_key()
-        );
-    }
+    assert!(
+        previous.is_none(),
+        "runtime NodeId collision while collecting retained snapshots: id={} key={:?}",
+        node.id,
+        node.mesh_key()
+    );
     for child in &node.children {
         collect_retained_snapshots(child, snapshots);
     }
@@ -2617,6 +2609,17 @@ mod tests {
         assert_eq!(replaced.children, 1);
         assert_eq!(replaced.inserted, 1);
         assert_eq!(replaced.removed, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "runtime NodeId collision while updating retained snapshots")]
+    fn retained_update_rejects_duplicate_live_node_ids_in_release_too() {
+        let mut tree = WidgetNode::new("row");
+        tree.children.push(WidgetNode::new("button"));
+        annotate_with_empty_context(&mut tree);
+        tree.children[0].id = tree.id;
+
+        RetainedWidgetTree::default().update(&tree);
     }
 
     #[test]

@@ -6,7 +6,9 @@ use super::{
     validate_relative_path,
 };
 use crate::manifest;
-use mesh_core_component::{Attribute, AttributeValue, SourceTag, TemplateNode, parse_component};
+use mesh_core_component::{
+    Attribute, AttributeValue, ComponentFile, SourceTag, TemplateNode, parse_component,
+};
 use mesh_core_service::{ContractCapabilities, InterfaceContract, parse_interface_contract};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -917,11 +919,15 @@ fn binary_package_hint(binary: &manifest::BinaryDependency) -> String {
 }
 
 pub(crate) fn extract_icon_names_from_mesh_source(content: &str) -> Vec<String> {
-    let mut names = Vec::new();
     let Ok(component) = parse_component(content) else {
-        return names;
+        return Vec::new();
     };
-    let Some(template) = component.template else {
+    extract_icon_names_from_component(&component)
+}
+
+fn extract_icon_names_from_component(component: &ComponentFile) -> Vec<String> {
+    let mut names = Vec::new();
+    let Some(template) = &component.template else {
         return names;
     };
 
@@ -993,7 +999,10 @@ pub(crate) fn extract_mesh_static_calls(content: &str) -> MeshStaticCalls {
     let Ok(component) = parse_component(content) else {
         return MeshStaticCalls::default();
     };
+    extract_mesh_static_calls_from_component(&component)
+}
 
+fn extract_mesh_static_calls_from_component(component: &ComponentFile) -> MeshStaticCalls {
     let mut sources = luau_scan::LuauSources::default();
     if let Some(script) = &component.script {
         sources.chunks.push(script.source.as_str());
@@ -1162,11 +1171,15 @@ pub(crate) fn extract_frontend_interface_event_subscriptions(
 }
 
 pub(crate) fn extract_keybind_subscriptions_from_mesh_source(content: &str) -> Vec<(String, bool)> {
-    let mut subscriptions = Vec::new();
     let Ok(component) = parse_component(content) else {
-        return subscriptions;
+        return Vec::new();
     };
-    let Some(template) = component.template else {
+    extract_keybind_subscriptions_from_component(&component)
+}
+
+fn extract_keybind_subscriptions_from_component(component: &ComponentFile) -> Vec<(String, bool)> {
+    let mut subscriptions = Vec::new();
+    let Some(template) = &component.template else {
         return subscriptions;
     };
 
@@ -1176,6 +1189,24 @@ pub(crate) fn extract_keybind_subscriptions_from_mesh_source(content: &str) -> V
     subscriptions.sort();
     subscriptions.dedup();
     subscriptions
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct MeshSourceScan {
+    pub(crate) icon_names: Vec<String>,
+    pub(crate) static_calls: MeshStaticCalls,
+    pub(crate) keybind_subscriptions: Vec<(String, bool)>,
+}
+
+pub(crate) fn scan_mesh_source(content: &str) -> MeshSourceScan {
+    let Ok(component) = parse_component(content) else {
+        return MeshSourceScan::default();
+    };
+    MeshSourceScan {
+        icon_names: extract_icon_names_from_component(&component),
+        static_calls: extract_mesh_static_calls_from_component(&component),
+        keybind_subscriptions: extract_keybind_subscriptions_from_component(&component),
+    }
 }
 
 fn collect_keybind_subscriptions_from_template_node(
@@ -1869,14 +1900,14 @@ fn diagnose_frontend_source_contracts(
         // each file is independent — do it up front across the pool, then keep
         // the diagnostic loop itself serial so ordering stays deterministic.
         let mesh_files = scan_mesh_files_recursive(scan_root);
-        let mesh_static_calls: Vec<MeshStaticCalls> = mesh_files
+        let mesh_source_scans: Vec<MeshSourceScan> = mesh_files
             .par_iter()
-            .map(|(_, content)| extract_mesh_static_calls(content))
+            .map(|(_, content)| scan_mesh_source(content))
             .collect();
 
-        for ((path, content), static_calls) in mesh_files.iter().zip(&mesh_static_calls) {
+        for ((path, _content), scan) in mesh_files.iter().zip(&mesh_source_scans) {
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-            for icon_name in extract_icon_names_from_mesh_source(&content) {
+            for icon_name in &scan.icon_names {
                 if !all_declared_icons.contains(icon_name.as_str()) {
                     diagnostics.push(ModuleGraphDiagnostic {
                         module_id: module.id.clone(),
@@ -1890,7 +1921,7 @@ fn diagnose_frontend_source_contracts(
                 }
             }
             if let Some(catalog) = &catalog_keys {
-                for key in &static_calls.t_keys {
+                for key in &scan.static_calls.t_keys {
                     if !catalog.contains(key.as_str()) {
                         diagnostics.push(ModuleGraphDiagnostic {
                             module_id: module.id.clone(),
@@ -1904,7 +1935,7 @@ fn diagnose_frontend_source_contracts(
                     }
                 }
             }
-            for channel in &static_calls.publish_channels {
+            for channel in &scan.static_calls.publish_channels {
                 if channel.starts_with("mesh.") {
                     diagnostics.push(ModuleGraphDiagnostic {
                         module_id: module.id.clone(),
@@ -1929,8 +1960,7 @@ fn diagnose_frontend_source_contracts(
                     });
                 }
             }
-            for (action_id, has_handler) in extract_keybind_subscriptions_from_mesh_source(&content)
-            {
+            for (action_id, has_handler) in &scan.keybind_subscriptions {
                 if !declared_keybinds.contains(action_id.as_str()) {
                     diagnostics.push(ModuleGraphDiagnostic {
                         module_id: module.id.clone(),

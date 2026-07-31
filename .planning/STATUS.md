@@ -7,6 +7,21 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Graph diagnostics parse frontend source once per file.** The icon, Luau, and
+keybind checks share one parsed component AST (2026-07-31). Record:
+[`log/performance-log.md`](log/performance-log.md).
+
+**Retained-tree identity collisions are release-safe.** A duplicate live
+`NodeId` now fails loudly with a diagnostic in release as well as debug,
+instead of silently aliasing retained snapshots (2026-07-31). Record:
+[`log/performance-log.md`](log/performance-log.md).
+
+**Luau translation calls use live module catalogs.** `mesh.i18n.t()` now
+resolves through each script context's effective module-scoped locale catalog,
+instead of echoing keys. New contexts receive the catalog before `init()`, and
+locale switches refresh existing imported `t` functions (2026-07-31). Record:
+[`log/2026-07.md`](log/2026-07.md).
+
 **Named shells switch live as one transaction.** Profiles now scope sparse
 shell/module/instance preferences, mount every named root instance, apply
 per-instance surfaces and Luau storage identity, and retain identical service

@@ -1041,6 +1041,10 @@ impl ShellComponent for FrontendSurfaceComponent {
             "current": locale.current(),
         });
         for runtime in self.runtimes.lock().unwrap().values_mut() {
+            runtime.script_ctx.set_i18n_translations(
+                self.locale
+                    .effective_translations_for_module(&runtime.script_ctx.module_id),
+            );
             runtime.script_ctx.apply_service_payload("locale", &payload);
             if script_has_service_read(&runtime.script_ctx, "mesh.locale", "locale") {
                 apply_service_update_with_name(

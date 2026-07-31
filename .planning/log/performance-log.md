@@ -11,6 +11,36 @@ Every entry keeps its benchmark numbers so future work can compare against the
 recorded baselines. Sections M–V were focused per-subsystem deep dives; see
 `PERFORMANCE_SECTIONS.md` for the subsystem map.
 
+## 2026-07-31 — graph diagnostics parse each `.mesh` source once
+
+area: module graph diagnostics
+
+The frontend authoring scan now parses each source once, then shares that
+component AST across static icon, translation/event, and keybind extraction.
+Standalone extractors retain their parse-own-source API for targeted tests.
+
+**Measured.** Debug `shipped_module_luau_scan_cost`, 38 shipped `.mesh` files
+(7,876 lines), one sample: legacy triple parse 1.812s versus shared parallel
+parse 519.7ms (3.49x). The gate verifies equal extracted facts (139).
+
+## 2026-07-31 — retained `NodeId` collisions fail safely in release
+
+area: retained render tree
+
+The retained tree's identity index is keyed by a hash-chained `NodeId`. Two
+live nodes with the same value were guarded only by `debug_assert_ne!`, so a
+release build could overwrite one snapshot with the other. The traversal epoch
+check is now an unconditional assertion, making the impossible identity
+violation fail with its node id/key diagnostic in every build instead of
+silently aliasing cache entries. The test-only snapshot collector uses the
+same unconditional check.
+
+**Verified.** The forced root/child collision regression passes in both debug
+and release: `cargo test -p mesh-core-shell --lib
+retained_update_rejects_duplicate_live_node_ids_in_release_too` and `cargo
+test -p mesh-core-shell --release --lib
+retained_update_rejects_duplicate_live_node_ids_in_release_too`.
+
 ## Rejected experiments — do not retry without new evidence
 
 Each of these was prototyped, measured, and reverted. Full context lives in the

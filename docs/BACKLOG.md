@@ -107,31 +107,11 @@ promotion")*
       for the shipped modules because it runs a real parser. These are author
       feedback, not runtime requirements — run them in `mesh-shell config
       doctor` and behind a dev flag, not on the path to first paint.
-- [ ] Parse each `.mesh` file once during the graph scan. The icon extractor,
-      the keybind extractor, and the Luau scan each call `parse_component` on
-      the same source.
 - [ ] Converge the immediate and retained renderers.
       `render/src/surface/painter/tree.rs` still holds a parallel
       widget-specific immediate renderer beside display-list replay. Route
       parity tests through one command builder, then delete the duplicate to
       stop semantic and clipping drift.
-- [ ] Wire `mesh.i18n.t()` (the Luau host API, `create_i18n_library` in
-      `crates/core/runtime/scripting/src/context/runtime.rs`) to the real
-      locale store. It currently just echoes its argument back unchanged —
-      any component that resolves a key in `<script lang="luau">` and binds
-      the result to a plain template variable (e.g.
-      `local t = import("mesh.i18n", "t"); label = t("nav.foo")` then
-      `{label}`) renders the raw key at runtime instead of the translated
-      string. `docs/spec/07-i18n.md` marks `t()` "shipped" — only the
-      template-level `{t(expr)}` form (compiled to `TranslateExpr` in
-      `crates/core/frontend/compiler/src/expr.rs`, resolved through
-      `VariableStore::translate`) actually reaches the locale catalog.
-      Confirmed broken by hovering the rendered shell: found while building
-      the battery tooltip (2026-07-31), which was rewritten to translate in
-      the template instead. `settings-button.mesh`'s `settings_tooltip =
-      t('nav.open_settings')` has the same bug and was not fixed. Audit other
-      components for the same pattern once the host API is fixed.
-
 ---
 
 ## Performance
@@ -160,11 +140,6 @@ gate where the win is structural.
       still flattened per ancestor. Replay must consume segments directly
       instead of eagerly re-flattening them — an eager reconstruction was tried
       and reverted (see log).
-- [ ] Make `NodeId` collision handling release-safe.
-      `update_retained_node` catches two live nodes sharing a hash-chained
-      identity only through `debug_assert_ne!`; release builds can silently
-      alias retained snapshots. Add checked allocation or a secondary-key
-      fallback, plus a forced-collision test.
 - [ ] Reuse retained-update scratch storage.
       `RetainedWidgetTree::update_for_dirty_roots_collect` builds a fresh
       `update_nodes` `Vec` per scoped update though the tree retains other

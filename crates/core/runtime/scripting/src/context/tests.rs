@@ -984,6 +984,10 @@ end
 fn require_resolves_mesh_i18n_library_alias() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/i18n-test", caps).unwrap();
+    ctx.set_i18n_translations(HashMap::from([(
+        "nav.volume".to_string(),
+        "Volume".to_string(),
+    )]));
     ctx.load_script(
         r#"
 function init()
@@ -996,10 +1000,7 @@ end
 
     ctx.call_init().unwrap();
 
-    assert_eq!(
-        ctx.state.get("label"),
-        Some(serde_json::json!("nav.volume"))
-    );
+    assert_eq!(ctx.state.get("label"), Some(serde_json::json!("Volume")));
 }
 
 #[test]
@@ -1027,6 +1028,10 @@ module_source = ModuleChild.source
 fn import_named_returns_selected_field() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/import-test", caps).unwrap();
+    ctx.set_i18n_translations(HashMap::from([(
+        "nav.volume".to_string(),
+        "Volume".to_string(),
+    )]));
     ctx.load_script(
         r#"
 function init()
@@ -1039,10 +1044,7 @@ end
 
     ctx.call_init().unwrap();
 
-    assert_eq!(
-        ctx.state.get("label"),
-        Some(serde_json::json!("nav.volume"))
-    );
+    assert_eq!(ctx.state.get("label"), Some(serde_json::json!("Volume")));
 }
 
 #[test]
@@ -1077,6 +1079,10 @@ end
 fn import_with_no_names_is_equivalent_to_require() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/import-default", caps).unwrap();
+    ctx.set_i18n_translations(HashMap::from([(
+        "nav.audio".to_string(),
+        "Audio".to_string(),
+    )]));
     ctx.load_script(
         r#"
 function init()
@@ -1089,13 +1095,17 @@ end
 
     ctx.call_init().unwrap();
 
-    assert_eq!(ctx.state.get("label"), Some(serde_json::json!("nav.audio")));
+    assert_eq!(ctx.state.get("label"), Some(serde_json::json!("Audio")));
 }
 
 #[test]
 fn import_renames_freely() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/import-rename", caps).unwrap();
+    ctx.set_i18n_translations(HashMap::from([(
+        "nav.battery".to_string(),
+        "Battery".to_string(),
+    )]));
     ctx.load_script(
         r#"
 function init()
@@ -1108,10 +1118,37 @@ end
 
     ctx.call_init().unwrap();
 
-    assert_eq!(
-        ctx.state.get("label"),
-        Some(serde_json::json!("nav.battery"))
-    );
+    assert_eq!(ctx.state.get("label"), Some(serde_json::json!("Battery")));
+}
+
+#[test]
+fn mesh_i18n_updates_existing_function_after_catalog_refresh() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/i18n-refresh", caps).unwrap();
+    ctx.set_i18n_translations(HashMap::from([(
+        "nav.volume".to_string(),
+        "Volume".to_string(),
+    )]));
+    ctx.load_script(
+        r#"
+function init()
+    t = import("mesh.i18n", "t")
+    label = t("nav.volume")
+end
+function refresh()
+    label = t("nav.volume")
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+    ctx.set_i18n_translations(HashMap::from([(
+        "nav.volume".to_string(),
+        "Hlasitosť".to_string(),
+    )]));
+    ctx.call_handler("refresh", &[]).unwrap();
+
+    assert_eq!(ctx.state.get("label"), Some(serde_json::json!("Hlasitosť")));
 }
 
 #[test]

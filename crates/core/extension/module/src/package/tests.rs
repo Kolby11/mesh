@@ -4922,7 +4922,10 @@ fn collect_mesh_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
 #[test]
 #[ignore = "release-only graph-scan cost measurement"]
 fn shipped_module_luau_scan_cost() {
-    use super::installed_graph::extract_mesh_static_calls;
+    use super::installed_graph::{
+        extract_icon_names_from_mesh_source, extract_keybind_subscriptions_from_mesh_source,
+        extract_mesh_static_calls, scan_mesh_source,
+    };
     use std::time::Instant;
 
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
@@ -4934,28 +4937,34 @@ fn shipped_module_luau_scan_cost() {
         .collect();
     let lines: usize = contents.iter().map(|c| c.lines().count()).sum();
 
-    let serial_started = Instant::now();
-    let mut found = 0;
+    let legacy_started = Instant::now();
+    let mut legacy_found = 0;
     for content in &contents {
         let calls = extract_mesh_static_calls(content);
-        found += calls.t_keys.len() + calls.publish_channels.len();
+        legacy_found += extract_icon_names_from_mesh_source(content).len()
+            + calls.t_keys.len()
+            + calls.publish_channels.len()
+            + extract_keybind_subscriptions_from_mesh_source(content).len();
     }
-    let serial = serial_started.elapsed();
+    let legacy = legacy_started.elapsed();
 
     use rayon::prelude::*;
-    let parallel_started = Instant::now();
-    let parallel_found: usize = contents
+    let shared_started = Instant::now();
+    let shared_found: usize = contents
         .par_iter()
         .map(|content| {
-            let calls = extract_mesh_static_calls(content);
-            calls.t_keys.len() + calls.publish_channels.len()
+            let scan = scan_mesh_source(content);
+            scan.icon_names.len()
+                + scan.static_calls.t_keys.len()
+                + scan.static_calls.publish_channels.len()
+                + scan.keybind_subscriptions.len()
         })
         .sum();
-    let parallel = parallel_started.elapsed();
+    let shared = shared_started.elapsed();
 
-    assert_eq!(found, parallel_found);
+    assert_eq!(legacy_found, shared_found);
     eprintln!(
-        "scanned {} .mesh files ({lines} lines), {found} static call arguments: serial {serial:?}, parallel {parallel:?}",
+        "scanned {} .mesh files ({lines} lines), {shared_found} static scan facts: legacy triple-parse {legacy:?}, shared parse {shared:?}",
         contents.len()
     );
 }

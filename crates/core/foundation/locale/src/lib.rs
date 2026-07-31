@@ -117,6 +117,30 @@ impl LocaleEngine {
         self.translate(key)
     }
 
+    /// Return the effective catalog visible to a module at the current locale.
+    ///
+    /// This is the owned counterpart to [`Self::translate_for_module`], for
+    /// consumers such as the Luau runtime that need to retain a lookup table.
+    /// Apply lower-priority locales first so later entries have exactly the
+    /// same precedence as individual lookups: module catalogs (including a
+    /// module fallback locale) take precedence over every global catalog.
+    pub fn effective_translations_for_module(&self, module_id: &str) -> HashMap<String, String> {
+        let mut messages = HashMap::new();
+        for locale in self.fallback_chain.iter().rev() {
+            if let Some(catalog) = self.translations.get(locale) {
+                messages.extend(catalog.clone());
+            }
+        }
+        if let Some(module_locales) = self.module_translations.get(module_id) {
+            for locale in self.fallback_chain.iter().rev() {
+                if let Some(catalog) = module_locales.get(locale) {
+                    messages.extend(catalog.clone());
+                }
+            }
+        }
+        messages
+    }
+
     /// Translate with interpolation. Placeholders use `{name}` syntax.
     ///
     /// Walks the template once instead of doing `String::replace` per
@@ -190,5 +214,32 @@ mod tests {
 
         // "ok" is not in "fr", falls back to "en"
         assert_eq!(engine.translate("ok"), Some("OK"));
+    }
+
+    #[test]
+    fn effective_module_catalog_matches_scoped_lookup_precedence() {
+        let mut engine = LocaleEngine::with_fallback_locale("sk", "en");
+        engine.load_translations(TranslationSet {
+            locale: "sk".to_string(),
+            messages: HashMap::from([
+                ("shared".to_string(), "global-sk".to_string()),
+                ("global".to_string(), "iba-global".to_string()),
+            ]),
+        });
+        engine.load_translations(TranslationSet {
+            locale: "en".to_string(),
+            messages: HashMap::from([("shared".to_string(), "global-en".to_string())]),
+        });
+        engine.load_module_translations(
+            "@mesh/example",
+            TranslationSet {
+                locale: "en".to_string(),
+                messages: HashMap::from([("shared".to_string(), "module-en".to_string())]),
+            },
+        );
+
+        let catalog = engine.effective_translations_for_module("@mesh/example");
+        assert_eq!(catalog.get("shared"), Some(&"module-en".to_string()));
+        assert_eq!(catalog.get("global"), Some(&"iba-global".to_string()));
     }
 }
