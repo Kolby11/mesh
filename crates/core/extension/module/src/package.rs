@@ -3,6 +3,7 @@ mod installed_graph;
 mod luau_scan;
 mod module_manifest;
 mod paths;
+mod profile;
 mod root;
 mod util;
 
@@ -18,4 +19,5 @@ pub use error::*;
 pub use installed_graph::*;
 pub use module_manifest::*;
 pub use paths::*;
+pub use profile::*;
 pub use root::*;

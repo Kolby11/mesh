@@ -12,6 +12,7 @@ state = {
     power_draw_watts = 0,
     energy_now_watt_hours = 0,
     energy_full_watt_hours = 0,
+    health_percent = 0,
 }
 
 local battery_path = nil
@@ -73,12 +74,18 @@ local function parse_battery_report(report)
         power_draw_watts = 0,
         energy_now_watt_hours = 0,
         energy_full_watt_hours = 0,
+        health_percent = 0,
     }
 
     -- Percentage is the source of truth for level. Capacity is health, not level.
     local percentage = report:match("percentage:%s*([%d%.]+)")
     if percentage then
         parsed.level = tonumber(percentage) or 0
+    end
+
+    local capacity = report:match("capacity:%s*([%d%.]+)")
+    if capacity then
+        parsed.health_percent = tonumber(capacity) or 0
     end
 
     local state_value = report:match("state:%s*(%S+)")
@@ -143,6 +150,7 @@ local function unavailable_state()
         power_draw_watts = 0,
         energy_now_watt_hours = 0,
         energy_full_watt_hours = 0,
+        health_percent = 0,
     }
 end
 

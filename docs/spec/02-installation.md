@@ -9,10 +9,12 @@ installer checks" and "what the runtime verifies".
 
 ## 1. Installer v1 — path + Git, editable source
 
-**Status: target** (the CLI is currently a shell launcher and inspection
-adapter). Installation behavior is exposed through a package service; a CLI or
-package component is a replaceable client of that service, not a privileged
-management layer.
+**Status: partially shipped.** Local path installation, capability gates,
+kind-aware frontend activation, profile commands, validation, and rollback of a
+failed staged copy are available through `mesh-shell`. Git sources, provenance
+locking, updates/uninstall, and the replaceable package-service contract remain
+target behavior. A CLI or package component is a client of that service, not a
+privileged management layer.
 
 v1 deliberately ships without a registry, package archives, or signing. The
 design must not block them (§6), but the first installer is:
@@ -60,7 +62,29 @@ Semantics:
   grouped by privilege level; `elevated` requires confirmation, `high`
   requires explicit opt-in ([01 §7](01-module-system.md)).
 
-### 1.1 Multi-provider installs
+### 1.1 Activation after installation
+
+Installation and activation are separate state transitions presented as one
+kind-aware user action. A direct frontend install defaults to **install and
+add**: it creates an active `#default` root in the selected profile and inherits
+the module's declared placement and props without copying them into user
+overrides. Dependency installs never create roots.
+
+| Installed kind | Default composition action |
+| --- | --- |
+| `frontend` | Add/re-enable one active `#default` root instance. |
+| `backend` | Select only when it is the sole provider required by the profile; a second provider stays available and inactive. |
+| `component`, `interface`, `library` | Make available to dependency resolution; no independent enabled state. |
+| `theme`, `icon-pack`, `font-pack`, `language-pack` | Make available; applying/reordering a resource is a separate explicit action. |
+
+Modules requiring unapproved elevated/high capabilities are never activated.
+The package service stages source, validates the candidate graph and capability
+decision, commits source/lock/profile changes, and asks the profile service to
+apply the candidate. Failure before the visible commit leaves the old profile
+active; the downloaded module may remain installed and available with the
+activation error reported.
+
+### 1.2 Multi-provider installs
 
 Installing a second provider for an interface is a feature, not a conflict:
 

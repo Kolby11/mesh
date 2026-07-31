@@ -7,6 +7,19 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Named profiles now own opt-in composition.** An `active-profile` pointer and
+`profiles/<id>.json` provide positive root instances, background services,
+provider bindings, and resource selections without turning installed source
+into an allow-list (2026-07-31). The graph infers declared module/resource
+dependencies, interface modules, and sole providers; absent `active-profile`
+preserves the legacy root graph. `mesh-shell profile` manages profiles, local
+`mesh-shell install <path>` stages and validates modules with capability gates,
+and direct frontend installs create an active `#default` instance while leaving
+manifest placement/props inherited. Settings-surface enable/disable writes the
+active profile atomically. Multiple mounted instances, live switching, Git
+installation, and typed package/profile services remain in the backlog. Record:
+[`log/2026-07.md`](log/2026-07.md).
+
 **Module script scanning parses Luau instead of searching for substrings.**
 The graph's authoring diagnostics (translation keys, published channels,
 backend events) walk a real `full_moon` AST (2026-07-31). `content.find("t(")`

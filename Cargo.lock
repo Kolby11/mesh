@@ -1957,6 +1957,7 @@ dependencies = [
 name = "mesh-tools-cli"
 version = "0.1.0"
 dependencies = [
+ "mesh-core-capability",
  "mesh-core-config",
  "mesh-core-debug",
  "mesh-core-diagnostics",

@@ -77,6 +77,11 @@
               "description": "Full-charge energy capacity in watt-hours"
             },
             {
+              "name": "health_percent",
+              "type": "float",
+              "description": "Battery health as a percentage of design capacity (0.0-100.0, 0 if unknown)"
+            },
+            {
               "name": "source_module",
               "type": "string",
               "description": "Backend module ID that emitted this state (runtime-additive)"

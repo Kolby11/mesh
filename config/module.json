@@ -4,7 +4,8 @@
       "@mesh/audio-popover",
       "@mesh/debug-inspector",
       "@mesh/language-popover",
-      "@mesh/text-selection-proof"
+      "@mesh/text-selection-proof",
+      "@mesh/touch-gesture-proof"
     ],
     "layout": {
       "entrypoint": "@mesh/navigation-bar:main"

@@ -1,8 +1,8 @@
 <template>
   <box
     class="battery-widget"
-    title="{t(battery_tooltip_key) .. battery_tooltip_value}"
-    aria-label="{t(battery_aria_key) .. battery_aria_value}"
+    title="{t('nav.battery') .. newline .. t(remaining_key) .. ': ' .. remaining_label .. newline .. t(rate_key) .. ': ' .. rate_label .. newline .. t('nav.health') .. ': ' .. health_label}"
+    aria-label="{t('nav.battery') .. ' ' .. battery_label .. '. ' .. t(rate_key) .. '. ' .. t(remaining_key) .. ': ' .. remaining_label .. '. ' .. t('nav.health') .. ': ' .. health_label .. '.'}"
   >
     <icon class="battery-glyph" name="{battery_icon_name}" size="18" />
     <text class="battery-value">{battery_label}</text>
@@ -10,15 +10,20 @@
 </template>
 
 <script lang="luau">
-local t = import("mesh.i18n", "t")
+-- `t(...)` only resolves through the real locale store when called from a
+-- template `{...}` expression (compiled to a TranslateExpr); the `mesh.i18n`
+-- Luau host API is an identity stub. So this script computes raw keys and
+-- formatted values, and the template above applies `t()` to the keys.
 local power = require("mesh.power")
 
+newline = "\n"
 battery_icon_name = "battery-empty"
 battery_label = "--%"
-battery_tooltip_key = "nav.battery_unavailable"
-battery_tooltip_value = ""
-battery_aria_key = "nav.battery_unavailable"
-battery_aria_value = ""
+remaining_key = "nav.time_to_empty"
+remaining_label = "--"
+rate_key = "nav.discharging"
+rate_label = "--"
+health_label = "--"
 
 function round_percent(level_value)
     local safe = level_value or 0
@@ -37,7 +42,7 @@ function format_minutes(total_minutes)
     local hours = math.floor(total_minutes / 60)
     local minutes = total_minutes % 60
     if hours > 0 and minutes > 0 then
-        return string.format("%dh %dm", hours, minutes)
+        return string.format("%dh, %dm", hours, minutes)
     end
     if hours > 0 then
         return string.format("%dh", hours)
@@ -49,14 +54,14 @@ function format_watts(watts)
     if watts == nil or watts <= 0 then
         return "--"
     end
-    return string.format("%.1f W", watts)
+    return string.format("%.2fW", watts)
 end
 
-function format_capacity(energy_now, energy_full)
-    if energy_now == nil or energy_full == nil or energy_full <= 0 then
+function format_health(health_percent)
+    if health_percent == nil or health_percent <= 0 then
         return "--"
     end
-    return string.format("%.1f / %.1f Wh", energy_now, energy_full)
+    return string.format("%.1f%%", health_percent)
 end
 
 function battery_icon_for(percent_value)
@@ -71,32 +76,26 @@ function render(self)
     if not power or not power.available then
         battery_icon_name = "battery-empty"
         battery_label = "N/A"
-        battery_tooltip_key = "nav.battery_unavailable"
-        battery_tooltip_value = ""
-        battery_aria_key = "nav.battery_unavailable"
-        battery_aria_value = ""
+        remaining_key = "nav.time_to_empty"
+        remaining_label = "--"
+        rate_key = "nav.discharging"
+        rate_label = "--"
+        health_label = "--"
         return
     end
 
     local percent_value = round_percent(power.level)
     local charging = power.charging or false
-    local remaining_label = charging
-        and format_minutes(power.time_to_full_minutes)
-        or format_minutes(power.time_remaining_minutes)
-    local status_key = charging and "nav.charging" or "nav.on_battery"
 
     battery_icon_name = battery_icon_for(percent_value)
     battery_label = string.format("%d%%", percent_value)
-    battery_tooltip_key = status_key
-    battery_tooltip_value = string.format(
-        " %d%%. %s. %s. %s.",
-        percent_value,
-        remaining_label,
-        format_watts(power.power_draw_watts),
-        format_capacity(power.energy_now_watt_hours, power.energy_full_watt_hours)
-    )
-    battery_aria_key = "nav.battery"
-    battery_aria_value = string.format(" %d%%", percent_value)
+    remaining_key = charging and "nav.time_to_full" or "nav.time_to_empty"
+    remaining_label = charging
+        and format_minutes(power.time_to_full_minutes)
+        or format_minutes(power.time_remaining_minutes)
+    rate_key = charging and "nav.charging" or "nav.discharging"
+    rate_label = format_watts(power.power_draw_watts)
+    health_label = format_health(power.health_percent)
 end
 </script>
 

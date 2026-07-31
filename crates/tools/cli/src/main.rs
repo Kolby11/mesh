@@ -30,6 +30,8 @@ fn main() {
         Some("ipc") => cmd_ipc(&args[2..]),
         Some("ipc-socket-path") => cmd_ipc_socket_path(),
         Some("config") => cmd_config(&args[2..]),
+        Some("profile") => cmd_profile(&args[2..]),
+        Some("install") => cmd_install(&args[2..]),
         Some("status") => cmd_status(),
         Some("version") => cmd_version(),
         Some("help") | Some("--help") | Some("-h") => cmd_help(),
@@ -229,6 +231,353 @@ fn cmd_ipc_socket_path() {
 
 fn cmd_version() {
     println!("mesh-shell {}", env!("CARGO_PKG_VERSION"));
+}
+
+fn root_module_graph_path() -> std::path::PathBuf {
+    if let Ok(path) = std::env::var("MESH_MODULE_GRAPH_PATH")
+        && !path.trim().is_empty()
+    {
+        return path.into();
+    }
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join("config/module.json")
+}
+
+fn profile_paths() -> mesh_core_module::package::ProfilePaths {
+    mesh_core_module::package::ProfilePaths::from_root_graph(&root_module_graph_path())
+        .unwrap_or_else(|error| exit_error(error.to_string()))
+}
+
+fn exit_error(message: impl std::fmt::Display) -> ! {
+    eprintln!("{message}");
+    std::process::exit(1);
+}
+
+fn cmd_profile(args: &[String]) {
+    let paths = profile_paths();
+    match args.first().map(String::as_str) {
+        Some("list") | None => {
+            let active = paths
+                .active_profile_id()
+                .unwrap_or_else(|error| exit_error(error));
+            let profiles = paths.list().unwrap_or_else(|error| exit_error(error));
+            if profiles.is_empty() {
+                println!("no profiles; the legacy root graph is active");
+            }
+            for profile in profiles {
+                let marker = if active.as_deref() == Some(profile.as_str()) {
+                    "*"
+                } else {
+                    " "
+                };
+                println!("{marker} {profile}");
+            }
+        }
+        Some("create") => {
+            let profile_id = required_arg(args, 1, "mesh-shell profile create <profile>");
+            let path = paths
+                .profile_path(profile_id)
+                .unwrap_or_else(|error| exit_error(error));
+            if path.exists() {
+                exit_error(format!("profile {profile_id} already exists"));
+            }
+            paths
+                .save(profile_id, &mesh_core_module::package::ShellProfile::new())
+                .unwrap_or_else(|error| exit_error(error));
+            println!("created profile {profile_id}; add roots, then select it with 'profile use'");
+        }
+        Some("use") => {
+            let profile_id = required_arg(args, 1, "mesh-shell profile use <profile>");
+            // Validate before changing the pointer. A malformed profile never
+            // replaces the currently active composition.
+            paths
+                .load(profile_id)
+                .unwrap_or_else(|error| exit_error(error));
+            paths
+                .set_active(profile_id)
+                .unwrap_or_else(|error| exit_error(error));
+            println!("active profile: {profile_id} (takes effect on shell restart)");
+        }
+        Some("show") => {
+            let profile_id = args
+                .get(1)
+                .cloned()
+                .or_else(|| {
+                    paths
+                        .active_profile_id()
+                        .unwrap_or_else(|error| exit_error(error))
+                })
+                .unwrap_or_else(|| exit_error("no active profile; specify a profile id"));
+            let profile = paths
+                .load(&profile_id)
+                .unwrap_or_else(|error| exit_error(error));
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&profile).expect("profile serialization")
+            );
+        }
+        Some("add") => {
+            let profile_id = required_arg(
+                args,
+                1,
+                "mesh-shell profile add <profile> <frontend-module>",
+            );
+            let module_id = required_arg(
+                args,
+                2,
+                "mesh-shell profile add <profile> <frontend-module>",
+            );
+            let mut profile = paths
+                .load_or_default(profile_id)
+                .unwrap_or_else(|error| exit_error(error));
+            let graph =
+                mesh_core_module::package::load_installed_module_graph(&root_module_graph_path())
+                    .unwrap_or_else(|error| exit_error(error));
+            let module = graph
+                .module(module_id)
+                .unwrap_or_else(|| exit_error(format!("module {module_id} is not installed")));
+            let instance_id = profile
+                .add_frontend(&module.manifest)
+                .unwrap_or_else(|error| exit_error(error));
+            paths
+                .save(profile_id, &profile)
+                .unwrap_or_else(|error| exit_error(error));
+            println!("added active instance {instance_id} to profile {profile_id}");
+            println!("placement and props inherit the module's declared defaults");
+        }
+        Some("enable") | Some("disable") => {
+            let active = args[0] == "enable";
+            let usage = format!("mesh-shell profile {} <profile> <module#instance>", args[0]);
+            let profile_id = required_arg(args, 1, &usage);
+            let instance_id = required_arg(args, 2, &usage);
+            let mut profile = paths
+                .load(profile_id)
+                .unwrap_or_else(|error| exit_error(error));
+            profile
+                .set_instance_active(instance_id, active)
+                .unwrap_or_else(|error| exit_error(error));
+            paths
+                .save(profile_id, &profile)
+                .unwrap_or_else(|error| exit_error(error));
+            println!(
+                "{} {instance_id} in profile {profile_id}",
+                if active { "enabled" } else { "disabled" }
+            );
+        }
+        Some("remove") => {
+            let profile_id = required_arg(
+                args,
+                1,
+                "mesh-shell profile remove <profile> <module#instance>",
+            );
+            let instance_id = required_arg(
+                args,
+                2,
+                "mesh-shell profile remove <profile> <module#instance>",
+            );
+            let mut profile = paths
+                .load(profile_id)
+                .unwrap_or_else(|error| exit_error(error));
+            if !profile.remove_instance(instance_id) {
+                exit_error(format!(
+                    "profile {profile_id} has no instance {instance_id}"
+                ));
+            }
+            paths
+                .save(profile_id, &profile)
+                .unwrap_or_else(|error| exit_error(error));
+            println!("removed {instance_id} from profile {profile_id}");
+        }
+        Some(other) => exit_error(format!(
+            "unknown profile subcommand: {other}\nsubcommands: list, create, use, show, add, enable, disable, remove"
+        )),
+    }
+}
+
+fn required_arg<'a>(args: &'a [String], index: usize, usage: &str) -> &'a str {
+    args.get(index)
+        .map(String::as_str)
+        .unwrap_or_else(|| exit_error(format!("usage: {usage}")))
+}
+
+fn cmd_install(args: &[String]) {
+    let source_arg = required_arg(
+        args,
+        0,
+        "mesh-shell install <path> [--available-only] [--profile <profile>] [--allow-elevated] [--allow-high]",
+    );
+    let source = std::path::PathBuf::from(source_arg);
+    if !source.is_dir() {
+        exit_error(format!(
+            "module source is not a directory: {}",
+            source.display()
+        ));
+    }
+    let manifest_path = source.join("module.json");
+    let manifest = mesh_core_module::package::ModuleManifest::from_path(&manifest_path)
+        .unwrap_or_else(|error| exit_error(error));
+
+    let allow_elevated = args.iter().any(|arg| arg == "--allow-elevated");
+    let allow_high = args.iter().any(|arg| arg == "--allow-high");
+    let requested = manifest
+        .mesh
+        .capabilities
+        .required
+        .iter()
+        .chain(manifest.mesh.uses.capabilities.iter())
+        .map(|id| mesh_core_capability::Capability::new(id.clone()))
+        .collect::<Vec<_>>();
+    for capability in &requested {
+        use mesh_core_capability::PrivilegeLevel;
+        match capability.privilege_level() {
+            PrivilegeLevel::High if !allow_high => exit_error(format!(
+                "{} requests high capability {}; review it and repeat with --allow-high",
+                manifest.name, capability
+            )),
+            PrivilegeLevel::Elevated if !allow_elevated && !allow_high => exit_error(format!(
+                "{} requests elevated capability {}; review it and repeat with --allow-elevated",
+                manifest.name, capability
+            )),
+            _ => {}
+        }
+    }
+
+    let root_path = root_module_graph_path();
+    let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
+        .unwrap_or_else(|error| exit_error(error));
+    let config_dir = root_path
+        .parent()
+        .expect("root graph path has a parent directory");
+    let modules_dir = config_dir.join(&root.modules_dir);
+    let destination = modules_dir.join(manifest.name.trim_start_matches('@'));
+    if destination.exists() {
+        exit_error(format!(
+            "module {} is already installed at {}",
+            manifest.name,
+            destination.display()
+        ));
+    }
+
+    copy_module_tree(&source, &destination).unwrap_or_else(|error| {
+        let _ = std::fs::remove_dir_all(&destination);
+        exit_error(format!("failed to install {}: {error}", manifest.name));
+    });
+
+    let install_result = (|| -> Result<Option<String>, String> {
+        let graph = mesh_core_module::package::load_installed_module_graph(&root_path)
+            .map_err(|error| error.to_string())?;
+        let installed = graph
+            .module(&manifest.name)
+            .ok_or_else(|| "installed module was not discovered".to_string())?;
+        if installed.kind != manifest.mesh.kind {
+            return Err("installed module kind changed while copying".into());
+        }
+
+        if args.iter().any(|arg| arg == "--available-only")
+            || manifest.mesh.kind != mesh_core_module::package::ModuleKind::Frontend
+        {
+            return Ok(None);
+        }
+
+        let paths = profile_paths();
+        let explicit_profile = args
+            .iter()
+            .position(|arg| arg == "--profile")
+            .and_then(|index| args.get(index + 1))
+            .cloned();
+        let profile_id = explicit_profile.or_else(|| paths.active_profile_id().ok().flatten());
+        let Some(profile_id) = profile_id else {
+            // Legacy auto-discovery already activates new modules by default.
+            return Ok(Some("legacy root graph (auto-enabled)".into()));
+        };
+        let mut profile = paths
+            .load_or_default(&profile_id)
+            .map_err(|error| error.to_string())?;
+        let instance_id = profile
+            .add_frontend(&manifest)
+            .map_err(|error| error.to_string())?;
+        let manifests = graph
+            .modules()
+            .into_iter()
+            .map(|module| &module.manifest)
+            .collect::<Vec<_>>();
+        profile
+            .active_module_ids(manifests)
+            .map_err(|error| error.to_string())?;
+        let profile_path = paths
+            .profile_path(&profile_id)
+            .map_err(|error| error.to_string())?;
+        let previous_profile = std::fs::read(&profile_path).ok();
+        paths
+            .save(&profile_id, &profile)
+            .map_err(|error| error.to_string())?;
+        if paths
+            .active_profile_id()
+            .map_err(|error| error.to_string())?
+            .is_none()
+        {
+            if let Err(error) = paths.set_active(&profile_id) {
+                match previous_profile {
+                    Some(content) => {
+                        let _ = std::fs::write(&profile_path, content);
+                    }
+                    None => {
+                        let _ = std::fs::remove_file(&profile_path);
+                    }
+                }
+                return Err(error.to_string());
+            }
+        }
+        Ok(Some(format!("{instance_id} in profile {profile_id}")))
+    })();
+
+    match install_result {
+        Ok(composition) => {
+            println!("installed {} at {}", manifest.name, destination.display());
+            if let Some(composition) = composition {
+                println!("activated {composition}; declared defaults remain inherited");
+            } else {
+                println!(
+                    "available but not independently activated ({:?})",
+                    manifest.mesh.kind
+                );
+            }
+        }
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&destination);
+            exit_error(format!(
+                "installation validation failed; removed staged module: {error}"
+            ));
+        }
+    }
+}
+
+fn copy_module_tree(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> std::io::Result<()> {
+    std::fs::create_dir_all(destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let target = destination.join(entry.file_name());
+        if file_type.is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "module contains unsupported symlink {}",
+                    entry.path().display()
+                ),
+            ));
+        }
+        if file_type.is_dir() {
+            copy_module_tree(&entry.path(), &target)?;
+        } else if file_type.is_file() {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
 }
 
 fn cmd_config(args: &[String]) {
@@ -458,6 +807,16 @@ fn cmd_help() {
     println!("            eject <module-id>    write a module's effective surface");
     println!("                                 placement in, ready to hand-edit");
     println!("            reset <namespace>    drop a namespace's overrides");
+    println!("  profile   Manage shell compositions");
+    println!("            list                 list profiles (* is active)");
+    println!("            create <profile>     create an empty profile");
+    println!("            use <profile>        select the active profile");
+    println!("            show [profile]       print a profile");
+    println!("            add <profile> <module>  add/enable a frontend instance");
+    println!("            enable|disable <profile> <module#instance>");
+    println!("            remove <profile> <module#instance>");
+    println!("  install <path>  Install a local module; frontends are added to the active profile");
+    println!("            flags: --available-only, --profile <id>, --allow-elevated, --allow-high");
     println!("  status    Show shell status");
     println!("  version   Print version");
     println!("  help      Show this help");

@@ -34,6 +34,11 @@ impl Shell {
         enabled: bool,
     ) -> VecDeque<CoreRequest> {
         let graph_path = self.installed_module_graph_path();
+        let uses_profile = mesh_core_module::package::ProfilePaths::from_root_graph(&graph_path)
+            .and_then(|paths| paths.active_profile_id())
+            .ok()
+            .flatten()
+            .is_some();
         if !enabled
             && self
                 .pending_backend_runtimes
@@ -63,7 +68,8 @@ impl Shell {
                 Some("cannot disable @mesh/settings from its own settings surface".into())
             }
             Ok(graph)
-                if !enabled
+                if !uses_profile
+                    && !enabled
                     && graph
                         .layout_entrypoint()
                         .is_some_and(|layout| layout.module_id == module_id) =>
@@ -104,10 +110,11 @@ impl Shell {
             .as_ref()
             .and_then(|graph| graph.module(module_id))
             .map(|module| module.kind)
-            .expect("validated module disappeared from the cached graph");
-        let rollback = match crate::shell::module_config::write_module_enabled(
+            .expect("module existence was validated above");
+        let rollback = match crate::shell::module_config::write_composed_module_enabled(
             &graph_path,
             module_id,
+            module_kind,
             enabled,
         ) {
             Ok(rollback) => rollback,

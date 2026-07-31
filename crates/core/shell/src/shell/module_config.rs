@@ -1,4 +1,7 @@
-use mesh_core_module::RootModuleGraphManifest;
+use mesh_core_module::{
+    RootModuleGraphManifest,
+    package::{ModuleKind, ProfilePaths, ProfileRootInstance},
+};
 use serde_json::{Map, Value};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -171,6 +174,84 @@ pub(super) fn write_module_enabled(
     })
 }
 
+/// Persist activation in the active profile when profiles are in use, falling
+/// back to the development root graph during migration.
+pub(super) fn write_composed_module_enabled(
+    path: &Path,
+    module_id: &str,
+    kind: ModuleKind,
+    enabled: bool,
+) -> Result<ModuleConfigRollback, ModuleConfigWriteError> {
+    let paths = ProfilePaths::from_root_graph(path)
+        .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))?;
+    let Some(profile_id) = paths
+        .active_profile_id()
+        .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))?
+    else {
+        return write_module_enabled(path, module_id, enabled);
+    };
+
+    let profile_path = paths
+        .profile_path(&profile_id)
+        .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))?;
+    let content = fs::read(&profile_path).map_err(|source| ModuleConfigWriteError::Read {
+        path: profile_path.clone(),
+        source,
+    })?;
+    let mut profile = paths
+        .load(&profile_id)
+        .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))?;
+
+    match kind {
+        ModuleKind::Frontend => {
+            let mut found = false;
+            for instance in profile
+                .roots
+                .values_mut()
+                .filter(|instance| instance.module == module_id)
+            {
+                instance.active = enabled;
+                found = true;
+            }
+            if enabled && !found {
+                profile.roots.insert(
+                    format!("{module_id}#default"),
+                    ProfileRootInstance {
+                        module: module_id.to_string(),
+                        entrypoint: "main".into(),
+                        active: true,
+                        surface: None,
+                    },
+                );
+            }
+        }
+        ModuleKind::Backend => {
+            if enabled {
+                profile.background_services.insert(module_id.to_string());
+            } else {
+                profile.background_services.remove(module_id);
+                profile
+                    .providers
+                    .retain(|_, provider| provider != module_id);
+            }
+        }
+        _ => {
+            return Err(ModuleConfigWriteError::InvalidSelection(format!(
+                "{} modules are available through installation/dependency resolution and do not have an independent enabled state",
+                format!("{kind:?}").to_lowercase()
+            )));
+        }
+    }
+
+    paths
+        .save(&profile_id, &profile)
+        .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))?;
+    Ok(ModuleConfigRollback {
+        path: profile_path,
+        content,
+    })
+}
+
 fn atomic_write(path: &Path, content: &[u8]) -> Result<(), ModuleConfigWriteError> {
     let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let file_name = path
@@ -333,5 +414,39 @@ mod tests {
         write_module_enabled(&path, "@mesh/panel", false).unwrap();
         let updated: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(updated["mesh"]["modules"]["@mesh/panel"]["enabled"], false);
+    }
+
+    #[test]
+    fn module_enabled_updates_active_profile_without_touching_root_graph() {
+        let directory = tempfile::tempdir().unwrap();
+        let root_path = directory.path().join("module.json");
+        let root = r#"{
+  "name": "@mesh/local-config",
+  "version": "0.1.0",
+  "mesh": {"schemaVersion": 1, "modulesDir": "../modules", "disabled": []}
+}"#;
+        fs::write(&root_path, root).unwrap();
+        let paths = ProfilePaths::from_root_graph(&root_path).unwrap();
+        let mut profile = mesh_core_module::package::ShellProfile::new();
+        profile.roots.insert(
+            "@mesh/panel#default".into(),
+            ProfileRootInstance {
+                module: "@mesh/panel".into(),
+                entrypoint: "main".into(),
+                active: true,
+                surface: None,
+            },
+        );
+        paths.save("desktop", &profile).unwrap();
+        paths.set_active("desktop").unwrap();
+
+        let rollback =
+            write_composed_module_enabled(&root_path, "@mesh/panel", ModuleKind::Frontend, false)
+                .unwrap();
+        assert!(!paths.load("desktop").unwrap().roots["@mesh/panel#default"].active);
+        assert_eq!(fs::read_to_string(&root_path).unwrap(), root);
+
+        rollback.restore().unwrap();
+        assert!(paths.load("desktop").unwrap().roots["@mesh/panel#default"].active);
     }
 }

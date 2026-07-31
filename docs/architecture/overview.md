@@ -12,7 +12,7 @@ turning MESH into a process or privilege supervisor.
 ## Current runtime flow
 
 ```text
-config/module.json
+config/module.json + optional active profile
         │
         ▼
 module discovery and installed graph
@@ -38,6 +38,13 @@ The CLI creates `mesh_core_shell::Shell`. The shell discovers modules, loads
 the installed graph, registers interface contracts and providers, compiles
 frontend roots, executes service/component Luau, renders surfaces, and handles
 Wayland events.
+
+During the profile migration, absence of `config/active-profile` preserves the
+legacy root-graph decisions. When it exists, `config/profiles/<id>.json` owns
+the desired composition: explicit roots/background services/providers/resources
+seed an activation closure, and declared dependencies plus sole providers are
+inferred before contributions are indexed. Installed source remains available
+even when it is not part of that closure.
 
 ## Platform boundary
 

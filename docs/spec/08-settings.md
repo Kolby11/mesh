@@ -8,6 +8,14 @@ stored overrides**
 props, manifest surface placement, and shell prop declarations. The store
 holds *only values the user changed*.
 
+"One logical service" describes the user/developer API, not one undifferentiated
+ownership bucket. Its effective snapshot joins the installed catalog, active
+profile composition, declared defaults, sparse overrides, and runtime status;
+the writable source remains authoritative by domain. Package installation owns
+availability, profiles own composition, this store owns preference overrides,
+and runtime health is observed state. A settings frontend may present all four
+on one module page without copying them into `settings.json`.
+
 **Status: shipped** for the store itself (§1–§4); **target** for the
 `mesh.settings` service contract, the generated settings UI (§5), and the CLI
 (§7). This replaced the previous multi-file model (`settings-default.json`,
@@ -97,6 +105,13 @@ Rules:
 - Profile composition owns root instances and ambiguous provider choices
   ([01 §5.2](01-module-system.md)); the settings service holds preference
   *values*, not module-graph topology.
+
+The settings provider exposes effective values with their source layer even
+when no raw namespace exists. Writes use typed operations (`set`, `unset`,
+`reset`, and atomic transactions with an expected revision); clients subscribe
+to structured changes. Profile and package mutations use their own typed
+services/capabilities rather than arbitrary JSON paths, although the settings
+frontend presents them together.
 
 ### 1.1 Profile scope
 

@@ -1,9 +1,10 @@
+use super::luau_scan;
 use super::{
     InstalledModuleEntry, InterfaceRelationship, ModuleKind, ModuleManifest,
-    ModuleManifestDiagnostic, ModuleManifestError, PathContribution, RootModuleGraphManifest,
-    dependency_spec_to_string, parse_module_entrypoint, validate_relative_path,
+    ModuleManifestDiagnostic, ModuleManifestError, PathContribution, ProfilePaths,
+    RootModuleGraphManifest, dependency_spec_to_string, parse_module_entrypoint,
+    validate_relative_path,
 };
-use super::luau_scan;
 use crate::manifest;
 use mesh_core_component::{Attribute, AttributeValue, SourceTag, TemplateNode, parse_component};
 use mesh_core_service::{ContractCapabilities, InterfaceContract, parse_interface_contract};
@@ -2516,6 +2517,20 @@ fn load_installed_module_graph_with(
             .map(|entry| modules_dir.join(&entry.path))
             .collect::<Vec<_>>();
         modules = load_manifests(&module_dirs)?;
+    }
+
+    // Profiles are opt-in during the migration from the repository root graph:
+    // no `active-profile` file means the legacy decisions remain authoritative.
+    // Once selected, the profile owns composition and the installed directory
+    // becomes availability only. Dependencies and sole providers are inferred
+    // before the graph indexes enabled contributions.
+    let profile_paths = ProfilePaths::from_root_graph(root_module_graph_path)?;
+    if let Some((_profile_id, profile)) = profile_paths.load_active()? {
+        let manifests = modules
+            .iter()
+            .map(|loaded| loaded.manifest.clone())
+            .collect::<Vec<_>>();
+        profile.apply_to_root(&mut root, &manifests)?;
     }
 
     InstalledModuleGraph::from_parts(root, modules)

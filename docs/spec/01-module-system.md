@@ -513,7 +513,40 @@ per-instance scoping keys on.
 
 ### 5.2 Shell profiles and live switching
 
-**Status: target.**
+**Status: partially shipped.** Profile documents, active-profile selection,
+root/background/provider/resource activation closure, and CLI persistence are
+shipped. Multiple simultaneously mounted instances and transactional live
+switching remain target behavior.
+
+Profiles are stored as `profiles/<id>.json`; `active-profile` contains the
+selected id. Their positive root list is not an installed-module allow-list:
+only user-composed roots and explicit choices are stored, while declared module
+dependencies, resource dependencies, interface modules, and a sole compatible
+provider are inferred. The installed directory remains the complete available
+catalog.
+
+```json
+{
+  "schemaVersion": 1,
+  "roots": {
+    "@alice/weather#default": {
+      "module": "@alice/weather",
+      "entrypoint": "main",
+      "active": true
+    }
+  },
+  "backgroundServices": [],
+  "providers": {},
+  "resources": { "icons": [], "fonts": [], "languages": [] }
+}
+```
+
+Presence composes an instance; `active: false` temporarily removes it while
+preserving identity and overrides. `surface` on an instance is sparse: omitted
+fields inherit `mesh.surface`, and only user changes are written. Installing a
+frontend directly creates or re-enables its `#default` instance. Component,
+interface, and library modules are availability/dependency nodes rather than
+independently enabled units.
 
 A profile is a declarative starting point for one shell composition. It lists
 root component instances and their surface placement, explicit provider choices
