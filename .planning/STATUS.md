@@ -7,6 +7,15 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Module script scanning parses Luau instead of searching for substrings.**
+The graph's authoring diagnostics (translation keys, published channels,
+backend events) walk a real `full_moon` AST (2026-07-31). `content.find("t(")`
+matched the tail of `format(` and `assert(`, so shipped modules were reported
+as using `%d%%` as a translation key; comments and string literals counted as
+code. Costs 20–35ms on graph load for the shipped modules, which is why moving
+authoring checks off the startup path is now a backlog item. Record:
+[`log/2026-07.md`](log/2026-07.md).
+
 **Child→parent `bind:this` events reach the parent's template.** A child's
 `self.<Event>:fire()` into a parent's `:on` closure now marks the parent for
 resync, so the pushed value lands in the parent's reactive state (2026-07-31).

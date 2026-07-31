@@ -106,13 +106,15 @@ promotion")*
       `render()` no longer has to re-derive popover state every frame. Needs
       live verification of the popover open/close/dismiss paths before landing.
 
-- [ ] Three hand-written `.mesh` / `.luau` source mini-parsers remain in
-      `installed_graph.rs` (`extract_t_keys_from_mesh_source`,
-      `extract_mesh_event_publish_channels`,
-      `extract_backend_emit_event_names`). Project rules class hand-rolled
-      script string-parsing as temporary migration code; move them to
-      template-AST traversal as the icon, keybind, and i18n extractors already
-      were.
+- [ ] Move the authoring diagnostics off shell startup. Undeclared icons,
+      translation keys, keybind subscriptions, and event publishes are scanned
+      on every `InstalledModuleGraph` build; the Luau half now costs 20-35ms
+      for the shipped modules because it runs a real parser. These are author
+      feedback, not runtime requirements — run them in `mesh-shell config
+      doctor` and behind a dev flag, not on the path to first paint.
+- [ ] Parse each `.mesh` file once during the graph scan. The icon extractor,
+      the keybind extractor, and the Luau scan each call `parse_component` on
+      the same source.
 - [ ] Converge the immediate and retained renderers.
       `render/src/surface/painter/tree.rs` still holds a parallel
       widget-specific immediate renderer beside display-list replay. Route

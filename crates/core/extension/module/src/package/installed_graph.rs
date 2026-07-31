@@ -3,6 +3,7 @@ use super::{
     ModuleManifestDiagnostic, ModuleManifestError, PathContribution, RootModuleGraphManifest,
     dependency_spec_to_string, parse_module_entrypoint, validate_relative_path,
 };
+use super::luau_scan;
 use crate::manifest;
 use mesh_core_component::{Attribute, AttributeValue, SourceTag, TemplateNode, parse_component};
 use mesh_core_service::{ContractCapabilities, InterfaceContract, parse_interface_contract};
@@ -970,85 +971,115 @@ fn collect_icon_names_from_template_node(node: &TemplateNode, names: &mut Vec<St
     }
 }
 
+/// Static call arguments a `.mesh` file's Luau supplies to the calls graph
+/// scanning cross-checks.
+#[derive(Debug, Default)]
+pub(crate) struct MeshStaticCalls {
+    /// Keys passed to `t("...")`.
+    pub(crate) t_keys: Vec<String>,
+    /// Channels passed to `mesh.events.publish("...")`.
+    pub(crate) publish_channels: Vec<String>,
+}
+
+const MESH_SCANNED_CALLEES: [&str; 2] = ["t", "mesh.events.publish"];
+
+/// Scan one `.mesh` file's Luau in a single parse pass.
+///
+/// Both halves of the file run Luau — the `<script>` chunk and every template
+/// expression (`{t('nav.volume') .. suffix}`) — so both are collected and
+/// handed to the parser together.
+pub(crate) fn extract_mesh_static_calls(content: &str) -> MeshStaticCalls {
+    let Ok(component) = parse_component(content) else {
+        return MeshStaticCalls::default();
+    };
+
+    let mut sources = luau_scan::LuauSources::default();
+    if let Some(script) = &component.script {
+        sources.chunks.push(script.source.as_str());
+    }
+    if let Some(template) = &component.template {
+        for node in &template.root {
+            collect_luau_expressions_from_template_node(node, &mut sources.expressions);
+        }
+    }
+
+    let mut found = luau_scan::static_call_string_arguments(&sources, &MESH_SCANNED_CALLEES);
+    let publish_channels = found.pop().unwrap_or_default();
+    let t_keys = found.pop().unwrap_or_default();
+    MeshStaticCalls {
+        t_keys,
+        publish_channels,
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn extract_t_keys_from_mesh_source(content: &str) -> Vec<String> {
-    let mut keys = Vec::new();
-    let mut remaining = content;
-    while let Some(start) = remaining.find("t(") {
-        remaining = &remaining[start + 2..];
-        let quote = if remaining.starts_with('\'') {
-            '\''
-        } else if remaining.starts_with('"') {
-            '"'
-        } else {
-            // dynamic expression — skip
-            continue;
-        };
-        let inner = &remaining[1..];
-        if let Some(end) = inner.find(quote) {
-            let key = &inner[..end];
-            if !key.is_empty() && !key.contains('{') && !key.contains(' ') {
-                keys.push(key.to_string());
-            }
-            remaining = &inner[end + 1..];
-        }
-    }
-    keys.sort();
-    keys.dedup();
-    keys
+    extract_mesh_static_calls(content).t_keys
 }
 
+#[cfg(test)]
 pub(crate) fn extract_mesh_event_publish_channels(content: &str) -> Vec<String> {
-    let mut channels = Vec::new();
-    let mut remaining = content;
-    while let Some(start) = remaining.find("mesh.events.publish(") {
-        remaining = &remaining[start + "mesh.events.publish(".len()..];
-        let quote = if remaining.starts_with('\'') {
-            '\''
-        } else if remaining.starts_with('"') {
-            '"'
-        } else {
-            // Dynamic channel expression — skip.
-            continue;
-        };
-        let inner = &remaining[1..];
-        if let Some(end) = inner.find(quote) {
-            let channel = &inner[..end];
-            if !channel.is_empty() && !channel.contains('{') && !channel.contains(' ') {
-                channels.push(channel.to_string());
-            }
-            remaining = &inner[end + 1..];
-        }
-    }
-    channels.sort();
-    channels.dedup();
-    channels
+    extract_mesh_static_calls(content).publish_channels
 }
 
+/// Interface events a backend `.luau` file emits with a static name. Backend
+/// entrypoints are plain Luau chunks, with no template half.
 pub(crate) fn extract_backend_emit_event_names(content: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    let mut remaining = content;
-    while let Some(start) = remaining.find("mesh.service.emit_event(") {
-        remaining = &remaining[start + "mesh.service.emit_event(".len()..];
-        let quote = if remaining.starts_with('\'') {
-            '\''
-        } else if remaining.starts_with('"') {
-            '"'
-        } else {
-            // Dynamic event name — skip.
-            continue;
-        };
-        let inner = &remaining[1..];
-        if let Some(end) = inner.find(quote) {
-            let name = &inner[..end];
-            if !name.is_empty() && !name.contains('{') && !name.contains(' ') {
-                names.push(name.to_string());
+    luau_scan::static_call_string_arguments_in_chunk(content, "mesh.service.emit_event")
+}
+
+fn collect_luau_expressions_from_template_node<'a>(
+    node: &'a TemplateNode,
+    expressions: &mut Vec<&'a str>,
+) {
+    match node {
+        TemplateNode::Element(element) => {
+            collect_luau_expressions_from_attributes(&element.attributes, expressions);
+            for child in &element.children {
+                collect_luau_expressions_from_template_node(child, expressions);
             }
-            remaining = &inner[end + 1..];
+        }
+        TemplateNode::Component(component) => {
+            collect_luau_expressions_from_attributes(&component.props, expressions);
+            for child in &component.children {
+                collect_luau_expressions_from_template_node(child, expressions);
+            }
+        }
+        TemplateNode::Expr(expr) => expressions.push(expr.expression.as_str()),
+        TemplateNode::If(node) => {
+            expressions.push(node.condition.as_str());
+            for child in node.then_children.iter().chain(&node.else_children) {
+                collect_luau_expressions_from_template_node(child, expressions);
+            }
+        }
+        TemplateNode::For(node) => {
+            expressions.push(node.iterable.as_str());
+            for child in &node.children {
+                collect_luau_expressions_from_template_node(child, expressions);
+            }
+        }
+        TemplateNode::Text(_) | TemplateNode::Slot(_) => {}
+    }
+}
+
+fn collect_luau_expressions_from_attributes<'a>(
+    attributes: &'a [Attribute],
+    expressions: &mut Vec<&'a str>,
+) {
+    for attribute in attributes {
+        match &attribute.value {
+            AttributeValue::Binding(expression) => expressions.push(expression.as_str()),
+            AttributeValue::EventHandlerCall { args, .. } => {
+                expressions.extend(args.iter().map(String::as_str));
+            }
+            // A handler name, a bound variable name, and static text are not
+            // expressions.
+            AttributeValue::Static(_)
+            | AttributeValue::TwoWayBinding(_)
+            | AttributeValue::InstanceBinding(_)
+            | AttributeValue::EventHandler(_) => {}
         }
     }
-    names.sort();
-    names.dedup();
-    names
 }
 
 pub(crate) fn extract_frontend_interface_event_subscriptions(
@@ -1833,7 +1864,16 @@ fn diagnose_frontend_source_contracts(
             module_dir
         };
 
-        for (path, content) in scan_mesh_files_recursive(scan_root) {
+        // Parsing every file's Luau is the expensive half of this scan, and
+        // each file is independent — do it up front across the pool, then keep
+        // the diagnostic loop itself serial so ordering stays deterministic.
+        let mesh_files = scan_mesh_files_recursive(scan_root);
+        let mesh_static_calls: Vec<MeshStaticCalls> = mesh_files
+            .par_iter()
+            .map(|(_, content)| extract_mesh_static_calls(content))
+            .collect();
+
+        for ((path, content), static_calls) in mesh_files.iter().zip(&mesh_static_calls) {
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
             for icon_name in extract_icon_names_from_mesh_source(&content) {
                 if !all_declared_icons.contains(icon_name.as_str()) {
@@ -1849,8 +1889,8 @@ fn diagnose_frontend_source_contracts(
                 }
             }
             if let Some(catalog) = &catalog_keys {
-                for key in extract_t_keys_from_mesh_source(&content) {
-                    if !catalog.contains(&key) {
+                for key in &static_calls.t_keys {
+                    if !catalog.contains(key.as_str()) {
                         diagnostics.push(ModuleGraphDiagnostic {
                             module_id: module.id.clone(),
                             contribution_id: Some(format!("{}:i18n:{}", module.id, file_name)),
@@ -1863,7 +1903,7 @@ fn diagnose_frontend_source_contracts(
                     }
                 }
             }
-            for channel in extract_mesh_event_publish_channels(&content) {
+            for channel in &static_calls.publish_channels {
                 if channel.starts_with("mesh.") {
                     diagnostics.push(ModuleGraphDiagnostic {
                         module_id: module.id.clone(),

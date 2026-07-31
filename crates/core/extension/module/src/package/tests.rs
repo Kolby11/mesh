@@ -3744,9 +3744,13 @@ fn graph_diagnostics_report_duplicate_keybind_trigger() {
 fn extract_t_keys_from_mesh_source_finds_static_keys() {
     use super::installed_graph::extract_t_keys_from_mesh_source;
     let src = r#"
+<template>
+    <box>
         <text>{t('nav.volume')}</text>
-        <text aria-label="{t("nav.mute")}"/>
+        <text aria-label={t("nav.mute")}/>
         <text>{t(dynamic_key)}</text>
+    </box>
+</template>
     "#;
     let keys = extract_t_keys_from_mesh_source(src);
     assert!(
@@ -3766,7 +3770,7 @@ fn extract_t_keys_from_mesh_source_finds_static_keys() {
 #[test]
 fn extract_t_keys_ignores_dynamic_expressions() {
     use super::installed_graph::extract_t_keys_from_mesh_source;
-    let src = r#"{t(audio_title_key)}{t("audio.fixed")}"#;
+    let src = r#"<template><box>{t(audio_title_key)}{t("audio.fixed")}</box></template>"#;
     let keys = extract_t_keys_from_mesh_source(src);
     assert_eq!(keys, vec!["audio.fixed".to_string()]);
 }
@@ -3931,7 +3935,7 @@ fn graph_diagnostics_report_undeclared_i18n_key() {
     // Write a .mesh file that uses a key not present in the catalog.
     fs::write(
         src_dir.join("main.mesh"),
-        r#"<text>{t('nav.volume')}{t('nav.missing')}</text>"#,
+        r#"<template><box><text>{t('nav.volume')}{t('nav.missing')}</text></box></template>"#,
     )
     .unwrap();
     // Write catalog with only one of those keys.
@@ -4836,4 +4840,122 @@ fn graph_diagnostics_accept_backend_provider_declared_base_module_dependency() {
         diagnostic.module_id == "@mesh/example-backend"
             && diagnostic.status == "missing_provider_interface_module_dependency"
     }));
+}
+
+#[test]
+fn shipped_frontend_translation_keys_are_declared() {
+    // End-to-end guard for the Luau scan. The substring scanner this replaced
+    // matched the `t(` inside `string.format(`, so shipped modules reported
+    // format strings such as `%d%%` as undeclared translation keys. Every key
+    // the scanner now reports must be a real key in the module's own catalog.
+    use super::installed_graph::extract_t_keys_from_mesh_source;
+
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let frontend_root = workspace_root.join("modules/frontend");
+    let mut checked_modules = 0;
+    let mut checked_keys = 0;
+
+    for entry in fs::read_dir(&frontend_root).unwrap().flatten() {
+        let module_dir = entry.path();
+        if !module_dir.is_dir() {
+            continue;
+        }
+        let Ok(loaded) = load_module_manifest(&module_dir) else {
+            continue;
+        };
+        let Some(default_locale) = loaded.manifest.mesh.i18n.default_locale.clone() else {
+            continue;
+        };
+        let Some(contribution) = loaded
+            .manifest
+            .mesh
+            .contributes
+            .i18n
+            .iter()
+            .find(|contribution| contribution.locale == default_locale)
+        else {
+            continue;
+        };
+        let Ok(catalog) = fs::read_to_string(module_dir.join(&contribution.path)) else {
+            continue;
+        };
+        let catalog: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&catalog).unwrap();
+        checked_modules += 1;
+
+        let mut sources = Vec::new();
+        collect_mesh_files(&module_dir.join("src"), &mut sources);
+        for source_path in sources {
+            let content = fs::read_to_string(&source_path).unwrap();
+            for key in extract_t_keys_from_mesh_source(&content) {
+                checked_keys += 1;
+                assert!(
+                    catalog.contains_key(&key),
+                    "{} calls t('{key}') but it is not in the '{default_locale}' catalog",
+                    source_path.display()
+                );
+            }
+        }
+    }
+
+    assert!(
+        checked_modules > 0 && checked_keys > 0,
+        "expected to check real shipped modules; got {checked_modules} modules, {checked_keys} keys"
+    );
+}
+
+fn collect_mesh_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_mesh_files(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "mesh") {
+            out.push(path);
+        }
+    }
+}
+
+// cargo test -p mesh-core-module --release -- shipped_module_luau_scan_cost --ignored --nocapture
+#[test]
+#[ignore = "release-only graph-scan cost measurement"]
+fn shipped_module_luau_scan_cost() {
+    use super::installed_graph::extract_mesh_static_calls;
+    use std::time::Instant;
+
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let mut sources = Vec::new();
+    collect_mesh_files(&workspace_root.join("modules"), &mut sources);
+    let contents: Vec<String> = sources
+        .iter()
+        .map(|path| fs::read_to_string(path).unwrap())
+        .collect();
+    let lines: usize = contents.iter().map(|c| c.lines().count()).sum();
+
+    let serial_started = Instant::now();
+    let mut found = 0;
+    for content in &contents {
+        let calls = extract_mesh_static_calls(content);
+        found += calls.t_keys.len() + calls.publish_channels.len();
+    }
+    let serial = serial_started.elapsed();
+
+    use rayon::prelude::*;
+    let parallel_started = Instant::now();
+    let parallel_found: usize = contents
+        .par_iter()
+        .map(|content| {
+            let calls = extract_mesh_static_calls(content);
+            calls.t_keys.len() + calls.publish_channels.len()
+        })
+        .sum();
+    let parallel = parallel_started.elapsed();
+
+    assert_eq!(found, parallel_found);
+    eprintln!(
+        "scanned {} .mesh files ({lines} lines), {found} static call arguments: serial {serial:?}, parallel {parallel:?}",
+        contents.len()
+    );
 }

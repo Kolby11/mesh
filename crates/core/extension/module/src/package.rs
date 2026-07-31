@@ -1,5 +1,6 @@
 mod error;
 mod installed_graph;
+mod luau_scan;
 mod module_manifest;
 mod paths;
 mod root;
