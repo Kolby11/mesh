@@ -325,6 +325,10 @@ to the child's live state:
   function onDrag() changed:fire({ label = string.format("%d%%", percent) }) end
   ```
 
+  A subscriber runs in the parent's own scope, so assigning a public member
+  from inside it (`audio_label` above) re-renders the parent's template in the
+  same tick — the parent does not have to poll the child from `render()`.
+
 Only the child's **public members** and `self.<Event>` channels cross the
 boundary. Host internals (`self`, `module`, `mesh`, `require`, `__mesh_*`) and
 lifecycle hooks (`init`, `render`, `mount`, `unmount`) stay private to the child.

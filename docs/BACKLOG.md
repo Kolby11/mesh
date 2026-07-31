@@ -101,12 +101,10 @@ promotion")*
 
 ## Tech debt
 
-- [ ] A child's `self.<Event>:fire()` into a parent's `bind:this` `:on` closure
-      mutates the parent's `_ENV` but never marks the parent for resync, so the
-      change never reaches its template. `resync_binding_neighbors` claims to
-      cover this direction but gates on `take_live_binding_external_accessed`,
-      which only the *parent touching the child* sets. Child→parent push is
-      therefore unusable; the language trigger pulls on its render hook instead.
+- [ ] Drop the render-hook pull in the navigation language and theme triggers.
+      Child→parent `self.<Event>:fire()` push now resyncs the parent, so
+      `render()` no longer has to re-derive popover state every frame. Needs
+      live verification of the popover open/close/dismiss paths before landing.
 
 - [ ] Three hand-written `.mesh` / `.luau` source mini-parsers remain in
       `installed_graph.rs` (`extract_t_keys_from_mesh_source`,

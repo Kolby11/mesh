@@ -718,6 +718,12 @@ impl FrontendSurfaceComponent {
     /// `_ENV` in the shared VM without going through the shell's normal
     /// post-handler sync, so its Rust-side reactive state would otherwise stay
     /// stale until some other event re-rendered it.
+    ///
+    /// Both directions are gated on the neighbour's own
+    /// `live_binding_external_accessed` flag, set by the live-binding proxy:
+    /// calling a child function through the proxy flags the child, and a child
+    /// firing a `self.<Event>` channel into a parent's subscription flags the
+    /// parent. Neighbours nothing touched are skipped.
     fn resync_binding_neighbors(&mut self, instance_key: &str) -> (bool, Vec<CoreRequest>) {
         let neighbor_keys: Vec<Arc<str>> = {
             let bound_children = self.bound_children.borrow();

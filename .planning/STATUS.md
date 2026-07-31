@@ -7,6 +7,14 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Child→parent `bind:this` events reach the parent's template.** A child's
+`self.<Event>:fire()` into a parent's `:on` closure now marks the parent for
+resync, so the pushed value lands in the parent's reactive state (2026-07-31).
+The live-binding proxy returns a wrapper channel whose `on`/`subscribe` flags
+the parent when a callback actually runs — previously only the parent touching
+the child set a flag, in either direction, so the push half was unusable.
+Untouched neighbours are still skipped. Record: [`log/2026-07.md`](log/2026-07.md).
+
 **Size constraints are real dimensions.** `min-width`, `max-width`,
 `min-height`, and `max-height` are `Dimension` like `width`/`height`, so they
 take percentages, `auto`, `fit-content`, and `none` instead of lengths only

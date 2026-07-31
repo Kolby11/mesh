@@ -1357,6 +1357,10 @@ impl ScriptContext {
             .clone();
         let denylist = child.builtin_globals.clone();
         let child_external_accessed = Arc::clone(&child.live_binding_external_accessed);
+        // The parent's own flag, for the reverse direction: the child firing a
+        // `self.<Event>` channel the parent subscribed to.
+        let parent_external_accessed = Arc::clone(&self.live_binding_external_accessed);
+        let event_channel_wrappers = lua.create_table().map_err(lua_err)?;
 
         let proxy = lua.create_table().map_err(lua_err)?;
         let meta = lua.create_table().map_err(lua_err)?;
@@ -1365,6 +1369,8 @@ impl ScriptContext {
         let index_scalars = child_scalars;
         let index_deny = denylist.clone();
         let index_external_accessed = Arc::clone(&child_external_accessed);
+        let index_parent_accessed = Arc::clone(&parent_external_accessed);
+        let index_channel_wrappers = event_channel_wrappers;
         meta.set(
             "__index",
             lua.create_function(move |lua, (_proxy, key): (Table, String)| {
@@ -1395,7 +1401,15 @@ impl ScriptContext {
                 // `self.Event:fire(...)` in the same tick (same channel table,
                 // shared VM, no marshalling).
                 if is_named_event_channel(&key) {
-                    return self_event_channel(lua, &index_env, &key).map(LuaValue::Table);
+                    let channel = self_event_channel(lua, &index_env, &key)?;
+                    return parent_subscription_channel(
+                        lua,
+                        &channel,
+                        &index_channel_wrappers,
+                        &key,
+                        &index_parent_accessed,
+                    )
+                    .map(LuaValue::Table);
                 }
                 Ok(LuaValue::Nil)
             })
@@ -2635,6 +2649,57 @@ fn self_event_channel(lua: &Lua, scope: &Table, event_name: &str) -> mlua::Resul
             Ok(channel)
         }
     }
+}
+
+/// Wrap a child's `self.<Event>` channel for a parent holding a live
+/// `bind:this` reference to that child.
+///
+/// The parent subscribes with a closure over its own `_ENV`, and the child
+/// fires it synchronously in the shared VM — so the parent's Lua state changes
+/// without the shell ever dispatching a handler to the parent, and its
+/// Rust-side reactive state would stay stale. Wrapping every registered
+/// callback flags the *parent* as externally accessed when the callback
+/// actually runs, which is what makes the post-handler neighbour resync pick it
+/// up. This is the mirror image of the function wrapper in the proxy's
+/// `__index`, which flags the *child* when the parent calls into it.
+///
+/// Everything other than `on`/`subscribe` (`fire`, `emit`, `__subscribers`)
+/// falls through to the real channel, so the two sides share one subscriber
+/// list. Wrappers are memoized per event name so repeated `child.Event` reads
+/// return the same table.
+fn parent_subscription_channel(
+    lua: &Lua,
+    channel: &Table,
+    wrappers: &Table,
+    event_name: &str,
+    parent_accessed: &Arc<AtomicBool>,
+) -> mlua::Result<Table> {
+    if let LuaValue::Table(existing) = wrappers.raw_get::<LuaValue>(event_name)? {
+        return Ok(existing);
+    }
+
+    let wrapper = lua.create_table()?;
+    let meta = lua.create_table()?;
+    meta.set("__index", channel.clone())?;
+    wrapper.set_metatable(Some(meta))?;
+
+    let target = channel.clone();
+    let accessed = Arc::clone(parent_accessed);
+    let subscribe = lua.create_function(move |lua, (_wrapper, callback): (Table, Function)| {
+        let accessed = Arc::clone(&accessed);
+        let tracked = lua.create_function(move |_lua, args: Variadic<LuaValue>| {
+            accessed.store(true, Ordering::Release);
+            callback.call::<MultiValue>(args)
+        })?;
+        target
+            .get::<Function>("subscribe")?
+            .call::<LuaValue>((target.clone(), tracked))
+    })?;
+    wrapper.set("subscribe", subscribe.clone())?;
+    wrapper.set("on", subscribe)?;
+
+    wrappers.raw_set(event_name, wrapper.clone())?;
+    Ok(wrapper)
 }
 
 fn create_i18n_library(lua: &Lua) -> mlua::Result<Table> {

@@ -241,3 +241,78 @@ other = 0
     );
     assert!(new_time < old_time);
 }
+
+#[test]
+fn child_self_event_fire_resyncs_the_parent_that_subscribed() {
+    // The reverse direction of `bind_this_event_handler_calls_child_live_and_resyncs_it`:
+    // the parent subscribes to the child's `self.<Event>` channel through the
+    // live binding, and the child fires it from its own handler. The callback
+    // is the parent's closure over the parent's `_ENV`, so the mutation lands
+    // in Lua but not in the parent's Rust-side reactive state unless the
+    // post-handler neighbour resync knows the parent was touched.
+    let mut component = bind_live_surface(
+        r#"
+<template>
+    <box>
+        <Child bind:this={child} />
+    </box>
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+received = -1
+function subscribe()
+    child.Changed:on(function(value)
+        received = value
+    end)
+end
+</script>
+"#,
+        r#"
+<template>
+    <box />
+</template>
+<script lang="luau">
+value = 0
+function fire_it()
+    value = 7
+    self.Changed:fire(7)
+end
+</script>
+"#,
+    );
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+
+    component.call_namespaced_handler("subscribe", &[]).unwrap();
+    assert_eq!(
+        runtime_value(&component, "received"),
+        Some(serde_json::json!(-1)),
+        "subscribing must not itself deliver a value"
+    );
+    assert!(
+        !component
+            .runtimes
+            .lock()
+            .unwrap()
+            .get(PARENT_ID)
+            .unwrap()
+            .script_ctx
+            .take_live_binding_external_accessed(),
+        "reading and subscribing to the channel must not flag the parent; only a delivered fire does"
+    );
+
+    let child_handler = format!("__mesh_embed__::{PARENT_ID}/local:Child::fire_it");
+    component.call_namespaced_handler(&child_handler, &[]).unwrap();
+
+    assert_eq!(
+        child_runtime_value(&component, "value"),
+        Some(serde_json::json!(7))
+    );
+    assert_eq!(
+        runtime_value(&component, "received"),
+        Some(serde_json::json!(7)),
+        "the child's fire ran the parent's closure, so the parent's reactive state must resync"
+    );
+}
