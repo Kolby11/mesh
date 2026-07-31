@@ -7,7 +7,6 @@ use super::lookup::{
 };
 use super::proxy::{create_event_channel, create_interface_proxy, interface_event_channel};
 use super::{PublishedEvent, ScriptDiagnostic, ScriptError, ScriptInterfaceImport, ScriptState};
-use crate::chunk_cache::ChunkCache;
 use crate::host_api::{HostApiManifest, InterfaceProxy};
 use crate::pool;
 use crate::storage::{ScopedStorage, StorageManager, StorageScope, create_lua_storage_table};
@@ -632,17 +631,14 @@ impl ScriptContext {
         Ok(())
     }
 
-    /// Compile and execute Luau source, caching the source string by its
-    /// FNV64 content hash so hot-reload can evict on file change (Phase 95).
+    /// Compile and execute Luau source.
+    ///
     /// Delegates to `load_script_with_interface_imports` for execution.
     pub fn compile_and_execute(
         &mut self,
         source: &str,
         imports: &[ScriptInterfaceImport],
     ) -> Result<(), ScriptError> {
-        // Cache the source by content hash — Phase 95 mtime watcher calls
-        // ChunkCache::remove(hash) to evict on .mesh file change.
-        ChunkCache::get_or_insert(source);
         self.load_script_with_interface_imports(source, imports)
     }
 
@@ -653,7 +649,6 @@ impl ScriptContext {
         template_expressions: &[String],
     ) -> Result<(), ScriptError> {
         let source = component_source_with_template_expressions(source, template_expressions);
-        ChunkCache::get_or_insert(&source);
         self.load_script_with_interface_imports(&source, imports)
     }
 

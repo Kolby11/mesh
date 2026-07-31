@@ -7,6 +7,11 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Dead Luau source caching is gone.** `ChunkCache` never supplied a compiled
+chunk (or even read its stored source) and could retain every historical script
+version. Script loading and source reload now execute directly (2026-07-31).
+Record: [`log/2026-07.md`](log/2026-07.md).
+
 **Graph diagnostics parse frontend source once per file.** The icon, Luau, and
 keybind checks share one parsed component AST (2026-07-31). Record:
 [`log/performance-log.md`](log/performance-log.md).

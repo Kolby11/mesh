@@ -221,10 +221,6 @@ gate where the win is structural.
 - [ ] Storage reads still clone per Lua access. Needs shared immutable JSON
       values or lock avoidance — two cache designs were measured and reverted
       (I; see log).
-- [ ] Delete `ChunkCache` or make it a real bounded compile cache. It inserts
-      source by unchecked FNV-64 key then loads the original source anyway;
-      production never reads cached entries, so it only retains memory.
-
 ### Input
 
 - [ ] Resolve each keyboard target once. `build_keyboard_event` searches
