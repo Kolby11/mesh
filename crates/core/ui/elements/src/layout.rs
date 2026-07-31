@@ -528,24 +528,12 @@ fn taffy_style_for_node(node: &WidgetNode, report: &mut TaffyLayoutReport) -> ta
             height: taffy_dimension(style.height),
         },
         min_size: TaffySize {
-            width: style
-                .min_width
-                .map(taffy_style::Dimension::length)
-                .unwrap_or_else(taffy_style::Dimension::auto),
-            height: style
-                .min_height
-                .map(taffy_style::Dimension::length)
-                .unwrap_or_else(taffy_style::Dimension::auto),
+            width: taffy_dimension(style.min_width),
+            height: taffy_dimension(style.min_height),
         },
         max_size: TaffySize {
-            width: style
-                .max_width
-                .map(taffy_style::Dimension::length)
-                .unwrap_or_else(taffy_style::Dimension::auto),
-            height: style
-                .max_height
-                .map(taffy_style::Dimension::length)
-                .unwrap_or_else(taffy_style::Dimension::auto),
+            width: taffy_dimension(style.max_width),
+            height: taffy_dimension(style.max_height),
         },
         margin: TaffyRect {
             left: taffy_style::LengthPercentageAuto::length(style.margin.left),
@@ -1413,6 +1401,52 @@ mod tests {
         assert_eq!(root.children[0].layout.height, 50.0);
         assert_eq!(root.children[1].layout.y, 60.0); // 50 + 10 gap
         assert_eq!(root.children[1].layout.height, 50.0);
+    }
+
+    #[test]
+    fn percentage_max_width_clamps_a_fixed_root_to_its_container() {
+        // A window that asks for 920px but must never exceed the surface it
+        // was given. Before `min-`/`max-` took full dimensions this could only
+        // be written as a px length, so the clamp had to be restated per size.
+        let mut root = make_node("column", Dimension::Px(920.0), Dimension::Px(700.0));
+        root.computed_style.max_width = Dimension::Percent(100.0);
+        root.computed_style.max_height = Dimension::Percent(100.0);
+
+        LayoutEngine::compute(&mut root, 400.0, 300.0);
+
+        assert_eq!(root.layout.width, 400.0);
+        assert_eq!(root.layout.height, 300.0);
+    }
+
+    #[test]
+    fn percentage_min_and_max_constrain_children_against_the_parent() {
+        let mut root = make_node("row", Dimension::Px(400.0), Dimension::Px(100.0));
+        root.computed_style.direction = FlexDirection::Row;
+
+        let mut clamped = make_node("a", Dimension::Px(300.0), Dimension::Px(20.0));
+        clamped.computed_style.max_width = Dimension::Percent(25.0);
+        let mut raised = make_node("b", Dimension::Px(10.0), Dimension::Px(20.0));
+        raised.computed_style.min_width = Dimension::Percent(50.0);
+        root.children = vec![clamped, raised].into();
+
+        LayoutEngine::compute(&mut root, 400.0, 100.0);
+
+        assert_eq!(root.children[0].layout.width, 100.0);
+        assert_eq!(root.children[1].layout.width, 200.0);
+    }
+
+    #[test]
+    fn auto_max_width_leaves_the_element_unconstrained() {
+        // `max-width: none` and `max-width: auto` both parse to `Auto`, which
+        // must mean "no constraint" rather than a zero-length clamp.
+        let mut root = make_node("row", Dimension::Px(400.0), Dimension::Px(100.0));
+        let mut child = make_node("a", Dimension::Px(300.0), Dimension::Px(20.0));
+        child.computed_style.max_width = Dimension::Auto;
+        root.children = vec![child].into();
+
+        LayoutEngine::compute(&mut root, 400.0, 100.0);
+
+        assert_eq!(root.children[0].layout.width, 300.0);
     }
 
     #[test]

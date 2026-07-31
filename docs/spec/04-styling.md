@@ -229,9 +229,11 @@ states override it:
 .window:maximized { width: 100%; height: 100%; min-width: 0; min-height: 0; }
 ```
 
-`min-width`/`max-width` take lengths only, not percentages, so a floating
-minimum must be cleared explicitly in the filling rules rather than capped
-with `max-width: 100%`.
+`min-width`/`max-width`/`min-height`/`max-height` take the same values as
+`width`/`height` — lengths, percentages, `auto`, and `fit-content` — plus
+`none`, which (like `auto`) clears the constraint. A fixed size can therefore
+be capped against whatever surface it lands in with `max-width: 100%` instead
+of restating the clamp in every filling state.
 
 There is **no CSS specificity**. Matching rules apply in source order and the
 last declaration wins, regardless of selector shape (`#id` does not beat

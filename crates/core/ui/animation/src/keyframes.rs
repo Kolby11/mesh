@@ -248,10 +248,10 @@ mod tests {
             color: Color::WHITE,
             width: mesh_core_elements::Dimension::Auto,
             height: mesh_core_elements::Dimension::Auto,
-            min_width: None,
-            max_width: None,
-            min_height: None,
-            max_height: None,
+            min_width: mesh_core_elements::Dimension::Auto,
+            max_width: mesh_core_elements::Dimension::Auto,
+            min_height: mesh_core_elements::Dimension::Auto,
+            max_height: mesh_core_elements::Dimension::Auto,
             padding: Edges::zero(),
             margin: Edges::zero(),
             transform: Transform2D {
@@ -269,6 +269,7 @@ mod tests {
             inset_right: None,
             inset_bottom: None,
             inset_left: None,
+            visibility: mesh_core_elements::style::Visibility::Visible,
         }
     }
 

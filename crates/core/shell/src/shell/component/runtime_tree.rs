@@ -796,10 +796,10 @@ fn style_fingerprint(style: &ComputedStyle) -> u64 {
 fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher) {
     hash_dimension(style.width, hasher);
     hash_dimension(style.height, hasher);
-    hash_option_f32(style.min_width, hasher);
-    hash_option_f32(style.max_width, hasher);
-    hash_option_f32(style.min_height, hasher);
-    hash_option_f32(style.max_height, hasher);
+    hash_dimension(style.min_width, hasher);
+    hash_dimension(style.max_width, hasher);
+    hash_dimension(style.min_height, hasher);
+    hash_dimension(style.max_height, hasher);
     hash_edges(style.padding, hasher);
     hash_edges(style.margin, hasher);
     hash_edges(style.border_width, hasher);
@@ -1626,8 +1626,8 @@ mod tests {
         let mut style = ComputedStyle::default();
         style.width = Dimension::Px(960.0);
         style.height = Dimension::Percent(100.0);
-        style.min_width = Some(24.0);
-        style.max_width = Some(1200.0);
+        style.min_width = Dimension::Px(24.0);
+        style.max_width = Dimension::Px(1200.0);
         style.padding = Edges {
             top: 4.0,
             right: 8.0,

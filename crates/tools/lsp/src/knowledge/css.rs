@@ -182,23 +182,23 @@ pub static CSS_PROPERTIES: &[CssProp] = &[
     },
     CssProp {
         name: "min-width",
-        description: "Minimum width.",
-        values: &[],
+        description: "Minimum width (px, %, auto, none).",
+        values: &["auto", "none", "100%"],
     },
     CssProp {
         name: "max-width",
-        description: "Maximum width.",
-        values: &[],
+        description: "Maximum width (px, %, auto, none).",
+        values: &["auto", "none", "100%"],
     },
     CssProp {
         name: "min-height",
-        description: "Minimum height.",
-        values: &[],
+        description: "Minimum height (px, %, auto, none).",
+        values: &["auto", "none", "100%"],
     },
     CssProp {
         name: "max-height",
-        description: "Maximum height.",
-        values: &[],
+        description: "Maximum height (px, %, auto, none).",
+        values: &["auto", "none", "100%"],
     },
     // Border / radius
     CssProp {

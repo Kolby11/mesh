@@ -751,6 +751,9 @@ fn typed_literal_value(property: &str, value: &StyleValue) -> Option<TypedLitera
         "width" | "height" | "flex-basis" => {
             Some(TypedLiteralValue::Dimension(parse_dimension(value)))
         }
+        "min-width" | "max-width" | "min-height" | "max-height" => {
+            Some(TypedLiteralValue::Dimension(parse_size_constraint(value)))
+        }
         _ => None,
     }
 }
@@ -796,6 +799,10 @@ fn apply_typed_literal(
         ("width", TypedLiteralValue::Dimension(value)) => style.width = value,
         ("height", TypedLiteralValue::Dimension(value)) => style.height = value,
         ("flex-basis", TypedLiteralValue::Dimension(value)) => style.flex_basis = value,
+        ("min-width", TypedLiteralValue::Dimension(value)) => style.min_width = value,
+        ("max-width", TypedLiteralValue::Dimension(value)) => style.max_width = value,
+        ("min-height", TypedLiteralValue::Dimension(value)) => style.min_height = value,
+        ("max-height", TypedLiteralValue::Dimension(value)) => style.max_height = value,
         _ => return false,
     }
     true
@@ -3006,16 +3013,20 @@ fn apply_declaration(
                 resolver.with_resolved_str(value, variables, |resolved| parse_dimension(resolved))
         }
         "min-width" => {
-            style.min_width = Some(resolver.resolve_number_with_variables(value, variables))
+            style.min_width = resolver
+                .with_resolved_str(value, variables, |resolved| parse_size_constraint(resolved))
         }
         "max-width" => {
-            style.max_width = Some(resolver.resolve_number_with_variables(value, variables))
+            style.max_width = resolver
+                .with_resolved_str(value, variables, |resolved| parse_size_constraint(resolved))
         }
         "min-height" => {
-            style.min_height = Some(resolver.resolve_number_with_variables(value, variables))
+            style.min_height = resolver
+                .with_resolved_str(value, variables, |resolved| parse_size_constraint(resolved))
         }
         "max-height" => {
-            style.max_height = Some(resolver.resolve_number_with_variables(value, variables))
+            style.max_height = resolver
+                .with_resolved_str(value, variables, |resolved| parse_size_constraint(resolved))
         }
         "flex-grow" => style.flex_grow = resolver.resolve_number_with_variables(value, variables),
         "flex-shrink" => {
@@ -5969,6 +5980,41 @@ mod tests {
         assert_eq!(animation.direction, AnimationDirection::Reverse);
         assert_eq!(animation.fill_mode, AnimationFillMode::Both);
         assert_eq!(animation.play_state, AnimationPlayState::Paused);
+    }
+
+    #[test]
+    fn size_constraints_accept_every_dimension_form() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme
+            .tokens_mut()
+            .insert("size.panel".into(), TokenValue::String("320px".into()));
+        let resolver = StyleResolver::new(&theme);
+        let mut variables = HashMap::new();
+        variables.insert("--fill".into(), StyleValue::Literal("100%".into()));
+
+        let cases = [
+            ("min-width", StyleValue::Literal("240px".into()), Dimension::Px(240.0)),
+            ("max-width", StyleValue::Literal("100%".into()), Dimension::Percent(100.0)),
+            ("min-height", StyleValue::Literal("auto".into()), Dimension::Auto),
+            // `none` is the CSS initial value for the max-* properties and has
+            // to clear the constraint, not clamp it to zero.
+            ("max-height", StyleValue::Literal("none".into()), Dimension::Auto),
+            ("max-width", StyleValue::Var("--fill".into()), Dimension::Percent(100.0)),
+            ("min-width", StyleValue::Var("--size-panel".into()), Dimension::Px(320.0)),
+            ("max-width", StyleValue::Literal("fit-content".into()), Dimension::Content),
+        ];
+
+        for (property, value, expected) in cases {
+            let mut style = ComputedStyle::default();
+            apply_declaration(&mut style, property, &value, &resolver, &variables);
+            let actual = match property {
+                "min-width" => style.min_width,
+                "max-width" => style.max_width,
+                "min-height" => style.min_height,
+                _ => style.max_height,
+            };
+            assert_eq!(actual, expected, "{property}: {value:?}");
+        }
     }
 
     // cargo test -p mesh-core-elements --release -- animation_keyword_token_resolution_beats_string_clone --ignored --nocapture

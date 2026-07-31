@@ -830,6 +830,15 @@ pub(super) fn parse_box_shadow(value: &str) -> BoxShadow {
     }
 }
 
+/// `min-*` / `max-*` accept every `width`/`height` value plus the CSS keyword
+/// `none`, which — like `auto` — means "no constraint".
+pub(super) fn parse_size_constraint(s: &str) -> Dimension {
+    match s.trim() {
+        "none" => Dimension::Auto,
+        other => parse_dimension(other),
+    }
+}
+
 pub(super) fn parse_dimension(s: &str) -> Dimension {
     let s = s.trim();
     match s {

@@ -1148,8 +1148,8 @@ fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
     {
         node.computed_style.width = mesh_core_elements::Dimension::Px(0.0);
         node.computed_style.height = mesh_core_elements::Dimension::Px(0.0);
-        node.computed_style.min_width = Some(0.0);
-        node.computed_style.min_height = Some(0.0);
+        node.computed_style.min_width = mesh_core_elements::Dimension::Px(0.0);
+        node.computed_style.min_height = mesh_core_elements::Dimension::Px(0.0);
         node.computed_style.overflow_x = mesh_core_elements::style::Overflow::Visible;
         node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Visible;
     }
@@ -1167,8 +1167,9 @@ pub(super) fn constrain_error_placeholders(node: &mut WidgetNode) {
         .attributes
         .contains_key(ERROR_PLACEHOLDER_MARKER)
     {
-        node.computed_style.min_width = Some(0.0);
-        node.computed_style.max_width = Some(ERROR_PLACEHOLDER_MAX_WIDTH);
+        node.computed_style.min_width = mesh_core_elements::Dimension::Px(0.0);
+        node.computed_style.max_width =
+            mesh_core_elements::Dimension::Px(ERROR_PLACEHOLDER_MAX_WIDTH);
         node.computed_style.flex_shrink = 1.0;
         node.computed_style.overflow_x = mesh_core_elements::style::Overflow::Hidden;
         node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Hidden;

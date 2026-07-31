@@ -23,10 +23,10 @@ pub struct AnimatableStyle {
     pub color: Color,
     pub width: Dimension,
     pub height: Dimension,
-    pub min_width: Option<f32>,
-    pub max_width: Option<f32>,
-    pub min_height: Option<f32>,
-    pub max_height: Option<f32>,
+    pub min_width: Dimension,
+    pub max_width: Dimension,
+    pub min_height: Dimension,
+    pub max_height: Dimension,
     pub padding: Edges,
     pub margin: Edges,
     pub transform: mesh_core_elements::Transform2D,
@@ -288,10 +288,10 @@ impl Interpolate for AnimatableStyle {
             color: self.color.lerp(other.color, progress),
             width: lerp_dimension(self.width, other.width, progress),
             height: lerp_dimension(self.height, other.height, progress),
-            min_width: lerp_option_f32(self.min_width, other.min_width, progress),
-            max_width: lerp_option_f32(self.max_width, other.max_width, progress),
-            min_height: lerp_option_f32(self.min_height, other.min_height, progress),
-            max_height: lerp_option_f32(self.max_height, other.max_height, progress),
+            min_width: lerp_dimension(self.min_width, other.min_width, progress),
+            max_width: lerp_dimension(self.max_width, other.max_width, progress),
+            min_height: lerp_dimension(self.min_height, other.min_height, progress),
+            max_height: lerp_dimension(self.max_height, other.max_height, progress),
             padding: self.padding.lerp(other.padding, progress),
             margin: self.margin.lerp(other.margin, progress),
             transform: self.transform.lerp(other.transform, progress),
@@ -584,7 +584,7 @@ mod tests {
 
         let mut animator = TransitionAnimator::new();
         let mut node = WidgetNode::new("box");
-        node.computed_style.transition = transition;
+        node.computed_style.transitions = vec![transition];
         node.computed_style.opacity = 1.0;
 
         // Previously displayed at 0.0; target is 1.0 -> transition starts.
@@ -636,10 +636,10 @@ mod tests {
             color: Color::TRANSPARENT,
             width: Dimension::Px(10.0),
             height: Dimension::Px(10.0),
-            min_width: None,
-            max_width: None,
-            min_height: None,
-            max_height: None,
+            min_width: Dimension::Auto,
+            max_width: Dimension::Auto,
+            min_height: Dimension::Auto,
+            max_height: Dimension::Auto,
             padding: Edges::zero(),
             margin: Edges::zero(),
             transform: Transform2D::IDENTITY,

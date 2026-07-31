@@ -18,7 +18,7 @@ Unsupported properties produce style diagnostics or parser errors instead of hid
 | Category | Status | Profile |
 |---|---|---|
 | color | implemented | `background`, `background-color`, and `color` resolve from literals, local variables, and theme tokens into `ComputedStyle` colors. |
-| size | implemented | `width`, `height`, `min-width`, `max-width`, `min-height`, and `max-height` feed retained layout dimensions. |
+| size | implemented | `width`, `height`, `min-width`, `max-width`, `min-height`, and `max-height` feed retained layout dimensions. All six accept lengths, percentages, `auto`, and `fit-content`; the four `min-`/`max-` properties also accept `none`. |
 | spacing | implemented | `padding`, `padding-*`, `padding-x`, `padding-y`, `padding-inline`, `padding-block`, `margin`, `margin-*`, `margin-x`, `margin-y`, `margin-inline`, and `margin-block` resolve into edge values. |
 | border | implemented | `border`, `border-color`, `border-width`, and `border-*-width` resolve into backend-neutral border color and width fields. |
 | border | diagnostic-only | Browser-specific `border-style` is not part of the executable supported-property list; practical shell border shorthands accept solid-style syntax as a compatibility parse detail. |

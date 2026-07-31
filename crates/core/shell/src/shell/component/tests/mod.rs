@@ -56,16 +56,19 @@ fn generated_error_placeholder_is_bounded_after_restyle_constraints() {
     let mut node = runtime::bounded_error_widget(&message);
 
     // Simulate arbitrary host CSS winning during the normal restyle pass.
-    node.computed_style.max_width = None;
-    node.children[0].computed_style.max_width = None;
+    node.computed_style.max_width = mesh_core_elements::Dimension::Auto;
+    node.children[0].computed_style.max_width = mesh_core_elements::Dimension::Auto;
     rendering::constrain_error_placeholders(&mut node);
 
     for constrained in [&node, &node.children[0]] {
         assert_eq!(
             constrained.computed_style.max_width,
-            Some(ERROR_PLACEHOLDER_MAX_WIDTH)
+            mesh_core_elements::Dimension::Px(ERROR_PLACEHOLDER_MAX_WIDTH)
         );
-        assert_eq!(constrained.computed_style.min_width, Some(0.0));
+        assert_eq!(
+            constrained.computed_style.min_width,
+            mesh_core_elements::Dimension::Px(0.0)
+        );
         assert_eq!(
             constrained.computed_style.overflow_x,
             mesh_core_elements::style::Overflow::Hidden

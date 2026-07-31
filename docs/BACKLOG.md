@@ -115,11 +115,6 @@ promotion")*
       script string-parsing as temporary migration code; move them to
       template-AST traversal as the icon, keybind, and i18n extractors already
       were.
-- [ ] `min-width`/`max-width`/`min-height`/`max-height` take lengths only —
-      `ComputedStyle` stores them as `Option<f32>` while `width`/`height` are
-      `Dimension`. So `max-width: 100%` cannot clamp a fixed root to its
-      surface, and a window that wants a floating minimum must clear it
-      explicitly in each `:fullscreen`/`:maximized`/`:tiled` rule.
 - [ ] Converge the immediate and retained renderers.
       `render/src/surface/painter/tree.rs` still holds a parallel
       widget-specific immediate renderer beside display-list replay. Route

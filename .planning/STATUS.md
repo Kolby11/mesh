@@ -7,6 +7,14 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Size constraints are real dimensions.** `min-width`, `max-width`,
+`min-height`, and `max-height` are `Dimension` like `width`/`height`, so they
+take percentages, `auto`, `fit-content`, and `none` instead of lengths only
+(2026-07-31). `max-width: 100%` now clamps a fixed root to its surface; it used
+to parse to `0` and collapse the element, as did `max-width: none`. The four
+also joined the typed-literal fast path and interpolate through
+`lerp_dimension`. Record: [`log/2026-07.md`](log/2026-07.md).
+
 **The editor understands `settings.json`.** `mesh-tools-lsp` now serves the
 settings store: namespace and key completion, hover documentation, and
 diagnostics, with the schema derived from `SHELL_SETTINGS_FIELDS` and
