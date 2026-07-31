@@ -150,12 +150,13 @@ impl FrontendSurfaceComponent {
                 }
             }
 
-            if find_node_by_key(tree, &focused_key).is_some_and(|node| node.tag == "button")
+            if let Some(focused_node) = find_node_by_key(tree, &focused_key)
+                && focused_node.tag == "button"
                 && Self::key_matches_any_binding(&key, &keyboard_settings.button_activation_keys)
             {
                 self.clear_selection();
                 self.keyboard_button_press_activations
-                    .insert((focused_key.clone(), key.clone()));
+                    .insert((focused_node.id, key.clone()));
                 requests.extend(self.dispatch_keyboard_button_activation(
                     tree,
                     &focused_key,
@@ -200,13 +201,14 @@ impl FrontendSurfaceComponent {
                 modifiers,
             )?;
 
-            if find_node_by_key(tree, &focused_key).is_some_and(|node| node.tag == "button")
+            if let Some(focused_node) = find_node_by_key(tree, &focused_key)
+                && focused_node.tag == "button"
                 && Self::key_matches_any_binding(&key, &keyboard_settings.button_activation_keys)
             {
                 self.clear_selection();
                 if self
                     .keyboard_button_press_activations
-                    .remove(&(focused_key.clone(), key.clone()))
+                    .remove(&(focused_node.id, key.clone()))
                 {
                     return Ok(requests);
                 }

@@ -704,6 +704,14 @@ fn cmd_config_doctor() {
     // Module namespaces need manifests to validate against, so the module graph
     // is resolved here — no surfaces are created and no Wayland connection is
     // made.
+    let authoring_graph =
+        match mesh_core_module::package::load_installed_module_graph(&root_module_graph_path()) {
+            Ok(graph) => graph,
+            Err(err) => {
+                eprintln!("failed to resolve modules: {err}");
+                std::process::exit(1);
+            }
+        };
     let mut shell = Shell::new();
     shell.discover_modules();
     if let Err(err) = shell.resolve_modules() {
@@ -740,8 +748,10 @@ fn cmd_config_doctor() {
         );
     }
 
+    let authoring_diagnostics = authoring_graph.authoring_diagnostics();
+
     println!("settings: {}", store.path().display());
-    if diagnostics.is_empty() {
+    if diagnostics.is_empty() && authoring_diagnostics.is_empty() {
         println!("no problems found");
         return;
     }
@@ -767,8 +777,18 @@ fn cmd_config_doctor() {
         println!("        → {}", diagnostic.suggested_action);
     }
 
+    for diagnostic in &authoring_diagnostics {
+        println!();
+        println!("warning {}: {}", diagnostic.module_id, diagnostic.message);
+        println!("        → fix the module source or manifest declaration");
+    }
+
     println!();
-    println!("{}, {}", count("error", errors), count("warning", warnings));
+    println!(
+        "{}, {}",
+        count("error", errors),
+        count("warning", warnings + authoring_diagnostics.len())
+    );
     if errors > 0 {
         println!("invalid values are ignored; the declared defaults apply until they are fixed");
         std::process::exit(1);

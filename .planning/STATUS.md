@@ -7,6 +7,19 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Interaction targets are `NodeId`s end-to-end.** Pointer-down capture, active
+slider state, and keyboard button activation no longer retain structural-key
+strings. Cleanup preserves a nested target across a keyed-list reorder and
+clears it on removal; keys remain only at Lua handler/ref boundaries and in
+diagnostics (2026-07-31). Record: [`log/2026-07.md`](log/2026-07.md).
+
+**Authoring source diagnostics are explicit.** Undeclared icon, translation,
+keybind-subscription, and raw event-publish checks no longer parse every
+frontend source file during normal graph construction. `mesh-shell config
+doctor` runs them intentionally, and `MESH_AUTHORING_DIAGNOSTICS=1` enables
+them for development graph builds (2026-07-31). Record:
+[`log/2026-07.md`](log/2026-07.md).
+
 **Keyboard targets resolve in one traversal.** Keyboard payload construction
 and button activation carry a borrowed node plus transformed bounds through
 dispatch, rather than separately finding the node, bounds, and handler

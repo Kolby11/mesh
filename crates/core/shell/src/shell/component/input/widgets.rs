@@ -231,7 +231,6 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn update_slider_from_resolved_press(
         &mut self,
-        slider_key: &str,
         node: &WidgetNode,
         bounds: (f32, f32, f32, f32),
         x: f32,
@@ -560,7 +559,9 @@ impl FrontendSurfaceComponent {
     ) -> Option<String> {
         captured_release_key(
             tree,
-            self.pointer_down_key.as_deref(),
+            self.pointer_down_target
+                .as_ref()
+                .map(|target| target.key.as_str()),
             self.pointer_down_bounds,
             x,
             y,

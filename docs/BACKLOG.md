@@ -96,12 +96,6 @@ promotion")*
 
 ## Tech debt
 
-- [ ] Move the authoring diagnostics off shell startup. Undeclared icons,
-      translation keys, keybind subscriptions, and event publishes are scanned
-      on every `InstalledModuleGraph` build; the Luau half now costs 20-35ms
-      for the shipped modules because it runs a real parser. These are author
-      feedback, not runtime requirements — run them in `mesh-shell config
-      doctor` and behind a dev flag, not on the path to first paint.
 - [ ] Converge the immediate and retained renderers.
       `render/src/surface/painter/tree.rs` still holds a parallel
       widget-specific immediate renderer beside display-list replay. Route
@@ -172,13 +166,6 @@ gate where the win is structural.
       **values**, and the broader symbol types remain. Profiling now puts the
       dominant remaining build cost in style resolution, not further attribute
       work. *(detail: "P2 — typing & interning")*
-- [ ] Finish the interaction-state move from strings to `NodeId`:
-      `pointer_down_key`, active-slider identity, and keyboard activation maps.
-      Keep strings only at Lua, diagnostics, and explicit ref boundaries. Add
-      keyed-list reorder/removal and nested-component identity regressions.
-      Scroll, checked, input, slider, hover, and focus state are already
-      migrated — see
-      [`interaction-identity-2026-07-28.md`](../.planning/log/interaction-identity-2026-07-28.md).
 - [ ] Replace the magic-string protocol at the composition boundary
       (`__mesh_embed__::`, `__mesh_binding_*`, `__mesh_bind_this`, the
       promoted-popover marker) with typed channels. The shared element IR owns

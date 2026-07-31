@@ -838,8 +838,8 @@ fn selector_dependencies_filter_unrelated_interaction_changes() {
     component.interaction_snapshot_valid = true;
     component.previous_focused_key = Some(runtime_node_id_for_key("root/old"));
     component.focused_key = Some("root/new".into());
-    component.previous_active_key = Some("root/pressed".into());
-    component.pointer_down_key = None;
+    component.previous_active_key = Some(runtime_node_id_for_key("root/pressed"));
+    component.pointer_down_id = None;
     component
         .previous_checked_values
         .insert(runtime_node_id_for_key("root/check"), false);

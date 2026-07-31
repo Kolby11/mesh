@@ -825,8 +825,8 @@ fn pointer_release_without_requests_still_clears_active_state() {
         component.wants_render(),
         "release must dirty the component so :active styling is cleared"
     );
-    assert!(component.pointer_down_key.is_none());
-    assert!(component.active_slider_key.is_none());
+    assert!(component.pointer_down_id.is_none());
+    assert!(component.active_slider_id.is_none());
 }
 
 #[test]
@@ -841,7 +841,7 @@ fn handlerless_slider_drag_uses_interaction_restyle_not_script_rebuild() {
         20.0,
         &[],
     )]));
-    component.active_slider_key = Some("root/0".into());
+    component.active_slider_id = Some(component.last_tree.as_ref().unwrap().children[0].id);
     component.dirty = false;
     component.dirty_types = ComponentDirtyFlags::empty();
 
@@ -889,7 +889,7 @@ end
         20.0,
         &[("change", "onChange")],
     )]));
-    component.active_slider_key = Some("root/0".into());
+    component.active_slider_id = Some(component.last_tree.as_ref().unwrap().children[0].id);
     component.dirty = false;
     component.dirty_types = ComponentDirtyFlags::empty();
 
@@ -928,7 +928,7 @@ fn handlerless_slider_drag_retained_paint_beats_script_rebuild() {
         x: f32,
         force_old_script_rebuild: bool,
     ) {
-        component.active_slider_key = Some("root/0/0".into());
+        component.active_slider_id = Some(runtime_node_id_for_key("root/0/0"));
         component
             .handle_input(theme, 640, 480, ComponentInput::PointerMove { x, y: 10.0 })
             .unwrap();

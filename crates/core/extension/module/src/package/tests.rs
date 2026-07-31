@@ -3960,8 +3960,15 @@ fn graph_diagnostics_report_undeclared_i18n_key() {
     module.path = dir.join("module.json");
 
     let graph = InstalledModuleGraph::from_parts(root, vec![module]).unwrap();
-    let i18n_diags: Vec<_> = graph
-        .diagnostics()
+    assert!(
+        !graph
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.status == "undeclared_i18n_key"),
+        "source authoring checks must not run during normal graph construction"
+    );
+    let authoring = graph.authoring_diagnostics();
+    let i18n_diags: Vec<_> = authoring
         .iter()
         .filter(|d| d.status == "undeclared_i18n_key")
         .collect();
@@ -4005,14 +4012,15 @@ mesh.events.publish("mesh.hyprland.switch_workspace", { id = 1 })
 
     let graph = InstalledModuleGraph::from_parts(root, vec![module]).unwrap();
 
-    assert!(graph.diagnostics().iter().any(|diagnostic| {
+    let authoring = graph.authoring_diagnostics();
+    assert!(authoring.iter().any(|diagnostic| {
         diagnostic.module_id == "@mesh/test-frontend"
             && diagnostic.status == "raw_interface_domain_event_publish"
             && diagnostic
                 .message
                 .contains("mesh.hyprland.switch_workspace")
     }));
-    assert!(!graph.diagnostics().iter().any(|diagnostic| {
+    assert!(!authoring.iter().any(|diagnostic| {
         diagnostic.status == "raw_interface_domain_event_publish"
             && diagnostic.message.contains("shell.set-theme")
     }));
@@ -4046,12 +4054,13 @@ mesh.events.publish("shell.not-declared", {})
 
     let graph = InstalledModuleGraph::from_parts(root, vec![module]).unwrap();
 
-    assert!(graph.diagnostics().iter().any(|diagnostic| {
+    let authoring = graph.authoring_diagnostics();
+    assert!(authoring.iter().any(|diagnostic| {
         diagnostic.module_id == "@mesh/test-frontend"
             && diagnostic.status == "unknown_shell_event_publish"
             && diagnostic.message.contains("shell.not-declared")
     }));
-    assert!(!graph.diagnostics().iter().any(|diagnostic| {
+    assert!(!authoring.iter().any(|diagnostic| {
         diagnostic.status == "unknown_shell_event_publish"
             && diagnostic.message.contains("shell.set-theme")
     }));
@@ -4097,12 +4106,13 @@ fn graph_diagnostics_report_keybind_subscription_contract_gaps() {
 
     let graph = InstalledModuleGraph::from_parts(root, vec![module]).unwrap();
 
-    assert!(graph.diagnostics().iter().any(|diagnostic| {
+    let authoring = graph.authoring_diagnostics();
+    assert!(authoring.iter().any(|diagnostic| {
         diagnostic.module_id == "@mesh/test-frontend"
             && diagnostic.status == "undeclared_keybind_subscription"
             && diagnostic.message.contains("missing")
     }));
-    assert!(graph.diagnostics().iter().any(|diagnostic| {
+    assert!(authoring.iter().any(|diagnostic| {
         diagnostic.module_id == "@mesh/test-frontend"
             && diagnostic.status == "keybind_subscription_missing_handler"
             && diagnostic.message.contains("mute")
@@ -4284,7 +4294,7 @@ fn graph_diagnostics_no_undeclared_i18n_key_when_all_present() {
     let graph = InstalledModuleGraph::from_parts(root, vec![module]).unwrap();
     assert!(
         !graph
-            .diagnostics()
+            .authoring_diagnostics()
             .iter()
             .any(|d| d.status == "undeclared_i18n_key"),
         "no undeclared_i18n_key diagnostic when all keys are in catalog"

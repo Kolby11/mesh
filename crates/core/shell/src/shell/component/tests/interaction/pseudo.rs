@@ -4,7 +4,7 @@ use super::*;
 fn pseudo_state_annotation_uses_stable_keys_after_rebuild() {
     let focused_key = Some("root/0".to_string());
     let hovered_path = ["root", "root/0"].map(runtime_node_id_for_key);
-    let active_key = Some("root/0".to_string());
+    let active_id = Some(runtime_node_id_for_key("root/0"));
     let checked_values = HashMap::from([(runtime_node_id_for_key("root/1"), true)]);
 
     let mut first_tree = root_with(vec![
@@ -18,8 +18,8 @@ fn pseudo_state_annotation_uses_stable_keys_after_rebuild() {
         &focused_key,
         &focused_key,
         &hovered_path,
-        &active_key,
-        &None,
+        active_id,
+        None,
         &HashMap::new(),
         &mut HashMap::new(),
         &mut HashMap::new(),
@@ -41,8 +41,8 @@ fn pseudo_state_annotation_uses_stable_keys_after_rebuild() {
         &focused_key,
         &focused_key,
         &hovered_path,
-        &active_key,
-        &None,
+        active_id,
+        None,
         &HashMap::new(),
         &mut HashMap::new(),
         &mut HashMap::new(),
@@ -75,8 +75,8 @@ fn pseudo_state_annotation_sets_disabled_and_checked_deterministically() {
         &None,
         &None,
         &[],
-        &None,
-        &None,
+        None,
+        None,
         &HashMap::new(),
         &mut HashMap::new(),
         &mut HashMap::new(),
@@ -142,7 +142,7 @@ input:checked {
         .map(runtime_node_id_for_key)
         .to_vec();
     component.hovered_key = Some("root/0/2".into());
-    component.pointer_down_key = Some("root/0/2".into());
+    component.pointer_down_id = Some(runtime_node_id_for_key("root/0/2"));
     component
         .checked_values
         .insert(runtime_node_id_for_key("root/0/3"), true);
@@ -216,7 +216,7 @@ fn targeted_restyle_tracks_active_checked_and_focus_visible_changes() {
         component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
     }
 
-    component.pointer_down_key = Some("root/0/0".into());
+    component.pointer_down_id = Some(runtime_node_id_for_key("root/0/0"));
     component
         .checked_values
         .insert(runtime_node_id_for_key("root/0/1"), true);
@@ -262,7 +262,7 @@ fn targeted_restyle_tracks_active_checked_and_focus_visible_changes() {
         mesh_core_elements::style::TextAlign::Right
     );
 
-    component.pointer_down_key = None;
+    component.pointer_down_id = None;
     component
         .checked_values
         .insert(runtime_node_id_for_key("root/0/1"), false);

@@ -405,17 +405,17 @@ impl FrontendSurfaceComponent {
             }
         }
 
-        if let Some(key) = &self.pointer_down_key {
-            if find_node_by_key(tree, key).is_none() {
-                self.pointer_down_key = None;
+        if let Some(node_id) = self.pointer_down_id {
+            if find_node_by_id(tree, node_id).is_none() {
+                self.pointer_down_id = None;
                 self.pointer_down_bounds = None;
                 self.pointer_down_target = None;
             }
         }
 
-        if let Some(key) = &self.active_slider_key {
-            if find_node_by_key(tree, key).is_none() {
-                self.active_slider_key = None;
+        if let Some(node_id) = self.active_slider_id {
+            if find_node_by_id(tree, node_id).is_none() {
+                self.active_slider_id = None;
             }
         }
 

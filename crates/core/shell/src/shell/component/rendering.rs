@@ -381,8 +381,8 @@ impl FrontendSurfaceComponent {
                     .map(runtime_node_id_for_key)
             }),
             &self.hovered_path,
-            &self.pointer_down_key,
-            &self.active_slider_key,
+            self.pointer_down_id,
+            self.active_slider_id,
             &self.input_values,
             &mut self.slider_values,
             &mut self.slider_script_values,
@@ -699,7 +699,7 @@ impl FrontendSurfaceComponent {
                 .as_deref()
                 .map(runtime_node_id_for_key)
         });
-        self.previous_active_key.clone_from(&self.pointer_down_key);
+        self.previous_active_key = self.pointer_down_id;
         if self.cached_restyle_state_dependencies.checked {
             self.previous_checked_values
                 .clone_from(&self.checked_values);
@@ -774,13 +774,12 @@ impl FrontendSurfaceComponent {
             changed_ids.extend(self.previous_focused_key.into_iter().chain(focused_id));
         }
 
-        if dependencies.active && self.previous_active_key != self.pointer_down_key {
-            if let Some(ref prev) = self.previous_active_key {
-                changed_ids.insert(runtime_node_id_for_key(prev));
-            }
-            if let Some(ref curr) = self.pointer_down_key {
-                changed_ids.insert(runtime_node_id_for_key(curr));
-            }
+        if dependencies.active && self.previous_active_key != self.pointer_down_id {
+            changed_ids.extend(
+                self.previous_active_key
+                    .into_iter()
+                    .chain(self.pointer_down_id),
+            );
         }
 
         if dependencies.checked {

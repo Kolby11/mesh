@@ -304,7 +304,9 @@ end
     );
 
     let child_handler = format!("__mesh_embed__::{PARENT_ID}/local:Child::fire_it");
-    component.call_namespaced_handler(&child_handler, &[]).unwrap();
+    component
+        .call_namespaced_handler(&child_handler, &[])
+        .unwrap();
 
     assert_eq!(
         child_runtime_value(&component, "value"),

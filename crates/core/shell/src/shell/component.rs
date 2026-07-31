@@ -70,6 +70,15 @@ use std::time::{Duration, Instant};
 
 pub(super) type SurfaceCssProps = HashMap<String, mesh_core_component::style::StyleValue>;
 
+pub(super) fn find_node_by_id(node: &WidgetNode, node_id: NodeId) -> Option<&WidgetNode> {
+    if node.id == node_id {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .find_map(|child| find_node_by_id(child, node_id))
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct StyleStateDependencies {
     any: bool,
@@ -684,16 +693,16 @@ pub(super) struct FrontendSurfaceComponent {
     /// Authoritative focus identities for runtime annotation and restyling.
     focused_id: Option<NodeId>,
     focus_visible_id: Option<NodeId>,
-    pointer_down_key: Option<String>,
+    pointer_down_id: Option<NodeId>,
     pointer_down_bounds: Option<(f32, f32, f32, f32)>,
     pointer_down_target: Option<input::PressedTargetSnapshot>,
-    active_slider_key: Option<String>,
+    active_slider_id: Option<NodeId>,
     gesture_capture: Option<GestureCapture>,
     touch_targets: HashMap<i32, String>,
     active_touches: HashMap<i32, (f32, f32)>,
     touch_gestures: HashMap<i32, TouchGestureCapture>,
     last_tap: Option<TapRecord>,
-    keyboard_button_press_activations: HashSet<(String, String)>,
+    keyboard_button_press_activations: HashSet<(NodeId, String)>,
     /// When a surface with keyboard interactivity transitions visible→true,
     /// this flag tells the next paint to seed focus on the first tabbable
     /// element. Lets a popover work with keyboard immediately after opening
@@ -752,7 +761,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// Previous interaction states whose pseudo-classes can change without a
     /// template rebuild. Together with hover/focus these make targeted
     /// interaction restyle complete for every supported dynamic pseudo-state.
-    previous_active_key: Option<String>,
+    previous_active_key: Option<NodeId>,
     previous_checked_values: HashMap<NodeId, bool>,
     interaction_snapshot_valid: bool,
     hovered_pos: (f32, f32),
@@ -1016,10 +1025,10 @@ impl FrontendSurfaceComponent {
             focus_visible_key: None,
             focused_id: None,
             focus_visible_id: None,
-            pointer_down_key: None,
+            pointer_down_id: None,
             pointer_down_bounds: None,
             pointer_down_target: None,
-            active_slider_key: None,
+            active_slider_id: None,
             gesture_capture: None,
             touch_targets: HashMap::new(),
             active_touches: HashMap::new(),

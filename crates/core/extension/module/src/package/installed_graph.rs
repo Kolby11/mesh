@@ -349,6 +349,11 @@ impl InstalledModuleGraph {
             &interface_contracts,
             manual_diagnostics,
         );
+        let mut diagnostics = diagnostics;
+        if authoring_diagnostics_enabled() {
+            diagnostics.extend(build_authoring_diagnostics(&graph_modules));
+            sort_diagnostics(&mut diagnostics);
+        }
         let health = build_graph_health(
             &backend_providers,
             &root.providers,
@@ -441,6 +446,13 @@ impl InstalledModuleGraph {
 
     pub fn diagnostics(&self) -> &[ModuleGraphDiagnostic] {
         &self.diagnostics
+    }
+
+    /// Static authoring feedback that is intentionally excluded from normal
+    /// graph construction. It parses module source, so callers should invoke
+    /// it from explicit tooling such as `mesh-shell config doctor`.
+    pub fn authoring_diagnostics(&self) -> Vec<ModuleGraphDiagnostic> {
+        build_authoring_diagnostics(&self.modules)
     }
 
     pub fn health(&self) -> &[ModuleGraphHealthRecord] {
@@ -1366,17 +1378,33 @@ fn build_graph_diagnostics(
     diagnose_settings_namespaces(contributions, &mut diagnostics);
     diagnose_frontend_surfaces(contributions, &mut diagnostics);
     diagnose_required_binaries(modules, &mut diagnostics);
-    diagnose_frontend_source_contracts(modules, &mut diagnostics);
     diagnose_missing_interface_contracts(modules, &mut diagnostics);
     diagnose_duplicate_keybind_triggers(contributions, &mut diagnostics);
 
+    sort_diagnostics(&mut diagnostics);
+    diagnostics
+}
+
+fn authoring_diagnostics_enabled() -> bool {
+    std::env::var_os("MESH_AUTHORING_DIAGNOSTICS").is_some_and(|value| value != "0")
+}
+
+fn build_authoring_diagnostics(
+    modules: &HashMap<String, InstalledModuleNode>,
+) -> Vec<ModuleGraphDiagnostic> {
+    let mut diagnostics = Vec::new();
+    diagnose_frontend_source_contracts(modules, &mut diagnostics);
+    sort_diagnostics(&mut diagnostics);
+    diagnostics
+}
+
+fn sort_diagnostics(diagnostics: &mut [ModuleGraphDiagnostic]) {
     diagnostics.sort_by(|a, b| {
         a.status
             .cmp(&b.status)
             .then_with(|| a.module_id.cmp(&b.module_id))
             .then_with(|| a.contribution_id.cmp(&b.contribution_id))
     });
-    diagnostics
 }
 
 fn diagnose_frontend_requirements(

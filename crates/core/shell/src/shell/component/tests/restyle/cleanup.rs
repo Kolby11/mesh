@@ -36,7 +36,7 @@ fn restyle_state_cleanup_focus_cleared_when_node_removed() {
 }
 
 /// When the active (pointer-down) node is removed from the tree, the
-/// `pointer_down_key` must be cleared deterministically.
+/// `pointer_down_id` must be cleared deterministically.
 #[test]
 fn restyle_state_cleanup_active_cleared_when_node_removed() {
     let mut component = test_frontend_component(
@@ -51,8 +51,8 @@ fn restyle_state_cleanup_active_cleared_when_node_removed() {
 "#,
     );
 
-    // Set a stale pointer_down_key pointing to a non-existent node.
-    component.pointer_down_key = Some("root/0/99".into());
+    // Set a stale pointer_down_id pointing to a non-existent node.
+    component.pointer_down_id = Some(runtime_node_id_for_key("root/0/99"));
     component.dirty = true;
 
     let theme = default_theme();
@@ -60,8 +60,8 @@ fn restyle_state_cleanup_active_cleared_when_node_removed() {
     component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
 
     assert!(
-        component.pointer_down_key.is_none(),
-        "pointer_down_key must be cleared when the active node is absent from the final tree"
+        component.pointer_down_id.is_none(),
+        "pointer_down_id must be cleared when the active node is absent from the final tree"
     );
 
     // Existing button must not show stale active styling.
@@ -107,7 +107,7 @@ button:hover {
     component.hovered_path = ["root", "root/0", "root/0/1"]
         .map(runtime_node_id_for_key)
         .to_vec();
-    component.pointer_down_key = Some("root/0/0".into());
+    component.pointer_down_id = Some(runtime_node_id_for_key("root/0/0"));
     component.dirty = true;
     component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
 
@@ -123,9 +123,9 @@ button:hover {
         "hovered_key for a present node must not be pruned"
     );
     assert_eq!(
-        component.pointer_down_key.as_deref(),
-        Some("root/0/0"),
-        "pointer_down_key for a present node must not be pruned"
+        component.pointer_down_id,
+        Some(runtime_node_id_for_key("root/0/0")),
+        "pointer_down_id for a present node must not be pruned"
     );
 
     // State flags must be applied correctly.
@@ -133,6 +133,39 @@ button:hover {
     assert!(node_by_mesh_key(tree, "root/0/0").state.focused);
     assert!(node_by_mesh_key(tree, "root/0/1").state.hovered);
     assert!(node_by_mesh_key(tree, "root/0/0").state.active);
+}
+
+#[test]
+fn interaction_target_cleanup_tracks_nested_node_ids_through_reorder_and_removal() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    let mut nested_component = event_node("box", "nested-component", 0.0, 0.0, 120.0, 32.0, &[]);
+    let dragged_slider = event_node(
+        "slider",
+        "nested-component/volume",
+        0.0,
+        0.0,
+        120.0,
+        20.0,
+        &[],
+    );
+    let dragged_id = dragged_slider.id;
+    nested_component.children = vec![dragged_slider].into();
+    let sibling = event_node("button", "list-item", 0.0, 36.0, 120.0, 20.0, &[]);
+
+    component.pointer_down_id = Some(dragged_id);
+    component.active_slider_id = Some(dragged_id);
+
+    // Reordering an enclosing keyed-list item must keep the nested drag target.
+    let reordered = root_with(vec![sibling, nested_component]);
+    component.prune_stale_interaction_targets(&reordered);
+    assert_eq!(component.pointer_down_id, Some(dragged_id));
+    assert_eq!(component.active_slider_id, Some(dragged_id));
+
+    // Once the item is removed, both identities are cleared together.
+    let removed = root_with(vec![]);
+    component.prune_stale_interaction_targets(&removed);
+    assert!(component.pointer_down_id.is_none());
+    assert!(component.active_slider_id.is_none());
 }
 
 #[test]
@@ -171,8 +204,8 @@ fn selection_boundaries_ignore_selectable_text_inside_controls() {
         "selectable text nested inside controls must not start Phase 10 selection"
     );
     assert_eq!(
-        component.pointer_down_key.as_deref(),
-        Some("root/0"),
+        component.pointer_down_id,
+        Some(component.last_tree.as_ref().unwrap().children[0].id),
         "control pointer handling should still win when text lives inside a button"
     );
 }

@@ -77,10 +77,10 @@ impl FrontendSurfaceComponent {
                 if pressed {
                     if let Some(selection_key) = selectable_text_target_key(tree, x, y) {
                         let requests = self.set_focus_target(tree, None, false)?;
-                        self.pointer_down_key = None;
+                        self.pointer_down_id = None;
                         self.pointer_down_bounds = None;
                         self.pointer_down_target = None;
-                        self.active_slider_key = None;
+                        self.active_slider_id = None;
                         self.begin_text_selection(selection_key, x, y);
                         self.invalidate_paint();
                         return Ok(requests);
@@ -91,7 +91,7 @@ impl FrontendSurfaceComponent {
                     if let Some(target) = press_hit.target {
                         let node_key = target.key.to_owned();
                         let focusable_key = press_hit.focusable.map(|hit| hit.key.to_owned());
-                        self.pointer_down_key = Some(node_key.clone());
+                        self.pointer_down_id = Some(target.node.id);
                         self.pointer_down_bounds = Some(target.bounds);
                         self.pointer_down_target = Some(self.pressed_target_snapshot(
                             &node_key,
@@ -107,9 +107,8 @@ impl FrontendSurfaceComponent {
                         };
 
                         if target.node.tag == "slider" {
-                            self.active_slider_key = Some(node_key.clone());
+                            self.active_slider_id = Some(target.node.id);
                             self.update_slider_from_resolved_press(
-                                &node_key,
                                 target.node,
                                 target.bounds,
                                 x,
@@ -129,7 +128,7 @@ impl FrontendSurfaceComponent {
                                 self.invalidate_interaction_restyle();
                             }
                         } else {
-                            self.active_slider_key = None;
+                            self.active_slider_id = None;
                             if node_is_source(target.node, &["option"]) {
                                 requests.extend(self.activate_option_choice_for_node(
                                     tree,
@@ -161,10 +160,10 @@ impl FrontendSurfaceComponent {
                         }
                     } else {
                         let requests = self.set_focus_target(tree, None, false)?;
-                        self.pointer_down_key = None;
+                        self.pointer_down_id = None;
                         self.pointer_down_bounds = None;
                         self.pointer_down_target = None;
-                        self.active_slider_key = None;
+                        self.active_slider_id = None;
                         self.invalidate_interaction_restyle();
                         if !requests.is_empty() {
                             return Ok(requests);
@@ -172,7 +171,11 @@ impl FrontendSurfaceComponent {
                     }
                 } else {
                     let mut requests = Vec::new();
-                    if let Some(slider_key) = self.active_slider_key.clone()
+                    if let Some(slider_key) = self
+                        .active_slider_id
+                        .and_then(|node_id| find_node_by_id(tree, node_id))
+                        .and_then(WidgetNode::mesh_key)
+                        .map(str::to_owned)
                         && let Some(value) = self.slider_value(tree, &slider_key)
                         && find_event_handler(tree, &slider_key, "release").is_some()
                     {
@@ -187,7 +190,7 @@ impl FrontendSurfaceComponent {
 
                     self.end_text_selection_drag();
 
-                    if self.selection.is_some() && self.pointer_down_key.is_none() {
+                    if self.selection.is_some() && self.pointer_down_id.is_none() {
                         self.invalidate_paint();
                         return Ok(requests);
                     }
@@ -248,10 +251,10 @@ impl FrontendSurfaceComponent {
                             }
                         }
                     }
-                    self.pointer_down_key = None;
+                    self.pointer_down_id = None;
                     self.pointer_down_bounds = None;
                     self.pointer_down_target = None;
-                    self.active_slider_key = None;
+                    self.active_slider_id = None;
                     self.invalidate_interaction_restyle();
                     if !requests.is_empty() {
                         return Ok(requests);
@@ -259,7 +262,12 @@ impl FrontendSurfaceComponent {
                 }
             }
             ComponentInput::PointerMove { x, y } => {
-                if let Some(slider_key) = self.active_slider_key.clone() {
+                if let Some(slider_key) = self
+                    .active_slider_id
+                    .and_then(|node_id| find_node_by_id(tree, node_id))
+                    .and_then(WidgetNode::mesh_key)
+                    .map(str::to_owned)
+                {
                     self.update_slider_from_position(tree, &slider_key, x, y);
                     let mut requests = Vec::new();
                     if let Some(value) = self.slider_value(tree, &slider_key) {
