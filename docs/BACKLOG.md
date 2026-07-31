@@ -218,10 +218,6 @@ gate where the win is structural.
       (I; see log).
 ### Input
 
-- [ ] Resolve each keyboard target once. `build_keyboard_event` searches
-      separately for node and bounds while a fused traversal already exists;
-      return a borrowed `ResolvedInputTarget` and reuse it for payload,
-      accessibility, and dispatch.
 - [ ] Slider drags with `change` / `release` handlers still take script
       invalidation; closing this needs narrow invalidation (J). Handlerless
       drags already use interaction restyle.

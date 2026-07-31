@@ -24,6 +24,14 @@ struct SurfaceShortcutDeclaration {
     localized_triggers: HashMap<String, mesh_core_module::KeybindTrigger>,
 }
 
+/// A keyboard target resolved in one tree traversal. Keyboard event payloads
+/// and dispatch both need the node's transformed bounds, so keeping these
+/// together prevents each stage from searching the tree again.
+struct ResolvedInputTarget<'a> {
+    node: &'a WidgetNode,
+    bounds: (f32, f32, f32, f32),
+}
+
 #[derive(Debug, Clone)]
 pub(in crate::shell::component) struct KeybindSubscriber {
     pub(in crate::shell::component) keybind_id: String,
@@ -32,6 +40,14 @@ pub(in crate::shell::component) struct KeybindSubscriber {
 }
 
 impl FrontendSurfaceComponent {
+    fn resolve_keyboard_target<'a>(
+        tree: &'a WidgetNode,
+        node_key: &str,
+    ) -> Option<ResolvedInputTarget<'a>> {
+        let (node, bounds) = find_node_with_bounds_by_key(tree, node_key)?;
+        Some(ResolvedInputTarget { node, bounds })
+    }
+
     pub(super) fn handle_key_pressed(
         &mut self,
         tree: &WidgetNode,
@@ -252,9 +268,23 @@ impl FrontendSurfaceComponent {
         key: &str,
         modifiers: KeyModifiers,
     ) -> serde_json::Value {
-        let target = find_node_by_key(tree, node_key);
-        let (left, top, right, bottom) =
-            find_node_bounds_by_key(tree, node_key, 0.0, 0.0).unwrap_or((0.0, 0.0, 0.0, 0.0));
+        let target = Self::resolve_keyboard_target(tree, node_key);
+        self.build_keyboard_event_for(tree, node_key, target, event_type, key, modifiers)
+    }
+
+    fn build_keyboard_event_for(
+        &self,
+        tree: &WidgetNode,
+        node_key: &str,
+        target: Option<ResolvedInputTarget<'_>>,
+        event_type: &str,
+        key: &str,
+        modifiers: KeyModifiers,
+    ) -> serde_json::Value {
+        let (left, top, right, bottom) = target
+            .as_ref()
+            .map(|target| target.bounds)
+            .unwrap_or((0.0, 0.0, 0.0, 0.0));
         let width = (right - left).max(0.0);
         let height = (bottom - top).max(0.0);
         let bounds = serde_json::json!({
@@ -269,9 +299,18 @@ impl FrontendSurfaceComponent {
             "margin_left": left.round() as i32,
             "margin_bottom": bottom.round() as i32,
         });
-        let tag = target.map(|node| node.tag.clone()).unwrap_or_default();
+        let tag = target
+            .as_ref()
+            .map(|target| target.node.tag.clone())
+            .unwrap_or_default();
         let mut current_target = target
-            .map(|node| element_snapshot_json(node, left - node.layout.x, top - node.layout.y))
+            .map(|target| {
+                element_snapshot_json(
+                    target.node,
+                    left - target.node.layout.x,
+                    top - target.node.layout.y,
+                )
+            })
             .unwrap_or_else(|| serde_json::json!({}));
         if let Some(object) = current_target.as_object_mut() {
             object.insert(
@@ -315,8 +354,22 @@ impl FrontendSurfaceComponent {
         key: &str,
         modifiers: KeyModifiers,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
-        let event = self.build_keyboard_event(tree, node_key, event_type, key, modifiers);
-        self.call_node_handler(tree, node_key, handler_name, &[event])
+        let target = Self::resolve_keyboard_target(tree, node_key);
+        let event = self.build_keyboard_event_for(
+            tree,
+            node_key,
+            target.as_ref().map(|target| ResolvedInputTarget {
+                node: target.node,
+                bounds: target.bounds,
+            }),
+            event_type,
+            key,
+            modifiers,
+        );
+        let Some(target) = target else {
+            return Ok(Vec::new());
+        };
+        self.call_resolved_node_handler(target.node, handler_name, &[event])
     }
 
     pub(super) fn dispatch_keyboard_button_activation(
@@ -325,14 +378,25 @@ impl FrontendSurfaceComponent {
         node_key: &str,
         key: &str,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
-        if find_click_handler(tree, node_key).is_none() {
+        let Some(target) = Self::resolve_keyboard_target(tree, node_key) else {
+            return Ok(Vec::new());
+        };
+        if !target.node.event_handlers.contains_key("click")
+            && !target.node.event_handler_calls.contains_key("click")
+        {
             return Ok(Vec::new());
         }
-        let (left, top, right, bottom) =
-            find_node_bounds_by_key(tree, node_key, 0.0, 0.0).unwrap_or((0.0, 0.0, 0.0, 0.0));
+        let (left, top, right, bottom) = target.bounds;
         let center_x = (left + right) * 0.5;
         let center_y = (top + bottom) * 0.5;
-        let mut event = self.build_click_event(tree, node_key, center_x, center_y);
+        let mut event = self.build_click_event_for(
+            tree,
+            node_key,
+            Some(target.node),
+            target.bounds,
+            center_x,
+            center_y,
+        );
         if let Some(object) = event.as_object_mut() {
             object.insert(
                 "trigger".into(),
@@ -342,14 +406,15 @@ impl FrontendSurfaceComponent {
                 }),
             );
         }
-        if find_node_by_key(tree, node_key).is_some_and(|node| {
-            node.attributes
-                .get("aria-haspopup")
-                .is_some_and(|value| value == "true" || value == "menu")
-        }) {
+        if target
+            .node
+            .attributes
+            .get("aria-haspopup")
+            .is_some_and(|value| value == "true" || value == "menu")
+        {
             self.pending_embedded_popover_focus = true;
         }
-        self.call_node_handler(tree, node_key, "click", &[event])
+        self.call_resolved_node_handler(target.node, "click", &[event])
     }
 
     /// Activation keys and shortcut overrides for the current key event.

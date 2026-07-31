@@ -7,6 +7,11 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Keyboard targets resolve in one traversal.** Keyboard payload construction
+and button activation carry a borrowed node plus transformed bounds through
+dispatch, rather than separately finding the node, bounds, and handler
+(2026-07-31). Record: [`log/2026-07.md`](log/2026-07.md).
+
 **Navigation popover triggers are push-driven.** The language and theme
 popovers notify their bound trigger when state changes, so trigger render hooks
 only establish the live binding and no longer poll child or service state
