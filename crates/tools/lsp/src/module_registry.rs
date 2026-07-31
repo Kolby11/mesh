@@ -26,6 +26,13 @@ pub struct ModuleRegistry {
     pub interface_shapes: HashMap<String, InterfaceShape>,
     /// Maps component tag name → module-id for modules that export a component tag.
     pub exported_tags: HashMap<String, String>,
+    /// Theme ids installed on this machine, from the theme directory
+    /// (`config/themes` in a checkout, `$MESH_HOME/themes` otherwise) plus any
+    /// theme modules in the graph. Sorted, deduplicated.
+    pub themes: Vec<String>,
+    /// Locale codes some module ships a catalog for, plus the default locales
+    /// modules declare. Sorted, deduplicated.
+    pub locales: Vec<String>,
 }
 
 impl ModuleRegistry {
@@ -37,6 +44,8 @@ impl ModuleRegistry {
             interface_fields: HashMap::new(),
             interface_shapes: HashMap::new(),
             exported_tags: HashMap::new(),
+            themes: Vec::new(),
+            locales: Vec::new(),
         }
     }
 
@@ -48,6 +57,9 @@ impl ModuleRegistry {
         for root in search_roots {
             registry.scan_dir(&root);
         }
+
+        registry.themes = discover_themes(workspace_root, &registry);
+        registry.locales = discover_locales(&registry);
 
         registry
     }
@@ -177,6 +189,96 @@ impl ModuleRegistry {
     pub fn module_entrypoint(&self, module_id: &str) -> Option<&Path> {
         self.module_entrypoints.get(module_id).map(PathBuf::as_path)
     }
+
+    /// Ids of every discovered module, sorted.
+    pub fn module_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.manifests.keys().cloned().collect();
+        ids.sort();
+        ids
+    }
+
+    /// Ids of the discovered modules of one kind, sorted. Used to offer only
+    /// icon packs where an icon pack belongs.
+    pub fn module_ids_of_type(&self, module_type: ModuleType) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .manifests
+            .iter()
+            .filter(|(_, manifest)| manifest.package.module_type == module_type)
+            .map(|(id, _)| id.clone())
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    /// Interface ids (`mesh.audio`), sorted.
+    pub fn interface_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.interface_fields.keys().cloned().collect();
+        ids.sort();
+        ids
+    }
+
+    /// A one-line description of a module, for completion documentation.
+    pub fn module_summary(&self, module_id: &str) -> Option<String> {
+        let manifest = self.manifests.get(module_id)?;
+        let kind = manifest.package.module_type.to_string();
+        Some(match &manifest.package.description {
+            Some(description) => format!("`{kind}` module — {description}"),
+            None => format!("`{kind}` module"),
+        })
+    }
+}
+
+/// Theme ids the shell could activate: the theme packages and legacy `*.json`
+/// themes in the theme directory, plus modules of kind `theme`.
+fn discover_themes(workspace_root: &Path, registry: &ModuleRegistry) -> Vec<String> {
+    let mut ids: Vec<String> =
+        mesh_core_theme::load_themes_from_dir(&mesh_core_theme::theme_dir_path())
+            .into_iter()
+            .map(|theme| theme.id)
+            .collect();
+
+    // A checkout being edited is not necessarily the checkout the LSP binary
+    // was built from, so look next to the workspace root as well.
+    ids.extend(
+        mesh_core_theme::load_themes_from_dir(&workspace_root.join("config/themes"))
+            .into_iter()
+            .map(|theme| theme.id),
+    );
+
+    ids.extend(registry.module_ids_of_type(ModuleType::Theme));
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// Locale codes with a catalog somewhere in the graph: every `config/i18n/*.json`
+/// a module ships, plus the default locales modules declare.
+fn discover_locales(registry: &ModuleRegistry) -> Vec<String> {
+    let mut locales: Vec<String> = Vec::new();
+
+    for dir in registry.module_dirs.values() {
+        let Ok(entries) = std::fs::read_dir(dir.join("config/i18n")) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json")
+                && let Some(stem) = path.file_stem().and_then(|stem| stem.to_str())
+            {
+                locales.push(stem.to_string());
+            }
+        }
+    }
+
+    for manifest in registry.manifests.values() {
+        if let Some(i18n) = &manifest.i18n {
+            locales.push(i18n.default_locale.clone());
+        }
+    }
+
+    locales.sort();
+    locales.dedup();
+    locales
 }
 
 fn search_paths(workspace_root: &Path) -> Vec<PathBuf> {

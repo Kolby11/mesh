@@ -5,13 +5,15 @@ use tower_lsp::{Client, LanguageServer, jsonrpc::Result, lsp_types::*};
 
 use crate::{
     analyzer, definition, diagnostics, document::Document, hover, manifest,
-    manifest::ManifestDocument, module_registry::ModuleRegistry, semantic_tokens,
+    manifest::ManifestDocument, module_registry::ModuleRegistry, semantic_tokens, settings,
+    settings::SettingsDocument,
 };
 
 pub struct Backend {
     client: Client,
     documents: Arc<RwLock<HashMap<Url, Document>>>,
     manifests: Arc<RwLock<HashMap<Url, ManifestDocument>>>,
+    settings: Arc<RwLock<HashMap<Url, SettingsDocument>>>,
     registry: Arc<RwLock<ModuleRegistry>>,
 }
 
@@ -21,6 +23,7 @@ impl Backend {
             client,
             documents: Arc::new(RwLock::new(HashMap::new())),
             manifests: Arc::new(RwLock::new(HashMap::new())),
+            settings: Arc::new(RwLock::new(HashMap::new())),
             registry: Arc::new(RwLock::new(ModuleRegistry::empty())),
         }
     }
@@ -101,6 +104,7 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         self.documents.write().await.remove(&uri);
         self.manifests.write().await.remove(&uri);
+        self.settings.write().await.remove(&uri);
         // Clear diagnostics on close.
         self.client.publish_diagnostics(uri, vec![], None).await;
     }
@@ -114,7 +118,17 @@ impl LanguageServer for Backend {
             let Some(doc) = manifests.get(uri) else {
                 return Ok(None);
             };
-            let items = manifest::complete::complete(doc, position);
+            let items = manifest::complete(doc, position);
+            return Ok((!items.is_empty()).then_some(CompletionResponse::Array(items)));
+        }
+
+        if settings::is_settings_uri(uri) {
+            let settings_docs = self.settings.read().await;
+            let Some(doc) = settings_docs.get(uri) else {
+                return Ok(None);
+            };
+            let registry = self.registry.read().await;
+            let items = settings::complete(doc, position, &registry);
             return Ok((!items.is_empty()).then_some(CompletionResponse::Array(items)));
         }
 
@@ -141,7 +155,16 @@ impl LanguageServer for Backend {
             let Some(doc) = manifests.get(uri) else {
                 return Ok(None);
             };
-            return Ok(manifest::hover::hover(doc, position));
+            return Ok(manifest::hover(doc, position));
+        }
+
+        if settings::is_settings_uri(uri) {
+            let settings_docs = self.settings.read().await;
+            let Some(doc) = settings_docs.get(uri) else {
+                return Ok(None);
+            };
+            let registry = self.registry.read().await;
+            return Ok(settings::hover(doc, position, &registry));
         }
 
         let docs = self.documents.read().await;
@@ -173,7 +196,7 @@ impl LanguageServer for Backend {
         let uri = &params.text_document.uri;
         // Manifest documents (module.json/package.json) are not `.mesh` files;
         // leave them to a JSON formatter.
-        if manifest::is_manifest_uri(uri) {
+        if manifest::is_manifest_uri(uri) || settings::is_settings_uri(uri) {
             return Ok(None);
         }
 
@@ -217,8 +240,19 @@ impl Backend {
     async fn update_document(&self, uri: Url, source: String) {
         if manifest::is_manifest_uri(&uri) {
             let doc = ManifestDocument::new(uri.clone(), source);
-            let diags = manifest::diagnostics::diagnostics(&doc);
+            let diags = manifest::diagnostics(&doc);
             self.manifests.write().await.insert(uri.clone(), doc);
+            self.client.publish_diagnostics(uri, diags, None).await;
+            return;
+        }
+
+        if settings::is_settings_uri(&uri) {
+            let doc = SettingsDocument::new(uri.clone(), source);
+            let diags = {
+                let registry = self.registry.read().await;
+                settings::diagnostics(&doc, &registry)
+            };
+            self.settings.write().await.insert(uri.clone(), doc);
             self.client.publish_diagnostics(uri, diags, None).await;
             return;
         }

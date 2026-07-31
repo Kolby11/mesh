@@ -58,6 +58,22 @@ changes to the module's own defaults no longer reach them.
 Settings are watched: editing the file re-applies theme, locale, surface
 placement, and module props to the running shell without a restart.
 
+### Editor support
+
+`mesh-tools-lsp` serves `config/settings.json` (and `$MESH_HOME/settings.json`)
+as well as module manifests. It completes namespaces, keys, and enum values,
+documents them on hover, and reports unknown keys, wrong types, and invalid
+enum values as you type — the same rules the store applies at load time, from
+the same field tables.
+
+Values that depend on what is installed are discovered from the workspace and
+offered as suggestions: themes for `shell.theme.active`, locales with a catalog
+for `shell.i18n.locale`, icon packs for `shell.icons.default_pack` and
+`<module>.icons.use_packs`, and installed module and interface ids as
+top-level namespaces. Suggestions are never enforced — a theme or pack may
+live outside the scanned workspace — so an unrecognized one is offered no
+warning, while an invalid enum value still is.
+
 ## Current user paths
 
 Module-path helpers currently default `MESH_HOME` to `~/.mesh`. Under that

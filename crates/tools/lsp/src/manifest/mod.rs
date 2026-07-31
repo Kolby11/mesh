@@ -2,15 +2,14 @@
 //!
 //! Two manifest flavors share the same `name`/`version`/`mesh` envelope:
 //! per-module manifests ([`ManifestFlavor::Module`]) and the workspace root
-//! graph config ([`ManifestFlavor::RootConfig`]). This module provides
-//! diagnostics, completion, and hover for both, driven by [`schema`].
+//! graph config ([`ManifestFlavor::RootConfig`]). [`schema`] describes both;
+//! the generic [`crate::json`] engine serves diagnostics, completion, and
+//! hover from that description.
 
-use tower_lsp::lsp_types::{Position, Url};
+use tower_lsp::lsp_types::{CompletionItem, Diagnostic, DiagnosticSeverity, Hover, Position, Url};
 
-pub mod complete;
-pub mod cursor;
-pub mod diagnostics;
-pub mod hover;
+use crate::json;
+
 pub mod schema;
 
 pub use schema::ManifestFlavor;
@@ -41,6 +40,58 @@ impl ManifestDocument {
     }
 }
 
+pub fn complete(doc: &ManifestDocument, position: Position) -> Vec<CompletionItem> {
+    json::complete::complete(&schema::root(doc.flavor), &doc.source, position)
+}
+
+pub fn hover(doc: &ManifestDocument, position: Position) -> Option<Hover> {
+    json::hover::hover(&schema::root(doc.flavor), &doc.source, position)
+}
+
+/// Schema diagnostics plus, for the root graph config, the canonical runtime
+/// validation (schemaVersion, entrypoint format, relative-path rules) that the
+/// schema tree cannot express.
+pub fn diagnostics(doc: &ManifestDocument) -> Vec<Diagnostic> {
+    let source = &doc.source;
+    let mut out = json::diagnostics::check(&schema::root(doc.flavor), source, "mesh-manifest");
+
+    // A syntax error is reported alone; do not pile runtime parse failures on it.
+    let has_syntax_error = out
+        .iter()
+        .any(|d| d.message.starts_with("JSON syntax error"));
+
+    if doc.flavor == ManifestFlavor::RootConfig
+        && !has_syntax_error
+        && let Err(err) = mesh_core_module::package::RootModuleGraphManifest::from_json_str(source)
+    {
+        // Attach to the `mesh` key when we can find it, else the document start.
+        let range = json::diagnostics::find_key_range(source, "mesh")
+            .unwrap_or_else(|| json::diagnostics::range_at(source, 0, 1));
+        out.push(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            source: Some("mesh-manifest".into()),
+            message: format!("invalid root config: {err}"),
+            ..Default::default()
+        });
+    }
+
+    out
+}
+
+/// The markdown body of a hover, for tests.
+#[cfg(test)]
+fn hover_text(hover: &Hover) -> String {
+    use tower_lsp::lsp_types::{HoverContents, MarkupContent, MarkupKind};
+    match &hover.contents {
+        HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value,
+        }) => value.clone(),
+        _ => String::new(),
+    }
+}
+
 /// Decide whether a manifest is a per-module manifest or the root graph config.
 ///
 /// The root config is identified by `mesh.schemaVersion` / `mesh.modulesDir`;
@@ -66,40 +117,116 @@ fn detect_flavor(source: &str) -> ManifestFlavor {
     }
 }
 
-/// Convert a byte offset into an LSP [`Position`] (0-based line + column).
-/// Columns are counted in UTF-16 code units, matching the LSP spec.
-pub fn offset_to_position(source: &str, offset: usize) -> Position {
-    let offset = offset.min(source.len());
-    let mut line = 0u32;
-    let mut col = 0u32;
-    for (i, ch) in source.char_indices() {
-        if i >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += ch.len_utf16() as u32;
-        }
-    }
-    Position::new(line, col)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Convert a 1-based line / 0-based column (as serde_json reports) to a byte
-/// offset into `source`.
-pub fn line_col_to_offset(source: &str, line: usize, column: usize) -> usize {
-    let mut current_line = 1usize;
-    let mut offset = 0usize;
-    for (i, ch) in source.char_indices() {
-        if current_line == line {
-            // serde_json columns are 1-based byte-ish counts within the line.
-            return (i + column.saturating_sub(1)).min(source.len());
-        }
-        if ch == '\n' {
-            current_line += 1;
-        }
-        offset = i + ch.len_utf8();
+    fn doc(src: &str) -> ManifestDocument {
+        ManifestDocument::new(
+            Url::parse("file:///m/module.json").unwrap(),
+            src.to_string(),
+        )
     }
-    offset.min(source.len())
+
+    fn complete_at(src: &str) -> Vec<String> {
+        let offset = src.find('|').expect("need a | cursor marker");
+        let clean = src.replacen('|', "", 1);
+        let before = &clean[..offset];
+        let line = before.matches('\n').count() as u32;
+        let col = before.rsplit('\n').next().unwrap().chars().count() as u32;
+        complete(&doc(&clean), Position::new(line, col))
+            .into_iter()
+            .map(|i| i.label)
+            .collect()
+    }
+
+    #[test]
+    fn completes_top_level_keys() {
+        let labels = complete_at(r#"{ "|" }"#);
+        assert!(labels.contains(&"name".to_string()));
+        assert!(labels.contains(&"mesh".to_string()));
+    }
+
+    #[test]
+    fn completes_kind_enum() {
+        let labels = complete_at(r#"{ "mesh": { "kind": "|" } }"#);
+        assert!(labels.contains(&"frontend".to_string()));
+        assert!(labels.contains(&"backend".to_string()));
+    }
+
+    #[test]
+    fn suggests_capabilities_without_requiring() {
+        let labels = complete_at(r#"{ "mesh": { "uses": { "capabilities": [ "|" ] } } }"#);
+        assert!(labels.contains(&"shell.surface".to_string()));
+    }
+
+    #[test]
+    fn omits_already_present_keys() {
+        let labels = complete_at(r#"{ "name": "x", "|" }"#);
+        assert!(!labels.contains(&"name".to_string()));
+    }
+
+    #[test]
+    fn flags_unknown_property() {
+        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "wat": 1 } }"#;
+        let d = diagnostics(&doc(src));
+        assert!(
+            d.iter()
+                .any(|d| d.message.contains("unknown property `wat`"))
+        );
+    }
+
+    #[test]
+    fn flags_bad_kind() {
+        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontnd" } }"#;
+        let d = diagnostics(&doc(src));
+        assert!(d.iter().any(|d| d.message.contains("not a valid value")));
+    }
+
+    #[test]
+    fn flags_missing_required() {
+        let src = r#"{ "name": "@x/y", "mesh": { "kind": "frontend" } }"#;
+        let d = diagnostics(&doc(src));
+        assert!(
+            d.iter()
+                .any(|d| d.message.contains("missing required property `version`"))
+        );
+        assert!(
+            d.iter()
+                .any(|d| d.message.contains("missing required property `apiVersion`"))
+        );
+    }
+
+    #[test]
+    fn accepts_valid_manifest() {
+        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "entry": "src/main.mesh" } }"#;
+        let d = diagnostics(&doc(src));
+        assert!(d.is_empty(), "expected no diagnostics, got {d:?}");
+    }
+
+    #[test]
+    fn reports_syntax_error() {
+        let src = r#"{ "name": "@x/y" "version": "1.0.0" }"#;
+        let d = diagnostics(&doc(src));
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("syntax error"));
+    }
+
+    #[test]
+    fn type_mismatch_for_object_field() {
+        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": "nope" }"#;
+        let d = diagnostics(&doc(src));
+        assert!(d.iter().any(|d| d.message.contains("expected object")));
+    }
+
+    #[test]
+    fn hovers_a_known_key() {
+        let src = r#"{ "mesh": { "kind": "frontend" } }"#;
+        let position = {
+            let offset = src.find("\"kind\"").unwrap() + 2;
+            json::offset_to_position(src, offset)
+        };
+        let hover = hover(&doc(src), position).expect("hover");
+        assert!(hover_text(&hover).contains("module role"));
+    }
 }

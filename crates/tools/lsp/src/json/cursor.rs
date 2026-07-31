@@ -26,6 +26,11 @@ pub struct CursorContext {
     pub role: Role,
     /// The token text already typed at the cursor (without surrounding quotes).
     pub partial: String,
+    /// The whole string literal the cursor sits in, including the part after the
+    /// cursor. Completion filters on [`partial`](Self::partial); hover needs the
+    /// whole word, because someone hovering the middle of `"anchor"` is asking
+    /// about `anchor`, not about `anc`.
+    pub token: String,
     /// Keys already present in the innermost object (to avoid suggesting dupes).
     pub existing_keys: Vec<String>,
     /// For a value: the key whose value is being edited (or, inside an array,
@@ -120,7 +125,8 @@ pub fn context_at(source: &str, offset: usize) -> CursorContext {
                 let (text, end, terminated) = scan_string(bytes, i, offset);
                 if end >= offset {
                     // Cursor is inside this (possibly unterminated) string.
-                    return classify_in_string(&stack, &text);
+                    let (token, _, _) = scan_string(bytes, i, bytes.len());
+                    return classify_in_string(&stack, &text, &token);
                 }
                 last_string = if terminated { Some(text) } else { None };
                 i = end;
@@ -181,7 +187,7 @@ fn path_of(stack: &[Frame]) -> Vec<String> {
     stack.iter().filter_map(|f| f.path_key.clone()).collect()
 }
 
-fn classify_in_string(stack: &[Frame], text: &str) -> CursorContext {
+fn classify_in_string(stack: &[Frame], text: &str, token: &str) -> CursorContext {
     let path = path_of(stack);
     match stack.last() {
         Some(frame) => match frame.kind {
@@ -192,6 +198,7 @@ fn classify_in_string(stack: &[Frame], text: &str) -> CursorContext {
                         innermost_is_array: false,
                         role: Role::Value,
                         partial: text.to_string(),
+                        token: token.to_string(),
                         existing_keys: frame.keys.clone(),
                         value_key: frame.current_key.clone(),
                         in_string: true,
@@ -204,6 +211,7 @@ fn classify_in_string(stack: &[Frame], text: &str) -> CursorContext {
                         innermost_is_array: false,
                         role: Role::Key,
                         partial: text.to_string(),
+                        token: token.to_string(),
                         existing_keys: frame.keys.clone(),
                         value_key: None,
                         in_string: true,
@@ -215,6 +223,7 @@ fn classify_in_string(stack: &[Frame], text: &str) -> CursorContext {
                 innermost_is_array: true,
                 role: Role::Value,
                 partial: text.to_string(),
+                token: token.to_string(),
                 existing_keys: Vec::new(),
                 value_key: frame.path_key.clone(),
                 in_string: true,
@@ -225,6 +234,7 @@ fn classify_in_string(stack: &[Frame], text: &str) -> CursorContext {
             innermost_is_array: false,
             role: Role::Value,
             partial: text.to_string(),
+            token: token.to_string(),
             existing_keys: Vec::new(),
             value_key: None,
             in_string: true,
@@ -243,6 +253,7 @@ fn classify_outside_string(stack: &[Frame]) -> CursorContext {
                         innermost_is_array: false,
                         role: Role::Value,
                         partial: String::new(),
+                        token: String::new(),
                         existing_keys: frame.keys.clone(),
                         value_key: frame.current_key.clone(),
                         in_string: false,
@@ -253,6 +264,7 @@ fn classify_outside_string(stack: &[Frame]) -> CursorContext {
                         innermost_is_array: false,
                         role: Role::Key,
                         partial: String::new(),
+                        token: String::new(),
                         existing_keys: frame.keys.clone(),
                         value_key: None,
                         in_string: false,
@@ -264,6 +276,7 @@ fn classify_outside_string(stack: &[Frame]) -> CursorContext {
                 innermost_is_array: true,
                 role: Role::Value,
                 partial: String::new(),
+                token: String::new(),
                 existing_keys: Vec::new(),
                 value_key: frame.path_key.clone(),
                 in_string: false,
@@ -275,6 +288,7 @@ fn classify_outside_string(stack: &[Frame]) -> CursorContext {
             innermost_is_array: false,
             role: Role::Value,
             partial: String::new(),
+            token: String::new(),
             existing_keys: Vec::new(),
             value_key: None,
             in_string: false,

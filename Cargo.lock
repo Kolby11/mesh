@@ -1978,6 +1978,7 @@ dependencies = [
  "mesh-core-config",
  "mesh-core-elements",
  "mesh-core-module",
+ "mesh-core-surface-config",
  "mesh-core-theme",
  "serde",
  "serde_json",

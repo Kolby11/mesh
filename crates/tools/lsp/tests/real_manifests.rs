@@ -3,7 +3,7 @@
 //! manifest drifted or the schema in `manifest::schema` fell out of sync with
 //! the runtime `mesh_core_module` structs.
 
-use mesh_tools_lsp::manifest::{ManifestDocument, diagnostics::diagnostics};
+use mesh_tools_lsp::manifest::{ManifestDocument, diagnostics};
 use tower_lsp::lsp_types::Url;
 
 fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {

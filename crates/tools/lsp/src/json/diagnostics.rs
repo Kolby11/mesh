@@ -1,63 +1,41 @@
-//! Diagnostics for manifest documents: JSON syntax, unknown keys, enum
-//! violations, missing required fields, structural type mismatches, and the
-//! canonical runtime validation rules for the root graph config.
+//! Schema-driven diagnostics for JSON documents: syntax, unknown keys, enum
+//! violations, missing required fields, and structural type mismatches.
+//!
+//! Document-specific rules a schema tree cannot express (the root graph
+//! config's canonical validation, for instance) are layered on by the caller.
 
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range};
 
-use super::schema::{self, Kind, ManifestFlavor, Node};
-use super::{ManifestDocument, line_col_to_offset, offset_to_position};
+use super::schema::{Kind, Node};
+use super::{line_col_to_offset, offset_to_position};
 
-pub fn diagnostics(doc: &ManifestDocument) -> Vec<Diagnostic> {
-    let source = &doc.source;
-
-    // 1. Syntax: a parse failure is fatal — report it and stop.
-    let value: serde_json::Value = match serde_json::from_str(source) {
-        Ok(value) => value,
-        Err(err) => {
-            let offset = line_col_to_offset(source, err.line(), err.column());
-            return vec![error_at(
-                source,
-                offset,
-                offset + 1,
-                format!("JSON syntax error: {err}"),
-            )];
-        }
-    };
+/// Validate `source` against `schema`. `origin` is the diagnostic `source`
+/// field shown by the editor (`"mesh-manifest"`, `"mesh-settings"`).
+///
+/// A syntax error is fatal: it is reported alone, because every schema
+/// complaint downstream of it would be noise about text the user is still
+/// typing.
+pub fn check(schema: &Node, source: &str, origin: &str) -> Vec<Diagnostic> {
+    if let Err(err) = serde_json::from_str::<serde_json::Value>(source) {
+        let offset = line_col_to_offset(source, err.line(), err.column());
+        return vec![error_at(
+            source,
+            offset,
+            offset + 1,
+            format!("JSON syntax error: {err}"),
+            origin,
+        )];
+    }
 
     let mut out = Vec::new();
-
-    // 2. Schema walk over the span AST for precise key/enum/type diagnostics.
     if let Some(ast) = JNode::parse(source) {
-        let root = schema::root(doc.flavor);
-        check_node(source, &ast, &root, &mut out);
-    } else {
-        // The strict parser only fails on input serde already rejected, so this
-        // is unreachable in practice; guard anyway.
-        let _ = &value;
+        check_node(source, &ast, schema, origin, &mut out);
     }
-
-    // 3. Canonical runtime validation for the root graph config (schemaVersion,
-    // entrypoint format, relative-path rules) which the schema tree can't express.
-    if doc.flavor == ManifestFlavor::RootConfig {
-        if let Err(err) = mesh_core_module::package::RootModuleGraphManifest::from_json_str(source)
-        {
-            // Attach to the `mesh` key when we can find it, else the document start.
-            let range = find_key_range(source, "mesh").unwrap_or_else(|| range_at(source, 0, 1));
-            out.push(Diagnostic {
-                range,
-                severity: Some(DiagnosticSeverity::ERROR),
-                source: Some("mesh-manifest".into()),
-                message: format!("invalid root config: {err}"),
-                ..Default::default()
-            });
-        }
-    }
-
     out
 }
 
 /// Recursively validate `node` (a JSON AST node) against `schema`.
-fn check_node(source: &str, node: &JNode, schema: &Node, out: &mut Vec<Diagnostic>) {
+fn check_node(source: &str, node: &JNode, schema: &Node, origin: &str, out: &mut Vec<Diagnostic>) {
     match (&node.value, &schema.kind) {
         (JValue::Object(members), Kind::Object(fields)) => {
             // Unknown keys.
@@ -65,7 +43,7 @@ fn check_node(source: &str, node: &JNode, schema: &Node, out: &mut Vec<Diagnosti
                 match fields.iter().find(|f| f.name == m.key) {
                     Some(field) => {
                         if let Some(v) = &m.value {
-                            check_node(source, v, &field.node, out);
+                            check_node(source, v, &field.node, origin, out);
                         }
                     }
                     None => out.push(warn(
@@ -73,6 +51,7 @@ fn check_node(source: &str, node: &JNode, schema: &Node, out: &mut Vec<Diagnosti
                         m.key_span.0,
                         m.key_span.1,
                         format!("unknown property `{}`", m.key),
+                        origin,
                     )),
                 }
             }
@@ -84,20 +63,34 @@ fn check_node(source: &str, node: &JNode, schema: &Node, out: &mut Vec<Diagnosti
                         node.span.0,
                         node.span.0 + 1,
                         format!("missing required property `{}`", f.name),
+                        origin,
                     ));
                 }
+            }
+        }
+        // An open object's unlisted keys are the user's own vocabulary (module
+        // ids, interface ids), so they are described by `other`, not flagged.
+        (JValue::Object(members), Kind::OpenObject { fields, other }) => {
+            for m in members {
+                let Some(v) = &m.value else { continue };
+                let target = fields
+                    .iter()
+                    .find(|f| f.name == m.key)
+                    .map(|f| &f.node)
+                    .unwrap_or(other.as_ref());
+                check_node(source, v, target, origin, out);
             }
         }
         (JValue::Object(members), Kind::Map(value)) => {
             for m in members {
                 if let Some(v) = &m.value {
-                    check_node(source, v, value, out);
+                    check_node(source, v, value, origin, out);
                 }
             }
         }
         (JValue::Array(elements), Kind::Array(element)) => {
             for e in elements {
-                check_node(source, e, element, out);
+                check_node(source, e, element, origin, out);
             }
         }
         (JValue::String(s), Kind::Enum(values)) => {
@@ -111,16 +104,18 @@ fn check_node(source: &str, node: &JNode, schema: &Node, out: &mut Vec<Diagnosti
                         s,
                         values.join(", ")
                     ),
+                    origin,
                 ));
             }
         }
-        // Suggested-value strings are never validated (extensible vocabulary).
-        (JValue::String(_), Kind::Suggest(_)) => {}
+        // Suggested-value strings are never validated (extensible vocabulary,
+        // or a discovery that cannot see everything the runtime can).
+        (JValue::String(_), Kind::Suggest(_) | Kind::SuggestDiscovered(_)) => {}
         // Structural mismatches: a container was expected but a scalar appeared
         // (or vice versa). Scalar schema nodes accept any JSON value.
         (actual, expected) => {
             if let Some(msg) = type_mismatch(actual, expected) {
-                out.push(error_at(source, node.span.0, node.span.1, msg));
+                out.push(error_at(source, node.span.0, node.span.1, msg, origin));
             }
         }
     }
@@ -128,10 +123,10 @@ fn check_node(source: &str, node: &JNode, schema: &Node, out: &mut Vec<Diagnosti
 
 fn type_mismatch(actual: &JValue, expected: &Kind) -> Option<String> {
     let want = match expected {
-        Kind::Object(_) | Kind::Map(_) => "object",
+        Kind::Object(_) | Kind::OpenObject { .. } | Kind::Map(_) => "object",
         Kind::Array(_) => "array",
         Kind::Enum(_) => "string",
-        Kind::Suggest(_) | Kind::Scalar => return None,
+        Kind::Suggest(_) | Kind::SuggestDiscovered(_) | Kind::Scalar => return None,
     };
     let got = match actual {
         JValue::Object(_) => "object",
@@ -146,34 +141,42 @@ fn type_mismatch(actual: &JValue, expected: &Kind) -> Option<String> {
     }
 }
 
-fn error_at(source: &str, start: usize, end: usize, message: String) -> Diagnostic {
+pub fn error_at(
+    source: &str,
+    start: usize,
+    end: usize,
+    message: String,
+    origin: &str,
+) -> Diagnostic {
     Diagnostic {
         range: range_at(source, start, end),
         severity: Some(DiagnosticSeverity::ERROR),
-        source: Some("mesh-manifest".into()),
+        source: Some(origin.to_string()),
         message,
         ..Default::default()
     }
 }
 
-fn warn(source: &str, start: usize, end: usize, message: String) -> Diagnostic {
+pub fn warn(source: &str, start: usize, end: usize, message: String, origin: &str) -> Diagnostic {
     Diagnostic {
         range: range_at(source, start, end),
         severity: Some(DiagnosticSeverity::WARNING),
-        source: Some("mesh-manifest".into()),
+        source: Some(origin.to_string()),
         message,
         ..Default::default()
     }
 }
 
-fn range_at(source: &str, start: usize, end: usize) -> Range {
+pub fn range_at(source: &str, start: usize, end: usize) -> Range {
     Range::new(
         offset_to_position(source, start),
         offset_to_position(source, end),
     )
 }
 
-fn find_key_range(source: &str, key: &str) -> Option<Range> {
+/// The range of the first `"key"` token in `source`, for diagnostics that
+/// belong to a section rather than to one value.
+pub fn find_key_range(source: &str, key: &str) -> Option<Range> {
     let needle = format!("\"{key}\"");
     let start = source.find(&needle)?;
     Some(range_at(source, start, start + needle.len()))
@@ -218,12 +221,11 @@ impl JNode {
             pos: 0,
         };
         p.skip_ws();
-        let node = p.parse_value()?;
-        Some(node)
+        p.parse_value()
     }
 }
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     fn skip_ws(&mut self) {
         while self.pos < self.bytes.len() {
             match self.bytes[self.pos] {
@@ -351,72 +353,5 @@ impl<'a> Parser<'a> {
             }
         }
         None
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tower_lsp::lsp_types::Url;
-
-    fn diag(src: &str) -> Vec<Diagnostic> {
-        let doc = ManifestDocument::new(
-            Url::parse("file:///m/module.json").unwrap(),
-            src.to_string(),
-        );
-        diagnostics(&doc)
-    }
-
-    #[test]
-    fn flags_unknown_property() {
-        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "wat": 1 } }"#;
-        let d = diag(src);
-        assert!(
-            d.iter()
-                .any(|d| d.message.contains("unknown property `wat`"))
-        );
-    }
-
-    #[test]
-    fn flags_bad_kind() {
-        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontnd" } }"#;
-        let d = diag(src);
-        assert!(d.iter().any(|d| d.message.contains("not a valid value")));
-    }
-
-    #[test]
-    fn flags_missing_required() {
-        let src = r#"{ "name": "@x/y", "mesh": { "kind": "frontend" } }"#;
-        let d = diag(src);
-        assert!(
-            d.iter()
-                .any(|d| d.message.contains("missing required property `version`"))
-        );
-        assert!(
-            d.iter()
-                .any(|d| d.message.contains("missing required property `apiVersion`"))
-        );
-    }
-
-    #[test]
-    fn accepts_valid_manifest() {
-        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "entry": "src/main.mesh" } }"#;
-        let d = diag(src);
-        assert!(d.is_empty(), "expected no diagnostics, got {d:?}");
-    }
-
-    #[test]
-    fn reports_syntax_error() {
-        let src = r#"{ "name": "@x/y" "version": "1.0.0" }"#;
-        let d = diag(src);
-        assert_eq!(d.len(), 1);
-        assert!(d[0].message.contains("syntax error"));
-    }
-
-    #[test]
-    fn type_mismatch_for_object_field() {
-        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": "nope" }"#;
-        let d = diag(src);
-        assert!(d.iter().any(|d| d.message.contains("expected object")));
     }
 }

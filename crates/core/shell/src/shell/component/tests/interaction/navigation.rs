@@ -3129,6 +3129,108 @@ fn navigation_shipped_keybind_metadata_resolves_from_i18n_catalogs() {
 }
 
 #[test]
+fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    let theme = default_theme();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree");
+    let settings_button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onOpenSettings",
+    )
+    .expect("rendered settings button");
+    let settings_key = settings_button
+        .mesh_key()
+        .expect("settings button mesh key")
+        .to_owned();
+    assert!(
+        settings_button
+            .attributes
+            .get("title")
+            .is_some_and(|title| !title.is_empty()),
+        "the resting settings trigger should carry a tooltip"
+    );
+
+    let (left, top, right, bottom) =
+        find_node_bounds_by_key(tree, &settings_key, 0.0, 0.0).expect("settings bounds");
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerMove {
+                x: (left + right) * 0.5,
+                y: (top + bottom) * 0.5,
+            },
+        )
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("navigation tree after hovering settings");
+    let settings_button =
+        find_node_by_key(tree, &settings_key).expect("settings button after hover");
+    // The promoted quick-settings popup covers the tooltip's placement, leaving
+    // only a sliver of it visible below the bar. The trigger must drop the
+    // tooltip while the popup is open.
+    assert_eq!(
+        settings_button.attributes.get("title").map(String::as_str),
+        Some(""),
+        "hovering should clear the settings tooltip text"
+    );
+    assert_eq!(
+        settings_button
+            .attributes
+            .get("data-tooltip-disabled")
+            .map(String::as_str),
+        Some("true"),
+        "hovering should disable the settings tooltip"
+    );
+
+    component
+        .handle_input(&theme, width, height, ComponentInput::PointerLeave)
+        .unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("navigation tree after leaving settings");
+    let settings_button =
+        find_node_by_key(tree, &settings_key).expect("settings button after leave");
+    assert!(
+        settings_button
+            .attributes
+            .get("title")
+            .is_some_and(|title| !title.is_empty()),
+        "closing the popup should restore the settings tooltip"
+    );
+    assert_ne!(
+        settings_button
+            .attributes
+            .get("data-tooltip-disabled")
+            .map(String::as_str),
+        Some("true"),
+        "closing the popup should re-enable the settings tooltip"
+    );
+}
+
+#[test]
 fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());

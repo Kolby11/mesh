@@ -1,11 +1,20 @@
 # Status
 
-**Updated:** 2026-07-30
+**Updated:** 2026-07-31
 
 This page describes the present and is meant to be overwritten. History lives in
 [`log/`](log/); open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
+
+**The editor understands `settings.json`.** `mesh-tools-lsp` now serves the
+settings store: namespace and key completion, hover documentation, and
+diagnostics, with the schema derived from `SHELL_SETTINGS_FIELDS` and
+`MODULE_NAMESPACE_FIELDS` rather than restated (2026-07-31). Themes, locales,
+icon packs, and installed module/interface ids are discovered from the
+workspace and offered as suggestions; enum values stay enforced. The
+manifest/settings machinery now shares one `json/` engine. Record:
+[`log/2026-07.md`](log/2026-07.md).
 
 **Element blur covers the subtree.** `filter: blur()` lowers into
 `PushFilterLayer`/`PopFilterLayer` around the element and its descendants, so

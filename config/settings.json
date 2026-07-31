@@ -11,6 +11,9 @@
     },
     "theme": {
       "active": "gruvbox-dark"
+    },
+    "render": {
+      "blur": { "passes": 2, "max_radius": 96 }
     }
   }
 }

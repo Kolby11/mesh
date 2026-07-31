@@ -6,7 +6,9 @@
       onpointerenter={onSettingsEnter}
       onpointerleave={onSettingsLeave}
       aria-haspopup="true"
-      title={t('nav.open_settings')}
+      aria-expanded={settings_aria_expanded}
+      data-tooltip-disabled={settings_tooltip_disabled}
+      title={settings_tooltip}
       aria-label={t('nav.open_settings')}
     >
       <icon class="nav-button-glyph" name="preferences-system" size="18" />
@@ -21,6 +23,24 @@ local QuickSettings = require("@mesh/quick-settings")
 
 settings_surface_id = "@mesh/quick-settings"
 settings_surface_hidden = true
+settings_aria_expanded = "false"
+settings_tooltip = t('nav.open_settings')
+settings_tooltip_disabled = "false"
+
+-- The quick-settings popup is a promoted child surface that covers the space
+-- the tooltip would occupy. Leaving the tooltip live while the popup is open
+-- leaves a sliver of it visible below the bar, so the trigger drops its
+-- tooltip for as long as the popup is up.
+local function sync_trigger_state()
+    settings_aria_expanded = settings_surface_hidden and "false" or "true"
+    if settings_surface_hidden then
+        settings_tooltip = t('nav.open_settings')
+        settings_tooltip_disabled = "false"
+    else
+        settings_tooltip = ""
+        settings_tooltip_disabled = "true"
+    end
+end
 
 local function show_settings_selector(event)
     if settings_surface_hidden then
@@ -32,6 +52,7 @@ local function show_settings_selector(event)
         local focus = event.trigger ~= nil and event.trigger.type == "keyboard"
         mesh.popover.activate(settings_surface_id, event, { focus = focus })
         settings_surface_hidden = false
+        sync_trigger_state()
     end
 end
 
@@ -39,6 +60,7 @@ local function hide_settings_selector(bridge)
     if not settings_surface_hidden then
         mesh.popover.hide(settings_surface_id, { bridge = bridge == true })
         settings_surface_hidden = true
+        sync_trigger_state()
     end
 end
 

@@ -6,6 +6,17 @@
 //! manifest key completion, hover documentation, and unknown-key / enum
 //! diagnostics. When the runtime schema changes, update this tree to match.
 
+use crate::json::schema::{Kind, Node, field, obj, scalar};
+
+/// Build a node from this file's `&'static str` literals.
+fn node(doc: &'static str, type_hint: &'static str, kind: Kind) -> Node {
+    Node {
+        doc: doc.to_string(),
+        type_hint: type_hint.to_string(),
+        kind,
+    }
+}
+
 /// Which manifest flavor a document is. Both share the `name`/`version`/`mesh`
 /// envelope but the contents of the `mesh` section differ completely.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,88 +62,12 @@ pub const KNOWN_CAPABILITIES: &[&str] = &[
     "exec.launch-app",
 ];
 
-/// One node in the schema tree.
-pub struct Node {
-    pub doc: &'static str,
-    pub type_hint: &'static str,
-    pub kind: Kind,
-}
-
-pub enum Kind {
-    /// An object with a fixed set of known properties.
-    Object(Vec<Field>),
-    /// An object with arbitrary string keys, each mapping to `value`.
-    Map(Box<Node>),
-    /// An array whose elements match `element`.
-    Array(Box<Node>),
-    /// A string constrained to one of these values.
-    Enum(&'static [&'static str]),
-    /// A string with suggested values that are *not* enforced. Used for
-    /// extensible vocabularies like capabilities (`<domain>.<action>`), so
-    /// completion offers known entries but unknown values are never flagged.
-    Suggest(&'static [&'static str]),
-    /// A leaf scalar (string / number / bool / freeform). Accepts any JSON.
-    Scalar,
-}
-
-/// A named property of an object node.
-pub struct Field {
-    pub name: &'static str,
-    /// True if the field must be present.
-    pub required: bool,
-    pub node: Node,
-}
-
-fn obj(doc: &'static str, fields: Vec<Field>) -> Node {
-    Node {
-        doc,
-        type_hint: "object",
-        kind: Kind::Object(fields),
-    }
-}
-
-fn scalar(doc: &'static str, type_hint: &'static str) -> Node {
-    Node {
-        doc,
-        type_hint,
-        kind: Kind::Scalar,
-    }
-}
-
-fn field(name: &'static str, required: bool, node: Node) -> Field {
-    Field {
-        name,
-        required,
-        node,
-    }
-}
-
 /// Resolve the schema root for a flavor.
 pub fn root(flavor: ManifestFlavor) -> Node {
     match flavor {
         ManifestFlavor::Module => module_root(),
         ManifestFlavor::RootConfig => root_config_root(),
     }
-}
-
-/// The synthetic path segment used for "an element inside an array".
-pub const ARRAY_ELEMENT: &str = "[]";
-
-/// Navigate the schema tree following a container path of object keys. Array
-/// element steps use the [`ARRAY_ELEMENT`] sentinel. Returns the node at the
-/// path, or `None` if the path leaves the known schema (e.g. inside a free-form
-/// map or `experimental`).
-pub fn navigate<'a>(node: &'a Node, path: &[String]) -> Option<&'a Node> {
-    let Some((head, rest)) = path.split_first() else {
-        return Some(node);
-    };
-    let next = match &node.kind {
-        Kind::Object(fields) => fields.iter().find(|f| f.name == head).map(|f| &f.node),
-        Kind::Map(value) => Some(value.as_ref()),
-        Kind::Array(element) if head == ARRAY_ELEMENT => Some(element.as_ref()),
-        _ => None,
-    }?;
-    navigate(next, rest)
 }
 
 fn localized_text(doc: &'static str) -> Node {
@@ -142,42 +77,42 @@ fn localized_text(doc: &'static str) -> Node {
 }
 
 fn dependency_map(doc: &'static str) -> Node {
-    Node {
+    node(
         doc,
-        type_hint: "object<string, version-spec>",
-        kind: Kind::Map(Box::new(scalar(
+        "object<string, version-spec>",
+        Kind::Map(Box::new(scalar(
             "Semver requirement (e.g. \">=1.0\", \"^0.1.0\").",
             "version-spec",
         ))),
-    }
+    )
 }
 
 fn string_array(doc: &'static str, element_doc: &'static str) -> Node {
-    Node {
+    node(
         doc,
-        type_hint: "array<string>",
-        kind: Kind::Array(Box::new(scalar(element_doc, "string"))),
-    }
+        "array<string>",
+        Kind::Array(Box::new(scalar(element_doc, "string"))),
+    )
 }
 
 fn capabilities_array(doc: &'static str) -> Node {
-    Node {
+    node(
         doc,
-        type_hint: "array<capability>",
-        kind: Kind::Array(Box::new(Node {
-            doc: "A capability string in `<domain>.<action>` form. Capabilities are \
+        "array<capability>",
+        Kind::Array(Box::new(node(
+            "A capability string in `<domain>.<action>` form. Capabilities are \
                   extensible, so unknown values are allowed.",
-            type_hint: "capability",
-            kind: Kind::Suggest(KNOWN_CAPABILITIES),
-        })),
-    }
+            "capability",
+            Kind::Suggest(KNOWN_CAPABILITIES),
+        ))),
+    )
 }
 
 fn binary_dependency(doc: &'static str) -> Node {
-    Node {
+    node(
         doc,
-        type_hint: "array",
-        kind: Kind::Array(Box::new(obj(
+        "array",
+        Kind::Array(Box::new(obj(
             "A required external binary.",
             vec![
                 field(
@@ -203,15 +138,15 @@ fn binary_dependency(doc: &'static str) -> Node {
                 field(
                     "packages",
                     false,
-                    Node {
-                        doc: "Distro → package name providing this binary.",
-                        type_hint: "object<string, string>",
-                        kind: Kind::Map(Box::new(scalar("Package name.", "string"))),
-                    },
+                    node(
+                        "Distro → package name providing this binary.",
+                        "object<string, string>",
+                        Kind::Map(Box::new(scalar("Package name.", "string"))),
+                    ),
                 ),
             ],
         ))),
-    }
+    )
 }
 
 fn module_root() -> Node {
@@ -286,11 +221,11 @@ fn mesh_section() -> Node {
             field(
                 "kind",
                 true,
-                Node {
-                    doc: "The module role. Determines how the core loads and wires the module.",
-                    type_hint: "enum",
-                    kind: Kind::Enum(MODULE_KINDS),
-                },
+                node(
+                    "The module role. Determines how the core loads and wires the module.",
+                    "enum",
+                    Kind::Enum(MODULE_KINDS),
+                ),
             ),
             field(
                 "entry",
@@ -360,11 +295,11 @@ fn mesh_section() -> Node {
             field(
                 "keybinds",
                 false,
-                Node {
-                    doc: "Declarative keybind metadata, keyed by action id.",
-                    type_hint: "object",
-                    kind: Kind::Map(Box::new(keybind_node())),
-                },
+                node(
+                    "Declarative keybind metadata, keyed by action id.",
+                    "object",
+                    Kind::Map(Box::new(keybind_node())),
+                ),
             ),
             field("dependencies", false, mesh_dependencies()),
             field(
@@ -380,23 +315,23 @@ fn mesh_section() -> Node {
             field(
                 "implements",
                 false,
-                Node {
-                    doc: "Interfaces this backend module implements.",
-                    type_hint: "array",
-                    kind: Kind::Array(Box::new(implements_node())),
-                },
+                node(
+                    "Interfaces this backend module implements.",
+                    "array",
+                    Kind::Array(Box::new(implements_node())),
+                ),
             ),
             field("interface", false, interface_node()),
             field(
                 "interfaces",
                 false,
-                Node {
-                    doc: "Inline interface contract declarations on a backend module — \
+                node(
+                    "Inline interface contract declarations on a backend module — \
                           the low-friction contract carrier for single-provider domains. \
                           Multi-provider domains keep a standalone interface module.",
-                    type_hint: "array",
-                    kind: Kind::Array(Box::new(interface_node())),
-                },
+                    "array",
+                    Kind::Array(Box::new(interface_node())),
+                ),
             ),
             field(
                 "theme",
@@ -467,11 +402,11 @@ fn mesh_section() -> Node {
             field(
                 "experimental",
                 false,
-                Node {
-                    doc: "Unvalidated experimental fields. Anything here is passed through untouched.",
-                    type_hint: "any",
-                    kind: Kind::Scalar,
-                },
+                node(
+                    "Unvalidated experimental fields. Anything here is passed through untouched.",
+                    "any",
+                    Kind::Scalar,
+                ),
             ),
         ],
     )
@@ -593,10 +528,10 @@ fn mesh_contributes(doc: &'static str) -> Node {
             field(
                 "layout",
                 false,
-                Node {
-                    doc: "Layout entrypoints this module contributes.",
-                    type_hint: "array",
-                    kind: Kind::Array(Box::new(obj(
+                node(
+                    "Layout entrypoints this module contributes.",
+                    "array",
+                    Kind::Array(Box::new(obj(
                         "A layout contribution.",
                         vec![
                             field("id", true, scalar("Layout id.", "string")),
@@ -604,7 +539,7 @@ fn mesh_contributes(doc: &'static str) -> Node {
                             field("label", false, localized_text("Display label.")),
                         ],
                     ))),
-                },
+                ),
             ),
             field(
                 "settings",
@@ -616,11 +551,11 @@ fn mesh_contributes(doc: &'static str) -> Node {
                         field(
                             "schema",
                             false,
-                            Node {
-                                doc: "JSON-schema-like settings definition.",
-                                type_hint: "object",
-                                kind: Kind::Scalar,
-                            },
+                            node(
+                                "JSON-schema-like settings definition.",
+                                "object",
+                                Kind::Scalar,
+                            ),
                         ),
                     ],
                 ),
@@ -628,10 +563,10 @@ fn mesh_contributes(doc: &'static str) -> Node {
             field(
                 "themes",
                 false,
-                Node {
-                    doc: "Theme contributions.",
-                    type_hint: "array",
-                    kind: Kind::Array(Box::new(obj(
+                node(
+                    "Theme contributions.",
+                    "array",
+                    Kind::Array(Box::new(obj(
                         "A theme contribution.",
                         vec![
                             field("id", true, scalar("Theme id.", "string")),
@@ -640,7 +575,7 @@ fn mesh_contributes(doc: &'static str) -> Node {
                             field("modes", false, dependency_map("Mode id → token-set path.")),
                         ],
                     ))),
-                },
+                ),
             ),
             field(
                 "icons",
@@ -655,10 +590,10 @@ fn mesh_contributes(doc: &'static str) -> Node {
             field(
                 "i18n",
                 false,
-                Node {
-                    doc: "Localization bundle contributions.",
-                    type_hint: "array",
-                    kind: Kind::Array(Box::new(obj(
+                node(
+                    "Localization bundle contributions.",
+                    "array",
+                    Kind::Array(Box::new(obj(
                         "An i18n contribution.",
                         vec![
                             field("id", true, scalar("Bundle id.", "string")),
@@ -666,32 +601,32 @@ fn mesh_contributes(doc: &'static str) -> Node {
                             field("path", true, scalar("Path to the locale bundle.", "path")),
                         ],
                     ))),
-                },
+                ),
             ),
             field(
                 "libraries",
                 false,
-                Node {
-                    doc: "Luau library contributions.",
-                    type_hint: "array",
-                    kind: Kind::Array(Box::new(obj(
+                node(
+                    "Luau library contributions.",
+                    "array",
+                    Kind::Array(Box::new(obj(
                         "A library contribution.",
                         vec![
                             field("namespace", true, scalar("Importable namespace.", "string")),
                             field("path", true, scalar("Path to the library source.", "path")),
                         ],
                     ))),
-                },
+                ),
             ),
         ],
     )
 }
 
 fn path_contribution_array(doc: &'static str) -> Node {
-    Node {
+    node(
         doc,
-        type_hint: "array",
-        kind: Kind::Array(Box::new(obj(
+        "array",
+        Kind::Array(Box::new(obj(
             "A path contribution.",
             vec![
                 field("id", true, scalar("Resource id.", "string")),
@@ -699,7 +634,7 @@ fn path_contribution_array(doc: &'static str) -> Node {
                 field("label", false, localized_text("Display label.")),
             ],
         ))),
-    }
+    )
 }
 
 fn keybind_node() -> Node {
@@ -799,11 +734,11 @@ fn interface_node() -> Node {
             field(
                 "relationship",
                 false,
-                Node {
-                    doc: "Relationship to the extended interface.",
-                    type_hint: "enum",
-                    kind: Kind::Enum(&["base", "extension", "independent"]),
-                },
+                node(
+                    "Relationship to the extended interface.",
+                    "enum",
+                    Kind::Enum(&["base", "extension", "independent"]),
+                ),
             ),
             field(
                 "reason",
@@ -841,31 +776,31 @@ fn contract_node() -> Node {
             field(
                 "state",
                 false,
-                Node {
-                    doc: "Public state fields every provider must emit; read through \
+                node(
+                    "Public state fields every provider must emit; read through \
                           the service proxy as plain field access.",
-                    type_hint: "array",
-                    kind: Kind::Array(Box::new(typed_field())),
-                },
+                    "array",
+                    Kind::Array(Box::new(typed_field())),
+                ),
             ),
             field(
                 "methods",
                 false,
-                Node {
-                    doc: "Mutating command methods callable from frontend scripts.",
-                    type_hint: "array",
-                    kind: Kind::Array(Box::new(obj(
+                node(
+                    "Mutating command methods callable from frontend scripts.",
+                    "array",
+                    Kind::Array(Box::new(obj(
                         "A command method declaration.",
                         vec![
                             field("name", true, scalar("Command name.", "string")),
                             field(
                                 "args",
                                 false,
-                                Node {
-                                    doc: "Typed command arguments.",
-                                    type_hint: "array",
-                                    kind: Kind::Array(Box::new(typed_field())),
-                                },
+                                node(
+                                    "Typed command arguments.",
+                                    "array",
+                                    Kind::Array(Box::new(typed_field())),
+                                ),
                             ),
                             field(
                                 "returns",
@@ -917,30 +852,30 @@ fn contract_node() -> Node {
                             ),
                         ],
                     ))),
-                },
+                ),
             ),
             field(
                 "events",
                 false,
-                Node {
-                    doc: "Named events with typed payload fields.",
-                    type_hint: "array",
-                    kind: Kind::Array(Box::new(obj(
+                node(
+                    "Named events with typed payload fields.",
+                    "array",
+                    Kind::Array(Box::new(obj(
                         "An event declaration.",
                         vec![
                             field("name", true, scalar("Event name.", "string")),
                             field(
                                 "payload",
                                 false,
-                                Node {
-                                    doc: "Typed payload fields.",
-                                    type_hint: "array",
-                                    kind: Kind::Array(Box::new(typed_field())),
-                                },
+                                node(
+                                    "Typed payload fields.",
+                                    "array",
+                                    Kind::Array(Box::new(typed_field())),
+                                ),
                             ),
                         ],
                     ))),
-                },
+                ),
             ),
             field(
                 "types",
@@ -987,13 +922,13 @@ fn surface_layout_node() -> Node {
             field(
                 "role",
                 false,
-                Node {
-                    doc: "Which compositor protocol realizes the surface: shell \
+                node(
+                    "Which compositor protocol realizes the surface: shell \
                           chrome (`layer`, the default) or an ordinary \
                           application window (`window`).",
-                    type_hint: "enum",
-                    kind: Kind::Enum(&["layer", "window"]),
-                },
+                    "enum",
+                    Kind::Enum(&["layer", "window"]),
+                ),
             ),
             field(
                 "promotable",
@@ -1037,30 +972,30 @@ fn surface_layout_node() -> Node {
             field(
                 "decorations",
                 false,
-                Node {
-                    doc: "Who draws the window's title bar (role `window`). \
+                node(
+                    "Who draws the window's title bar (role `window`). \
                           MESH paints its own chrome, so `client` is the default.",
-                    type_hint: "enum",
-                    kind: Kind::Enum(&["client", "server"]),
-                },
+                    "enum",
+                    Kind::Enum(&["client", "server"]),
+                ),
             ),
             field(
                 "anchor",
                 false,
-                Node {
-                    doc: "Screen edge the surface anchors to.",
-                    type_hint: "enum",
-                    kind: Kind::Enum(&["top", "bottom", "left", "right"]),
-                },
+                node(
+                    "Screen edge the surface anchors to.",
+                    "enum",
+                    Kind::Enum(&["top", "bottom", "left", "right"]),
+                ),
             ),
             field(
                 "layer",
                 false,
-                Node {
-                    doc: "Layer-shell stacking layer.",
-                    type_hint: "enum",
-                    kind: Kind::Enum(&["background", "bottom", "top", "overlay"]),
-                },
+                node(
+                    "Layer-shell stacking layer.",
+                    "enum",
+                    Kind::Enum(&["background", "bottom", "top", "overlay"]),
+                ),
             ),
             field(
                 "exclusive_zone",
@@ -1075,11 +1010,11 @@ fn surface_layout_node() -> Node {
             field(
                 "keyboard_mode",
                 false,
-                Node {
-                    doc: "Keyboard interactivity mode.",
-                    type_hint: "enum",
-                    kind: Kind::Enum(&["none", "on_demand", "exclusive"]),
-                },
+                node(
+                    "Keyboard interactivity mode.",
+                    "enum",
+                    Kind::Enum(&["none", "on_demand", "exclusive"]),
+                ),
             ),
             field(
                 "blur",
@@ -1143,20 +1078,16 @@ fn root_config_root() -> Node {
                         field(
                             "modules",
                             false,
-                            Node {
-                                doc: "Explicit installed module set, keyed by module id.",
-                                type_hint: "object",
-                                kind: Kind::Map(Box::new(obj(
+                            node(
+                                "Explicit installed module set, keyed by module id.",
+                                "object",
+                                Kind::Map(Box::new(obj(
                                     "An installed module entry.",
                                     vec![
                                         field(
                                             "kind",
                                             true,
-                                            Node {
-                                                doc: "Module kind.",
-                                                type_hint: "enum",
-                                                kind: Kind::Enum(MODULE_KINDS),
-                                            },
+                                            node("Module kind.", "enum", Kind::Enum(MODULE_KINDS)),
                                         ),
                                         field(
                                             "path",
@@ -1170,7 +1101,7 @@ fn root_config_root() -> Node {
                                         ),
                                     ],
                                 ))),
-                            },
+                            ),
                         ),
                         field(
                             "disabled",

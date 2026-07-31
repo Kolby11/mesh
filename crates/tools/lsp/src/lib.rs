@@ -5,10 +5,12 @@ pub mod diagnostics;
 pub mod document;
 pub mod format;
 pub mod hover;
+pub mod json;
 pub mod knowledge;
 pub mod manifest;
 pub mod module_registry;
 pub mod semantic_tokens;
+pub mod settings;
 pub mod util;
 
 pub use backend::Backend;
