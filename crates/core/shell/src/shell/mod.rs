@@ -36,6 +36,7 @@ mod discovery;
 mod file_watch;
 mod ipc;
 mod module_config;
+mod profile;
 mod runtime;
 mod service;
 mod sounds;
@@ -404,6 +405,7 @@ pub struct Shell {
     pub services: ServiceRegistry,
     pub interfaces: InterfaceRegistry,
     installed_module_graph: Option<InstalledModuleGraph>,
+    active_profile_id: Option<String>,
     modules: HashMap<String, ModuleInstance>,
     frontend_catalog: component::FrontendCatalogHandle,
     module_dirs: Vec<PathBuf>,
@@ -435,6 +437,8 @@ pub struct Shell {
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,
     pending_backend_runtimes: HashMap<String, PendingBackendRuntime>,
+    pending_profile_switch: Option<profile::PendingProfileSwitch>,
+    deferred_requests: VecDeque<CoreRequest>,
     backend_runtime_statuses: BackendRuntimeStatusMap,
     backend_supervision: HashMap<String, backend::BackendSupervisionState>,
     backend_respawn: Option<backend::BackendRespawnContext>,
@@ -454,6 +458,9 @@ type BackendRuntimeStatusMap = HashMap<String, HashMap<String, BackendRuntimeSta
 struct BackendRuntimeSlot {
     interface: String,
     provider_id: String,
+    /// Identity carried by events from this particular runtime generation.
+    /// Candidate generations use a private value until they are committed.
+    event_provider_id: Arc<std::sync::RwLock<String>>,
     command_tx: mpsc::UnboundedSender<ServiceCommandMsg>,
     task: AbortHandle,
 }
@@ -506,6 +513,9 @@ pub enum ShellRunError {
 
     #[error(transparent)]
     DependencyGraph(#[from] DependencyGraphError),
+
+    #[error(transparent)]
+    ModuleGraph(#[from] mesh_core_module::package::ModuleManifestError),
 
     #[error("{message}")]
     FrontendComposition { message: String },

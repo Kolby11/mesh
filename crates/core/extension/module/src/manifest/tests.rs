@@ -669,8 +669,8 @@ fn navigation_bar_declares_icon_pack_dependency() {
             .icon_packs
             .required
             .iter()
-            .any(|id| id == "@mesh/icons-default"),
-        "navigation-bar should depend on @mesh/icons-default",
+            .any(|id| id == "@mesh/icons-material-symbols"),
+        "navigation-bar should depend on @mesh/icons-material-symbols",
     );
     // Frontend no longer carries inline mappings — those live in the
     // icon-pack module now.

@@ -513,10 +513,10 @@ per-instance scoping keys on.
 
 ### 5.2 Shell profiles and live switching
 
-**Status: partially shipped.** Profile documents, active-profile selection,
-root/background/provider/resource activation closure, and CLI persistence are
-shipped. Multiple simultaneously mounted instances and transactional live
-switching remain target behavior.
+**Status: shipped** for profile documents, scoped preferences, multiple root
+instances, activation closure, and transactional live switching. Typed
+profile/package service contracts for replaceable settings frontends remain
+target behavior.
 
 Profiles are stored as `profiles/<id>.json`; `active-profile` contains the
 selected id. Their positive root list is not an installed-module allow-list:
@@ -537,7 +537,11 @@ catalog.
   },
   "backgroundServices": [],
   "providers": {},
-  "resources": { "icons": [], "fonts": [], "languages": [] }
+  "resources": { "icons": [], "fonts": [], "languages": [] },
+  "settings": {
+    "shell": { "i18n": { "locale": "en-US" } },
+    "@alice/weather#default": { "props": { "global": { "units": "metric" } } }
+  }
 }
 ```
 
@@ -564,6 +568,10 @@ Live profile switching is transactional: validate the candidate, diff it
 against the active graph, retain identical service instances, initialize new
 services and hidden surfaces, reveal the new roots, then remove orphaned
 objects. Failure before commit leaves the active profile untouched.
+
+`mesh-shell profile use <id>` requests that transaction from a running shell
+over its private IPC socket; when no shell is running it updates the pointer for
+the next start. `profile set` and `profile unset` edit sparse profile settings.
 
 ## 6. Scripting model
 

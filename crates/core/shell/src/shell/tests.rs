@@ -401,6 +401,7 @@ fn backend_runtime_slot(
         BackendRuntimeSlot {
             interface: interface.to_string(),
             provider_id: provider_id.to_string(),
+            event_provider_id: Arc::new(std::sync::RwLock::new(provider_id.to_string())),
             command_tx,
             task: task.abort_handle(),
         },
@@ -2215,7 +2216,7 @@ fn debug_snapshot_exposes_installed_module_graph_contracts() {
     assert!(
         navigation
             .uses_icon_packs
-            .contains(&"@mesh/icons-default".into())
+            .contains(&"@mesh/icons-material-symbols".into())
     );
     assert!(
         navigation

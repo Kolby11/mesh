@@ -267,6 +267,14 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                 enabled,
             })
         }
+        "shell.switch-profile" if event.source_module_id == "@mesh/settings" => event
+            .payload
+            .get("profile_id")
+            .and_then(|value| value.as_str())
+            .filter(|profile_id| !profile_id.trim().is_empty())
+            .map(|profile_id| CoreRequest::SwitchProfile {
+                profile_id: profile_id.to_string(),
+            }),
         "shell.toggle-debug-overlay" => Some(CoreRequest::ToggleDebugOverlay),
         "shell.toggle-debug-layout-bounds" => Some(CoreRequest::ToggleDebugLayoutBounds),
         "shell.toggle-debug-element-picker" => Some(CoreRequest::ToggleDebugElementPicker),

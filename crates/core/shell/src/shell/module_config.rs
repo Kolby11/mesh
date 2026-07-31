@@ -100,6 +100,32 @@ pub(super) fn write_active_provider_selection(
     atomic_write(path, updated.as_bytes())
 }
 
+/// Persist a provider choice in the active composition boundary. Profiles own
+/// provider policy when selected; the legacy root graph remains the fallback.
+pub(super) fn write_composed_provider_selection(
+    path: &Path,
+    interface: &str,
+    provider_id: &str,
+) -> Result<(), ModuleConfigWriteError> {
+    let paths = ProfilePaths::from_root_graph(path)
+        .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))?;
+    let Some(profile_id) = paths
+        .active_profile_id()
+        .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))?
+    else {
+        return write_active_provider_selection(path, interface, provider_id);
+    };
+    let mut profile = paths
+        .load(&profile_id)
+        .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))?;
+    profile
+        .providers
+        .insert(interface.to_string(), provider_id.to_string());
+    paths
+        .save(&profile_id, &profile)
+        .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))
+}
+
 pub(super) fn write_module_enabled(
     path: &Path,
     module_id: &str,
@@ -448,5 +474,30 @@ mod tests {
 
         rollback.restore().unwrap();
         assert!(paths.load("desktop").unwrap().roots["@mesh/panel#default"].active);
+    }
+
+    #[test]
+    fn provider_selection_is_scoped_to_the_active_profile() {
+        let directory = tempfile::tempdir().unwrap();
+        let root_path = directory.path().join("module.json");
+        let root = r#"{
+  "name": "@mesh/local-config",
+  "version": "0.1.0",
+  "mesh": {"schemaVersion": 1, "modulesDir": "../modules", "providers": {}}
+}"#;
+        fs::write(&root_path, root).unwrap();
+        let paths = ProfilePaths::from_root_graph(&root_path).unwrap();
+        paths
+            .save("work", &mesh_core_module::package::ShellProfile::new())
+            .unwrap();
+        paths.set_active("work").unwrap();
+
+        write_composed_provider_selection(&root_path, "mesh.audio", "@mesh/work-audio").unwrap();
+
+        assert_eq!(
+            paths.load("work").unwrap().providers["mesh.audio"],
+            "@mesh/work-audio"
+        );
+        assert_eq!(fs::read_to_string(root_path).unwrap(), root);
     }
 }

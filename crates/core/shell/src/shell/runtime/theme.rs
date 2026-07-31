@@ -205,7 +205,16 @@ impl Shell {
 
         self.settings_watch.modified_at = Some(modified_at);
 
-        let store = match SettingsStore::load() {
+        let store = match SettingsStore::load().and_then(|shared| {
+            let profile = self.active_profile_id.as_ref().and_then(|profile_id| {
+                mesh_core_module::package::ProfilePaths::from_root_graph(
+                    &self.installed_module_graph_path(),
+                )
+                .and_then(|paths| paths.load(profile_id))
+                .ok()
+            });
+            super::super::discovery::effective_profile_settings(shared, profile.as_ref())
+        }) {
             Ok(store) => Arc::new(store),
             Err(e) => {
                 tracing::warn!("failed to reload settings: {e}");
@@ -271,7 +280,7 @@ impl Shell {
     /// One file holds every namespace, so a single reload here replaces what
     /// used to be a per-component stat-and-parse poll: components adopt the
     /// same snapshot the shell just read.
-    fn apply_settings_to_components(&mut self) -> Result<(), ShellRunError> {
+    pub(in crate::shell) fn apply_settings_to_components(&mut self) -> Result<(), ShellRunError> {
         let store = self.settings_store.clone();
         for runtime in &mut self.components {
             let changed = runtime

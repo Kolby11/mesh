@@ -124,7 +124,7 @@ impl Shell {
             return;
         }
 
-        if let Err(error) = crate::shell::module_config::write_active_provider_selection(
+        if let Err(error) = crate::shell::module_config::write_composed_provider_selection(
             &pending.graph_path,
             interface,
             provider_id,
@@ -181,6 +181,9 @@ impl Shell {
             runtime_status,
             message,
         );
+        if self.handle_profile_backend_lifecycle(&interface, &provider_id, runtime_status) {
+            return;
+        }
         let event_provider_is_pending = self
             .pending_backend_runtimes
             .get(&interface)

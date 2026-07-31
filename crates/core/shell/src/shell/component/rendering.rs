@@ -219,7 +219,9 @@ impl FrontendSurfaceComponent {
     /// own `<props>` are resolved during build; the flat restyle pass uses the
     /// surface root's props — full per-instance restyle is future work.)
     pub(super) fn surface_css_props(&self) -> SurfaceCssProps {
-        let state = self.runtime_state(self.id()).unwrap_or_default();
+        let state = self
+            .runtime_state(self.root_instance_key())
+            .unwrap_or_default();
         let bound = LocaleBoundState::new(&state, &self.locale);
         mesh_core_frontend::resolve_css_props(self.compiled.component.props.as_ref(), Some(&bound))
     }
@@ -242,12 +244,14 @@ impl FrontendSurfaceComponent {
             self.render_hooks_pending = false;
         }
         self.refresh_active_theme(theme);
-        let root_state = self.runtime_state(self.id()).unwrap_or_default();
+        let root_state = self
+            .runtime_state(self.root_instance_key())
+            .unwrap_or_default();
         let bound = LocaleBoundState::new(&root_state, &self.locale);
         {
             let mut stack = self.render_stack.borrow_mut();
             stack.clear();
-            stack.push(self.id().to_string());
+            stack.push(self.root_instance_key().to_string());
         }
         self.composition_occurrences.borrow_mut().clear();
         self.has_promoted_popover_wrappers.set(false);
@@ -260,7 +264,7 @@ impl FrontendSurfaceComponent {
             height,
             Some(&bound),
             FrontendRenderMode::Surface,
-            self.id(),
+            self.root_instance_key(),
             Some(self),
             Some(&measurer),
         );

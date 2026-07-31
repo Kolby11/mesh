@@ -422,11 +422,13 @@ impl FrontendSurfaceComponent {
     pub(super) fn init_root_runtime(&self) -> Result<(), ComponentError> {
         let mut props = HashMap::new();
         props.insert("settings".into(), self.settings_json.clone());
-        let runtime = self.create_runtime(self.id(), &self.compiled, &props)?;
-        self.runtimes
-            .lock()
-            .unwrap()
-            .insert(self.instance_keys.borrow_mut().intern(self.id()), runtime);
+        let runtime = self.create_runtime(self.root_instance_key(), &self.compiled, &props)?;
+        self.runtimes.lock().unwrap().insert(
+            self.instance_keys
+                .borrow_mut()
+                .intern(self.root_instance_key()),
+            runtime,
+        );
         Ok(())
     }
 
@@ -614,7 +616,7 @@ impl FrontendSurfaceComponent {
 
         let mut runtimes = self.runtimes.lock().unwrap();
         let instance_key = match target {
-            HandlerDispatchTarget::Root { .. } => self.id(),
+            HandlerDispatchTarget::Root { .. } => self.root_instance_key(),
             HandlerDispatchTarget::Embedded { instance_key, .. } => instance_key,
         };
         let Some(runtime) = runtimes.get_mut(instance_key) else {
@@ -665,11 +667,11 @@ impl FrontendSurfaceComponent {
                 // participate in live bindings, so avoid cloning that ID before
                 // every dispatch. The uncommon post-dispatch paths still receive
                 // an owned key, preserving their existing behavior.
-                let needs_neighbor_sync = self.has_binding_neighbors(self.id());
+                let needs_neighbor_sync = self.has_binding_neighbors(self.root_instance_key());
                 if published.is_empty() && !needs_neighbor_sync {
                     (Vec::new(), false)
                 } else {
-                    let instance_key = self.id().to_string();
+                    let instance_key = self.root_instance_key().to_string();
                     let mut events = self.drain_local_script_events(&instance_key, published);
                     let (neighbors_dirty, mut neighbor_events) = if needs_neighbor_sync {
                         self.resync_binding_neighbors(&instance_key)

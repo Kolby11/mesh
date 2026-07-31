@@ -245,6 +245,7 @@ impl Shell {
             }
 
             pending.extend(self.tick_components()?);
+            pending.extend(std::mem::take(&mut self.deferred_requests));
             pending.extend(self.complete_due_surface_transitions()?);
             if !pending.is_empty() {
                 self.presented_last_frame = true;
@@ -323,6 +324,22 @@ impl Shell {
                 provider_id,
                 event,
             } => {
+                let provider_is_active =
+                    self.backend_runtimes.get(&interface).is_some_and(|slot| {
+                        *slot
+                            .event_provider_id
+                            .read()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            == provider_id
+                    });
+                if !provider_is_active {
+                    tracing::debug!(
+                        interface,
+                        provider_id,
+                        "ignored service update from a prepared or obsolete provider"
+                    );
+                    return Ok(());
+                }
                 let profiling_started = self.profiling_enabled().then(std::time::Instant::now);
                 let event = self.normalize_service_event(event);
                 if self.record_latest_service_state(&event) {
@@ -350,7 +367,19 @@ impl Shell {
                 provider_id,
                 command,
                 result,
-            } => self.record_backend_method_result(interface, provider_id, command, result),
+            } => {
+                let provider_is_active =
+                    self.backend_runtimes.get(&interface).is_some_and(|slot| {
+                        *slot
+                            .event_provider_id
+                            .read()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            == provider_id
+                    });
+                if provider_is_active {
+                    self.record_backend_method_result(interface, provider_id, command, result);
+                }
+            }
             ShellMessage::BackendInterfaceEvent {
                 interface,
                 provider_id,

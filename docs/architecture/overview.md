@@ -86,11 +86,11 @@ When exactly one compatible provider exists, the current graph may select it
 automatically. Missing optional services degrade locally; missing required
 services are graph diagnostics.
 
-## Target shell profiles
+## Shell profiles
 
-The accepted next composition model replaces a single root layout decision with
-named shell profiles. A profile will select root component instances, surface
-placement, ambiguous service providers, resources, root background services,
+Named shell profiles replace a single root layout decision. A profile selects
+root component instances, surface placement, ambiguous service providers,
+resources, root background services,
 and profile-scoped configuration. Required services remain inferred from
 component contracts.
 
@@ -99,9 +99,10 @@ preserve identical service instances, initialize new surfaces, commit the
 visible switch, and only then remove orphaned runtime objects. Durable
 service-owned data remains shared while configuration is profile-scoped.
 
-This section is target architecture. The current code still reads the
-repository graph from `config/module.json` and does not implement live profile
-switching.
+The root `config/module.json` remains the installed-module inventory and legacy
+fallback. Profiles are the active composition boundary once `active-profile`
+exists. Typed profile/package services for replaceable settings frontends are
+still target architecture.
 
 ## Directory structure
 

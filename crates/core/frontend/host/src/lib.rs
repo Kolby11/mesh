@@ -231,6 +231,12 @@ pub enum CoreRequest {
         module_id: String,
         enabled: bool,
     },
+    /// Transactionally replace the running composition and its profile-scoped
+    /// preferences. Candidate modules are prepared before the active pointer
+    /// and visible roots change.
+    SwitchProfile {
+        profile_id: String,
+    },
     /// Show a surface as a popover triggered by a specific element.
     ///
     /// The shell records `(trigger_surface, trigger_key)` on the trigger's

@@ -36,16 +36,10 @@ The 2026-06-18 redesign largely shipped: canonical `module.json` with
 `mesh.uses` / `mesh.provides` / `mesh.implements`, the graph as single source of
 truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
-- [ ] Support multiple instances of the same frontend module — module identity
-      should not be the only surface identity. Two panels or repeated widgets
-      need separate settings and storage scopes.
-- [ ] Complete named shell profiles beyond the shipped persistence/activation
-      closure and CLI: mount multiple root instances concurrently, apply
-      per-instance surface overrides, and expose typed profile/package services
-      to the settings frontend. See [`spec/01-module-system.md`](spec/01-module-system.md).
-- [ ] Implement transactional live profile switching — retain identical service
-      instances, and leave the active profile untouched when candidate
-      initialization fails.
+- [ ] Expose typed profile/package services to the settings frontend. Named
+      composition, multiple root instances, scoped preferences, and
+      transactional live switching are shipped; the replaceable UI still needs
+      service contracts instead of privileged file access. See [`spec/01-module-system.md`](spec/01-module-system.md).
 - [ ] Add external `contract.json` support with keyed state, method, event, and
       type objects; compile into `InterfaceContract` and generate strict
       Luau/LSP types.

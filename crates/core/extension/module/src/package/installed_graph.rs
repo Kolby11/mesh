@@ -2,7 +2,7 @@ use super::luau_scan;
 use super::{
     InstalledModuleEntry, InterfaceRelationship, ModuleKind, ModuleManifest,
     ModuleManifestDiagnostic, ModuleManifestError, PathContribution, ProfilePaths,
-    RootModuleGraphManifest, dependency_spec_to_string, parse_module_entrypoint,
+    RootModuleGraphManifest, ShellProfile, dependency_spec_to_string, parse_module_entrypoint,
     validate_relative_path,
 };
 use crate::manifest;
@@ -2466,11 +2466,22 @@ pub struct ContributedIconPack {
 pub fn load_installed_module_graph(
     root_module_graph_path: &Path,
 ) -> Result<InstalledModuleGraph, ModuleManifestError> {
-    load_installed_module_graph_with(root_module_graph_path, load_module_manifests)
+    load_installed_module_graph_with(root_module_graph_path, None, load_module_manifests)
+}
+
+/// Resolve the installed graph against an explicit candidate profile without
+/// changing `active-profile`. Live switching uses this to validate and prepare
+/// a complete candidate before committing the pointer.
+pub fn load_installed_module_graph_for_profile(
+    root_module_graph_path: &Path,
+    profile: &ShellProfile,
+) -> Result<InstalledModuleGraph, ModuleManifestError> {
+    load_installed_module_graph_with(root_module_graph_path, Some(profile), load_module_manifests)
 }
 
 fn load_installed_module_graph_with(
     root_module_graph_path: &Path,
+    candidate_profile: Option<&ShellProfile>,
     load_manifests: impl Fn(&[PathBuf]) -> Result<Vec<LoadedModuleManifest>, ModuleManifestError>,
 ) -> Result<InstalledModuleGraph, ModuleManifestError> {
     let mut root = RootModuleGraphManifest::from_path(root_module_graph_path)?;
@@ -2524,8 +2535,15 @@ fn load_installed_module_graph_with(
     // Once selected, the profile owns composition and the installed directory
     // becomes availability only. Dependencies and sole providers are inferred
     // before the graph indexes enabled contributions.
-    let profile_paths = ProfilePaths::from_root_graph(root_module_graph_path)?;
-    if let Some((_profile_id, profile)) = profile_paths.load_active()? {
+    let active_profile;
+    let profile = if let Some(profile) = candidate_profile {
+        Some(profile)
+    } else {
+        let profile_paths = ProfilePaths::from_root_graph(root_module_graph_path)?;
+        active_profile = profile_paths.load_active()?.map(|(_, profile)| profile);
+        active_profile.as_ref()
+    };
+    if let Some(profile) = profile {
         let manifests = modules
             .iter()
             .map(|loaded| loaded.manifest.clone())
@@ -2540,7 +2558,7 @@ fn load_installed_module_graph_with(
 pub(super) fn load_installed_module_graph_serial(
     root_module_graph_path: &Path,
 ) -> Result<InstalledModuleGraph, ModuleManifestError> {
-    load_installed_module_graph_with(root_module_graph_path, load_module_manifests_serial)
+    load_installed_module_graph_with(root_module_graph_path, None, load_module_manifests_serial)
 }
 
 #[cfg(test)]

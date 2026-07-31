@@ -403,7 +403,11 @@ impl Shell {
         payload: serde_json::Value,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         if let Some(slot) = self.backend_runtimes.get(&interface)
-            && slot.provider_id != provider_id
+            && *slot
+                .event_provider_id
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                != provider_id
         {
             tracing::debug!(
                 interface,

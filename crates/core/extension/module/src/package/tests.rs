@@ -897,7 +897,7 @@ fn shipped_module_graph_loads_repo_module_fixture() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();
 
-    assert_eq!(graph.frontend_modules().len(), 4);
+    assert_eq!(graph.frontend_modules().len(), 5);
     assert!(
         graph
             .frontend_modules()
@@ -909,9 +909,9 @@ fn shipped_module_graph_loads_repo_module_fixture() {
         .into_iter()
         .map(|module| module.id.as_str())
         .collect();
-    assert_eq!(component_ids.len(), 2);
-    assert!(component_ids.contains("@mesh/language-popover"));
+    assert_eq!(component_ids.len(), 1);
     assert!(component_ids.contains("@mesh/theme-selector"));
+    assert!(!graph.module("@mesh/language-popover").unwrap().enabled);
     assert_eq!(
         graph
             .module("@mesh/navigation-bar")

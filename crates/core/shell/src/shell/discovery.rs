@@ -5,6 +5,55 @@ use std::collections::HashSet;
 
 const BUILTIN_DEBUG_INSPECTOR_ID: &str = "@mesh/debug-inspector";
 
+pub(in crate::shell) fn installed_module_graph_path() -> PathBuf {
+    if let Ok(path) = std::env::var("MESH_MODULE_GRAPH_PATH")
+        && !path.trim().is_empty()
+    {
+        return PathBuf::from(path);
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join("config/module.json")
+}
+
+/// Layer a profile's sparse preferences and per-instance surface overrides on
+/// top of shared user defaults. The shared document remains untouched.
+pub(in crate::shell) fn effective_profile_settings(
+    shared: SettingsStore,
+    profile: Option<&mesh_core_module::package::ShellProfile>,
+) -> Result<SettingsStore, mesh_core_config::ConfigError> {
+    let Some(profile) = profile else {
+        return Ok(shared);
+    };
+    let path = shared.path().to_path_buf();
+    let mut document = shared.to_value();
+    let root = document
+        .as_object_mut()
+        .expect("SettingsStore always serializes an object");
+    if let Some(theme) = &profile.resources.theme {
+        let target = root
+            .entry("shell".to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        mesh_core_config::merge_json(target, &serde_json::json!({ "theme": { "active": theme } }));
+    }
+    for (namespace, overrides) in &profile.settings {
+        let target = root
+            .entry(namespace.clone())
+            .or_insert_with(|| serde_json::json!({}));
+        mesh_core_config::merge_json(target, overrides);
+    }
+    for (instance_id, instance) in profile.roots.iter().filter(|(_, root)| root.active) {
+        let Some(surface) = &instance.surface else {
+            continue;
+        };
+        let target = root
+            .entry(instance_id.clone())
+            .or_insert_with(|| serde_json::json!({}));
+        mesh_core_config::merge_json(target, &serde_json::json!({ "surface": surface }));
+    }
+    SettingsStore::from_value(path, document)
+}
+
 fn builtin_state_contract(
     interface: &str,
     fields: &[(&str, &str)],
@@ -120,10 +169,28 @@ impl Shell {
                 modules: HashMap::new(),
             }
         });
-        let settings_store = Arc::new(SettingsStore::load().unwrap_or_else(|e| {
+        let shared_settings = SettingsStore::load().unwrap_or_else(|e| {
             tracing::warn!("failed to load settings, using defaults: {e}");
             SettingsStore::default()
-        }));
+        });
+        let graph_path = installed_module_graph_path();
+        let active_profile = mesh_core_module::package::ProfilePaths::from_root_graph(&graph_path)
+            .and_then(|paths| paths.load_active())
+            .unwrap_or_else(|error| {
+                tracing::warn!("failed to load active shell profile: {error}");
+                None
+            });
+        let active_profile_id = active_profile.as_ref().map(|(id, _)| id.clone());
+        let settings_store = Arc::new(
+            effective_profile_settings(
+                shared_settings,
+                active_profile.as_ref().map(|(_, profile)| profile),
+            )
+            .unwrap_or_else(|error| {
+                tracing::warn!("failed to apply active profile settings: {error}");
+                SettingsStore::default()
+            }),
+        );
         // A hand-edited file is the whole point of the store, so a bad value in
         // it is reported and skipped, never fatal: the shell starts on declared
         // defaults with the reason on stderr.
@@ -213,6 +280,7 @@ impl Shell {
             services: ServiceRegistry::new(),
             interfaces,
             installed_module_graph: None,
+            active_profile_id,
             modules: HashMap::new(),
             frontend_catalog: FrontendCatalogHandle::default(),
             module_dirs,
@@ -241,6 +309,8 @@ impl Shell {
             service_handlers: HashMap::new(),
             backend_runtimes: HashMap::new(),
             pending_backend_runtimes: HashMap::new(),
+            pending_profile_switch: None,
+            deferred_requests: VecDeque::new(),
             backend_runtime_statuses: HashMap::new(),
             backend_supervision: HashMap::new(),
             backend_respawn: None,
@@ -268,9 +338,7 @@ impl Shell {
     }
 
     pub(in crate::shell) fn installed_module_graph_path(&self) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../..")
-            .join("config/module.json")
+        installed_module_graph_path()
     }
 
     pub(in crate::shell) fn load_installed_module_graph_cached(
@@ -419,6 +487,34 @@ impl Shell {
         let enabled_frontends = self.installed_enabled_frontend_ids();
         let graph_i18n_catalogs = self.graph_i18n_catalog_paths();
         let interface_catalog = std::sync::Arc::new(self.interfaces.catalog());
+        if let Some(profile_id) = self.active_profile_id.clone() {
+            let paths = mesh_core_module::package::ProfilePaths::from_root_graph(
+                &self.installed_module_graph_path(),
+            )?;
+            let profile = paths.load(&profile_id)?;
+            let entries = frontend_catalog
+                .top_level_surfaces()
+                .into_iter()
+                .map(|entry| (entry.compiled.manifest.package.id.clone(), entry))
+                .collect::<HashMap<_, _>>();
+            for (instance_id, root) in profile.roots.iter().filter(|(_, root)| root.active) {
+                let Some(entry) = entries.get(&root.module) else {
+                    continue;
+                };
+                self.register_component(Box::new(
+                    FrontendSurfaceComponent::new(
+                        entry.compiled.clone(),
+                        entry.module_dir.clone(),
+                        self.frontend_catalog.clone(),
+                        interface_catalog.clone(),
+                        self.settings_store.clone(),
+                    )
+                    .with_instance_id(instance_id)
+                    .with_graph_i18n_catalogs(graph_i18n_catalogs.clone()),
+                ));
+            }
+            return Ok(());
+        }
         for entry in frontend_catalog.top_level_surfaces_filtered(enabled_frontends.as_ref()) {
             self.register_component(Box::new(
                 FrontendSurfaceComponent::new(
@@ -440,10 +536,6 @@ impl Shell {
         module_id: &str,
         graph: &InstalledModuleGraph,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        let already_mounted = self
-            .components
-            .iter()
-            .any(|runtime| runtime.component.id() == module_id);
         let catalog = FrontendCatalog::from_modules(&self.modules, Some(graph))?;
         let entry = catalog
             .top_level_surfaces()
@@ -451,69 +543,89 @@ impl Shell {
             .find(|entry| entry.compiled.manifest.package.id == module_id);
         let previous_catalog = self.frontend_catalog.replace(catalog, None);
 
-        if already_mounted {
-            self.sync_frontend_catalog_components();
-            return Ok(VecDeque::new());
-        }
         let Some(entry) = entry else {
             // Widgets and component-only frontend packages own no surface.
             self.sync_frontend_catalog_components();
             return Ok(VecDeque::new());
         };
-
+        let instance_ids = if let Some(profile_id) = &self.active_profile_id {
+            let paths = mesh_core_module::package::ProfilePaths::from_root_graph(
+                &self.installed_module_graph_path(),
+            )?;
+            paths
+                .load(profile_id)?
+                .roots
+                .into_iter()
+                .filter(|(_, root)| root.active && root.module == module_id)
+                .map(|(instance_id, _)| instance_id)
+                .collect::<Vec<_>>()
+        } else {
+            vec![entry.compiled.surface_id().to_string()]
+        };
+        let existing = self
+            .components
+            .iter()
+            .map(|runtime| runtime.surface_id.clone())
+            .collect::<HashSet<_>>();
         let mounted = (|| {
             let interface_catalog = std::sync::Arc::new(self.interfaces.catalog());
-            let mut component = FrontendSurfaceComponent::new(
-                entry.compiled,
-                entry.module_dir,
-                self.frontend_catalog.clone(),
-                interface_catalog,
-                self.settings_store.clone(),
-            )
-            .with_graph_i18n_catalogs(self.graph_i18n_catalog_paths());
-            let surface_id = component.surface_id().to_string();
-            let diagnostics = self.diagnostics.register(module_id.to_string());
-            let mut requests = VecDeque::from(
-                component
-                    .mount(ComponentContext {
-                        component_id: module_id.to_string(),
-                        surface_id,
-                        diagnostics,
-                    })
-                    .map_err(ShellRunError::Component)?,
-            );
-            component
-                .locale_changed(&self.locale)
-                .map_err(ShellRunError::Component)?;
-            let latest = self
-                .latest_service_state
-                .values()
-                .cloned()
-                .collect::<Vec<_>>();
-            for state in latest {
-                let event = ServiceEvent::Updated {
-                    service: state.interface,
-                    source_module: state.provider_id,
-                    payload: state.state,
-                };
-                if component.observes_service_event(&event) {
-                    requests.extend(
-                        component
-                            .handle_service_event(&event)
-                            .map_err(ShellRunError::Component)?,
-                    );
+            let mut mounted = Vec::new();
+            for instance_id in instance_ids {
+                if existing.contains(&instance_id) {
+                    continue;
                 }
+                let mut component = FrontendSurfaceComponent::new(
+                    entry.compiled.clone(),
+                    entry.module_dir.clone(),
+                    self.frontend_catalog.clone(),
+                    interface_catalog.clone(),
+                    self.settings_store.clone(),
+                )
+                .with_instance_id(&instance_id)
+                .with_graph_i18n_catalogs(self.graph_i18n_catalog_paths());
+                let diagnostics = self.diagnostics.register(module_id.to_string());
+                let mut requests = VecDeque::from(
+                    component
+                        .mount(ComponentContext {
+                            component_id: module_id.to_string(),
+                            surface_id: instance_id,
+                            diagnostics,
+                        })
+                        .map_err(ShellRunError::Component)?,
+                );
+                component
+                    .locale_changed(&self.locale)
+                    .map_err(ShellRunError::Component)?;
+                for state in self.latest_service_state.values() {
+                    let event = ServiceEvent::Updated {
+                        service: state.interface.clone(),
+                        source_module: state.provider_id.clone(),
+                        payload: state.state.clone(),
+                    };
+                    if component.observes_service_event(&event) {
+                        requests.extend(
+                            component
+                                .handle_service_event(&event)
+                                .map_err(ShellRunError::Component)?,
+                        );
+                    }
+                }
+                mounted.push((component, requests));
             }
-            Ok::<_, ShellRunError>((component, requests))
+            Ok::<_, ShellRunError>(mounted)
         })();
-        let (component, requests) = match mounted {
+        let mounted = match mounted {
             Ok(mounted) => mounted,
             Err(error) => {
                 self.frontend_catalog.restore(previous_catalog);
                 return Err(error);
             }
         };
-        self.register_component(Box::new(component));
+        let mut requests = VecDeque::new();
+        for (component, component_requests) in mounted {
+            requests.extend(component_requests);
+            self.register_component(Box::new(component));
+        }
         self.sync_frontend_catalog_components();
         tracing::info!(module_id, "activated frontend module live");
         Ok(requests)
@@ -528,40 +640,48 @@ impl Shell {
         self.frontend_catalog.replace(catalog, None);
         self.sync_frontend_catalog_components();
 
-        let Some(index) = self
+        let indices = self
             .components
             .iter()
-            .position(|runtime| runtime.component.id() == module_id)
-        else {
+            .enumerate()
+            .filter(|(_, runtime)| runtime.component.id() == module_id)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        if indices.is_empty() {
             return Ok(VecDeque::new());
-        };
-        let surface_id = self.components[index].surface_id.clone();
-        self.destroy_all_child_surfaces(index);
-        self.presentation_engine.destroy_surface(&surface_id);
-        self.components.remove(index);
-        self.core.surfaces.remove(&surface_id);
-        self.surfaces.remove(&surface_id);
-        self.pending_popover_hides.remove(&surface_id);
-        self.transfer_owned_keyboard_modes.remove(&surface_id);
-        if self.keyboard_focus_surface.as_deref() == Some(surface_id.as_str()) {
-            self.keyboard_focus_surface = None;
+        }
+        let mut removed_surfaces = Vec::new();
+        for index in indices.into_iter().rev() {
+            let surface_id = self.components[index].surface_id.clone();
+            self.destroy_all_child_surfaces(index);
+            self.presentation_engine.destroy_surface(&surface_id);
+            self.components.remove(index);
+            self.core.surfaces.remove(&surface_id);
+            self.surfaces.remove(&surface_id);
+            self.pending_popover_hides.remove(&surface_id);
+            self.transfer_owned_keyboard_modes.remove(&surface_id);
+            if self.keyboard_focus_surface.as_deref() == Some(surface_id.as_str()) {
+                self.keyboard_focus_surface = None;
+            }
+            removed_surfaces.push(surface_id);
         }
         self.rebuild_component_surface_index();
         self.service_delivery_index.mark_dirty();
         tracing::info!(module_id, "deactivated frontend module live");
-        match self.broadcast_core_event(CoreEvent::SurfaceVisibilityChanged {
-            surface_id,
-            visible: false,
-        }) {
-            Ok(requests) => Ok(requests),
-            Err(error) => {
-                tracing::warn!(
+        let mut requests = VecDeque::new();
+        for surface_id in removed_surfaces {
+            match self.broadcast_core_event(CoreEvent::SurfaceVisibilityChanged {
+                surface_id,
+                visible: false,
+            }) {
+                Ok(next) => requests.extend(next),
+                Err(error) => tracing::warn!(
                     module_id,
                     "frontend was disabled but its visibility notification failed: {error}"
-                );
-                Ok(VecDeque::new())
+                ),
             }
         }
+        Ok(requests)
     }
 
     pub(in crate::shell) fn sync_frontend_catalog_components(&mut self) -> bool {

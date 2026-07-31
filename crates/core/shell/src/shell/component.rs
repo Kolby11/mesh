@@ -613,6 +613,9 @@ pub(super) struct TapRecord {
 }
 
 pub(super) struct FrontendSurfaceComponent {
+    /// Runtime instance identity. Defaults to the module's declared surface id
+    /// and is replaced by a profile root key for composed instances.
+    surface_id: String,
     pub(super) compiled: CompiledFrontendModule,
     pub(super) module_dir: PathBuf,
     /// The one settings store, shared with the shell and every sibling
@@ -954,6 +957,10 @@ struct EmbeddedFrontendRuntime {
 }
 
 impl FrontendSurfaceComponent {
+    pub(super) fn root_instance_key(&self) -> &str {
+        &self.surface_id
+    }
+
     pub(super) fn new(
         compiled: CompiledFrontendModule,
         module_dir: PathBuf,
@@ -976,7 +983,9 @@ impl FrontendSurfaceComponent {
         let frontend_catalog_state = frontend_catalog_handle.snapshot();
         let frontend_catalog = frontend_catalog_state.catalog;
         let declared_service_names = declared_service_names(&compiled, &frontend_catalog);
+        let surface_id = compiled.surface_id().to_string();
         Self {
+            surface_id,
             compiled,
             module_dir,
             settings,
@@ -1122,6 +1131,32 @@ impl FrontendSurfaceComponent {
             element_metric_usage,
             resolved_surface_shortcuts_cache: RefCell::new(None),
         }
+    }
+
+    /// Bind this compiled module to a named profile instance. The instance key
+    /// scopes surface identity and settings while the compiled module remains
+    /// reusable by other profiles or sibling instances.
+    pub(super) fn with_instance_id(mut self, instance_id: &str) -> Self {
+        self.surface_id = instance_id.to_string();
+        self.settings_namespace = instance_id.to_string();
+        let settings_state = resolve_frontend_module_settings(
+            &self.settings_namespace,
+            self.settings.namespace(&self.settings_namespace),
+            &self.compiled.manifest,
+        );
+        mesh_core_config::log_settings_diagnostics("profile settings", &settings_state.diagnostics);
+        self.settings_json = settings_state.raw;
+        self.settings_diagnostics = settings_state.diagnostics;
+        self.surface_layout = settings_state.layout;
+        self.visible = self.surface_layout.visible_on_start;
+        self
+    }
+
+    pub(super) fn adopt_frontend_catalog(&mut self, handle: FrontendCatalogHandle) {
+        let snapshot = handle.snapshot();
+        self.frontend_catalog_handle = handle;
+        self.frontend_catalog = snapshot.catalog;
+        self.frontend_catalog_version = snapshot.version;
     }
 
     pub(super) fn with_graph_i18n_catalogs(

@@ -7,6 +7,17 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Named shells switch live as one transaction.** Profiles now scope sparse
+shell/module/instance preferences, mount every named root instance, apply
+per-instance surfaces and Luau storage identity, and retain identical service
+providers across switches (2026-07-31). A changed provider and all new roots
+are prepared before `active-profile` changes; candidate failure aborts the
+staged runtimes and leaves the running shell untouched. `mesh-shell profile
+use` switches over IPC when running and selects the next startup otherwise;
+`profile set/unset` edits scoped preferences. Typed profile/package services
+for the replaceable settings frontend remain open. Record:
+[`log/2026-07.md`](log/2026-07.md).
+
 **Named profiles now own opt-in composition.** An `active-profile` pointer and
 `profiles/<id>.json` provide positive root instances, background services,
 provider bindings, and resource selections without turning installed source
@@ -16,8 +27,8 @@ preserves the legacy root graph. `mesh-shell profile` manages profiles, local
 `mesh-shell install <path>` stages and validates modules with capability gates,
 and direct frontend installs create an active `#default` instance while leaving
 manifest placement/props inherited. Settings-surface enable/disable writes the
-active profile atomically. Multiple mounted instances, live switching, Git
-installation, and typed package/profile services remain in the backlog. Record:
+active profile atomically. Git installation and typed package/profile services
+remain in the backlog. Record:
 [`log/2026-07.md`](log/2026-07.md).
 
 **Module script scanning parses Luau instead of searching for substrings.**

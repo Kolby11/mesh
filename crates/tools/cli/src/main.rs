@@ -160,24 +160,31 @@ fn cmd_debug(args: &[String]) {
 }
 
 fn send_ipc_command(command: &str) {
-    let socket_path = default_ipc_socket_path();
-    let mut stream = match UnixStream::connect(&socket_path) {
-        Ok(stream) => stream,
-        Err(err) => {
-            eprintln!(
-                "failed to connect to shell ipc socket {}: {err}",
-                socket_path.display()
-            );
-            std::process::exit(1);
-        }
-    };
-    if let Err(err) = writeln!(stream, "{command}") {
-        eprintln!("failed to send ipc command: {err}");
+    if let Err(error) = try_send_ipc_command(command) {
+        eprintln!("{error}");
         std::process::exit(1);
     }
+}
+
+fn try_send_ipc_command(command: &str) -> Result<String, String> {
+    let socket_path = default_ipc_socket_path();
+    let mut stream = UnixStream::connect(&socket_path).map_err(|error| {
+        format!(
+            "failed to connect to shell ipc socket {}: {error}",
+            socket_path.display()
+        )
+    })?;
+    writeln!(stream, "{command}")
+        .map_err(|error| format!("failed to send ipc command: {error}"))?;
     let mut reader = BufReader::new(stream);
     let mut response = String::new();
-    let _ = reader.read_line(&mut response);
+    reader
+        .read_line(&mut response)
+        .map_err(|error| format!("failed to read ipc response: {error}"))?;
+    if response.starts_with("error ") {
+        return Err(response.trim().to_string());
+    }
+    Ok(response)
 }
 
 fn cmd_ipc(args: &[String]) {
@@ -294,10 +301,16 @@ fn cmd_profile(args: &[String]) {
             paths
                 .load(profile_id)
                 .unwrap_or_else(|error| exit_error(error));
-            paths
-                .set_active(profile_id)
-                .unwrap_or_else(|error| exit_error(error));
-            println!("active profile: {profile_id} (takes effect on shell restart)");
+            let command = format!("shell:switch_profile:{profile_id}");
+            match try_send_ipc_command(&command) {
+                Ok(_) => println!("profile switch requested live: {profile_id}"),
+                Err(_) => {
+                    paths
+                        .set_active(profile_id)
+                        .unwrap_or_else(|error| exit_error(error));
+                    println!("active profile: {profile_id} (applies when the shell starts)");
+                }
+            }
         }
         Some("show") => {
             let profile_id = args
@@ -389,8 +402,51 @@ fn cmd_profile(args: &[String]) {
                 .unwrap_or_else(|error| exit_error(error));
             println!("removed {instance_id} from profile {profile_id}");
         }
+        Some("set") => {
+            let profile_id = required_arg(
+                args,
+                1,
+                "mesh-shell profile set <profile> <namespace> <json-object>",
+            );
+            let namespace = required_arg(
+                args,
+                2,
+                "mesh-shell profile set <profile> <namespace> <json-object>",
+            );
+            let value = required_arg(
+                args,
+                3,
+                "mesh-shell profile set <profile> <namespace> <json-object>",
+            );
+            let value: serde_json::Value = serde_json::from_str(value)
+                .unwrap_or_else(|error| exit_error(format!("invalid settings JSON: {error}")));
+            if !value.is_object() {
+                exit_error("profile settings value must be a JSON object");
+            }
+            let mut profile = paths
+                .load(profile_id)
+                .unwrap_or_else(|error| exit_error(error));
+            profile.settings.insert(namespace.to_string(), value);
+            paths
+                .save(profile_id, &profile)
+                .unwrap_or_else(|error| exit_error(error));
+            println!("updated {namespace} settings in profile {profile_id}");
+        }
+        Some("unset") => {
+            let profile_id =
+                required_arg(args, 1, "mesh-shell profile unset <profile> <namespace>");
+            let namespace = required_arg(args, 2, "mesh-shell profile unset <profile> <namespace>");
+            let mut profile = paths
+                .load(profile_id)
+                .unwrap_or_else(|error| exit_error(error));
+            profile.settings.remove(namespace);
+            paths
+                .save(profile_id, &profile)
+                .unwrap_or_else(|error| exit_error(error));
+            println!("removed {namespace} settings from profile {profile_id}");
+        }
         Some(other) => exit_error(format!(
-            "unknown profile subcommand: {other}\nsubcommands: list, create, use, show, add, enable, disable, remove"
+            "unknown profile subcommand: {other}\nsubcommands: list, create, use, show, add, enable, disable, remove, set, unset"
         )),
     }
 }
@@ -815,6 +871,8 @@ fn cmd_help() {
     println!("            add <profile> <module>  add/enable a frontend instance");
     println!("            enable|disable <profile> <module#instance>");
     println!("            remove <profile> <module#instance>");
+    println!("            set <profile> <namespace> <json>  set scoped preferences");
+    println!("            unset <profile> <namespace>      clear scoped preferences");
     println!("  install <path>  Install a local module; frontends are added to the active profile");
     println!("            flags: --available-only, --profile <id>, --allow-elevated, --allow-high");
     println!("  status    Show shell status");

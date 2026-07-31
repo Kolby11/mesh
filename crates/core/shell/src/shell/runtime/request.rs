@@ -33,6 +33,14 @@ impl Shell {
         module_id: &str,
         enabled: bool,
     ) -> VecDeque<CoreRequest> {
+        if self.pending_profile_switch.is_some() {
+            tracing::warn!(
+                module_id,
+                enabled,
+                "module change rejected during profile switch"
+            );
+            return VecDeque::new();
+        }
         let graph_path = self.installed_module_graph_path();
         let uses_profile = mesh_core_module::package::ProfilePaths::from_root_graph(&graph_path)
             .and_then(|paths| paths.active_profile_id())
@@ -191,6 +199,14 @@ impl Shell {
     }
 
     fn apply_set_provider(&mut self, interface: &str, provider_id: &str) {
+        if self.pending_profile_switch.is_some() {
+            tracing::warn!(
+                interface,
+                provider_id,
+                "provider change rejected during profile switch"
+            );
+            return;
+        }
         let graph_path = self.installed_module_graph_path();
         let (graph, provider) = match self.load_installed_module_graph_cached() {
             Ok(graph) => {
@@ -261,7 +277,7 @@ impl Shell {
                 tracing::debug!(interface, provider_id, "backend provider is already active");
                 return;
             }
-            match crate::shell::module_config::write_active_provider_selection(
+            match crate::shell::module_config::write_composed_provider_selection(
                 &graph_path,
                 interface,
                 provider_id,
@@ -787,6 +803,7 @@ impl Shell {
             CoreRequest::SetModuleEnabled { module_id, enabled } => {
                 Ok(self.apply_set_module_enabled(&module_id, enabled))
             }
+            CoreRequest::SwitchProfile { profile_id } => Ok(self.apply_switch_profile(&profile_id)),
             CoreRequest::ToggleDebugOverlay => {
                 self.debug.toggle();
                 tracing::debug!(
@@ -1738,6 +1755,7 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::SetLocale { .. } => "set_locale",
         CoreRequest::SetProvider { .. } => "set_provider",
         CoreRequest::SetModuleEnabled { .. } => "set_module_enabled",
+        CoreRequest::SwitchProfile { .. } => "switch_profile",
         CoreRequest::ActivatePopover { .. } => "activate_popover",
         CoreRequest::TransferTabFocus { .. } => "transfer_tab_focus",
         CoreRequest::ToggleDebugOverlay => "toggle_debug_overlay",

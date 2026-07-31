@@ -1,5 +1,6 @@
 use super::{
     ModuleKind, ModuleManifest, ModuleManifestError, RootLayoutSelection, RootModuleGraphManifest,
+    RootThemeSelection,
 };
 use crate::manifest::SurfaceLayoutSection;
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,11 @@ pub struct ShellProfile {
     pub providers: BTreeMap<String, String>,
     #[serde(default)]
     pub resources: ProfileResources,
+    /// Sparse preference overrides layered over the shared settings store.
+    /// Keys use the same namespaces as `settings.json`; durable module data is
+    /// deliberately not stored here.
+    #[serde(default)]
+    pub settings: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,7 +138,20 @@ impl ShellProfile {
                 .chain(self.resources.fonts.iter())
                 .chain(self.resources.languages.iter()),
             "resources",
-        )
+        )?;
+        for (namespace, value) in &self.settings {
+            if namespace != "shell" && !namespace.starts_with('@') && !namespace.contains('.') {
+                return Err(ModuleManifestError::Validation(format!(
+                    "profile settings key '{namespace}' is not a shell, module, instance, or interface namespace"
+                )));
+            }
+            if !value.is_object() {
+                return Err(ModuleManifestError::Validation(format!(
+                    "profile settings namespace '{namespace}' must contain an object"
+                )));
+            }
+        }
+        Ok(())
     }
 
     pub fn add_frontend(
@@ -269,6 +288,14 @@ impl ShellProfile {
         }
         root.disabled.clear();
         root.providers = self.providers.clone().into_iter().collect();
+        root.theme = self
+            .resources
+            .theme
+            .as_ref()
+            .map(|active| RootThemeSelection {
+                active: active.clone(),
+                mode: None,
+            });
         root.layout = self
             .roots
             .values()
@@ -288,6 +315,7 @@ impl Default for ShellProfile {
             background_services: BTreeSet::new(),
             providers: BTreeMap::new(),
             resources: ProfileResources::default(),
+            settings: BTreeMap::new(),
         }
     }
 }
@@ -573,5 +601,26 @@ mod tests {
     fn profile_paths_reject_traversal() {
         let paths = ProfilePaths::from_root_graph(Path::new("/tmp/mesh/module.json")).unwrap();
         assert!(paths.profile_path("../outside").is_err());
+    }
+
+    #[test]
+    fn profile_settings_are_sparse_namespaced_objects() {
+        let profile = ShellProfile::from_json_str(
+            r#"{
+                "schemaVersion": 1,
+                "settings": {
+                    "shell": { "i18n": { "locale": "sk-SK" } },
+                    "@me/panel#work": { "props": { "global": { "dense": true } } }
+                }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(profile.settings["shell"]["i18n"]["locale"], "sk-SK");
+        assert!(
+            ShellProfile::from_json_str(
+                r#"{"schemaVersion":1,"settings":{"shell":"not-an-object"}}"#
+            )
+            .is_err()
+        );
     }
 }

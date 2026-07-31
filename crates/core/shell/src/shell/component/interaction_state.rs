@@ -64,7 +64,12 @@ impl FrontendSurfaceComponent {
             .refs
             .then(|| Arc::new(serde_json::Value::Object(refs)));
 
-        if let Some(root_runtime) = self.runtimes.lock().unwrap().get_mut(self.id()) {
+        if let Some(root_runtime) = self
+            .runtimes
+            .lock()
+            .unwrap()
+            .get_mut(self.root_instance_key())
+        {
             // `elements` and the `refs` snapshot stay in script state (templates can
             // bind `{refs.x.width}`); `apply_element_metrics` additionally feeds the
             // live `refs.<name>` proxy that scripts read, which also exposes
@@ -99,7 +104,12 @@ impl FrontendSurfaceComponent {
     /// `refs.<name>` references (`focus`, `blur`, …), resolving each target to its
     /// live widget node and routing through the real focus/interaction paths.
     pub(super) fn apply_element_actions(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
-        let actions = match self.runtimes.lock().unwrap().get_mut(self.id()) {
+        let actions = match self
+            .runtimes
+            .lock()
+            .unwrap()
+            .get_mut(self.root_instance_key())
+        {
             Some(runtime) => runtime.script_ctx.drain_element_actions(),
             None => Vec::new(),
         };

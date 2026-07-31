@@ -54,7 +54,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn surface_id(&self) -> &str {
-        self.compiled.surface_id()
+        &self.surface_id
     }
 
     fn initial_visibility(&self) -> Option<bool> {
@@ -1094,7 +1094,12 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.settings_json = settings_state.raw;
 
         if settings_changed {
-            if let Some(runtime) = self.runtimes.lock().unwrap().get_mut(self.id()) {
+            if let Some(runtime) = self
+                .runtimes
+                .lock()
+                .unwrap()
+                .get_mut(self.root_instance_key())
+            {
                 runtime
                     .script_ctx
                     .state_mut()

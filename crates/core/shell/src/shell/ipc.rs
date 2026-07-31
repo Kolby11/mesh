@@ -214,6 +214,13 @@ pub(super) fn parse_ipc_command(command: &str) -> Option<CoreRequest> {
             scenario_id: scenario_id.to_string(),
         });
     }
+    if let Some(profile_id) = command.strip_prefix("shell:switch_profile:")
+        && !profile_id.trim().is_empty()
+    {
+        return Some(CoreRequest::SwitchProfile {
+            profile_id: profile_id.to_string(),
+        });
+    }
     match command {
         "shell:debug_overlay" => Some(CoreRequest::ToggleDebugOverlay),
         "shell:debug_layout_bounds" => Some(CoreRequest::ToggleDebugLayoutBounds),
@@ -391,5 +398,10 @@ mod tests {
             Some(CoreRequest::ToggleSurface { .. })
         ));
         assert!(parse_ipc_command("shell:promote_surface").is_none());
+        assert!(matches!(
+            parse_ipc_command("shell:switch_profile:work"),
+            Some(CoreRequest::SwitchProfile { profile_id }) if profile_id == "work"
+        ));
+        assert!(parse_ipc_command("shell:switch_profile:").is_none());
     }
 }

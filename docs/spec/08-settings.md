@@ -115,6 +115,8 @@ frontend presents them together.
 
 ### 1.1 Profile scope
 
+**Status: shipped.**
+
 Configuration overrides are profile-scoped by default. Resolution layers a
 shared user default beneath the active profile and instance override. Durable
 service-owned data such as histories or indexes is shared across profiles unless
