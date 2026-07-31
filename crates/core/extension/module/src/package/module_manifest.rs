@@ -871,8 +871,7 @@ pub struct MeshInterfaceDeclaration {
     pub name: String,
     #[serde(default)]
     pub version: Option<String>,
-    /// Inline contract JSON (state/methods/events/types/capabilities). This is
-    /// the only contract carrier — there is no separate contract file format.
+    /// Inline contract JSON or a module-relative `contract.json` path.
     #[serde(default)]
     pub contract: Option<serde_json::Value>,
     #[serde(default)]
@@ -899,13 +898,19 @@ impl MeshInterfaceDeclaration {
                 "mesh.interface.version cannot be empty".into(),
             ));
         }
-        if let Some(contract) = &self.contract
-            && !contract.is_object()
-        {
-            return Err(ModuleManifestError::Validation(format!(
-                "mesh interface declaration '{}' contract must be a JSON object",
-                self.name
-            )));
+        if let Some(contract) = &self.contract {
+            match contract {
+                serde_json::Value::Object(_) => {}
+                serde_json::Value::String(path) => {
+                    validate_relative_path("mesh interface declaration contract path", path)?
+                }
+                _ => {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "mesh interface declaration '{}' contract must be a JSON object or relative path",
+                        self.name
+                    )));
+                }
+            }
         }
         if let Some(domain) = &self.domain
             && domain.trim().is_empty()

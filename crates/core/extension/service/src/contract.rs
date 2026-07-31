@@ -5,10 +5,8 @@ use std::collections::HashMap;
 
 /// A parsed interface contract.
 ///
-/// Contracts are declared as JSON inside `module.json` — either by a
-/// standalone `interface` module (`mesh.interface.contract`) or inline by a
-/// backend module (`mesh.interfaces[].contract`). There is no separate
-/// contract file format.
+/// Contracts are declared inline in `module.json`, or in a module-relative
+/// JSON file referenced by an interface declaration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterfaceContract {
     pub interface: String,
@@ -193,8 +191,8 @@ impl TypeExpr {
     }
 }
 
-/// Parse and validate a contract JSON object (the `contract` value from
-/// `module.json`) into an [`InterfaceContract`].
+/// Parse and validate an inline or external contract JSON object into an
+/// [`InterfaceContract`].
 ///
 /// Every type expression in the contract is validated against the type
 /// grammar, and named types must be declared in `types` (or be the builtin
@@ -204,8 +202,14 @@ pub fn parse_interface_contract(
     interface_version: &str,
     contract: &JsonValue,
 ) -> Result<InterfaceContract, ContractError> {
+    let contract = normalize_keyed_contract_declarations(contract.clone()).map_err(|message| {
+        ContractError::Parse {
+            interface: interface_name.to_string(),
+            message,
+        }
+    })?;
     let parsed: ContractJson =
-        serde_json::from_value(contract.clone()).map_err(|source| ContractError::Parse {
+        serde_json::from_value(contract).map_err(|source| ContractError::Parse {
             interface: interface_name.to_string(),
             message: source.to_string(),
         })?;
@@ -284,6 +288,45 @@ pub fn parse_interface_contract(
         });
     }
 
+    Ok(contract)
+}
+
+/// The compact external `contract.json` format keys state, methods, and
+/// events by their public names. Normalize it to the established array form so
+/// both authoring shapes compile through exactly the same validation path.
+fn normalize_keyed_contract_declarations(mut contract: JsonValue) -> Result<JsonValue, String> {
+    let object = contract
+        .as_object_mut()
+        .ok_or_else(|| "contract must be a JSON object".to_string())?;
+
+    for section in ["state", "methods", "events"] {
+        let Some(value) = object.get_mut(section) else {
+            continue;
+        };
+        let Some(entries) = value.as_object() else {
+            continue;
+        };
+        let mut normalized = Vec::with_capacity(entries.len());
+        for (name, declaration) in entries {
+            let Some(mut declaration) = declaration.as_object().cloned() else {
+                return Err(format!("contract {section}.{name} must be a JSON object"));
+            };
+            match declaration.get("name") {
+                Some(JsonValue::String(existing)) if existing == name => {}
+                Some(JsonValue::String(existing)) => {
+                    return Err(format!(
+                        "contract {section}.{name} names itself '{existing}', which does not match its key"
+                    ));
+                }
+                Some(_) => return Err(format!("contract {section}.{name}.name must be a string")),
+                None => {
+                    declaration.insert("name".into(), JsonValue::String(name.clone()));
+                }
+            }
+            normalized.push(JsonValue::Object(declaration));
+        }
+        *value = JsonValue::Array(normalized);
+    }
     Ok(contract)
 }
 
@@ -582,6 +625,26 @@ mod tests {
             vec!["service.thermal.read".to_string()]
         );
         assert!(contract.types.contains_key("Sensor"));
+    }
+
+    #[test]
+    fn parses_keyed_contract_json_shape() {
+        let contract = serde_json::json!({
+            "state": { "percent": { "type": "float" } },
+            "methods": {
+                "set_percent": {
+                    "args": [{ "name": "value", "type": "float" }],
+                    "stateBinding": { "field": "percent", "fromArg": "value" }
+                }
+            },
+            "events": { "Changed": { "payload": [] } },
+            "types": { "Device": { "fields": [] } }
+        });
+        let parsed = parse_interface_contract("mesh.audio", "1.0", &contract).unwrap();
+        assert_eq!(parsed.state_fields[0].name, "percent");
+        assert_eq!(parsed.methods[0].name, "set_percent");
+        assert_eq!(parsed.events[0].name, "Changed");
+        assert!(parsed.types.contains_key("Device"));
     }
 
     #[test]

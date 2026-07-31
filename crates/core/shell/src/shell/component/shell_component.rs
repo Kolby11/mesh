@@ -1148,7 +1148,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         })?;
 
         let component_id = self.id().to_string();
-        self.compiled = recompiled;
+        self.compiled = recompiled.into();
         self.element_metric_usage = element_metric_usage(&self.compiled);
         self.frontend_catalog_handle
             .update_compiled_module(&component_id, self.compiled.clone());

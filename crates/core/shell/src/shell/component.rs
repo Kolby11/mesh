@@ -30,7 +30,9 @@ mod runtime_tree;
 mod shell_component;
 mod tooltip;
 
-pub(in crate::shell) use catalog::{FrontendCatalog, FrontendCatalogHandle};
+pub(in crate::shell) use catalog::{
+    FrontendCatalog, FrontendCatalogHandle, SharedCompiledFrontendModule,
+};
 #[cfg(test)]
 pub(crate) use input::KeybindResolutionSource;
 use input::ResolvedSurfaceShortcut;
@@ -625,7 +627,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// Runtime instance identity. Defaults to the module's declared surface id
     /// and is replaced by a profile root key for composed instances.
     surface_id: String,
-    pub(super) compiled: CompiledFrontendModule,
+    /// Shared immutable frontend source. Multiple profile roots of the same
+    /// module must not duplicate the compiled template, scripts, or styles.
+    pub(super) compiled: SharedCompiledFrontendModule,
     pub(super) module_dir: PathBuf,
     /// The one settings store, shared with the shell and every sibling
     /// component. Swapped wholesale when the file changes.
@@ -971,12 +975,13 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn new(
-        compiled: CompiledFrontendModule,
+        compiled: impl Into<SharedCompiledFrontendModule>,
         module_dir: PathBuf,
         frontend_catalog: impl Into<FrontendCatalogHandle>,
         interface_catalog: impl Into<Arc<mesh_core_service::InterfaceCatalog>>,
         settings: impl Into<Arc<SettingsStore>>,
     ) -> Self {
+        let compiled = compiled.into();
         let settings = settings.into();
         let settings_namespace = compiled.manifest.package.id.clone();
         let settings_state = resolve_frontend_module_settings(

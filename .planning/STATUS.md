@@ -7,6 +7,13 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Compiled frontend modules are shared across surface instances.** Catalog
+entries and mounted profile roots retain copy-on-write `Arc` handles, so
+multiple instances no longer clone compiled templates, scripts, or styles. A
+source reload publishes a replacement in the next catalog generation while
+existing surfaces retain their previous immutable snapshot until rebind
+(2026-07-31). Record: [`log/performance-log.md`](log/performance-log.md).
+
 **Interaction targets are `NodeId`s end-to-end.** Pointer-down capture, active
 slider state, and keyboard button activation no longer retain structural-key
 strings. Cleanup preserves a nested target across a keyed-list reorder and

@@ -27,7 +27,7 @@ fn memo_surface(parent_src: &str, locals: &[(&str, &str)]) -> FrontendSurfaceCom
             PARENT_ID.into(),
             FrontendCatalogEntry {
                 module_dir: PathBuf::from("."),
-                compiled: compiled.clone(),
+                compiled: compiled.clone().into(),
             },
         )]),
         slot_contributions: HashMap::new(),
@@ -315,14 +315,14 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
                 PARENT_ID.into(),
                 FrontendCatalogEntry {
                     module_dir: PathBuf::from("."),
-                    compiled: parent_compiled.clone(),
+                    compiled: parent_compiled.clone().into(),
                 },
             ),
             (
                 widget_id.into(),
                 FrontendCatalogEntry {
                     module_dir: PathBuf::from("."),
-                    compiled: widget_compiled,
+                    compiled: widget_compiled.into(),
                 },
             ),
         ]),
@@ -680,14 +680,14 @@ import MenuPopover from "@mesh/menu-popover"
                 PARENT_ID.into(),
                 FrontendCatalogEntry {
                     module_dir: PathBuf::from("."),
-                    compiled: parent_compiled.clone(),
+                    compiled: parent_compiled.clone().into(),
                 },
             ),
             (
                 "@mesh/menu-popover".into(),
                 FrontendCatalogEntry {
                     module_dir: PathBuf::from("."),
-                    compiled: popover_compiled,
+                    compiled: popover_compiled.into(),
                 },
             ),
         ]),

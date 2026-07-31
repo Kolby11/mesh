@@ -679,8 +679,8 @@ pub struct ThemeDefaultsSection {
 pub struct InterfaceSection {
     pub name: String,
     pub version: String,
-    /// Inline contract JSON (state/methods/events/types/capabilities), parsed
-    /// by `mesh_core_service::parse_interface_contract`.
+    /// Inline contract JSON or the resolved contents of a module-relative
+    /// contract file, parsed by `mesh_core_service::parse_interface_contract`.
     #[serde(default)]
     pub contract: Option<serde_json::Value>,
     #[serde(default)]

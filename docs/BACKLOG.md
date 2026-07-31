@@ -232,10 +232,6 @@ gate where the win is structural.
       `activate_frontend_module` recompiles every frontend for a one-module
       enable. Cache compiled modules by manifest/source fingerprint and update
       indexes from a graph diff.
-- [ ] Share compiled frontend modules instead of cloning roots —
-      `top_level_surfaces` clones an owned `CompiledFrontendModule` per surface.
-      Store `Arc<CompiledFrontendModule>` with versioned replacement for hot
-      reload.
 
 ### Architecture
 

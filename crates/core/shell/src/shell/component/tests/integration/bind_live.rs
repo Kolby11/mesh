@@ -25,7 +25,7 @@ fn bind_live_surface(parent_src: &str, child_src: &str) -> FrontendSurfaceCompon
             PARENT_ID.into(),
             FrontendCatalogEntry {
                 module_dir: PathBuf::from("."),
-                compiled: compiled.clone(),
+                compiled: compiled.clone().into(),
             },
         )]),
         slot_contributions: HashMap::new(),

@@ -264,14 +264,14 @@ end
                 "@mesh/navigation-bar".into(),
                 FrontendCatalogEntry {
                     module_dir: PathBuf::from("."),
-                    compiled: root_compiled.clone(),
+                    compiled: root_compiled.clone().into(),
                 },
             ),
             (
                 "@mesh/audio-popover".into(),
                 FrontendCatalogEntry {
                     module_dir: PathBuf::from("."),
-                    compiled: popover_compiled,
+                    compiled: popover_compiled.into(),
                 },
             ),
         ]),

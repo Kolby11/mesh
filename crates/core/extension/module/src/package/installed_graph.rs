@@ -2738,7 +2738,8 @@ pub fn load_module_manifest(
                 source,
             }
         })? {
-            let manifest = ModuleManifest::from_path(&module_json)?;
+            let mut manifest = ModuleManifest::from_path(&module_json)?;
+            resolve_external_interface_contracts(&mut manifest, module_dir)?;
             let diagnostics = manifest.localized_text_diagnostics(&module_json);
             return Ok(LoadedModuleManifest {
                 manifest,
@@ -2787,4 +2788,43 @@ pub fn load_module_manifest(
         "no module.json found in {}",
         module_dir.display()
     )))
+}
+
+/// Replaces a module-relative external contract reference with its JSON object
+/// before graph construction. Keeping the loaded manifest canonical means the
+/// graph, runtime, and tooling share the existing contract path.
+fn resolve_external_interface_contracts(
+    manifest: &mut ModuleManifest,
+    module_dir: &Path,
+) -> Result<(), ModuleManifestError> {
+    let module_id = manifest.name.clone();
+    let mut declarations = manifest
+        .mesh
+        .interface
+        .iter_mut()
+        .chain(manifest.mesh.interfaces.iter_mut());
+
+    for declaration in &mut declarations {
+        let Some(serde_json::Value::String(relative_path)) = declaration.contract.as_ref() else {
+            continue;
+        };
+        let path = module_dir.join(relative_path);
+        let content = std::fs::read_to_string(&path).map_err(|source| ModuleManifestError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let contract: serde_json::Value =
+            serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
+                path: path.clone(),
+                source,
+            })?;
+        if !contract.is_object() {
+            return Err(ModuleManifestError::Validation(format!(
+                "external contract '{}' for interface {} in module {} must be a JSON object",
+                relative_path, declaration.name, module_id
+            )));
+        }
+        declaration.contract = Some(contract);
+    }
+    Ok(())
 }

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -20,7 +21,38 @@ pub(in crate::shell) struct FrontendCatalog {
 #[derive(Debug, Clone)]
 pub(in crate::shell) struct FrontendCatalogEntry {
     pub(in crate::shell) module_dir: PathBuf,
-    pub(in crate::shell) compiled: CompiledFrontendModule,
+    /// The immutable compiled source is shared by every surface instance and
+    /// catalog generation that still references it. A source reload replaces
+    /// this pointer atomically with the next catalog snapshot.
+    pub(in crate::shell) compiled: SharedCompiledFrontendModule,
+}
+
+/// Copy-on-write handle for a compiled frontend module.
+///
+/// Production code treats compiled source as immutable and cloning this handle
+/// only increments an `Arc` count. `DerefMut` is deliberately copy-on-write to
+/// retain the concise fixture setup used by component tests.
+#[derive(Debug, Clone)]
+pub(in crate::shell) struct SharedCompiledFrontendModule(Arc<CompiledFrontendModule>);
+
+impl From<CompiledFrontendModule> for SharedCompiledFrontendModule {
+    fn from(compiled: CompiledFrontendModule) -> Self {
+        Self(Arc::new(compiled))
+    }
+}
+
+impl Deref for SharedCompiledFrontendModule {
+    type Target = CompiledFrontendModule;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for SharedCompiledFrontendModule {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        Arc::make_mut(&mut self.0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,7 +136,7 @@ impl FrontendCatalogHandle {
     pub(in crate::shell) fn update_compiled_module(
         &self,
         module_id: &str,
-        compiled: CompiledFrontendModule,
+        compiled: SharedCompiledFrontendModule,
     ) {
         let mut catalog = (*self.snapshot().catalog).clone();
         if let Some(entry) = catalog.modules.get_mut(module_id) {
@@ -209,7 +241,7 @@ impl FrontendCatalog {
                             (*module_id).clone(),
                             FrontendCatalogEntry {
                                 module_dir: module.path.clone(),
-                                compiled,
+                                compiled: compiled.into(),
                             },
                         )
                     })
@@ -449,7 +481,7 @@ mod performance_tests {
                             module_id.clone(),
                             FrontendCatalogEntry {
                                 module_dir: module.path.clone(),
-                                compiled,
+                                compiled: compiled.into(),
                             },
                         )
                     })
@@ -472,6 +504,55 @@ mod performance_tests {
             .into_keys()
             .collect();
         assert_eq!(parallel, sequential);
+    }
+
+    #[test]
+    fn top_level_surface_entries_share_the_compiled_module() {
+        let modules = shipped_frontend_modules();
+        let catalog = FrontendCatalog::from_modules(&modules, None).unwrap();
+        let surfaces = catalog.top_level_surfaces();
+        let surface = surfaces.first().expect("shipped catalog has a surface");
+        let module_id = &surface.compiled.manifest.package.id;
+        let catalog_entry = catalog.modules.get(module_id).unwrap();
+
+        assert!(std::ptr::eq::<CompiledFrontendModule>(
+            &*surface.compiled,
+            &*catalog_entry.compiled,
+        ));
+    }
+
+    // cargo test -p mesh-core-shell --release --lib shared_compiled_handle_clone_beats_deep_clone -- --ignored --nocapture
+    #[test]
+    #[ignore = "release-only compiled frontend ownership benchmark"]
+    fn shared_compiled_handle_clone_beats_deep_clone() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let modules = shipped_frontend_modules();
+        let catalog = FrontendCatalog::from_modules(&modules, None).unwrap();
+        let surface = catalog
+            .top_level_surfaces()
+            .into_iter()
+            .next()
+            .expect("shipped catalog has a surface");
+        let iterations = 1_000;
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box((*surface.compiled).clone());
+        }
+        let deep_clone = started.elapsed();
+
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(surface.compiled.clone());
+        }
+        let shared_clone = started.elapsed();
+
+        eprintln!(
+            "compiled frontend clone over {iterations} iterations: deep {deep_clone:?}, shared {shared_clone:?}"
+        );
+        assert!(shared_clone < deep_clone);
     }
 
     #[test]

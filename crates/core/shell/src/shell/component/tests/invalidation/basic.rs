@@ -959,7 +959,8 @@ surface { width: 200px; height: 80px; }
                     local_components: HashMap::new(),
                     module_component_imports: HashMap::new(),
                     watched_paths: Vec::new(),
-                },
+                }
+                .into(),
             },
         );
     // The rule cache may have been built before the import was wired (as it
@@ -1351,7 +1352,7 @@ local Child = require("./components/child.mesh")
             manifest.package.id.clone(),
             crate::shell::component::catalog::FrontendCatalogEntry {
                 module_dir: module_dir.to_path_buf(),
-                compiled: compiled.clone(),
+                compiled: compiled.clone().into(),
             },
         )]),
         slot_contributions: Default::default(),

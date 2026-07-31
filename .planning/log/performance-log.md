@@ -11,6 +11,23 @@ Every entry keeps its benchmark numbers so future work can compare against the
 recorded baselines. Sections M–V were focused per-subsystem deep dives; see
 `PERFORMANCE_SECTIONS.md` for the subsystem map.
 
+## 2026-07-31 — share compiled frontend modules across surface instances
+
+area: frontend catalog, shell component lifecycle
+
+Catalog entries and surface components now retain a copy-on-write `Arc` handle
+to their immutable `CompiledFrontendModule`. Multiple profile roots no longer
+clone compiled templates, scripts, or style rules; a source reload compiles one
+replacement and publishes it in the next catalog generation, leaving prior
+snapshots valid until their live surfaces adopt the change. Test fixtures keep
+their concise manifest setup through copy-on-write mutation.
+
+**Verified.** `cargo check -p mesh-core-shell` and `cargo test -p
+mesh-core-shell --lib --no-run`; the catalog regression asserts that a cloned
+top-level surface entry and its catalog entry dereference to the same compiled
+module. The release-only `shared_compiled_handle_clone_beats_deep_clone` gate
+pins the ownership improvement against the former deep-clone operation.
+
 ## 2026-07-31 — graph diagnostics parse each `.mesh` source once
 
 area: module graph diagnostics

@@ -1022,6 +1022,54 @@ fn load_installed_module_graph_auto_discovers_modules() {
 }
 
 #[test]
+fn module_loader_resolves_keyed_external_interface_contract() {
+    let root = temp_dir("external-interface-contract");
+    fs::write(
+        root.join("module.json"),
+        r#"{
+  "name": "@me/audio-interface",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "me.audio",
+      "version": "1.0",
+      "contract": "contract.json"
+    }
+  }
+}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("contract.json"),
+        r#"{
+  "state": { "percent": { "type": "float" } },
+  "methods": { "set_percent": {
+    "args": [{ "name": "value", "type": "float" }],
+    "stateBinding": { "field": "percent", "fromArg": "value" }
+  } },
+  "events": { "Changed": { "payload": [] } }
+}"#,
+    )
+    .unwrap();
+
+    let loaded = load_module_manifest(&root).unwrap();
+    let declaration = loaded.manifest.mesh.interface.as_ref().unwrap();
+    let contract = declaration.contract.as_ref().unwrap();
+    let parsed = mesh_core_service::parse_interface_contract(
+        &declaration.name,
+        declaration.version.as_deref().unwrap(),
+        contract,
+    )
+    .unwrap();
+    assert_eq!(parsed.methods[0].name, "set_percent");
+    assert_eq!(parsed.events[0].name, "Changed");
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn load_installed_module_graph_loads_explicit_inventory() {
     let root = temp_dir("explicit-installed-graph");
     let config_dir = root.join("config");

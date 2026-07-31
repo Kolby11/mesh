@@ -499,7 +499,7 @@ pub(super) fn test_frontend_component_with_local_components(
             "@test/reactive-surface".to_string(),
             FrontendCatalogEntry {
                 module_dir: PathBuf::from("."),
-                compiled: compiled.clone(),
+                compiled: compiled.clone().into(),
             },
         )]),
         slot_contributions: HashMap::new(),
@@ -933,42 +933,42 @@ pub(super) fn real_frontend_module_component(
                 "@mesh/navigation-bar".into(),
                 FrontendCatalogEntry {
                     module_dir: navigation_dir.clone(),
-                    compiled: navigation_compiled.clone(),
+                    compiled: navigation_compiled.clone().into(),
                 },
             ),
             (
                 "@mesh/audio-popover".into(),
                 FrontendCatalogEntry {
                     module_dir: audio_popover_dir.clone(),
-                    compiled: audio_popover_compiled.clone(),
+                    compiled: audio_popover_compiled.clone().into(),
                 },
             ),
             (
                 "@mesh/language-popover".into(),
                 FrontendCatalogEntry {
                     module_dir: language_popover_dir.clone(),
-                    compiled: language_popover_compiled.clone(),
+                    compiled: language_popover_compiled.clone().into(),
                 },
             ),
             (
                 "@mesh/theme-selector".into(),
                 FrontendCatalogEntry {
                     module_dir: theme_selector_dir.clone(),
-                    compiled: theme_selector_compiled.clone(),
+                    compiled: theme_selector_compiled.clone().into(),
                 },
             ),
             (
                 "@mesh/debug-inspector".into(),
                 FrontendCatalogEntry {
                     module_dir: debug_inspector_dir.clone(),
-                    compiled: debug_inspector_compiled.clone(),
+                    compiled: debug_inspector_compiled.clone().into(),
                 },
             ),
             (
                 "@mesh/settings".into(),
                 FrontendCatalogEntry {
                     module_dir: settings_dir.clone(),
-                    compiled: settings_compiled.clone(),
+                    compiled: settings_compiled.clone().into(),
                 },
             ),
         ]),
