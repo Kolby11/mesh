@@ -96,11 +96,6 @@ promotion")*
 
 ## Tech debt
 
-- [ ] Drop the render-hook pull in the navigation language and theme triggers.
-      Child→parent `self.<Event>:fire()` push now resyncs the parent, so
-      `render()` no longer has to re-derive popover state every frame. Needs
-      live verification of the popover open/close/dismiss paths before landing.
-
 - [ ] Move the authoring diagnostics off shell startup. Undeclared icons,
       translation keys, keybind subscriptions, and event publishes are scanned
       on every `InstalledModuleGraph` build; the Luau half now costs 20-35ms

@@ -33,6 +33,7 @@ lang_popover = nil
 local lang_popover_connected = false
 local CLOSE_BRIDGE_KEY = "language-popover-close"
 local CLOSE_BRIDGE_DELAY_MS = 400
+local do_close
 
 local function cancel_bridge_close()
     mesh.events.publish("shell.cancel-handler", { key = CLOSE_BRIDGE_KEY })
@@ -72,8 +73,29 @@ local function sync_trigger_state()
     end
 end
 
+local function connect_popover()
+    if lang_popover == nil or lang_popover_connected then
+        return
+    end
+    lang_popover_connected = true
+    current_locale_label = popover_flag() or current_locale_label
+    lang_popover.LocaleChanged:on(function()
+        current_locale_label = popover_flag() or current_locale_label
+    end)
+    lang_popover.PopoverEnter:on(function()
+        cancel_bridge_close()
+    end)
+    lang_popover.CloseRequested:on(function()
+        do_close()
+    end)
+    lang_popover.KeyboardDismissRequested:on(function()
+        do_close()
+    end)
+end
+
 local function do_open()
     if lang_popover and language_surface_hidden then
+        connect_popover()
         cancel_bridge_close()
         lang_popover.open = true
         language_surface_hidden = false
@@ -81,7 +103,7 @@ local function do_open()
     end
 end
 
-local function do_close()
+do_close = function()
     cancel_bridge_close()
     if lang_popover and not language_surface_hidden then
         lang_popover.open = false
@@ -91,23 +113,12 @@ local function do_close()
 end
 
 function render(self)
-    current_locale_label = popover_flag() or current_locale_label
-    sync_trigger_state()
-
-    -- Subscribe to popover events once the bound instance is available.
-    if lang_popover ~= nil and not lang_popover_connected then
-        lang_popover_connected = true
-        lang_popover.PopoverEnter:on(function()
-            cancel_bridge_close()
-        end)
-        lang_popover.CloseRequested:on(function()
-            do_close()
-        end)
-        lang_popover.KeyboardDismissRequested:on(function()
-            do_close()
-        end)
-    end
+    -- `bind:this` becomes available after the initial template evaluation.
+    -- State updates then flow through the child event instead of being polled.
+    connect_popover()
 end
+
+sync_trigger_state()
 
 -- Keyboard-only toggle; hover opens/closes.
 function onLanguageToggle(event)

@@ -67,6 +67,7 @@ end
 -- The flag for the active locale. The language button reads this off its
 -- `bind:this` reference instead of keeping a second copy of the table.
 current_flag = FLAGS["en"]
+local locale_changed = nil
 
 open = false
 local CLOSE_BRIDGE_KEY = "language-popover-close"
@@ -120,6 +121,9 @@ end
 local function apply_selection(locale)
     selected_locale = locale
     current_flag = locale_label(locale)
+    if locale_changed ~= nil then
+        locale_changed:fire({ flag = current_flag })
+    end
 end
 
 local function current_locale()
@@ -237,6 +241,7 @@ local function recenter_ring()
 end
 
 function init(self)
+    locale_changed = self.LocaleChanged
     local locale = stored_locale(self.storage)
     if locale ~= nil then
         mesh.locale.set(locale)

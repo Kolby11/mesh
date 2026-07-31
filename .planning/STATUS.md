@@ -7,6 +7,11 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Navigation popover triggers are push-driven.** The language and theme
+popovers notify their bound trigger when state changes, so trigger render hooks
+only establish the live binding and no longer poll child or service state
+(2026-07-31). Record: [`log/2026-07.md`](log/2026-07.md).
+
 **Dead Luau source caching is gone.** `ChunkCache` never supplied a compiled
 chunk (or even read its stored source) and could retain every historical script
 version. Script loading and source reload now execute directly (2026-07-31).

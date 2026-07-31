@@ -68,6 +68,7 @@ local pointer_inside = false
 -- service was reporting when it asked. See `active_theme`.
 local pending_theme = nil
 local pending_theme_replaced = nil
+local theme_changed = nil
 
 local THEME_DARK = "mesh-default-dark"
 local THEME_LIGHT = "mesh-default-light"
@@ -76,6 +77,8 @@ local THEME_NORD = "nord"
 local THEME_MOCHA = "catppuccin-mocha"
 local THEME_TOKYO = "tokyo-night"
 local THEME_SOLARIZED = "solarized-dark"
+
+current_theme = THEME_DARK
 
 -- Every installed theme, in ring order. Three of them fit on screen at once and
 -- scrolling turns the rest through; each `core` class carries that theme's own
@@ -200,8 +203,24 @@ local function active_theme()
     return pending_theme
 end
 
+local function set_current_theme(theme_id)
+    if current_theme == theme_id then
+        return
+    end
+    current_theme = theme_id
+    if theme_changed ~= nil then
+        theme_changed:fire({ theme_id = theme_id })
+    end
+end
+
+function init(self)
+    theme_changed = self.ThemeChanged
+    set_current_theme(active_theme())
+end
+
 function render(self)
     local current = active_theme()
+    set_current_theme(current)
     if not window_centred then
         window_centred = true
         centre_window_on(current)
@@ -215,6 +234,7 @@ end
 function onSelectTheme(theme_id)
     pending_theme_replaced = service_theme()
     pending_theme = theme_id
+    set_current_theme(theme_id)
     sync_options(theme_id)
     mesh.events.publish("shell.set-theme", { theme_id = theme_id })
 end

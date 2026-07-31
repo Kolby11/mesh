@@ -20,7 +20,6 @@
 
 <script lang="luau">
 local t = import("mesh.i18n", "t")
-local theme = require("mesh.theme")
 local ThemeSelector = require("@mesh/theme-selector")
 
 theme_icon = "weather-clear-night"
@@ -36,6 +35,7 @@ theme_popover = nil
 local theme_popover_connected = false
 local CLOSE_BRIDGE_KEY = "theme-popover-close"
 local CLOSE_BRIDGE_DELAY_MS = 400
+local do_close
 
 local function cancel_bridge_close()
     mesh.events.publish("shell.cancel-handler", { key = CLOSE_BRIDGE_KEY })
@@ -47,27 +47,6 @@ local function schedule_bridge_close()
         handler = "closeThemeBridge",
         delay_ms = CLOSE_BRIDGE_DELAY_MS,
     })
-end
-
-local function read_theme_is_dark()
-    if theme then
-        local current_is_dark = theme.is_dark
-        if current_is_dark == nil and theme.state then
-            current_is_dark = theme.state.is_dark
-        end
-        if current_is_dark ~= nil then
-            return current_is_dark == true
-        end
-
-        local current = theme.current or theme.theme_id
-        if current == nil and theme.state then
-            current = theme.state.current or theme.state.theme_id
-        end
-        if type(current) == "string" then
-            return string.find(current, "dark", 1, true) ~= nil
-        end
-    end
-    return theme_is_dark
 end
 
 local function sync_trigger_state()
@@ -82,8 +61,34 @@ local function sync_trigger_state()
     end
 end
 
+local function apply_theme(theme_id)
+    theme_is_dark = type(theme_id) == "string" and string.find(theme_id, "dark", 1, true) ~= nil
+    theme_icon = theme_is_dark and "weather-clear-night" or "weather-clear"
+end
+
+local function connect_popover()
+    if theme_popover == nil or theme_popover_connected then
+        return
+    end
+    theme_popover_connected = true
+    apply_theme(theme_popover.current_theme)
+    theme_popover.ThemeChanged:on(function()
+        apply_theme(theme_popover.current_theme)
+    end)
+    theme_popover.PopoverEnter:on(function()
+        cancel_bridge_close()
+    end)
+    theme_popover.CloseRequested:on(function()
+        do_close()
+    end)
+    theme_popover.KeyboardDismissRequested:on(function()
+        do_close()
+    end)
+end
+
 local function do_open()
     if theme_popover and theme_surface_hidden then
+        connect_popover()
         cancel_bridge_close()
         theme_popover.open = true
         theme_surface_hidden = false
@@ -91,7 +96,7 @@ local function do_open()
     end
 end
 
-local function do_close()
+do_close = function()
     cancel_bridge_close()
     if theme_popover and not theme_surface_hidden then
         theme_popover.open = false
@@ -101,29 +106,12 @@ local function do_close()
 end
 
 function render(self)
-    theme_is_dark = read_theme_is_dark()
-    if theme_is_dark then
-        theme_icon = "weather-clear-night"
-        theme_tooltip_key = "nav.select_theme"
-    else
-        theme_icon = "weather-clear"
-        theme_tooltip_key = "nav.select_theme"
-    end
-    sync_trigger_state()
-
-    if theme_popover ~= nil and not theme_popover_connected then
-        theme_popover_connected = true
-        theme_popover.PopoverEnter:on(function()
-            cancel_bridge_close()
-        end)
-        theme_popover.CloseRequested:on(function()
-            do_close()
-        end)
-        theme_popover.KeyboardDismissRequested:on(function()
-            do_close()
-        end)
-    end
+    -- `bind:this` becomes available after the initial template evaluation.
+    -- State updates then flow through the child event instead of being polled.
+    connect_popover()
 end
+
+sync_trigger_state()
 
 -- Keyboard-only toggle; hover opens/closes.
 function onThemeToggle(event)
