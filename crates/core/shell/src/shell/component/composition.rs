@@ -1,15 +1,12 @@
 use std::collections::{BTreeMap, HashMap};
 
 use mesh_core_elements::style::Dimension;
-use mesh_core_elements::{
-    AttributeMap, COMPONENT_BIND_THIS_ATTRIBUTE, EventHandlerCall, WidgetNode,
-    component_binding_attribute, is_composition_protocol_attribute,
-};
+use mesh_core_elements::{AttributeMap, ComponentCompositionProps, EventHandlerCall, WidgetNode};
 use mesh_core_frontend::FrontendCompositionResolver;
 use mesh_core_interaction::source_element_tag;
 use mesh_core_module::ModuleType;
 
-use super::{FrontendSurfaceComponent, PROMOTED_POPOVER_MARKER, memo};
+use super::{FrontendSurfaceComponent, memo};
 
 fn slot_id(module_id: &str, slot_name: &str) -> String {
     let mut id = String::with_capacity(module_id.len() + 1 + slot_name.len());
@@ -112,7 +109,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         source_ordinal: usize,
         duplicate_ordinal: Option<usize>,
         repeated_by_loop: bool,
-        props: &AttributeMap,
+        props: &ComponentCompositionProps,
         prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
         container_width: f32,
         container_height: f32,
@@ -141,8 +138,8 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 }
                 let marks_before = self.memo_effect_marks();
                 let build_started = self.profiling_enabled.then(std::time::Instant::now);
-                let bind_this = props.get(COMPONENT_BIND_THIS_ATTRIBUTE).cloned();
-                let props_json = runtime_props_json(props);
+                let bind_this = props.bind_this.clone();
+                let props_json = runtime_props_json(&props.values);
                 let mut node = self.render_local_component(
                     &entry.compiled.manifest,
                     alias,
@@ -161,7 +158,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 );
                 let source_path = local_component_source_path(&entry.compiled, alias);
                 annotate_source_file(&mut node, &source_path);
-                apply_prop_handler_calls(&mut node, props, prop_handler_calls);
+                apply_prop_handler_calls(&mut node, &props.values, prop_handler_calls);
                 if let Some(binding) = bind_this.and_then(|value| simple_state_binding(&value)) {
                     self.bind_child_instance(host_instance_key, &binding, &instance_key);
                 }
@@ -200,12 +197,13 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             .unwrap_or(false);
         if is_surface {
             let hidden = props
+                .values
                 .get("hidden")
                 .map(|v| v == "true" || v == "True")
                 .unwrap_or(false);
-            let hidden_binding = component_binding_attribute("hidden");
             if let Some(binding) = props
-                .get(&hidden_binding)
+                .bindings
+                .get("hidden")
                 .and_then(|binding| simple_state_binding(binding))
             {
                 self.portal_hidden_bindings.borrow_mut().insert(
@@ -251,8 +249,8 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         }
         let marks_before = self.memo_effect_marks();
         let build_started = self.profiling_enabled.then(std::time::Instant::now);
-        let props_json = runtime_props_json(props);
-        let bind_this = props.get(COMPONENT_BIND_THIS_ATTRIBUTE).cloned();
+        let props_json = runtime_props_json(&props.values);
+        let bind_this = props.bind_this.clone();
         let mut node = self.render_embedded_instance(
             &instance_key,
             &module_id,
@@ -260,7 +258,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             container_width,
             container_height,
         );
-        apply_prop_handler_calls(&mut node, props, prop_handler_calls);
+        apply_prop_handler_calls(&mut node, &props.values, prop_handler_calls);
         if let Some(binding) = bind_this.and_then(|value| simple_state_binding(&value)) {
             self.bind_child_instance(host_instance_key, &binding, &instance_key);
         }
@@ -283,8 +281,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             self.popover_wrapper_marks
                 .set(self.popover_wrapper_marks.get().wrapping_add(1));
             node.attributes.insert("hidden".into(), "true".into());
-            node.attributes
-                .insert(PROMOTED_POPOVER_MARKER.into(), "true".into());
+            node.mark_promoted_popover();
         }
         self.store_component_memo(
             &instance_key,
@@ -442,21 +439,9 @@ fn embedded_root_is_popover(node: &WidgetNode) -> bool {
 }
 
 fn runtime_props_json(props: &AttributeMap) -> HashMap<String, serde_json::Value> {
-    // Typical embedded components have only a few props. Avoid a separate
-    // count pass there while keeping precise capacity for larger prop maps.
-    let capacity = if props.len() <= 8 {
-        props.len()
-    } else {
-        props
-            .keys()
-            .filter(|key| runtime_prop_is_public(key.as_str()))
-            .count()
-    };
-    let mut props_json = HashMap::with_capacity(capacity);
+    let mut props_json = HashMap::with_capacity(props.len());
     for (key, value) in props {
-        if runtime_prop_is_public(key) {
-            props_json.insert(key.as_str().to_string(), decode_prop_value(value));
-        }
+        props_json.insert(key.as_str().to_string(), decode_prop_value(value));
     }
     props_json
 }
@@ -475,10 +460,6 @@ fn decode_prop_value(value: &str) -> serde_json::Value {
             .unwrap_or_else(|_| serde_json::Value::String(value.to_string())),
         _ => serde_json::Value::String(value.to_string()),
     }
-}
-
-fn runtime_prop_is_public(key: &str) -> bool {
-    !is_composition_protocol_attribute(key)
 }
 
 fn apply_prop_handler_calls(
@@ -893,21 +874,24 @@ mod tests {
     }
 
     #[test]
-    fn runtime_props_json_filters_internal_binding_props() {
-        let props = AttributeMap::from([
-            ("label".into(), "Volume".into()),
-            ("__mesh_binding_hidden".into(), "isHidden".into()),
-            ("__mesh_bind_this".into(), "child".into()),
-        ]);
+    fn runtime_props_json_receives_only_public_typed_props() {
+        let props = ComponentCompositionProps {
+            values: AttributeMap::from([("label".into(), "Volume".into())]),
+            bindings: AttributeMap::from([("hidden".into(), "isHidden".into())]),
+            bind_this: Some("child".into()),
+        };
 
-        let props_json = runtime_props_json(&props);
+        let props_json = runtime_props_json(&props.values);
 
         assert_eq!(
             props_json.get("label"),
             Some(&serde_json::Value::String("Volume".into()))
         );
-        assert!(!props_json.contains_key("__mesh_binding_hidden"));
-        assert!(!props_json.contains_key("__mesh_bind_this"));
+        assert_eq!(
+            props.bindings.get("hidden").map(String::as_str),
+            Some("isHidden")
+        );
+        assert_eq!(props.bind_this.as_deref(), Some("child"));
     }
 
     #[test]
@@ -970,28 +954,32 @@ mod tests {
                 .collect()
         }
 
-        let mut props = AttributeMap::new();
+        let mut legacy_props = AttributeMap::new();
+        let mut typed_props = AttributeMap::new();
         for index in 0..64 {
-            props.insert(format!("prop{index}").into(), format!("value{index}"));
-            props.insert(
+            let key = format!("prop{index}");
+            let value = format!("value{index}");
+            legacy_props.insert(key.clone().into(), value.clone());
+            typed_props.insert(key.into(), value);
+            legacy_props.insert(
                 format!("__mesh_binding_prop{index}").into(),
                 format!("state{index}"),
             );
         }
-        props.insert("__mesh_bind_this".into(), "child".into());
+        legacy_props.insert("__mesh_bind_this".into(), "child".into());
         let iterations = 100_000;
 
         let old_started = Instant::now();
         let mut old_total = 0usize;
         for _ in 0..iterations {
-            old_total += old_runtime_props_json(std::hint::black_box(&props)).len();
+            old_total += old_runtime_props_json(std::hint::black_box(&legacy_props)).len();
         }
         let old_time = old_started.elapsed();
 
         let new_started = Instant::now();
         let mut new_total = 0usize;
         for _ in 0..iterations {
-            new_total += runtime_props_json(std::hint::black_box(&props)).len();
+            new_total += runtime_props_json(std::hint::black_box(&typed_props)).len();
         }
         let new_time = new_started.elapsed();
 

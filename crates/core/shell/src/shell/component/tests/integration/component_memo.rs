@@ -736,11 +736,7 @@ import MenuPopover from "@mesh/menu-popover"
 }
 
 fn find_marker(node: &WidgetNode) -> bool {
-    if node
-        .attributes
-        .get(crate::shell::component::PROMOTED_POPOVER_MARKER)
-        .is_some_and(|value| value == "true")
-    {
+    if node.is_promoted_popover() {
         return true;
     }
     node.children.iter().any(find_marker)

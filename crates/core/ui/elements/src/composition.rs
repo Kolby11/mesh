@@ -1,16 +1,24 @@
 //! Typed protocol helpers for compiler-to-shell component composition.
 //!
-//! The widget tree still stores handler names and component props as strings
-//! at its serialization boundary, but these helpers own the reserved wire
-//! format so compiler, interaction, and shell code do not independently parse
-//! or construct it.
+//! Handler names still use a serialized string at the widget-tree boundary.
+//! Component values and binding metadata use [`ComponentCompositionProps`], so
+//! bindings cannot leak into an embedded component's public prop namespace.
+
+use crate::AttributeMap;
 
 /// Reserved handler prefix for an embedded component instance.
 pub const EMBEDDED_HANDLER_PREFIX: &str = "__mesh_embed__::";
-/// Reserved attribute prefix for a component binding.
-pub const COMPONENT_BINDING_PREFIX: &str = "__mesh_binding_";
-/// Reserved component attribute that carries an instance binding target.
-pub const COMPONENT_BIND_THIS_ATTRIBUTE: &str = "__mesh_bind_this";
+/// Resolved values and binding metadata passed from the frontend compiler to
+/// the shell composition host.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ComponentCompositionProps {
+    /// Public values supplied to the embedded component.
+    pub values: AttributeMap,
+    /// Parent-state bindings keyed by public prop name.
+    pub bindings: AttributeMap,
+    /// Optional parent field receiving the child component instance.
+    pub bind_this: Option<String>,
+}
 
 /// Returns whether `handler` already targets an embedded component instance.
 pub fn is_embedded_handler(handler: &str) -> bool {
@@ -51,20 +59,6 @@ pub fn parse_embedded_handler(handler: &str) -> Option<(&str, &str)> {
     rest.rsplit_once("::")
 }
 
-/// Returns the reserved wire attribute for a component binding name.
-pub fn component_binding_attribute(name: &str) -> String {
-    let mut key = String::with_capacity(COMPONENT_BINDING_PREFIX.len() + name.len());
-    key.push_str(COMPONENT_BINDING_PREFIX);
-    key.push_str(name);
-    key
-}
-
-/// Returns whether an attribute belongs to the composition protocol rather
-/// than the embedded component's public props.
-pub fn is_composition_protocol_attribute(name: &str) -> bool {
-    name.starts_with(COMPONENT_BINDING_PREFIX) || name == COMPONENT_BIND_THIS_ATTRIBUTE
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,16 +72,5 @@ mod tests {
             Some(("@mesh/panel/local:Clock", "open"))
         );
         assert_eq!(namespace_embedded_handler("other", &namespaced), namespaced);
-    }
-
-    #[test]
-    fn composition_protocol_attributes_are_not_public_props() {
-        assert_eq!(
-            component_binding_attribute("hidden"),
-            "__mesh_binding_hidden"
-        );
-        assert!(is_composition_protocol_attribute("__mesh_binding_hidden"));
-        assert!(is_composition_protocol_attribute("__mesh_bind_this"));
-        assert!(!is_composition_protocol_attribute("hidden"));
     }
 }

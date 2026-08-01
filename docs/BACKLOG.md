@@ -166,11 +166,10 @@ gate where the win is structural.
       **values**, and the broader symbol types remain. Profiling now puts the
       dominant remaining build cost in style resolution, not further attribute
       work. *(detail: "P2 — typing & interning")*
-- [ ] Replace the magic-string protocol at the composition boundary
-      (`__mesh_embed__::`, `__mesh_binding_*`, `__mesh_bind_this`, the
-      promoted-popover marker) with typed channels. The shared element IR owns
-      the wire protocol now; direct string storage remains at the serialized
-      `WidgetNode` boundary.
+- [ ] Replace the remaining magic-string handler protocol at the composition
+      boundary (`__mesh_embed__::`) with typed targets. Component values,
+      bindings, `bind:this`, and promoted-popover metadata are typed; handler
+      names still serialize their embedded instance target into `WidgetNode`.
 
 ### Composition
 

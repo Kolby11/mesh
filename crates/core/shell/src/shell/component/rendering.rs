@@ -1114,7 +1114,7 @@ fn apply_hidden_attribute_layout(node: &mut WidgetNode) {
             "" | "true" | "1" | "hidden" | "disabled" | "checked"
         )
     });
-    if hidden && !authored.attributes.contains_key(PROMOTED_POPOVER_MARKER) {
+    if hidden && !node.is_promoted_popover() {
         node.computed_style.display = mesh_core_elements::style::Display::None;
     }
 }
@@ -1142,13 +1142,9 @@ fn apply_runtime_attribute_state_for_ids(
 /// position — which child-surface paint and input translation rely on to locate the
 /// promoted subtree. (Out-of-flow `position: absolute` would instead relocate the
 /// subtree's layout coordinates, breaking that translation.) See
-/// [`PROMOTED_POPOVER_MARKER`].
+/// the node's typed composition metadata.
 fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
-    if node
-        .authored_payload()
-        .attributes
-        .contains_key(PROMOTED_POPOVER_MARKER)
-    {
+    if node.is_promoted_popover() {
         node.computed_style.width = mesh_core_elements::Dimension::Px(0.0);
         node.computed_style.height = mesh_core_elements::Dimension::Px(0.0);
         node.computed_style.min_width = mesh_core_elements::Dimension::Px(0.0);

@@ -196,6 +196,14 @@ pub struct WidgetNodeAuthored {
     pub event_handler_calls: BTreeMap<String, EventHandlerCall>,
     module_id: Option<Arc<str>>,
     pub service_field_reads: Vec<(String, String)>,
+    /// Shell-owned composition flags that must survive memoized subtree reuse.
+    composition: WidgetCompositionMetadata,
+}
+
+/// Typed metadata added while component trees are composed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WidgetCompositionMetadata {
+    pub promoted_popover: bool,
 }
 
 /// A single node in the widget tree.
@@ -260,6 +268,7 @@ impl WidgetNode {
                 event_handler_calls: BTreeMap::new(),
                 module_id: None,
                 service_field_reads: Vec::new(),
+                composition: WidgetCompositionMetadata::default(),
             }),
         }
     }
@@ -285,6 +294,14 @@ impl WidgetNode {
     #[doc(hidden)]
     pub fn authored_payload(&self) -> &WidgetNodeAuthored {
         &self.authored
+    }
+
+    pub fn mark_promoted_popover(&mut self) {
+        self.composition.promoted_popover = true;
+    }
+
+    pub fn is_promoted_popover(&self) -> bool {
+        self.composition.promoted_popover
     }
 
     pub fn set_mesh_key(&mut self, key: impl Into<String>) {

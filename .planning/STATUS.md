@@ -1,11 +1,18 @@
 # Status
 
-**Updated:** 2026-07-31
+**Updated:** 2026-08-01
 
 This page describes the present and is meant to be overwritten. History lives in
 [`log/`](log/); open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
+
+**Component binding and popover metadata are typed.** Compiler-to-shell
+composition now passes public values, prop bindings, and `bind:this` separately,
+so reserved binding attributes cannot leak into module props. Promoted-popover
+wrappers use memo-safe node metadata instead of a hidden authored attribute. The
+remaining composition wire string is the embedded handler target (2026-08-01).
+Record: [`log/2026-08.md`](log/2026-08.md).
 
 **Compiled frontend modules are shared across surface instances.** Catalog
 entries and mounted profile roots retain copy-on-write `Arc` handles, so

@@ -336,11 +336,6 @@ pub(in crate::shell) fn tooltip_overlay_extra_for_content(width: u32, height: u3
     (extra_w, extra_h)
 }
 
-/// Marker attribute set on an embedded `<popover>` wrapper that is promoted to a
-/// child surface. `finalize_tree` re-applies the out-of-flow collapse to nodes
-/// carrying this after each restyle pass (restyle re-resolves `computed_style`
-/// from CSS and would otherwise drop imperatively-set geometry).
-pub(super) const PROMOTED_POPOVER_MARKER: &str = "_mesh_promoted_popover";
 pub(super) const ERROR_PLACEHOLDER_MARKER: &str = "_mesh_error_placeholder";
 pub(super) const ERROR_PLACEHOLDER_MAX_WIDTH: f32 = 320.0;
 

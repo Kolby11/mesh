@@ -13,10 +13,9 @@ use mesh_core_component::template::{
 use mesh_core_component::{PropValue, PropsBlock};
 use mesh_core_elements::accessibility::AccessibilityInfo;
 use mesh_core_elements::{
-    AttrKey, AttributeMap, COMPONENT_BIND_THIS_ATTRIBUTE, ComputedStyle, EventHandlerCall,
+    AttrKey, AttributeMap, ComponentCompositionProps, ComputedStyle, EventHandlerCall,
     StyleContext, StyleResolver, StyleRuleIndex, VariableStore, WidgetNode,
-    component_binding_attribute, element_contract_for_tag, is_embedded_handler,
-    namespace_embedded_handler,
+    element_contract_for_tag, is_embedded_handler, namespace_embedded_handler,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
@@ -1030,17 +1029,21 @@ fn build_component_ref(
     host_instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
 ) -> WidgetNode {
-    let (_, _, mut props, _, parsed_handler_calls) = parse_attributes_runtime(
+    let (_, _, props, _, parsed_handler_calls) = parse_attributes_runtime(
         &component.props,
         state,
         host_instance_key,
         composition,
         false,
     );
+    let mut composition_props = ComponentCompositionProps {
+        values: props,
+        ..ComponentCompositionProps::default()
+    };
     let mut prop_handler_calls = BTreeMap::new();
     for attr in &component.props {
         if let AttributeValue::EventHandler(handler) = &attr.value {
-            props.insert(
+            composition_props.values.insert(
                 AttrKey::new(&attr.name),
                 resolve_component_prop_handler_value(state, host_instance_key, handler),
             );
@@ -1053,19 +1056,18 @@ fn build_component_ref(
             if let Some(call) = parsed_handler_calls.get(&event_name) {
                 let mut call = call.clone();
                 call.handler = namespaced_handler(host_instance_key, &call.handler);
-                props.insert(
+                composition_props.values.insert(
                     AttrKey::new(&attr.name),
                     component_prop_handler_token(host_instance_key, &attr.name),
                 );
                 prop_handler_calls.insert(attr.name.clone(), call);
             }
         } else if let AttributeValue::Binding(binding) = &attr.value {
-            props.insert(
-                AttrKey::new(&component_binding_attribute(&attr.name)),
-                binding.clone(),
-            );
+            composition_props
+                .bindings
+                .insert(AttrKey::new(&attr.name), binding.clone());
         } else if let AttributeValue::InstanceBinding(binding) = &attr.value {
-            props.insert(AttrKey::new(COMPONENT_BIND_THIS_ATTRIBUTE), binding.clone());
+            composition_props.bind_this = Some(binding.clone());
         }
     }
     if let Some(composition) = composition {
@@ -1076,7 +1078,7 @@ fn build_component_ref(
             component.source_ordinal,
             component.duplicate_ordinal,
             component.repeated_by_loop,
-            &props,
+            &composition_props,
             &prop_handler_calls,
             container_context.container_width,
             container_context.container_height,
@@ -1569,7 +1571,7 @@ mod tests {
             _source_ordinal: usize,
             _duplicate_ordinal: Option<usize>,
             _repeated_by_loop: bool,
-            _props: &AttributeMap,
+            _props: &ComponentCompositionProps,
             _prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
             _container_width: f32,
             _container_height: f32,
@@ -1618,7 +1620,7 @@ mod tests {
             _source_ordinal: usize,
             _duplicate_ordinal: Option<usize>,
             _repeated_by_loop: bool,
-            _props: &AttributeMap,
+            _props: &ComponentCompositionProps,
             _prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
             _container_width: f32,
             _container_height: f32,
@@ -1654,7 +1656,7 @@ mod tests {
     fn component_handler_calls_preserve_authored_prop_identity() {
         #[derive(Default)]
         struct CapturingComposition {
-            props: std::cell::RefCell<AttributeMap>,
+            props: std::cell::RefCell<ComponentCompositionProps>,
             calls: std::cell::RefCell<BTreeMap<String, EventHandlerCall>>,
         }
 
@@ -1676,7 +1678,7 @@ mod tests {
                 _source_ordinal: usize,
                 _duplicate_ordinal: Option<usize>,
                 _repeated_by_loop: bool,
-                props: &AttributeMap,
+                props: &ComponentCompositionProps,
                 prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
                 _container_width: f32,
                 _container_height: f32,
@@ -1701,7 +1703,8 @@ mod tests {
         let component = mesh_core_component::parse_component(
             r#"
 <template>
-  <Child onprimary={onShared("primary")} onsecondary={onShared("secondary")} />
+  <Child hidden="{isHidden}" bind:this={child}
+         onprimary={onShared("primary")} onsecondary={onShared("secondary")} />
 </template>
 <script lang="luau">
 import Child from "./child.mesh"
@@ -1710,9 +1713,12 @@ import Child from "./child.mesh"
         )
         .unwrap();
         let store = MapStore(
-            [("onShared".to_string(), serde_json::json!("onShared"))]
-                .into_iter()
-                .collect(),
+            [
+                ("onShared".to_string(), serde_json::json!("onShared")),
+                ("isHidden".to_string(), serde_json::json!(true)),
+            ]
+            .into_iter()
+            .collect(),
         );
         let composition = CapturingComposition::default();
 
@@ -1729,9 +1735,23 @@ import Child from "./child.mesh"
         );
 
         let props = composition.props.borrow();
-        assert!(props.contains_key("onprimary"));
-        assert!(props.contains_key("onsecondary"));
-        assert_ne!(props.get("onprimary"), props.get("onsecondary"));
+        assert!(props.values.contains_key("onprimary"));
+        assert!(props.values.contains_key("onsecondary"));
+        assert_ne!(
+            props.values.get("onprimary"),
+            props.values.get("onsecondary")
+        );
+        assert_eq!(
+            props.bindings.get("hidden").map(String::as_str),
+            Some("isHidden")
+        );
+        assert_eq!(props.bind_this.as_deref(), Some("child"));
+        assert!(
+            props
+                .values
+                .keys()
+                .all(|key| !key.as_str().starts_with("__mesh_"))
+        );
         let calls = composition.calls.borrow();
         assert_eq!(calls["onprimary"].handler, "__mesh_embed__::root::onShared");
         assert_eq!(calls["onsecondary"].handler, calls["onprimary"].handler);

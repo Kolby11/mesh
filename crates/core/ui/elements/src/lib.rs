@@ -27,8 +27,7 @@ pub use accessibility::{
 };
 pub use attributes::{AttrKey, AttributeMap};
 pub use composition::{
-    COMPONENT_BIND_THIS_ATTRIBUTE, COMPONENT_BINDING_PREFIX, EMBEDDED_HANDLER_PREFIX,
-    component_binding_attribute, embedded_handler_prefix, is_composition_protocol_attribute,
+    ComponentCompositionProps, EMBEDDED_HANDLER_PREFIX, embedded_handler_prefix,
     is_embedded_handler, namespace_embedded_handler, namespace_embedded_handler_with_prefix,
     parse_embedded_handler,
 };

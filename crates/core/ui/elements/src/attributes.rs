@@ -835,7 +835,6 @@ fn well_known(name: &str) -> Option<&'static str> {
         "_mesh_focused" => "_mesh_focused",
         "_mesh_key" => "_mesh_key",
         "_mesh_module_id" => "_mesh_module_id",
-        "_mesh_promoted_popover" => "_mesh_promoted_popover",
         "_mesh_scroll_max_x" => "_mesh_scroll_max_x",
         "_mesh_scroll_max_y" => "_mesh_scroll_max_y",
         "_mesh_scroll_x" => "_mesh_scroll_x",

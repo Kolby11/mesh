@@ -40,7 +40,7 @@ use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use mesh_core_elements::{AttributeMap, EventHandlerCall, WidgetNode};
+use mesh_core_elements::{ComponentCompositionProps, EventHandlerCall, WidgetNode};
 
 use super::FrontendSurfaceComponent;
 
@@ -70,15 +70,21 @@ pub(super) struct MemoEffectMarks {
 }
 
 pub(super) fn component_props_fingerprint(
-    props: &AttributeMap,
+    props: &ComponentCompositionProps,
     prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
 ) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
-    props.len().hash(&mut hasher);
-    for (key, value) in props {
+    props.values.len().hash(&mut hasher);
+    for (key, value) in &props.values {
         key.hash(&mut hasher);
         value.hash(&mut hasher);
     }
+    props.bindings.len().hash(&mut hasher);
+    for (key, value) in &props.bindings {
+        key.hash(&mut hasher);
+        value.hash(&mut hasher);
+    }
+    props.bind_this.hash(&mut hasher);
     prop_handler_calls.len().hash(&mut hasher);
     for (name, call) in prop_handler_calls {
         name.hash(&mut hasher);
