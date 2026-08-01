@@ -1196,10 +1196,11 @@ pub(super) fn first_node_with_click_handler<'a>(
     node: &'a WidgetNode,
     handler: &str,
 ) -> Option<&'a WidgetNode> {
+    let expected = HandlerTarget::from_legacy_serialized(handler);
     if node
         .event_handlers
         .get("click")
-        .is_some_and(|candidate| candidate == handler)
+        .is_some_and(|candidate| candidate == &expected)
     {
         return Some(node);
     }

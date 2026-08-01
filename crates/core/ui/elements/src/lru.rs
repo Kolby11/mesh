@@ -76,6 +76,17 @@ where
         self.nodes[idx].as_ref().map(|n| &n.value)
     }
 
+    /// Mutably borrow the entry under `key` and mark it as most-recently-used.
+    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        let idx = *self.map.get(key)?;
+        self.move_to_head(idx);
+        self.nodes[idx].as_mut().map(|n| &mut n.value)
+    }
+
     /// Insert (or refresh) an entry. Evicts the least-recent entry when over
     /// capacity. If `capacity == 0`, no eviction happens.
     pub fn insert(&mut self, key: K, value: V) {
@@ -232,6 +243,17 @@ mod tests {
         assert_eq!(cache.get(&1), Some(&11));
         assert_eq!(cache.get(&2), None);
         assert_eq!(cache.get(&3), Some(&30));
+    }
+
+    #[test]
+    fn mutable_access_refreshes_existing_entry() {
+        let mut cache: LruCache<u32, u32> = LruCache::new(2);
+        cache.insert(1, 10);
+        cache.insert(2, 20);
+        *cache.get_mut(&1).unwrap() = 11;
+        cache.insert(3, 30);
+        assert_eq!(cache.get(&1), Some(&11));
+        assert_eq!(cache.get(&2), None);
     }
 
     #[test]

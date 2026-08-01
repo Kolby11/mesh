@@ -72,6 +72,8 @@ run_benchmark mesh-core-elements style_function_scan_beats_contains_pair
 run_benchmark mesh-core-elements borrowed_style_props_beat_per_resolver_clone
 run_benchmark mesh-core-elements shared_theme_defaults_beat_hashed_deep_clone
 run_benchmark mesh-core-elements shared_theme_revision_cache_beats_per_resolver_lowering
+run_benchmark mesh-core-elements bounded_style_cache_p95_beats_flush_all
+run_benchmark mesh-core-shell runtime_style_diagnostic_generation_gate_beats_full_tree_fingerprint
 
 awk '
   BEGIN { failed = 0 }

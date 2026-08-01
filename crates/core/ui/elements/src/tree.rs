@@ -1,6 +1,7 @@
 /// Widget tree — the live, evaluated UI structure.
 use crate::accessibility::AccessibilityInfo;
 use crate::attributes::AttributeMap;
+use crate::composition::HandlerTarget;
 use crate::layout::LayoutRect;
 use crate::style::ComputedStyle;
 use std::collections::BTreeMap;
@@ -76,7 +77,7 @@ pub fn next_node_id() -> NodeId {
 /// handler-call arguments as JSON strings that must be reparsed at dispatch.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventHandlerCall {
-    pub handler: String,
+    pub handler: HandlerTarget,
     pub args: Vec<serde_json::Value>,
 }
 
@@ -192,7 +193,7 @@ impl IntoIterator for SharedWidgetChildren {
 pub struct WidgetNodeAuthored {
     pub tag: String,
     pub attributes: AttributeMap,
-    pub event_handlers: BTreeMap<String, String>,
+    pub event_handlers: BTreeMap<String, HandlerTarget>,
     pub event_handler_calls: BTreeMap<String, EventHandlerCall>,
     module_id: Option<Arc<str>>,
     pub service_field_reads: Vec<(String, String)>,
@@ -425,11 +426,11 @@ mod tests {
         node.attributes
             .insert("class".into(), "surface-card primary interactive".into());
         node.event_handlers
-            .insert("click".into(), format!("instance/{index}:activate"));
+            .insert("click".into(), format!("instance/{index}:activate").into());
         node.event_handler_calls.insert(
             "change".into(),
             EventHandlerCall {
-                handler: format!("instance/{index}:change"),
+                handler: format!("instance/{index}:change").into(),
                 args: vec![serde_json::json!({ "index": index, "enabled": true })],
             },
         );
@@ -496,11 +497,11 @@ mod tests {
                 .iter()
                 .map(|(key, value)| key.len() + value.capacity())
                 .sum::<usize>()
-            + node.event_handlers.len() * std::mem::size_of::<(String, String)>()
+            + node.event_handlers.len() * std::mem::size_of::<(String, HandlerTarget)>()
             + node
                 .event_handlers
                 .iter()
-                .map(|(event, handler)| event.capacity() + handler.capacity())
+                .map(|(event, handler)| event.capacity() + handler.dynamic_heap_bytes())
                 .sum::<usize>()
             + node.event_handler_calls.len() * std::mem::size_of::<(String, EventHandlerCall)>()
             + node
@@ -508,7 +509,7 @@ mod tests {
                 .iter()
                 .map(|(event, call)| {
                     event.capacity()
-                        + call.handler.capacity()
+                        + call.handler.dynamic_heap_bytes()
                         + call.args.capacity() * std::mem::size_of::<serde_json::Value>()
                 })
                 .sum::<usize>()

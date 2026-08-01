@@ -304,13 +304,11 @@ end
         .expect("click handler")
         .clone();
 
-    assert_eq!(
-        handler,
-        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface"
-    );
+    assert_eq!(handler.handler(), "onToggleAudioSurface");
+    assert_eq!(handler.instance_key(), Some("@mesh/navigation-bar"));
 
     let requests = component
-        .call_namespaced_handler(
+        .call_handler_target(
             &handler,
             &[serde_json::json!({
                 "current_target": {

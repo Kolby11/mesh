@@ -527,6 +527,7 @@ fn simple_state_binding(binding: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mesh_core_elements::HandlerTarget;
     use std::time::Instant;
 
     #[test]
@@ -619,11 +620,11 @@ mod tests {
         fn build_tree(width: usize, depth: usize) -> WidgetNode {
             let mut node = WidgetNode::new("button");
             node.event_handlers
-                .insert("onclick".to_string(), "handleClick".to_string());
+                .insert("onclick".to_string(), "handleClick".into());
             node.event_handlers
-                .insert("onpointerenter".to_string(), "handleHoverEnter".to_string());
+                .insert("onpointerenter".to_string(), "handleHoverEnter".into());
             node.event_handlers
-                .insert("onpointerleave".to_string(), "handleHoverLeave".to_string());
+                .insert("onpointerleave".to_string(), "handleHoverLeave".into());
             if depth > 0 {
                 node.children = (0..width).map(|_| build_tree(width, depth - 1)).collect();
             }
@@ -637,7 +638,7 @@ mod tests {
         let tree = build_tree(5, 4);
         let node_count = count_nodes(&tree);
         let call = EventHandlerCall {
-            handler: "__mesh_embed__::@mesh/panel/local:Toolbar::onSelect".to_string(),
+            handler: HandlerTarget::embedded("@mesh/panel/local:Toolbar", "onSelect"),
             args: Vec::new(),
         };
         let mut calls_by_token: HashMap<&str, &EventHandlerCall> = HashMap::new();
@@ -716,7 +717,7 @@ mod tests {
                 let mut child = WidgetNode::new("button");
                 child
                     .event_handlers
-                    .insert("click".into(), format!("onChild{index}"));
+                    .insert("click".into(), format!("onChild{index}").into());
                 child
                     .event_handlers
                     .insert("pointermove".into(), "onMove".into());
@@ -735,10 +736,9 @@ mod tests {
             return;
         }
         for (event_name, handler) in node.event_handlers.clone() {
-            let Some((_, call)) = prop_handler_calls
-                .iter()
-                .find(|(prop_name, _)| props.get(prop_name.as_str()) == Some(&handler))
-            else {
+            let Some((_, call)) = prop_handler_calls.iter().find(|(prop_name, _)| {
+                props.get(prop_name.as_str()).map(String::as_str) == Some(handler.as_str())
+            }) else {
                 continue;
             };
             node.event_handler_calls.insert(
@@ -765,7 +765,9 @@ mod tests {
             .filter_map(|(event_name, handler)| {
                 prop_handler_calls
                     .iter()
-                    .find(|(prop_name, _)| props.get(prop_name.as_str()) == Some(handler))
+                    .find(|(prop_name, _)| {
+                        props.get(prop_name.as_str()).map(String::as_str) == Some(handler.as_str())
+                    })
                     .map(|(_, call)| {
                         (
                             event_name.clone(),
@@ -836,7 +838,7 @@ mod tests {
             ("onPrimary".into(), "primary-token".into()),
             ("onSecondary".into(), "secondary-token".into()),
         ]);
-        let shared_handler = "__mesh_embed__::parent::onShared".to_string();
+        let shared_handler = HandlerTarget::embedded("parent", "onShared");
         let calls = BTreeMap::from([
             (
                 "onPrimary".into(),
@@ -1062,7 +1064,7 @@ mod tests {
                 (
                     format!("onEvent{index}"),
                     EventHandlerCall {
-                        handler: format!("event{index}"),
+                        handler: format!("event{index}").into(),
                         args: vec![serde_json::json!(index)],
                     },
                 )

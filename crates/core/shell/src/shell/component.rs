@@ -14,8 +14,8 @@ use mesh_core_interaction::{
     collect_focus_traversal, find_click_handler, find_event_handler, find_node_bounds_by_key,
     find_node_by_key, find_node_path_at, find_node_with_bounds_by_key, find_nodes_by_keys,
     find_scrollable_at_with_limits, is_input_key, is_slider_key, measure_content_size,
-    next_focus_target, node_is_source, parse_namespaced_handler, pointer_event_handler_hit,
-    pointer_press_hit, scroll_into_view_offsets, scroll_limits, source_element_tag,
+    next_focus_target, node_is_source, pointer_event_handler_hit, pointer_press_hit,
+    scroll_into_view_offsets, scroll_limits, source_element_tag,
 };
 mod animation;
 mod catalog;
@@ -51,8 +51,8 @@ use mesh_core_component::template::{AttributeValue, TemplateNode};
 use mesh_core_config::TooltipSettings;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::{
-    IntrinsicLayoutCache, LayoutEngine, NodeId, PerSurfaceLayoutState, PopoverPlacement,
-    StyleContext, StyleResolver, VariableStore, WidgetNode, WindowSurfaceState,
+    HandlerTarget, IntrinsicLayoutCache, LayoutEngine, NodeId, PerSurfaceLayoutState,
+    PopoverPlacement, StyleContext, StyleResolver, VariableStore, WidgetNode, WindowSurfaceState,
     element_snapshot_json,
 };
 use mesh_core_frontend::{
@@ -372,7 +372,7 @@ pub(super) struct ScrollAnimation {
 
 #[derive(Debug, Clone)]
 struct ScheduledHandler {
-    namespaced_handler: String,
+    target: HandlerTarget,
     deadline: Instant,
 }
 
@@ -445,7 +445,7 @@ struct EffectiveDamage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RuntimeStyleDiagnosticFingerprint {
     rules_generation: u64,
-    tree: u64,
+    retained_tree_generation: u64,
     props: u64,
     container_width: u32,
     container_height: u32,

@@ -427,13 +427,13 @@ impl ShellComponent for FrontendSurfaceComponent {
             .scheduled_handlers
             .iter()
             .filter(|(_, scheduled)| scheduled.deadline <= now)
-            .map(|(key, scheduled)| (key.clone(), scheduled.namespaced_handler.clone()))
+            .map(|(key, scheduled)| (key.clone(), scheduled.target.clone()))
             .collect();
 
         let mut requests = Vec::new();
-        for (key, namespaced_handler) in due_handlers {
+        for (key, target) in due_handlers {
             self.scheduled_handlers.remove(&key);
-            requests.extend(self.call_namespaced_handler(&namespaced_handler, &[])?);
+            requests.extend(self.call_handler_target(&target, &[])?);
         }
 
         let due_long_presses = self.due_long_presses(now);
@@ -639,7 +639,9 @@ impl ShellComponent for FrontendSurfaceComponent {
             Default::default()
         };
         let surface_css_props = self.surface_css_props();
+        let mut tree_was_rebuilt = false;
         let mut tree = if dirty_types.contains(ComponentDirtyFlags::SCRIPT_NARROW) {
+            tree_was_rebuilt = true;
             self.narrow_script_update(theme, content_width, content_height, &surface_css_props)
         } else if use_retained_style_path {
             match self.restyle_retained_tree(
@@ -651,14 +653,18 @@ impl ShellComponent for FrontendSurfaceComponent {
                 &surface_css_props,
             ) {
                 Some(t) => t,
-                None => self.build_tree_with_surface_css_props(
-                    theme,
-                    content_width,
-                    content_height,
-                    &surface_css_props,
-                ),
+                None => {
+                    tree_was_rebuilt = true;
+                    self.build_tree_with_surface_css_props(
+                        theme,
+                        content_width,
+                        content_height,
+                        &surface_css_props,
+                    )
+                }
             }
         } else {
+            tree_was_rebuilt = true;
             self.build_tree_with_surface_css_props(
                 theme,
                 content_width,
@@ -718,6 +724,16 @@ impl ShellComponent for FrontendSurfaceComponent {
             render_object_started.elapsed(),
             Some("rebuild"),
         );
+        if tree_was_rebuilt {
+            self.record_runtime_style_diagnostics_after_retained_update(
+                &mut tree,
+                theme,
+                retained_tree_generation,
+                content_width,
+                content_height,
+                &surface_css_props,
+            );
+        }
 
         let tooltip = self.compute_tooltip_state(
             theme,

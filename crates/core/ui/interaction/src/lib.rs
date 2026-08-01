@@ -12,8 +12,8 @@ pub use hit_test::{
     find_node_bounds_by_key, find_node_by_key, find_node_path_at, find_node_with_bounds_by_key,
     find_nodes_by_keys, find_tooltip_by_key, find_tooltip_container_bounds,
     find_tooltip_target_by_key, find_tooltip_text_by_key, inspect_hit_test, is_input_key,
-    is_slider_key, namespace_event_handlers, node_is_source, parse_namespaced_handler,
-    pointer_event_handler_hit, pointer_hit_test, pointer_press_hit, source_element_tag,
+    is_slider_key, namespace_event_handlers, node_is_source, pointer_event_handler_hit,
+    pointer_hit_test, pointer_press_hit, source_element_tag,
 };
 pub use scroll::{
     ScrollableHit, annotate_overflow_node, annotate_overflow_tree, find_scrollable_at,

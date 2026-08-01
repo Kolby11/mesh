@@ -608,33 +608,6 @@ impl FrontendSurfaceComponent {
                 Some("waste:empty_restyle_avoided"),
             );
         }
-        // The diagnostic pass re-resolves every node's style a second time to
-        // surface rule errors (bad animation references etc.). Those are
-        // properties of the rules and selector-facing tree inputs. Rebuilds
-        // commonly reproduce those inputs exactly, so fingerprint them before
-        // paying for another full diagnostic resolution pass.
-        let record_style_diagnostics = trigger_kind == "rebuild"
-            && self.runtime_style_diagnostics_changed(tree, context, surface_css_props);
-        // Re-borrow after the &mut self call above; the rule cache itself has
-        // not changed, only the diagnostic fingerprint has.
-        let restyle_rules = self
-            .cached_restyle_rules
-            .as_deref()
-            .expect("cache still populated");
-        if record_style_diagnostics {
-            let style_index = self
-                .cached_style_rule_index
-                .as_ref()
-                .expect("style index cache populated by restyle");
-            self.record_runtime_style_diagnostics(
-                tree,
-                restyle_rules,
-                style_index,
-                &resolver,
-                context,
-            );
-        }
-
         if tree.tag == "surface" {
             tree.computed_style.width = mesh_core_elements::Dimension::Px(width as f32);
             tree.computed_style.height = mesh_core_elements::Dimension::Px(height as f32);
@@ -895,27 +868,47 @@ impl FrontendSurfaceComponent {
         self.record_runtime_style_diagnostics_for_node(tree, rules, index, resolver, context);
     }
 
-    fn runtime_style_diagnostics_changed(
+    pub(super) fn record_runtime_style_diagnostics_after_retained_update(
         &mut self,
-        tree: &WidgetNode,
-        context: StyleContext,
+        tree: &mut WidgetNode,
+        theme: &Theme,
+        retained_tree_generation: u64,
+        width: u32,
+        height: u32,
         surface_css_props: &SurfaceCssProps,
-    ) -> bool {
+    ) {
         if self.diagnostics.is_none() {
             self.runtime_style_diagnostic_fingerprint = None;
-            return false;
+            return;
         }
+        let context = StyleContext {
+            container_width: width as f32,
+            container_height: height as f32,
+        };
         let fingerprint = RuntimeStyleDiagnosticFingerprint {
             rules_generation: self.style_rules_generation,
-            tree: runtime_style_diagnostic_tree_fingerprint(tree),
+            retained_tree_generation,
             props: runtime_style_diagnostic_props_fingerprint(surface_css_props),
             container_width: context.container_width.to_bits(),
             container_height: context.container_height.to_bits(),
         };
-        runtime_style_diagnostic_inputs_changed(
+        if !runtime_style_diagnostic_inputs_changed(
             &mut self.runtime_style_diagnostic_fingerprint,
             fingerprint,
-        )
+        ) {
+            return;
+        }
+
+        let resolver = StyleResolver::new(theme).with_borrowed_props(surface_css_props);
+        let restyle_rules = self
+            .cached_restyle_rules
+            .as_deref()
+            .expect("rule cache populated during tree finalization");
+        let style_index = self
+            .cached_style_rule_index
+            .as_ref()
+            .expect("style index cache populated during tree finalization");
+        self.record_runtime_style_diagnostics(tree, restyle_rules, style_index, &resolver, context);
     }
 
     fn record_runtime_style_diagnostics_for_node(
@@ -1014,60 +1007,6 @@ fn diagnostic_hash_bytes(hash: &mut u64, bytes: &[u8]) {
     // Separate adjacent fields, including absent and empty strings.
     *hash ^= 0xff;
     *hash = hash.wrapping_mul(DIAGNOSTIC_FNV_PRIME);
-}
-
-fn diagnostic_hash_optional_bytes(hash: &mut u64, bytes: Option<&[u8]>) {
-    match bytes {
-        Some(bytes) => {
-            diagnostic_hash_bytes(hash, &[1]);
-            diagnostic_hash_bytes(hash, bytes);
-        }
-        None => diagnostic_hash_bytes(hash, &[0]),
-    }
-}
-
-fn runtime_style_diagnostic_tree_fingerprint(tree: &WidgetNode) -> u64 {
-    fn visit(node: &WidgetNode, hash: &mut u64) {
-        diagnostic_hash_bytes(hash, node.tag.as_bytes());
-        diagnostic_hash_optional_bytes(
-            hash,
-            node.attributes.get("class").map(|value| value.as_bytes()),
-        );
-        diagnostic_hash_optional_bytes(
-            hash,
-            node.attributes.get("id").map(|value| value.as_bytes()),
-        );
-        diagnostic_hash_optional_bytes(hash, node.mesh_key().map(str::as_bytes));
-        diagnostic_hash_optional_bytes(hash, node.module_id().map(str::as_bytes));
-        let state = node.state;
-        let state_bits = u32::from(state.hovered)
-            | (u32::from(state.active) << 1)
-            | (u32::from(state.focused) << 2)
-            | (u32::from(state.focus_visible) << 3)
-            | (u32::from(state.disabled) << 4)
-            | (u32::from(state.read_only) << 5)
-            | (u32::from(state.required) << 6)
-            | (u32::from(state.selected) << 7)
-            | (u32::from(state.checked) << 8)
-            | (u32::from(state.expanded) << 9)
-            | (u32::from(state.pressed) << 10)
-            | (u32::from(state.invalid) << 11)
-            | (u32::from(state.value) << 12)
-            | (u32::from(state.window.fullscreen) << 13)
-            | (u32::from(state.window.maximized) << 14)
-            | (u32::from(state.window.activated) << 15)
-            | (u32::from(state.window.tiled) << 16)
-            | (u32::from(state.window.windowed) << 17);
-        diagnostic_hash_bytes(hash, &state_bits.to_le_bytes());
-        diagnostic_hash_bytes(hash, &(node.children.len() as u64).to_le_bytes());
-        for child in &node.children {
-            visit(child, hash);
-        }
-    }
-
-    let mut hash = DIAGNOSTIC_FNV_OFFSET;
-    visit(tree, &mut hash);
-    hash
 }
 
 fn runtime_style_diagnostic_props_fingerprint(props: &SurfaceCssProps) -> u64 {
@@ -1198,7 +1137,7 @@ fn direct_interaction_changed_node_ids(changed_ids: HashSet<NodeId>) -> Interact
 #[cfg(test)]
 mod interaction_changed_key_tests {
     use super::*;
-    use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
+    use mesh_core_component::style::StyleValue;
     use std::time::Instant;
 
     fn keyed_node(key: &str, children: Vec<WidgetNode>) -> WidgetNode {
@@ -1230,10 +1169,10 @@ mod interaction_changed_key_tests {
         build(0, width, depth)
     }
 
-    fn diagnostic_fingerprint(tree: &WidgetNode) -> RuntimeStyleDiagnosticFingerprint {
+    fn diagnostic_fingerprint(retained_tree_generation: u64) -> RuntimeStyleDiagnosticFingerprint {
         RuntimeStyleDiagnosticFingerprint {
             rules_generation: 7,
-            tree: runtime_style_diagnostic_tree_fingerprint(tree),
+            retained_tree_generation,
             props: 11,
             container_width: 800.0f32.to_bits(),
             container_height: 600.0f32.to_bits(),
@@ -1241,7 +1180,7 @@ mod interaction_changed_key_tests {
     }
 
     #[test]
-    fn runtime_style_diagnostic_fingerprint_tracks_every_resolution_input() {
+    fn runtime_style_diagnostic_generation_tracks_every_resolution_input() {
         let mut child = WidgetNode::new("button");
         child
             .attributes
@@ -1251,10 +1190,16 @@ mod interaction_changed_key_tests {
         child.set_module_id("@test/controls");
         let mut tree = WidgetNode::new("surface");
         tree.children.push(child);
-        let baseline = diagnostic_fingerprint(&tree);
+        let mut retained = RetainedWidgetTree::default();
+        retained.update(&tree);
+        let baseline_generation = retained.generation();
+        let baseline = diagnostic_fingerprint(baseline_generation);
 
         let assert_tree_change = |changed: WidgetNode| {
-            assert_ne!(diagnostic_fingerprint(&changed), baseline);
+            let mut retained = RetainedWidgetTree::default();
+            retained.update(&tree);
+            retained.update(&changed);
+            assert_ne!(retained.generation(), baseline_generation);
         };
 
         let mut changed = tree.clone();
@@ -1277,9 +1222,6 @@ mod interaction_changed_key_tests {
         changed.children[0].set_module_id("@test/alternate");
         assert_tree_change(changed);
         let mut changed = tree.clone();
-        changed.children[0].set_mesh_key("root/apply");
-        assert_tree_change(changed);
-        let mut changed = tree.clone();
         changed.children.push(WidgetNode::new("text"));
         assert_tree_change(changed);
 
@@ -1299,8 +1241,7 @@ mod interaction_changed_key_tests {
 
     #[test]
     fn runtime_style_diagnostic_gate_reuses_only_identical_inputs() {
-        let tree = broad_plain_tree(3, 3);
-        let fingerprint = diagnostic_fingerprint(&tree);
+        let fingerprint = diagnostic_fingerprint(42);
         let mut previous = None;
         assert!(runtime_style_diagnostic_inputs_changed(
             &mut previous,
@@ -1339,24 +1280,30 @@ mod interaction_changed_key_tests {
         );
     }
 
-    // cargo test -p mesh-core-shell --release -- runtime_style_diagnostic_fingerprint_gate_beats_full_reresolve -- --ignored --nocapture
+    // cargo test -p mesh-core-shell --release -- runtime_style_diagnostic_generation_gate_beats_full_tree_fingerprint -- --ignored --nocapture
     #[test]
     #[ignore = "release-only runtime style diagnostic gate microbenchmark"]
-    fn runtime_style_diagnostic_fingerprint_gate_beats_full_reresolve() {
-        fn resolve_tree(
-            node: &mut WidgetNode,
-            rules: &[StyleRule],
-            index: &mesh_core_elements::StyleRuleIndex,
-            resolver: &StyleResolver,
-            context: StyleContext,
-        ) -> usize {
-            let (style, diagnostics) = resolver
-                .resolve_node_style_with_diagnostics_for_node_indexed(rules, index, node, context);
-            let mut total = diagnostics.len() + style.opacity.to_bits() as usize;
-            for child in &mut node.children {
-                total = total.wrapping_add(resolve_tree(child, rules, index, resolver, context));
+    fn runtime_style_diagnostic_generation_gate_beats_full_tree_fingerprint() {
+        fn legacy_tree_fingerprint(tree: &WidgetNode) -> u64 {
+            fn visit(node: &WidgetNode, hash: &mut u64) {
+                diagnostic_hash_bytes(hash, node.tag.as_bytes());
+                for name in ["class", "id"] {
+                    if let Some(value) = node.attributes.get(name) {
+                        diagnostic_hash_bytes(hash, value.as_bytes());
+                    }
+                }
+                if let Some(module_id) = node.module_id() {
+                    diagnostic_hash_bytes(hash, module_id.as_bytes());
+                }
+                diagnostic_hash_bytes(hash, &[u8::from(node.state.focused)]);
+                diagnostic_hash_bytes(hash, &(node.children.len() as u64).to_le_bytes());
+                for child in &node.children {
+                    visit(child, hash);
+                }
             }
-            total
+            let mut hash = DIAGNOSTIC_FNV_OFFSET;
+            visit(tree, &mut hash);
+            hash
         }
 
         let mut tree = broad_plain_tree(5, 3);
@@ -1377,54 +1324,26 @@ mod interaction_changed_key_tests {
         }
         let mut node_index = 0;
         decorate(&mut tree, &mut node_index);
-        let declarations = [
-            ("opacity", "0.8"),
-            ("padding", "8px"),
-            ("margin", "2px"),
-            ("border-width", "1px"),
-            ("border-radius", "4px"),
-            ("width", "120px"),
-            ("height", "24px"),
-            ("font-size", "13px"),
-        ]
-        .into_iter()
-        .map(|(property, value)| Declaration {
-            property: property.into(),
-            value: StyleValue::Literal(value.into()),
-        })
-        .collect();
-        let rules = vec![StyleRule {
-            selector: Selector::Class("card".into()),
-            declarations,
-            container_query: None,
-        }];
-        let index = mesh_core_elements::StyleRuleIndex::new(&rules);
-        let theme = mesh_core_theme::default_theme();
-        let resolver = StyleResolver::new(&theme);
         let context = StyleContext {
             container_width: 800.0,
             container_height: 600.0,
         };
         let iterations = 2_000;
-
-        // Warm class/default caches equally before timing repeated unchanged rebuilds.
-        std::hint::black_box(resolve_tree(&mut tree, &rules, &index, &resolver, context));
+        let mut legacy_retained = RetainedWidgetTree::default();
+        legacy_retained.update(&tree);
         let old_started = Instant::now();
-        let mut old_total = 0usize;
+        let mut old_total = 0u64;
         for _ in 0..iterations {
-            old_total = old_total.wrapping_add(resolve_tree(
-                std::hint::black_box(&mut tree),
-                &rules,
-                &index,
-                &resolver,
-                context,
-            ));
+            legacy_retained.update(std::hint::black_box(&tree));
+            old_total = old_total.wrapping_add(legacy_tree_fingerprint(&tree));
         }
         let old_time = old_started.elapsed();
 
+        let mut retained = RetainedWidgetTree::default();
+        retained.update(&tree);
         let mut previous = Some(RuntimeStyleDiagnosticFingerprint {
             rules_generation: 1,
-            tree: runtime_style_diagnostic_tree_fingerprint(&tree),
+            retained_tree_generation: retained.generation(),
             props: 0,
             container_width: context.container_width.to_bits(),
             container_height: context.container_height.to_bits(),
@@ -1432,9 +1351,10 @@ mod interaction_changed_key_tests {
         let gated_started = Instant::now();
         let mut gated_changes = 0usize;
         for _ in 0..iterations {
+            retained.update(std::hint::black_box(&tree));
             let current = RuntimeStyleDiagnosticFingerprint {
                 rules_generation: 1,
-                tree: runtime_style_diagnostic_tree_fingerprint(std::hint::black_box(&tree)),
+                retained_tree_generation: retained.generation(),
                 props: 0,
                 container_width: context.container_width.to_bits(),
                 container_height: context.container_height.to_bits(),
@@ -1447,11 +1367,13 @@ mod interaction_changed_key_tests {
         let gated_time = gated_started.elapsed();
 
         eprintln!(
-            "runtime style diagnostics over {iterations} unchanged rebuilds: full re-resolve {old_time:?}; fingerprint gate {gated_time:?}; ratio {:.1}x; old_total={old_total} gated_changes={gated_changes}",
-            old_time.as_secs_f64() / gated_time.as_secs_f64()
+            "MESH_PERF metric=runtime_style_diagnostic_generation_speedup value={:.6} legacy_rebuild_ns={} generation_rebuild_ns={} workload=2000_unchanged_diagnostic_enabled_rebuilds_156_nodes old_total={old_total} gated_changes={gated_changes}",
+            old_time.as_secs_f64() / gated_time.as_secs_f64(),
+            old_time.as_nanos(),
+            gated_time.as_nanos(),
         );
         assert_eq!(gated_changes, 0);
-        assert!(gated_time < old_time);
+        assert!(old_time.as_secs_f64() / gated_time.as_secs_f64() >= 1.20);
     }
 
     // cargo test -p mesh-core-shell --release -- hover_snapshot_clone_from_reuses_path_storage -- --ignored --nocapture

@@ -36,7 +36,7 @@ struct ResolvedInputTarget<'a> {
 pub(in crate::shell::component) struct KeybindSubscriber {
     pub(in crate::shell::component) keybind_id: String,
     pub(in crate::shell::component) node_key: String,
-    pub(in crate::shell::component) handler: String,
+    pub(in crate::shell::component) handler: HandlerTarget,
 }
 
 impl FrontendSurfaceComponent {
@@ -616,7 +616,7 @@ impl FrontendSurfaceComponent {
                     }),
                 );
             }
-            requests.extend(self.call_namespaced_handler(&subscriber.handler, &[event])?);
+            requests.extend(self.call_handler_target(&subscriber.handler, &[event])?);
         }
         Ok(Some(requests))
     }

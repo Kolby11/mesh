@@ -1,9 +1,6 @@
 use super::*;
+use mesh_core_elements::HandlerTarget;
 use mesh_core_elements::style::TooltipAnchor;
-use mesh_core_elements::{
-    embedded_handler_prefix, is_embedded_handler, namespace_embedded_handler_with_prefix,
-    parse_embedded_handler,
-};
 use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq)]
 pub struct PointerHit {
@@ -669,44 +666,27 @@ pub fn is_slider_key(tree: &WidgetNode, key: &str) -> bool {
     find_node_by_key(tree, key).is_some_and(|node| node.tag == "slider")
 }
 
-pub fn find_click_handler(tree: &WidgetNode, key: &str) -> Option<String> {
+pub fn find_click_handler(tree: &WidgetNode, key: &str) -> Option<HandlerTarget> {
     find_event_handler(tree, key, "click")
 }
 
-pub fn find_event_handler(tree: &WidgetNode, key: &str, event_name: &str) -> Option<String> {
+pub fn find_event_handler(tree: &WidgetNode, key: &str, event_name: &str) -> Option<HandlerTarget> {
     find_node_by_key(tree, key)
         .and_then(|node| node.event_handlers.get(event_name))
         .cloned()
 }
 
 pub fn namespace_event_handlers(node: &mut WidgetNode, instance_key: &str) {
-    let prefix = embedded_handler_prefix(instance_key);
-    namespace_event_handlers_with_prefix(node, &prefix);
-}
-
-fn namespace_event_handlers_with_prefix(node: &mut WidgetNode, prefix: &str) {
     for handler in node.event_handlers.values_mut() {
-        if !is_embedded_handler(handler) {
-            namespace_handler(handler, prefix);
-        }
+        handler.namespace(instance_key);
     }
     for call in node.event_handler_calls.values_mut() {
-        if !is_embedded_handler(&call.handler) {
-            namespace_handler(&mut call.handler, prefix);
-        }
+        call.handler.namespace(instance_key);
     }
 
     for child in &mut node.children {
-        namespace_event_handlers_with_prefix(child, prefix);
+        namespace_event_handlers(child, instance_key);
     }
-}
-
-fn namespace_handler(handler: &mut String, prefix: &str) {
-    *handler = namespace_embedded_handler_with_prefix(prefix, handler);
-}
-
-pub fn parse_namespaced_handler(handler: &str) -> Option<(&str, &str)> {
-    parse_embedded_handler(handler)
 }
 
 #[cfg(test)]
@@ -752,31 +732,6 @@ mod tests {
         root
     }
 
-    fn legacy_namespace_event_handlers(node: &mut WidgetNode, instance_key: &str) {
-        for handler in node.event_handlers.values_mut() {
-            if !handler.starts_with("__mesh_embed__::") {
-                *handler = format!("__mesh_embed__::{instance_key}::{handler}");
-            }
-        }
-        for call in node.event_handler_calls.values_mut() {
-            if !call.handler.starts_with("__mesh_embed__::") {
-                call.handler = format!("__mesh_embed__::{instance_key}::{}", call.handler);
-            }
-        }
-        for child in &mut node.children {
-            legacy_namespace_event_handlers(child, instance_key);
-        }
-    }
-
-    fn assert_handler_graph_eq(left: &WidgetNode, right: &WidgetNode) {
-        assert_eq!(left.event_handlers, right.event_handlers);
-        assert_eq!(left.event_handler_calls, right.event_handler_calls);
-        assert_eq!(left.children.len(), right.children.len());
-        for (left_child, right_child) in left.children.iter().zip(&right.children) {
-            assert_handler_graph_eq(left_child, right_child);
-        }
-    }
-
     fn representative_handler_tree(rows: usize, columns: usize) -> WidgetNode {
         let mut tree = indexed_tree(rows, columns);
         for row in &mut tree.children {
@@ -787,7 +742,7 @@ mod tests {
                     .insert("pointerenter".into(), "handlePointerEnter".into());
                 cell.event_handlers.insert(
                     "focus".into(),
-                    "__mesh_embed__::@mesh/shared::alreadyNamespaced".into(),
+                    HandlerTarget::embedded("@mesh/shared", "alreadyNamespaced"),
                 );
                 cell.event_handler_calls.insert(
                     "change".into(),
@@ -802,64 +757,29 @@ mod tests {
     }
 
     #[test]
-    fn namespace_event_handlers_matches_legacy_graph_output() {
+    fn namespace_event_handlers_assigns_typed_owners_once() {
         let instance_key = "@mesh/settings/local:appearance/import:ThemeControls";
-        let tree = representative_handler_tree(3, 4);
-        let mut legacy = tree.clone();
-        let mut prefixed = tree;
+        let mut tree = representative_handler_tree(3, 4);
+        namespace_event_handlers(&mut tree, instance_key);
+        namespace_event_handlers(&mut tree, "ignored-second-owner");
 
-        legacy_namespace_event_handlers(&mut legacy, instance_key);
-        namespace_event_handlers(&mut prefixed, instance_key);
-
-        assert_handler_graph_eq(&legacy, &prefixed);
-    }
-
-    // cargo test -p mesh-core-interaction --release -- shared_handler_namespace_prefix_beats_per_handler_format --ignored --nocapture
-    #[test]
-    #[ignore = "release-only handler namespace allocation microbenchmark"]
-    fn shared_handler_namespace_prefix_beats_per_handler_format() {
-        use std::hint::black_box;
-        use std::time::{Duration, Instant};
-
-        let instance_key = "@mesh/settings/local:appearance/import:ThemeControls";
-        let template = representative_handler_tree(40, 25);
-        let iterations = 200usize;
-        let mut legacy_time = Duration::ZERO;
-        let mut prefixed_time = Duration::ZERO;
-        let mut legacy_total = 0usize;
-        let mut prefixed_total = 0usize;
-
-        for iteration in 0..iterations {
-            let mut legacy = template.clone();
-            let mut prefixed = template.clone();
-            if iteration % 2 == 0 {
-                let started = Instant::now();
-                legacy_namespace_event_handlers(black_box(&mut legacy), black_box(instance_key));
-                legacy_time += started.elapsed();
-                let started = Instant::now();
-                namespace_event_handlers(black_box(&mut prefixed), black_box(instance_key));
-                prefixed_time += started.elapsed();
-            } else {
-                let started = Instant::now();
-                namespace_event_handlers(black_box(&mut prefixed), black_box(instance_key));
-                prefixed_time += started.elapsed();
-                let started = Instant::now();
-                legacy_namespace_event_handlers(black_box(&mut legacy), black_box(instance_key));
-                legacy_time += started.elapsed();
-            }
-            assert_handler_graph_eq(&legacy, &prefixed);
-            legacy_total = legacy_total
-                .wrapping_add(legacy.children[0].children[0].event_handlers["click"].len());
-            prefixed_total = prefixed_total
-                .wrapping_add(prefixed.children[0].children[0].event_handlers["click"].len());
-        }
-
-        eprintln!(
-            "ordinary handler graph namespacing: per-handler format {legacy_time:?}; shared prefix {prefixed_time:?}; ratio {:.2}x",
-            legacy_time.as_secs_f64() / prefixed_time.as_secs_f64()
+        let cell = &tree.children[0].children[0];
+        assert_eq!(
+            cell.event_handlers["click"].handler(),
+            "handlePrimaryAction"
         );
-        assert_eq!(legacy_total, prefixed_total);
-        assert!(prefixed_time < legacy_time);
+        assert_eq!(
+            cell.event_handlers["click"].instance_key(),
+            Some(instance_key)
+        );
+        assert_eq!(
+            cell.event_handlers["focus"].instance_key(),
+            Some("@mesh/shared")
+        );
+        assert_eq!(
+            cell.event_handler_calls["change"].handler.instance_key(),
+            Some(instance_key)
+        );
     }
 
     #[test]

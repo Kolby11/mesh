@@ -1,5 +1,6 @@
 use super::parse::*;
 use super::*;
+use crate::lru::LruCache;
 use crate::tree::ElementState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue, prop_variable_key};
 use mesh_core_theme::{Theme, TokenValue};
@@ -23,12 +24,12 @@ thread_local! {
     static VARIABLE_SCRATCH: RefCell<HashMap<String, StyleValue>> =
         RefCell::new(HashMap::new());
     static CANDIDATE_RULE_SCRATCH: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
-    static INLINE_STYLE_CACHE: RefCell<HashMap<Arc<str>, CachedInlineStyle>> =
-        RefCell::new(HashMap::new());
-    static SHARED_THEME_DEFAULT_CACHE: RefCell<HashMap<u64, SharedThemeDefaultCache>> =
-        RefCell::new(HashMap::new());
-    static THEME_DEFAULT_DECLARATION_CACHE: RefCell<HashMap<(u64, usize), Arc<[IndexedDeclaration]>>> =
-        RefCell::new(HashMap::new());
+    static INLINE_STYLE_CACHE: RefCell<LruCache<Arc<str>, CachedInlineStyle>> =
+        RefCell::new(LruCache::new(MAX_INLINE_STYLE_CACHE_ENTRIES));
+    static SHARED_THEME_DEFAULT_CACHE: RefCell<LruCache<u64, SharedThemeDefaultCache>> =
+        RefCell::new(LruCache::new(MAX_SHARED_THEME_REVISIONS));
+    static THEME_DEFAULT_DECLARATION_CACHE: RefCell<LruCache<(u64, usize), CachedThemeDefaultDeclarations>> =
+        RefCell::new(LruCache::new(MAX_THEME_DEFAULT_DECLARATION_CACHE_ENTRIES));
 }
 
 const MAX_INLINE_STYLE_CACHE_ENTRIES: usize = 256;
@@ -95,17 +96,30 @@ struct ThemeComponentDefaults {
     variables: HashMap<String, StyleValue>,
 }
 
-#[derive(Default)]
 struct SharedThemeDefaultCache {
-    prop_sets: Vec<SharedThemePropDefaults>,
-    entry_count: usize,
+    entries: LruCache<SharedThemeDefaultKey, Vec<SharedThemePropDefaults>>,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct SharedThemeDefaultKey {
+    props_fingerprint: u64,
+    module_id_hash: u64,
+    tag_hash: u64,
 }
 
 struct SharedThemePropDefaults {
-    fingerprint: u64,
     props: HashMap<String, StyleValue>,
-    defaults: HashMap<String, Rc<ThemeComponentDefaults>>,
-    module_defaults: HashMap<String, HashMap<String, Rc<ThemeComponentDefaults>>>,
+    module_id: Option<String>,
+    tag: String,
+    defaults: Rc<ThemeComponentDefaults>,
+}
+
+impl Default for SharedThemeDefaultCache {
+    fn default() -> Self {
+        Self {
+            entries: LruCache::new(MAX_SHARED_THEME_DEFAULTS_PER_REVISION),
+        }
+    }
 }
 
 fn style_props_fingerprint(props: &HashMap<String, StyleValue>) -> u64 {
@@ -119,6 +133,23 @@ fn style_props_fingerprint(props: &HashMap<String, StyleValue>) -> u64 {
     fingerprint
 }
 
+fn shared_theme_key(
+    props_fingerprint: u64,
+    tag: &str,
+    module_id: Option<&str>,
+) -> SharedThemeDefaultKey {
+    fn hash(value: Option<&str>) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+    SharedThemeDefaultKey {
+        props_fingerprint,
+        module_id_hash: hash(module_id),
+        tag_hash: hash(Some(tag)),
+    }
+}
+
 fn shared_theme_defaults(
     revision: u64,
     props_fingerprint: u64,
@@ -127,20 +158,17 @@ fn shared_theme_defaults(
     module_id: Option<&str>,
 ) -> Option<Rc<ThemeComponentDefaults>> {
     SHARED_THEME_DEFAULT_CACHE.with(|cache| {
-        let cache = cache.borrow();
-        let revision_cache = cache.get(&revision)?;
-        let prop_defaults = revision_cache
-            .prop_sets
+        let key = shared_theme_key(props_fingerprint, tag, module_id);
+        let mut cache = cache.borrow_mut();
+        let revision_cache = cache.get_mut(&revision)?;
+        revision_cache
+            .entries
+            .get(&key)?
             .iter()
-            .find(|entry| entry.fingerprint == props_fingerprint && entry.props == *props)?;
-        match module_id {
-            Some(module_id) => prop_defaults
-                .module_defaults
-                .get(module_id)
-                .and_then(|tags| tags.get(tag))
-                .cloned(),
-            None => prop_defaults.defaults.get(tag).cloned(),
-        }
+            .find(|entry| {
+                entry.props == *props && entry.module_id.as_deref() == module_id && entry.tag == tag
+            })
+            .map(|entry| Rc::clone(&entry.defaults))
     })
 }
 
@@ -154,48 +182,37 @@ fn remember_shared_theme_defaults(
 ) {
     SHARED_THEME_DEFAULT_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if !cache.contains_key(&revision) && cache.len() >= MAX_SHARED_THEME_REVISIONS {
-            cache.clear();
+        if !cache.contains_key(&revision) {
+            cache.insert(revision, SharedThemeDefaultCache::default());
         }
-        let revision_cache = cache.entry(revision).or_default();
-        if revision_cache.entry_count >= MAX_SHARED_THEME_DEFAULTS_PER_REVISION {
-            revision_cache.prop_sets.clear();
-            revision_cache.entry_count = 0;
-        }
-        let prop_defaults = match revision_cache
-            .prop_sets
-            .iter()
-            .position(|entry| entry.fingerprint == props_fingerprint && entry.props == *props)
-        {
-            Some(position) => &mut revision_cache.prop_sets[position],
-            None => {
-                revision_cache.prop_sets.push(SharedThemePropDefaults {
-                    fingerprint: props_fingerprint,
+        let revision_cache = cache
+            .get_mut(&revision)
+            .expect("revision cache inserted above");
+        let key = shared_theme_key(props_fingerprint, tag, module_id);
+        if let Some(entries) = revision_cache.entries.get_mut(&key) {
+            if let Some(entry) = entries.iter_mut().find(|entry| {
+                entry.props == *props && entry.module_id.as_deref() == module_id && entry.tag == tag
+            }) {
+                entry.defaults = Rc::clone(defaults);
+            } else {
+                entries.push(SharedThemePropDefaults {
                     props: props.clone(),
-                    defaults: HashMap::new(),
-                    module_defaults: HashMap::new(),
+                    module_id: module_id.map(str::to_owned),
+                    tag: tag.to_owned(),
+                    defaults: Rc::clone(defaults),
                 });
-                revision_cache
-                    .prop_sets
-                    .last_mut()
-                    .expect("prop-default cache entry inserted above")
             }
-        };
-        match module_id {
-            Some(module_id) => {
-                prop_defaults
-                    .module_defaults
-                    .entry(module_id.to_owned())
-                    .or_default()
-                    .insert(tag.to_owned(), Rc::clone(defaults));
-            }
-            None => {
-                prop_defaults
-                    .defaults
-                    .insert(tag.to_owned(), Rc::clone(defaults));
-            }
+        } else {
+            revision_cache.entries.insert(
+                key,
+                vec![SharedThemePropDefaults {
+                    props: props.clone(),
+                    module_id: module_id.map(str::to_owned),
+                    tag: tag.to_owned(),
+                    defaults: Rc::clone(defaults),
+                }],
+            );
         }
-        revision_cache.entry_count += 1;
     });
 }
 
@@ -654,9 +671,18 @@ enum CachedInlineStyle {
     Error(Arc<str>),
 }
 
+struct CachedThemeDefaultDeclarations {
+    /// The cache key includes the map address because immutable theme defaults
+    /// keep it stable for their lifetime. Retaining entries across more theme
+    /// churn makes allocator address reuse possible, though, so preserve the
+    /// source map to reject a stale pointer-key hit before returning it.
+    source: mesh_core_theme::ComponentDefaults,
+    declarations: Arc<[IndexedDeclaration]>,
+}
+
 fn cached_inline_style(source: &str) -> CachedInlineStyle {
     INLINE_STYLE_CACHE.with(|cache| {
-        if let Some(cached) = cache.borrow().get(source).cloned() {
+        if let Some(cached) = cache.borrow_mut().get(source).cloned() {
             return cached;
         }
 
@@ -671,9 +697,6 @@ fn cached_inline_style(source: &str) -> CachedInlineStyle {
             Err(error) => CachedInlineStyle::Error(Arc::from(error.to_string())),
         };
         let mut cache = cache.borrow_mut();
-        if cache.len() >= MAX_INLINE_STYLE_CACHE_ENTRIES {
-            cache.clear();
-        }
         cache.insert(Arc::from(source), parsed.clone());
         parsed
     })
@@ -822,8 +845,10 @@ fn indexed_theme_defaults(
 ) -> Arc<[IndexedDeclaration]> {
     let key = (revision, std::ptr::from_ref(defaults).cast::<()>() as usize);
     THEME_DEFAULT_DECLARATION_CACHE.with(|cache| {
-        if let Some(declarations) = cache.borrow().get(&key) {
-            return Arc::clone(declarations);
+        if let Some(cached) = cache.borrow_mut().get(&key)
+            && cached.source == *defaults
+        {
+            return Arc::clone(&cached.declarations);
         }
 
         let declarations: Arc<[IndexedDeclaration]> = defaults
@@ -840,10 +865,13 @@ fn indexed_theme_defaults(
             .into();
 
         let mut cache = cache.borrow_mut();
-        if cache.len() >= MAX_THEME_DEFAULT_DECLARATION_CACHE_ENTRIES {
-            cache.clear();
-        }
-        cache.insert(key, Arc::clone(&declarations));
+        cache.insert(
+            key,
+            CachedThemeDefaultDeclarations {
+                source: defaults.clone(),
+                declarations: Arc::clone(&declarations),
+            },
+        );
         declarations
     })
 }
@@ -3316,6 +3344,202 @@ mod tests {
 
         let changed_revision = indexed_theme_defaults(u64::MAX, &defaults);
         assert!(!Arc::ptr_eq(&first, &changed_revision));
+    }
+
+    #[test]
+    fn bounded_style_caches_evict_one_cold_entry_without_flushing_hot_entries() {
+        INLINE_STYLE_CACHE.with(|cache| cache.borrow_mut().clear());
+        let hot_inline = cached_inline_style("left: 7px;");
+        for index in 0..MAX_INLINE_STYLE_CACHE_ENTRIES - 1 {
+            cached_inline_style(&format!("left: {}px;", index + 100));
+        }
+        let refreshed_inline = cached_inline_style("left: 7px;");
+        cached_inline_style("left: 99999px;");
+        let retained_inline = cached_inline_style("left: 7px;");
+        match (hot_inline, refreshed_inline, retained_inline) {
+            (
+                CachedInlineStyle::Declarations(first),
+                CachedInlineStyle::Declarations(refreshed),
+                CachedInlineStyle::Declarations(retained),
+            ) => {
+                assert!(Arc::ptr_eq(&first, &refreshed));
+                assert!(Arc::ptr_eq(&first, &retained));
+            }
+            _ => panic!("valid inline declarations must remain cached"),
+        }
+        INLINE_STYLE_CACHE.with(|cache| {
+            let cache = cache.borrow();
+            assert_eq!(cache.len(), MAX_INLINE_STYLE_CACHE_ENTRIES);
+            assert!(!cache.contains_key("left: 100px;"));
+        });
+
+        SHARED_THEME_DEFAULT_CACHE.with(|cache| cache.borrow_mut().clear());
+        let props = HashMap::new();
+        let hot_defaults = Rc::new(ThemeComponentDefaults::default());
+        remember_shared_theme_defaults(1, 0, &props, "hot", None, &hot_defaults);
+        for index in 0..MAX_SHARED_THEME_DEFAULTS_PER_REVISION - 1 {
+            remember_shared_theme_defaults(
+                1,
+                0,
+                &props,
+                &format!("cold-{index}"),
+                None,
+                &Rc::new(ThemeComponentDefaults::default()),
+            );
+        }
+        assert!(Rc::ptr_eq(
+            &shared_theme_defaults(1, 0, &props, "hot", None).unwrap(),
+            &hot_defaults
+        ));
+        remember_shared_theme_defaults(
+            1,
+            0,
+            &props,
+            "new",
+            None,
+            &Rc::new(ThemeComponentDefaults::default()),
+        );
+        assert!(Rc::ptr_eq(
+            &shared_theme_defaults(1, 0, &props, "hot", None).unwrap(),
+            &hot_defaults
+        ));
+        assert!(shared_theme_defaults(1, 0, &props, "cold-0", None).is_none());
+
+        for revision in 2..=MAX_SHARED_THEME_REVISIONS as u64 {
+            remember_shared_theme_defaults(
+                revision,
+                0,
+                &props,
+                "revision",
+                None,
+                &Rc::new(ThemeComponentDefaults::default()),
+            );
+        }
+        let _ = shared_theme_defaults(1, 0, &props, "hot", None);
+        remember_shared_theme_defaults(
+            MAX_SHARED_THEME_REVISIONS as u64 + 1,
+            0,
+            &props,
+            "revision",
+            None,
+            &Rc::new(ThemeComponentDefaults::default()),
+        );
+        SHARED_THEME_DEFAULT_CACHE.with(|cache| {
+            let cache = cache.borrow();
+            assert_eq!(cache.len(), MAX_SHARED_THEME_REVISIONS);
+            assert!(cache.contains_key(&1));
+            assert!(!cache.contains_key(&2));
+        });
+
+        THEME_DEFAULT_DECLARATION_CACHE.with(|cache| cache.borrow_mut().clear());
+        let hot_declarations = Box::new(mesh_core_theme::ComponentDefaults::new());
+        let hot_lowered = indexed_theme_defaults(10_001, &hot_declarations);
+        let cold_declarations = (0..MAX_THEME_DEFAULT_DECLARATION_CACHE_ENTRIES - 1)
+            .map(|_| Box::new(mesh_core_theme::ComponentDefaults::new()))
+            .collect::<Vec<_>>();
+        for declarations in &cold_declarations {
+            indexed_theme_defaults(10_001, declarations);
+        }
+        let refreshed_lowered = indexed_theme_defaults(10_001, &hot_declarations);
+        assert!(Arc::ptr_eq(&hot_lowered, &refreshed_lowered));
+        let newcomer = Box::new(mesh_core_theme::ComponentDefaults::new());
+        indexed_theme_defaults(10_001, &newcomer);
+        let retained_lowered = indexed_theme_defaults(10_001, &hot_declarations);
+        assert!(Arc::ptr_eq(&hot_lowered, &retained_lowered));
+        THEME_DEFAULT_DECLARATION_CACHE.with(|cache| {
+            assert_eq!(
+                cache.borrow().len(),
+                MAX_THEME_DEFAULT_DECLARATION_CACHE_ENTRIES
+            );
+        });
+    }
+
+    // cargo test -p mesh-core-elements --release -- bounded_style_cache_p95_beats_flush_all --ignored --nocapture
+    #[test]
+    #[ignore = "release-only cache-churn p95 benchmark"]
+    fn bounded_style_cache_p95_beats_flush_all() {
+        fn percentile_95(mut samples: Vec<u128>) -> u128 {
+            samples.sort_unstable();
+            samples[samples.len() * 95 / 100]
+        }
+
+        fn measure(flush_all: bool, sources: &[String]) -> u128 {
+            const CAPACITY: usize = 128;
+            const HOT: usize = 96;
+            const ROTATING_PER_FRAME: usize = 12;
+            const FRAMES: usize = 300;
+            let mut flush_cache = HashMap::<String, usize>::new();
+            let mut lru_cache = LruCache::<String, usize>::new(CAPACITY);
+            let mut frame_times = Vec::with_capacity(FRAMES);
+            let mut checksum = 0usize;
+
+            for frame in 0..FRAMES {
+                let started = std::time::Instant::now();
+                let rotating_start = HOT + (frame * ROTATING_PER_FRAME) % (sources.len() - HOT);
+                let indices =
+                    (0..HOT).chain((0..ROTATING_PER_FRAME).map(|offset| {
+                        HOT + (rotating_start - HOT + offset) % (sources.len() - HOT)
+                    }));
+                for index in indices {
+                    let source = &sources[index];
+                    if flush_all {
+                        let value = if let Some(value) = flush_cache.get(source) {
+                            *value
+                        } else {
+                            let parsed = mesh_core_component::parse_inline_style(source).unwrap();
+                            if flush_cache.len() >= CAPACITY {
+                                flush_cache.clear();
+                            }
+                            let value = parsed.len();
+                            flush_cache.insert(source.clone(), value);
+                            value
+                        };
+                        checksum = checksum.wrapping_add(value);
+                    } else {
+                        let value = if let Some(value) = lru_cache.get(source) {
+                            *value
+                        } else {
+                            let parsed = mesh_core_component::parse_inline_style(source).unwrap();
+                            let value = parsed.len();
+                            lru_cache.insert(source.clone(), value);
+                            value
+                        };
+                        checksum = checksum.wrapping_add(value);
+                    }
+                }
+                frame_times.push(started.elapsed().as_nanos());
+            }
+            std::hint::black_box(checksum);
+            percentile_95(frame_times)
+        }
+
+        let sources = (0..608)
+            .map(|index| {
+                format!(
+                    "left: {index}px; top: {}px; width: {}px; opacity: 0.8;",
+                    index + 1,
+                    index + 2
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut flush_samples = Vec::new();
+        let mut lru_samples = Vec::new();
+        for _ in 0..5 {
+            flush_samples.push(measure(true, &sources));
+            lru_samples.push(measure(false, &sources));
+        }
+        let flush_min = *flush_samples.iter().min().unwrap();
+        let flush_max = *flush_samples.iter().max().unwrap();
+        let lru_min = *lru_samples.iter().min().unwrap();
+        let lru_max = *lru_samples.iter().max().unwrap();
+        let conservative_ratio = flush_min as f64 / lru_max as f64;
+        eprintln!(
+            "MESH_PERF metric=bounded_style_cache_p95_speedup value={conservative_ratio:.6} flush_all_p95_ns={flush_min}-{flush_max} lru_p95_ns={lru_min}-{lru_max} workload=300_frames_96_hot_12_rotating capacity=128"
+        );
+        assert!(
+            conservative_ratio >= 1.25,
+            "bounded eviction p95 must be at least 1.25x faster; conservative ratio {conservative_ratio:.3}x"
+        );
     }
 
     #[test]
@@ -5993,15 +6217,43 @@ mod tests {
         variables.insert("--fill".into(), StyleValue::Literal("100%".into()));
 
         let cases = [
-            ("min-width", StyleValue::Literal("240px".into()), Dimension::Px(240.0)),
-            ("max-width", StyleValue::Literal("100%".into()), Dimension::Percent(100.0)),
-            ("min-height", StyleValue::Literal("auto".into()), Dimension::Auto),
+            (
+                "min-width",
+                StyleValue::Literal("240px".into()),
+                Dimension::Px(240.0),
+            ),
+            (
+                "max-width",
+                StyleValue::Literal("100%".into()),
+                Dimension::Percent(100.0),
+            ),
+            (
+                "min-height",
+                StyleValue::Literal("auto".into()),
+                Dimension::Auto,
+            ),
             // `none` is the CSS initial value for the max-* properties and has
             // to clear the constraint, not clamp it to zero.
-            ("max-height", StyleValue::Literal("none".into()), Dimension::Auto),
-            ("max-width", StyleValue::Var("--fill".into()), Dimension::Percent(100.0)),
-            ("min-width", StyleValue::Var("--size-panel".into()), Dimension::Px(320.0)),
-            ("max-width", StyleValue::Literal("fit-content".into()), Dimension::Content),
+            (
+                "max-height",
+                StyleValue::Literal("none".into()),
+                Dimension::Auto,
+            ),
+            (
+                "max-width",
+                StyleValue::Var("--fill".into()),
+                Dimension::Percent(100.0),
+            ),
+            (
+                "min-width",
+                StyleValue::Var("--size-panel".into()),
+                Dimension::Px(320.0),
+            ),
+            (
+                "max-width",
+                StyleValue::Literal("fit-content".into()),
+                Dimension::Content,
+            ),
         ];
 
         for (property, value, expected) in cases {

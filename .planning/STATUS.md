@@ -7,12 +7,27 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
-**Component binding and popover metadata are typed.** Compiler-to-shell
-composition now passes public values, prop bindings, and `bind:this` separately,
-so reserved binding attributes cannot leak into module props. Promoted-popover
-wrappers use memo-safe node metadata instead of a hidden authored attribute. The
-remaining composition wire string is the embedded handler target (2026-08-01).
-Record: [`log/2026-08.md`](log/2026-08.md).
+**Component composition metadata is typed end-to-end.** `WidgetNode` handler
+records now carry the local script handler and owning embedded instance as a
+`HandlerTarget`, so compiler namespacing, interaction lookup, scheduling, and
+shell dispatch no longer build or parse the `__mesh_embed__::` wire string.
+Legacy runtime-provided strings are decoded only at the compatibility edge.
+Component values, prop bindings, `bind:this`, and promoted-popover metadata use
+their existing typed channels (2026-08-01). Record:
+[`log/2026-08.md`](log/2026-08.md).
+
+**Runtime style diagnostics reuse retained-tree generations.** Diagnostic-enabled
+rebuilds no longer hash every node a second time merely to decide whether to
+repeat the diagnostic restyle. The gate now combines the authoritative retained
+generation with rules, props, and container dimensions (2026-07-31). Record:
+[`log/performance-log.md`](log/performance-log.md).
+
+**Style caches evict cold entries individually.** Inline-style parsing, shared
+theme defaults (revision and per-revision), and lowered theme declarations now
+use bounded LRU eviction instead of clearing every hot entry at capacity
+(2026-07-31). The 300-frame churn gate measures p95 latency and protects the
+cache-cliff improvement. Record:
+[`log/performance-log.md`](log/performance-log.md).
 
 **Compiled frontend modules are shared across surface instances.** Catalog
 entries and mounted profile roots retain copy-on-write `Arc` handles, so

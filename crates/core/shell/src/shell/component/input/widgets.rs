@@ -13,7 +13,7 @@ pub(in crate::shell::component) struct PressedTargetSnapshot {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct PressedHandlerSnapshot {
-    handler: String,
+    handler: HandlerTarget,
     args: Vec<serde_json::Value>,
 }
 
@@ -421,7 +421,7 @@ impl FrontendSurfaceComponent {
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let mut args = handler.args.clone();
         args.push(event_arg);
-        self.call_namespaced_handler(&handler.handler, &args)
+        self.call_handler_target(&handler.handler, &args)
     }
 
     pub(in crate::shell::component) fn activate_option_choice(

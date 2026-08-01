@@ -26,11 +26,7 @@ pub use accessibility::{
     AccessibilityTreeNode,
 };
 pub use attributes::{AttrKey, AttributeMap};
-pub use composition::{
-    ComponentCompositionProps, EMBEDDED_HANDLER_PREFIX, embedded_handler_prefix,
-    is_embedded_handler, namespace_embedded_handler, namespace_embedded_handler_with_prefix,
-    parse_embedded_handler,
-};
+pub use composition::{ComponentCompositionProps, HandlerTarget};
 pub use element::{
     BASE_ELEMENT_FIELDS, ELEMENT_CONTRACT_DEFS, ELEMENT_TYPE_DEFS, ElementAttributeDef,
     ElementAttributeType, ElementContractDef, ElementDiagnostic, ElementDiagnosticKind,

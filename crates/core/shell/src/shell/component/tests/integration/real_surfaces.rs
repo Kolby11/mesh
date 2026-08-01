@@ -1321,7 +1321,7 @@ end
         }
     });
     component
-        .call_namespaced_handler(&handler, std::slice::from_ref(&click_event))
+        .call_handler_target(&handler, std::slice::from_ref(&click_event))
         .unwrap();
     component.paint(&theme, 220, 80, &mut buffer, 1.0).unwrap();
     let show_requests = component.tick().unwrap();
@@ -1331,7 +1331,7 @@ end
     ));
 
     let requests = component
-        .call_namespaced_handler(&handler, &[click_event])
+        .call_handler_target(&handler, &[click_event])
         .unwrap();
     assert!(
         requests.is_empty(),
@@ -1398,7 +1398,7 @@ fn shipped_navigation_volume_button_click_toggles_mute() {
     let click_handler = button.event_handlers.get("click").unwrap().clone();
 
     let requests = component
-        .call_namespaced_handler(
+        .call_handler_target(
             &click_handler,
             &[serde_json::json!({
                 "surface": {
@@ -1594,14 +1594,16 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     );
     let inherited_handler =
         find_click_handler(tree, &button_key).expect("button should own a click handler");
+    assert_eq!(inherited_handler.handler(), "onAudioToggle");
     assert_eq!(
-        inherited_handler, "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
+        inherited_handler.instance_key(),
+        Some("@mesh/navigation-bar/local:VolumeButton"),
         "icon click should bubble to the VolumeButton toggle handler"
     );
 
     let button_node = node_by_mesh_key(tree, &button_key);
     let requests = component
-        .call_namespaced_handler(
+        .call_handler_target(
             &inherited_handler,
             &[serde_json::json!({
                 "surface": { "id": "@mesh/navigation-bar" },
@@ -2084,7 +2086,7 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
         })
         .clone();
     component
-        .call_namespaced_handler(
+        .call_handler_target(
             &enter_handler,
             &[serde_json::json!({
                 "surface": { "id": "@mesh/navigation-bar" },

@@ -6,6 +6,8 @@ mod style;
 mod tags;
 
 use mesh_core_component::ComponentFile;
+#[cfg(test)]
+use mesh_core_elements::HandlerTarget;
 use mesh_core_elements::{
     ComponentCompositionProps, EventHandlerCall, LayoutEngine, StyleContext, StyleResolver,
     VariableStore, WidgetNode,
@@ -461,17 +463,20 @@ mod tests {
 
         let (_, _, _, handlers, _) = render::parse_attributes(&attrs, None);
 
-        assert_eq!(handlers.get("click").map(String::as_str), Some("openPanel"));
         assert_eq!(
-            handlers.get("change").map(String::as_str),
+            handlers.get("click").map(HandlerTarget::as_str),
+            Some("openPanel")
+        );
+        assert_eq!(
+            handlers.get("change").map(HandlerTarget::as_str),
             Some("updateValue")
         );
         assert_eq!(
-            handlers.get("release").map(String::as_str),
+            handlers.get("release").map(HandlerTarget::as_str),
             Some("finishDrag")
         );
         assert_eq!(
-            handlers.get("focus").map(String::as_str),
+            handlers.get("focus").map(HandlerTarget::as_str),
             Some("focusControl")
         );
         assert!(!handlers.contains_key("onclick"));
@@ -498,8 +503,12 @@ mod tests {
         let (_, _, _, handlers, _) = render::parse_attributes(&attrs, Some(&store));
 
         assert_eq!(
-            handlers.get("click").map(String::as_str),
-            Some("__mesh_embed__::@test/root::toggleSurface")
+            handlers.get("click").map(HandlerTarget::as_str),
+            Some("toggleSurface")
+        );
+        assert_eq!(
+            handlers.get("click").and_then(HandlerTarget::instance_key),
+            Some("@test/root")
         );
     }
 
@@ -522,8 +531,12 @@ mod tests {
 
         assert!(resolved.is_empty());
         assert_eq!(
-            handlers.get("focus").map(String::as_str),
-            Some("__mesh_embed__::@test/root::markFocused")
+            handlers.get("focus").map(HandlerTarget::as_str),
+            Some("markFocused")
+        );
+        assert_eq!(
+            handlers.get("focus").and_then(HandlerTarget::instance_key),
+            Some("@test/root")
         );
     }
 
@@ -1160,8 +1173,15 @@ mod tests {
             embedded.children[0].children[0]
                 .event_handlers
                 .get("click")
-                .map(String::as_str),
-            Some("__mesh_embed__::test/embedded::onFirst")
+                .map(HandlerTarget::as_str),
+            Some("onFirst")
+        );
+        assert_eq!(
+            embedded.children[0].children[0]
+                .event_handlers
+                .get("click")
+                .and_then(HandlerTarget::instance_key),
+            Some("test/embedded")
         );
         assert!(surface.layout.width > 0.0);
         assert!(surface.layout.height > 0.0);
@@ -1277,14 +1297,10 @@ mod tests {
 
         fn legacy_namespace_walk(node: &mut WidgetNode, instance_key: &str) {
             for handler in node.event_handlers.values_mut() {
-                if !handler.starts_with("__mesh_embed__::") {
-                    *handler = format!("__mesh_embed__::{instance_key}::{handler}");
-                }
+                handler.namespace(instance_key);
             }
             for call in node.event_handler_calls.values_mut() {
-                if !call.handler.starts_with("__mesh_embed__::") {
-                    call.handler = format!("__mesh_embed__::{instance_key}::{}", call.handler);
-                }
+                call.handler.namespace(instance_key);
             }
             for child in &mut node.children {
                 legacy_namespace_walk(child, instance_key);

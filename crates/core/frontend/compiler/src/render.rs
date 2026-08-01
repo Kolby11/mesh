@@ -14,8 +14,8 @@ use mesh_core_component::{PropValue, PropsBlock};
 use mesh_core_elements::accessibility::AccessibilityInfo;
 use mesh_core_elements::{
     AttrKey, AttributeMap, ComponentCompositionProps, ComputedStyle, EventHandlerCall,
-    StyleContext, StyleResolver, StyleRuleIndex, VariableStore, WidgetNode,
-    element_contract_for_tag, is_embedded_handler, namespace_embedded_handler,
+    HandlerTarget, StyleContext, StyleResolver, StyleRuleIndex, VariableStore, WidgetNode,
+    element_contract_for_tag,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
@@ -1043,9 +1043,19 @@ fn build_component_ref(
     let mut prop_handler_calls = BTreeMap::new();
     for attr in &component.props {
         if let AttributeValue::EventHandler(handler) = &attr.value {
+            let mut target =
+                HandlerTarget::from_legacy_serialized(resolve_event_handler_value(state, handler));
+            target.namespace(host_instance_key);
             composition_props.values.insert(
                 AttrKey::new(&attr.name),
-                resolve_component_prop_handler_value(state, host_instance_key, handler),
+                component_prop_handler_token(host_instance_key, &attr.name),
+            );
+            prop_handler_calls.insert(
+                attr.name.clone(),
+                EventHandlerCall {
+                    handler: target,
+                    args: Vec::new(),
+                },
             );
         } else if matches!(attr.value, AttributeValue::EventHandlerCall { .. }) {
             // Attribute parsing normalizes event-looking names (`onselect` →
@@ -1055,7 +1065,7 @@ fn build_component_ref(
             let event_name = normalize_event_handler_name(&attr.name);
             if let Some(call) = parsed_handler_calls.get(&event_name) {
                 let mut call = call.clone();
-                call.handler = namespaced_handler(host_instance_key, &call.handler);
+                call.handler.namespace(host_instance_key);
                 composition_props.values.insert(
                     AttrKey::new(&attr.name),
                     component_prop_handler_token(host_instance_key, &attr.name),
@@ -1170,7 +1180,7 @@ pub(crate) fn parse_attributes(
     Vec<String>,
     Option<String>,
     AttributeMap,
-    BTreeMap<String, String>,
+    BTreeMap<String, HandlerTarget>,
     BTreeMap<String, EventHandlerCall>,
 ) {
     parse_attributes_runtime(attrs, state, "", None, false)
@@ -1186,7 +1196,7 @@ fn parse_attributes_runtime(
     Vec<String>,
     Option<String>,
     AttributeMap,
-    BTreeMap<String, String>,
+    BTreeMap<String, HandlerTarget>,
     BTreeMap<String, EventHandlerCall>,
 ) {
     let mut classes = Vec::new();
@@ -1278,12 +1288,12 @@ fn namespace_handler_if_needed(
     instance_key: &str,
     handler: String,
     namespace_handlers: bool,
-) -> String {
+) -> HandlerTarget {
+    let mut target = HandlerTarget::from_legacy_serialized(handler);
     if namespace_handlers {
-        namespaced_handler(instance_key, &handler)
-    } else {
-        handler
+        target.namespace(instance_key);
     }
+    target
 }
 
 fn resolve_event_handler_value(state: Option<&dyn VariableStore>, handler: &str) -> String {
@@ -1296,23 +1306,6 @@ fn resolve_event_handler_value(state: Option<&dyn VariableStore>, handler: &str)
         })
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| handler.to_string())
-}
-
-fn resolve_component_prop_handler_value(
-    state: Option<&dyn VariableStore>,
-    host_instance_key: &str,
-    handler: &str,
-) -> String {
-    let resolved = resolve_event_handler_value(state, handler);
-    if is_embedded_handler(&resolved) {
-        resolved
-    } else {
-        namespaced_handler(host_instance_key, &resolved)
-    }
-}
-
-fn namespaced_handler(host_instance_key: &str, handler: &str) -> String {
-    namespace_embedded_handler(host_instance_key, handler)
 }
 
 fn normalize_event_handler_name(name: &str) -> String {
@@ -1753,7 +1746,8 @@ import Child from "./child.mesh"
                 .all(|key| !key.as_str().starts_with("__mesh_"))
         );
         let calls = composition.calls.borrow();
-        assert_eq!(calls["onprimary"].handler, "__mesh_embed__::root::onShared");
+        assert_eq!(calls["onprimary"].handler, "onShared");
+        assert_eq!(calls["onprimary"].handler.instance_key(), Some("root"));
         assert_eq!(calls["onsecondary"].handler, calls["onprimary"].handler);
         assert_eq!(calls["onprimary"].args, vec![serde_json::json!("primary")]);
         assert_eq!(
@@ -2202,13 +2196,25 @@ import Child from "./child.mesh"
 
         let (_, _, _, handlers, _) = parse_attributes(&attrs, None);
 
-        assert_eq!(handlers.get("input"), Some(&"onInput".to_string()));
-        assert_eq!(handlers.get("change"), Some(&"onChange".to_string()));
-        assert_eq!(handlers.get("select"), Some(&"onSelect".to_string()));
-        assert_eq!(handlers.get("activate"), Some(&"onActivate".to_string()));
         assert_eq!(
-            handlers.get("openchange"),
-            Some(&"onOpenChange".to_string())
+            handlers.get("input").map(HandlerTarget::as_str),
+            Some("onInput")
+        );
+        assert_eq!(
+            handlers.get("change").map(HandlerTarget::as_str),
+            Some("onChange")
+        );
+        assert_eq!(
+            handlers.get("select").map(HandlerTarget::as_str),
+            Some("onSelect")
+        );
+        assert_eq!(
+            handlers.get("activate").map(HandlerTarget::as_str),
+            Some("onActivate")
+        );
+        assert_eq!(
+            handlers.get("openchange").map(HandlerTarget::as_str),
+            Some("onOpenChange")
         );
     }
 
@@ -2232,7 +2238,10 @@ import Child from "./child.mesh"
 
         let (_, _, _, handlers, handler_calls) = parse_attributes(&attrs, Some(&store));
 
-        assert_eq!(handlers.get("click"), Some(&"onSelectItem".to_string()));
+        assert_eq!(
+            handlers.get("click").map(HandlerTarget::as_str),
+            Some("onSelectItem")
+        );
         let call = handler_calls.get("click").expect("typed call");
         assert_eq!(call.handler, "onSelectItem");
         assert_eq!(
@@ -3040,18 +3049,13 @@ import Child from "./child.mesh"
     }
 
     #[test]
-    fn namespaced_handler_matches_legacy_format() {
-        assert_eq!(
-            namespaced_handler("@mesh/panel/local:Toolbar", "onToggle"),
-            "__mesh_embed__::@mesh/panel/local:Toolbar::onToggle"
-        );
-        assert_eq!(
-            namespaced_handler(
-                "@mesh/panel",
-                "__mesh_embed__::@mesh/other::already_namespaced",
-            ),
-            "__mesh_embed__::@mesh/other::already_namespaced"
-        );
+    fn namespaced_handler_preserves_typed_owner() {
+        let mut target = HandlerTarget::root("onToggle");
+        target.namespace("@mesh/panel/local:Toolbar");
+        assert_eq!(target.handler(), "onToggle");
+        assert_eq!(target.instance_key(), Some("@mesh/panel/local:Toolbar"));
+        target.namespace("@mesh/other");
+        assert_eq!(target.instance_key(), Some("@mesh/panel/local:Toolbar"));
     }
 
     #[test]
@@ -3147,15 +3151,16 @@ import Child from "./child.mesh"
         let new_started = Instant::now();
         let mut new_total = 0usize;
         for _ in 0..iterations {
-            new_total ^= std::hint::black_box(namespaced_handler(instance_key, handler).len());
+            let target = std::hint::black_box(HandlerTarget::embedded(instance_key, handler));
+            new_total ^= target.dynamic_heap_bytes();
         }
         let new_time = new_started.elapsed();
 
         eprintln!(
-            "compiler handler namespace: format {old_time:?}; presized {new_time:?}; ratio {:.2}x",
+            "compiler handler namespace: format {old_time:?}; typed {new_time:?}; ratio {:.2}x; totals={old_total}/{new_total}",
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
-        assert_eq!(old_total, new_total);
+        assert_eq!(new_total, 0);
         assert!(new_time < old_time);
     }
 

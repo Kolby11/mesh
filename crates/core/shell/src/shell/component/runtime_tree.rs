@@ -845,6 +845,7 @@ fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher) {
 fn attributes_fingerprint(node: &WidgetNode) -> u64 {
     let mut hasher = RuntimeTreeHasher::default();
     node.tag.hash(&mut hasher);
+    node.module_id().hash(&mut hasher);
     for (key, value) in &node.attributes {
         if is_typed_runtime_annotation_attribute(key) {
             continue;
@@ -1847,6 +1848,15 @@ mod tests {
 
         node.attributes.insert("class".into(), "card active".into());
         assert_ne!(attributes_fingerprint(&node), original);
+    }
+
+    #[test]
+    fn attribute_fingerprint_tracks_module_identity_for_style_diagnostics() {
+        let mut node = WidgetNode::new("box");
+        node.set_module_id("@test/first");
+        let first = attributes_fingerprint(&node);
+        node.set_module_id("@test/second");
+        assert_ne!(attributes_fingerprint(&node), first);
     }
 
     #[test]

@@ -1,8 +1,7 @@
 use super::*;
-use mesh_core_elements::namespace_embedded_handler;
 
-fn scheduled_handler_name(instance_key: &str, handler: &str) -> String {
-    namespace_embedded_handler(instance_key, handler)
+fn scheduled_handler_target(instance_key: &str, handler: &str) -> HandlerTarget {
+    HandlerTarget::embedded(instance_key, handler)
 }
 
 fn render_stack_contains_cycle(stack: &[String], module_id: &str) -> bool {
@@ -19,35 +18,6 @@ fn local_component_runtime_id(host_module_id: &str, alias: &str) -> String {
     component_id.push_str("::");
     component_id.push_str(alias);
     component_id
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HandlerDispatchTarget<'a> {
-    Root {
-        handler: &'a str,
-    },
-    Embedded {
-        instance_key: &'a str,
-        handler: &'a str,
-    },
-}
-
-impl<'a> HandlerDispatchTarget<'a> {
-    fn resolve(handler: &'a str) -> Self {
-        match parse_namespaced_handler(handler) {
-            Some((instance_key, handler)) => Self::Embedded {
-                instance_key,
-                handler,
-            },
-            None => Self::Root { handler },
-        }
-    }
-
-    fn handler(self) -> &'a str {
-        match self {
-            Self::Root { handler } | Self::Embedded { handler, .. } => handler,
-        }
-    }
 }
 
 fn apply_runtime_props(
@@ -109,7 +79,7 @@ impl FrontendSurfaceComponent {
                     self.scheduled_handlers.insert(
                         key.to_string(),
                         ScheduledHandler {
-                            namespaced_handler: scheduled_handler_name(instance_key, handler),
+                            target: scheduled_handler_target(instance_key, handler),
                             deadline: Instant::now() + Duration::from_millis(delay_ms),
                         },
                     );
@@ -138,7 +108,7 @@ impl FrontendSurfaceComponent {
         let Some((handler, merged_args)) = node_handler_and_args(node, event_name, args) else {
             return Ok(Vec::new());
         };
-        self.call_namespaced_handler(&handler, &merged_args)
+        self.call_handler_target(handler, &merged_args)
     }
 
     /// Same as `call_node_handler`, but reads the handler off an
@@ -154,7 +124,7 @@ impl FrontendSurfaceComponent {
         let Some((handler, merged_args)) = node_handler_and_args(node, event_name, args) else {
             return Ok(Vec::new());
         };
-        self.call_namespaced_handler(&handler, &merged_args)
+        self.call_handler_target(handler, &merged_args)
     }
 
     pub(super) fn call_render_hooks(&mut self) {
@@ -609,20 +579,34 @@ impl FrontendSurfaceComponent {
         tree
     }
 
+    #[cfg(test)]
     pub(super) fn call_namespaced_handler(
         &mut self,
         handler: &str,
         args: &[serde_json::Value],
     ) -> Result<Vec<CoreRequest>, ComponentError> {
-        let _span = tracing::debug_span!("call_handler", surface = %self.id(), handler).entered();
-        let target = HandlerDispatchTarget::resolve(handler);
+        let target = HandlerTarget::from_legacy_serialized(handler);
+        self.call_handler_target(&target, args)
+    }
+
+    pub(super) fn call_handler_target(
+        &mut self,
+        target: &HandlerTarget,
+        args: &[serde_json::Value],
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let _span = tracing::debug_span!(
+            "call_handler",
+            surface = %self.id(),
+            handler = target.handler(),
+            instance_key = target.instance_key(),
+        )
+        .entered();
         let (handler_name, merged_args) = unpack_handler_args(target.handler(), args);
 
         let mut runtimes = self.runtimes.lock().unwrap();
-        let instance_key = match target {
-            HandlerDispatchTarget::Root { .. } => self.root_instance_key(),
-            HandlerDispatchTarget::Embedded { instance_key, .. } => instance_key,
-        };
+        let instance_key = target
+            .instance_key()
+            .unwrap_or_else(|| self.root_instance_key());
         let Some(runtime) = runtimes.get_mut(instance_key) else {
             return Ok(Vec::new());
         };
@@ -657,15 +641,15 @@ impl FrontendSurfaceComponent {
         let published = runtime.script_ctx.drain_published_events();
         drop(runtimes);
 
-        let (mut events, neighbors_dirty) = match target {
-            HandlerDispatchTarget::Embedded { instance_key, .. } => {
+        let (mut events, neighbors_dirty) = match target.instance_key() {
+            Some(instance_key) => {
                 let mut events = self.drain_local_script_events(instance_key, published);
                 let (neighbors_dirty, mut neighbor_events) =
                     self.resync_binding_neighbors(instance_key);
                 events.append(&mut neighbor_events);
                 (events, neighbors_dirty)
             }
-            HandlerDispatchTarget::Root { .. } => {
+            None => {
                 // The root ID is borrowed from `self` for the runtime lookup above.
                 // Most ordinary handlers neither publish scheduling events nor
                 // participate in live bindings, so avoid cloning that ID before
@@ -794,28 +778,25 @@ fn node_handler_and_args<'a>(
     node: &'a WidgetNode,
     event_name: &str,
     event_args: &'a [serde_json::Value],
-) -> Option<(&'a str, std::borrow::Cow<'a, [serde_json::Value]>)> {
+) -> Option<(&'a HandlerTarget, std::borrow::Cow<'a, [serde_json::Value]>)> {
     if let Some(call) = node.event_handler_calls.get(event_name) {
         if call.args.is_empty() {
-            return Some((
-                call.handler.as_str(),
-                std::borrow::Cow::Borrowed(event_args),
-            ));
+            return Some((&call.handler, std::borrow::Cow::Borrowed(event_args)));
         }
         if event_args.is_empty() {
             return Some((
-                call.handler.as_str(),
+                &call.handler,
                 std::borrow::Cow::Borrowed(call.args.as_slice()),
             ));
         }
         let mut merged = Vec::with_capacity(call.args.len() + event_args.len());
         merged.extend(call.args.iter().cloned());
         merged.extend_from_slice(event_args);
-        return Some((call.handler.as_str(), std::borrow::Cow::Owned(merged)));
+        return Some((&call.handler, std::borrow::Cow::Owned(merged)));
     }
     node.event_handlers
         .get(event_name)
-        .map(|handler| (handler.as_str(), std::borrow::Cow::Borrowed(event_args)))
+        .map(|handler| (handler, std::borrow::Cow::Borrowed(event_args)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -834,11 +815,11 @@ mod handler_call_tests {
     fn node_handler_and_args_prefers_typed_call_args() {
         let mut node = WidgetNode::new("button");
         node.event_handlers
-            .insert("click".into(), "__mesh_embed__::host::legacy".into());
+            .insert("click".into(), HandlerTarget::embedded("host", "legacy"));
         node.event_handler_calls.insert(
             "click".into(),
             EventHandlerCall {
-                handler: "__mesh_embed__::host::typed".into(),
+                handler: HandlerTarget::embedded("host", "typed"),
                 args: vec![serde_json::json!("prebound")],
             },
         );
@@ -846,7 +827,8 @@ mod handler_call_tests {
         let event_args = [serde_json::json!({ "type": "click" })];
         let (handler, args) = node_handler_and_args(&node, "click", &event_args).expect("handler");
 
-        assert_eq!(handler, "__mesh_embed__::host::typed");
+        assert_eq!(handler.handler(), "typed");
+        assert_eq!(handler.instance_key(), Some("host"));
         assert_eq!(args[0], serde_json::json!("prebound"));
         assert_eq!(args[1], serde_json::json!({ "type": "click" }));
         assert!(matches!(args, std::borrow::Cow::Owned(_)));
@@ -858,7 +840,7 @@ mod handler_call_tests {
         node.event_handler_calls.insert(
             "click".into(),
             EventHandlerCall {
-                handler: "__mesh_embed__::host::typed".into(),
+                handler: HandlerTarget::embedded("host", "typed"),
                 args: Vec::new(),
             },
         );
@@ -886,18 +868,13 @@ mod handler_call_tests {
     }
 
     #[test]
-    fn handler_dispatch_target_preserves_root_and_embedded_identity() {
-        assert_eq!(
-            HandlerDispatchTarget::resolve("onClick"),
-            HandlerDispatchTarget::Root { handler: "onClick" }
-        );
-        assert_eq!(
-            HandlerDispatchTarget::resolve("__mesh_embed__::@mesh/panel/local:Clock::open"),
-            HandlerDispatchTarget::Embedded {
-                instance_key: "@mesh/panel/local:Clock",
-                handler: "open",
-            }
-        );
+    fn handler_target_preserves_root_and_embedded_identity() {
+        let root = HandlerTarget::root("onClick");
+        assert_eq!(root.handler(), "onClick");
+        assert_eq!(root.instance_key(), None);
+        let embedded = HandlerTarget::embedded("@mesh/panel/local:Clock", "open");
+        assert_eq!(embedded.handler(), "open");
+        assert_eq!(embedded.instance_key(), Some("@mesh/panel/local:Clock"));
     }
 
     // cargo test -p mesh-core-shell --release -- root_handler_runtime_lookup_borrows_instance_key --ignored --nocapture
@@ -909,26 +886,18 @@ mod handler_call_tests {
             root_instance_key: &str,
             handler: &str,
         ) -> Option<usize> {
-            let owned_root_instance_key;
-            let instance_key = if let Some((instance_key, _)) = parse_namespaced_handler(handler) {
-                instance_key
-            } else {
-                owned_root_instance_key = root_instance_key.to_string();
-                owned_root_instance_key.as_str()
-            };
+            let target = HandlerTarget::from_legacy_serialized(handler);
+            let owned_root_instance_key = root_instance_key.to_string();
+            let instance_key = target.instance_key().unwrap_or(&owned_root_instance_key);
             runtimes.get(instance_key).copied()
         }
 
         fn borrowed_lookup(
             runtimes: &HashMap<String, usize>,
             root_instance_key: &str,
-            handler: &str,
+            target: &HandlerTarget,
         ) -> Option<usize> {
-            let target = HandlerDispatchTarget::resolve(handler);
-            let instance_key = match target {
-                HandlerDispatchTarget::Root { .. } => root_instance_key,
-                HandlerDispatchTarget::Embedded { instance_key, .. } => instance_key,
-            };
+            let instance_key = target.instance_key().unwrap_or(root_instance_key);
             runtimes.get(instance_key).copied()
         }
 
@@ -956,7 +925,7 @@ mod handler_call_tests {
             new_total ^= std::hint::black_box(borrowed_lookup(
                 &runtimes,
                 root_instance_key,
-                std::hint::black_box("onPointerMove"),
+                std::hint::black_box(&HandlerTarget::root("onPointerMove")),
             ))
             .unwrap();
         }
@@ -1041,34 +1010,29 @@ mod handler_call_tests {
     #[ignore = "release-only namespaced handler target microbenchmark"]
     fn namespaced_handler_resolution_borrows_parts() {
         fn old_resolve(handler: &str, fallback_id: &str) -> (String, String, String) {
-            if let Some((instance_key, handler_name)) = parse_namespaced_handler(handler) {
-                (
-                    instance_key.to_string(),
-                    handler_name.to_string(),
-                    format!("{instance_key}:component"),
-                )
-            } else {
-                (
-                    fallback_id.to_string(),
-                    handler.to_string(),
-                    fallback_id.to_string(),
-                )
-            }
+            let target = HandlerTarget::from_legacy_serialized(handler);
+            let instance_key = target.instance_key().unwrap_or(fallback_id);
+            (
+                instance_key.to_string(),
+                target.handler().to_string(),
+                format!("{instance_key}:component"),
+            )
         }
 
         fn new_resolve<'a>(
-            handler: &'a str,
+            target: &'a HandlerTarget,
             fallback_id: &'a str,
         ) -> (&'a str, &'a str, Option<String>) {
-            if let Some((instance_key, handler_name)) = parse_namespaced_handler(handler) {
-                (instance_key, handler_name, None)
-            } else {
-                (fallback_id, handler, None)
-            }
+            (
+                target.instance_key().unwrap_or(fallback_id),
+                target.handler(),
+                None,
+            )
         }
 
         let iterations = 500_000;
         let handler = "__mesh_embed__::@mesh/settings/local:theme-selector::onThemeLight";
+        let target = HandlerTarget::embedded("@mesh/settings/local:theme-selector", "onThemeLight");
         let fallback = "@mesh/settings";
 
         let old_started = std::time::Instant::now();
@@ -1079,7 +1043,7 @@ mod handler_call_tests {
 
         let new_started = std::time::Instant::now();
         for _ in 0..iterations {
-            std::hint::black_box(new_resolve(handler, fallback));
+            std::hint::black_box(new_resolve(&target, fallback));
         }
         let new_time = new_started.elapsed();
 
@@ -1136,7 +1100,7 @@ mod handler_call_tests {
         node.event_handler_calls.insert(
             "click".into(),
             EventHandlerCall {
-                handler: "__mesh_embed__::host::selectItem".into(),
+                handler: HandlerTarget::embedded("host", "selectItem"),
                 args: vec![
                     serde_json::json!("alpha"),
                     serde_json::json!("beta"),
@@ -1149,7 +1113,8 @@ mod handler_call_tests {
         for _ in 0..iterations {
             let (handler, args) =
                 node_handler_and_args(&node, "click", &event_args).expect("handler");
-            assert_eq!(handler, "__mesh_embed__::host::selectItem");
+            assert_eq!(handler.handler(), "selectItem");
+            assert_eq!(handler.instance_key(), Some("host"));
             assert_eq!(args.len(), 4);
         }
         let typed_ns = typed_start.elapsed().as_nanos();
@@ -1183,7 +1148,7 @@ mod handler_call_tests {
         node.event_handler_calls.insert(
             "click".into(),
             EventHandlerCall {
-                handler: "__mesh_embed__::host::onClick".into(),
+                handler: HandlerTarget::embedded("host", "onClick"),
                 args: Vec::new(),
             },
         );
@@ -1240,7 +1205,7 @@ mod handler_call_tests {
         node.event_handler_calls.insert(
             "click".into(),
             EventHandlerCall {
-                handler: "__mesh_embed__::host::selectItem".into(),
+                handler: HandlerTarget::embedded("host", "selectItem"),
                 args: vec![
                     serde_json::json!("alpha"),
                     serde_json::json!({ "source": "palette", "index": 3 }),
@@ -1544,15 +1509,10 @@ mod scheduled_handler_tests {
     use std::time::{Duration, Instant};
 
     #[test]
-    fn scheduled_handler_name_namespaces_plain_handlers_once() {
-        assert_eq!(
-            scheduled_handler_name("@mesh/panel/local:Clock", "close"),
-            "__mesh_embed__::@mesh/panel/local:Clock::close"
-        );
-        assert_eq!(
-            scheduled_handler_name("@mesh/panel", "__mesh_embed__::@mesh/panel::close"),
-            "__mesh_embed__::@mesh/panel::close"
-        );
+    fn scheduled_handler_target_carries_typed_owner() {
+        let target = scheduled_handler_target("@mesh/panel/local:Clock", "close");
+        assert_eq!(target.handler(), "close");
+        assert_eq!(target.instance_key(), Some("@mesh/panel/local:Clock"));
     }
 
     #[test]
@@ -1630,7 +1590,9 @@ mod scheduled_handler_tests {
         let new_started = Instant::now();
         let mut new_total = 0usize;
         for _ in 0..iterations {
-            new_total ^= std::hint::black_box(scheduled_handler_name(instance_key, handler).len());
+            new_total ^= std::hint::black_box(
+                scheduled_handler_target(instance_key, handler).dynamic_heap_bytes(),
+            );
         }
         let new_time = new_started.elapsed();
 
@@ -1638,7 +1600,8 @@ mod scheduled_handler_tests {
             "scheduled handler namespace: format {old_time:?}; presized {new_time:?}; ratio {:.2}x",
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
-        assert_eq!(old_total, new_total);
+        assert_eq!(old_total, 0);
+        assert_eq!(new_total, 0);
         assert!(new_time < old_time);
     }
 
@@ -1665,7 +1628,7 @@ mod scheduled_handler_tests {
                 (
                     key.clone(),
                     ScheduledHandler {
-                        namespaced_handler: scheduled_handler_name(instance_key, handler),
+                        target: scheduled_handler_target(instance_key, handler),
                         deadline: *deadline,
                     },
                 )
@@ -1696,7 +1659,7 @@ mod scheduled_handler_tests {
             let due = new_handlers
                 .iter()
                 .filter(|(_, scheduled)| scheduled.deadline <= now)
-                .map(|(key, scheduled)| (key.clone(), scheduled.namespaced_handler.clone()))
+                .map(|(key, scheduled)| (key.clone(), scheduled.target.clone()))
                 .collect::<Vec<_>>();
             new_total = new_total.wrapping_add(std::hint::black_box(due.len()));
         }

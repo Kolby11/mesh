@@ -145,16 +145,6 @@ gate where the win is structural.
       only for diagnostics (E). Static literals now pre-lower; typed property
       values and one-time token lowering remain. *(detail: "P2 — typing &
       interning")*
-- [ ] Remove the diagnostic-only full-tree fingerprint pass.
-      `runtime_style_diagnostic_tree_fingerprint` hashes every node's tag, id,
-      classes, key, module, state, and children just to gate diagnostic
-      re-resolution. Drive it from existing dirty generations, and measure the
-      diagnostic-enabled rebuild separately so instrumentation cannot hide its
-      own cost.
-- [ ] Replace flush-all style caches with bounded eviction. Inline-style,
-      shared-theme, and declaration caches `clear()` at their caps, producing
-      periodic cold-cache latency cliffs. Compare p95 frame time, not
-      steady-state throughput.
 - [ ] Interaction frames still re-apply string style declarations per node —
       folds into typed declarations and narrower invalidation.
       *(detail: "P2 — architecture")*
@@ -166,11 +156,6 @@ gate where the win is structural.
       **values**, and the broader symbol types remain. Profiling now puts the
       dominant remaining build cost in style resolution, not further attribute
       work. *(detail: "P2 — typing & interning")*
-- [ ] Replace the remaining magic-string handler protocol at the composition
-      boundary (`__mesh_embed__::`) with typed targets. Component values,
-      bindings, `bind:this`, and promoted-popover metadata are typed; handler
-      names still serialize their embedded instance target into `WidgetNode`.
-
 ### Composition
 
 - [ ] `{#if}` / `{#for}` always wrap children in a synthetic `column` node —

@@ -11,6 +11,64 @@ Every entry keeps its benchmark numbers so future work can compare against the
 recorded baselines. Sections M–V were focused per-subsystem deep dives; see
 `PERFORMANCE_SECTIONS.md` for the subsystem map.
 
+## 2026-07-31 — style diagnostics reuse the retained generation
+
+area: style diagnostics, retained invalidation
+
+Diagnostic-enabled rebuilds no longer traverse the complete widget tree to
+hash tag, class, id, module, state, and child inputs after the normal restyle.
+The diagnostic pass now runs after the authoritative retained-tree diff and
+keys its reuse decision on that generation together with the style-rule
+generation, resolved props, and container dimensions. Module identity joined
+the retained attribute fingerprint because it affects module-scoped theme
+defaults and was the one former diagnostic input not already represented by
+the retained snapshots. Source/theme cache resets still clear the diagnostic
+gate, and the first rebuilt tree still records diagnostics.
+
+**Measured.** Release under `nix develop` (rustc/cargo 1.95.0), five repeated
+runs of 2,000 unchanged diagnostic-enabled rebuild gates over a 156-node tree.
+Both sides include the existing retained-tree diff. The legacy path plus the
+extra full-tree fingerprint took 336.331–339.755ms; the retained-generation
+path took 271.427–275.034ms, a 1.235–1.250x improvement. The checked
+`runtime_style_diagnostic_generation_speedup` gate uses a 1.20x baseline with
+5% tolerance.
+
+**Verified.** Focused tests prove retained generations change for tag, class,
+id, state, module, and structural inputs; the independent fingerprint fields
+cover rules, props, and both container dimensions. The module-identity
+regression directly checks the retained attribute fingerprint. The full shell
+suite reports 590 passed, 19 failed, and 123 ignored; the failures are
+outside the new gate in real-surface fixtures, interaction/reflow expectations,
+profiling proofs, and backend debug state; all new diagnostic-generation tests
+pass.
+
+## 2026-07-31 — style caches use bounded eviction
+
+area: style resolution, cache tail latency
+
+The inline-style parse cache, shared theme-default revision and entry caches,
+and lowered theme-declaration cache now evict one least-recently-used entry at
+their existing bounds. Capacity churn no longer clears unrelated hot styles.
+The shared O(1) LRU gained mutable lookup so nested revision caches update
+recency without removing and reinserting values. Lowered declarations retain
+their source defaults and validate them on lookup, preventing allocator address
+reuse from turning a retained pointer-key entry into a stale hit.
+
+**Measured.** Release under `nix develop` (rustc/cargo 1.95.0), five runs of a
+300-frame inline-style churn workload with 96 hot and 12 rotating declarations
+per frame at capacity 128. Flush-all p95 was 335,936–341,872ns; individual LRU
+p95 was 46,295–49,856ns, a conservative 6.74x improvement. The checked
+`bounded_style_cache_p95_speedup` gate uses a 5.00x baseline with 30% tolerance
+(minimum 3.50x).
+
+**Verified.** The capacity regression covers inline entries, shared-theme
+revision and per-revision entries, and lowered declarations, proving that a
+refreshed hot entry survives while the oldest cold entry leaves. The elements
+suite reports 207 passed, 2 failed, and 56 ignored; both failures reproduce in
+the current baseline (`indexed_theme_defaults_reuse_lowered_declarations_per_revision`
+expects the reverse of declaration insertion order, and the shipped navigation
+hover fixture expects a transform no longer present in its source).
+
 ## 2026-07-31 — share compiled frontend modules across surface instances
 
 area: frontend catalog, shell component lifecycle
