@@ -7,6 +7,13 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Scoped retained updates keep their fresh `Vec`.** A reintroduced inline
+`SmallVec` candidate removed one allocation per 13-node sparse-update frame,
+but repeated end-to-end gains were only 1.011–1.075x and could not sustain the
+5% gate. The candidate was reverted, corroborating the 2026-07-28 rejected
+experiment; the stale backlog item is closed (2026-08-01). Record:
+[`log/performance-log.md`](log/performance-log.md).
+
 **Component composition metadata is typed end-to-end.** `WidgetNode` handler
 records now carry the local script handler and owning embedded instance as a
 `HandlerTarget`, so compiler namespacing, interaction lookup, scheduling, and

@@ -129,12 +129,6 @@ gate where the win is structural.
       still flattened per ancestor. Replay must consume segments directly
       instead of eagerly re-flattening them — an eager reconstruction was tried
       and reverted (see log).
-- [ ] Reuse retained-update scratch storage.
-      `RetainedWidgetTree::update_for_dirty_roots_collect` builds a fresh
-      `update_nodes` `Vec` per scoped update though the tree retains other
-      frame-to-frame state. Keep a bounded reusable vector (or `SmallVec` for
-      shallow roots), validate reentrancy and early returns, and keep it only if
-      allocation *and* end-to-end frame benchmarks improve.
 - [ ] Replace all-runtime descendant-generation scans in memo stores with a
       parent/child runtime index carrying an aggregated subtree generation.
 

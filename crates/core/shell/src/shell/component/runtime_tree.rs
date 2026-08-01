@@ -206,11 +206,7 @@ impl RetainedWidgetTree {
             return (self.update(root), None);
         }
 
-        // A narrow update normally contains the dirty leaf plus a short
-        // ancestor chain whose layout fingerprint changed. Keep that common
-        // case on the stack; broad scopes still spill before the existing
-        // full-update promotion check.
-        let mut update_nodes = SmallVec::<[&WidgetNode; 8]>::new();
+        let mut update_nodes = Vec::new();
         if !collect_scoped_update_nodes(
             root,
             false,
@@ -707,7 +703,7 @@ fn collect_scoped_update_nodes<'a>(
     dirty_roots: &HashSet<NodeId>,
     nodes: &SlotMap<RetainedNodeKey, RetainedNodeSnapshot>,
     node_keys: &HashMap<NodeId, RetainedNodeKey>,
-    update_nodes: &mut SmallVec<[&'a WidgetNode; 8]>,
+    update_nodes: &mut Vec<&'a WidgetNode>,
 ) -> bool {
     let Some(previous) = node_keys.get(&node.id).and_then(|key| nodes.get(*key)) else {
         return false;

@@ -11,6 +11,27 @@ Every entry keeps its benchmark numbers so future work can compare against the
 recorded baselines. Sections M–V were focused per-subsystem deep dives; see
 `PERFORMANCE_SECTIONS.md` for the subsystem map.
 
+## 2026-08-01 — retained-update inline scratch revalidation rejected
+
+area: retained render tree (N)
+
+A stale backlog item caused the 2026-07-28 `SmallVec<[&WidgetNode; 8]>`
+candidate to be revalidated after it had already been rejected. The inline
+buffer removed one candidate-list allocation per sparse update, but did not
+produce a stable end-to-end frame win. The candidate was reverted again to the
+fresh `Vec`; early returns remain local and cannot retain borrowed tree nodes.
+This entry reaffirms the existing 2026-07-28 rejected-experiments row rather
+than superseding it.
+
+**Measured.** Release with allocation profiling under `nix develop`
+(rustc/cargo 1.94.0), three repeated runs of 100,000 one-leaf-dirty updates on
+a 13-node tree, using ten alternating 10,000-frame batches per run. The fresh
+`Vec` took 208.536–214.576ms and made 200,000 allocations; inline `SmallVec`
+took 199.644–206.299ms and made 100,000 allocations, a noisy 1.011–1.075x.
+Two of three runs missed the proposed 1.05x gate, consistent with the earlier
+40-node result of 1.005x, so the allocation reduction is not a reliable frame
+improvement.
+
 ## 2026-07-31 — style diagnostics reuse the retained generation
 
 area: style diagnostics, retained invalidation
@@ -123,6 +144,7 @@ section noted.
 
 | Date | Experiment | Section | Result |
 | --- | --- | --- | --- |
+| 2026-08-01 | Revalidate `SmallVec<[&WidgetNode; 8]>` for scoped retained-update candidates | N | Halved measured allocations on a 13-node sparse frame, but only 1.011–1.075x over three runs and missed the 1.05x gate twice; reverted again |
 | 2026-07-03 | Component-local copied tracked-field summary for the service event gate | C | Only 1.1x (2.544ms → 2.221ms/100k) and refresh had to clone tracked maps; shell-side subscription index is the viable design |
 | 2026-07-03 | Fractional-scale physical-damage rect fix | D | Byte-for-byte correct but no CPU-side win (28.066ms vs 28.367ms one-box); revisit with compositor/upload damage instrumentation |
 | 2026-07-04 | Fuse surface + child enter/exit class annotation into one full-tree traversal | D | 0.6x — 87.249ms fused vs 52.903ms targeted walks; fusion must not scan unrelated branches |
