@@ -5662,16 +5662,16 @@ mod tests {
     }
 
     #[test]
-    fn target_local_display_list_matches_immediate_child_popup_pixels() {
+    fn target_local_display_list_matches_transient_child_popup_pixels() {
         let popup = child_popup_benchmark_tree(4, 6);
         let offset_x = -popup.layout.x + 7.0;
         let offset_y = -popup.layout.y + 5.0;
-        let mut immediate = crate::PixelBuffer::new(214, 132);
+        let mut transient = crate::PixelBuffer::new(214, 132);
         let mut retained = crate::PixelBuffer::new(214, 132);
 
         crate::paint_frontend_tree_at_for_module(
             &popup,
-            &mut immediate,
+            &mut transient,
             1.0,
             offset_x,
             offset_y,
@@ -5690,27 +5690,27 @@ mod tests {
             None,
         );
 
-        assert_eq!(retained.data, immediate.data);
+        assert_eq!(retained.data, transient.data);
     }
 
-    // cargo test -p mesh-core-render --release -- retained_child_popup_replay_beats_immediate_tree_paint --ignored --nocapture
+    // cargo test -p mesh-core-render --release -- retained_child_popup_replay_beats_transient_display_list --ignored --nocapture
     #[test]
     #[ignore = "release-only child popup retained-replay benchmark"]
-    fn retained_child_popup_replay_beats_immediate_tree_paint() {
+    fn retained_child_popup_replay_beats_transient_display_list() {
         const ITERATIONS: u64 = 400;
         let offset_x = -300.0 + 6.0;
         let offset_y = -180.0 + 6.0;
         let changed_id = 1;
 
-        let mut immediate_tree = child_popup_benchmark_tree(6, 10);
-        let mut immediate_buffer = crate::PixelBuffer::new(212, 132);
-        let immediate_started = std::time::Instant::now();
+        let mut transient_tree = child_popup_benchmark_tree(6, 10);
+        let mut transient_buffer = crate::PixelBuffer::new(212, 132);
+        let transient_started = std::time::Instant::now();
         for generation in 1..=ITERATIONS {
-            immediate_tree.computed_style.opacity = 0.25 + (generation % 70) as f32 / 100.0;
-            immediate_buffer.clear(Color::TRANSPARENT);
+            transient_tree.computed_style.opacity = 0.25 + (generation % 70) as f32 / 100.0;
+            transient_buffer.clear(Color::TRANSPARENT);
             crate::paint_frontend_tree_at_for_module(
-                std::hint::black_box(&immediate_tree),
-                &mut immediate_buffer,
+                std::hint::black_box(&transient_tree),
+                &mut transient_buffer,
                 1.0,
                 offset_x,
                 offset_y,
@@ -5718,7 +5718,7 @@ mod tests {
                 None,
             );
         }
-        let immediate_time = immediate_started.elapsed();
+        let transient_time = transient_started.elapsed();
 
         let mut retained_tree = child_popup_benchmark_tree(6, 10);
         let mut retained_buffer = crate::PixelBuffer::new(212, 132);
@@ -5765,13 +5765,13 @@ mod tests {
         }
         let retained_time = retained_started.elapsed();
 
-        assert_eq!(retained_buffer.data, immediate_buffer.data);
+        assert_eq!(retained_buffer.data, transient_buffer.data);
         eprintln!(
-            "animated child popup raster: immediate tree {immediate_time:?}; retained display-list {retained_time:?}; ratio {:.2}x",
-            immediate_time.as_secs_f64() / retained_time.as_secs_f64()
+            "animated child popup raster: transient display-list {transient_time:?}; retained display-list {retained_time:?}; ratio {:.2}x",
+            transient_time.as_secs_f64() / retained_time.as_secs_f64()
         );
         assert!(
-            retained_time * 10 < immediate_time * 9,
+            retained_time * 10 < transient_time * 9,
             "retained child replay should improve the production animation path by at least 10%"
         );
     }

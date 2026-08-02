@@ -79,15 +79,6 @@ promotion")*
       path, starting with audio once drag and capture state is represented in
       core.
 
-## Tech debt
-
-- [ ] Converge the immediate and retained renderers.
-      `render/src/surface/painter/tree.rs` still holds a parallel
-      widget-specific immediate renderer beside display-list replay. Route
-      parity tests through one command builder, then delete the duplicate to
-      stop semantic and clipping drift.
----
-
 ## Performance
 
 Full history, baselines, and the **rejected-experiments table** are in

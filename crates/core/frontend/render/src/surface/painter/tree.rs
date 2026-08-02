@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use crate::display_list::{
     CheckmarkKind, DisplayCheckmarkPaint, DisplayListClip, DisplayPaintCommand,
-    DisplayPaintCommandKind, DisplayPaintContent, DisplayPaintNode, SelectedDisplayListPaint,
+    DisplayPaintCommandKind, DisplayPaintContent, DisplayPaintNode, RetainedDisplayList,
+    SelectedDisplayListPaint,
 };
 use mesh_core_elements::style::Edges;
 use smallvec::SmallVec;
@@ -39,14 +40,9 @@ impl FrontendRenderEngine {
         offset_y: f32,
         module_id: Option<&str>,
     ) {
-        let clip = ClipRect {
-            x: 0,
-            y: 0,
-            width: buffer.width as i32,
-            height: buffer.height as i32,
-        };
-        self.viewport_clip.set(clip);
-        self.render_node(root, buffer, scale, offset_x, offset_y, clip, module_id);
+        self.render_tree_display_list(
+            root, buffer, scale, offset_x, offset_y, None, None, module_id,
+        );
     }
 
     pub fn render_tree_at_for_module_clipped(
@@ -59,21 +55,16 @@ impl FrontendRenderEngine {
         clip: (u32, u32, u32, u32),
         module_id: Option<&str>,
     ) {
-        let surface_clip = ClipRect {
-            x: 0,
-            y: 0,
-            width: buffer.width as i32,
-            height: buffer.height as i32,
-        };
-        let damage_clip = ClipRect {
-            x: clip.0 as i32,
-            y: clip.1 as i32,
-            width: clip.2 as i32,
-            height: clip.3 as i32,
-        };
-        let clip = intersect_clip(surface_clip, damage_clip);
-        self.viewport_clip.set(surface_clip);
-        self.render_node(root, buffer, scale, offset_x, offset_y, clip, module_id);
+        self.render_tree_display_list(
+            root,
+            buffer,
+            scale,
+            offset_x,
+            offset_y,
+            Some(clip),
+            None,
+            module_id,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -88,28 +79,46 @@ impl FrontendRenderEngine {
         paint_nodes: &HashSet<mesh_core_elements::NodeId>,
         module_id: Option<&str>,
     ) {
-        let surface_clip = ClipRect {
-            x: 0,
-            y: 0,
-            width: buffer.width as i32,
-            height: buffer.height as i32,
-        };
-        let damage_clip = ClipRect {
-            x: clip.0 as i32,
-            y: clip.1 as i32,
-            width: clip.2 as i32,
-            height: clip.3 as i32,
-        };
-        let clip = intersect_clip(surface_clip, damage_clip);
-        self.viewport_clip.set(surface_clip);
-        self.render_node_with_filter(
+        self.render_tree_display_list(
             root,
             buffer,
             scale,
             offset_x,
             offset_y,
-            clip,
+            Some(clip),
             Some(paint_nodes),
+            module_id,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_tree_display_list(
+        &self,
+        root: &WidgetNode,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        offset_x: f32,
+        offset_y: f32,
+        clip: Option<(u32, u32, u32, u32)>,
+        paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
+        module_id: Option<&str>,
+    ) {
+        let mut display_list = RetainedDisplayList::default();
+        display_list.update_at(
+            root,
+            offset_x,
+            offset_y,
+            buffer.width,
+            buffer.height,
+            true,
+            true,
+        );
+        self.render_display_list_for_module(
+            display_list.paint_commands(),
+            buffer,
+            scale,
+            clip,
+            paint_nodes,
             module_id,
         );
     }
@@ -706,445 +715,6 @@ impl FrontendRenderEngine {
         }
     }
 
-    fn render_node(
-        &self,
-        node: &WidgetNode,
-        buffer: &mut PixelBuffer,
-        scale: f32,
-        offset_x: f32,
-        offset_y: f32,
-        clip: ClipRect,
-        module_id: Option<&str>,
-    ) {
-        self.render_node_with_filter(
-            node, buffer, scale, offset_x, offset_y, clip, None, module_id,
-        );
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn render_node_with_filter(
-        &self,
-        node: &WidgetNode,
-        buffer: &mut PixelBuffer,
-        scale: f32,
-        offset_x: f32,
-        offset_y: f32,
-        clip: ClipRect,
-        paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
-        module_id: Option<&str>,
-    ) {
-        self.render_node_subtree(
-            node,
-            buffer,
-            scale,
-            offset_x,
-            offset_y,
-            clip,
-            paint_nodes,
-            module_id,
-            true,
-        );
-    }
-
-    /// Renders `node` and its descendants. `apply_filter` is false only for the
-    /// re-entry from [`Self::render_node_blurred`], which has already taken
-    /// this node's `filter` into account by redirecting the subtree into an
-    /// offscreen buffer.
-    #[allow(clippy::too_many_arguments)]
-    fn render_node_subtree(
-        &self,
-        node: &WidgetNode,
-        buffer: &mut PixelBuffer,
-        scale: f32,
-        offset_x: f32,
-        offset_y: f32,
-        clip: ClipRect,
-        paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
-        module_id: Option<&str>,
-        apply_filter: bool,
-    ) {
-        if paint_nodes.is_some_and(|nodes| !nodes.contains(&node.id)) {
-            return;
-        }
-
-        let style = &node.computed_style;
-        if node_is_explicitly_hidden(node) {
-            return;
-        }
-
-        // `filter: blur()` covers the element and everything under it, so the
-        // subtree is rasterized on its own and blurred as one image.
-        if apply_filter && style.filter.blur_radius > 0.0 {
-            self.render_node_blurred(
-                node,
-                buffer,
-                scale,
-                offset_x,
-                offset_y,
-                clip,
-                paint_nodes,
-                module_id,
-            );
-            return;
-        }
-
-        // Apply transform: translate, then scale around transform-origin, then rotate.
-        let transform = style.transform;
-        let offset_x = offset_x + transform.translate_x;
-        let offset_y = offset_y + transform.translate_y;
-
-        let layout = &node.layout;
-        let scale_x = transform.scale_x.max(0.0);
-        let scale_y = transform.scale_y.max(0.0);
-        let base_w = layout.width * scale;
-        let base_h = layout.height * scale;
-        let scaled_w = base_w * scale_x;
-        let scaled_h = base_h * scale_y;
-        let base_x = (layout.x + offset_x) * scale;
-        let base_y = (layout.y + offset_y) * scale;
-
-        // Apply transform-origin for scale pivot
-        let origin_x = style.transform_origin.x.resolve(layout.width) * scale;
-        let origin_y = style.transform_origin.y.resolve(layout.height) * scale;
-        let origin_frac_x = if base_w > 0.0 { origin_x / base_w } else { 0.5 };
-        let origin_frac_y = if base_h > 0.0 { origin_y / base_h } else { 0.5 };
-        let x = (base_x - (scaled_w - base_w) * origin_frac_x).round() as i32;
-        let y = (base_y - (scaled_h - base_h) * origin_frac_y).round() as i32;
-        let w = scaled_w.round().max(0.0) as i32;
-        let h = scaled_h.round().max(0.0) as i32;
-
-        // If rotation is non-zero, render to a temp buffer and blit rotated
-        let nearly_zero = |v: f32| v.abs() < f32::EPSILON;
-        if !nearly_zero(transform.rotation) && w > 0 && h > 0 {
-            // Render element at (0,0) in temp buffer
-            let mut temp = PixelBuffer::new(w as u32, h as u32);
-            let temp_bounds = ClipRect {
-                x: 0,
-                y: 0,
-                width: w,
-                height: h,
-            };
-            let temp_clip = temp_bounds;
-            self.render_node_self(node, &mut temp, scale, temp_bounds, temp_clip, module_id);
-            // Render children into temp buffer too
-            let scroll = node.resolved_scroll_metrics();
-            let scroll_x = scroll.x;
-            let scroll_y = scroll.y;
-            let child_offset_x_temp = -scroll_x;
-            let child_offset_y_temp = -scroll_y;
-            let child_clip_temp = if node_clips_children(node) {
-                temp_clip
-            } else {
-                temp_clip
-            };
-            for child in &node.children {
-                self.render_node_with_filter(
-                    child,
-                    &mut temp,
-                    scale,
-                    child_offset_x_temp,
-                    child_offset_y_temp,
-                    child_clip_temp,
-                    paint_nodes,
-                    module_id,
-                );
-            }
-            // Blit rotated temp buffer onto main buffer
-            let angle = transform.rotation;
-            let cos_a = angle.cos();
-            let sin_a = angle.sin();
-            // Center of rotation in temp buffer space
-            let cx = origin_x;
-            let cy = origin_y;
-            // Bounding box of rotated element
-            let corners_x = [0.0f32 - cx, w as f32 - cx, 0.0 - cx, w as f32 - cx];
-            let corners_y = [0.0f32 - cy, 0.0 - cy, h as f32 - cy, h as f32 - cy];
-            let mut rot_min_x = f32::MAX;
-            let mut rot_max_x = f32::MIN;
-            let mut rot_min_y = f32::MAX;
-            let mut rot_max_y = f32::MIN;
-            for i in 0..4 {
-                let rx = corners_x[i] * cos_a - corners_y[i] * sin_a;
-                let ry = corners_x[i] * sin_a + corners_y[i] * cos_a;
-                rot_min_x = rot_min_x.min(rx);
-                rot_max_x = rot_max_x.max(rx);
-                rot_min_y = rot_min_y.min(ry);
-                rot_max_y = rot_max_y.max(ry);
-            }
-            let rot_w = (rot_max_x - rot_min_x).ceil() as i32;
-            let rot_h = (rot_max_y - rot_min_y).ceil() as i32;
-            // dst_x/dst_y is where the rotated bounding box starts on the output buffer
-            let dst_x = x + rot_min_x as i32;
-            let dst_y = y + rot_min_y as i32;
-            let opacity = style.opacity;
-            for py in 0..rot_h {
-                for px in 0..rot_w {
-                    // relative to rotation center in rotated space
-                    let rx = px as f32 + rot_min_x;
-                    let ry = py as f32 + rot_min_y;
-                    // inverse rotate to source coords
-                    let sx = rx * cos_a + ry * sin_a + cx;
-                    let sy = -rx * sin_a + ry * cos_a + cy;
-                    if sx < 0.0 || sy < 0.0 || sx >= w as f32 || sy >= h as f32 {
-                        continue;
-                    }
-                    // Bilinear sample from temp
-                    let tx = sx as u32;
-                    let ty = sy as u32;
-                    if tx >= temp.width || ty >= temp.height {
-                        continue;
-                    }
-                    let src_pixel = temp.get_pixel(tx, ty);
-                    if src_pixel.a == 0 {
-                        continue;
-                    }
-                    let out_x = (dst_x + px) as u32;
-                    let out_y = (dst_y + py) as u32;
-                    if out_x >= buffer.width || out_y >= buffer.height {
-                        continue;
-                    }
-                    // Apply opacity via coverage
-                    let coverage = ((opacity * 255.0).round() as u8).min(255);
-                    buffer.blend_pixel(out_x, out_y, src_pixel, coverage);
-                }
-            }
-            self.render_scrollbars(
-                node,
-                buffer,
-                scale,
-                ClipRect {
-                    x,
-                    y,
-                    width: w,
-                    height: h,
-                },
-                clip,
-            );
-            return;
-        }
-
-        let bounds = ClipRect {
-            x,
-            y,
-            width: w,
-            height: h,
-        };
-        let node_clip = intersect_clip(clip, bounds);
-
-        if node_clip.width <= 0 || node_clip.height <= 0 {
-            return;
-        }
-
-        self.render_node_self(node, buffer, scale, bounds, clip, module_id);
-
-        let scroll = node.resolved_scroll_metrics();
-        let scroll_x = scroll.x;
-        let scroll_y = scroll.y;
-        let child_offset_x = offset_x - scroll_x;
-        let child_offset_y = offset_y - scroll_y;
-        let child_clip = if node_clips_children(node) {
-            intersect_clip(clip, bounds)
-        } else {
-            clip
-        };
-
-        let mut needs_sort = false;
-        let mut previous_z_index = node
-            .children
-            .first()
-            .map(|child| child.computed_style.z_index);
-        for child in node.children.iter().skip(1) {
-            if let Some(previous) = previous_z_index
-                && previous > child.computed_style.z_index
-            {
-                needs_sort = true;
-                break;
-            }
-            previous_z_index = Some(child.computed_style.z_index);
-        }
-
-        if needs_sort {
-            let mut child_order: Vec<usize> = (0..node.children.len()).collect();
-            child_order.sort_by_key(|&index| node.children[index].computed_style.z_index);
-            for index in child_order {
-                let child = &node.children[index];
-                let (cox, coy, cc) = fixed_child_offsets(
-                    child,
-                    child_offset_x,
-                    child_offset_y,
-                    child_clip,
-                    self.viewport_clip.get(),
-                );
-                self.render_node_with_filter(
-                    child,
-                    buffer,
-                    scale,
-                    cox,
-                    coy,
-                    cc,
-                    paint_nodes,
-                    module_id,
-                );
-            }
-        } else {
-            for child in &node.children {
-                let (cox, coy, cc) = fixed_child_offsets(
-                    child,
-                    child_offset_x,
-                    child_offset_y,
-                    child_clip,
-                    self.viewport_clip.get(),
-                );
-                self.render_node_with_filter(
-                    child,
-                    buffer,
-                    scale,
-                    cox,
-                    coy,
-                    cc,
-                    paint_nodes,
-                    module_id,
-                );
-            }
-        }
-
-        self.render_scrollbars(node, buffer, scale, bounds, clip);
-    }
-
-    /// Rasterizes a `filter: blur()` subtree into its own buffer and composites
-    /// it back blurred. The offscreen covers the subtree's extent grown by the
-    /// blur kernel's reach, so the blur can spill past the element's own box
-    /// the way it does in a browser.
-    #[allow(clippy::too_many_arguments)]
-    fn render_node_blurred(
-        &self,
-        node: &WidgetNode,
-        buffer: &mut PixelBuffer,
-        scale: f32,
-        offset_x: f32,
-        offset_y: f32,
-        clip: ClipRect,
-        paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
-        module_id: Option<&str>,
-    ) {
-        let filter = scaled_visual_filter(node.computed_style.filter, scale);
-        let Some(subtree) = subtree_device_bounds(node, scale, offset_x, offset_y) else {
-            return;
-        };
-        let pad = (filter.blur_radius * 3.0).ceil() as i32;
-        let region = intersect_clip(
-            clip,
-            ClipRect {
-                x: subtree.x - pad,
-                y: subtree.y - pad,
-                width: subtree.width + pad * 2,
-                height: subtree.height + pad * 2,
-            },
-        );
-        if region.width <= 0 || region.height <= 0 {
-            return;
-        }
-
-        let mut layer = PixelBuffer::new(region.width as u32, region.height as u32);
-        let layer_clip = ClipRect {
-            x: 0,
-            y: 0,
-            width: region.width,
-            height: region.height,
-        };
-        self.render_node_subtree(
-            node,
-            &mut layer,
-            scale,
-            offset_x - region.x as f32 / scale,
-            offset_y - region.y as f32 / scale,
-            layer_clip,
-            paint_nodes,
-            module_id,
-            false,
-        );
-        self.composite_blurred_buffer(buffer, &layer, (region.x, region.y), filter, clip);
-    }
-
-    fn render_node_self(
-        &self,
-        node: &WidgetNode,
-        buffer: &mut PixelBuffer,
-        scale: f32,
-        bounds: ClipRect,
-        clip: ClipRect,
-        module_id: Option<&str>,
-    ) {
-        let style = &node.computed_style;
-        if node_is_explicitly_hidden(node) {
-            return;
-        }
-
-        let node_clip = intersect_clip(clip, bounds);
-        if node_clip.width <= 0 || node_clip.height <= 0 {
-            return;
-        }
-        let x = bounds.x;
-        let y = bounds.y;
-        let w = bounds.width;
-        let h = bounds.height;
-
-        let background_color = opacity_color(style.background_color, style.opacity);
-        let border_color = opacity_color(style.border_color, style.opacity);
-        let content_color = opacity_color(style.color, style.opacity);
-
-        self.draw_box_shadow(
-            buffer,
-            bounds,
-            style.border_radius.top_left * scale,
-            style.box_shadow,
-            clip,
-        );
-        if background_color.a > 0 {
-            let radius = style.border_radius.top_left * scale;
-            if radius > 0.5 {
-                self.fill_rounded_rect_clipped(buffer, bounds, radius, background_color, node_clip);
-            } else {
-                self.fill_rect_clipped(buffer, bounds, background_color, node_clip);
-            }
-        }
-        self.draw_background_paint(
-            buffer,
-            &style.background_paint,
-            bounds,
-            style.border_radius.top_left * scale,
-            node_clip,
-        );
-
-        self.draw_border_clipped(
-            buffer,
-            bounds,
-            &style.border_width,
-            style.border_radius.top_left * scale,
-            border_color,
-            scale,
-            node_clip,
-        );
-
-        match node.tag.as_str() {
-            "text" => self.render_text_node(node, buffer, scale, x, y, node_clip),
-            "input" => self.render_input_node(node, buffer, scale, x, y, node_clip),
-            "slider" => self.render_slider_node(node, buffer, scale, x, y, w, h, node_clip),
-            "icon" => self.render_icon_node(node, buffer, x, y, w, h, content_color, module_id),
-            "checkbox" | "radio" if crate::display_list::node_is_checked(node) => {
-                let kind = if node.tag == "radio" {
-                    CheckmarkKind::Dot
-                } else {
-                    CheckmarkKind::Check
-                };
-                if let Some(command) = checkmark_command(kind, bounds, content_color, node_clip) {
-                    self.execute_painter_commands(buffer, &[command]);
-                }
-            }
-            _ => {}
-        }
-    }
-
     fn render_display_node_self(
         &self,
         node: &DisplayPaintNode,
@@ -1240,75 +810,6 @@ impl FrontendRenderEngine {
         if let Some(command) = checkmark_command(mark.kind, bounds, node.style.color, clip) {
             self.execute_painter_commands_in_session(session, &[command]);
         }
-    }
-
-    fn draw_border_clipped(
-        &self,
-        buffer: &mut PixelBuffer,
-        bounds: ClipRect,
-        border_widths: &Edges,
-        radius: f32,
-        color: Color,
-        scale: f32,
-        clip: ClipRect,
-    ) {
-        if border_widths.top <= 0.0 || color.a == 0 {
-            return;
-        }
-
-        let border_width = (border_widths.top * scale).max(1.0) as i32;
-        if self.stroke_rounded_rect_clipped(buffer, bounds, radius, border_width, color, clip) {
-            return;
-        }
-
-        let x = bounds.x;
-        let y = bounds.y;
-        let w = bounds.width;
-        let h = bounds.height;
-        self.fill_rect_clipped(
-            buffer,
-            ClipRect {
-                x,
-                y,
-                width: w,
-                height: border_width,
-            },
-            color,
-            clip,
-        );
-        self.fill_rect_clipped(
-            buffer,
-            ClipRect {
-                x,
-                y: y + h.saturating_sub(border_width),
-                width: w,
-                height: border_width,
-            },
-            color,
-            clip,
-        );
-        self.fill_rect_clipped(
-            buffer,
-            ClipRect {
-                x,
-                y,
-                width: border_width,
-                height: h,
-            },
-            color,
-            clip,
-        );
-        self.fill_rect_clipped(
-            buffer,
-            ClipRect {
-                x: x + w.saturating_sub(border_width),
-                y,
-                width: border_width,
-                height: h,
-            },
-            color,
-            clip,
-        );
     }
 }
 
@@ -1563,76 +1064,6 @@ fn push_border_commands(
     });
 }
 
-/// Blur radii are authored in layout units; the painter works in device
-/// pixels, so a surface at 2x scale blurs twice as far.
-/// Device-pixel extent of `node` and its descendants, including the reach of
-/// their shadows and blurs. Mirrors the offset accumulation of
-/// `render_node_subtree` (translation and scroll), which is what keeps the
-/// offscreen aligned with where the subtree would have painted.
-fn subtree_device_bounds(
-    node: &WidgetNode,
-    scale: f32,
-    offset_x: f32,
-    offset_y: f32,
-) -> Option<ClipRect> {
-    if node_is_explicitly_hidden(node) {
-        return None;
-    }
-    let style = &node.computed_style;
-    let offset_x = offset_x + style.transform.translate_x;
-    let offset_y = offset_y + style.transform.translate_y;
-    let layout = &node.layout;
-    let mut left = (layout.x + offset_x) * scale;
-    let mut top = (layout.y + offset_y) * scale;
-    let mut right = left + layout.width * scale;
-    let mut bottom = top + layout.height * scale;
-
-    let shadow = style.box_shadow;
-    if !shadow.is_none() && !shadow.inset {
-        let reach = (shadow.spread_radius + shadow.blur_radius * 3.0) * scale;
-        left = left.min(left + shadow.offset_x * scale - reach);
-        top = top.min(top + shadow.offset_y * scale - reach);
-        right = right.max(right + shadow.offset_x * scale + reach);
-        bottom = bottom.max(bottom + shadow.offset_y * scale + reach);
-    }
-    let filter_reach = style
-        .filter
-        .blur_radius
-        .max(style.backdrop_filter.blur_radius)
-        * 3.0
-        * scale;
-    left -= filter_reach;
-    top -= filter_reach;
-    right += filter_reach;
-    bottom += filter_reach;
-
-    let scroll = node.resolved_scroll_metrics();
-    let child_offset_x = offset_x - scroll.x;
-    let child_offset_y = offset_y - scroll.y;
-    for child in &node.children {
-        let (cox, coy) = if child.computed_style.position == Position::Fixed {
-            (0.0, 0.0)
-        } else {
-            (child_offset_x, child_offset_y)
-        };
-        let Some(child_bounds) = subtree_device_bounds(child, scale, cox, coy) else {
-            continue;
-        };
-        left = left.min(child_bounds.x as f32);
-        top = top.min(child_bounds.y as f32);
-        right = right.max((child_bounds.x + child_bounds.width) as f32);
-        bottom = bottom.max((child_bounds.y + child_bounds.height) as f32);
-    }
-
-    let rect = ClipRect {
-        x: left.floor() as i32,
-        y: top.floor() as i32,
-        width: (right - left).ceil().max(0.0) as i32,
-        height: (bottom - top).ceil().max(0.0) as i32,
-    };
-    (rect.width > 0 && rect.height > 0).then_some(rect)
-}
-
 fn scaled_visual_filter(filter: VisualFilter, scale: f32) -> VisualFilter {
     VisualFilter {
         blur_radius: filter.blur_radius * scale,
@@ -1655,37 +1086,4 @@ fn scaled_display_clip(clip: DisplayListClip, scale: f32) -> ClipRect {
         width: (clip.width as f32 * scale).round().max(0.0) as i32,
         height: (clip.height as f32 * scale).round().max(0.0) as i32,
     }
-}
-
-/// Returns (offset_x, offset_y, clip) for a child node.
-/// For `position: fixed` children, resets the accumulated offset to (0, 0)
-/// and uses the viewport clip so they are not constrained by scrollable ancestors.
-fn fixed_child_offsets(
-    child: &WidgetNode,
-    child_offset_x: f32,
-    child_offset_y: f32,
-    child_clip: ClipRect,
-    viewport_clip: ClipRect,
-) -> (f32, f32, ClipRect) {
-    if child.computed_style.position == Position::Fixed {
-        (0.0, 0.0, viewport_clip)
-    } else {
-        (child_offset_x, child_offset_y, child_clip)
-    }
-}
-
-fn node_is_explicitly_hidden(node: &WidgetNode) -> bool {
-    node.computed_style.display == Display::None
-        || matches!(
-            node.computed_style.visibility,
-            Visibility::Hidden | Visibility::Collapse
-        )
-        || node
-            .attributes
-            .get("hidden")
-            .is_some_and(|value| truthy_attribute(value))
-}
-
-fn truthy_attribute(value: &str) -> bool {
-    matches!(value, "" | "true" | "1" | "hidden" | "disabled" | "checked")
 }

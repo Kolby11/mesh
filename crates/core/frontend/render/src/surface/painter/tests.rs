@@ -813,7 +813,7 @@ fn painter_primitive_command_classes_record_helper_backed_rects() {
 }
 
 #[test]
-fn display_list_primitive_direct_and_retained_box_emit_same_command_classes() {
+fn compatibility_and_retained_box_paths_emit_same_command_classes() {
     let mut root = node(
         "box",
         LayoutRect {
@@ -925,10 +925,18 @@ fn painter_primitive_box_rounded_shadow_and_filters_emit_effect_classes() {
     let mut buffer = PixelBuffer::new(32, 32);
     engine.render_tree(&root, &mut buffer, 1.0);
 
-    // backdrop-filter is compositor metadata and emits no CPU command. CSS
-    // filter (non-backdrop) remains encoded in DrawRoundedRect.paint.filter.
+    // Backdrop-filter is compositor metadata and emits no CPU command. The
+    // authoritative display-list builder wraps CSS filter content in a layer.
     let classes = painter_command_classes(&recorded.recorded_commands());
-    assert_eq!(classes, vec!["draw_shadow", "draw_rounded_rect"]);
+    assert_eq!(
+        classes,
+        vec![
+            "push_layer",
+            "draw_shadow",
+            "draw_rounded_rect",
+            "pop_layer"
+        ]
+    );
 }
 
 #[test]
@@ -1027,7 +1035,7 @@ fn painter_primitive_debug_overlay_bounds_use_draw_rect_commands() {
 }
 
 #[test]
-fn painter_primitive_controls_input_direct_and_retained_emit_same_classes() {
+fn compatibility_and_retained_input_paths_emit_same_classes() {
     let mut root = node(
         "input",
         LayoutRect {
@@ -1082,7 +1090,7 @@ fn painter_primitive_controls_input_direct_and_retained_emit_same_classes() {
 }
 
 #[test]
-fn painter_primitive_controls_slider_direct_and_retained_emit_same_classes() {
+fn compatibility_and_retained_slider_paths_emit_same_classes() {
     let mut root = node(
         "slider",
         LayoutRect {
@@ -1139,7 +1147,7 @@ fn painter_primitive_controls_slider_direct_and_retained_emit_same_classes() {
 }
 
 #[test]
-fn painter_effect_lowering_direct_and_retained_image_emit_same_command_classes() {
+fn compatibility_and_retained_image_paths_emit_same_command_classes() {
     let mut root = node(
         "box",
         LayoutRect {
@@ -1192,7 +1200,7 @@ fn painter_effect_lowering_direct_and_retained_image_emit_same_command_classes()
 }
 
 #[test]
-fn painter_effect_lowering_direct_and_retained_gradient_emit_same_command_classes() {
+fn compatibility_and_retained_gradient_paths_emit_same_command_classes() {
     let mut root = node(
         "box",
         LayoutRect {
@@ -1246,7 +1254,7 @@ fn painter_effect_lowering_direct_and_retained_gradient_emit_same_command_classe
 }
 
 #[test]
-fn painter_primitive_icon_direct_and_retained_preserve_image_like_boundary() {
+fn compatibility_and_retained_icon_paths_preserve_image_like_boundary() {
     let mut root = node(
         "icon",
         LayoutRect {
@@ -2677,7 +2685,7 @@ fn painter_clips_children_when_overflow_hidden() {
 }
 
 #[test]
-fn direct_tree_painter_omits_explicitly_hidden_descendants() {
+fn compatibility_tree_painter_omits_explicitly_hidden_descendants() {
     let mut root = node(
         "box",
         LayoutRect {

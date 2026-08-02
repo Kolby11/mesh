@@ -7,6 +7,12 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Widget-tree and retained painting share one command builder.** Compatibility
+`render_tree*` callers now build and replay a transient display list, and the
+parallel recursive `WidgetNode` painter has been removed. The retained builder
+is authoritative for clipping, ordering, controls, and filter/effect scopes
+(2026-08-02). Record: [`log/2026-08.md`](log/2026-08.md).
+
 **The settings frontend exposes the installed graph per module.** Each module
 row expands to required and optional interface bindings, provided interfaces,
 module dependencies, required/optional capabilities, resource packs, native

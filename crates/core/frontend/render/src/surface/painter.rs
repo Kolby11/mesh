@@ -21,16 +21,13 @@ pub(crate) use backend::{
 };
 
 use mesh_core_elements::style::{
-    BackgroundPaint, Color, Display, Overflow, Position, TextAlign, TextDirection, TextOverflow,
-    Visibility,
+    BackgroundPaint, Color, Overflow, TextAlign, TextDirection, TextOverflow,
 };
 use mesh_core_elements::tree::WidgetNode;
 use mesh_core_elements::{BoxShadow, VisualFilter};
 
 pub(crate) use geometry::ClipRect;
-use geometry::{
-    clip_to_tuple, dim_color, intersect_clip, node_attr_f32, node_clips_children, opacity_color,
-};
+use geometry::{clip_to_tuple, dim_color, intersect_clip, node_attr_f32, opacity_color};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PainterBackendSnapshot {
@@ -142,9 +139,6 @@ pub struct FrontendRenderEngine {
     /// and pops it several buffers later.
     painter_layers: RefCell<PainterLayerStack>,
     blur_quality: Cell<BlurQuality>,
-    /// Full-surface clip set at the start of each render pass. Used to give
-    /// `position: fixed` children the viewport clip rather than their parent's.
-    viewport_clip: Cell<ClipRect>,
 }
 
 #[derive(Default)]
@@ -193,12 +187,6 @@ impl FrontendRenderEngine {
             render_scratch: RefCell::new(RenderScratch::default()),
             painter_layers: RefCell::new(PainterLayerStack::default()),
             blur_quality: Cell::new(BlurQuality::default()),
-            viewport_clip: Cell::new(ClipRect {
-                x: 0,
-                y: 0,
-                width: 0,
-                height: 0,
-            }),
         }
     }
 
@@ -215,12 +203,6 @@ impl FrontendRenderEngine {
             render_scratch: RefCell::new(RenderScratch::default()),
             painter_layers: RefCell::new(PainterLayerStack::default()),
             blur_quality: Cell::new(BlurQuality::default()),
-            viewport_clip: Cell::new(ClipRect {
-                x: 0,
-                y: 0,
-                width: 0,
-                height: 0,
-            }),
         }
     }
 
