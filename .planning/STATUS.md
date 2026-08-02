@@ -7,6 +7,13 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Core-triggered sound and backend profiling no longer bypass interface
+routing.** `mesh.audio.play_sound` is a declared contract method, startup
+dispatch follows the same capability-checked request path as module calls, and
+the backend-update profiler selects active/sample-producing providers without
+matching an interface name. Built-in debug and theme/locale service state
+remain open (2026-08-02). Record: [`log/2026-08.md`](log/2026-08.md).
+
 **Module props have a generated settings surface.** Installed frontend props
 are projected into the module graph as typed schemas; the settings frontend
 renders controls and reset actions, and privileged writes are validated before

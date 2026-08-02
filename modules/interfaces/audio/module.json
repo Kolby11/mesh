@@ -59,6 +59,13 @@
           {
             "name": "toggle_mute",
             "stateBinding": { "field": "muted", "toggle": true }
+          },
+          {
+            "name": "play_sound",
+            "args": [
+              { "name": "path", "type": "string" }
+            ],
+            "returns": "Result"
           }
         ],
         "events": [

@@ -209,11 +209,9 @@ impl Shell {
         self.mark_components_locale_changed()?;
         pending.extend(self.sync_locale_service_state()?);
         pending.extend(self.broadcast_core_event(CoreEvent::Started)?);
-        play_shell_sound(
-            SoundKind::Startup,
-            &self.settings.sounds,
-            self.service_handlers.get("mesh.audio"),
-        );
+        if let Some(request) = shell_sound_request(SoundKind::Startup, &self.settings.sounds) {
+            pending.push_back(request);
+        }
 
         tracing::info!(
             "MESH shell core is running with {} frontend component(s)",

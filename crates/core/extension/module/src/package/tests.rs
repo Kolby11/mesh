@@ -934,6 +934,14 @@ fn shipped_module_graph_loads_repo_module_fixture() {
         graph.declared_interface("mesh.audio").unwrap().module_id,
         "@mesh/audio-interface"
     );
+    assert!(
+        graph
+            .interface_contract("mesh.audio")
+            .unwrap()
+            .methods
+            .iter()
+            .any(|method| method.name == "play_sound")
+    );
     assert_eq!(graph.backend_providers_for_interface("mesh.audio").len(), 2);
     assert_eq!(
         graph.active_provider("mesh.audio").unwrap().module_id,

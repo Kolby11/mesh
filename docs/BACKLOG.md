@@ -43,9 +43,10 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 - [ ] Mount optional `settings_ui` entrypoints and add per-instance selection
       to generated prop controls. Default controls and profile-scoped global
       writes are shipped. See [`spec/08-settings.md`](spec/08-settings.md) §5.
-- [ ] Eliminate the remaining service-specific Rust branches. The startup-sound
-      path still calls the `mesh.audio` handler directly; debug and profiling
-      paths also branch. *(detail: "Module system — remaining open follow-ups")*
+- [ ] Move the remaining built-in debug and theme/locale service behavior
+      behind generic providers. Startup sounds and backend profiling use the
+      generic contract/runtime path; core-owned service state still branches.
+      *(detail: "Module system — remaining open follow-ups")*
 - [ ] Show each module's uses/provides graph in settings and diagnostics —
       required and optional interfaces, active provider, native binaries,
       capabilities, i18n catalogs, keybinds, health. The debug inspector renders

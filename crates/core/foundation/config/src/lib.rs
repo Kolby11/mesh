@@ -225,7 +225,8 @@ pub struct SurfaceShortcutOverride {
 /// System sound file mappings for shell events.
 ///
 /// Paths are absolute or relative to the shell's data directory.
-/// The audio backend module plays these via its `play-sound` command.
+/// The audio backend module plays these through the `mesh.audio.play_sound`
+/// interface method.
 /// Leave a field as `None` to silence that event.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ShellSounds {

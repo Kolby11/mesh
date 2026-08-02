@@ -641,6 +641,7 @@ struct BenchmarkProfilingView<'a> {
     settings: Option<&'a mesh_core_debug::ProfilingSurfaceSnapshot>,
     debug_inspector: Option<&'a mesh_core_debug::ProfilingSurfaceSnapshot>,
     backend_update_backend: Option<&'a mesh_core_debug::ProfilingBackendSnapshot>,
+    backend_update_surface: Option<&'a mesh_core_debug::ProfilingSurfaceSnapshot>,
     backend_runtime_available: bool,
 }
 
@@ -653,9 +654,12 @@ impl<'a> BenchmarkProfilingView<'a> {
         let audio_popover = profiling_surface(profiling, "@mesh/audio-popover");
         let settings = profiling_surface(profiling, "@mesh/settings");
         let debug_inspector = profiling_surface(profiling, "@mesh/debug-inspector");
-        let backend_update_provider_id =
-            backend_update_provider_id(Some(profiling), backend_runtimes);
-        let backend_update_backend = backend_update_backend(profiling, backend_update_provider_id);
+        let backend_update_backend = backend_update_backend(profiling, backend_runtimes);
+        let backend_update_surface = profiling
+            .surfaces
+            .iter()
+            .filter(|surface| surface.total_surface_render_time_micros > 0)
+            .max_by_key(|surface| surface.total_surface_render_time_micros);
         let backend_runtime_available = backend_update_runtime_available(backend_runtimes);
 
         Self {
@@ -665,6 +669,7 @@ impl<'a> BenchmarkProfilingView<'a> {
             settings,
             debug_inspector,
             backend_update_backend,
+            backend_update_surface,
             backend_runtime_available,
         }
     }
@@ -945,9 +950,7 @@ fn backend_update_benchmark_metrics(
     String,
 ) {
     let backend = profiling_view.backend_update_backend;
-    let frontend = profiling_view
-        .navigation_bar
-        .or(profiling_view.audio_popover);
+    let frontend = profiling_view.backend_update_surface;
     let primary = backend.and_then(|backend| {
         first_backend_stage(
             backend,
@@ -975,7 +978,7 @@ fn backend_update_benchmark_metrics(
                     "frontend total_surface_render: {}us",
                     frontend.total_surface_render_time_micros
                 ),
-                "Update mesh.audio while profiling is live".to_string(),
+                format!("Update {} while profiling is live", backend.interface),
             )
         }
         (None, _, _) if !profiling_view.backend_runtime_available => (
@@ -997,54 +1000,36 @@ fn backend_update_target(
     if let Some(backend) = profiling_view.and_then(|view| view.backend_update_backend) {
         return format!("{} -> {}", backend.interface, backend.provider_id);
     }
-    if let Some(runtime) = backend_runtimes
-        .iter()
-        .find(|entry| is_running_audio_runtime(entry))
-    {
+    if let Some(runtime) = running_backend_runtime(backend_runtimes) {
         return format!("{} -> {}", runtime.interface, runtime.provider_id);
     }
-    "mesh.audio -> @mesh/pipewire-audio".to_string()
+    "active backend provider".to_string()
 }
 
 fn backend_update_backend<'a>(
     profiling: &'a mesh_core_debug::ProfilingSnapshot,
-    provider_id: Option<&str>,
+    backend_runtimes: &[mesh_core_debug::BackendRuntimeEntry],
 ) -> Option<&'a mesh_core_debug::ProfilingBackendSnapshot> {
+    let Some(runtime) = running_backend_runtime(backend_runtimes) else {
+        return profiling.backends.first();
+    };
     profiling.backends.iter().find(|backend| {
-        backend.interface == "mesh.audio"
-            && provider_id
-                .map(|provider_id| backend.provider_id == provider_id)
-                .unwrap_or(true)
+        backend.interface == runtime.interface && backend.provider_id == runtime.provider_id
     })
 }
 
 fn backend_update_runtime_available(
     backend_runtimes: &[mesh_core_debug::BackendRuntimeEntry],
 ) -> bool {
-    backend_runtimes.iter().any(is_running_audio_runtime)
+    running_backend_runtime(backend_runtimes).is_some()
 }
 
-fn backend_update_provider_id<'a>(
-    profiling: Option<&'a mesh_core_debug::ProfilingSnapshot>,
-    backend_runtimes: &'a [mesh_core_debug::BackendRuntimeEntry],
-) -> Option<&'a str> {
+fn running_backend_runtime(
+    backend_runtimes: &[mesh_core_debug::BackendRuntimeEntry],
+) -> Option<&mesh_core_debug::BackendRuntimeEntry> {
     backend_runtimes
         .iter()
-        .find(|entry| is_running_audio_runtime(entry))
-        .map(|entry| entry.provider_id.as_str())
-        .or_else(|| {
-            profiling.and_then(|profiling| {
-                profiling
-                    .backends
-                    .iter()
-                    .find(|backend| backend.interface == "mesh.audio")
-                    .map(|backend| backend.provider_id.as_str())
-            })
-        })
-}
-
-fn is_running_audio_runtime(entry: &mesh_core_debug::BackendRuntimeEntry) -> bool {
-    entry.interface == "mesh.audio" && entry.status == BackendRuntimeStatus::Running.as_str()
+        .find(|entry| entry.status == BackendRuntimeStatus::Running.as_str())
 }
 
 fn waiting_for_backend_samples(

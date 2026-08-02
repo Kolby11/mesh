@@ -598,6 +598,9 @@ the next start. `profile set` and `profile unset` edit sparse profile settings.
   `on_poll(self)`, `on_command_<method>()` returning `{ ok = true }` /
   `{ ok = false, error = "…" }`, and fire declared events via
   `self.EventName:fire(payload)`.
+- Core-triggered service actions use that same declared method and generic
+  dispatcher. For example, startup playback calls `mesh.audio.play_sound`
+  rather than sending directly to a known backend handler.
 - Libraries wrap host APIs; host APIs stay generic. Good:
   `@mesh/backend-kit/process` wraps `mesh.exec`. Bad: Rust core adds
   `mesh.audio.get_volume()`.

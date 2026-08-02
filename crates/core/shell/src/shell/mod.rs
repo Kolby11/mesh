@@ -52,7 +52,7 @@ use mesh_core_presentation::{
     PresentationEngine, SurfaceConfig, WindowEvent, WindowKeyEvent, coalesce_input_events,
 };
 use mesh_core_render::{DebugOverlay, PixelBuffer};
-use sounds::{SoundKind, play_shell_sound};
+use sounds::{SoundKind, shell_sound_request};
 use surface_layout::{default_surface_visibility, load_active_theme};
 use types::{
     CommandThrottleState, CompiledContractField, ComponentRuntime, ContractValidationCache,

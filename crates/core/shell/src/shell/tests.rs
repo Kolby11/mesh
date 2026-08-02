@@ -2586,7 +2586,7 @@ fn benchmark_payload_serializes_targets_statuses_and_metrics() {
             "active theme + @mesh/navigation-bar",
             "@mesh/navigation-bar",
             "@mesh/navigation-bar focus chain",
-            "mesh.audio -> @mesh/pipewire-audio",
+            "active backend provider",
         ]
     );
     let backend_update = &scenarios[11];
@@ -2848,21 +2848,21 @@ fn benchmark_run_request_does_not_enable_profiling() {
 }
 
 #[test]
-fn benchmark_backend_update_uses_active_audio_provider() {
+fn benchmark_backend_update_uses_the_active_provider_without_interface_branches() {
     let mut shell = Shell::new();
     shell
         .apply_request(CoreRequest::ToggleDebugProfiling)
         .unwrap();
     shell.record_backend_runtime_status(
-        "mesh.audio".to_string(),
-        "@mesh/pulseaudio-audio".to_string(),
+        "mesh.network".to_string(),
+        "@mesh/networkmanager".to_string(),
         BackendRuntimeStatus::Running,
         "backend runtime started".to_string(),
     );
 
     shell.record_backend_profiling_stage(
-        "mesh.audio",
-        "@mesh/pulseaudio-audio",
+        "mesh.network",
+        "@mesh/networkmanager",
         ProfilingBackendStage::StatePublishDelivery,
         std::time::Duration::from_micros(29),
         Some("broadcast_service_event"),
@@ -2889,12 +2889,12 @@ fn benchmark_backend_update_uses_active_audio_provider() {
     );
     assert_eq!(
         backend_update.target,
-        "mesh.audio -> @mesh/pulseaudio-audio"
+        "mesh.network -> @mesh/networkmanager"
     );
     assert!(
         backend_update
             .primary_metric
-            .contains("@mesh/pulseaudio-audio")
+            .contains("@mesh/networkmanager")
     );
     assert!(
         backend_update
@@ -2904,7 +2904,7 @@ fn benchmark_backend_update_uses_active_audio_provider() {
 }
 
 #[test]
-fn benchmark_backend_update_ignores_terminal_audio_runtime_when_running_provider_exists() {
+fn benchmark_backend_update_ignores_terminal_runtime_when_running_provider_exists() {
     let mut shell = Shell::new();
     shell
         .apply_request(CoreRequest::ToggleDebugProfiling)
@@ -2968,7 +2968,7 @@ fn benchmark_backend_update_ignores_terminal_audio_runtime_when_running_provider
 }
 
 #[test]
-fn benchmark_backend_update_reports_unavailable_for_failed_only_audio_runtime() {
+fn benchmark_backend_update_reports_unavailable_for_failed_only_runtime() {
     let mut shell = Shell::new();
     shell
         .apply_request(CoreRequest::ToggleDebugProfiling)
