@@ -12,6 +12,20 @@ thread_local! {
 }
 
 impl Shell {
+    /// Attribute a shell-derived service snapshot to the active provider when
+    /// one is running. This keeps host-produced snapshots on the same generic
+    /// provider path as the provider's own later updates.
+    pub(in crate::shell) fn active_service_provider_or(
+        &self,
+        interface: &str,
+        fallback: &str,
+    ) -> String {
+        self.backend_runtimes
+            .get(interface)
+            .map(|slot| slot.provider_id.clone())
+            .unwrap_or_else(|| fallback.to_string())
+    }
+
     pub(in crate::shell) fn broadcast_service_event(
         &mut self,
         event: ServiceEvent,
@@ -56,10 +70,8 @@ impl Shell {
             return event;
         };
         let interface = canonical_interface_name_owned(service);
-        let shell_authoritative_theme_update =
-            interface == "mesh.theme" && source_module == "@mesh/shell";
         if self.backend_runtimes.get(&interface).is_some_and(|slot| {
-            slot.provider_id != source_module && !shell_authoritative_theme_update
+            slot.provider_id != source_module
         }) || self
             .backend_runtime_status(&interface, &source_module)
             .is_some_and(|entry| {
@@ -117,10 +129,8 @@ impl Shell {
             return true;
         };
         let interface = canonical_interface_name_cow(service);
-        let shell_authoritative_theme_update =
-            interface == "mesh.theme" && source_module == "@mesh/shell";
         if let Some(slot) = self.backend_runtimes.get(interface.as_ref()) {
-            if slot.provider_id != *source_module && !shell_authoritative_theme_update {
+            if slot.provider_id != *source_module {
                 tracing::debug!(
                     interface = interface.as_ref(),
                     source_module,

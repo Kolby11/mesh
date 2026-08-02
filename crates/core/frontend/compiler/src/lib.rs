@@ -20,7 +20,9 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 pub use accessibility::root_accessibility_role;
-pub use compile::{CompileFrontendError, compile_frontend_module, is_frontend_module};
+pub use compile::{
+    CompileFrontendError, compile_frontend_entrypoint, compile_frontend_module, is_frontend_module,
+};
 pub use render::{
     PreparedComponentStyleRules, build_embedded_widget_tree_from_component,
     build_embedded_widget_tree_from_component_with_prepared_styles,
@@ -499,6 +501,28 @@ mod tests {
             ),
             (920, 700)
         );
+    }
+
+    #[test]
+    fn compiles_a_declared_alternate_frontend_entrypoint() {
+        let module_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../modules/frontend/settings");
+        let loaded = mesh_core_module::manifest::load_manifest(&module_dir)
+            .expect("settings manifest should load");
+
+        let compiled = compile_frontend_entrypoint(
+            &loaded.manifest,
+            &module_dir,
+            "src/components/advanced-page.mesh",
+        )
+        .expect("an alternate frontend entrypoint should compile");
+
+        assert!(
+            compiled
+                .source_path
+                .ends_with("src/components/advanced-page.mesh")
+        );
+        assert_eq!(compiled.watched_paths, vec![compiled.source_path.clone()]);
     }
 
     #[test]

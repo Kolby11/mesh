@@ -3,7 +3,10 @@ use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use mesh_core_frontend::{CompiledFrontendModule, compile_frontend_module};
+use mesh_core_frontend::{
+    CompileFrontendError, CompiledFrontendModule, compile_frontend_entrypoint,
+    compile_frontend_module,
+};
 use mesh_core_module::ModuleType;
 use mesh_core_module::lifecycle::ModuleInstance;
 use mesh_core_module::package::InstalledModuleGraph;
@@ -11,6 +14,27 @@ use rayon::prelude::*;
 
 use super::memo;
 use crate::shell::ShellRunError;
+
+fn compile_module_entrypoints(
+    manifest: &mesh_core_module::Manifest,
+    module_dir: &std::path::Path,
+) -> Result<CompiledFrontendModule, CompileFrontendError> {
+    let mut compiled = compile_frontend_module(manifest, module_dir)?;
+    // `settings_ui` is not a surface, but it is still a module-owned component
+    // with the same import and authoring rules as `main`. Compile it here so an
+    // invalid optional settings page cannot lurk until a future mount path
+    // reaches it. Its dependency paths also join the main module's watch set,
+    // ensuring an edit triggers catalog validation and reload.
+    if let Some(entrypoint) = manifest.entrypoints.settings_ui.as_deref() {
+        let settings_ui = compile_frontend_entrypoint(manifest, module_dir, entrypoint)?;
+        for path in settings_ui.watched_paths {
+            if !compiled.watched_paths.contains(&path) {
+                compiled.watched_paths.push(path);
+            }
+        }
+    }
+    Ok(compiled)
+}
 
 #[derive(Debug, Clone, Default)]
 pub(in crate::shell) struct FrontendCatalog {
@@ -239,7 +263,7 @@ impl FrontendCatalog {
         let compiled_entries = frontend_modules
             .par_iter()
             .map(|(module_id, module)| {
-                compile_frontend_module(&module.manifest, &module.path)
+                compile_module_entrypoints(&module.manifest, &module.path)
                     .map(|compiled| {
                         (
                             (*module_id).clone(),
@@ -479,7 +503,7 @@ mod performance_tests {
                     .then_some((module_id, module))
             })
             .map(|(module_id, module)| {
-                compile_frontend_module(&module.manifest, &module.path)
+                compile_module_entrypoints(&module.manifest, &module.path)
                     .map(|compiled| {
                         (
                             module_id.clone(),

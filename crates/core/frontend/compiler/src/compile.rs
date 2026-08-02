@@ -64,6 +64,28 @@ pub fn compile_frontend_module(
             module_id: manifest.package.id.clone(),
         })?;
 
+    compile_frontend_entrypoint(manifest, module_dir, entrypoint)
+}
+
+/// Compile a declared frontend `.mesh` entrypoint using the owning module's
+/// manifest and import rules.  Besides a module's primary surface entrypoint,
+/// the shell uses this for optional module-owned UI such as `settings_ui`.
+pub fn compile_frontend_entrypoint(
+    manifest: &Manifest,
+    module_dir: &Path,
+    entrypoint: &str,
+) -> Result<CompiledFrontendModule, CompileFrontendError> {
+    if !is_frontend_module(manifest) {
+        return Err(CompileFrontendError::NotFrontendModule {
+            module_id: manifest.package.id.clone(),
+        });
+    }
+    if !entrypoint.ends_with(".mesh") {
+        return Err(CompileFrontendError::MissingFrontendEntrypoint {
+            module_id: manifest.package.id.clone(),
+        });
+    }
+
     let source_path = module_dir.join(entrypoint);
     let component = parse_component_file(&source_path)?;
     let mut local_components: HashMap<String, ComponentFile> = HashMap::new();

@@ -3281,6 +3281,25 @@ fn debug_snapshot_backfills_mesh_debug_service_state() {
 }
 
 #[test]
+fn debug_snapshot_is_attributed_to_the_active_provider() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let (slot, _rx) = backend_runtime_slot(
+        &runtime,
+        mesh_core_debug::DEBUG_INTERFACE,
+        "@mesh/custom-debug",
+    );
+    shell.replace_backend_runtime(mesh_core_debug::DEBUG_INTERFACE.to_string(), slot);
+
+    shell.build_debug_snapshot();
+
+    assert_eq!(
+        shell.latest_service_state[mesh_core_debug::DEBUG_INTERFACE].provider_id,
+        "@mesh/custom-debug"
+    );
+}
+
+#[test]
 fn debug_snapshot_exposes_deduplicated_ordered_profiling_stream() {
     let mut shell = Shell::new();
     shell.debug.profiling_enabled = true;
@@ -6548,7 +6567,7 @@ fn terminal_provider_update_does_not_replace_latest_state_or_reach_components() 
 }
 
 #[test]
-fn shell_theme_update_is_authoritative_when_theme_provider_is_active() {
+fn inactive_shell_theme_update_is_ignored_when_theme_provider_is_active() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
     let seen_events = Arc::new(Mutex::new(Vec::new()));
@@ -6572,13 +6591,37 @@ fn shell_theme_update_is_authoritative_when_theme_provider_is_active() {
         ))
         .unwrap();
 
-    assert_eq!(seen_events.lock().unwrap().len(), 1);
+    assert!(seen_events.lock().unwrap().is_empty());
+    assert!(!shell.latest_service_state.contains_key("mesh.theme"));
+}
+
+#[test]
+fn theme_snapshot_is_published_by_the_active_provider() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.theme", "@mesh/shell-theme");
+    shell.replace_backend_runtime("mesh.theme".to_string(), slot);
+
+    shell.sync_theme_service_state("mesh-default-dark").unwrap();
+
     assert_eq!(
-        shell
-            .latest_service_state
-            .get("mesh.theme")
-            .and_then(|state| state.state.get("current")),
-        Some(&serde_json::json!("mesh-default-light"))
+        shell.latest_service_state["mesh.theme"].provider_id,
+        "@mesh/shell-theme"
+    );
+}
+
+#[test]
+fn locale_snapshot_is_published_by_the_active_provider() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.locale", "@mesh/shell-locale");
+    shell.replace_backend_runtime("mesh.locale".to_string(), slot);
+
+    shell.sync_locale_service_state().unwrap();
+
+    assert_eq!(
+        shell.latest_service_state["mesh.locale"].provider_id,
+        "@mesh/shell-locale"
     );
 }
 

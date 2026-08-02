@@ -2556,6 +2556,54 @@ fn collect_child_surface_requests(
         });
     }
 
+    // A positioned overlay cannot be painted beyond its parent SHM buffer.
+    // Promote only direct, absolutely positioned root children for now: this
+    // covers inline overlay UI without mistaking normal flow, scrolling, or a
+    // nested clipped region for a new Wayland surface. Explicit `<popover>`
+    // nodes above retain their authored anchor/grab behavior.
+    if std::ptr::eq(root, node) {
+        for child in &node.children {
+            if source_element_tag(child) == "popover"
+                || child.computed_style.position != mesh_core_elements::style::Position::Absolute
+            {
+                continue;
+            }
+            let Some(node_key) = child.mesh_key() else {
+                continue;
+            };
+            let Some(bounds) = find_node_bounds_by_key(root, node_key, 0.0, 0.0) else {
+                continue;
+            };
+            let root_bounds = (
+                root.layout.x,
+                root.layout.y,
+                root.layout.x + root.layout.width,
+                root.layout.y + root.layout.height,
+            );
+            if bounds.0 >= root_bounds.0
+                && bounds.1 >= root_bounds.1
+                && bounds.2 <= root_bounds.2
+                && bounds.3 <= root_bounds.3
+            {
+                continue;
+            }
+            let mut placement = PopoverPlacement::default();
+            placement.anchor = mesh_core_elements::PopoverAnchor::TopLeft;
+            placement.gravity = mesh_core_elements::PopoverGravity::TopLeft;
+            requests.push(ChildSurfaceRequest {
+                node_key: node_key.to_string(),
+                kind: ChildSurfaceKind::Overflow,
+                anchor_rect: bounds_to_i32_rect(bounds),
+                content_size: (
+                    child.layout.width.ceil().max(1.0) as u32,
+                    child.layout.height.ceil().max(1.0) as u32,
+                ),
+                content_padding: popover_content_padding(child),
+                placement,
+            });
+        }
+    }
+
     for child in &node.children {
         collect_child_surface_requests(root, child, requests);
     }
@@ -3085,6 +3133,22 @@ mod tests {
         collect_child_surface_requests(&root, &root, &mut requests);
 
         assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn absolute_child_escaping_root_derives_overflow_surface_request() {
+        let mut root = keyed_node("row", "root", 0.0, 0.0, 120.0, 40.0);
+        let mut overlay = keyed_node("box", "root/overlay", 90.0, 24.0, 80.0, 32.0);
+        overlay.computed_style.position = mesh_core_elements::style::Position::Absolute;
+        root.children.push(overlay);
+
+        let mut requests = Vec::new();
+        collect_child_surface_requests(&root, &root, &mut requests);
+
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].kind, ChildSurfaceKind::Overflow);
+        assert_eq!(requests[0].node_key, "root/overlay");
+        assert_eq!(requests[0].anchor_rect, (90, 24, 80, 32));
     }
 
     #[test]

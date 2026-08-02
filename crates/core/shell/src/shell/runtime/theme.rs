@@ -163,6 +163,11 @@ impl Shell {
             "themes": themes,
             "available": available,
         });
+        // The shell derives the system theme snapshot, but the selected
+        // provider owns the interface state. Publishing under that provider
+        // keeps the optimistic update on the same generic routing path as
+        // the provider's later confirmation.
+        let source_module = self.active_service_provider_or("mesh.theme", "@mesh/shell");
         if let Some(tx) = self.service_handlers.get("mesh.theme") {
             let _ = tx.send(ServiceCommandMsg {
                 command: "set-current".to_string(),
@@ -172,7 +177,7 @@ impl Shell {
         }
         self.broadcast_service_event(ServiceEvent::Updated {
             service: "mesh.theme".into(),
-            source_module: "@mesh/shell".into(),
+            source_module,
             payload,
         })
     }
@@ -333,9 +338,12 @@ impl Shell {
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let locale = self.locale.current().to_string();
+        // As with theme, the shell supplies the host-derived snapshot while
+        // the selected provider owns the interface state observed by modules.
+        let source_module = self.active_service_provider_or("mesh.locale", "@mesh/shell");
         self.broadcast_service_event(ServiceEvent::Updated {
             service: "mesh.locale".into(),
-            source_module: "@mesh/shell".into(),
+            source_module,
             payload: serde_json::json!({
                 "locale": locale.clone(),
                 "current": locale

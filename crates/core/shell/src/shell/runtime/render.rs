@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::shell::types::{ChildSurface, ChildSurfaceKind, SurfaceTarget};
+use crate::shell::types::{ChildSurface, SurfaceTarget};
 use mesh_core_elements::style::BackgroundPaint;
 use mesh_core_elements::{PopoverAnchor, PopoverConstraintAdjustment, PopoverGrab, PopoverGravity};
 use mesh_core_presentation::{
@@ -640,9 +640,6 @@ impl Shell {
 
         let mut any_presented = false;
         for request in &requests {
-            if !matches!(request.kind, ChildSurfaceKind::Popover) {
-                continue;
-            }
             if self.components[index]
                 .dismissed_child_node_keys
                 .contains(&request.node_key)

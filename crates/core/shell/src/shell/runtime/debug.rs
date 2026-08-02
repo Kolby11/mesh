@@ -131,20 +131,20 @@ impl Shell {
     }
 
     fn record_debug_snapshot_state(&mut self, snapshot: &DebugSnapshot) {
-        self.latest_service_state.insert(
-            mesh_core_debug::DEBUG_INTERFACE.to_string(),
-            LatestServiceState::new(
-                mesh_core_debug::DEBUG_INTERFACE.to_string(),
-                mesh_core_debug::DEBUG_SOURCE_MODULE_ID.to_string(),
-                debug_service_payload(&self.debug, snapshot),
-            ),
-        );
+        // Synchronous snapshot reads need the latest state before the next
+        // render tick, but they must still use the normal service-state path
+        // for provider filtering, contract validation, and deduplication.
+        let event = self.debug_snapshot_event(snapshot);
+        self.record_latest_service_state(&event);
     }
 
     fn debug_snapshot_event(&self, snapshot: &DebugSnapshot) -> ServiceEvent {
         ServiceEvent::Updated {
             service: mesh_core_debug::DEBUG_INTERFACE.to_string(),
-            source_module: mesh_core_debug::DEBUG_SOURCE_MODULE_ID.to_string(),
+            source_module: self.active_service_provider_or(
+                mesh_core_debug::DEBUG_INTERFACE,
+                mesh_core_debug::DEBUG_SOURCE_MODULE_ID,
+            ),
             payload: debug_service_payload(&self.debug, snapshot),
         }
     }
