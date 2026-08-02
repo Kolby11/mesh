@@ -70,18 +70,20 @@ impl Shell {
             return event;
         };
         let interface = canonical_interface_name_owned(service);
-        if self.backend_runtimes.get(&interface).is_some_and(|slot| {
-            slot.provider_id != source_module
-        }) || self
-            .backend_runtime_status(&interface, &source_module)
-            .is_some_and(|entry| {
-                matches!(
-                    entry.status,
-                    BackendRuntimeStatus::InitFailed
-                        | BackendRuntimeStatus::Failed
-                        | BackendRuntimeStatus::Stopped
-                )
-            })
+        if self
+            .backend_runtimes
+            .get(&interface)
+            .is_some_and(|slot| slot.provider_id != source_module)
+            || self
+                .backend_runtime_status(&interface, &source_module)
+                .is_some_and(|entry| {
+                    matches!(
+                        entry.status,
+                        BackendRuntimeStatus::InitFailed
+                            | BackendRuntimeStatus::Failed
+                            | BackendRuntimeStatus::Stopped
+                    )
+                })
         {
             return ServiceEvent::Updated {
                 service: interface,

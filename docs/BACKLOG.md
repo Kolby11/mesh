@@ -162,17 +162,17 @@ gate where the win is structural.
       per-surface path flushes the queue each time, repeating connection work
       and obstructing the planned parallel present split.
 - [ ] Direct Skia paint into the mapped SHM canvas for full-present frames,
-      keeping `PixelBuffer` as the retained compare copy (H).
+      keeping `PixelBuffer` as the retained compare copy (H). Design:
+      [`.planning/todos/pending/2026-08-02-direct-shm-paint.md`](../.planning/todos/pending/2026-08-02-direct-shm-paint.md).
 - [ ] Rotation transforms allocate a temp `PixelBuffer` and repaint the subtree
       per frame. Low priority until rotation ships; scratch-buffer reuse was
       measured and rejected (see log).
 
 ### Startup and catalog
 
-- [ ] Incrementally rebuild the frontend catalog on graph changes.
-      `activate_frontend_module` recompiles every frontend for a one-module
-      enable. Cache compiled modules by manifest/source fingerprint and update
-      indexes from a graph diff.
+- [ ] Narrow frontend catalog index rebuilds to graph deltas. Compiled sources
+      now survive live graph changes by manifest/source fingerprint, but slot
+      and validation indexes still rebuild across the catalog.
 
 ### Architecture
 

@@ -101,6 +101,7 @@ struct TestingBackend {
     events: Vec<WindowEvent>,
     presented: Vec<String>,
     presented_damage: Vec<(String, Vec<DamageRect>)>,
+    completed_frames: usize,
     window_states: HashMap<String, WindowStates>,
     unconfigured_surfaces: HashSet<String>,
 }
@@ -428,6 +429,31 @@ impl PresentationEngine {
                 }
                 Ok(PresentStatus::Presented)
             }
+        }
+    }
+
+    /// Finish one shell frame after all surface presents have staged their
+    /// protocol requests. The Wayland backend flushes and progresses its event
+    /// queue once here instead of doing connection work for every surface.
+    pub fn finish_frame(&mut self) -> Result<(), PresentationError> {
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.finish_frame(),
+            Backend::DevWindow(bridge) => {
+                bridge.pump();
+                Ok(())
+            }
+            Backend::Testing(backend) => {
+                backend.completed_frames += 1;
+                Ok(())
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_completed_frames(&self) -> usize {
+        match &self.backend {
+            Backend::Testing(backend) => backend.completed_frames,
+            _ => 0,
         }
     }
 
@@ -932,6 +958,30 @@ mod tests {
             PresentStatus::Presented
         );
         assert_eq!(engine.testing_presented_surfaces(), ["panel"]);
+    }
+
+    #[test]
+    fn presents_share_one_explicit_frame_completion() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        let buffer = PixelBuffer::new(32, 16);
+        let damage = [DamageRect {
+            x: 0,
+            y: 0,
+            width: 32,
+            height: 16,
+        }];
+
+        engine
+            .present_with_damage("panel", "Panel", true, &buffer, &damage)
+            .unwrap();
+        engine
+            .present_with_damage("overlay", "Overlay", true, &buffer, &damage)
+            .unwrap();
+        assert_eq!(engine.testing_completed_frames(), 0);
+
+        engine.finish_frame().unwrap();
+        assert_eq!(engine.testing_completed_frames(), 1);
+        assert_eq!(engine.testing_presented_surfaces(), ["panel", "overlay"]);
     }
 
     fn pointer_move(surface_id: &str, x: f32, y: f32) -> WindowEvent {

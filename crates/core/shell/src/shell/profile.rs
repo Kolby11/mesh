@@ -297,7 +297,12 @@ impl Shell {
             }
         };
 
-        let catalog = match FrontendCatalog::from_modules(&self.modules, Some(&graph)) {
+        let previous_catalog = self.frontend_catalog.snapshot().catalog;
+        let catalog = match FrontendCatalog::from_modules_reusing(
+            &self.modules,
+            Some(&graph),
+            Some(&previous_catalog),
+        ) {
             Ok(catalog) => catalog,
             Err(error) => {
                 self.reject_profile_switch(profile_id, error.to_string());

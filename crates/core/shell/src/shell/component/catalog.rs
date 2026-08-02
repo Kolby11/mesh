@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -51,17 +52,66 @@ pub(in crate::shell) struct FrontendCatalogEntry {
     pub(in crate::shell) compiled: SharedCompiledFrontendModule,
 }
 
+fn manifest_fingerprint(manifest: &mesh_core_module::Manifest) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    // A manifest is normalized before it reaches the shell and always
+    // serializable. Hash its canonical data instead of relying on pointer or
+    // `Debug` identity, so edits to entrypoints/import declarations invalidate
+    // the cached compilation.
+    serde_json::to_vec(manifest)
+        .expect("normalized module manifests serialize")
+        .hash(&mut hasher);
+    hasher.finish()
+}
+
+fn source_fingerprint(paths: &[PathBuf]) -> Option<u64> {
+    let mut paths = paths.to_vec();
+    paths.sort();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for path in paths {
+        path.hash(&mut hasher);
+        std::fs::read(path).ok()?.hash(&mut hasher);
+    }
+    Some(hasher.finish())
+}
+
+fn compile_catalog_entry(
+    module_id: &str,
+    module: &ModuleInstance,
+) -> Result<FrontendCatalogEntry, ShellRunError> {
+    let compiled =
+        compile_module_entrypoints(&module.manifest, &module.path).map_err(|source| {
+            ShellRunError::FrontendCompile {
+                module_id: module_id.to_string(),
+                source,
+            }
+        })?;
+    Ok(FrontendCatalogEntry {
+        module_dir: module.path.clone(),
+        compiled: compiled.into(),
+    })
+}
+
 /// Copy-on-write handle for a compiled frontend module.
 ///
 /// Production code treats compiled source as immutable and cloning this handle
 /// only increments an `Arc` count. `DerefMut` is deliberately copy-on-write to
 /// retain the concise fixture setup used by component tests.
 #[derive(Debug, Clone)]
-pub(in crate::shell) struct SharedCompiledFrontendModule(Arc<CompiledFrontendModule>);
+pub(in crate::shell) struct SharedCompiledFrontendModule {
+    compiled: Arc<CompiledFrontendModule>,
+    /// Captured when the immutable compilation was created. A graph rebuild
+    /// compares it with the current files before retaining this snapshot.
+    source_fingerprint: Option<u64>,
+}
 
 impl From<CompiledFrontendModule> for SharedCompiledFrontendModule {
     fn from(compiled: CompiledFrontendModule) -> Self {
-        Self(Arc::new(compiled))
+        let source_fingerprint = source_fingerprint(&compiled.watched_paths);
+        Self {
+            compiled: Arc::new(compiled),
+            source_fingerprint,
+        }
     }
 }
 
@@ -69,13 +119,13 @@ impl Deref for SharedCompiledFrontendModule {
     type Target = CompiledFrontendModule;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.compiled
     }
 }
 
 impl DerefMut for SharedCompiledFrontendModule {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        Arc::make_mut(&mut self.0)
+        Arc::make_mut(&mut self.compiled)
     }
 }
 
@@ -249,6 +299,21 @@ impl FrontendCatalog {
         modules: &HashMap<String, ModuleInstance>,
         graph: Option<&InstalledModuleGraph>,
     ) -> Result<Self, ShellRunError> {
+        Self::from_modules_reusing(modules, graph, None)
+    }
+
+    /// Rebuild graph-derived indexes while retaining compiled frontend sources
+    /// whose normalized manifest and complete `.mesh` source set are unchanged.
+    ///
+    /// Module activation and deactivation change graph state far more often
+    /// than authoring source. Revalidating the assembled catalog is necessary
+    /// (enabled slot contributions and interface availability can change), but
+    /// reparsing every independent frontend module is not.
+    pub(in crate::shell) fn from_modules_reusing(
+        modules: &HashMap<String, ModuleInstance>,
+        graph: Option<&InstalledModuleGraph>,
+        previous: Option<&FrontendCatalog>,
+    ) -> Result<Self, ShellRunError> {
         let mut module_ids: Vec<String> = modules.keys().cloned().collect();
         module_ids.sort();
 
@@ -263,20 +328,22 @@ impl FrontendCatalog {
         let compiled_entries = frontend_modules
             .par_iter()
             .map(|(module_id, module)| {
-                compile_module_entrypoints(&module.manifest, &module.path)
-                    .map(|compiled| {
-                        (
-                            (*module_id).clone(),
-                            FrontendCatalogEntry {
-                                module_dir: module.path.clone(),
-                                compiled: compiled.into(),
-                            },
-                        )
-                    })
-                    .map_err(|source| ShellRunError::FrontendCompile {
-                        module_id: (*module_id).clone(),
-                        source,
-                    })
+                let current_manifest_fingerprint = manifest_fingerprint(&module.manifest);
+                if let Some(entry) = previous.and_then(|catalog| catalog.modules.get(*module_id))
+                    && entry.module_dir == module.path
+                    && manifest_fingerprint(&entry.compiled.manifest)
+                        == current_manifest_fingerprint
+                    && entry
+                        .compiled
+                        .source_fingerprint
+                        .is_some_and(|fingerprint| {
+                            source_fingerprint(&entry.compiled.watched_paths) == Some(fingerprint)
+                        })
+                {
+                    return Ok(((*module_id).clone(), entry.clone()));
+                }
+
+                compile_catalog_entry(module_id, module).map(|entry| ((*module_id).clone(), entry))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -503,17 +570,7 @@ mod performance_tests {
                     .then_some((module_id, module))
             })
             .map(|(module_id, module)| {
-                compile_module_entrypoints(&module.manifest, &module.path)
-                    .map(|compiled| {
-                        (
-                            module_id.clone(),
-                            FrontendCatalogEntry {
-                                module_dir: module.path.clone(),
-                                compiled: compiled.into(),
-                            },
-                        )
-                    })
-                    .map_err(|source| ShellRunError::FrontendCompile { module_id, source })
+                compile_catalog_entry(&module_id, module).map(|entry| (module_id, entry))
             })
             .collect()
     }
@@ -547,6 +604,23 @@ mod performance_tests {
             &*surface.compiled,
             &*catalog_entry.compiled,
         ));
+    }
+
+    #[test]
+    fn graph_only_catalog_rebuild_reuses_unchanged_compilations() {
+        let modules = shipped_frontend_modules();
+        let initial = FrontendCatalog::from_modules(&modules, None).unwrap();
+        let rebuilt =
+            FrontendCatalog::from_modules_reusing(&modules, None, Some(&initial)).unwrap();
+
+        assert_eq!(initial.modules.len(), rebuilt.modules.len());
+        for (module_id, initial_entry) in &initial.modules {
+            let rebuilt_entry = rebuilt.modules.get(module_id).unwrap();
+            assert!(std::ptr::eq::<CompiledFrontendModule>(
+                &*initial_entry.compiled,
+                &*rebuilt_entry.compiled,
+            ));
+        }
     }
 
     // cargo test -p mesh-core-shell --release --lib shared_compiled_handle_clone_beats_deep_clone -- --ignored --nocapture

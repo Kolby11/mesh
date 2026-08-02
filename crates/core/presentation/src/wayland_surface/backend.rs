@@ -1440,10 +1440,6 @@ impl WaylandSurfaceBackend {
             }
         }
 
-        if let Err(error) = self.dispatch_pending() {
-            self.destroy_popup(surface_id);
-            return Err(error);
-        }
         Ok(())
     }
 
@@ -1620,7 +1616,6 @@ impl WaylandSurfaceBackend {
                 .is_some_and(|entry| entry.role.is_window())
             {
                 self.destroy_surface(surface_id);
-                self.dispatch_pending()?;
                 return Ok(PresentStatus::Presented);
             }
             // Only detach a buffer (to hide) if the compositor has already configured this
@@ -1645,7 +1640,6 @@ impl WaylandSurfaceBackend {
                 entry.blur_regions.clear();
                 entry.hide();
             }
-            self.dispatch_pending()?;
             return Ok(PresentStatus::Presented);
         }
 
@@ -1653,26 +1647,10 @@ impl WaylandSurfaceBackend {
             // present() called before configure() — nothing to do.
             return Ok(PresentStatus::Presented);
         }
-        self.dispatch_available()?;
         if !self.surface_ready_to_present(surface_id) {
             return Ok(PresentStatus::NotReady);
         }
 
-        if self
-            .state
-            .surfaces
-            .get(surface_id)
-            .is_some_and(|entry| entry.frame_pending)
-        {
-            // Frame callbacks are throttling hints, not correctness gates.
-            // Some layer-shell compositors can leave a callback pending while
-            // the surface remains otherwise usable; hard-deferring every
-            // repaint behind that flag makes later theme/focus/drag updates
-            // invisible until a remap path happens to clear the surface state.
-            // Drain any available callback, then commit the latest buffer even
-            // if the old callback is still pending.
-            self.dispatch_available()?;
-        }
         let qh = self.state.qh.clone();
         let state = &mut self.state;
         let pool = state
@@ -1808,7 +1786,6 @@ impl WaylandSurfaceBackend {
             scale,
         );
 
-        self.dispatch_pending()?;
         Ok(PresentStatus::Presented)
     }
 
@@ -1934,6 +1911,14 @@ impl WaylandSurfaceBackend {
     pub fn pump(&mut self) {
         let _ = self.dispatch_available();
         let _ = self.release_expired_surface_focus_grab();
+    }
+
+    /// Flush all requests staged by this shell frame, then dispatch already
+    /// available events once. Per-surface presentation intentionally does not
+    /// progress the shared Wayland connection so independent surfaces can be
+    /// prepared and painted before one outbound flush.
+    pub fn finish_frame(&mut self) -> Result<(), PresentationError> {
+        self.dispatch_pending()
     }
 
     pub fn poll_events(&mut self) -> Vec<DevWindowEvent> {

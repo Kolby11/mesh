@@ -145,6 +145,11 @@ pub struct PerSurfaceLayoutState {
     /// here as `_mesh_key` strings, so retained lookup no longer hashes or
     /// clones long ancestor paths.
     pub node_map: HashMap<NodeId, TaffyNodeId>,
+    /// The subset of [`Self::node_map`] whose identity survives structural
+    /// reconciliation. Unkeyed nodes still have entries in `node_map` so
+    /// layout write-back never needs a second full-tree index, but are
+    /// deliberately recreated when the tree shape changes.
+    stable_node_ids: HashSet<NodeId>,
     /// Text measurement inputs keyed by stable node identity. Keeping these
     /// alongside the retained Taffy nodes avoids rebuilding text content and
     /// style contexts on every layout-dirty frame.
@@ -168,6 +173,7 @@ impl PerSurfaceLayoutState {
         Self {
             tree: TaffyTree::new(),
             node_map: HashMap::new(),
+            stable_node_ids: HashSet::new(),
             text_nodes: HashMap::new(),
             last_available: (0.0, 0.0),
             valid: false,
@@ -389,15 +395,7 @@ impl LayoutEngine {
         }
 
         let mut report = TaffyLayoutReport::default();
-        let mut node_map = HashMap::new();
-        update_retained_node_styles(
-            root,
-            state,
-            dirty_layout,
-            dirty_node_ids,
-            &mut node_map,
-            &mut report,
-        );
+        update_retained_node_styles(root, state, dirty_layout, dirty_node_ids, &mut report);
 
         if available_changed || dirty_layout {
             let available_space = taffy_available_space(available_width, available_height);
@@ -426,7 +424,7 @@ impl LayoutEngine {
                 write_taffy_layout(
                     root,
                     &state.tree,
-                    &node_map,
+                    &state.node_map,
                     available_width,
                     available_height,
                 );
@@ -643,21 +641,21 @@ fn compute_fresh_retained_layout(
     measurer: Option<&dyn TextMeasurer>,
 ) {
     let mut report = TaffyLayoutReport::default();
-    let mut node_id_to_taffy = HashMap::new();
 
     state.tree = TaffyTree::<NodeId>::new();
     state.node_map.clear();
+    state.stable_node_ids.clear();
     state.text_nodes.clear();
 
     match build_taffy_tree(
         root,
         &mut state.tree,
-        &mut node_id_to_taffy,
+        &mut state.node_map,
         &mut state.text_nodes,
         &mut report,
     ) {
         Ok(root_id) => {
-            collect_stable_taffy_map(root, &node_id_to_taffy, &mut state.node_map);
+            collect_stable_node_ids(root, &mut state.stable_node_ids);
             let available_space = taffy_available_space(available_width, available_height);
             let (tree, text_nodes) = (&mut state.tree, &state.text_nodes);
             if let Err(error) = tree.compute_layout_with_measure(
@@ -685,7 +683,7 @@ fn compute_fresh_retained_layout(
                 write_taffy_layout(
                     root,
                     &state.tree,
-                    &node_id_to_taffy,
+                    &state.node_map,
                     available_width,
                     available_height,
                 );
@@ -716,37 +714,36 @@ fn compute_structural_retained_layout(
     measurer: Option<&dyn TextMeasurer>,
 ) {
     let mut report = TaffyLayoutReport::default();
-    let mut node_id_to_taffy = HashMap::new();
     let mut present_ids = HashSet::new();
-    collect_retained_node_ids(root, &mut present_ids);
+    collect_node_ids(root, &mut present_ids);
+    // An unkeyed node may happen to retain a runtime ID in a caller-owned
+    // tree, but that ID does not express structural identity. Save its old
+    // Taffy node before reconciliation so it is removed after replacement.
+    let obsolete_taffy_ids = state
+        .node_map
+        .iter()
+        .filter(|(node_id, _)| {
+            !state.stable_node_ids.contains(node_id) || !present_ids.contains(node_id)
+        })
+        .map(|(_, taffy_id)| *taffy_id)
+        .collect::<HashSet<_>>();
 
-    match reconcile_retained_taffy_node(root, state, &mut node_id_to_taffy, &mut report) {
+    match reconcile_retained_taffy_node(root, state, &mut report) {
         Ok(root_id) => {
-            let stale_nodes = state
-                .node_map
+            let stale_roots = obsolete_taffy_ids
                 .iter()
-                .filter(|(node_id, _)| !present_ids.contains(node_id))
-                .map(|(node_id, taffy_id)| (*node_id, *taffy_id))
-                .collect::<Vec<_>>();
-            let stale_taffy_ids = stale_nodes
-                .iter()
-                .map(|(_, taffy_id)| *taffy_id)
-                .collect::<HashSet<_>>();
-            let stale_roots = stale_nodes
-                .iter()
-                .filter(|(_, taffy_id)| {
+                .filter(|taffy_id| {
                     !state
                         .tree
-                        .parent(*taffy_id)
-                        .is_some_and(|parent| stale_taffy_ids.contains(&parent))
+                        .parent(**taffy_id)
+                        .is_some_and(|parent| obsolete_taffy_ids.contains(&parent))
                 })
                 .copied()
                 .collect::<Vec<_>>();
-            for (node_id, taffy_id) in stale_roots {
+            for taffy_id in stale_roots {
                 if let Err(error) = remove_taffy_subtree(&mut state.tree, taffy_id) {
                     tracing::warn!(
                         target: "mesh::layout",
-                        node_id,
                         error = %error,
                         "failed to remove stale retained layout subtree"
                     );
@@ -755,9 +752,11 @@ fn compute_structural_retained_layout(
             state
                 .node_map
                 .retain(|node_id, _| present_ids.contains(node_id));
+            state.stable_node_ids.clear();
+            collect_stable_node_ids(root, &mut state.stable_node_ids);
             state
                 .text_nodes
-                .retain(|node_id, _| node_id_to_taffy.contains_key(node_id));
+                .retain(|node_id, _| state.node_map.contains_key(node_id));
 
             let available_space = taffy_available_space(available_width, available_height);
             let (tree, text_nodes) = (&mut state.tree, &state.text_nodes);
@@ -786,7 +785,7 @@ fn compute_structural_retained_layout(
                 write_taffy_layout(
                     root,
                     &state.tree,
-                    &node_id_to_taffy,
+                    &state.node_map,
                     available_width,
                     available_height,
                 );
@@ -811,7 +810,6 @@ fn compute_structural_retained_layout(
 fn reconcile_retained_taffy_node(
     node: &WidgetNode,
     state: &mut PerSurfaceLayoutState,
-    node_id_to_taffy: &mut HashMap<NodeId, TaffyNodeId>,
     report: &mut TaffyLayoutReport,
 ) -> Result<TaffyNodeId, taffy::TaffyError> {
     let style = taffy_style_for_node(node, report);
@@ -834,12 +832,12 @@ fn reconcile_retained_taffy_node(
     };
 
     update_text_context(node, &mut state.tree, taffy_id, &mut state.text_nodes)?;
-    node_id_to_taffy.insert(node.id, taffy_id);
+    state.node_map.insert(node.id, taffy_id);
 
     let child_ids = node
         .children
         .iter()
-        .map(|child| reconcile_retained_taffy_node(child, state, node_id_to_taffy, report))
+        .map(|child| reconcile_retained_taffy_node(child, state, report))
         .collect::<Result<Vec<_>, _>>()?;
     if state.tree.children(taffy_id)? != child_ids {
         state.tree.set_children(taffy_id, &child_ids)?;
@@ -852,7 +850,6 @@ fn update_retained_node_styles(
     state: &mut PerSurfaceLayoutState,
     mark_dirty: bool,
     dirty_node_ids: Option<&HashSet<NodeId>>,
-    node_id_to_taffy: &mut HashMap<NodeId, TaffyNodeId>,
     report: &mut TaffyLayoutReport,
 ) {
     if let Some(taffy_id) = retained_taffy_id(node, state) {
@@ -883,18 +880,10 @@ fn update_retained_node_styles(
                 "failed to update retained taffy text context"
             );
         }
-        node_id_to_taffy.insert(node.id, taffy_id);
     }
 
     for child in &node.children {
-        update_retained_node_styles(
-            child,
-            state,
-            mark_dirty,
-            dirty_node_ids,
-            node_id_to_taffy,
-            report,
-        );
+        update_retained_node_styles(child, state, mark_dirty, dirty_node_ids, report);
     }
 }
 
@@ -940,35 +929,38 @@ fn update_text_context(
     Ok(())
 }
 
-fn collect_stable_taffy_map(
-    node: &WidgetNode,
-    node_id_to_taffy: &HashMap<NodeId, TaffyNodeId>,
-    stable_map: &mut HashMap<NodeId, TaffyNodeId>,
-) {
-    if node.has_mesh_key()
-        && let Some(taffy_id) = node_id_to_taffy.get(&node.id)
-    {
-        stable_map.insert(node.id, *taffy_id);
-    }
-    for child in &node.children {
-        collect_stable_taffy_map(child, node_id_to_taffy, stable_map);
-    }
-}
-
-fn collect_retained_node_ids(node: &WidgetNode, ids: &mut HashSet<NodeId>) {
+fn collect_stable_node_ids(node: &WidgetNode, ids: &mut HashSet<NodeId>) {
     if node.has_mesh_key() {
         ids.insert(node.id);
     }
     for child in &node.children {
-        collect_retained_node_ids(child, ids);
+        collect_stable_node_ids(child, ids);
+    }
+}
+
+fn collect_node_ids(node: &WidgetNode, ids: &mut HashSet<NodeId>) {
+    ids.insert(node.id);
+    for child in &node.children {
+        collect_node_ids(child, ids);
     }
 }
 
 fn retained_taffy_id(node: &WidgetNode, state: &PerSurfaceLayoutState) -> Option<TaffyNodeId> {
-    node.has_mesh_key()
-        .then(|| state.node_map.get(&node.id))
-        .flatten()
-        .copied()
+    state.node_map.get(&node.id).copied()
+}
+
+#[cfg(test)]
+fn collect_taffy_node_map(
+    node: &WidgetNode,
+    state: &PerSurfaceLayoutState,
+    node_map: &mut HashMap<NodeId, TaffyNodeId>,
+) {
+    if let Some(taffy_id) = retained_taffy_id(node, state) {
+        node_map.insert(node.id, taffy_id);
+    }
+    for child in &node.children {
+        collect_taffy_node_map(child, state, node_map);
+    }
 }
 
 fn taffy_available_space(width: f32, height: f32) -> TaffySize<TaffyAvailableSpace> {
@@ -1715,6 +1707,38 @@ mod tests {
         assert!(state.text_nodes.contains_key(&text_id));
     }
 
+    #[test]
+    fn structural_layout_indexes_unkeyed_nodes_without_reusing_them() {
+        let mut root = make_node("row", Dimension::Px(100.0), Dimension::Px(20.0));
+        root.computed_style.direction = FlexDirection::Row;
+        let child = make_node("a", Dimension::Px(40.0), Dimension::Px(20.0));
+        let child_id = child.id;
+        root.children.push(child);
+
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, 100.0, 20.0, false, false, &mut cache, None,
+        );
+        let prior_root = state.node_map[&root.id];
+        let prior_child = state.node_map[&child_id];
+
+        let sibling = make_node("b", Dimension::Px(30.0), Dimension::Px(20.0));
+        let sibling_id = sibling.id;
+        root.children.push(sibling);
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, 100.0, 20.0, false, true, &mut cache, None,
+        );
+
+        assert_eq!(state.node_map.len(), 3);
+        assert_ne!(state.node_map[&root.id], prior_root);
+        assert_ne!(state.node_map[&child_id], prior_child);
+        assert!(state.node_map.contains_key(&sibling_id));
+        assert_eq!(root.children[0].layout.width, 40.0);
+        assert_eq!(root.children[1].layout.x, 40.0);
+        assert_eq!(root.children[1].layout.width, 30.0);
+    }
+
     // cargo test -p mesh-core-elements --release -- retained_text_context_reuse_beats_rebuilding_inputs --ignored --nocapture
     #[test]
     #[ignore = "release-only retained text-context benchmark"]
@@ -2126,9 +2150,9 @@ mod tests {
                 &mut state,
                 false,
                 None,
-                &mut node_map,
                 &mut report,
             );
+            collect_taffy_node_map(&root, &state, &mut node_map);
             std::hint::black_box((node_map, report));
         }
         let old_time = old_started.elapsed();

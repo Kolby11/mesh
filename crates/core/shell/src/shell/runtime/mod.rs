@@ -251,8 +251,10 @@ impl Shell {
             self.drain_requests(&mut pending)?;
             self.flush_throttled_commands();
             self.render_components()?;
+            self.presentation_engine
+                .finish_frame()
+                .map_err(ShellRunError::Presentation)?;
             self.flush_wayland()?;
-            self.presentation_engine.pump();
 
             let deadline = self.next_runtime_sleep(shell_message_backlog_likely);
             if self.presentation_engine.supports_blocking_dispatch() {

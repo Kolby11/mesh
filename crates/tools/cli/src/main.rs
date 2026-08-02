@@ -1,7 +1,9 @@
 use mesh_core_module::ModuleType;
 use mesh_core_shell::{Shell, default_ipc_socket_path};
+use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
+use std::process::Command;
 
 #[cfg(all(feature = "perf-tracy", feature = "allocation-profiling"))]
 compile_error!("perf-tracy and allocation-profiling use different global allocators; enable one");
@@ -461,16 +463,18 @@ fn cmd_install(args: &[String]) {
     let source_arg = required_arg(
         args,
         0,
-        "mesh-shell install <path> [--available-only] [--profile <profile>] [--allow-elevated] [--allow-high]",
+        "mesh-shell install <path-or-git-url>[#ref] [--available-only] [--profile <profile>] [--allow-elevated] [--allow-high]",
     );
-    let source = std::path::PathBuf::from(source_arg);
-    if !source.is_dir() {
-        exit_error(format!(
-            "module source is not a directory: {}",
-            source.display()
-        ));
-    }
-    let manifest_path = source.join("module.json");
+    let root_path = root_module_graph_path();
+    let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
+        .unwrap_or_else(|error| exit_error(error));
+    let config_dir = root_path
+        .parent()
+        .expect("root graph path has a parent directory");
+    let modules_dir = config_dir.join(&root.modules_dir);
+    let source = install_source(source_arg, &modules_dir).unwrap_or_else(|error| exit_error(error));
+    let source_path = source.path();
+    let manifest_path = source_path.join("module.json");
     let manifest = mesh_core_module::package::ModuleManifest::from_path(&manifest_path)
         .unwrap_or_else(|error| exit_error(error));
 
@@ -499,13 +503,6 @@ fn cmd_install(args: &[String]) {
         }
     }
 
-    let root_path = root_module_graph_path();
-    let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
-        .unwrap_or_else(|error| exit_error(error));
-    let config_dir = root_path
-        .parent()
-        .expect("root graph path has a parent directory");
-    let modules_dir = config_dir.join(&root.modules_dir);
     let destination = modules_dir.join(manifest.name.trim_start_matches('@'));
     if destination.exists() {
         exit_error(format!(
@@ -515,7 +512,7 @@ fn cmd_install(args: &[String]) {
         ));
     }
 
-    copy_module_tree(&source, &destination).unwrap_or_else(|error| {
+    source.place_at(&destination).unwrap_or_else(|error| {
         let _ = std::fs::remove_dir_all(&destination);
         exit_error(format!("failed to install {}: {error}", manifest.name));
     });
@@ -533,6 +530,7 @@ fn cmd_install(args: &[String]) {
         if args.iter().any(|arg| arg == "--available-only")
             || manifest.mesh.kind != mesh_core_module::package::ModuleKind::Frontend
         {
+            persist_git_provenance(config_dir, &manifest.name, source.provenance());
             return Ok(None);
         }
 
@@ -545,6 +543,7 @@ fn cmd_install(args: &[String]) {
         let profile_id = explicit_profile.or_else(|| paths.active_profile_id().ok().flatten());
         let Some(profile_id) = profile_id else {
             // Legacy auto-discovery already activates new modules by default.
+            persist_git_provenance(config_dir, &manifest.name, source.provenance());
             return Ok(Some("legacy root graph (auto-enabled)".into()));
         };
         let mut profile = paths
@@ -585,6 +584,7 @@ fn cmd_install(args: &[String]) {
                 return Err(error.to_string());
             }
         }
+        persist_git_provenance(config_dir, &manifest.name, source.provenance());
         Ok(Some(format!("{instance_id} in profile {profile_id}")))
     })();
 
@@ -634,6 +634,204 @@ fn copy_module_tree(
         }
     }
     Ok(())
+}
+
+/// A local directory or a staged checkout. Git sources are cloned outside the
+/// installed tree, validated exactly like local sources, then renamed into
+/// place so a failed clone or manifest check never leaves a partial module.
+enum InstallSource {
+    Local(std::path::PathBuf),
+    Git {
+        checkout: std::path::PathBuf,
+        provenance: GitProvenance,
+    },
+}
+
+impl InstallSource {
+    fn path(&self) -> &std::path::Path {
+        match self {
+            Self::Local(path) => path,
+            Self::Git { checkout, .. } => checkout,
+        }
+    }
+
+    fn provenance(&self) -> Option<&GitProvenance> {
+        match self {
+            Self::Local(_) => None,
+            Self::Git { provenance, .. } => Some(provenance),
+        }
+    }
+
+    fn place_at(&self, destination: &std::path::Path) -> Result<(), String> {
+        match self {
+            Self::Local(path) => {
+                copy_module_tree(path, destination).map_err(|error| error.to_string())
+            }
+            Self::Git { checkout, .. } => std::fs::rename(checkout, destination)
+                .map_err(|error| format!("failed to move staged Git checkout into place: {error}")),
+        }
+    }
+}
+
+impl Drop for InstallSource {
+    fn drop(&mut self) {
+        // A successful Git install renames this path, so this is a no-op on
+        // success. Every early return instead removes only its private stage.
+        if let Self::Git { checkout, .. } = self {
+            let _ = std::fs::remove_dir_all(checkout);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitProvenance {
+    source: String,
+    requested_ref: Option<String>,
+    revision: String,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct MeshLock {
+    #[serde(default)]
+    git: std::collections::BTreeMap<String, GitProvenance>,
+}
+
+fn install_source(source: &str, modules_dir: &std::path::Path) -> Result<InstallSource, String> {
+    let local = std::path::PathBuf::from(source);
+    if local.is_dir() {
+        return Ok(InstallSource::Local(local));
+    }
+
+    let (url, requested_ref) = parse_git_source(source)?;
+    std::fs::create_dir_all(modules_dir).map_err(|error| {
+        format!(
+            "failed to create module directory {}: {error}",
+            modules_dir.display()
+        )
+    })?;
+    let checkout = modules_dir.join(format!(
+        ".mesh-install-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let cleanup = |message: String| {
+        let _ = std::fs::remove_dir_all(&checkout);
+        Err(message)
+    };
+    let clone = Command::new("git")
+        .args(["clone", "--quiet", &url])
+        .arg(&checkout)
+        .output()
+        .map_err(|error| format!("failed to run git clone: {error}"))?;
+    if !clone.status.success() {
+        return cleanup(format!("git clone failed: {}", command_error(&clone)));
+    }
+    if let Some(reference) = &requested_ref {
+        let checkout_ref = Command::new("git")
+            .args(["-C"])
+            .arg(&checkout)
+            .args(["checkout", "--quiet", reference])
+            .output();
+        let checkout_ref = match checkout_ref {
+            Ok(output) => output,
+            Err(error) => return cleanup(format!("failed to run git checkout: {error}")),
+        };
+        if !checkout_ref.status.success() {
+            return cleanup(format!(
+                "git checkout of {reference:?} failed: {}",
+                command_error(&checkout_ref)
+            ));
+        }
+    }
+    let revision = Command::new("git")
+        .args(["-C"])
+        .arg(&checkout)
+        .args(["rev-parse", "HEAD"])
+        .output();
+    let revision = match revision {
+        Ok(output) => output,
+        Err(error) => return cleanup(format!("failed to read cloned revision: {error}")),
+    };
+    if !revision.status.success() {
+        return cleanup(format!(
+            "git rev-parse failed: {}",
+            command_error(&revision)
+        ));
+    }
+    Ok(InstallSource::Git {
+        checkout,
+        provenance: GitProvenance {
+            source: url,
+            requested_ref,
+            revision: String::from_utf8_lossy(&revision.stdout).trim().to_string(),
+        },
+    })
+}
+
+fn parse_git_source(source: &str) -> Result<(String, Option<String>), String> {
+    let (url, requested_ref) = match source.rsplit_once('#') {
+        Some((url, reference)) if !reference.is_empty() => (url, Some(reference.to_string())),
+        Some(_) => {
+            return Err("Git source has an empty ref after '#'; omit '#' or provide a ref".into());
+        }
+        None => (source, None),
+    };
+    if url.trim().is_empty() {
+        return Err("Git source URL cannot be empty".into());
+    }
+    Ok((url.to_string(), requested_ref))
+}
+
+fn command_error(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.is_empty() {
+        format!("exit status {}", output.status)
+    } else {
+        stderr
+    }
+}
+
+fn write_git_provenance(
+    config_dir: &std::path::Path,
+    module_id: &str,
+    provenance: &GitProvenance,
+) -> Result<(), String> {
+    let path = config_dir.join("mesh.lock");
+    let mut lock = if path.exists() {
+        let content = std::fs::read_to_string(&path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        serde_json::from_str(&content)
+            .map_err(|error| format!("failed to parse {}: {error}", path.display()))?
+    } else {
+        MeshLock::default()
+    };
+    lock.git.insert(module_id.to_string(), provenance.clone());
+    let content = serde_json::to_string_pretty(&lock)
+        .map_err(|error| format!("failed to serialize {}: {error}", path.display()))?
+        + "\n";
+    let temporary = path.with_extension("lock.tmp");
+    std::fs::write(&temporary, content)
+        .map_err(|error| format!("failed to write {}: {error}", temporary.display()))?;
+    std::fs::rename(&temporary, &path)
+        .map_err(|error| format!("failed to replace {}: {error}", path.display()))
+}
+
+fn persist_git_provenance(
+    config_dir: &std::path::Path,
+    module_id: &str,
+    provenance: Option<&GitProvenance>,
+) {
+    if let Some(provenance) = provenance
+        && let Err(error) = write_git_provenance(config_dir, module_id, provenance)
+    {
+        // Source is installed and validated already; do not turn an incidental
+        // lock-write failure into a broken profile/module transaction.
+        eprintln!("warning: installed {module_id}, but could not record Git provenance: {error}");
+    }
 }
 
 fn cmd_config(args: &[String]) {
@@ -934,9 +1132,48 @@ fn cmd_help() {
     println!("            remove <profile> <module#instance>");
     println!("            set <profile> <namespace> <json>  set scoped preferences");
     println!("            unset <profile> <namespace>      clear scoped preferences");
-    println!("  install <path>  Install a local module; frontends are added to the active profile");
+    println!(
+        "  install <path-or-git-url>[#ref]  Install a module; frontends are added to the active profile"
+    );
     println!("            flags: --available-only, --profile <id>, --allow-elevated, --allow-high");
     println!("  status    Show shell status");
     println!("  version   Print version");
     println!("  help      Show this help");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn git_source_splits_an_optional_ref() {
+        assert_eq!(
+            parse_git_source("https://example.invalid/widgets.git#v1.2.3").unwrap(),
+            (
+                "https://example.invalid/widgets.git".to_string(),
+                Some("v1.2.3".to_string())
+            )
+        );
+        assert_eq!(
+            parse_git_source("git@host:group/widgets.git").unwrap(),
+            ("git@host:group/widgets.git".to_string(), None)
+        );
+        assert!(parse_git_source("https://example.invalid/widgets.git#").is_err());
+    }
+
+    #[test]
+    fn mesh_lock_round_trips_git_provenance() {
+        let mut lock = MeshLock::default();
+        lock.git.insert(
+            "@example/widget".to_string(),
+            GitProvenance {
+                source: "https://example.invalid/widgets.git".to_string(),
+                requested_ref: Some("main".to_string()),
+                revision: "abc123".to_string(),
+            },
+        );
+        let decoded: MeshLock =
+            serde_json::from_str(&serde_json::to_string(&lock).unwrap()).unwrap();
+        assert_eq!(decoded.git["@example/widget"].revision, "abc123");
+    }
 }

@@ -242,6 +242,10 @@ impl Shell {
             "mesh.locale",
             &[("current", "string"), ("locale", "string")],
         ));
+        interfaces.register_contract(builtin_state_contract(
+            "mesh.settings",
+            &[("revision", "string"), ("namespaces", "object")],
+        ));
         interfaces.register(InterfaceProvider {
             interface: mesh_core_debug::DEBUG_INTERFACE.to_string(),
             version: Some("1.0".to_string()),
@@ -264,6 +268,14 @@ impl Shell {
             base_module: Some("@mesh/locale-interface".to_string()),
             provider_module: "@mesh/shell".to_string(),
             backend_name: "Shell Locale".to_string(),
+            priority: 200,
+        });
+        interfaces.register(InterfaceProvider {
+            interface: "mesh.settings".to_string(),
+            version: Some("1.0".to_string()),
+            base_module: Some("@mesh/settings-interface".to_string()),
+            provider_module: "@mesh/shell".to_string(),
+            backend_name: "Shell Settings Store".to_string(),
             priority: 200,
         });
 
@@ -536,7 +548,12 @@ impl Shell {
         module_id: &str,
         graph: &InstalledModuleGraph,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        let catalog = FrontendCatalog::from_modules(&self.modules, Some(graph))?;
+        let previous_catalog = self.frontend_catalog.snapshot().catalog;
+        let catalog = FrontendCatalog::from_modules_reusing(
+            &self.modules,
+            Some(graph),
+            Some(&previous_catalog),
+        )?;
         let entry = catalog
             .top_level_surfaces()
             .into_iter()
@@ -636,7 +653,9 @@ impl Shell {
         module_id: &str,
         graph: Option<&InstalledModuleGraph>,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        let catalog = FrontendCatalog::from_modules(&self.modules, graph)?;
+        let previous_catalog = self.frontend_catalog.snapshot().catalog;
+        let catalog =
+            FrontendCatalog::from_modules_reusing(&self.modules, graph, Some(&previous_catalog))?;
         self.frontend_catalog.replace(catalog, None);
         self.sync_frontend_catalog_components();
 
@@ -774,6 +793,9 @@ impl Shell {
                     .map_err(ShellRunError::Component)?,
             );
         }
+        // Mount first so module scripts can establish their service proxy;
+        // then deliver the revisioned effective settings snapshot normally.
+        requests.extend(self.sync_settings_service_state()?);
         self.service_delivery_index.mark_dirty();
         Ok(requests)
     }

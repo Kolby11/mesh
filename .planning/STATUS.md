@@ -7,6 +7,39 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**The retained Taffy node map is authoritative through incremental layout.**
+Fresh, dirty, and structural paths write layouts through the per-surface map;
+unkeyed nodes are indexed for write-back but are still recreated on structural
+changes, while keyed nodes retain their Taffy identity. A focused regression
+covers the unkeyed replacement path. Cargo verification is blocked by the
+configured missing Nix linker wrapper (2026-08-02).
+
+**Wayland presentation is batched at the shell-frame boundary.** Per-surface
+present now only stages protocol requests; one `finish_frame` flushes and
+dispatches the shared connection after all surfaces are rendered. The testing
+backend records that explicit boundary. Cargo verification is blocked by the
+configured missing Nix linker wrapper (2026-08-02).
+
+**Direct SHM paint needs a scoped raster-target boundary.** The renderer owns
+`PixelBuffer` bytes today, while presentation selects the mapped slot after
+painting; an unsafe alias or reverse full copy would defeat the goal. The
+implementation design and required damage/slot verification are in
+[`todos/pending/2026-08-02-direct-shm-paint.md`](todos/pending/2026-08-02-direct-shm-paint.md).
+
+**Git module installation is available.** `mesh-shell install <git-url>[#ref]`
+stages and validates a checkout, then records its requested ref and resolved
+revision in `config/mesh.lock`; update/uninstall and package/profile services
+remain open. Verification is blocked by the configured missing Nix linker
+wrapper (2026-08-02). Record: [`log/2026-08.md`](log/2026-08.md).
+
+**Live graph changes reuse unchanged frontend compilations.** Activation,
+deactivation, and profile switching now retain compiled frontend modules when
+their normalized manifest and every watched `.mesh` source match; the catalog
+still rebuilds graph-derived slot and validation indexes. Verification is
+blocked in this checkout because the configured Nix linker wrapper references
+a missing store path (2026-08-02). Record:
+[`log/performance-log.md`](log/performance-log.md).
+
 **Control-flow blocks are layout-transparent.** `{#if}` and `{#for}` now
 expand their active children directly into the surrounding list instead of
 creating synthetic `column` nodes, preserving the parent layout semantics.

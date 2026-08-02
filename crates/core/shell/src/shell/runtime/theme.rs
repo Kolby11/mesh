@@ -1,4 +1,5 @@
 use super::super::*;
+use std::hash::{Hash, Hasher};
 
 const THEME_RELOAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 const SHELL_SETTINGS_RELOAD_POLL_INTERVAL: std::time::Duration =
@@ -26,6 +27,26 @@ fn theme_preview_palette(theme: &mesh_core_theme::Theme) -> serde_json::Value {
 }
 
 impl Shell {
+    /// Publish the effective settings snapshot through the ordinary interface
+    /// path. Consumers observe one revisioned value and never need the
+    /// settings-file path or a raw component namespace injected by the shell.
+    pub(in crate::shell) fn sync_settings_service_state(
+        &mut self,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let namespaces = self.settings_store.to_value();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        namespaces.to_string().hash(&mut hasher);
+        let payload = serde_json::json!({
+            "revision": format!("{:016x}", hasher.finish()),
+            "namespaces": namespaces,
+        });
+        self.broadcast_service_event(ServiceEvent::Updated {
+            service: "mesh.settings".into(),
+            source_module: self.active_service_provider_or("mesh.settings", "@mesh/shell"),
+            payload,
+        })
+    }
+
     pub(in crate::shell) fn reload_theme_if_changed(
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
@@ -276,6 +297,7 @@ impl Shell {
         self.settings = new_settings;
         self.settings_store = store;
         self.apply_settings_to_components()?;
+        requests.extend(self.sync_settings_service_state()?);
 
         Ok(requests)
     }

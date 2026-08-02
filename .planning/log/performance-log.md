@@ -1,5 +1,20 @@
 # MESH Performance Log
 
+## 2026-08-02 — Frontend catalog compilation reuse
+
+`working tree` · area: frontend catalog
+
+Live frontend activation, deactivation, and profile switches now retain an
+existing compiled frontend module when its normalized manifest and complete
+watched `.mesh` source fingerprint match. The catalog continues to rebuild
+slot-contribution and validation indexes against the new graph; narrowing those
+indexes to graph deltas remains open in `docs/BACKLOG.md`.
+
+**Not measured.** The checkout's configured Nix linker wrapper references a
+missing store path, preventing `cargo check -p mesh-core-shell` from linking
+dependencies. The change has a pointer-identity regression test; benchmark it
+once the toolchain is repaired before making a speedup claim.
+
 Archived record of the performance work tracked in `todo.md`, moved here on
 2026-07-13 to keep the backlog readable. This file is **history, not backlog**:
 the canonical open-item list lives in `todo.md`. Checkbox state, progress

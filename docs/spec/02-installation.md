@@ -9,11 +9,12 @@ installer checks" and "what the runtime verifies".
 
 ## 1. Installer v1 — path + Git, editable source
 
-**Status: partially shipped.** Local path installation, capability gates,
-kind-aware frontend activation, profile commands, validation, and rollback of a
-failed staged copy are available through `mesh-shell`. Git sources, provenance
-locking, updates/uninstall, and the replaceable package-service contract remain
-target behavior. A CLI or package component is a client of that service, not a
+**Status: partially shipped.** Local-path and Git installation (including an
+optional `#ref` and resolved-revision provenance in `mesh.lock`), capability
+gates, kind-aware frontend activation, profile commands, validation, and
+rollback of a failed staged copy are available through `mesh-shell`.
+Updates/uninstall and the replaceable package-service contract remain target
+behavior. A CLI or package component is a client of that service, not a
 privileged management layer.
 
 v1 deliberately ships without a registry, package archives, or signing. The
