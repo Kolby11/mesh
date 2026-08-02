@@ -1,4 +1,5 @@
-/// Configuration loading, validation, and schema support for MESH.
+//! Shell configuration loading and validation.
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
@@ -16,13 +17,10 @@ pub use validate::{
     new_settings_diagnostics, validate_object,
 };
 
-/// Top-level MESH shell configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShellConfig {
     #[serde(default)]
     pub shell: ShellSection,
-    #[serde(default)]
-    pub modules: HashMap<String, ModuleConfig>,
 }
 
 /// Global shell settings sourced from JSON files.
@@ -44,13 +42,9 @@ pub struct ShellSettings {
     pub render: RenderSettings,
 }
 
-/// The `"shell"` namespace's schema, as the store validates it.
-///
-/// One entry per field of [`ShellSettings`] and its sections: the struct's serde
-/// defaults define what a valid value falls back to, and this table defines
-/// what is valid in the first place. A field added to [`ShellSettings`] without
-/// a line here is reported as an unknown key, which is the failure mode that
-/// gets noticed rather than the one that goes silent.
+/// The `"shell"` namespace's schema. One entry per [`ShellSettings`] field:
+/// serde defines what a valid value falls back to, this defines what is valid.
+/// A field added without a line here is reported as an unknown key.
 pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
     FieldSpec::new(
         "theme",
@@ -81,7 +75,7 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
             FieldSpec::new("toggle_activation_keys", FieldKind::StrArray),
             FieldSpec::new("slider_decrement_keys", FieldKind::StrArray),
             FieldSpec::new("slider_increment_keys", FieldKind::StrArray),
-            // module id -> action name -> { key }. Both levels are the user's
+            // module id -> action name -> { key }; both levels are the user's
             // own vocabulary, so only the leaf shape is checked.
             FieldSpec::new(
                 "surface_shortcuts",
@@ -124,32 +118,24 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
     ),
 ];
 
-/// Accepted values for [`TooltipSettings::position`].
-///
-/// The shell's anchor resolution matches these strings; a `mesh-core-shell`
-/// test walks this list to keep the two from drifting apart.
+/// Accepted values for [`TooltipSettings::position`]. A `mesh-core-shell` test
+/// walks this list to keep anchor resolution from drifting apart from it.
 pub const TOOLTIP_POSITIONS: &[&str] = &["auto", "bottom", "top", "left", "right", "cursor"];
 
 fn tooltip_position_is_valid(value: &str) -> bool {
     TOOLTIP_POSITIONS.contains(&value.trim())
 }
 
-/// Shell-wide icon configuration. `default_pack` is the user's preferred
-/// icon-pack module id, implicitly prepended to every frontend's effective
-/// icon-pack chain (unless the frontend opts out via
-/// `icons.ignore_shell_default`).
+/// `default_pack` is prepended to every frontend's effective icon-pack chain
+/// unless the frontend sets `icons.ignore_shell_default`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct IconSettings {
     #[serde(default)]
     pub default_pack: Option<String>,
 }
 
-/// Per-module user-side overrides applied on top of values declared in the
-/// frontend's manifest.
-///
-/// Read from the module's own namespace in the settings store
-/// (`"@scope/name": { "icons": { … } }`), not from a shell-wide map — the
-/// namespace is the module's, so its overrides live with the rest of them.
+/// User overrides layered on the frontend manifest, read from the module's own
+/// namespace in the settings store rather than from a shell-wide map.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ModuleSettingsOverrides {
     #[serde(default)]
@@ -157,9 +143,7 @@ pub struct ModuleSettingsOverrides {
 }
 
 impl ModuleSettingsOverrides {
-    /// Parse the icon-relevant part of a module namespace. Unknown keys in the
-    /// namespace (surface, props, keyboard) are ignored rather than rejected —
-    /// each consumer reads only what it owns.
+    /// Unknown keys are ignored: each consumer reads only what it owns.
     pub fn from_namespace(namespace: &JsonValue) -> Self {
         let icons = namespace
             .get("icons")
@@ -168,24 +152,16 @@ impl ModuleSettingsOverrides {
     }
 }
 
-/// User-side per-module icon overrides.
-///
-/// `use_packs`, when set, **replaces** the frontend's declared
-/// `dependencies.icon_packs` for this module (the shell default is still
-/// prepended unless the frontend opted out).
-///
-/// `overrides` is a flat map of logical-name → pack-qualified target
-/// (`<pack-id>/<asset-name>`), prepended in front of every other
-/// resolution path for matching names.
-///
-/// `ignore_shell_default`, when `true`, also suppresses the shell-default
-/// pack from this module's effective chain.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ModuleIconOverrides {
+    /// Replaces the frontend's declared `dependencies.icon_packs`.
     #[serde(default)]
     pub use_packs: Option<Vec<String>>,
+    /// Logical name → `<pack-id>/<asset-name>`, tried before every other
+    /// resolution path for matching names.
     #[serde(default)]
     pub overrides: HashMap<String, String>,
+    /// Also drop the shell-default pack from this module's chain.
     #[serde(default)]
     pub ignore_shell_default: bool,
 }
@@ -222,12 +198,8 @@ pub struct SurfaceShortcutOverride {
     pub key: Option<String>,
 }
 
-/// System sound file mappings for shell events.
-///
-/// Paths are absolute or relative to the shell's data directory.
-/// The audio backend module plays these through the `mesh.audio.play_sound`
-/// interface method.
-/// Leave a field as `None` to silence that event.
+/// Sound files for shell events, absolute or relative to the data directory,
+/// played through `mesh.audio.play_sound`. `None` silences the event.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ShellSounds {
     #[serde(default)]
@@ -275,30 +247,25 @@ impl Default for I18nSettings {
     }
 }
 
-/// Shell-wide rendering settings.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct RenderSettings {
     #[serde(default)]
     pub blur: BlurSettings,
 }
 
-/// How much work a blur may cost.
-///
-/// `filter: blur()` and `backdrop-filter: blur()` are the only styles whose
-/// cost scales with the *area* they cover rather than with the number of
-/// elements, so they are the one part of painting worth a user-facing dial —
-/// a weak machine can trade blur fidelity for frame time without giving up
-/// the frosted look.
+/// Blur cost is the one part of painting worth a user-facing dial: it scales
+/// with covered *area* rather than element count, so a weak machine can trade
+/// fidelity for frame time without giving up the frosted look.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BlurSettings {
-    /// Blur passes per filtered layer (1–3). Each pass runs at the reduced
-    /// sigma that keeps the total blur constant, so more passes buy a smoother
-    /// falloff rather than a stronger blur — and cost roughly linearly.
+    /// Passes per filtered layer (1–3). Each runs at a reduced sigma that keeps
+    /// total blur constant, so more passes buy a smoother falloff, not a
+    /// stronger blur, and cost roughly linearly.
     #[serde(default = "default_blur_passes")]
     pub passes: u8,
 
-    /// Blur radii larger than this are dropped with a diagnostic instead of
-    /// rasterized, bounding the worst frame a stylesheet can ask for.
+    /// Larger radii are dropped with a diagnostic rather than rasterized,
+    /// bounding the worst frame a stylesheet can ask for.
     #[serde(default = "default_blur_max_radius")]
     pub max_radius: f32,
 }
@@ -320,33 +287,18 @@ fn default_blur_max_radius() -> f32 {
     96.0
 }
 
-/// Global tooltip behavior settings.
-///
-/// These control the default tooltip positioning and timing for all shell
-/// components. Individual elements can override the positioning strategy via
-/// the `tooltip-anchor` CSS property. The enter animation is not configured
-/// here — it is authored in theme CSS (`tooltip { animation: ... }` plus a
-/// theme-level `@keyframes` rule).
+/// Shell-wide tooltip defaults. The enter animation is not configured here —
+/// it is authored in theme CSS (`tooltip { animation: ... }` plus `@keyframes`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TooltipSettings {
-    /// Default positioning strategy when the element does not specify
-    /// `tooltip-anchor`. Accepted values: `"auto"`, `"bottom"`, `"top"`,
-    /// `"left"`, `"right"`, `"cursor"`.
-    ///
-    /// Placement resolves in three steps: this shell-wide default, then the
-    /// element's `tooltip-anchor` CSS preference on top, then automatic
-    /// container-aware adjustment — if the chosen side would overflow the
-    /// element's nearest clipping container (or the paint surface), the
-    /// tooltip flips to the opposite side when it fits there.
-    ///
-    /// - `"auto"` picks whichever side has room, preferring below.
-    /// - `"bottom"` / `"top"` / `"left"` / `"right"` place the tooltip at
-    ///   the corresponding edge of the hovered element, flipping when needed.
-    /// - `"cursor"` places the tooltip near the cursor position.
+    /// One of [`TOOLTIP_POSITIONS`], used when the element sets no
+    /// `tooltip-anchor`. Placement resolves in three steps: this default, the
+    /// element's CSS preference, then a container-aware flip to the opposite
+    /// side if the chosen one would overflow the nearest clipping container.
     #[serde(default = "default_tooltip_position")]
     pub position: String,
 
-    /// Delay in milliseconds before the tooltip appears after hover starts.
+    /// Delay after hover starts, in milliseconds.
     #[serde(default = "default_tooltip_delay_ms")]
     pub delay_ms: u64,
 
@@ -354,11 +306,9 @@ pub struct TooltipSettings {
     #[serde(default = "default_tooltip_gap")]
     pub gap: f32,
 
-    /// Horizontal offset from the cursor when using cursor positioning.
     #[serde(default = "default_tooltip_cursor_offset_x")]
     pub cursor_offset_x: f32,
 
-    /// Vertical offset from the cursor when using cursor positioning.
     #[serde(default = "default_tooltip_cursor_offset_y")]
     pub cursor_offset_y: f32,
 }
@@ -481,38 +431,6 @@ fn default_discovery_paths(workspace_root: &Path) -> Vec<PathBuf> {
     paths
 }
 
-/// Per-module configuration values.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModuleConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    #[serde(flatten)]
-    pub values: HashMap<String, toml::Value>,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-/// Schema definition for a module's settings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SettingsSchema {
-    #[serde(flatten)]
-    pub fields: HashMap<String, SchemaField>,
-}
-
-/// A single field in a settings schema.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SchemaField {
-    #[serde(rename = "type")]
-    pub field_type: String,
-    pub default: Option<toml::Value>,
-    pub description: Option<String>,
-    pub min: Option<f64>,
-    pub max: Option<f64>,
-    pub values: Option<Vec<String>>,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("failed to read config file: {0}")]
@@ -528,148 +446,19 @@ pub enum ConfigError {
     Validation(String),
 }
 
-/// Load shell configuration from the standard path.
 pub fn default_config_path() -> PathBuf {
     dirs_path("config").join("mesh/config.toml")
 }
 
-/// Load shell configuration from a file.
 pub fn load_config(path: &Path) -> Result<ShellConfig, ConfigError> {
     if !path.exists() {
         return Ok(ShellConfig {
             shell: ShellSection::default(),
-            modules: HashMap::new(),
         });
     }
     let content = std::fs::read_to_string(path)?;
     let config: ShellConfig = toml::from_str(&content)?;
     Ok(config)
-}
-
-/// Validate a JSON value against a simple SettingsSchema. This performs basic
-/// checks for type, enum values, and numeric min/max. It is intentionally
-/// conservative: unknown keys are allowed (validation is per-field).
-pub fn validate_module_settings(
-    schema: &SettingsSchema,
-    values: &JsonValue,
-) -> Result<(), ConfigError> {
-    for (key, field) in &schema.fields {
-        if let Some(v) = values.get(key) {
-            // check type
-            match field.field_type.as_str() {
-                "string" => {
-                    if !v.is_string() {
-                        return Err(ConfigError::Validation(format!("{} must be a string", key)));
-                    }
-                    if let Some(vals) = &field.values {
-                        if let Some(s) = v.as_str() {
-                            if !vals.contains(&s.to_string()) {
-                                return Err(ConfigError::Validation(format!(
-                                    "{}: invalid enum value",
-                                    key
-                                )));
-                            }
-                        }
-                    }
-                }
-                "integer" => {
-                    if !v.is_i64() && !v.is_u64() {
-                        // JSON numbers are f64 by default; allow numeric but check integer-ness
-                        if let Some(n) = v.as_f64() {
-                            if n.fract() != 0.0 {
-                                return Err(ConfigError::Validation(format!(
-                                    "{} must be an integer",
-                                    key
-                                )));
-                            }
-                        } else {
-                            return Err(ConfigError::Validation(format!(
-                                "{} must be an integer",
-                                key
-                            )));
-                        }
-                    }
-                    if let Some(min) = field.min {
-                        if let Some(n) = v.as_f64() {
-                            if n < min {
-                                return Err(ConfigError::Validation(format!("{} below min", key)));
-                            }
-                        }
-                    }
-                    if let Some(max) = field.max {
-                        if let Some(n) = v.as_f64() {
-                            if n > max {
-                                return Err(ConfigError::Validation(format!("{} above max", key)));
-                            }
-                        }
-                    }
-                }
-                "float" => {
-                    if !v.is_number() {
-                        return Err(ConfigError::Validation(format!("{} must be a number", key)));
-                    }
-                    if let Some(min) = field.min {
-                        if let Some(n) = v.as_f64() {
-                            if n < min {
-                                return Err(ConfigError::Validation(format!("{} below min", key)));
-                            }
-                        }
-                    }
-                    if let Some(max) = field.max {
-                        if let Some(n) = v.as_f64() {
-                            if n > max {
-                                return Err(ConfigError::Validation(format!("{} above max", key)));
-                            }
-                        }
-                    }
-                }
-                "boolean" => {
-                    if !v.is_boolean() {
-                        return Err(ConfigError::Validation(format!(
-                            "{} must be a boolean",
-                            key
-                        )));
-                    }
-                }
-                "enum" => {
-                    if let Some(vals) = &field.values {
-                        if !v.is_string() {
-                            return Err(ConfigError::Validation(format!(
-                                "{} must be an enum/string",
-                                key
-                            )));
-                        }
-                        if let Some(s) = v.as_str() {
-                            if !vals.contains(&s.to_string()) {
-                                return Err(ConfigError::Validation(format!(
-                                    "{}: invalid enum value",
-                                    key
-                                )));
-                            }
-                        }
-                    }
-                }
-                "array" => {
-                    if !v.is_array() {
-                        return Err(ConfigError::Validation(format!("{} must be an array", key)));
-                    }
-                }
-                "object" => {
-                    if !v.is_object() {
-                        return Err(ConfigError::Validation(format!(
-                            "{} must be an object",
-                            key
-                        )));
-                    }
-                }
-                other => {
-                    // Unknown types are ignored for now
-                    tracing::debug!("unknown schema field type: {}", other);
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 fn dirs_path(kind: &str) -> PathBuf {
@@ -705,114 +494,6 @@ fn mesh_home_path() -> PathBuf {
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn test_validate_module_settings_valid() {
-        let mut fields = HashMap::new();
-        fields.insert(
-            "active".to_string(),
-            SchemaField {
-                field_type: "string".to_string(),
-                default: None,
-                description: None,
-                min: None,
-                max: None,
-                values: Some(vec!["dark".to_string(), "light".to_string()]),
-            },
-        );
-        fields.insert(
-            "speed".to_string(),
-            SchemaField {
-                field_type: "integer".to_string(),
-                default: None,
-                description: None,
-                min: Some(1.0),
-                max: Some(10.0),
-                values: None,
-            },
-        );
-
-        let schema = SettingsSchema { fields };
-
-        let valid_json = json!({
-            "active": "dark",
-            "speed": 5
-        });
-
-        assert!(validate_module_settings(&schema, &valid_json).is_ok());
-    }
-
-    #[test]
-    fn test_validate_module_settings_invalid_enum() {
-        let mut fields = HashMap::new();
-        fields.insert(
-            "active".to_string(),
-            SchemaField {
-                field_type: "string".to_string(),
-                default: None,
-                description: None,
-                min: None,
-                max: None,
-                values: Some(vec!["dark".to_string(), "light".to_string()]),
-            },
-        );
-
-        let schema = SettingsSchema { fields };
-
-        let invalid_json = json!({
-            "active": "neon"
-        });
-
-        assert!(validate_module_settings(&schema, &invalid_json).is_err());
-    }
-
-    #[test]
-    fn test_validate_module_settings_invalid_type() {
-        let mut fields = HashMap::new();
-        fields.insert(
-            "speed".to_string(),
-            SchemaField {
-                field_type: "integer".to_string(),
-                default: None,
-                description: None,
-                min: Some(1.0),
-                max: Some(10.0),
-                values: None,
-            },
-        );
-
-        let schema = SettingsSchema { fields };
-
-        let invalid_json = json!({
-            "speed": "fast"
-        });
-
-        assert!(validate_module_settings(&schema, &invalid_json).is_err());
-    }
-
-    #[test]
-    fn test_validate_module_settings_out_of_bounds() {
-        let mut fields = HashMap::new();
-        fields.insert(
-            "speed".to_string(),
-            SchemaField {
-                field_type: "integer".to_string(),
-                default: None,
-                description: None,
-                min: Some(1.0),
-                max: Some(10.0),
-                values: None,
-            },
-        );
-
-        let schema = SettingsSchema { fields };
-
-        let invalid_json_low = json!({ "speed": 0 });
-        let invalid_json_high = json!({ "speed": 11 });
-
-        assert!(validate_module_settings(&schema, &invalid_json_low).is_err());
-        assert!(validate_module_settings(&schema, &invalid_json_high).is_err());
-    }
 
     #[test]
     fn keyboard_settings_default_shortcuts_remain_available_without_user_overrides() {

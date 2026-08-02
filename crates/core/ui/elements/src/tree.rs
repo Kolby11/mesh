@@ -1,4 +1,4 @@
-/// Widget tree — the live, evaluated UI structure.
+//! Widget tree — the live, evaluated UI structure.
 use crate::accessibility::AccessibilityInfo;
 use crate::attributes::AttributeMap;
 use crate::composition::HandlerTarget;
@@ -9,10 +9,8 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Live interaction state for a single node.
-///
-/// Updated by `InputState::process` as pointer and keyboard events arrive.
-/// Read by `selector_matches` to evaluate pseudo-class selectors like `:hover`.
+/// Live interaction state, written by `InputState::process` and read by
+/// `selector_matches` for pseudo-class selectors like `:hover`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ElementState {
     pub hovered: bool,
@@ -28,27 +26,22 @@ pub struct ElementState {
     pub pressed: bool,
     pub invalid: bool,
     pub value: bool,
-    /// Ambient state of the surface the node lives on, not of the node itself:
-    /// the compositor's `xdg_toplevel` states, projected onto every node in the
-    /// tree. This CSS engine has no descendant combinators, so a window state
-    /// carried only on the root would be unreachable from the elements that
-    /// need to restyle for it — a sidebar cannot say
-    /// `.window:fullscreen .sidebar`. Carrying it on every node lets any
-    /// element write `.sidebar:fullscreen` directly.
-    ///
-    /// Always false on layer surfaces and popups, which have no such states.
+    /// Surface state, not node state: the compositor's `xdg_toplevel` states
+    /// projected onto every node. This engine has no descendant combinators, so
+    /// carrying them only on the root would put them out of reach — a sidebar
+    /// cannot write `.window:fullscreen .sidebar`, but can write
+    /// `.sidebar:fullscreen`. Always false on layer surfaces and popups.
     pub window: WindowSurfaceState,
 }
 
-/// The compositor's view of the containing toplevel, projected onto every node
-/// of that surface's tree as CSS state. See [`ElementState::window`].
+/// The compositor's view of the containing toplevel, as CSS state on every
+/// node of the surface's tree. See [`ElementState::window`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WindowSurfaceState {
-    /// `:windowed` — the surface is realized as an `xdg_toplevel` rather than
-    /// shell chrome. Unlike the flags below this is MESH's own decision, not the
-    /// compositor's, and it is the one a component restyles against to draw its
-    /// own window chrome (a "dock back" control instead of a "pop out" one).
-    /// The four compositor states are only ever true when this is.
+    /// `:windowed` — realized as an `xdg_toplevel` rather than shell chrome.
+    /// MESH's own decision, unlike the compositor states below, which are only
+    /// ever true when this is. Components restyle against it to draw window
+    /// chrome (a "dock back" control instead of "pop out").
     pub windowed: bool,
     /// `:fullscreen` — the window covers a whole output.
     pub fullscreen: bool,
@@ -60,21 +53,16 @@ pub struct WindowSurfaceState {
     pub tiled: bool,
 }
 
-/// Unique identifier for a node in the widget tree.
 pub type NodeId = u64;
 
 static NEXT_NODE_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Generate a unique node ID.
 pub fn next_node_id() -> NodeId {
     NEXT_NODE_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-/// Pre-bound event-handler call generated from markup like
-/// `onclick={handler(arg)}`.
-///
-/// Kept out of `event_handlers` string values so compiled trees do not encode
-/// handler-call arguments as JSON strings that must be reparsed at dispatch.
+/// Pre-bound handler call from markup like `onclick={handler(arg)}`, kept out
+/// of `event_handlers` so arguments need no JSON reparse at dispatch.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventHandlerCall {
     pub handler: HandlerTarget,
@@ -91,12 +79,9 @@ pub struct WidgetScrollMetrics {
     pub content_height: f32,
 }
 
-/// Copy-on-write child topology for a [`WidgetNode`].
-///
-/// Component memo entries and live trees share this allocation. A mutable tree
-/// walk copies only the immediate child-node overlays before descending; each
-/// child's authored payload and descendants remain shared until that level is
-/// actually mutated.
+/// Copy-on-write child topology shared by memo entries and live trees. A
+/// mutable walk copies only the immediate child overlays; authored payloads and
+/// descendants stay shared until that level is itself mutated.
 #[derive(Clone, Default)]
 pub struct SharedWidgetChildren(Arc<Vec<WidgetNode>>);
 
@@ -184,10 +169,8 @@ impl IntoIterator for SharedWidgetChildren {
 }
 
 /// Immutable template/build payload shared by memo entries and live nodes.
-///
-/// Public fields preserve the existing `WidgetNode` field API through its
-/// `Deref` implementation. Mutation is copy-on-write and is normally limited
-/// to the handful of nodes whose runtime attributes actually change.
+/// Public fields reach callers through `WidgetNode`'s `Deref`; mutation is
+/// copy-on-write and normally touches only the nodes that actually change.
 #[derive(Debug, Clone)]
 #[doc(hidden)]
 pub struct WidgetNodeAuthored {
@@ -207,29 +190,20 @@ pub struct WidgetCompositionMetadata {
     pub promoted_popover: bool,
 }
 
-/// A single node in the widget tree.
-///
-/// Produced by evaluating a template against script state. Each node has
-/// computed styles, layout, accessibility info, and optional event handlers.
+/// A node produced by evaluating a template against script state.
 #[derive(Debug, Clone)]
 pub struct WidgetNode {
     pub id: NodeId,
-    /// Fully resolved style (theme tokens → concrete values).
     pub computed_style: ComputedStyle,
-    /// Layout rectangle computed by the layout engine.
     pub layout: LayoutRect,
-    /// Child nodes, shared copy-on-write across component memo hits.
     pub children: SharedWidgetChildren,
-    /// Accessibility metadata.
     pub accessibility: AccessibilityInfo,
-    /// Live interaction state (hover, focus, active, etc.).
     pub state: ElementState,
     /// Typed runtime scroll state, kept out of the string attribute map.
     pub scroll_metrics: Option<WidgetScrollMetrics>,
     /// Stable runtime identity for this node, kept out of the string attribute map.
     mesh_key: Option<String>,
-    /// Keyed-loop identity for the node's direct placement in its parent.
-    /// Consumed while assigning shell runtime keys and never exposed to styles.
+    /// Consumed while assigning shell runtime keys; never exposed to styles.
     loop_identity: Option<Arc<str>>,
     /// Cached split `class` tokens derived from the raw `class` attribute.
     cached_class_attr: Option<String>,
@@ -252,7 +226,6 @@ impl DerefMut for WidgetNode {
 }
 
 impl WidgetNode {
-    /// Create a new node with defaults.
     pub fn new(tag: impl Into<String>) -> Self {
         Self {
             id: next_node_id(),
@@ -283,10 +256,9 @@ impl WidgetNode {
         Arc::ptr_eq(&self.authored, &other.authored)
     }
 
-    /// Whether any node in this subtree shares authored template payload with
-    /// `other`. This is useful at composition boundaries where runtime
-    /// finalization may legitimately copy the root overlay while leaving clean
-    /// descendants shared with a memo entry.
+    /// Whether any node here still shares authored payload with `other` —
+    /// true at composition boundaries, where finalization may copy the root
+    /// overlay while leaving clean descendants shared with a memo entry.
     #[doc(hidden)]
     pub fn contains_shared_authored_payload_with(&self, other: &Self) -> bool {
         self.shares_authored_payload_with(other)
@@ -327,12 +299,10 @@ impl WidgetNode {
         self.mesh_key().is_some()
     }
 
-    /// Attach a stable `{#for key=...}` identity to this direct loop child.
     pub fn set_loop_identity(&mut self, identity: impl Into<Arc<str>>) {
         self.loop_identity = Some(identity.into());
     }
 
-    /// The keyed-loop identity used when assigning this node's runtime key.
     pub fn loop_identity(&self) -> Option<&str> {
         self.loop_identity.as_deref()
     }
@@ -341,8 +311,7 @@ impl WidgetNode {
         self.module_id = Some(module_id.into());
     }
 
-    /// The shared module identity, for handing the same allocation to sibling
-    /// and child nodes built from the same module.
+    /// Shared so sibling and child nodes reuse the same allocation.
     pub fn shared_module_id(&self) -> Option<&Arc<str>> {
         self.module_id.as_ref()
     }
@@ -395,7 +364,6 @@ impl WidgetNode {
         &self.cached_classes
     }
 
-    /// Recursively find a node by ID.
     pub fn find(&self, id: NodeId) -> Option<&WidgetNode> {
         if self.id == id {
             return Some(self);
@@ -408,7 +376,6 @@ impl WidgetNode {
         None
     }
 
-    /// Recursively find a node by ID, returning a mutable reference.
     pub fn find_mut(&mut self, id: NodeId) -> Option<&mut WidgetNode> {
         if self.id == id {
             return Some(self);
@@ -421,7 +388,6 @@ impl WidgetNode {
         None
     }
 
-    /// Count total nodes in this subtree.
     pub fn node_count(&self) -> usize {
         1 + self.children.iter().map(|c| c.node_count()).sum::<usize>()
     }
@@ -470,6 +436,7 @@ mod tests {
             mesh_key: node.mesh_key.clone(),
             cached_class_attr: node.cached_class_attr.clone(),
             cached_classes: node.cached_classes.clone(),
+            loop_identity: node.loop_identity.clone(),
             authored: Arc::new((*node.authored).clone()),
         }
     }
@@ -535,9 +502,8 @@ mod tests {
                 .sum::<usize>()
     }
 
-    /// Conservative heap payload owned only by this tree clone. Allocator
-    /// headers and allocations nested inside JSON values are intentionally
-    /// omitted, so the reported COW memory reduction is a lower bound.
+    /// Heap owned only by this clone. Allocator headers and JSON-nested
+    /// allocations are omitted, so the reported reduction is a lower bound.
     fn exclusive_heap_bytes(node: &WidgetNode) -> usize {
         let mut bytes = dynamic_heap_bytes(node);
         if Arc::strong_count(&node.authored) == 1 {

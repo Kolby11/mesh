@@ -1,25 +1,21 @@
-/// Localization engine for MESH.
-///
-/// Provides system-wide locale management with per-module translation support,
-/// fallback chains, and runtime locale switching.
+//! System-wide locale management with per-module translation catalogs,
+//! fallback chains, and runtime locale switching.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// A set of translations for a single locale.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranslationSet {
     pub locale: String,
     pub messages: HashMap<String, String>,
 }
 
-/// The locale engine manages the active locale and translation lookup.
 #[derive(Debug, Clone)]
 pub struct LocaleEngine {
     active_locale: String,
     fallback_chain: Vec<String>,
     translations: HashMap<String, HashMap<String, String>>,
-    /// Per-module catalogs. Scoped lookup checks these before the global pool.
-    /// Key: module_id → locale → translation key → value.
+    /// `module_id → locale → key → value`, checked before the global pool.
     module_translations: HashMap<String, HashMap<String, HashMap<String, String>>>,
 }
 
@@ -64,7 +60,6 @@ impl LocaleEngine {
         self.active_locale = locale;
     }
 
-    /// Register translations for a locale.
     pub fn load_translations(&mut self, set: TranslationSet) {
         self.translations
             .entry(set.locale)
@@ -72,11 +67,8 @@ impl LocaleEngine {
             .extend(set.messages);
     }
 
-    /// Register translations scoped to a specific module.
-    ///
-    /// Module-scoped translations take precedence over global ones in
-    /// `translate_for_module`. All catalogs are also merged into the global pool
-    /// so that `translate` and template `t("key")` calls continue to work.
+    /// Takes precedence over global catalogs in [`Self::translate_for_module`].
+    /// Also merged into the global pool so `translate` and `t("key")` still work.
     pub fn load_module_translations(&mut self, module_id: &str, set: TranslationSet) {
         self.module_translations
             .entry(module_id.to_string())
@@ -87,7 +79,7 @@ impl LocaleEngine {
         self.load_translations(set);
     }
 
-    /// Look up a translation key, walking the fallback chain.
+    /// Walks the fallback chain.
     pub fn translate(&self, key: &str) -> Option<&str> {
         for locale in &self.fallback_chain {
             if let Some(messages) = self.translations.get(locale) {
@@ -99,11 +91,8 @@ impl LocaleEngine {
         None
     }
 
-    /// Look up a translation key scoped to a module, then fall back to global.
-    ///
-    /// Use this when resolving manifest text (keybind labels, layout labels,
-    /// provider labels, resource labels) so module-specific catalog entries take
-    /// precedence and accidental cross-module key collisions are avoided.
+    /// Module catalog first, then global. Use for manifest text so module
+    /// entries win and cross-module key collisions cannot bite.
     pub fn translate_for_module<'a>(&'a self, key: &str, module_id: &str) -> Option<&'a str> {
         if let Some(module_locales) = self.module_translations.get(module_id) {
             for locale in &self.fallback_chain {
@@ -117,13 +106,9 @@ impl LocaleEngine {
         self.translate(key)
     }
 
-    /// Return the effective catalog visible to a module at the current locale.
-    ///
-    /// This is the owned counterpart to [`Self::translate_for_module`], for
-    /// consumers such as the Luau runtime that need to retain a lookup table.
-    /// Apply lower-priority locales first so later entries have exactly the
-    /// same precedence as individual lookups: module catalogs (including a
-    /// module fallback locale) take precedence over every global catalog.
+    /// Owned counterpart to [`Self::translate_for_module`], for consumers such
+    /// as the Luau runtime that retain a lookup table. Lower-priority locales
+    /// are applied first so precedence matches individual lookups.
     pub fn effective_translations_for_module(&self, module_id: &str) -> HashMap<String, String> {
         let mut messages = HashMap::new();
         for locale in self.fallback_chain.iter().rev() {
@@ -141,11 +126,8 @@ impl LocaleEngine {
         messages
     }
 
-    /// Translate with interpolation. Placeholders use `{name}` syntax.
-    ///
-    /// Walks the template once instead of doing `String::replace` per
-    /// placeholder, so cost is O(template_len) regardless of how many
-    /// args are supplied.
+    /// Interpolates `{name}` placeholders in one walk, so cost is
+    /// O(template_len) regardless of how many args are supplied.
     pub fn translate_with(&self, key: &str, args: &HashMap<String, String>) -> Option<String> {
         let template = self.translate(key)?;
         let mut result = String::with_capacity(template.len());
@@ -158,7 +140,6 @@ impl LocaleEngine {
                 match args.get(name) {
                     Some(value) => result.push_str(value),
                     None => {
-                        // Unknown placeholder: preserve the literal `{name}`.
                         result.push('{');
                         result.push_str(name);
                         result.push('}');
@@ -212,7 +193,6 @@ mod tests {
             messages: HashMap::from([("ok".to_string(), "OK".to_string())]),
         });
 
-        // "ok" is not in "fr", falls back to "en"
         assert_eq!(engine.translate("ok"), Some("OK"));
     }
 

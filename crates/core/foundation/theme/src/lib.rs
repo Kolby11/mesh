@@ -1,8 +1,8 @@
-/// Token-based theme engine for MESH.
-///
-/// Themes define design tokens across standard groups: colors, typography,
-/// spacing, radius, elevation, borders, motion, and shadows. Components
-/// inherit tokens from the active theme.
+//! Token-based theme engine.
+//!
+//! Themes define design tokens across standard groups — colors, typography,
+//! spacing, radius, elevation, borders, motion, shadows — which components
+//! inherit from the active theme.
 use serde::de::{MapAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -154,7 +154,6 @@ impl<'de> Deserialize<'de> for ComponentDefaults {
     }
 }
 
-/// A resolved theme token value.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TokenValue {
@@ -179,10 +178,8 @@ pub struct ThemeDefaults {
     pub components: HashMap<String, ComponentDefaults>,
 }
 
-/// One stop of a theme-level `@keyframes` rule: a timeline offset in
-/// `[0.0, 1.0]` plus the raw CSS declarations at that stop. The theme stores
-/// keyframes uninterpreted; consumers (e.g. the shell's tooltip animation)
-/// resolve `var()` references and lower the properties themselves.
+/// A timeline offset in `[0.0, 1.0]` plus the raw declarations at that stop.
+/// Stored uninterpreted; consumers resolve `var()` and lower the properties.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ThemeKeyframeStop {
     pub offset: f32,
@@ -198,7 +195,6 @@ pub struct ThemeModule {
     pub defaults: ThemeDefaults,
 }
 
-/// A complete theme definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Theme {
     pub id: String,
@@ -211,12 +207,9 @@ pub struct Theme {
     pub keyframes: HashMap<String, Vec<ThemeKeyframeStop>>,
     #[serde(default)]
     modules: HashMap<String, ThemeModule>,
-    /// Monotonic identity for the style-bearing theme data.
-    ///
-    /// Clones retain the revision so consumers can safely share derived style
-    /// caches. Every public mutable accessor advances it before exposing the
-    /// corresponding data, preventing an in-place theme edit from reusing
-    /// values lowered from the previous contents.
+    /// Monotonic identity for the style-bearing data, retained across clones
+    /// so consumers can share derived style caches. Every mutable accessor
+    /// advances it, so an in-place edit cannot reuse stale lowered values.
     #[serde(skip, default = "next_theme_revision")]
     revision: u64,
 }
@@ -234,7 +227,6 @@ impl Theme {
         }
     }
 
-    /// Identity of the current style-bearing theme contents.
     pub fn revision(&self) -> u64 {
         self.revision
     }
@@ -266,7 +258,7 @@ impl Theme {
         &mut self.modules
     }
 
-    /// Look up a single token by dotted name (e.g. "color.primary").
+    /// Look up a token by dotted name, e.g. `color.primary`.
     pub fn token(&self, name: &str) -> Option<&TokenValue> {
         self.tokens
             .get(name)
@@ -279,7 +271,7 @@ impl Theme {
             })
     }
 
-    /// Return all tokens in a group (e.g. "color" returns "color.primary", "color.surface", etc.).
+    /// Every token whose dotted name starts with `group`.
     pub fn tokens_in_group(&self, group: &str) -> HashMap<&str, &TokenValue> {
         let prefix = format!("{group}.");
         self.tokens
@@ -293,8 +285,7 @@ impl Theme {
         self.defaults.components.get(component)
     }
 
-    /// Look up a named `@keyframes` rule declared in the theme CSS. Stops are
-    /// sorted by offset.
+    /// Stops of a theme-CSS `@keyframes` rule, sorted by offset.
     pub fn keyframe_stops(&self, name: &str) -> Option<&[ThemeKeyframeStop]> {
         self.keyframes.get(name).map(Vec::as_slice)
     }
@@ -397,7 +388,6 @@ fn flatten_module_tokens_into(
     }
 }
 
-/// The theme engine manages the active theme and notifies listeners on change.
 #[derive(Debug)]
 pub struct ThemeEngine {
     active: Theme,
@@ -500,9 +490,7 @@ pub fn theme_path_for_id(theme_id: &str) -> PathBuf {
     theme_dir_path().join(format!("{theme_id}.json"))
 }
 
-/// Load all theme packages and legacy `*.json` theme files found in a directory.
-/// Files that fail to parse are silently skipped so one bad theme does not block
-/// startup.
+/// Unparseable files are skipped so one bad theme cannot block startup.
 pub fn load_themes_from_dir(dir: &Path) -> Vec<Theme> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -723,10 +711,9 @@ fn parse_theme_css_block(selector: &str, body: &str, theme: &mut Theme) -> Resul
     Ok(())
 }
 
-/// Parse the inside of an `@keyframes` rule: a sequence of
-/// `<stop-selector> { declarations }` blocks where the stop selector is
-/// `from`, `to`, a `<percent>%`, or a comma list of those (which duplicates
-/// the declarations at each listed offset). Returns stops sorted by offset.
+/// Parse `<stop-selector> { declarations }` blocks, where the selector is
+/// `from`, `to`, `<percent>%`, or a comma list duplicating the declarations at
+/// each offset. Returns stops sorted by offset.
 fn parse_keyframes_body(name: &str, mut rest: &str) -> Result<Vec<ThemeKeyframeStop>, String> {
     let mut stops: Vec<ThemeKeyframeStop> = Vec::new();
     while let Some(open) = rest.find('{') {

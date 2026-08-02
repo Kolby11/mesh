@@ -386,29 +386,21 @@ fn balanced_parens(expr: &str) -> bool {
 }
 
 fn eval_path(expr: &str, store: &dyn mesh_core_elements::VariableStore) -> ExprValue {
-    if let Some(value) = store.get_ref(expr) {
-        return json_value_ref_to_expr_value(value);
-    }
-
-    let parts: Vec<&str> = expr.splitn(2, '.').collect();
-    if parts.len() == 2 {
-        if let Some(root) = store.get_ref(parts[0]) {
-            if let Some(nested) = json_path_ref(root, parts[1]) {
+    if let Some((root_name, path)) = expr.split_once('.') {
+        if let Some(root) = store.get_ref(root_name) {
+            if let Some(nested) = json_path_ref(root, path) {
                 return json_value_ref_to_expr_value(nested);
             }
         }
-    }
-
-    if let Some(value) = store.get(expr) {
-        return json_value_to_expr_value(value);
-    }
-
-    if parts.len() == 2 {
-        if let Some(root) = store.get(parts[0]) {
-            if let Some(nested) = json_path(root, parts[1]) {
+        if let Some(root) = store.get(root_name) {
+            if let Some(nested) = json_path(root, path) {
                 return json_value_to_expr_value(nested);
             }
         }
+    } else if let Some(value) = store.get_ref(expr) {
+        return json_value_ref_to_expr_value(value);
+    } else if let Some(value) = store.get(expr) {
+        return json_value_to_expr_value(value);
     }
 
     if let Ok(value) = expr.parse::<f64>() {
@@ -483,11 +475,8 @@ fn json_path_ref<'a>(
     Some(value)
 }
 
-fn json_path(mut value: serde_json::Value, path: &str) -> Option<serde_json::Value> {
-    for key in path.split('.') {
-        value = value.get(key)?.clone();
-    }
-    Some(value)
+fn json_path(value: serde_json::Value, path: &str) -> Option<serde_json::Value> {
+    json_path_ref(&value, path).cloned()
 }
 
 fn strip_string_literal(s: &str) -> Option<String> {

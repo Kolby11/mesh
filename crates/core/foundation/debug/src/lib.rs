@@ -1,10 +1,8 @@
-/// Debug overlay types for the MESH shell.
-///
-/// `DebugSnapshot` is a point-in-time view of shell internals built by the
-/// core and handed to the renderer to paint over live surfaces.
+//! Debug overlay types. [`DebugSnapshot`] is a point-in-time view of shell
+//! internals built by core and painted over live surfaces by the renderer.
+
 pub mod allocation;
 
-/// A point-in-time snapshot of shell state for the debug overlay.
 #[derive(Debug, Clone, Default)]
 pub struct DebugSnapshot {
     pub modules: Vec<ModuleEntry>,
@@ -243,9 +241,9 @@ pub struct ProfilingInvalidationSnapshot {
     pub retained: RetainedInvalidationCounts,
     pub paint: RetainedPaintSnapshot,
     pub text: TextCacheSnapshot,
-    /// True when the paint pass took the narrow-script path (SCRIPT_NARROW flag).
+    /// The paint pass took the `SCRIPT_NARROW` path.
     pub narrow_path: bool,
-    /// Number of nodes (expanded leaf + ancestor chain) dirtied on the narrow path.
+    /// Leaf plus ancestor chain dirtied on the narrow path.
     pub affected_node_count: u64,
 }
 
@@ -260,7 +258,6 @@ pub struct ComponentInvalidationCounts {
     pub accessibility: u64,
     pub metrics: u64,
     pub surface_config: u64,
-    /// Incremented when a SCRIPT_NARROW invalidation was taken (leaf-only path).
     pub script_narrow: u64,
 }
 
@@ -524,18 +521,17 @@ pub struct ModuleGraphEntry {
     pub surface_layout_label_key: Option<String>,
     pub surface_layout_label_fallback: Option<String>,
     pub provides_interfaces: Vec<String>,
-    /// Resolved display labels for each provided interface, indexed parallel to `provides_interfaces`.
+    /// Parallel to `provides_interfaces`.
     pub provides_interface_labels: Vec<Option<String>>,
     pub provides_settings: Vec<String>,
-    /// Generated prop schema for the module's public component, when exposed.
+    /// Generated prop schema for the public component, when exposed.
     pub settings_schema: Option<serde_json::Value>,
-    /// Effective profile-scoped `props.global` overrides for the module.
+    /// Effective profile-scoped `props.global` overrides.
     pub settings_values: serde_json::Value,
-    /// Live root-instance ids that may receive a per-instance prop override.
+    /// Live root-instance ids that may take a per-instance override.
     pub settings_instances: Vec<String>,
-    /// Effective profile-scoped `props.instances` overrides, keyed by instance id.
+    /// Effective `props.instances` overrides, keyed by instance id.
     pub settings_instance_values: serde_json::Value,
-    /// Optional module-authored settings component entrypoint.
     pub settings_ui: Option<String>,
     pub provides_i18n: Vec<String>,
     pub provides_themes: Vec<String>,
@@ -583,8 +579,7 @@ pub struct BackendRuntimeEntry {
     pub provider_id: String,
     pub status: String,
     pub message: String,
-    /// Number of times this (interface, provider_id) pair has recorded a failure.
-    /// Zero for non-failure entries.
+    /// Failures recorded for this `(interface, provider_id)` pair.
     pub failure_count: u64,
 }
 
@@ -606,15 +601,14 @@ pub struct HealthEntry {
     pub status: String,
 }
 
-/// Runtime state of the debug overlay — owned by the shell.
 #[derive(Debug, Default)]
 pub struct DebugOverlayState {
     pub enabled: bool,
     pub show_layout_bounds: bool,
-    /// Chrome-style element picker. While active, pointer input is captured
-    /// by the shell and the deepest node under the cursor is highlighted.
+    /// While active, the shell captures pointer input and highlights the
+    /// deepest node under the cursor.
     pub element_picker_enabled: bool,
-    /// Last node under the picker cursor, also retained after click selection.
+    /// Last node under the picker cursor, retained after click selection.
     pub inspected_element: Option<serde_json::Value>,
     pub active_tab: DebugTab,
     pub active_view: DebugInspectorView,

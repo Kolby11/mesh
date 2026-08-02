@@ -126,10 +126,8 @@ pub fn with_tracking_suspended<T>(work: impl FnOnce() -> T) -> T {
     }
 }
 
-/// Global allocator wrapper used by the opt-in allocation profiling build.
-///
-/// Counters are thread-local so a surface render pass observes allocations made
-/// on the shell thread without folding in concurrent backend runtime activity.
+/// Counters are thread-local so a render pass observes allocations on the shell
+/// thread without folding in concurrent backend runtime activity.
 pub struct CountingAllocator<A> {
     inner: A,
 }

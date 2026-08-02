@@ -1,10 +1,7 @@
 //! Template AST — represents the markup structure of a component.
 
-/// Source-level UI tag classification.
-///
-/// Encodes the semantic intent of the tag as written by the module author.
-/// Distinct from `UiTag` in `mesh-core-render`, which is the lowered
-/// runtime primitive set.
+/// The tag's semantic intent as authored. Distinct from `UiTag` in
+/// `mesh-core-render`, which is the lowered runtime primitive set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceTag {
     // Layout family
@@ -89,11 +86,10 @@ pub enum SourceTag {
 }
 
 impl SourceTag {
-    /// Classify a raw tag name from the template source.
     pub fn from_tag_name(tag: &str) -> Self {
         match tag {
-            // Built-in MESH UI vocabulary. Keep primitives lowercase so
-            // PascalCase remains unambiguous for custom components.
+            // Primitives stay lowercase so PascalCase is unambiguously a
+            // custom component.
             "panel" => Self::Panel,
             "row" => Self::Row,
             "column" => Self::Column,
@@ -165,24 +161,19 @@ impl SourceTag {
             "slot" => Self::Slot,
             "surface" => Self::Surface,
             "widget" => Self::Widget,
-            // Component refs are handled before ElementNode is constructed
             _ => Self::Unknown,
         }
     }
 }
 
-/// The template block containing the root node list.
 #[derive(Debug, Clone)]
 pub struct TemplateBlock {
     pub root: Vec<TemplateNode>,
 }
 
-/// A single node in the template tree.
 #[derive(Debug, Clone)]
 pub enum TemplateNode {
-    /// An element like `<row>`, `<text>`, `<button>`.
     Element(ElementNode),
-    /// Raw text content.
     Text(TextNode),
     /// An expression interpolation: `{ variable }`.
     Expr(ExprNode),

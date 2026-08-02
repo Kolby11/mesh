@@ -166,7 +166,6 @@ impl Shell {
             tracing::warn!("failed to load config, using defaults: {e}");
             ShellConfig {
                 shell: Default::default(),
-                modules: HashMap::new(),
             }
         });
         let shared_settings = SettingsStore::load().unwrap_or_else(|e| {

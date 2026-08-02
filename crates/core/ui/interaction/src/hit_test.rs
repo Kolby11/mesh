@@ -29,9 +29,8 @@ pub struct PointerEventHandlerHit<'a> {
     pub bounds: ContentBounds,
 }
 
-/// Deepest visible layout node under a point. Unlike the normal pointer hit,
-/// this intentionally includes non-interactive and synthetic nodes so the
-/// debug element picker can inspect everything that was painted.
+/// Deepest visible node under a point, including non-interactive and synthetic
+/// ones so the debug element picker can inspect everything painted.
 #[derive(Debug, Clone, Copy)]
 pub struct InspectHit<'a> {
     pub node: &'a WidgetNode,
@@ -116,8 +115,8 @@ impl TooltipTargetCache {
                 self.cached = None;
                 return None;
             };
-            // Preserve the shell's anonymous-owner behavior: without a stable
-            // key, placement uses the pointer-hit bounds and default style.
+            // Without a stable key, placement falls back to the pointer-hit
+            // bounds and default style.
             let keyed_owner = tooltip.owner.mesh_key().map(|_| tooltip.owner);
             self.cached = Some(CachedTooltipTarget {
                 generation: retained_generation,
@@ -171,24 +170,16 @@ pub fn pointer_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<PointerHit>
     Some(hit)
 }
 
-/// Resolve pointer-press targeting in one traversal.
-///
-/// The shell press path needs the deepest pointer-focusable node, and if none
-/// exists, the deepest ancestor under the point with a click handler. The older
-/// path computed these with separate full-tree walks (`find_focusable_at`,
-/// `find_node_path_at`, and per-key handler lookups), then walked again for
-/// target bounds. This returns the same target decision plus bounds directly
-/// from the hit traversal.
+/// Press targeting in one traversal: the deepest pointer-focusable node, or
+/// failing that the deepest ancestor with a click handler, plus its bounds.
 pub fn pointer_press_hit(node: &WidgetNode, x: f32, y: f32) -> PointerPressHit<'_> {
     let mut hit = pointer_press_hit_inner(node, x, y, 0.0, 0.0).unwrap_or_default();
     hit.target = hit.focusable.or(hit.target);
     hit
 }
 
-/// Resolve the deepest node under the pointer that owns a plain event handler.
-///
-/// This preserves the legacy `find_node_path_at(...).rev().find(find_event_handler)`
-/// behavior while avoiding the path allocation plus per-key tree walks.
+/// Deepest node under the pointer owning a plain event handler, without the
+/// path allocation and per-key tree walks a two-pass search would need.
 pub fn pointer_event_handler_hit<'a>(
     node: &'a WidgetNode,
     x: f32,
@@ -349,10 +340,8 @@ pub fn node_is_source(node: &WidgetNode, tags: &[&str]) -> bool {
     tags.iter().any(|tag| *tag == source)
 }
 
-/// Resolves node references and bounds for a set of `_mesh_key`s in one
-/// traversal, instead of a separate `find_node_by_key` + `find_node_bounds_by_key`
-/// walk per key. Used by hover-transition dispatch, where a path-depth number
-/// of keys would otherwise each re-walk the whole tree.
+/// Node references and bounds for a set of `_mesh_key`s in one traversal. Used
+/// by hover-transition dispatch, where each key would otherwise re-walk.
 pub fn find_nodes_by_keys<'a>(
     node: &'a WidgetNode,
     keys: &std::collections::HashSet<&str>,
@@ -408,9 +397,8 @@ pub fn find_node_bounds_by_key(
     None
 }
 
-/// Resolves a keyed node and its content bounds in one traversal. This is the
-/// allocation-free counterpart to [`find_nodes_by_keys`] for callers that need
-/// exactly one active node, such as slider drags.
+/// Allocation-free counterpart to [`find_nodes_by_keys`] for callers needing
+/// exactly one node, such as slider drags.
 pub fn find_node_with_bounds_by_key<'a>(
     node: &'a WidgetNode,
     key: &str,
@@ -457,8 +445,8 @@ fn find_node_path_at_offset(
     Some(reversed)
 }
 
-/// Collects the hit path in deepest-first order. The caller reverses once
-/// at the top, avoiding O(n) `Vec::insert(0, ...)` at every ancestor.
+/// Deepest-first; the caller reverses once, avoiding an insert-at-front per
+/// ancestor.
 fn find_node_path_reversed(
     node: &WidgetNode,
     x: f32,
@@ -528,14 +516,10 @@ fn non_empty_tooltip_text(value: Option<&str>) -> Option<&str> {
     value.filter(|value| !value.trim().is_empty())
 }
 
-/// Bounds of the innermost ancestor of the keyed node whose overflow clips
-/// contents, in surface coordinates (left, top, right, bottom).
-///
-/// Tooltip auto-placement uses this as the box the tooltip should stay inside:
-/// a clipping container is the visual region the user perceives the element to
-/// live in, so a tooltip escaping it reads as overflow. Returns `None` when the
-/// key is absent or no ancestor clips — the caller then constrains against the
-/// whole paint surface instead. The node itself is never its own container.
+/// Surface-space bounds of the innermost clipping ancestor, which tooltip
+/// auto-placement treats as the box to stay inside — a clipping container is
+/// the region the user perceives the element to live in. `None` when the key is
+/// absent or nothing clips; the node is never its own container.
 pub fn find_tooltip_container_bounds(node: &WidgetNode, key: &str) -> Option<ContentBounds> {
     find_container_bounds_inner(node, key, 0.0, 0.0, None).flatten()
 }
@@ -952,26 +936,21 @@ mod tests {
         use mesh_core_elements::style::Overflow;
 
         let mut root = indexed_tree(6, 8);
-        // No ancestor clips → no container.
         assert_eq!(find_tooltip_container_bounds(&root, "cell-2-3"), None);
-        // Missing key → no container.
         assert_eq!(find_tooltip_container_bounds(&root, "missing"), None);
 
-        // Root clips: it becomes the container for descendants.
         root.computed_style.overflow_y = Overflow::Hidden;
         assert_eq!(
             find_tooltip_container_bounds(&root, "cell-2-3"),
             Some((0.0, 0.0, 160.0, 120.0))
         );
 
-        // An inner clipping row overrides the root for its own children.
         root.children[2].computed_style.overflow_y = Overflow::Scroll;
         assert_eq!(
             find_tooltip_container_bounds(&root, "cell-2-3"),
             Some(find_node_bounds_by_key(&root, "row-2", 0.0, 0.0).unwrap())
         );
 
-        // The clipping node itself is not its own container.
         assert_eq!(
             find_tooltip_container_bounds(&root, "row-2"),
             Some((0.0, 0.0, 160.0, 120.0))

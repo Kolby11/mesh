@@ -1,27 +1,19 @@
 //! Typed placement model for `<popover>` surface promotion.
 //!
-//! A `<popover>` is authored inline as a child of its trigger's component, but
-//! at runtime it is *promoted* into its own compositor surface (an `xdg_popup`
-//! child of the host surface) so it can paint outside the host buffer. The host
-//! buffer is a fixed pixel rectangle — `PixelBuffer::set_pixel` drops every
-//! out-of-bounds write — so a menu that hangs below a short bar physically needs
-//! a surface of its own.
+//! A `<popover>` is authored inline but promoted at runtime into its own
+//! `xdg_popup` child surface, because the host buffer is a fixed pixel rectangle
+//! that drops out-of-bounds writes — a menu hanging below a short bar needs a
+//! surface of its own.
 //!
-//! This module owns the placement data the shell hands to the presentation
-//! backend when it promotes a popover. The field set maps 1:1 onto
-//! `xdg_positioner` (anchor / gravity / constraint-adjustment / offset) so the
-//! Wayland translation in `mesh-core-presentation` is a direct enum mapping with
-//! no policy of its own.
-//!
-//! The placement is parsed from the element's attributes, e.g.
+//! The field set maps 1:1 onto `xdg_positioner`, so the Wayland translation in
+//! `mesh-core-presentation` is a direct enum mapping with no policy of its own.
+//! Placement is parsed from attributes:
 //! `<popover anchor="bottom" gravity="bottom" offset-y="4" grab="hover">`.
 
 use crate::tree::WidgetNode;
 
-/// Edge/corner of the anchor rectangle the popup is positioned against.
-///
-/// Mirrors `xdg_positioner.anchor`. `Center` means the popup is positioned
-/// relative to the center of the anchor rectangle.
+/// Edge or corner of the anchor rectangle the popup positions against.
+/// Mirrors `xdg_positioner.anchor`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PopoverAnchor {
     Center,
@@ -36,10 +28,8 @@ pub enum PopoverAnchor {
     BottomRight,
 }
 
-/// Direction the popup grows away from the anchor point.
-///
-/// Mirrors `xdg_positioner.gravity`. For a menu dropping below a top bar the
-/// gravity is `Bottom` (the popup extends downward from its anchor edge).
+/// Direction the popup grows away from the anchor point. Mirrors
+/// `xdg_positioner.gravity`; a menu below a top bar has gravity `Bottom`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PopoverGravity {
     Center,
@@ -54,9 +44,7 @@ pub enum PopoverGravity {
     BottomRight,
 }
 
-/// How the compositor may adjust placement to keep the popup on-screen.
-///
-/// Mirrors `xdg_positioner.constraint_adjustment`. Defaults enable flip+slide
+/// Mirrors `xdg_positioner.constraint_adjustment`. Flip+slide is on by default
 /// on both axes so an edge-anchored menu re-anchors instead of clipping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PopoverConstraintAdjustment {
@@ -81,17 +69,11 @@ impl Default for PopoverConstraintAdjustment {
     }
 }
 
-/// Input-grab policy for the promoted popup.
-///
-/// An `xdg_popup` grab requires a recent input *serial* — i.e. it can only be
-/// taken in response to a click — so a popover opened purely on hover cannot
-/// grab. The two policies make that constraint explicit per popover:
-///
-/// - [`PopoverGrab::Hover`] — no compositor grab. The popover opens on hover and
-///   the core popover controller owns the hover-bridge / dismiss logic (so the
-///   cursor can travel from trigger to popup without dismissing).
-/// - [`PopoverGrab::Click`] — take the compositor grab using the click serial.
-///   The compositor dismisses on outside-click and routes a keyboard grab.
+/// An `xdg_popup` grab needs a recent input serial, so it can only be taken in
+/// response to a click; a hover-opened popover cannot grab. [`PopoverGrab::Hover`]
+/// therefore leaves dismissal to the core popover controller (letting the cursor
+/// travel from trigger to popup), while [`PopoverGrab::Click`] takes the
+/// compositor grab and gets outside-click dismissal and a keyboard grab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PopoverGrab {
     #[default]
@@ -112,9 +94,8 @@ pub struct PopoverPlacement {
 }
 
 impl PopoverPlacement {
-    /// Parse placement from a `<popover>` node's attributes. Unknown or missing
-    /// attributes fall back to the menu-friendly defaults (anchor/gravity below,
-    /// flip+slide on, hover grab).
+    /// Missing attributes fall back to menu-friendly defaults: anchor and
+    /// gravity below, flip+slide on, hover grab.
     pub fn from_node(node: &WidgetNode) -> Self {
         Self::from_attributes(&node.attributes)
     }
@@ -129,8 +110,8 @@ impl PopoverPlacement {
         if let Some(gravity) = attrs.get("gravity").and_then(|v| parse_gravity(v)) {
             placement.gravity = gravity;
         } else if attrs.get("gravity").is_none() && attrs.contains_key("anchor") {
-            // When only an anchor is given, default the gravity to match it so a
-            // popover "anchored left" also grows left without restating it.
+            // With only an anchor given, match gravity to it so a popover
+            // "anchored left" also grows left without restating it.
             placement.gravity = gravity_for_anchor(placement.anchor);
         }
         if let Some(offset) = attrs.get("offset-x").and_then(|v| v.parse::<i32>().ok()) {
@@ -202,8 +183,8 @@ fn parse_grab(value: &str) -> Option<PopoverGrab> {
     })
 }
 
-/// Parse a space/comma separated constraint list, e.g. `"flip-y slide-x"`.
-/// An empty or `"none"` list disables all adjustments.
+/// Space/comma separated, e.g. `"flip-y slide-x"`; empty or `"none"` disables
+/// every adjustment.
 fn parse_constraint(value: &str) -> PopoverConstraintAdjustment {
     let mut adjust = PopoverConstraintAdjustment {
         flip_x: false,

@@ -10,25 +10,15 @@ use std::collections::BTreeMap;
 
 /// Surface **placement**, resolved from the manifest and user settings.
 ///
-/// Sizing is no longer part of this struct: every surface is sized by CSS
-/// content measurement of its component root (`width`/`height`/`min-*`/`max-*`
-/// on the surface root, resolved by the layout engine) and the show/hide
-/// transition is a CSS `transition` on that root. See
-/// `docs/spec/03-components.md` §2.
+/// Sizing is not part of this struct: surfaces are sized by CSS content
+/// measurement of the component root. See `docs/spec/03-components.md` §2.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SurfaceLayoutSettings {
-    /// Whether this surface is compositor shell chrome or an ordinary window.
-    /// The layer fields below are inert for [`SurfaceRole::Window`] (the
-    /// compositor places a toplevel), and [`Self::window`] is inert for
-    /// [`SurfaceRole::Layer`].
+    /// The layer fields below are inert for [`SurfaceRole::Window`], and
+    /// [`Self::window`] is inert for [`SurfaceRole::Layer`].
     pub role: SurfaceRole,
-    /// Whether [`Self::role`] may be changed while the surface is running. Only
-    /// a surface that declared `mesh.surface.promotable` can be popped out into
-    /// a window and docked back; see [`SurfaceLayoutSection::promotable`].
+    /// Whether [`Self::role`] may change while the surface is running.
     pub promotable: bool,
-    /// Toplevel-only properties. `title` is still unresolved here — it is
-    /// localized against the owning module's catalog at render time, where the
-    /// locale is known.
     pub window: WindowLayoutSettings,
     pub edge: Edge,
     pub layer: Layer,
@@ -39,22 +29,19 @@ pub struct SurfaceLayoutSettings {
     pub margin_right: i32,
     pub margin_bottom: i32,
     pub margin_left: i32,
-    /// Opt this surface into compositor background blur. Surfaces up the layer
-    /// stack use this to acquire a `:blur`-suffixed compositor namespace that a
-    /// single blur rule can target (see [`SurfaceLayoutSection::blur`]).
+    /// Appends a `:blur` suffix to the compositor namespace so a single
+    /// compositor blur rule can target every opted-in surface.
     pub blur: bool,
 }
 
 /// Toplevel-only placement settings (`role: "window"`).
 ///
-/// `title` stays a [`LocalizedText`] rather than a resolved string because
-/// this struct is built once at load time, before a locale is bound; the shell
-/// resolves it per render against the owning module's catalog.
+/// `title` stays a [`LocalizedText`] because this struct is built at load time,
+/// before a locale is bound; the shell resolves it per render.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowLayoutSettings {
     pub title: Option<LocalizedText>,
-    /// `None` means "derive from the module id" — resolved by the shell, which
-    /// knows the id. Keeps this layer free of identity guesses.
+    /// `None` means "derive from the module id" — resolved by the shell.
     pub app_id: Option<String>,
     pub resizable: bool,
     pub decorations: WindowDecorations,
@@ -80,18 +67,13 @@ pub struct FrontendModuleSettingsState {
     pub effective: serde_json::Value,
     pub layout: SurfaceLayoutSettings,
     pub props: FrontendModulePropSettings,
-    /// Stored values this resolution refused, and inert ones it kept.
-    ///
-    /// Returned rather than logged: only the caller knows whether it is reading
-    /// the store at startup or re-reading it after the user saved the file, and
-    /// a live reload must not repeat what it already said.
+    /// Returned rather than logged: only the caller knows whether this is a
+    /// startup read or a reload, and a reload must not repeat itself.
     pub diagnostics: Vec<SettingsDiagnostic>,
 }
 
-/// User prop overrides from this module's namespace in the settings store.
-///
-/// Shape:
-/// `{ "props": { "global": { ... }, "instances": { "<instance_key>": { ... } } } }`.
+/// User prop overrides, shaped as
+/// `{ "global": { ... }, "instances": { "<instance_key>": { ... } } }`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FrontendModulePropSettings {
     pub global: BTreeMap<String, serde_json::Value>,
@@ -120,13 +102,9 @@ pub fn generic_surface_layout_fallback() -> SurfaceLayoutSettings {
     }
 }
 
-/// Resolve a surface's baseline layout from its manifest.
-///
-/// Core owns the canonical defaults (`generic_surface_layout_fallback`). The
-/// module's compact `mesh.surface` block (normalized into `surface_layout`)
-/// overrides only the fields it declares. User overrides from the settings
-/// store's module namespace are applied on top of this in
-/// [`resolve_frontend_module_settings`].
+/// Resolve a surface's baseline layout: core defaults overridden by whatever
+/// the module's `mesh.surface` block declares. User overrides land on top of
+/// this in [`resolve_frontend_module_settings`].
 pub fn surface_layout_from_manifest(manifest: &Manifest) -> SurfaceLayoutSettings {
     let mut layout = generic_surface_layout_fallback();
 
@@ -189,18 +167,12 @@ pub fn surface_layout_from_manifest(manifest: &Manifest) -> SurfaceLayoutSetting
 
 /// Layer a module's stored user overrides over its manifest declarations.
 ///
-/// `raw` is the module's namespace from the single settings store
-/// (`docs/spec/08-settings.md` §1) — sparse, so any field the user never
-/// touched falls through to the manifest and then to the core default. The
-/// module directory is never read here: shipped module source holds defaults
-/// only, never user decisions.
-///
-/// `namespace` is the store key `raw` came from (`@mesh/navigation-bar`), used
-/// only to locate diagnostics. Values the placement schema rejects are dropped
-/// before the reads below, so an unusable stored value falls through to the
-/// declared default *and* is reported, rather than silently doing nothing.
-/// `raw` itself is returned untouched: it is what the module's script sees, and
-/// the store stays the record of what the user actually wrote.
+/// `raw` is the module's sparse namespace from the settings store
+/// (`docs/spec/08-settings.md` §1); untouched fields fall through to the
+/// manifest and then to the core default. `namespace` is the store key it came
+/// from, used to locate diagnostics. Rejected values are dropped before the
+/// reads below, so an unusable stored value falls through *and* is reported.
+/// `raw` is returned untouched — it is what the module's script sees.
 pub fn resolve_frontend_module_settings(
     namespace: &str,
     raw: serde_json::Value,
@@ -212,9 +184,8 @@ pub fn resolve_frontend_module_settings(
 /// Resolve module settings and validate prop overrides against the primary
 /// component's declarations.
 ///
-/// The declaration is optional so non-frontend modules and callers that only
-/// have a manifest can still resolve surface placement. Frontend runtime and
-/// tooling callers should pass the compiled component's `<props>` block.
+/// `props_block` is optional so manifest-only callers can still resolve
+/// placement; frontend and tooling callers should pass the compiled block.
 pub fn resolve_frontend_module_settings_with_props(
     namespace: &str,
     raw: serde_json::Value,
@@ -226,9 +197,6 @@ pub fn resolve_frontend_module_settings_with_props(
         validate_module_namespace(namespace, &raw, manifest, props_block);
     let surface = checked_surface.as_object();
 
-    // The user can move a surface between shell chrome and a window
-    // (`"surface": { "role": "window" }`) — the sparse settings model layers
-    // over the author default like every other placement field.
     if let Some(role) = surface
         .and_then(|value| value.get("role"))
         .and_then(serde_json::Value::as_str)
@@ -359,9 +327,8 @@ pub fn resolve_frontend_module_settings_with_props(
 
 /// Materialize the effective global values of exposed component props.
 ///
-/// Declared defaults form the baseline and already-validated stored globals
-/// override them. Props without a default and without an override have no
-/// effective value to eject and are omitted.
+/// Declared defaults form the baseline; validated stored globals override them.
+/// Props with neither are omitted, having no effective value to eject.
 pub fn effective_global_props_to_json(
     block: Option<&PropsBlock>,
     stored: &FrontendModulePropSettings,
@@ -411,16 +378,11 @@ fn load_prop_settings(raw: &serde_json::Value) -> FrontendModulePropSettings {
     settings
 }
 
-/// Serialize a resolved layout back into the `surface` block a settings
-/// namespace stores.
+/// Serialize a resolved layout back into a settings namespace's `surface`
+/// block, for `mesh-shell config eject`.
 ///
-/// The inverse of the readers above, used by `mesh-shell config eject` to
-/// materialize a module's effective placement into the settings file so it can
-/// be hand-edited. Round-trips through [`resolve_frontend_module_settings`]:
-/// feeding this output back in reproduces the same layout.
-///
-/// Window-only fields are emitted only for `role: "window"` (and vice versa for
-/// layer fields), so an ejected block contains nothing inert.
+/// Round-trips through [`resolve_frontend_module_settings`], and emits
+/// role-specific fields only for the matching role so nothing inert is written.
 pub fn surface_layout_to_json(layout: &SurfaceLayoutSettings) -> serde_json::Value {
     let mut block = serde_json::Map::new();
     block.insert("role".into(), surface_role_name(layout.role).into());
@@ -548,31 +510,22 @@ pub fn parse_keyboard_mode(value: &str) -> Option<KeyboardMode> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Validation of a stored module namespace
-//
-// The parsers above define the placement vocabulary, so the schema below is
-// built out of them rather than out of a second copy of their strings: each
-// enum field carries `parse_*` as its acceptance test (so the aliases those
-// parsers take are accepted here too) and the canonical `*_name` output as the
-// list quoted back to the user. The `*_is_listed` guards make adding an enum
-// variant a compile error until its value list is updated, so a new variant
-// cannot go missing from its own diagnostic.
-// ---------------------------------------------------------------------------
+// The schema below is built from the parsers above rather than a second copy of
+// their strings: each enum field uses `parse_*` as its acceptance test and the
+// canonical `*_name` output as the list quoted back to the user. The
+// `*_is_listed` guards turn adding a variant into a compile error until its
+// value list is updated, so a new variant cannot go missing from a diagnostic.
 
-/// Canonical `surface.role` values.
 pub const SURFACE_ROLE_VALUES: &[&str] = &[
     surface_role_name(SurfaceRole::Layer),
     surface_role_name(SurfaceRole::Window),
 ];
 
-/// Canonical `surface.decorations` values.
 pub const WINDOW_DECORATIONS_VALUES: &[&str] = &[
     window_decorations_name(WindowDecorations::Client),
     window_decorations_name(WindowDecorations::Server),
 ];
 
-/// Canonical `surface.anchor` values.
 pub const SURFACE_EDGE_VALUES: &[&str] = &[
     surface_edge_name(Edge::Top),
     surface_edge_name(Edge::Bottom),
@@ -580,7 +533,6 @@ pub const SURFACE_EDGE_VALUES: &[&str] = &[
     surface_edge_name(Edge::Right),
 ];
 
-/// Canonical `surface.layer` values.
 pub const SURFACE_LAYER_VALUES: &[&str] = &[
     surface_layer_name(Layer::Background),
     surface_layer_name(Layer::Bottom),
@@ -588,7 +540,6 @@ pub const SURFACE_LAYER_VALUES: &[&str] = &[
     surface_layer_name(Layer::Overlay),
 ];
 
-/// Canonical `surface.keyboard_mode` values.
 pub const KEYBOARD_MODE_VALUES: &[&str] = &[
     keyboard_mode_name(KeyboardMode::None),
     keyboard_mode_name(KeyboardMode::Exclusive),
@@ -649,8 +600,7 @@ fn accepts_keyboard_mode(value: &str) -> bool {
     parse_keyboard_mode(value).is_some()
 }
 
-/// The `surface` placement block's schema — one entry per field
-/// [`resolve_frontend_module_settings`] reads.
+/// One entry per field [`resolve_frontend_module_settings`] reads.
 pub const SURFACE_FIELDS: &[FieldSpec] = &[
     FieldSpec::new(
         "role",
@@ -700,11 +650,9 @@ pub const SURFACE_FIELDS: &[FieldSpec] = &[
     FieldSpec::new("blur", FieldKind::Bool),
 ];
 
-/// A module namespace's own top-level keys.
-///
-/// `props` has a component-specific vocabulary, so this static walk checks its
-/// scope shape and [`validate_module_namespace`] performs the declaration-aware
-/// name and value validation afterward.
+/// A module namespace's top-level keys. `props` has a component-specific
+/// vocabulary, so this static walk only checks its scope shape;
+/// [`validate_module_namespace`] validates names and values afterward.
 pub const MODULE_NAMESPACE_FIELDS: &[FieldSpec] = &[
     FieldSpec::new("surface", FieldKind::Section(SURFACE_FIELDS)),
     FieldSpec::new(
@@ -728,18 +676,14 @@ pub const MODULE_NAMESPACE_FIELDS: &[FieldSpec] = &[
     ),
 ];
 
-/// Fields that only mean something for `role: "window"`.
 const WINDOW_ONLY_KEYS: &[&str] = &["title", "app_id", "resizable", "decorations"];
-
-/// Fields that only mean something for `role: "layer"`.
 const LAYER_ONLY_KEYS: &[&str] = &["anchor", "layer", "exclusive_zone", "blur"];
 
 /// Validate one module's stored namespace, returning the `surface` block
 /// stripped of anything unusable plus everything worth telling the user.
 ///
-/// `manifest` supplies the surface's declared role, because whether a stored
-/// field is inert depends on the role the surface ends up with — including when
-/// the user's own `role` override is what changes it.
+/// `manifest` supplies the declared role, because whether a stored field is
+/// inert depends on the role the surface ends up with.
 fn validate_module_namespace(
     namespace: &str,
     raw: &serde_json::Value,
@@ -785,10 +729,8 @@ fn validate_prop_scopes(
     block: Option<&PropsBlock>,
     diagnostics: &mut Vec<SettingsDiagnostic>,
 ) -> serde_json::Value {
-    // A caller without the owning component declaration cannot make a sound
-    // judgment about names or values. The static namespace walk above still
-    // validates the scope shape; preserve its contents until a prop-aware
-    // frontend caller can validate them.
+    // Without the owning declaration there is no sound judgment to make about
+    // names or values; preserve them for a prop-aware caller.
     let Some(block) = block else {
         return raw.clone();
     };
@@ -892,10 +834,8 @@ fn prop_value_error(def: &PropDef, value: &serde_json::Value) -> String {
 
 /// Warn about stored placement fields the surface's role ignores.
 ///
-/// A warning, never an error: `resizable` on a layer surface is meaningless but
-/// harmless, and a `promotable` surface legitimately carries both roles' fields
-/// because both apply over its life — so promotable surfaces are exempt
-/// entirely rather than reported on whichever role they are currently in.
+/// Never an error: `resizable` on a layer surface is meaningless but harmless.
+/// Promotable surfaces are exempt — both roles' fields apply over their life.
 fn report_inert_placement_fields(
     namespace: &str,
     stored: &serde_json::Map<String, serde_json::Value>,
@@ -1002,9 +942,6 @@ mod tests {
         let layout = surface_layout_from_manifest(&manifest);
 
         assert_eq!(layout.role, SurfaceRole::Layer);
-        // An unset window block must not imply a pinned window: `resizable`
-        // defaults true so a `role: "window"` module that says nothing gets an
-        // ordinary resizable window.
         assert!(layout.window.resizable);
         assert_eq!(layout.window.decorations, WindowDecorations::Client);
     }
@@ -1037,8 +974,6 @@ mod tests {
 
     #[test]
     fn promotable_defaults_off_and_is_read_from_the_manifest() {
-        // Being movable between roles is an author declaration, not a default:
-        // the shell refuses a runtime role change without it.
         let plain = manifest_with_surface_layout(SurfaceLayoutSection::default());
         assert!(!surface_layout_from_manifest(&plain).promotable);
 
@@ -1052,7 +987,6 @@ mod tests {
         let layout = surface_layout_from_manifest(&promotable);
 
         assert!(layout.promotable);
-        // Both roles' fields resolve, because both apply over the surface's life.
         assert_eq!(layout.role, SurfaceRole::Layer);
         assert_eq!(layout.edge, Edge::Right);
         assert_eq!(layout.window.app_id.as_deref(), Some("mesh.settings"));
@@ -1060,8 +994,6 @@ mod tests {
 
     #[test]
     fn user_settings_override_manifest_surface_role() {
-        // A user moving a panel into a window is an ordinary sparse-settings
-        // override, not a separate mechanism.
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
         let settings = resolve_frontend_module_settings(
             "@mesh/test",
@@ -1090,8 +1022,6 @@ mod tests {
 
     #[test]
     fn an_empty_namespace_leaves_every_manifest_default_intact() {
-        // The common case: the user has stored nothing for this module, so the
-        // manifest is the whole answer.
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
             anchor: Some("bottom".into()),
             exclusive_zone: Some(56),
@@ -1178,8 +1108,6 @@ mod tests {
 
     #[test]
     fn an_ejected_layer_block_round_trips_through_resolution() {
-        // `config eject` is only useful if the block it writes reproduces the
-        // placement the surface already had.
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
             anchor: Some("bottom".into()),
             layer: Some("overlay".into()),
@@ -1192,8 +1120,6 @@ mod tests {
         let original = surface_layout_from_manifest(&manifest);
 
         let ejected = serde_json::json!({ "surface": surface_layout_to_json(&original) });
-        // Resolve the ejected block against a manifest that declares nothing,
-        // so every value has to come from the stored block itself.
         let bare = manifest_with_surface_layout(SurfaceLayoutSection::default());
         let round_tripped = resolve_frontend_module_settings("@mesh/test", ejected, &bare).layout;
 
@@ -1253,8 +1179,6 @@ mod tests {
 
     #[test]
     fn every_listed_enum_value_is_one_its_parser_accepts() {
-        // The value lists are what a diagnostic tells the user to type, so a
-        // value that does not parse would be advice that does not work.
         for value in SURFACE_ROLE_VALUES {
             assert!(parse_surface_role(value).is_some(), "role {value}");
         }
@@ -1298,8 +1222,6 @@ mod tests {
 
     #[test]
     fn an_enum_alias_the_parser_accepts_is_not_reported() {
-        // `parse_surface_role` takes "toplevel"; validation is that parser, so
-        // it must not contradict it.
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
         let (layout, diagnostics) = diagnose(serde_json::json!({ "role": "toplevel" }), &manifest);
 
@@ -1332,7 +1254,6 @@ mod tests {
         assert!(diagnostic.is_error());
         assert_eq!(diagnostic.key_path, "surface.anchr");
         assert_eq!(diagnostic.suggested_action, "did you mean \"anchor\"?");
-        // Silence was the bug: the value never applied, and now that is said.
         assert_eq!(layout.edge, Edge::Top);
     }
 
@@ -1351,7 +1272,6 @@ mod tests {
 
     #[test]
     fn a_role_inert_field_warns_rather_than_failing() {
-        // `resizable` on a layer surface is meaningless but harmless.
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
         let (layout, diagnostics) = diagnose(serde_json::json!({ "resizable": false }), &manifest);
 
@@ -1363,14 +1283,11 @@ mod tests {
             "the warning should name the role that ignores it: {}",
             diagnostic.message
         );
-        // Warned, not rejected: the value still resolves.
         assert!(!layout.window.resizable);
     }
 
     #[test]
     fn a_promotable_surface_carries_both_roles_fields_without_warnings() {
-        // `@mesh/settings` is promotable and legitimately stores window and
-        // layer placement at once; anything stricter would cry wolf on it.
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
             promotable: Some(true),
             ..Default::default()
@@ -1398,8 +1315,6 @@ mod tests {
 
     #[test]
     fn callers_without_prop_declarations_preserve_prop_values() {
-        // Backend/interface declarations are still target work. A caller that
-        // cannot supply a declaration must not silently discard their values.
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
         let state = resolve_frontend_module_settings(
             "@mesh/navigation-bar",
@@ -1512,8 +1427,6 @@ mod tests {
             resolve_frontend_module_settings("@mesh/navigation-bar", raw.clone(), &manifest);
 
         assert_eq!(only(&state.diagnostics).key_path, "surfce");
-        // The module's script reads `raw`; validation reports, it does not edit
-        // what the user wrote.
         assert_eq!(state.raw, raw);
     }
 

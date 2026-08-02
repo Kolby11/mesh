@@ -1,11 +1,10 @@
 //! The single settings store.
 //!
-//! One JSON file holds every user decision in the shell, keyed by namespace
+//! One JSON file holds every user decision, keyed by namespace
 //! (`docs/spec/08-settings.md` §1). Defaults never live here — they come from
-//! [`ShellSettings`]'s serde defaults for the `"shell"` namespace, and from
-//! module manifests / `<props>` declarations for module namespaces. The file
-//! holds only what the user changed, so a module updating its own defaults
-//! still reaches a user who never overrode them.
+//! [`ShellSettings`]'s serde defaults and from module manifests / `<props>`
+//! declarations, so a module updating its defaults still reaches users who
+//! never overrode them.
 //!
 //! ```json
 //! {
@@ -23,7 +22,6 @@ use crate::{ConfigError, SHELL_SETTINGS_FIELDS, ShellSettings, mesh_home_path};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::path::{Path, PathBuf};
 
-/// Current on-disk shape of the settings file.
 pub const SETTINGS_SCHEMA_VERSION: u64 = 1;
 
 /// Namespace holding core shell preferences (theme, locale, icons, keyboard,
@@ -34,9 +32,6 @@ pub const SHELL_NAMESPACE: &str = "shell";
 const SCHEMA_VERSION_KEY: &str = "schemaVersion";
 
 /// Every user-owned setting in the shell, loaded from one file.
-///
-/// Cheap to clone the resolved [`ShellSettings`] out of; module namespaces are
-/// cloned on demand because consumers hand the raw JSON to Luau anyway.
 #[derive(Debug, Clone)]
 pub struct SettingsStore {
     path: PathBuf,
@@ -57,9 +52,7 @@ impl Default for SettingsStore {
 }
 
 impl SettingsStore {
-    /// Load from [`default_settings_path`]. A missing file is not an error —
-    /// it means the user has changed nothing, which is the expected state of a
-    /// fresh install.
+    /// A missing file is not an error: it means the user changed nothing.
     pub fn load() -> Result<Self, ConfigError> {
         Self::load_from(&default_settings_path())
     }
@@ -90,8 +83,7 @@ impl SettingsStore {
         })
     }
 
-    /// Build a store from an in-memory document, for tests and for callers
-    /// that already hold the parsed file.
+    /// Build a store from an already-parsed document.
     pub fn from_value(path: impl Into<PathBuf>, value: JsonValue) -> Result<Self, ConfigError> {
         let root = match value {
             JsonValue::Object(map) => map,
@@ -116,11 +108,7 @@ impl SettingsStore {
     }
 
     /// Everything rejected while resolving the `"shell"` namespace and the
-    /// file's own top level, in file order.
-    ///
-    /// Module namespaces are not validated here — each reader owns its own
-    /// schema, and `mesh_core_surface_config::resolve_frontend_module_settings`
-    /// reports the `surface` block against the manifest it is resolved with.
+    /// file's top level. Module namespaces are validated by their own readers.
     pub fn diagnostics(&self) -> &[SettingsDiagnostic] {
         &self.diagnostics
     }
@@ -130,13 +118,9 @@ impl SettingsStore {
         &self.shell
     }
 
-    /// The raw stored overrides for one namespace, or `{}` when the user has
-    /// changed nothing in it.
-    ///
-    /// For a namespace carrying an instance suffix (`@mesh/navigation-bar#top`)
-    /// the bare module namespace is the base and the instance object layers
-    /// over it, so a user can set a value once for every instance and refine
-    /// it per instance.
+    /// The raw stored overrides for one namespace, or `{}`. For an instance
+    /// key (`@mesh/navigation-bar#top`) the bare module namespace is the base
+    /// and the instance object layers over it.
     pub fn namespace(&self, name: &str) -> JsonValue {
         let mut resolved = match name.split_once('#') {
             Some((base, _)) => self.stored(base),
@@ -146,8 +130,8 @@ impl SettingsStore {
         resolved
     }
 
-    /// Whether the user has stored anything at all under `name` (or, for an
-    /// instance key, under its base module).
+    /// Whether anything is stored under `name` or, for an instance key, its
+    /// base module.
     pub fn has_namespace(&self, name: &str) -> bool {
         if self.root.contains_key(name) {
             return true;
@@ -158,9 +142,7 @@ impl SettingsStore {
         }
     }
 
-    /// Module ids and interface ids the user has stored overrides for, in the
-    /// file's own order. Used by `mesh settings doctor` to report namespaces
-    /// whose module is gone.
+    /// Namespaces with stored overrides, in file order.
     pub fn namespace_names(&self) -> impl Iterator<Item = &str> {
         self.root
             .keys()
@@ -168,12 +150,9 @@ impl SettingsStore {
             .filter(|key| *key != SHELL_NAMESPACE && *key != SCHEMA_VERSION_KEY)
     }
 
-    /// Replace one namespace's stored overrides. An empty object removes the
-    /// namespace rather than leaving `{}` behind — the store stays sparse.
-    ///
-    /// Writing a value the schema rejects is not an error here: it lands in the
-    /// file, is dropped from the resolved settings, and shows up in
-    /// [`Self::diagnostics`] — the same treatment a hand-edited value gets.
+    /// Replace one namespace's overrides; an empty object removes it so the
+    /// store stays sparse. A value the schema rejects still lands in the file
+    /// and surfaces in [`Self::diagnostics`], as a hand-edited one would.
     pub fn set_namespace(&mut self, name: &str, value: JsonValue) {
         let is_empty = value.as_object().is_some_and(JsonMap::is_empty);
         if value.is_null() || is_empty {
@@ -200,9 +179,8 @@ impl SettingsStore {
         self.set_namespace(name, JsonValue::Null);
     }
 
-    /// The full document as written to disk. Key order is `serde_json`'s
-    /// `BTreeMap` order, so a saved file always diffs cleanly no matter which
-    /// namespace was touched.
+    /// The full document as written to disk, in `BTreeMap` key order so saves
+    /// diff cleanly regardless of which namespace was touched.
     pub fn to_value(&self) -> JsonValue {
         let mut root = self.root.clone();
         root.insert(
@@ -212,8 +190,7 @@ impl SettingsStore {
         JsonValue::Object(root)
     }
 
-    /// Write the store back atomically, so a crash mid-write cannot leave the
-    /// user with a truncated settings file.
+    /// Written atomically: a crash mid-write cannot truncate the file.
     pub fn save(&self) -> Result<(), ConfigError> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -234,11 +211,8 @@ impl SettingsStore {
     }
 }
 
-/// Path of the one settings file.
-///
-/// `MESH_SETTINGS_PATH` wins (tests and alternate profiles use it); otherwise
-/// a checked-out repo keeps its settings in `config/settings.json` so a
-/// development shell does not write into the user's real dotfiles.
+/// `MESH_SETTINGS_PATH` wins; otherwise a checked-out repo uses
+/// `config/settings.json` so a dev shell stays out of the user's dotfiles.
 pub fn default_settings_path() -> PathBuf {
     if let Ok(path) = std::env::var("MESH_SETTINGS_PATH") {
         if !path.trim().is_empty() {
@@ -261,12 +235,9 @@ pub fn load_shell_settings() -> Result<ShellSettings, ConfigError> {
     Ok(SettingsStore::load()?.shell)
 }
 
-/// Recursively merge `overlay` into `base`.
-///
-/// Objects merge key by key so a user who sets one field does not erase its
-/// siblings; every other JSON kind replaces wholesale, because a stored array
-/// (a pack chain, an activation-key list) is a complete replacement by intent,
-/// not something to append to.
+/// Objects merge key by key so setting one field does not erase its siblings.
+/// Every other kind replaces wholesale: a stored array (a pack chain, a key
+/// list) is a complete replacement by intent.
 pub fn merge_json(base: &mut JsonValue, overlay: &JsonValue) {
     match (base, overlay) {
         (JsonValue::Object(base), JsonValue::Object(overlay)) => {
@@ -285,10 +256,9 @@ pub fn merge_json(base: &mut JsonValue, overlay: &JsonValue) {
 
 /// Resolve the `"shell"` namespace, dropping and reporting what it cannot use.
 ///
-/// Infallible on purpose: a hand-edited settings file must never stop the shell
-/// from starting (`docs/spec/08-settings.md` §1). Every stored value is checked
-/// against [`SHELL_SETTINGS_FIELDS`] before it is merged, so what reaches serde
-/// is already well-typed and the declared default survives anything rejected.
+/// Infallible on purpose: a hand-edited file must never stop the shell from
+/// starting. Values are checked against [`SHELL_SETTINGS_FIELDS`] before the
+/// merge, so serde only ever sees well-typed input.
 fn resolve_shell_settings(
     root: &JsonMap<String, JsonValue>,
 ) -> (ShellSettings, Vec<SettingsDiagnostic>) {
@@ -315,8 +285,7 @@ fn resolve_shell_settings(
     match serde_json::from_value(resolved) {
         Ok(settings) => (settings, diagnostics),
         Err(err) => {
-            // Validation should have caught anything serde would reject, so
-            // reaching here means the schema table and `ShellSettings` disagree.
+            // Reaching here means the schema table and `ShellSettings` disagree.
             diagnostics.push(SettingsDiagnostic::error(
                 SHELL_NAMESPACE,
                 "",
@@ -328,8 +297,7 @@ fn resolve_shell_settings(
     }
 }
 
-/// Check the file's own top level: the schema stamp, and that every other key
-/// looks like a namespace someone could own.
+/// Check the schema stamp and that other keys look like ownable namespaces.
 fn validate_settings_root(root: &JsonMap<String, JsonValue>) -> Vec<SettingsDiagnostic> {
     const ROOT_KEYS: &[&str] = &[SHELL_NAMESPACE, SCHEMA_VERSION_KEY];
     let mut diagnostics = Vec::new();
@@ -365,11 +333,9 @@ fn validate_settings_root(root: &JsonMap<String, JsonValue>) -> Vec<SettingsDiag
     diagnostics
 }
 
-/// Whether a top-level key is shaped like a namespace a module or interface
-/// could own: `@scope/name`, optionally `#instance`, or a dotted interface id
-/// such as `mesh.audio`. Whether that owner actually exists is a question for
-/// `config doctor`, which can see the module graph; here it only has to not be
-/// mistaken for a typo of `shell`.
+/// Shaped like `@scope/name[#instance]` or a dotted interface id. Whether the
+/// owner exists is `config doctor`'s question; this only avoids mistaking a
+/// real namespace for a typo of `shell`.
 fn is_namespace_id(key: &str) -> bool {
     let base = key.split('#').next().unwrap_or(key);
     (base.starts_with('@') && base.contains('/')) || base.contains('.')
@@ -408,9 +374,6 @@ mod tests {
 
     #[test]
     fn shell_overrides_are_sparse_and_leave_siblings_alone() {
-        // The previous two-file loader replaced whole sections, so a user file
-        // that mentioned only `theme` silently reset tooltip and keyboard to
-        // whatever the defaults file happened to say.
         let store = store(json!({
             "shell": { "tooltip": { "delay_ms": 25 } }
         }));
@@ -447,7 +410,6 @@ mod tests {
 
         let resolved = store.namespace("@mesh/navigation-bar#bottom");
         assert_eq!(resolved["surface"]["anchor"], json!("bottom"));
-        // The base module's unrelated keys survive the instance override.
         assert_eq!(resolved["surface"]["layer"], json!("top"));
     }
 
@@ -512,8 +474,6 @@ mod tests {
             .map(String::as_str)
             .collect();
 
-        // Stable ordering keeps saves diff-friendly regardless of which
-        // namespace a write touched.
         assert_eq!(
             keys,
             vec![
@@ -558,7 +518,6 @@ mod tests {
         std::fs::remove_file(&path).ok();
 
         assert_eq!(loaded.shell().i18n.locale, "sk");
-        // The fallback locale was never stored, so its default still applies.
         assert_eq!(loaded.shell().i18n.fallback_locale, "en");
         assert_eq!(
             loaded.namespace("@mesh/navigation-bar")["surface"]["exclusive_zone"],
@@ -591,8 +550,6 @@ mod tests {
 
     #[test]
     fn the_repository_settings_file_is_clean() {
-        // The acceptance bar for this validation: the file the repo ships with
-        // must produce nothing at all.
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../..")
             .join("config/settings.json");
@@ -614,7 +571,6 @@ mod tests {
             "message should name both the expectation and the value: {}",
             diagnostic.message
         );
-        // Rejected, so the declared default still applies — and the store loaded.
         assert_eq!(store.shell().tooltip.delay_ms, 300);
     }
 
@@ -667,7 +623,6 @@ mod tests {
 
         let diagnostic = only(store.diagnostics());
         assert_eq!(diagnostic.key_path, "fonts");
-        // The valid sibling still applied.
         assert_eq!(store.shell().theme.active, "gruvbox-dark");
     }
 
@@ -704,11 +659,8 @@ mod tests {
             diagnostic.key_path,
             "keyboard.surface_shortcuts.@mesh/navigation-bar.raise.key"
         );
-        // The user's own key names are not second-guessed; the good one applied.
         let shortcuts = &store.shell().keyboard.surface_shortcuts["@mesh/navigation-bar"];
         assert_eq!(shortcuts["mute"].key.as_deref(), Some("u"));
-        // The rejected leaf leaves an override with nothing to say, which is
-        // indistinguishable from not having written one.
         assert!(shortcuts["raise"].key.is_none());
     }
 
@@ -749,7 +701,6 @@ mod tests {
         }));
 
         assert_eq!(before.diagnostics().len(), 2);
-        // Fixing one of two must not re-announce the other.
         assert!(
             crate::validate::new_settings_diagnostics(before.diagnostics(), after.diagnostics())
                 .is_empty()
@@ -758,7 +709,6 @@ mod tests {
 
     #[test]
     fn merge_json_replaces_arrays_wholesale() {
-        // A pack chain is an ordered replacement, not something to append to.
         let mut base = json!({ "icons": { "packs": ["a", "b"] } });
         merge_json(&mut base, &json!({ "icons": { "packs": ["c"] } }));
 

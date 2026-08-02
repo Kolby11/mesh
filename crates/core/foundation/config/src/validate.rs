@@ -1,33 +1,17 @@
 //! Validation of stored settings values against the declarations that own them.
 //!
-//! `docs/spec/08-settings.md` §1 requires that an invalid stored value be
-//! *rejected with a diagnostic* and fall through to its declared default. The
-//! falling-through half comes free from the sparse model — a value that never
-//! reaches a reader simply is not there. This module supplies the other half:
-//! it walks a stored namespace against a schema, drops what it cannot accept,
-//! and says so.
-//!
-//! The schema is declarative ([`FieldSpec`] / [`FieldKind`]) so the same walk
-//! serves the `"shell"` namespace here and the `surface` placement block in
-//! `mesh-core-surface-config`, which owns its own vocabulary. Enum fields carry
-//! the parser that defines them ([`FieldKind::Enum`]) rather than a copy of its
-//! accepted strings, so a new variant cannot drift away from its own error
-//! message.
+//! `docs/spec/08-settings.md` §1 requires an invalid stored value to be
+//! rejected with a diagnostic and fall through to its declared default. Falling
+//! through is free in the sparse model; this module supplies the rest: it walks
+//! a namespace against a declarative schema ([`FieldSpec`] / [`FieldKind`]),
+//! drops what it cannot accept, and says so.
 
 use serde_json::{Map as JsonMap, Value as JsonValue};
 
-/// How much a rejected value matters.
-///
-/// A wrong type or an unrecognized enum value is an [`Error`]: the user wrote
-/// something meaning to change behavior and nothing changed. An unknown key is
-/// an error only when a known key sits within typo distance of it — the strong
-/// signal that it was meant to be that key. An unknown key with no near match
-/// is a [`Warning`]: it may be a forward-looking key, a key owned by a reader
-/// this walk does not know about, or a leftover, and none of those deserve a
-/// non-zero exit.
-///
-/// [`Error`]: SettingsDiagnosticSeverity::Error
-/// [`Warning`]: SettingsDiagnosticSeverity::Warning
+/// A wrong type or unrecognized enum value is an error: the user meant to
+/// change behavior and nothing changed. An unknown key is an error only within
+/// typo distance of a known one; otherwise it warns, since it may belong to a
+/// reader this walk does not know about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SettingsDiagnosticSeverity {
     Warning,
@@ -44,18 +28,12 @@ impl SettingsDiagnosticSeverity {
 }
 
 /// One rejected (or inert) stored settings value.
-///
-/// Modeled on `ModuleManifestDiagnostic`: the pairing of a located `message`
-/// with a `suggested_action` is what makes the manifest diagnostics actionable,
-/// and a hand-edited settings file needs exactly the same thing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingsDiagnostic {
     pub severity: SettingsDiagnosticSeverity,
-    /// `"shell"`, `"@mesh/navigation-bar"`, `"mesh.audio"` — the top-level key
-    /// the offending value lives under.
+    /// The top-level key the offending value lives under.
     pub namespace: String,
-    /// Dotted path within the namespace: `"surface.anchor"`,
-    /// `"tooltip.delay_ms"`. Empty for a diagnostic about the namespace itself.
+    /// Dotted path within the namespace, empty for the namespace itself.
     pub key_path: String,
     pub message: String,
     pub suggested_action: String,
@@ -119,9 +97,7 @@ impl std::fmt::Display for SettingsDiagnostic {
     }
 }
 
-/// Log a batch of diagnostics through `tracing`.
-///
-/// `source` names the read that produced them (`"settings"`, `"settings
+/// `source` names the read that produced these (`"settings"`, `"settings
 /// reload"`) so a live-reload warning is not mistaken for a startup one.
 pub fn log_settings_diagnostics(source: &str, diagnostics: &[SettingsDiagnostic]) {
     for diagnostic in diagnostics {
@@ -146,11 +122,8 @@ pub fn log_settings_diagnostics(source: &str, diagnostics: &[SettingsDiagnostic]
     }
 }
 
-/// The diagnostics in `current` that were not already in `previous`.
-///
-/// Live reload re-validates the whole file on every save, so a user fixing one
-/// of five mistakes would otherwise be told about the other four again. Keeping
-/// only what is new means each save reports only what changed.
+/// Reload re-validates the whole file, so fixing one of five mistakes would
+/// otherwise re-announce the other four. Each save reports only what changed.
 pub fn new_settings_diagnostics(
     previous: &[SettingsDiagnostic],
     current: &[SettingsDiagnostic],
@@ -162,7 +135,6 @@ pub fn new_settings_diagnostics(
         .collect()
 }
 
-/// One declared key in a settings schema.
 #[derive(Debug, Clone, Copy)]
 pub struct FieldSpec {
     pub key: &'static str,
@@ -180,33 +152,28 @@ impl FieldSpec {
 pub enum FieldKind {
     Str,
     Bool,
-    /// Non-negative integer (`tooltip.delay_ms`).
     UInt,
-    /// Signed integer that has to survive the trip into `i32`
-    /// (`surface.exclusive_zone`, margins).
+    /// Signed integer that must survive the trip into `i32`.
     Int32,
     Float,
     StrArray,
-    /// A string whose vocabulary belongs to a parser. `accepts` *is* the
-    /// parser, so aliases it takes are accepted here too; `values` is only the
-    /// canonical list quoted back in the suggestion.
+    /// `accepts` *is* the defining parser, so aliases it takes are accepted
+    /// here too; `values` is only the canonical list quoted in the suggestion.
     Enum {
         accepts: fn(&str) -> bool,
         values: &'static [&'static str],
     },
     /// Object with a known key set; unknown keys inside it are reported.
     Section(&'static [FieldSpec]),
-    /// Object whose keys the user chooses (module ids, action names). Keys are
-    /// not checked; each value is validated against the inner kind.
+    /// Object whose keys the user chooses. Keys are not checked; each value is
+    /// validated against the inner kind.
     Map(&'static FieldKind),
-    /// An object this walk does not own the schema for yet, so its contents
-    /// pass through untouched. Used for `props`, which cannot be validated
-    /// until the `<props>` block exists (`docs/spec/03-components.md`).
+    /// Contents pass through untouched — used where the schema is owned
+    /// elsewhere, such as `props`.
     Opaque,
 }
 
 impl FieldKind {
-    /// The phrase used after "expected" in a diagnostic.
     fn expectation(&self) -> String {
         match self {
             Self::Str => "a string".to_string(),
@@ -231,12 +198,8 @@ impl FieldKind {
     }
 }
 
-/// Validate a stored object against a known key set.
-///
-/// Returns the subset of `value` that may be applied: every key that validated,
-/// with nested objects likewise filtered. Anything rejected is left out, which
-/// is what makes the value fall through to its declared default, and is
-/// reported in `diagnostics`.
+/// Returns the subset of `value` that may be applied, nested objects likewise
+/// filtered. What is left out is what falls through to its declared default.
 pub fn validate_object(
     namespace: &str,
     key_prefix: &str,
@@ -331,8 +294,7 @@ pub fn validate_value(
     None
 }
 
-/// Build the diagnostic for a key that no declaration claims, suggesting the
-/// nearest known key when there is one.
+/// Diagnose a key no declaration claims, suggesting the nearest known one.
 pub fn unknown_key_diagnostic(
     namespace: &str,
     key_prefix: &str,
@@ -343,8 +305,7 @@ pub fn unknown_key_diagnostic(
     unknown_key_diagnostic_from(namespace, key_prefix, key, &known)
 }
 
-/// As [`unknown_key_diagnostic`], for callers holding a plain key list (the
-/// settings file's own top level, which has no [`FieldSpec`] table).
+/// As [`unknown_key_diagnostic`], for callers holding a plain key list.
 pub fn unknown_key_diagnostic_from(
     namespace: &str,
     key_prefix: &str,
@@ -372,11 +333,9 @@ pub fn unknown_key_diagnostic_from(
     }
 }
 
-/// The known key closest to `key`, if one is close enough to be a typo of it.
-///
-/// The distance budget scales with the key's length so that short keys cannot
-/// be "corrected" into unrelated short keys (`top` is not a typo of `left`),
-/// while a long key tolerates the two-character slip that a long key invites.
+/// The known key closest to `key`, if close enough to be a typo of it. The
+/// budget scales with length so short keys are not "corrected" into unrelated
+/// short keys (`top` is not a typo of `left`).
 pub fn nearest_key<'a>(key: &str, known: &[&'a str]) -> Option<&'a str> {
     let lowered = key.to_ascii_lowercase();
     let budget = match lowered.chars().count() {
@@ -422,8 +381,7 @@ fn join_path(prefix: &str, key: &str) -> String {
     }
 }
 
-/// Describe a found value for a diagnostic message, quoting scalars so the user
-/// can see the thing they typed (`the string "300"` rather than `a string`).
+/// Quotes scalars so the user sees what they typed: `the string "300"`.
 pub fn describe(value: &JsonValue) -> String {
     match value {
         JsonValue::Null => "null".to_string(),
@@ -449,8 +407,6 @@ mod tests {
 
     #[test]
     fn nearest_key_refuses_unrelated_short_keys() {
-        // `blur` and `left` are two edits apart but nothing to do with each
-        // other; a short key gets a budget of one.
         assert_eq!(nearest_key("wat", &["anchor", "layer", "blur"]), None);
     }
 

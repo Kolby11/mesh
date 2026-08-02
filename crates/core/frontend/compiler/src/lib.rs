@@ -681,11 +681,12 @@ mod tests {
 
     #[test]
     fn eval_expr_dotted_path_uses_borrowed_variable_lookup() {
-        use std::cell::Cell;
+        use std::cell::{Cell, RefCell};
 
         struct BorrowCountingStore {
             payload: serde_json::Value,
             owned_gets: Cell<usize>,
+            borrowed_reads: RefCell<Vec<String>>,
         }
 
         impl mesh_core_elements::VariableStore for BorrowCountingStore {
@@ -695,6 +696,7 @@ mod tests {
             }
 
             fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
+                self.borrowed_reads.borrow_mut().push(name.to_string());
                 (name == "payload").then_some(&self.payload)
             }
 
@@ -714,6 +716,7 @@ mod tests {
                 }
             }),
             owned_gets: Cell::new(0),
+            borrowed_reads: RefCell::new(Vec::new()),
         };
 
         assert_eq!(
@@ -725,6 +728,8 @@ mod tests {
             0,
             "borrowed dotted-path reads should not clone the root JSON value"
         );
+        assert_eq!(store.borrowed_reads.borrow().len(), 1);
+        assert_eq!(store.borrowed_reads.borrow()[0], "payload");
     }
 
     // Run with:

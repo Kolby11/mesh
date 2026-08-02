@@ -1,14 +1,10 @@
 //! Interned attribute keys for the widget tree.
 //!
 //! Attribute *names* are template vocabulary, not data: the same handful of
-//! short strings (`class`, `content`, `data-mesh-element`, `_mesh_key`, …) is
-//! rebuilt for every node on every widget-tree build. Storing them as owned
-//! `String`s made every node pay a `malloc` + copy + `free` per attribute.
-//!
-//! [`AttrKey`] keeps the same ordering and lookup behavior as `String` — it
-//! borrows as `str`, so `map.get("class")` still works — while resolving
-//! well-known names to `&'static str` and everything else to a shared `Arc<str>`
-//! taken from a small per-thread cache.
+//! short strings is rebuilt for every node on every tree build, so owned
+//! `String` keys cost a malloc/copy/free per attribute. [`AttrKey`] keeps
+//! `String`'s ordering and lookup behavior while resolving well-known names to
+//! `&'static str` and the rest to an `Arc<str>` from a per-thread cache.
 
 use std::borrow::Borrow;
 use std::cell::RefCell;
@@ -18,29 +14,24 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::{Arc, OnceLock};
 
-/// Key type for [`AttributeMap`].
-///
-/// Ordering, equality, and hashing all delegate to the string contents, so a
-/// `BTreeMap` keyed by `AttrKey` iterates in exactly the order the equivalent
-/// `BTreeMap<String, _>` would.
+/// Ordering, equality, and hashing delegate to the string contents, so this
+/// iterates exactly as the equivalent `BTreeMap<String, _>` would.
 #[derive(Clone)]
 pub enum AttrKey {
-    /// A name from the known template/runtime vocabulary. Free to clone.
+    /// Known template/runtime vocabulary. Free to clone.
     Static(&'static str),
     /// Any other name, shared through the per-thread intern cache.
     Shared(Arc<str>),
 }
 
-/// A borrowed resolved attribute value that preserves the type produced by a
-/// template expression.
+/// A borrowed attribute value preserving the type a template expression made.
 #[derive(Clone, Copy)]
 pub struct ResolvedAttributeValueRef<'a> {
     value: &'a StoredAttributeValue,
 }
 
 impl ResolvedAttributeValueRef<'_> {
-    /// Match the historical string-backed boolean interpretation without
-    /// formatting a typed value first.
+    /// Matches the string-backed interpretation without formatting first.
     pub fn legacy_bool(self) -> bool {
         match self.value {
             StoredAttributeValue::String(value) => {
@@ -60,7 +51,7 @@ impl ResolvedAttributeValueRef<'_> {
         }
     }
 
-    /// Match the historical string parse used by numeric attribute consumers.
+    /// Matches the string parse numeric attribute consumers use.
     pub fn parse_f32(self) -> Option<f32> {
         match self.value {
             StoredAttributeValue::String(value) => value.trim().parse::<f32>().ok(),
@@ -75,8 +66,7 @@ impl ResolvedAttributeValueRef<'_> {
         }
     }
 
-    /// Materialize the legacy string representation for consumers whose public
-    /// data model still requires owned text.
+    /// For consumers whose data model still requires owned text.
     pub fn to_legacy_string(self) -> String {
         match self.value {
             StoredAttributeValue::String(value) => value.clone(),
@@ -180,13 +170,10 @@ fn value_ref_to_string(value: &serde_json::Value) -> String {
 
 /// Resolved attributes of a widget node.
 ///
-/// A sorted `Vec` rather than a `BTreeMap`: real elements carry a handful of
-/// attributes, so a B-tree spends its time allocating and walking node blocks
-/// for a set that fits in one cache-friendly run. Iteration order is the same
-/// key order a `BTreeMap<String, String>` would produce, so nothing downstream
-/// of the widget tree observes the change. Non-string template bindings retain
-/// their JSON type and lazily materialize the legacy string representation only
-/// when a string-only consumer asks for it.
+/// A sorted `Vec`, not a `BTreeMap`: real elements carry a handful of
+/// attributes, a set that fits in one cache-friendly run rather than a tree of
+/// separately allocated node blocks. Iteration order is unchanged. Non-string
+/// bindings keep their JSON type and materialize text only on demand.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct AttributeMap {
     entries: Vec<(AttrKey, StoredAttributeValue)>,
@@ -215,17 +202,14 @@ impl AttributeMap {
         self.insert_stored(key, StoredAttributeValue::String(value))
     }
 
-    /// Insert a value produced by template expression evaluation without
-    /// stringifying booleans, numbers, null, arrays, or objects.
+    /// Insert without stringifying non-string JSON values.
     pub fn insert_value(&mut self, key: AttrKey, value: serde_json::Value) -> Option<String> {
         self.insert_stored(key, StoredAttributeValue::from_json(value))
     }
 
     fn insert_stored(&mut self, key: AttrKey, value: StoredAttributeValue) -> Option<String> {
-        // Parsed attributes and conversions from ordered maps normally arrive
-        // in key order. Keep that common construction path append-only: it
-        // avoids a binary search and, more importantly, avoids asking Vec to
-        // shift the existing tail for every new attribute.
+        // Attributes normally arrive in key order; keeping that path
+        // append-only avoids a binary search and a tail shift per insert.
         if let Some((last_key, _)) = self.entries.last() {
             match last_key.as_str().cmp(key.as_str()) {
                 Ordering::Less => {
@@ -344,7 +328,6 @@ impl AttributeMap {
     }
 }
 
-/// Vacant/occupied slot returned by [`AttributeMap::entry`].
 pub struct Entry<'a> {
     map: &'a mut AttributeMap,
     key: AttrKey,
@@ -522,7 +505,7 @@ impl<'de> serde::Deserialize<'de> for AttributeMap {
 }
 
 impl AttrKey {
-    /// Intern `name`, avoiding an allocation for known vocabulary.
+    /// Allocation-free for known vocabulary.
     pub fn new(name: &str) -> Self {
         match well_known(name) {
             Some(name) => AttrKey::Static(name),
@@ -538,7 +521,7 @@ impl AttrKey {
         }
     }
 
-    /// True when the name resolved to the allocation-free static vocabulary.
+    /// Whether the name resolved to the static vocabulary.
     pub fn is_static(&self) -> bool {
         matches!(self, AttrKey::Static(_))
     }
@@ -570,10 +553,9 @@ impl AsRef<str> for AttrKey {
 impl PartialEq for AttrKey {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        // Two keys built by `AttrKey::new` from the same name share one
-        // vocabulary literal, so the common case answers on the pointer. The
-        // byte comparison still runs as a fallback because `Static` is a public
-        // variant anyone can build from their own `&'static str`.
+        // Keys from `AttrKey::new` share one vocabulary literal, so the
+        // common case answers on the pointer. `Static` is public, though, so
+        // the byte comparison still has to run as a fallback.
         match (self, other) {
             (AttrKey::Static(left), AttrKey::Static(right)) => {
                 std::ptr::eq(*left, *right) || left == right
@@ -700,12 +682,9 @@ impl<'de> serde::Deserialize<'de> for AttrKey {
     }
 }
 
-/// Per-thread cache for names outside the static vocabulary.
-///
-/// Attribute names come from template source, never from user data, so the
-/// working set is tiny and bounded in practice. The cache is capped anyway so a
-/// pathological module cannot grow it without limit; eviction only costs the
-/// next lookup an allocation, never correctness.
+/// Per-thread cache for names outside the static vocabulary. Names come from
+/// template source, never user data, so the working set is tiny; the cap only
+/// guards against a pathological module, and eviction costs an allocation.
 const INTERN_CAPACITY: usize = 64;
 
 thread_local! {
@@ -730,17 +709,12 @@ fn intern(name: &str) -> Arc<str> {
     })
 }
 
-/// Known attribute vocabulary.
-///
-/// Every name declared by an element contract must appear here — the
-/// `well_known_covers_every_contract_attribute` test fails otherwise — plus the
-/// runtime-internal `_mesh_*` keys and the annotations the shell writes.
-///
-/// The `match` lowers to a length switch over short literals rather than a
-/// scan, which is why the table can grow without costing lookups.
+/// Known attribute vocabulary: every contract-declared name (enforced by
+/// `well_known_covers_every_contract_attribute`), the runtime-internal
+/// `_mesh_*` keys, and the shell's annotations. The `match` lowers to a length
+/// switch, so the table grows without costing lookups.
 fn well_known(name: &str) -> Option<&'static str> {
     Some(match name {
-        // Common contract attributes.
         "align" => "align",
         "alt" => "alt",
         "anchor" => "anchor",
@@ -827,7 +801,6 @@ fn well_known(name: &str) -> Option<&'static str> {
         "value" => "value",
         "variant" => "variant",
         "width" => "width",
-        // Runtime-internal annotations.
         "_mesh_bind_this" => "_mesh_bind_this",
         "_mesh_content_height" => "_mesh_content_height",
         "_mesh_content_width" => "_mesh_content_width",
@@ -911,7 +884,6 @@ mod tests {
             assert_eq!(AttrKey::new(name).as_str(), name.as_str());
         }
         INTERNED.with(|cache| assert!(cache.borrow().len() <= INTERN_CAPACITY));
-        // A name evicted by later inserts still resolves to the same contents.
         assert_eq!(AttrKey::new(&names[0]).as_str(), names[0].as_str());
     }
 
@@ -947,9 +919,7 @@ mod tests {
         assert_eq!(interned_order, owned_order);
     }
 
-    /// The sorted-`Vec` map must be observationally identical to the
-    /// `BTreeMap<String, String>` it replaced, including iteration order and
-    /// the value returned by a replacing `insert`.
+    /// Must be observationally identical to the `BTreeMap` it replaced.
     #[test]
     fn matches_btreemap_semantics_under_random_operations() {
         let mut state = 0x2545_f491_4f6c_dd1du64;
@@ -1020,7 +990,6 @@ mod tests {
         map.entry(AttrKey::new("aria-label")).or_default();
         assert_eq!(map.get("aria-label").map(String::as_str), Some(""));
 
-        // Insertion happened at the sorted slot, not appended.
         let keys: Vec<&str> = map.keys().map(AttrKey::as_str).collect();
         assert_eq!(keys, ["aria-label", "class", "content"]);
 
@@ -1116,8 +1085,7 @@ mod tests {
         );
     }
 
-    /// Representative per-node attribute sets from the shipped modules: a
-    /// handful of short, well-known names built once per node per tree build.
+    /// Representative per-node attribute sets from the shipped modules.
     const BENCH_NODES: &[&[(&str, &str)]] = &[
         &[("data-mesh-element", "row")],
         &[("data-mesh-element", "column"), ("class", "entry")],
@@ -1147,15 +1115,11 @@ mod tests {
     fn interned_attribute_map_beats_owned_btreemap() {
         use std::time::Instant;
 
-        // A tree's worth of maps is built and held before any of it is
-        // released, which is what makes the key allocations cost more than a
-        // tcache round-trip. Building and dropping one map at a time measures
-        // the allocator's fast path, not the widget-tree build.
+        // A whole tree of maps is held before any is released; building and
+        // dropping one at a time would measure the allocator's fast path.
         const NODES_PER_TREE: usize = 456;
         const TREES: usize = 900;
 
-        // The previous representation: an owned `String` key per attribute per
-        // node, stored in a B-tree.
         fn owned_build(source: &[(&str, &str)]) -> BTreeMap<String, String> {
             let mut map = BTreeMap::new();
             for (name, value) in source {
@@ -1172,8 +1136,6 @@ mod tests {
             map
         }
 
-        // Parity first: the two representations must agree key for key, in the
-        // same order, before either timing means anything.
         for source in BENCH_NODES {
             let owned = owned_build(source);
             let interned = interned_build(source);
@@ -1231,8 +1193,7 @@ mod tests {
         );
     }
 
-    /// `Static` is a public variant, so equality must not rest on every static
-    /// key coming from the vocabulary table.
+    /// `Static` is public, so equality cannot assume the vocabulary table.
     #[test]
     fn independently_constructed_static_keys_compare_by_contents() {
         let interned = AttrKey::new("class");

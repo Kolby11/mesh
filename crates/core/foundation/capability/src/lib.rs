@@ -1,16 +1,11 @@
-/// Capability-based permission model for MESH modules.
-///
-/// Capabilities are named permissions that grant access to specific host APIs.
-/// Modules declare required and optional capabilities in their manifest.
-/// The core grants or denies them at load time.
+//! Capability-based permissions. Modules declare required and optional
+//! capabilities in their manifest; core grants or denies them at load time.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
 
-/// A single capability identifier.
-///
-/// Capabilities follow a dotted namespace convention:
-/// `shell.widget`, `service.battery.read`, `exec.launch-app`, etc.
+/// A dotted capability id: `shell.widget`, `service.battery.read`, …
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Capability(String);
 
@@ -53,14 +48,13 @@ impl fmt::Display for Capability {
     }
 }
 
-/// How sensitive a capability is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum PrivilegeLevel {
-    /// Safe for most modules. Read-only access to services, theme, locale.
+    /// Read-only access to services, theme, locale.
     Standard,
-    /// Grants meaningful system interaction. Requires user confirmation at install.
+    /// Meaningful system interaction; confirmed at install.
     Elevated,
-    /// Powerful or sensitive access. Requires explicit user opt-in with a warning.
+    /// Sensitive access; explicit opt-in with a warning.
     High,
 }
 
@@ -74,11 +68,8 @@ impl fmt::Display for PrivilegeLevel {
     }
 }
 
-/// A handle proving that a capability has been granted.
-///
-/// Modules receive handles at init for each granted capability.
-/// APIs require the corresponding handle as a parameter, making
-/// unauthorized access a compile-time error for Rust modules.
+/// Proof that a capability was granted. APIs take the handle as a parameter,
+/// making unauthorized access a compile-time error for Rust modules.
 #[derive(Debug, Clone)]
 pub struct CapabilityHandle {
     capability: Capability,
@@ -90,7 +81,6 @@ impl CapabilityHandle {
     }
 }
 
-/// Manages capability grants for a module.
 #[derive(Debug, Clone)]
 pub struct CapabilitySet {
     granted: HashSet<Capability>,
@@ -103,18 +93,15 @@ impl CapabilitySet {
         }
     }
 
-    /// Grant a capability and return its handle.
     pub fn grant(&mut self, capability: Capability) -> CapabilityHandle {
         self.granted.insert(capability.clone());
         CapabilityHandle { capability }
     }
 
-    /// Check if a capability has been granted.
     pub fn is_granted(&self, capability: &Capability) -> bool {
         self.granted.contains(capability)
     }
 
-    /// Return all granted capabilities.
     pub fn granted(&self) -> &HashSet<Capability> {
         &self.granted
     }

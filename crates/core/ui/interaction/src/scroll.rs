@@ -22,10 +22,8 @@ pub fn scroll_limits(node: &WidgetNode) -> (f32, f32) {
     (scroll.max_x, scroll.max_y)
 }
 
-/// Build the chain of nodes from the tree root down to the node whose
-/// `_mesh_key` matches `target_key` (inclusive of both ends). Returns `None` if
-/// the key is absent. The first element is always the root and the last is the
-/// target, so `[..len-1]` are the target's ancestors in outer-to-inner order.
+/// Root-to-target node chain, inclusive of both ends, or `None` if the key is
+/// absent. `[..len-1]` are the target's ancestors, outer to inner.
 fn node_path_by_key<'a>(node: &'a WidgetNode, target_key: &str) -> Option<Vec<&'a WidgetNode>> {
     if node.mesh_key().is_some_and(|value| value == target_key) {
         return Some(vec![node]);
@@ -39,11 +37,9 @@ fn node_path_by_key<'a>(node: &'a WidgetNode, target_key: &str) -> Option<Vec<&'
     None
 }
 
-/// Accumulated on-screen offset `(x, y)` for each node along `path`, mirroring
-/// what the painter applies: a node's own `transform.translate` shifts its own
-/// box, and its scroll offset shifts its children. The root's offset is `(0, 0)`.
-/// `offsets` supplies the authoritative live scroll positions (tree attributes
-/// can lag a frame).
+/// Accumulated on-screen offset per node along `path`, mirroring the painter:
+/// `transform.translate` shifts the node's own box, scroll offset shifts its
+/// children. `offsets` carries live scroll state, since tree attributes lag.
 fn path_screen_offsets(
     path: &[&WidgetNode],
     offsets: &HashMap<NodeId, ScrollOffsetState>,
@@ -60,18 +56,13 @@ fn path_screen_offsets(
     result
 }
 
-/// Compute the minimal scroll-offset adjustments that bring the node identified
-/// by `target_key` into view within each of its scrollable ancestors. Returns
-/// the changed `(scroll_container_key, new_offset)` pairs; an empty vec means
-/// nothing needed to move (or the key is not in the tree / has no scrollable
-/// ancestor).
+/// Minimal scroll adjustments bringing `target_key` into view within each
+/// scrollable ancestor, as changed `(container_key, new_offset)` pairs.
 ///
-/// `current_offsets` provides the live scroll state; the math mirrors the wheel
-/// handler so the result composes with manual scrolling. Containers are
-/// processed deepest-first so nested scroll regions settle correctly: adjusting
-/// an inner region moves the target, then outer regions re-evaluate against the
-/// new position. This implements the CSS `scroll-into-view` "nearest" rule —
-/// scroll just enough to reveal the leading edge, then the trailing edge.
+/// The math mirrors the wheel handler so results compose with manual scrolling.
+/// Containers settle deepest-first: adjusting an inner region moves the target,
+/// then outer regions re-evaluate. Implements the CSS `scroll-into-view`
+/// "nearest" rule — reveal the leading edge, then the trailing one.
 pub fn scroll_into_view_offsets(
     root: &WidgetNode,
     target_key: &str,
@@ -117,8 +108,8 @@ pub fn scroll_into_view_offsets(
         let t_w = target.layout.width.max(0.0);
         let t_h = target.layout.height.max(0.0);
 
-        // Increasing a container's scroll offset moves its children up/left, so a
-        // positive delta reduces the target's screen position by the same amount.
+        // A positive delta moves children up/left, reducing the target's
+        // screen position by the same amount.
         let dx = edge_delta(t_left - view_left, (t_left + t_w) - (view_left + view_w));
         let dy = edge_delta(t_top - view_top, (t_top + t_h) - (view_top + view_h));
 
@@ -137,10 +128,9 @@ pub fn scroll_into_view_offsets(
     changed
 }
 
-/// Minimal scroll delta along one axis given the target's leading-edge gap
-/// (`lead`, negative when the target sits before the viewport) and trailing-edge
-/// overflow (`trail`, positive when it spills past the viewport end). Reveals the
-/// leading edge first, matching the CSS "nearest" alignment.
+/// Minimal delta along one axis: `lead` is negative when the target sits before
+/// the viewport, `trail` positive when it spills past the end. Leading edge
+/// wins, matching CSS "nearest" alignment.
 fn edge_delta(lead: f32, trail: f32) -> f32 {
     if lead < 0.0 {
         lead
@@ -193,27 +183,16 @@ fn find_scrollable_at_with_offset(
 
 /// Measure a surface's content size for the compositor.
 ///
-/// The surface root's own laid-out box **is** the measured size: the layout
-/// engine already resolved the root's CSS `width`/`height` against the available
-/// space — `100%` spans, a fixed length pins, `fit-content`/`min-content`/
-/// `max-content` shrink to content — with the root's `min-*`/`max-*` clamps
-/// applied by taffy. So sizing is fully CSS-driven with no manifest inputs; this
-/// replaces the old `mesh.surface` `size_policy`/`min_*`/`max_*`/
-/// `prefers_content_children_sizing` fields (see
-/// `docs/spec/03-components.md` §2).
+/// Sizing is fully CSS-driven: the layout engine already resolved the root's
+/// `width`/`height` and `min-*`/`max-*` clamps against the available space
+/// (`docs/spec/03-components.md` §2). `fallback_*` applies only when the root
+/// has no positive extent yet, as on a degenerate first frame.
 ///
-/// `fallback_*` is used only when the root has no positive laid-out extent yet
-/// (e.g. a degenerate first frame).
-///
-/// The compiled surface tree's root is a synthetic `surface` wrapper whose
-/// style is pinned to the paint-input size (`surface_style()` in the frontend
-/// compiler), so its own laid-out box can only ever echo the input back —
-/// circular for content-sized surfaces, which then stay stuck at whatever
-/// size the first paint assumed (the shipped symptom: a right-anchored panel
-/// permanently mapped at the 1x1 protocol clamp). The box whose CSS
-/// `width`/`height` the layout engine actually resolved is the wrapper's
-/// child (the component root), so for a `surface` wrapper measure the union
-/// extent of its children instead.
+/// The compiled root is a synthetic `surface` wrapper pinned to the paint-input
+/// size, so its own box only echoes the input back — circular for content-sized
+/// surfaces, which then stick at whatever the first paint assumed (the shipped
+/// symptom: a panel permanently mapped at the 1x1 protocol clamp). For a
+/// `surface` wrapper, measure the union extent of its children instead.
 pub fn measure_content_size(
     tree: &WidgetNode,
     fallback_width: u32,
@@ -262,10 +241,8 @@ pub fn annotate_overflow_tree(
     ))
 }
 
-/// Annotates one node after its children and returns its propagated bounds.
-///
-/// This is exposed so callers that already perform a pre-order annotation can
-/// fold overflow's post-order work into the same traversal.
+/// Annotates one node after its children and returns its propagated bounds, so
+/// a caller already walking pre-order can fold this into the same traversal.
 pub fn annotate_overflow_node(
     node: &mut WidgetNode,
     scroll_offsets: &mut HashMap<NodeId, ScrollOffsetState>,
@@ -296,11 +273,8 @@ pub fn annotate_overflow_node(
         0.0
     };
 
-    // A node that scrolls on neither axis always settles at offset (0, 0)
-    // (there's nothing to clamp against), so skip allocating a map entry for it.
-    // Non-scrollable nodes vastly outnumber scrollable containers in most
-    // trees, and every reader of `scroll_offsets` already treats a missing
-    // entry as the default zero offset.
+    // A node that scrolls on neither axis always settles at (0, 0), and every
+    // reader treats a missing entry as that default — so skip the entry.
     let (offset_x, offset_y) = if scrollable_x || scrollable_y {
         let offset = scroll_offsets.entry(node.id).or_default();
         offset.x = offset.x.clamp(0.0, max_x);
@@ -355,7 +329,6 @@ mod scroll_into_view_tests {
         n
     }
 
-    // root > viewport(scrollable, 200px tall, content 600px) > item at y=400.
     fn list_tree() -> WidgetNode {
         let item = node("root/0/0", "box", 0.0, 400.0, 100.0, 50.0);
         let mut viewport = scrollable(node("root/0", "column", 0.0, 0.0, 100.0, 200.0), 0.0, 400.0);
@@ -372,8 +345,6 @@ mod scroll_into_view_tests {
         assert_eq!(updates.len(), 1);
         let (node_id, offset) = &updates[0];
         assert_eq!(*node_id, tree.children[0].id);
-        // Item bottom is at 450; viewport is 200 tall, so scroll to 250 to align
-        // the trailing edge.
         assert!((offset.y - 250.0).abs() < 0.01, "got {}", offset.y);
         assert_eq!(offset.x, 0.0);
     }
@@ -382,13 +353,9 @@ mod scroll_into_view_tests {
     fn scrolls_up_to_reveal_item_above_current_offset() {
         let tree = list_tree();
         let mut current = HashMap::new();
-        // Scrolled past the item: at offset 500 the item (abs y 400) sits at screen
-        // y -100, above the viewport top.
         current.insert(tree.children[0].id, ScrollOffsetState { x: 0.0, y: 500.0 });
         let updates = scroll_into_view_offsets(&tree, "root/0/0", &current);
         assert_eq!(updates.len(), 1);
-        // Reveal the leading edge → offset aligns the item top to the viewport top
-        // at 400.
         assert!(
             (updates[0].1.y - 400.0).abs() < 0.01,
             "got {}",
@@ -400,7 +367,6 @@ mod scroll_into_view_tests {
     fn no_change_when_already_visible() {
         let tree = list_tree();
         let mut current = HashMap::new();
-        // Item [400,450] sits inside viewport window [300,500].
         current.insert(tree.children[0].id, ScrollOffsetState { x: 0.0, y: 300.0 });
         let updates = scroll_into_view_offsets(&tree, "root/0/0", &current);
         assert!(updates.is_empty());
@@ -410,8 +376,6 @@ mod scroll_into_view_tests {
     fn clamps_to_scroll_max() {
         let tree = list_tree();
         let updates = scroll_into_view_offsets(&tree, "root/0/0", &HashMap::new());
-        // max_y is 400; the computed 250 is within bounds, but verify clamping by
-        // shrinking the limit: a deeper item would clamp here.
         assert!(updates[0].1.y <= 400.0);
     }
 
@@ -433,9 +397,6 @@ mod scroll_into_view_tests {
 
     #[test]
     fn nested_containers_both_adjust() {
-        // Coords are absolute (the layout engine bakes ancestor position into
-        // layout.x/y). outer viewport [0,200]; inner box at abs y 300 (its own
-        // viewport [300,400]); item at abs y 380 (inside inner's viewport already).
         let item = node("root/0/0/0", "box", 0.0, 380.0, 40.0, 20.0);
         let mut inner = scrollable(
             node("root/0/0", "column", 0.0, 300.0, 100.0, 100.0),
@@ -452,9 +413,6 @@ mod scroll_into_view_tests {
         let inner_id = root.children[0].children[0].id;
         let updates = scroll_into_view_offsets(&root, "root/0/0/0", &HashMap::new());
         let by_id: HashMap<_, _> = updates.into_iter().collect();
-        // Inner: item [380,400] fits its viewport [300,400] → no inner scroll. Outer:
-        // item screen-top 380 is below the 200-tall outer viewport → outer scrolls by
-        // 200 to align the trailing edge.
         assert!(
             !by_id.contains_key(&inner_id),
             "inner should not move: {by_id:?}"
@@ -728,8 +686,6 @@ mod scroll_into_view_tests {
     fn scrollable_gate_skips_offset_map_for_non_scrollable_nodes() {
         fn build_tree(width: usize, depth: usize, key: &str) -> WidgetNode {
             let mut node = node(key, "column", 0.0, 0.0, 120.0, 120.0);
-            // Only the root scrolls; every descendant is a plain non-scrollable
-            // container, the realistic common case for most subtrees.
             if key == "root" {
                 node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Auto;
             }
@@ -743,8 +699,6 @@ mod scroll_into_view_tests {
             node
         }
 
-        // Pre-guard behavior: touch (and lazily allocate into) `scroll_offsets`
-        // for every node, scrollable or not.
         fn old_annotate_overflow_tree(
             node: &mut WidgetNode,
             key: &str,

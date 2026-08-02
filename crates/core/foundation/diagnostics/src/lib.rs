@@ -1,10 +1,10 @@
-/// Logging, health reporting, and performance monitoring for MESH modules.
+//! Logging, health reporting, and performance monitoring for modules.
+
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-/// Health status of a module.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HealthStatus {
     Healthy,
@@ -22,7 +22,6 @@ impl fmt::Display for HealthStatus {
     }
 }
 
-/// Per-module performance metrics.
 #[derive(Debug, Clone)]
 pub struct ModuleMetrics {
     pub module_id: String,
@@ -33,14 +32,12 @@ pub struct ModuleMetrics {
     pub health: HealthStatus,
 }
 
-/// Diagnostics handle given to each module.
 #[derive(Debug, Clone)]
 pub struct Diagnostics {
     module_id: String,
     state: Arc<Mutex<DiagnosticsState>>,
 }
 
-/// A deduplicated record for a repeated backend lifecycle failure.
 /// Keyed by `(provider_id, stage)`; repeats update `count` and `last_seen`.
 #[derive(Debug, Clone)]
 pub struct LifecycleErrorRecord {
@@ -154,13 +151,11 @@ impl Diagnostics {
         let mut state = self.state.lock().unwrap();
         let key = (provider_id.clone(), stage.clone());
         if let Some(record) = state.lifecycle_errors.get_mut(&key) {
-            // Repeat: update metadata only, do not increment unique error count.
             record.latest_message = message;
             record.count += 1;
             record.last_seen = SystemTime::now();
             false
         } else {
-            // First occurrence: create bucket, set health, increment error count.
             state.lifecycle_errors.insert(
                 key,
                 LifecycleErrorRecord {
@@ -179,7 +174,6 @@ impl Diagnostics {
         }
     }
 
-    /// Return a snapshot of all lifecycle error records for this diagnostics handle.
     pub fn lifecycle_error_records(&self) -> Vec<LifecycleErrorRecord> {
         self.state
             .lock()
@@ -199,7 +193,6 @@ impl Diagnostics {
     }
 }
 
-/// Central diagnostics collector that aggregates metrics from all modules.
 #[derive(Debug, Default)]
 pub struct DiagnosticsCollector {
     modules: Vec<Diagnostics>,
@@ -210,7 +203,6 @@ impl DiagnosticsCollector {
         Self::default()
     }
 
-    /// Register a module and return its diagnostics handle.
     pub fn register(&mut self, module_id: impl Into<String>) -> Diagnostics {
         let diag = Diagnostics::new(module_id);
         self.modules.push(diag.clone());
@@ -233,7 +225,6 @@ impl DiagnosticsCollector {
         diagnostics.record_lifecycle_error(provider_id, stage, message)
     }
 
-    /// Snapshot the health of all registered modules.
     pub fn snapshot(&self) -> Vec<(String, HealthStatus)> {
         self.modules
             .iter()
@@ -302,19 +293,15 @@ mod tests {
     fn lifecycle_errors_are_deduplicated_by_provider_and_stage() {
         let diagnostics = Diagnostics::new("@mesh/pipewire-audio");
 
-        // First occurrence returns true and sets health.
         assert!(diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "msg A"));
         assert_eq!(diagnostics.error_count(), 1);
 
-        // Different stage is a new bucket.
         assert!(diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "init", "msg A"));
         assert_eq!(diagnostics.error_count(), 2);
 
-        // Same (provider, stage) with different message is NOT a new bucket.
         assert!(!diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "msg B"));
         assert_eq!(diagnostics.error_count(), 2);
 
-        // Different provider, same stage is a new bucket.
         assert!(diagnostics.record_lifecycle_error("@mesh/pulseaudio", "poll", "msg A"));
         assert_eq!(diagnostics.error_count(), 3);
     }
@@ -323,19 +310,15 @@ mod tests {
     fn repeated_lifecycle_failures_increment_count_without_new_error() {
         let diagnostics = Diagnostics::new("@mesh/pipewire-audio");
 
-        // First occurrence.
         assert!(diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "boom 1"));
         assert_eq!(diagnostics.error_count(), 1);
 
-        // Second occurrence — different message, same (provider, stage) bucket.
         assert!(!diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "boom 2"));
         assert_eq!(diagnostics.error_count(), 1);
 
-        // Third occurrence.
         assert!(!diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "boom 3"));
         assert_eq!(diagnostics.error_count(), 1);
 
-        // Record count should be 3.
         let records = diagnostics.lifecycle_error_records();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].count, 3);

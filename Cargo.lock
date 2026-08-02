@@ -1966,6 +1966,7 @@ dependencies = [
  "mesh-core-module",
  "mesh-core-shell",
  "mesh-core-surface-config",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

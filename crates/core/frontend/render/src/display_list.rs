@@ -1595,38 +1595,8 @@ impl RetainedDisplayList {
             };
         }
 
-        let mut selected_spans = Vec::with_capacity(self.command_spans.len().min(32));
-        let mut matched_spans = 0u64;
-        for span in self.command_spans.iter() {
-            if span.bounds.intersects(damage) {
-                matched_spans = matched_spans.saturating_add(1);
-                insert_selected_command_span(
-                    &mut selected_spans,
-                    SelectedCommandSpan {
-                        start: span.start,
-                        end: span.end,
-                    },
-                );
-            }
-        }
-        if selected_spans.is_empty() {
-            for (index, command) in self.paint_commands.iter().enumerate() {
-                if command_bounds(command).intersects(damage) {
-                    insert_selected_command_span(
-                        &mut selected_spans,
-                        SelectedCommandSpan {
-                            start: index,
-                            end: index.saturating_add(1),
-                        },
-                    );
-                }
-            }
-        }
-        self.widen_selection_to_layer_scopes(&mut selected_spans);
-        let selected_command_count = selected_spans
-            .iter()
-            .map(|span| span.end.saturating_sub(span.start))
-            .sum::<usize>();
+        let (selected_spans, matched_spans, selected_command_count) =
+            self.select_matching_command_spans(|bounds| bounds.intersects(damage));
 
         metrics.filtered_span_count = matched_spans;
         metrics.filtered_command_count = selected_command_count as u64;
@@ -1699,41 +1669,8 @@ impl RetainedDisplayList {
             };
         }
 
-        let mut selected_spans = Vec::with_capacity(self.command_spans.len().min(32));
-        let mut matched_spans = 0u64;
-        for span in self.command_spans.iter() {
-            if rects_intersect_any(span.bounds, damages) {
-                matched_spans = matched_spans.saturating_add(1);
-                insert_selected_command_span(
-                    &mut selected_spans,
-                    SelectedCommandSpan {
-                        start: span.start,
-                        end: span.end,
-                    },
-                );
-            }
-        }
-
-        if selected_spans.is_empty() {
-            for (index, command) in self.paint_commands.iter().enumerate() {
-                let command_bounds = command_bounds(command);
-                if rects_intersect_any(command_bounds, damages) {
-                    insert_selected_command_span(
-                        &mut selected_spans,
-                        SelectedCommandSpan {
-                            start: index,
-                            end: index.saturating_add(1),
-                        },
-                    );
-                }
-            }
-        }
-
-        self.widen_selection_to_layer_scopes(&mut selected_spans);
-        let selected_command_count = selected_spans
-            .iter()
-            .map(|span| span.end.saturating_sub(span.start))
-            .sum::<usize>();
+        let (selected_spans, matched_spans, selected_command_count) =
+            self.select_matching_command_spans(|bounds| rects_intersect_any(bounds, damages));
 
         metrics.filtered_span_count = matched_spans;
         metrics.filtered_command_count = selected_command_count as u64;
@@ -1749,6 +1686,46 @@ impl RetainedDisplayList {
             },
             metrics,
         }
+    }
+
+    fn select_matching_command_spans(
+        &self,
+        matches: impl Fn(DamageRect) -> bool,
+    ) -> (Vec<SelectedCommandSpan>, u64, usize) {
+        let mut selected = Vec::with_capacity(self.command_spans.len().min(32));
+        let mut matched_spans = 0u64;
+        for span in self.command_spans.iter() {
+            if !matches(span.bounds) {
+                continue;
+            }
+            matched_spans = matched_spans.saturating_add(1);
+            insert_selected_command_span(
+                &mut selected,
+                SelectedCommandSpan {
+                    start: span.start,
+                    end: span.end,
+                },
+            );
+        }
+        if selected.is_empty() {
+            for (index, command) in self.paint_commands.iter().enumerate() {
+                if matches(command_bounds(command)) {
+                    insert_selected_command_span(
+                        &mut selected,
+                        SelectedCommandSpan {
+                            start: index,
+                            end: index.saturating_add(1),
+                        },
+                    );
+                }
+            }
+        }
+        self.widen_selection_to_layer_scopes(&mut selected);
+        let command_count = selected
+            .iter()
+            .map(|span| span.end.saturating_sub(span.start))
+            .sum();
+        (selected, matched_spans, command_count)
     }
 
     /// Grows every selected range that overlaps a blur layer's command range
@@ -6423,6 +6400,33 @@ mod tests {
         assert!(multi_ids.contains(&3));
         assert!(selected_multi.len() >= selected_left.len());
         assert!(selected_multi.len() >= selected_right.len());
+
+        drop(selected_multi);
+        drop(selected_right);
+        drop(selected_left);
+        list.command_spans = Vec::new().into();
+        let fallback = list.select_paint_commands_for_rects(
+            &[
+                DamageRect {
+                    x: 0,
+                    y: 0,
+                    width: 45,
+                    height: 40,
+                },
+                DamageRect {
+                    x: 80,
+                    y: 0,
+                    width: 40,
+                    height: 40,
+                },
+            ],
+            DisplayListRepaintPolicy::MinimalDamage,
+        );
+        let fallback_ids: Vec<_> = fallback.iter().map(|command| command.node.id).collect();
+        assert_eq!(fallback.metrics().filtered_span_count, 0);
+        assert!(fallback_ids.contains(&1));
+        assert!(fallback_ids.contains(&2));
+        assert!(fallback_ids.contains(&3));
     }
 
     #[test]

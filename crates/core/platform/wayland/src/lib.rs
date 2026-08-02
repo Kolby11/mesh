@@ -1,11 +1,9 @@
-/// Wayland surface management and compositor abstraction for MESH.
-///
-/// This crate abstracts over compositor-specific protocol extensions so that
-/// modules can create shell surfaces without knowing which compositor is running.
+//! Compositor abstraction: modules create shell surfaces without knowing which
+//! compositor is running.
+
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-/// Screen edge for surface anchoring.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Edge {
     Top,
@@ -14,7 +12,6 @@ pub enum Edge {
     Right,
 }
 
-/// Layer for surface stacking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Layer {
     Background,
@@ -23,7 +20,6 @@ pub enum Layer {
     Overlay,
 }
 
-/// Keyboard interactivity mode for a shell surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyboardMode {
     None,
@@ -31,18 +27,10 @@ pub enum KeyboardMode {
     OnDemand,
 }
 
-/// Which compositor shell protocol realizes a surface.
-///
-/// `Layer` surfaces are shell chrome placed by the compositor
-/// (`zwlr_layer_shell_v1`): panels, launchers, overlays. `Window` surfaces are
-/// ordinary application windows (`xdg_toplevel`) that tile, float, move between
-/// workspaces, and close like any other app — settings, module browsers, and
-/// developer tools.
-///
-/// The two roles size in opposite directions. A layer surface tells the
-/// compositor its CSS-measured size; a window is *told* its size by the
-/// compositor's configure and lays content out into it. See
-/// `docs/spec/01-module-system.md`.
+/// `Layer` is shell chrome placed by the compositor (`zwlr_layer_shell_v1`);
+/// `Window` is an ordinary `xdg_toplevel`. They size in opposite directions: a
+/// layer surface tells the compositor its CSS-measured size, a window is *told*
+/// its size by configure. See `docs/spec/01-module-system.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SurfaceRole {
     #[default]
@@ -50,14 +38,9 @@ pub enum SurfaceRole {
     Window,
 }
 
-/// Who draws a window's title bar and borders.
-///
-/// MESH paints its own chrome, so `Client` is the default: the compositor is
-/// asked to leave decoration to the module. `Server` opts into the
-/// compositor's own decorations for users whose setup decorates uniformly.
-/// Either way the compositor has the final say — it may answer a request with
-/// the other mode, and [`WindowOptions::decorations`] records what was asked
-/// for, not what was granted.
+/// MESH paints its own chrome, so `Client` is the default. Either way the
+/// compositor has the final say: [`WindowOptions::decorations`] records what
+/// was asked for, not what was granted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WindowDecorations {
     #[default]
@@ -66,12 +49,9 @@ pub enum WindowDecorations {
 }
 
 /// Toplevel-only surface properties, resolved (title already localized).
-///
-/// Meaningless for [`SurfaceRole::Layer`]; the manifest layer rejects them on
-/// layer surfaces rather than silently ignoring them.
+/// Rejected by the manifest layer on [`SurfaceRole::Layer`] surfaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowOptions {
-    /// Toplevel title shown by the compositor / task switcher.
     pub title: String,
     /// `xdg_toplevel.set_app_id` — what compositor window rules key off.
     pub app_id: String,
@@ -92,32 +72,23 @@ impl Default for WindowOptions {
     }
 }
 
-/// What the compositor last said a toplevel *is* — the `xdg_toplevel` states
-/// carried by every configure.
-///
-/// These are decisions, not requests: a window cannot put itself in them, it
-/// only learns about them and restyles. The shell projects each flag onto the
-/// surface tree as a CSS state (`:fullscreen`, `:maximized`, `:activated`,
-/// `:tiled`), so a module can size and decorate itself differently when it
-/// fills the output than when it floats.
-///
-/// Meaningless for [`SurfaceRole::Layer`], which has no such protocol states;
-/// a layer surface reports [`Self::default`] (everything false).
+/// The `xdg_toplevel` states carried by every configure — decisions, not
+/// requests. The shell projects each onto the tree as a CSS state
+/// (`:fullscreen`, `:maximized`, `:activated`, `:tiled`). Layer surfaces have
+/// no such states and report [`Self::default`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WindowStates {
     pub maximized: bool,
     pub fullscreen: bool,
-    /// The window has keyboard focus as far as the compositor is concerned.
     pub activated: bool,
-    /// Any edge is tiled — the window abuts a screen edge or neighbour under a
-    /// tiling layout, so rounded corners and outer shadows are wrong.
+    /// Any edge abuts a screen edge or neighbour, so rounded corners and outer
+    /// shadows are wrong.
     pub tiled: bool,
 }
 
 impl WindowStates {
-    /// True when the window covers its whole allotment (fullscreen or
-    /// maximized) — the case where content should stretch rather than keep a
-    /// floating window's natural size.
+    /// Covers its whole allotment, so content should stretch rather than keep
+    /// a floating window's natural size.
     pub fn is_filling(self) -> bool {
         self.fullscreen || self.maximized
     }
@@ -126,19 +97,17 @@ impl WindowStates {
 /// Abstracted shell surface that maps to compositor-specific protocols.
 pub trait ShellSurface {
     fn anchor(&mut self, edge: Edge);
-    /// Select the compositor protocol backing this surface. Applied before the
-    /// surface is created; changing it on a live surface re-creates the
-    /// compositor object (see the shell's role-change path).
+    /// Applied before creation; changing it on a live surface re-creates the
+    /// compositor object.
     fn set_role(&mut self, role: SurfaceRole);
-    /// Apply toplevel-only properties. Ignored for [`SurfaceRole::Layer`].
+    /// Ignored for [`SurfaceRole::Layer`].
     fn set_window_options(&mut self, options: WindowOptions);
     fn set_size(&mut self, width: u32, height: u32);
     fn set_exclusive_zone(&mut self, zone: i32);
     fn set_layer(&mut self, layer: Layer);
     fn set_keyboard_interactivity(&mut self, mode: KeyboardMode);
     fn set_margin(&mut self, top: i32, right: i32, bottom: i32, left: i32);
-    /// Opt this surface into compositor blur. The presentation layer turns this
-    /// into a `:blur`-suffixed layer-shell namespace a compositor rule targets.
+    /// Turned into a `:blur`-suffixed layer-shell namespace by presentation.
     fn set_blur(&mut self, blur: bool);
     fn show(&mut self);
     fn hide(&mut self);
@@ -197,7 +166,6 @@ impl ClipboardWriter for WaylandClipboard {
     }
 }
 
-/// Reports what the current compositor supports.
 pub trait CompositorCapabilities {
     fn name(&self) -> &str;
     fn version(&self) -> &str;
@@ -205,7 +173,6 @@ pub trait CompositorCapabilities {
     fn supported_protocols(&self) -> Vec<String>;
 }
 
-/// Placeholder compositor backend for development and testing.
 #[derive(Debug)]
 pub struct StubCompositor;
 
@@ -227,7 +194,6 @@ impl CompositorCapabilities for StubCompositor {
     }
 }
 
-/// Placeholder shell surface for development and testing.
 #[derive(Debug)]
 pub struct StubSurface {
     pub visible: bool,

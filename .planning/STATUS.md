@@ -7,6 +7,25 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**A whole-codebase refactor is in flight.** Files over 2000 lines are being
+split and comment volume cut, section by section. Foundation, platform,
+surface-config, and the UI crates are done and verified; frontend, runtime and
+extension, presentation and shell, and tools remain. Record:
+[`log/2026-08.md`](log/2026-08.md).
+
+**Dotted template reads take one root lookup and one leaf clone at most.** The
+compiler no longer probes synthetic dotted keys or allocates a temporary path
+vector; owned-only stores traverse by reference and clone only the resolved
+leaf. The focused test cannot link in this checkout because the configured Nix
+linker wrapper references a missing store path (2026-08-02). Record:
+[`log/2026-08.md`](log/2026-08.md).
+
+**Display-list damage selection shares one span-selection path.** Single- and
+multi-rect callers now use the same span/fallback/layer-scope logic; a
+regression covers disjoint rects with and without retained spans. The focused
+test cannot link because of the missing Nix linker wrapper (2026-08-02).
+Record: [`log/2026-08.md`](log/2026-08.md).
+
 **The retained Taffy node map is authoritative through incremental layout.**
 Fresh, dirty, and structural paths write layouts through the per-surface map;
 unkeyed nodes are indexed for write-back but are still recreated on structural
