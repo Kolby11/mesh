@@ -19,6 +19,9 @@ pub enum ManifestError {
     #[error("failed to parse JSON manifest: {0}")]
     Json(#[from] serde_json::Error),
 
+    #[error("failed to load canonical module manifest: {0}")]
+    Canonical(#[from] crate::package::ModuleManifestError),
+
     #[error("no manifest found in module directory {0}")]
     NotFound(PathBuf),
 }
@@ -56,9 +59,15 @@ fn load_package_json(path: &Path) -> Result<LoadedManifest, ManifestError> {
 fn load_module_json(path: &Path) -> Result<LoadedManifest, ManifestError> {
     let content = std::fs::read_to_string(path)?;
     if is_canonical_module_json(&content)? {
-        let parsed: crate::package::ModuleManifest = serde_json::from_str(&content)?;
+        // Use the package loader for canonical manifests so every caller gets
+        // the same validation and module-relative external-contract
+        // resolution as installed-graph construction. Tooling used to parse
+        // the manifest directly here and therefore saw `"contract.json"`
+        // instead of the contract object consumed by the runtime.
+        let module_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        let loaded = crate::package::load_module_manifest(module_dir)?;
         return Ok(LoadedManifest {
-            manifest: parsed.into_runtime_manifest(),
+            manifest: loaded.manifest.into_runtime_manifest(),
             path: path.to_path_buf(),
             source: ManifestSource::CanonicalModuleJson,
         });

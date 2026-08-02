@@ -255,12 +255,22 @@ impl Shell {
                         })
                         .unzip();
 
+                let module_settings = graph
+                    .settings_schemas()
+                    .iter()
+                    .find(|settings| settings.module_id == module.id);
                 let provides_settings = graph
                     .settings_schemas()
                     .iter()
                     .filter(|settings| settings.module_id == module.id)
                     .map(|settings| settings.namespace.clone())
                     .collect::<Vec<_>>();
+                let settings_values = self
+                    .settings_store
+                    .namespace(&module.id)
+                    .pointer("/props/global")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
                 let provides_i18n = graph
                     .contributed_i18n()
                     .iter()
@@ -411,6 +421,11 @@ impl Shell {
                     provides_interfaces,
                     provides_interface_labels,
                     provides_settings,
+                    settings_schema: module_settings.map(|settings| settings.schema.clone()),
+                    settings_values,
+                    settings_ui: module_settings
+                        .and_then(|settings| settings.settings_ui.clone())
+                        .or_else(|| module.manifest.mesh.entrypoints.settings_ui.clone()),
                     provides_i18n,
                     provides_themes,
                     provides_theme_labels,
@@ -1204,6 +1219,9 @@ fn module_graph_entry_json(entry: &mesh_core_debug::ModuleGraphEntry) -> serde_j
                 .map(|(id, label)| serde_json::json!({ "id": id, "label": label }))
                 .collect::<Vec<_>>(),
             "settings": entry.provides_settings,
+            "settings_schema": entry.settings_schema,
+            "settings_values": entry.settings_values,
+            "settings_ui": entry.settings_ui,
             "i18n": entry.provides_i18n,
             "required_icons": entry.required_icons,
             "optional_icons": entry.optional_icons,

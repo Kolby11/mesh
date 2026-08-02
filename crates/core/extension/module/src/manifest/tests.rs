@@ -609,6 +609,55 @@ fn parses_canonical_module_json_module_manifest() {
 }
 
 #[test]
+fn canonical_manifest_loader_resolves_external_interface_contract() {
+    let dir = std::env::temp_dir().join(format!(
+        "mesh-canonical-external-contract-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("module.json"),
+        r#"{
+  "name": "@mesh/audio-interface",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.audio",
+      "version": "1.0",
+      "contract": "contract.json"
+    }
+  }
+}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("contract.json"),
+        r#"{
+  "state": { "percent": { "type": "float" } },
+  "methods": {},
+  "events": {},
+  "types": {}
+}"#,
+    )
+    .unwrap();
+
+    let loaded = load_manifest(&dir).unwrap();
+    let contract = loaded
+        .manifest
+        .interface
+        .as_ref()
+        .and_then(|declaration| declaration.contract.as_ref())
+        .expect("resolved contract object");
+    assert!(contract.is_object());
+    assert!(contract["state"]["percent"].is_object());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn parses_module_json_icon_requirements() {
     let content = r#"
 {

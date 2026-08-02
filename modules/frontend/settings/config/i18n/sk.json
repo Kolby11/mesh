@@ -184,5 +184,10 @@
   "advanced.of": "z",
   "advanced.modules_match": "modulov zodpovedá",
   "advanced.switching_live": "Prebieha prepnutie",
-  "advanced.applying_live": "Prebieha použitie"
+  "advanced.applying_live": "Prebieha použitie",
+  "advanced.module_preferences": "Predvoľby modulov",
+  "advanced.module_preferences.copy": "Ovládacie prvky sa generujú z verejných vlastností modulov a ukladajú sa do aktívneho profilu.",
+  "advanced.no_module_preferences": "Žiadne verejné predvoľby modulov",
+  "advanced.no_module_preferences.copy": "Moduly so zverejnenými vlastnosťami sa tu zobrazia automaticky.",
+  "common.reset": "Obnoviť"
 }

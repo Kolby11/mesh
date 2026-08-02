@@ -217,6 +217,10 @@ fn catalog_changes(
 }
 
 impl FrontendCatalog {
+    pub(in crate::shell) fn module(&self, module_id: &str) -> Option<&FrontendCatalogEntry> {
+        self.modules.get(module_id)
+    }
+
     pub(in crate::shell) fn from_modules(
         modules: &HashMap<String, ModuleInstance>,
         graph: Option<&InstalledModuleGraph>,

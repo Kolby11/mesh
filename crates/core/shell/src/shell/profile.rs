@@ -14,6 +14,7 @@ pub(super) struct PreparedProfileFrontend {
 #[cfg(test)]
 mod tests {
     use super::super::discovery::effective_profile_settings;
+    use super::update_module_prop_override;
     use mesh_core_config::SettingsStore;
     use mesh_core_module::package::ShellProfile;
 
@@ -46,6 +47,29 @@ mod tests {
             "compact"
         );
         assert_eq!(shared.shell().theme.active, "mesh-default-light");
+    }
+
+    #[test]
+    fn module_prop_updates_preserve_siblings_and_reset_sparsely() {
+        let mut namespace = serde_json::json!({
+            "surface": { "anchor": "top" },
+            "props": { "global": { "density": "compact" } }
+        });
+
+        update_module_prop_override(
+            &mut namespace,
+            "blur_enabled",
+            Some(serde_json::json!(false)),
+        );
+        assert_eq!(
+            namespace["props"]["global"],
+            serde_json::json!({ "density": "compact", "blur_enabled": false })
+        );
+
+        update_module_prop_override(&mut namespace, "blur_enabled", None);
+        update_module_prop_override(&mut namespace, "density", None);
+        assert!(namespace.get("props").is_none());
+        assert_eq!(namespace["surface"]["anchor"], serde_json::json!("top"));
     }
 
     #[test]
@@ -93,6 +117,93 @@ pub(super) struct PendingProfileSwitch {
 }
 
 impl Shell {
+    pub(in crate::shell) fn apply_set_module_prop(
+        &mut self,
+        module_id: &str,
+        prop: &str,
+        value: Option<serde_json::Value>,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let catalog = self.frontend_catalog.snapshot();
+        let definition = catalog
+            .catalog
+            .module(module_id)
+            .and_then(|entry| entry.compiled.component.props.as_ref())
+            .and_then(|block| {
+                block
+                    .props
+                    .iter()
+                    .find(|definition| definition.name == prop)
+            })
+            .filter(|definition| definition.expose)
+            .cloned()
+            .ok_or_else(|| ShellRunError::FrontendComposition {
+                message: format!(
+                    "module '{module_id}' does not expose a configurable prop named '{prop}'"
+                ),
+            })?;
+
+        if let Some(value) = value.as_ref() {
+            let parsed = mesh_core_component::json_to_prop_value_ref(value).ok_or_else(|| {
+                ShellRunError::FrontendComposition {
+                    message: format!(
+                        "setting {module_id}.props.global.{prop} must be a string, number, or boolean"
+                    ),
+                }
+            })?;
+            mesh_core_component::validate_prop_value(&definition, &parsed).map_err(|error| {
+                ShellRunError::FrontendComposition {
+                    message: format!("invalid setting {module_id}.props.global.{prop}: {error}"),
+                }
+            })?;
+        }
+
+        let effective = if let Some(profile_id) = self.active_profile_id.clone() {
+            let paths = ProfilePaths::from_root_graph(&self.installed_module_graph_path())?;
+            let mut profile = paths.load(&profile_id)?;
+            let namespace = profile
+                .settings
+                .entry(module_id.to_string())
+                .or_insert_with(|| serde_json::json!({}));
+            update_module_prop_override(namespace, prop, value);
+            if namespace.as_object().is_some_and(serde_json::Map::is_empty) {
+                profile.settings.remove(module_id);
+            }
+            paths.save(&profile_id, &profile)?;
+            let shared =
+                SettingsStore::load().map_err(|error| ShellRunError::FrontendComposition {
+                    message: format!("failed to reload shared settings: {error}"),
+                })?;
+            super::discovery::effective_profile_settings(shared, Some(&profile)).map_err(
+                |error| ShellRunError::FrontendComposition {
+                    message: format!("failed to resolve updated profile settings: {error}"),
+                },
+            )?
+        } else {
+            let mut shared =
+                SettingsStore::load().map_err(|error| ShellRunError::FrontendComposition {
+                    message: format!("failed to load settings for update: {error}"),
+                })?;
+            let mut namespace = shared.namespace(module_id);
+            update_module_prop_override(&mut namespace, prop, value);
+            shared.set_namespace(module_id, namespace);
+            shared
+                .save()
+                .map_err(|error| ShellRunError::FrontendComposition {
+                    message: format!("failed to save settings: {error}"),
+                })?;
+            shared
+        };
+
+        self.settings_store = Arc::new(effective);
+        self.settings = self.settings_store.shell().clone();
+        self.settings_watch.modified_at = std::fs::metadata(&self.settings_watch.path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok());
+        self.apply_settings_to_components()?;
+        self.components_want_render = true;
+        Ok(VecDeque::new())
+    }
+
     pub(in crate::shell) fn apply_switch_profile(
         &mut self,
         profile_id: &str,
@@ -290,11 +401,11 @@ impl Shell {
                     .backend_runtimes
                     .get(&candidate.interface)
                     .is_some_and(|running| running.provider_id == candidate.module_id);
-                let config_matches = current_configs
-                    .get(&candidate.interface)
-                    .is_some_and(|(provider_id, settings)| {
+                let config_matches = current_configs.get(&candidate.interface).is_some_and(
+                    |(provider_id, settings)| {
                         provider_id == &candidate.module_id && settings == &candidate.settings
-                    });
+                    },
+                );
                 !(running_matches && config_matches)
             })
             .collect::<Vec<_>>();
@@ -555,5 +666,44 @@ impl Shell {
             "profile_switch_rejected",
             format!("profile {profile_id}: {message}"),
         );
+    }
+}
+
+fn update_module_prop_override(
+    namespace: &mut serde_json::Value,
+    prop: &str,
+    value: Option<serde_json::Value>,
+) {
+    if !namespace.is_object() {
+        *namespace = serde_json::json!({});
+    }
+    let namespace_object = namespace.as_object_mut().expect("object established above");
+    let props = namespace_object
+        .entry("props".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !props.is_object() {
+        *props = serde_json::json!({});
+    }
+    let props_object = props.as_object_mut().expect("object established above");
+    let global = props_object
+        .entry("global".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !global.is_object() {
+        *global = serde_json::json!({});
+    }
+    let global_object = global.as_object_mut().expect("object established above");
+    match value {
+        Some(value) => {
+            global_object.insert(prop.to_string(), value);
+        }
+        None => {
+            global_object.remove(prop);
+        }
+    }
+    if global_object.is_empty() {
+        props_object.remove("global");
+    }
+    if props_object.is_empty() {
+        namespace_object.remove("props");
     }
 }

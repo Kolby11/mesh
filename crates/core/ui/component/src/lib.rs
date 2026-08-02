@@ -232,6 +232,77 @@ pub fn prop_value_to_json(value: &PropValue) -> serde_json::Value {
     }
 }
 
+/// Derive the settings schema projected by a component's exposed props.
+///
+/// This lives with the prop grammar so graph discovery, the compiler, the LSP,
+/// and settings UI cannot grow separate schema translations.
+pub fn props_settings_schema(block: Option<&PropsBlock>) -> Option<serde_json::Value> {
+    let block = block?;
+    let mut properties = serde_json::Map::new();
+    for def in &block.props {
+        if !def.expose {
+            continue;
+        }
+        let mut field = serde_json::Map::new();
+        field.insert(
+            "type".into(),
+            serde_json::Value::String(def.ty.as_str().into()),
+        );
+        if let Some(default) = &def.default {
+            field.insert("default".into(), prop_value_to_json(default));
+        }
+        if let Some(label) = &def.label {
+            field.insert("label".into(), localized_label_to_json(label));
+        }
+        if let Some(description) = &def.description {
+            field.insert("description".into(), localized_label_to_json(description));
+        }
+        if !def.options.is_empty() {
+            field.insert(
+                "enum".into(),
+                serde_json::Value::Array(
+                    def.options
+                        .iter()
+                        .map(|option| serde_json::Value::String(option.clone()))
+                        .collect(),
+                ),
+            );
+        }
+        if let Some(min) = def.min {
+            field.insert("minimum".into(), serde_json::json!(min));
+        }
+        if let Some(max) = def.max {
+            field.insert("maximum".into(), serde_json::json!(max));
+        }
+        if let Some(step) = def.step {
+            field.insert("step".into(), serde_json::json!(step));
+        }
+        if let Some(unit) = &def.unit {
+            field.insert("unit".into(), serde_json::Value::String(unit.clone()));
+        }
+        properties.insert(def.name.clone(), serde_json::Value::Object(field));
+    }
+    (!properties.is_empty())
+        .then(|| serde_json::json!({ "type": "object", "properties": properties }))
+}
+
+fn localized_label_to_json(label: &LocalizedLabel) -> serde_json::Value {
+    match label {
+        LocalizedLabel::Literal(text) => serde_json::Value::String(text.clone()),
+        LocalizedLabel::Translation { key, fallback } => {
+            let mut object = serde_json::Map::new();
+            object.insert("t".into(), serde_json::Value::String(key.clone()));
+            if let Some(fallback) = fallback {
+                object.insert(
+                    "fallback".into(),
+                    serde_json::Value::String(fallback.clone()),
+                );
+            }
+            serde_json::Value::Object(object)
+        }
+    }
+}
+
 pub fn json_to_prop_value(value: serde_json::Value) -> Option<PropValue> {
     match value {
         serde_json::Value::String(s) => Some(PropValue::String(s)),

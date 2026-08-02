@@ -40,12 +40,9 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
       composition, multiple root instances, scoped preferences, and
       transactional live switching are shipped; the replaceable UI still needs
       service contracts instead of privileged file access. See [`spec/01-module-system.md`](spec/01-module-system.md).
-- [ ] Add external `contract.json` support with keyed state, method, event, and
-      type objects; compile into `InterfaceContract` and generate strict
-      Luau/LSP types.
-- [ ] Generate settings UI from props declarations by default, with an optional
-      `settings_ui` entrypoint for advanced modules. Writes go to the module's
-      namespace in the settings store. See [`spec/08-settings.md`](spec/08-settings.md) §5.
+- [ ] Mount optional `settings_ui` entrypoints and add per-instance selection
+      to generated prop controls. Default controls and profile-scoped global
+      writes are shipped. See [`spec/08-settings.md`](spec/08-settings.md) §5.
 - [ ] Eliminate the remaining service-specific Rust branches. The startup-sound
       path still calls the `mesh.audio` handler directly; debug and profiling
       paths also branch. *(detail: "Module system — remaining open follow-ups")*

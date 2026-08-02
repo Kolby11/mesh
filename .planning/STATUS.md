@@ -7,6 +7,20 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Module props have a generated settings surface.** Installed frontend props
+are projected into the module graph as typed schemas; the settings frontend
+renders controls and reset actions, and privileged writes are validated before
+updating sparse profile-scoped overrides. Custom `settings_ui` mounting and
+per-instance targeting remain open (2026-08-02). Record:
+[`log/2026-08.md`](log/2026-08.md).
+
+**External interface contracts are typed through the editor boundary.** The
+shared canonical manifest loader resolves module-relative `contract.json`
+references for runtime and tooling callers alike. The LSP consumes the
+validated `InterfaceContract`, so service proxy completion carries exact state,
+method, return, and event-payload types rather than guessing from a backend
+script (2026-08-02). Record: [`log/2026-08.md`](log/2026-08.md).
+
 **The retained widget tree owns the render fingerprint pass.** Each retained
 node snapshot now carries the paint fingerprint and produces the detailed
 render dirty summary/node set while its normal layout/style/attribute diff is

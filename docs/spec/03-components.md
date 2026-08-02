@@ -20,7 +20,7 @@ API; packaging stays in the manifest.
 <style>                 CSS-like styling: var(--…) tokens, prop(…) references
 ```
 
-**Status: shipped** except `<props>` (**target**, §3).
+**Status: shipped**, including component `<props>` (§3).
 
 Component rules (shipped):
 
@@ -64,8 +64,8 @@ hatch, not the default path.
 
 ## 3. The `<props>` block
 
-**Status: target** (design final; Phase 3 manifest narrowing already landed —
-see §7).
+**Status: shipped** for `.mesh` components. Backend and interface declarations
+remain target work (§5).
 
 One declaration per configurable value; everything else derives from it.
 
@@ -209,15 +209,15 @@ generated settings.
 
 ## 7. Implementation roadmap
 
-1. **Phase 1** — `<props>` parsing + all three projections for the `size`
+1. **Phase 1 — landed.** `<props>` parsing + all three projections for the `size`
    type end-to-end (parser block, `StyleValue::Prop`, precedence resolver,
    reactive `props` table, derived settings schema).
-2. **Phase 2** — migrate `@mesh/audio-popover` as the reference proof.
+2. **Phase 2 — landed.** Migrate shipped frontends as reference proofs.
 3. **Phase 3 — landed.** Manifest narrowed to placement-only
    `SurfaceLayoutSection`; sizing/`display_transition`/`mesh.settings`
    deleted with no compat readers; LSP manifest schema synced.
-4. **Phase 4** — remaining types, per-instance persistence in the settings
-   store, LSP completions/hover/diagnostics, then in-script backend props and
-   interface props (§5).
+4. **Phase 4 — partial.** Remaining component types, global persistence, and
+   LSP completions/hover/diagnostics landed. Per-instance settings UI and
+   in-script backend/interface props remain (§5).
 
 No phase leaves an old config path readable (no-backward-compat rule).

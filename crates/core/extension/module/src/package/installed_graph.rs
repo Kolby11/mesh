@@ -1299,6 +1299,8 @@ fn is_declared_shell_event_channel(channel: &str) -> bool {
             | "shell.set-locale"
             | "shell.set-provider"
             | "shell.set-module-enabled"
+            | "shell.set-module-prop"
+            | "shell.unset-module-prop"
             | "shell.toggle-debug-overlay"
             | "shell.toggle-debug-layout-bounds"
             | "shell.toggle-debug-profiling"
@@ -2205,6 +2207,26 @@ impl ModuleContributionIndex {
     fn index_module(&mut self, module: &InstalledModuleNode) -> Result<(), ModuleManifestError> {
         let module_id = module.id.as_str();
         let manifest = &module.manifest;
+        let derived_props_schema = if module.kind == ModuleKind::Frontend {
+            manifest
+                .mesh
+                .entrypoints
+                .main
+                .as_deref()
+                .and_then(|entrypoint| {
+                    module
+                        .manifest_path
+                        .parent()
+                        .map(|dir| dir.join(entrypoint))
+                })
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .and_then(|source| parse_component(&source).ok())
+                .and_then(|component| {
+                    mesh_core_component::props_settings_schema(component.props.as_ref())
+                })
+        } else {
+            None
+        };
         if module.kind == ModuleKind::Frontend {
             if let Some(path) = &manifest.mesh.entrypoints.main {
                 validate_relative_path("frontend main entrypoint", path)?;
@@ -2295,12 +2317,24 @@ impl ModuleContributionIndex {
                 path: contribution.path.clone(),
             });
         }
-        if let Some(settings) = &manifest.mesh.contributes.settings {
+        if let Some(settings) = &manifest.mesh.contributes.settings
+            && !(settings.namespace == module_id && derived_props_schema.is_some())
+        {
             self.settings.push(ContributedSettingsSchema {
                 source: ContributionSource::new(module, &settings.namespace),
                 module_id: module_id.into(),
                 namespace: settings.namespace.clone(),
                 schema: settings.schema.clone(),
+                settings_ui: manifest.mesh.entrypoints.settings_ui.clone(),
+            });
+        }
+        if let Some(schema) = derived_props_schema {
+            self.settings.push(ContributedSettingsSchema {
+                source: ContributionSource::new(module, "props"),
+                module_id: module_id.into(),
+                namespace: module_id.into(),
+                schema,
+                settings_ui: manifest.mesh.entrypoints.settings_ui.clone(),
             });
         }
         for (action_id, action) in &manifest.mesh.keybinds.actions {
@@ -2470,6 +2504,9 @@ pub struct ContributedSettingsSchema {
     pub module_id: String,
     pub namespace: String,
     pub schema: serde_json::Value,
+    /// Optional module-authored settings component that replaces the generated
+    /// layout while retaining this schema for validation and persistence.
+    pub settings_ui: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

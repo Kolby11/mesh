@@ -803,6 +803,14 @@ impl Shell {
             CoreRequest::SetModuleEnabled { module_id, enabled } => {
                 Ok(self.apply_set_module_enabled(&module_id, enabled))
             }
+            CoreRequest::SetModuleProp {
+                module_id,
+                prop,
+                value,
+            } => self.apply_set_module_prop(&module_id, &prop, Some(value)),
+            CoreRequest::UnsetModuleProp { module_id, prop } => {
+                self.apply_set_module_prop(&module_id, &prop, None)
+            }
             CoreRequest::SwitchProfile { profile_id } => Ok(self.apply_switch_profile(&profile_id)),
             CoreRequest::ToggleDebugOverlay => {
                 self.debug.toggle();
@@ -1755,6 +1763,8 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::SetLocale { .. } => "set_locale",
         CoreRequest::SetProvider { .. } => "set_provider",
         CoreRequest::SetModuleEnabled { .. } => "set_module_enabled",
+        CoreRequest::SetModuleProp { .. } => "set_module_prop",
+        CoreRequest::UnsetModuleProp { .. } => "unset_module_prop",
         CoreRequest::SwitchProfile { .. } => "switch_profile",
         CoreRequest::ActivatePopover { .. } => "activate_popover",
         CoreRequest::TransferTabFocus { .. } => "transfer_tab_focus",

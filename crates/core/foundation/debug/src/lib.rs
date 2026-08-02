@@ -527,6 +527,12 @@ pub struct ModuleGraphEntry {
     /// Resolved display labels for each provided interface, indexed parallel to `provides_interfaces`.
     pub provides_interface_labels: Vec<Option<String>>,
     pub provides_settings: Vec<String>,
+    /// Generated prop schema for the module's public component, when exposed.
+    pub settings_schema: Option<serde_json::Value>,
+    /// Effective profile-scoped `props.global` overrides for the module.
+    pub settings_values: serde_json::Value,
+    /// Optional module-authored settings component entrypoint.
+    pub settings_ui: Option<String>,
     pub provides_i18n: Vec<String>,
     pub provides_themes: Vec<String>,
     pub provides_theme_labels: Vec<Option<String>>,

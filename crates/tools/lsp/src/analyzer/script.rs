@@ -133,8 +133,41 @@ fn complete_interface_proxy(
         return vec![];
     };
 
-    let shape = registry.interface_shapes.get(iface_name);
     let mut items: Vec<CompletionItem> = Vec::new();
+
+    if let Some(contract) = registry.interface_contract(iface_name) {
+        for field in &contract.state_fields {
+            if field.name.starts_with(prefix) {
+                items.push(contract_state_item(iface_name, field));
+            }
+        }
+        for method in &contract.methods {
+            if method.name.starts_with(prefix) {
+                items.push(contract_method_item(iface_name, method));
+            }
+        }
+        for event in &contract.events {
+            if event.name.starts_with(prefix) {
+                items.push(contract_event_item(iface_name, event));
+            }
+        }
+        for (name, detail) in [
+            ("state", "typed service-state table"),
+            ("events", "typed interface-event channels"),
+        ] {
+            if name.starts_with(prefix) {
+                items.push(CompletionItem {
+                    label: name.to_string(),
+                    kind: Some(CompletionItemKind::FIELD),
+                    detail: Some(format!("{iface_name} {detail}")),
+                    ..Default::default()
+                });
+            }
+        }
+        return items;
+    }
+
+    let shape = registry.interface_shapes.get(iface_name);
 
     // State fields from backend script analysis
     if let Some(shape) = shape {
@@ -197,6 +230,119 @@ fn complete_interface_proxy(
     }
 
     items
+}
+
+fn contract_state_item(
+    interface: &str,
+    field: &mesh_core_service::ContractStateField,
+) -> CompletionItem {
+    let ty = contract_type_to_luau(&field.field_type);
+    CompletionItem {
+        label: field.name.clone(),
+        kind: Some(CompletionItemKind::FIELD),
+        detail: Some(ty.clone()),
+        documentation: Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: format!(
+                "**`{}.{}`**: `{}`{}",
+                interface,
+                field.name,
+                ty,
+                field
+                    .description
+                    .as_deref()
+                    .map(|description| format!("\n\n{description}"))
+                    .unwrap_or_default()
+            ),
+        })),
+        ..Default::default()
+    }
+}
+
+fn contract_method_item(
+    interface: &str,
+    method: &mesh_core_service::InterfaceMethod,
+) -> CompletionItem {
+    let signature = contract_method_signature(method);
+    let placeholders = (1..=method.args.len())
+        .map(|index| format!("${index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    CompletionItem {
+        label: method.name.clone(),
+        kind: Some(CompletionItemKind::METHOD),
+        detail: Some(signature.clone()),
+        insert_text: Some(format!("{}({placeholders})", method.name)),
+        insert_text_format: Some(Fmt::SNIPPET),
+        documentation: Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: format!("Typed command declared by `{interface}`.\n\n```luau\n{signature}\n```"),
+        })),
+        ..Default::default()
+    }
+}
+
+fn contract_event_item(
+    interface: &str,
+    event: &mesh_core_service::InterfaceEvent,
+) -> CompletionItem {
+    let payload = event
+        .payload
+        .iter()
+        .map(|field| format!("{}: {}", field.name, contract_type_to_luau(&field.arg_type)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    CompletionItem {
+        label: event.name.clone(),
+        kind: Some(CompletionItemKind::EVENT),
+        detail: Some(format!("EventChannel<{{ {payload} }}>")),
+        documentation: Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: format!("Typed event channel declared by `{interface}`."),
+        })),
+        ..Default::default()
+    }
+}
+
+fn contract_method_signature(method: &mesh_core_service::InterfaceMethod) -> String {
+    let args = method
+        .args
+        .iter()
+        .map(|arg| format!("{}: {}", arg.name, contract_type_to_luau(&arg.arg_type)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let returns = method
+        .returns
+        .as_deref()
+        .map(contract_type_to_luau)
+        .unwrap_or_else(|| "nil".to_string());
+    format!("{}({args}): {returns}", method.name)
+}
+
+fn contract_type_to_luau(contract_type: &str) -> String {
+    let Ok(parsed) = mesh_core_service::TypeExpr::parse(contract_type) else {
+        return contract_type.to_string();
+    };
+    let base = match parsed.base {
+        mesh_core_service::BaseType::String => "string".to_string(),
+        mesh_core_service::BaseType::Int | mesh_core_service::BaseType::Float => {
+            "number".to_string()
+        }
+        mesh_core_service::BaseType::Boolean => "boolean".to_string(),
+        mesh_core_service::BaseType::Object => "{ [string]: any }".to_string(),
+        mesh_core_service::BaseType::Any => "any".to_string(),
+        mesh_core_service::BaseType::Named(name) => name,
+    };
+    let array = if parsed.array {
+        format!("{{{base}}}")
+    } else {
+        base
+    };
+    if parsed.optional {
+        format!("{array}?")
+    } else {
+        array
+    }
 }
 
 fn complete_props(prefix: &str, doc: &Document) -> Vec<CompletionItem> {
@@ -452,6 +598,47 @@ fn complete_import_member(
             .filter_map(|(m, sig)| member_item(m, prefix, sig, CompletionItemKind::METHOD))
             .collect();
         }
+    }
+
+    if let Some(contract) = registry.interface_contract(canonical) {
+        let mut items = Vec::new();
+        for field in &contract.state_fields {
+            if let Some(item) = member_item(
+                &field.name,
+                prefix,
+                &contract_type_to_luau(&field.field_type),
+                CompletionItemKind::FIELD,
+            ) {
+                items.push(item);
+            }
+        }
+        for method in &contract.methods {
+            if let Some(item) = member_item(
+                &method.name,
+                prefix,
+                &contract_method_signature(method),
+                CompletionItemKind::METHOD,
+            ) {
+                items.push(item);
+            }
+        }
+        for event in &contract.events {
+            let payload = event
+                .payload
+                .iter()
+                .map(|field| format!("{}: {}", field.name, contract_type_to_luau(&field.arg_type)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            if let Some(item) = member_item(
+                &event.name,
+                prefix,
+                &format!("EventChannel<{{ {payload} }}>"),
+                CompletionItemKind::EVENT,
+            ) {
+                items.push(item);
+            }
+        }
+        return items;
     }
 
     if let Some(shape) = registry.interface_shapes.get(canonical) {

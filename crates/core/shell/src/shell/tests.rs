@@ -2223,6 +2223,14 @@ fn debug_snapshot_exposes_installed_module_graph_contracts() {
             .provides_settings
             .contains(&"@mesh/navigation-bar".into())
     );
+    assert_eq!(
+        navigation
+            .settings_schema
+            .as_ref()
+            .and_then(|schema| { schema["properties"]["blur_enabled"]["type"].as_str() }),
+        Some("bool")
+    );
+    assert!(navigation.settings_values.is_object());
     assert!(
         navigation
             .provides_i18n
@@ -2273,6 +2281,8 @@ fn debug_snapshot_exposes_installed_module_graph_contracts() {
                     && entry["uses"]["keybinds"]
                         .as_array()
                         .is_some_and(|actions| actions.contains(&serde_json::json!("mute")))
+                    && entry["provides"]["settings_schema"]["properties"]["blur_enabled"]["type"]
+                        == serde_json::json!("bool")
             }))
     );
     let pipewire_json = debug_payload.state["module_graph"]

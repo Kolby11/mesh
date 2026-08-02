@@ -66,6 +66,66 @@
                 <text class="settings-section-copy">{t('advanced.clear_filter')}</text>
             </empty-state>
         </column>
+
+        <column class="settings-section">
+            <column class="settings-card-copy">
+                <text class="settings-section-title">{t('advanced.module_preferences')}</text>
+                <text class="settings-section-copy">{t('advanced.module_preferences.copy')}</text>
+            </column>
+            <list class="settings-list" label={t('advanced.module_preferences')} hidden={props_hidden}>
+                {#for row in prop_rows}
+                    <list-item class="settings-card settings-prop-card">
+                        <column class="settings-card-copy settings-prop-copy">
+                            <text class="settings-card-title">{row.label}</text>
+                            <text class="settings-card-meta">{row.module_id .. ' · ' .. row.name .. row.description}</text>
+                        </column>
+                        <button
+                            class="settings-secondary-button settings-prop-control"
+                            hidden={row.bool_hidden}
+                            onclick={onPropToggle(row.module_id, row.name, row.value)}
+                        >
+                            {row.value and t('common.enabled') or t('common.disabled')}
+                        </button>
+                        <button
+                            class="settings-secondary-button settings-prop-control"
+                            hidden={row.enum_hidden}
+                            onclick={onPropEnumNext(row.module_id, row.name, row.value, row.options)}
+                        >
+                            {row.display_value}
+                        </button>
+                        <slider
+                            class="settings-slider settings-prop-slider"
+                            hidden={row.number_hidden}
+                            min={row.minimum}
+                            max={row.maximum}
+                            step={row.step}
+                            value={row.value}
+                            label={row.label}
+                            onchange={onPropNumber(row.module_id, row.name)}
+                        />
+                        <input
+                            class="module-filter settings-prop-control"
+                            hidden={row.text_hidden}
+                            value={row.display_value}
+                            label={row.label}
+                            onchange={onPropText(row.module_id, row.name, row.type)}
+                        />
+                        <text class="settings-value" hidden={row.number_hidden}>{row.display_value}</text>
+                        <button
+                            class="settings-secondary-button"
+                            hidden={row.reset_hidden}
+                            onclick={onPropReset(row.module_id, row.name, row.default)}
+                        >
+                            {t('common.reset')}
+                        </button>
+                    </list-item>
+                {/for}
+            </list>
+            <empty-state class="settings-empty-state" hidden={props_empty_hidden}>
+                <text class="settings-card-title">{t('advanced.no_module_preferences')}</text>
+                <text class="settings-section-copy">{t('advanced.no_module_preferences.copy')}</text>
+            </empty-state>
+        </column>
     </column>
 </template>
 
@@ -86,16 +146,20 @@ modules_notice_separator = ""
 module_filter = ""
 provider_rows = {}
 module_rows = {}
+prop_rows = {}
 providers_hidden = true
 providers_empty_hidden = false
 modules_hidden = true
 modules_empty_hidden = false
+props_hidden = true
+props_empty_hidden = false
 
 local provider_candidates = {}
 local pending_providers = {}
 local pending_module_enabled = {}
 local provider_notice = ""
 local module_notice = ""
+local pending_props = {}
 
 local function lower(value)
     return string.lower(tostring(value or ""))
@@ -129,6 +193,41 @@ local function module_matches(entry, query)
     if string.find(lower(join_limited(uses.interfaces, 16)), query, 1, true) then return true end
     local provides = entry.provides or {}
     return string.find(lower(join_limited(provides.settings, 16)), query, 1, true) ~= nil
+end
+
+local function localized_text(value, fallback)
+    if type(value) == "string" and value ~= "" then return value end
+    if type(value) == "table" then
+        if type(value.t) == "string" and value.t ~= "" then
+            local translated = t(value.t)
+            if translated ~= value.t then return translated end
+        end
+        if type(value.fallback) == "string" and value.fallback ~= "" then
+            return value.fallback
+        end
+    end
+    return fallback
+end
+
+local function event_value(event)
+    if type(event) == "table" then return event.value end
+    return event
+end
+
+local function pending_key(module_id, name)
+    return tostring(module_id) .. "\0" .. tostring(name)
+end
+
+local function update_local_prop(module_id, name, value, has_override)
+    local key = pending_key(module_id, name)
+    pending_props[key] = { value = value, has_override = has_override }
+    for _, row in ipairs(prop_rows) do
+        if row.module_id == module_id and row.name == name then
+            row.value = value
+            row.display_value = tostring(value or "") .. tostring(row.unit or "")
+            row.reset_hidden = not has_override
+        end
+    end
 end
 
 function render()
@@ -200,6 +299,7 @@ function render()
     providers_notice_separator = provider_notice == "" and "" or " · "
 
     module_rows = {}
+    prop_rows = {}
     for i = 1, math.min(#matched, 12) do
         local entry = matched[i]
         local module_id = tostring(entry.module_id or "")
@@ -227,15 +327,108 @@ function render()
             action_hidden = not action_allowed,
             button_class = enabled and "settings-danger-button" or "settings-primary-button",
         }
+
+        local settings_schema = provides.settings_schema or {}
+        local properties = settings_schema.properties or {}
+        local overrides = provides.settings_values or {}
+        for name, definition in pairs(properties) do
+            local prop_type = tostring(definition.type or "string")
+            local override = overrides[name]
+            local has_override = override ~= nil
+            local value = has_override and override or definition.default
+            local pending = pending_props[pending_key(module_id, name)]
+            if pending ~= nil then
+                value = pending.value
+                has_override = pending.has_override
+            end
+            local bounded_number = (prop_type == "number" or prop_type == "int" or prop_type == "duration")
+                and definition.minimum ~= nil and definition.maximum ~= nil
+            local description = localized_text(definition.description, "")
+            prop_rows[#prop_rows + 1] = {
+                module_id = module_id,
+                name = tostring(name),
+                type = prop_type,
+                label = localized_text(definition.label, tostring(name)),
+                description = description == "" and "" or (" · " .. description),
+                value = value,
+                default = definition.default,
+                display_value = tostring(value or "") .. tostring(definition.unit or ""),
+                unit = tostring(definition.unit or ""),
+                options = definition.enum or {},
+                minimum = tonumber(definition.minimum) or 0,
+                maximum = tonumber(definition.maximum) or 100,
+                step = tonumber(definition.step) or 1,
+                bool_hidden = prop_type ~= "bool",
+                enum_hidden = prop_type ~= "enum",
+                number_hidden = not bounded_number,
+                text_hidden = prop_type == "bool" or prop_type == "enum" or bounded_number,
+                reset_hidden = not has_override,
+            }
+        end
     end
+    table.sort(prop_rows, function(a, b)
+        if a.module_id == b.module_id then return a.name < b.name end
+        return a.module_id < b.module_id
+    end)
     modules_hidden = #module_rows == 0
     modules_empty_hidden = #module_rows > 0
+    props_hidden = #prop_rows == 0
+    props_empty_hidden = #prop_rows > 0
     modules_match_count = #graph == 0 and "" or (tostring(#matched) .. " ")
     modules_of = #graph == 0 and "" or "advanced.of"
     modules_total_count = #graph == 0 and "" or (" " .. tostring(#graph) .. " ")
     modules_summary = #graph == 0 and "advanced.no_modules_published"
         or "advanced.modules_match"
     modules_notice_separator = module_notice == "" and "" or " · "
+end
+
+function onPropToggle(module_id, name, current)
+    local value = not (current == true)
+    update_local_prop(module_id, name, value, true)
+    mesh.events.publish("shell.set-module-prop", {
+        module_id = module_id, prop = name, value = value,
+    })
+end
+
+function onPropEnumNext(module_id, name, current, options)
+    if type(options) ~= "table" or #options == 0 then return end
+    local index = 0
+    for i, option in ipairs(options) do
+        if option == current then index = i end
+    end
+    local value = options[(index % #options) + 1]
+    update_local_prop(module_id, name, value, true)
+    mesh.events.publish("shell.set-module-prop", {
+        module_id = module_id, prop = name, value = value,
+    })
+end
+
+function onPropNumber(module_id, name, event)
+    local value = tonumber(event_value(event))
+    if value == nil then return end
+    update_local_prop(module_id, name, value, true)
+    mesh.events.publish("shell.set-module-prop", {
+        module_id = module_id, prop = name, value = value,
+    })
+end
+
+function onPropText(module_id, name, prop_type, event)
+    local value = tostring(event_value(event) or "")
+    if prop_type == "number" or prop_type == "int" or prop_type == "duration" then
+        value = tonumber(value)
+        if value == nil then return end
+    end
+    update_local_prop(module_id, name, value, true)
+    mesh.events.publish("shell.set-module-prop", {
+        module_id = module_id, prop = name, value = value,
+    })
+end
+
+function onPropReset(module_id, name, default)
+    update_local_prop(module_id, name, default, false)
+    mesh.events.publish("shell.unset-module-prop", {
+        module_id = module_id, prop = name,
+    })
 end
 
 function onModuleFilterChange(value)
@@ -285,5 +478,24 @@ end
         align-items: center;
         justify-content: space-between;
         gap: var(--spacing-sm);
+    }
+
+    .settings-prop-card {
+        gap: var(--spacing-sm);
+    }
+
+    .settings-prop-copy {
+        min-width: 0;
+        flex-grow: 1;
+    }
+
+    .settings-prop-control {
+        width: 180px;
+        flex-shrink: 0;
+    }
+
+    .settings-prop-slider {
+        width: 150px;
+        flex-shrink: 0;
     }
 </style>

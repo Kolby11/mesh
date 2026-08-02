@@ -6,11 +6,11 @@ use crate::style::{
 use crate::tags::lower_source_tag;
 use crate::{FrontendCompositionResolver, LayeredStore};
 
+use mesh_core_component::PropsBlock;
 use mesh_core_component::style::{StyleRule, StyleValue, prop_variable_key};
 use mesh_core_component::template::{
     Attribute, AttributeValue, ComponentRef, ElementNode, ForNode, SourceTag, TemplateNode,
 };
-use mesh_core_component::{PropValue, PropsBlock};
 use mesh_core_elements::accessibility::AccessibilityInfo;
 use mesh_core_elements::{
     AttrKey, AttributeMap, ComponentCompositionProps, ComputedStyle, EventHandlerCall,
@@ -169,78 +169,7 @@ pub fn resolve_css_props(
 /// consume it directly. Only `expose`d props are included; returns `None` when
 /// the component declares no exposable props.
 pub fn props_settings_schema(block: Option<&PropsBlock>) -> Option<serde_json::Value> {
-    let block = block?;
-    let mut properties = serde_json::Map::new();
-    for def in &block.props {
-        if !def.expose {
-            continue;
-        }
-        let mut field = serde_json::Map::new();
-        field.insert(
-            "type".into(),
-            serde_json::Value::String(def.ty.as_str().into()),
-        );
-        if let Some(default) = &def.default {
-            field.insert("default".into(), prop_value_to_json(default));
-        }
-        if let Some(label) = &def.label {
-            field.insert("label".into(), localized_label_to_json(label));
-        }
-        if let Some(description) = &def.description {
-            field.insert("description".into(), localized_label_to_json(description));
-        }
-        if !def.options.is_empty() {
-            field.insert(
-                "enum".into(),
-                serde_json::Value::Array(
-                    def.options
-                        .iter()
-                        .map(|option| serde_json::Value::String(option.clone()))
-                        .collect(),
-                ),
-            );
-        }
-        if let Some(min) = def.min {
-            field.insert("minimum".into(), serde_json::json!(min));
-        }
-        if let Some(max) = def.max {
-            field.insert("maximum".into(), serde_json::json!(max));
-        }
-        if let Some(step) = def.step {
-            field.insert("step".into(), serde_json::json!(step));
-        }
-        if let Some(unit) = &def.unit {
-            field.insert("unit".into(), serde_json::Value::String(unit.clone()));
-        }
-        properties.insert(def.name.clone(), serde_json::Value::Object(field));
-    }
-    if properties.is_empty() {
-        return None;
-    }
-    Some(serde_json::json!({ "type": "object", "properties": properties }))
-}
-
-fn prop_value_to_json(value: &PropValue) -> serde_json::Value {
-    mesh_core_component::prop_value_to_json(value)
-}
-
-fn localized_label_to_json(label: &mesh_core_component::LocalizedLabel) -> serde_json::Value {
-    match label {
-        mesh_core_component::LocalizedLabel::Literal(text) => {
-            serde_json::Value::String(text.clone())
-        }
-        mesh_core_component::LocalizedLabel::Translation { key, fallback } => {
-            let mut obj = serde_json::Map::new();
-            obj.insert("t".into(), serde_json::Value::String(key.clone()));
-            if let Some(fallback) = fallback {
-                obj.insert(
-                    "fallback".into(),
-                    serde_json::Value::String(fallback.clone()),
-                );
-            }
-            serde_json::Value::Object(obj)
-        }
-    }
+    mesh_core_component::props_settings_schema(block)
 }
 
 struct TrackingVariableStore<'a> {

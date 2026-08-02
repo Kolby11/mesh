@@ -267,6 +267,24 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                 enabled,
             })
         }
+        "shell.set-module-prop" if event.source_module_id == "@mesh/settings" => {
+            let module_id = event.payload.get("module_id")?.as_str()?;
+            let prop = event.payload.get("prop")?.as_str()?;
+            let value = event.payload.get("value")?.clone();
+            Some(CoreRequest::SetModuleProp {
+                module_id: module_id.to_string(),
+                prop: prop.to_string(),
+                value,
+            })
+        }
+        "shell.unset-module-prop" if event.source_module_id == "@mesh/settings" => {
+            let module_id = event.payload.get("module_id")?.as_str()?;
+            let prop = event.payload.get("prop")?.as_str()?;
+            Some(CoreRequest::UnsetModuleProp {
+                module_id: module_id.to_string(),
+                prop: prop.to_string(),
+            })
+        }
         "shell.switch-profile" if event.source_module_id == "@mesh/settings" => event
             .payload
             .get("profile_id")
@@ -491,6 +509,63 @@ mod tests {
             requests.as_slice(),
             [CoreRequest::SetModuleEnabled { module_id, enabled: false }]
                 if module_id == "@mesh/audio-popover"
+        ));
+    }
+
+    #[test]
+    fn settings_prop_events_map_to_typed_requests() {
+        let requests = script_events_to_requests(vec![
+            PublishedEvent {
+                channel: "shell.set-module-prop".into(),
+                payload: serde_json::json!({
+                    "module_id": "@mesh/navigation-bar",
+                    "prop": "blur_enabled",
+                    "value": false,
+                }),
+                source_module_id: "@mesh/settings".into(),
+                source_capabilities: Default::default(),
+            },
+            PublishedEvent {
+                channel: "shell.unset-module-prop".into(),
+                payload: serde_json::json!({
+                    "module_id": "@mesh/navigation-bar",
+                    "prop": "blur_enabled",
+                }),
+                source_module_id: "@mesh/settings".into(),
+                source_capabilities: Default::default(),
+            },
+        ]);
+
+        assert!(matches!(
+            requests.as_slice(),
+            [
+                CoreRequest::SetModuleProp { module_id, prop, value },
+                CoreRequest::UnsetModuleProp { module_id: unset_module, prop: unset_prop },
+            ] if module_id == "@mesh/navigation-bar"
+                && prop == "blur_enabled"
+                && value == &serde_json::json!(false)
+                && unset_module == module_id
+                && unset_prop == prop
+        ));
+    }
+
+    #[test]
+    fn non_settings_module_cannot_write_module_props() {
+        let requests = script_events_to_requests(vec![PublishedEvent {
+            channel: "shell.set-module-prop".into(),
+            payload: serde_json::json!({
+                "module_id": "@mesh/navigation-bar",
+                "prop": "blur_enabled",
+                "value": false,
+            }),
+            source_module_id: "@mesh/navigation-bar".into(),
+            source_capabilities: Default::default(),
+        }]);
+
+        assert!(matches!(
+            requests.as_slice(),
+            [CoreRequest::PublishDiagnostics { message }]
+                if message.contains("shell.set-module-prop")
         ));
     }
 

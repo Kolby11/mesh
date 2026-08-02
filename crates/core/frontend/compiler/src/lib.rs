@@ -1292,7 +1292,11 @@ mod tests {
         let compiled = compile_frontend_module(&loaded.manifest, &module_dir)
             .expect("navigation module should compile");
         let theme = mesh_core_theme::default_theme();
-        let tree = compiled.build_preview_tree(&theme, 960, 56);
+        let state = MapStore(HashMap::from([(
+            "props".to_string(),
+            serde_json::json!({ "blur_enabled": true }),
+        )]));
+        let tree = compiled.build_preview_tree_with_state(&theme, 960, 56, Some(&state));
         let nav_shell = first_node_with_class(&tree, "nav-shell").expect("nav-shell node");
 
         assert_eq!(tree.layout.width.round() as u32, 960);

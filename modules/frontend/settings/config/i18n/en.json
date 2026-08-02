@@ -184,5 +184,10 @@
   "advanced.of": "of",
   "advanced.modules_match": "modules match",
   "advanced.switching_live": "Switching live",
-  "advanced.applying_live": "Applying live"
+  "advanced.applying_live": "Applying live",
+  "advanced.module_preferences": "Module preferences",
+  "advanced.module_preferences.copy": "Controls are generated from each module's public props and saved in the active profile.",
+  "advanced.no_module_preferences": "No public module preferences",
+  "advanced.no_module_preferences.copy": "Modules with exposed props will appear here automatically.",
+  "common.reset": "Reset"
 }

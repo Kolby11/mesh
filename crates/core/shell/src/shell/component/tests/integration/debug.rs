@@ -565,6 +565,17 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
                         "provides": {
                             "interfaces": [],
                             "settings": ["@mesh/navigation-bar"],
+                            "settings_schema": {
+                                "type": "object",
+                                "properties": {
+                                    "blur_enabled": {
+                                        "type": "bool",
+                                        "default": true,
+                                        "label": "Backdrop blur"
+                                    }
+                                }
+                            },
+                            "settings_values": { "blur_enabled": false },
                             "i18n": [],
                             "required_icons": [],
                             "optional_icons": []
@@ -746,6 +757,26 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
     assert!(text.iter().any(|line| line == "@mesh/pipewire-audio"));
     assert!(text.iter().any(|line| line == "Installed modules"));
     assert!(text.iter().any(|line| line == "@mesh/navigation-bar"));
+    assert!(text.iter().any(|line| line == "Module preferences"));
+    assert!(text.iter().any(|line| line == "Backdrop blur"));
+
+    let requests = component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/settings/local:AdvancedPage::onPropToggle",
+            &[
+                serde_json::json!("@mesh/navigation-bar"),
+                serde_json::json!("blur_enabled"),
+                serde_json::json!(false),
+            ],
+        )
+        .unwrap();
+    assert!(matches!(
+        requests.as_slice(),
+        [CoreRequest::SetModuleProp { module_id, prop, value }]
+            if module_id == "@mesh/navigation-bar"
+                && prop == "blur_enabled"
+                && value == &serde_json::json!(true)
+    ));
 
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
@@ -772,7 +803,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         options: &mut Vec<(String, String)>,
     ) {
         if let Some(call) = node.event_handler_calls.get("click")
-            && call.handler.ends_with("::onThemeSelect")
+            && call.handler.handler() == "onThemeSelect"
             && let Some(theme_id) = call.args.first().and_then(|arg| arg.as_str())
         {
             options.push((

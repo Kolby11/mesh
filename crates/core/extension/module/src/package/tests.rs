@@ -959,6 +959,19 @@ fn shipped_module_graph_loads_repo_module_fixture() {
             .iter()
             .any(|settings| settings.namespace == "@mesh/navigation-bar")
     );
+    let navigation_settings = graph
+        .settings_schemas()
+        .iter()
+        .find(|settings| settings.namespace == "@mesh/navigation-bar")
+        .expect("navigation props schema");
+    assert_eq!(
+        navigation_settings.schema["properties"]["blur_enabled"]["type"],
+        serde_json::json!("bool")
+    );
+    assert_eq!(
+        navigation_settings.schema["properties"]["blur_radius"]["type"],
+        serde_json::json!("size")
+    );
     assert!(
         graph
             .keybind_actions()
@@ -2480,6 +2493,10 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
     assert_eq!(
         graph.settings_schemas()[0].namespace,
         "@mesh/example-widget"
+    );
+    assert_eq!(
+        graph.settings_schemas()[0].settings_ui.as_deref(),
+        Some("src/settings.mesh")
     );
     let keybind = &graph.keybind_actions()[0];
     assert_eq!(keybind.action_id, "mute");

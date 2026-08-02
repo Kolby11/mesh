@@ -434,6 +434,76 @@ audio.$0
     }
 
     #[test]
+    fn interface_proxy_completion_uses_declared_contract_types() {
+        let (source, position) = fixture_with_cursor(
+            r#"<template></template>
+
+<script lang="luau">
+local audio = require("mesh.audio")
+audio.$0
+</script>
+"#,
+        );
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+        let mut registry = ModuleRegistry::empty();
+        let contract = mesh_core_service::parse_interface_contract(
+            "mesh.audio",
+            "1.0",
+            &serde_json::json!({
+                "state": {
+                    "percent": { "type": "float", "description": "Current volume." }
+                },
+                "methods": {
+                    "set_volume": {
+                        "args": [
+                            { "name": "device_id", "type": "string" },
+                            { "name": "percent", "type": "float" }
+                        ],
+                        "returns": "Result"
+                    }
+                },
+                "events": {
+                    "Changed": {
+                        "payload": [{ "name": "percent", "type": "float" }]
+                    }
+                },
+                "types": {}
+            }),
+        )
+        .unwrap();
+        registry
+            .interface_contracts
+            .insert("mesh.audio".to_string(), contract);
+
+        let items = complete(&doc, position, &registry);
+        let percent = items
+            .iter()
+            .find(|item| item.label == "percent")
+            .expect("state field completion");
+        assert_eq!(percent.detail.as_deref(), Some("number"));
+
+        let method = items
+            .iter()
+            .find(|item| item.label == "set_volume")
+            .expect("method completion");
+        assert_eq!(
+            method.detail.as_deref(),
+            Some("set_volume(device_id: string, percent: number): Result")
+        );
+        assert_eq!(method.insert_text.as_deref(), Some("set_volume($1, $2)"));
+
+        let event = items
+            .iter()
+            .find(|item| item.label == "Changed")
+            .expect("event completion");
+        assert_eq!(
+            event.detail.as_deref(),
+            Some("EventChannel<{ percent: number }>")
+        );
+        assert!(!items.iter().any(|item| item.label == "on_change"));
+    }
+
+    #[test]
     fn template_attr_completion_offers_bind_this_with_brace_value() {
         let (source, position) = fixture_with_cursor(
             r#"<template>

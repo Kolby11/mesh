@@ -231,6 +231,19 @@ pub enum CoreRequest {
         module_id: String,
         enabled: bool,
     },
+    /// Set one validated public component prop in the active profile's module
+    /// namespace (`props.global`).
+    SetModuleProp {
+        module_id: String,
+        prop: String,
+        value: serde_json::Value,
+    },
+    /// Remove one public component prop override so its declaration default
+    /// becomes effective again.
+    UnsetModuleProp {
+        module_id: String,
+        prop: String,
+    },
     /// Transactionally replace the running composition and its profile-scoped
     /// preferences. Candidate modules are prepared before the active pointer
     /// and visible roots change.

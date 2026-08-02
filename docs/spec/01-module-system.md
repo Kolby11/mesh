@@ -279,11 +279,13 @@ Per the props model ([03](03-components.md)) and settings model
 
 ## 4. Interfaces
 
-**Status: shipped** for the registry, inline JSON contracts, event validation,
-and relationship metadata. **Target:** substantial interface modules move the
-same JSON contract object to a separate `contract.json` referenced by
-`module.json`; tiny contracts may remain inline. This reduces manifest noise
-without adding another language or execution model.
+**Status: shipped** for the registry, inline and external JSON contracts, keyed
+external declarations, type/event validation, runtime proxy typing, LSP
+contract completions, and relationship metadata. Substantial interface modules
+may move the same JSON contract object to a separate `contract.json` referenced
+by `module.json`; tiny contracts may remain inline. This reduces manifest noise
+without adding another language or execution model. **Target:** generated
+provider stubs, mocks, standalone documentation, and compatibility reports.
 
 An interface is a named, versioned declaration of:
 
@@ -352,7 +354,7 @@ the contract inline:
 }
 ```
 
-The target external form keeps `module.json` canonical:
+The external form keeps `module.json` canonical:
 
 ```json
 {
@@ -373,8 +375,10 @@ The target external form keeps `module.json` canonical:
 `contract.json` uses keyed `state`, `methods`, `events`, and `types` objects.
 It declares descriptions, units, ranges, errors, capabilities, and optional
 feature groups. Tooling compiles inline and external forms into the same
-canonical `InterfaceContract` representation and generates strict Luau types,
-provider stubs, mocks, documentation, and compatibility reports.
+canonical `InterfaceContract` representation. Runtime validation and LSP
+completion use its strict Luau field, argument, return, and event-payload types.
+Provider stubs, mocks, standalone documentation, and compatibility reports
+remain target tooling.
 
 - **Type grammar.** Every `type`/`returns` expression is validated at graph
   build: primitives (`string`, `int`, `float`, `boolean`, `object`, `any`),

@@ -1,5 +1,6 @@
 use mesh_core_config::{default_config_path, load_config, resolve_discovery_paths};
 use mesh_core_module::manifest::{Manifest, ModuleType, load_manifest};
+use mesh_core_service::{InterfaceContract, parse_interface_contract};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -24,6 +25,9 @@ pub struct ModuleRegistry {
     pub interface_fields: HashMap<String, Vec<String>>,
     /// Maps interface name → inferred shape (state fields + commands) from backend script.
     pub interface_shapes: HashMap<String, InterfaceShape>,
+    /// Validated declared contracts. These are authoritative over shapes
+    /// inferred from a provider implementation.
+    pub interface_contracts: HashMap<String, InterfaceContract>,
     /// Maps component tag name → module-id for modules that export a component tag.
     pub exported_tags: HashMap<String, String>,
     /// Theme ids installed on this machine, from the theme directory
@@ -43,6 +47,7 @@ impl ModuleRegistry {
             module_entrypoints: HashMap::new(),
             interface_fields: HashMap::new(),
             interface_shapes: HashMap::new(),
+            interface_contracts: HashMap::new(),
             exported_tags: HashMap::new(),
             themes: Vec::new(),
             locales: Vec::new(),
@@ -119,7 +124,35 @@ impl ModuleRegistry {
         }
         self.module_dirs.insert(module_id.clone(), manifest_dir);
 
-        // For interface modules, record the interface name
+        // Index declared contracts before provider inference. A standalone
+        // interface module is authoritative if it collides with an inline
+        // backend declaration, matching installed-graph precedence.
+        let standalone_interface = manifest.package.module_type == ModuleType::Interface;
+        let declarations = manifest.interface.iter().chain(manifest.interfaces.iter());
+        for declaration in declarations {
+            self.interface_fields
+                .entry(declaration.name.clone())
+                .or_default();
+            let Some(contract_json) = declaration.contract.as_ref() else {
+                continue;
+            };
+            let Ok(contract) =
+                parse_interface_contract(&declaration.name, &declaration.version, contract_json)
+            else {
+                continue;
+            };
+            if standalone_interface {
+                self.interface_contracts
+                    .insert(declaration.name.clone(), contract);
+            } else {
+                self.interface_contracts
+                    .entry(declaration.name.clone())
+                    .or_insert(contract);
+            }
+        }
+
+        // For interface modules, record the interface name even when the
+        // declaration has no contract yet.
         if manifest.package.module_type == ModuleType::Interface {
             if let Some(iface) = &manifest.interface {
                 self.interface_fields.entry(iface.name.clone()).or_default();
@@ -215,6 +248,11 @@ impl ModuleRegistry {
         let mut ids: Vec<String> = self.interface_fields.keys().cloned().collect();
         ids.sort();
         ids
+    }
+
+    /// The validated contract for an interface, when one was declared.
+    pub fn interface_contract(&self, interface: &str) -> Option<&InterfaceContract> {
+        self.interface_contracts.get(interface)
     }
 
     /// A one-line description of a module, for completion documentation.
@@ -345,6 +383,59 @@ fn is_lua_identifier(s: &str) -> bool {
             .next()
             .map_or(false, |c| c.is_ascii_alphabetic() || c == '_')
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn indexes_external_contract_as_authoritative_interface_shape() {
+        let dir =
+            std::env::temp_dir().join(format!("mesh-lsp-external-contract-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("module.json"),
+            r#"{
+  "name": "@mesh/audio-interface",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.audio",
+      "version": "1.0",
+      "contract": "contract.json"
+    }
+  }
+}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("contract.json"),
+            r#"{
+  "state": { "percent": { "type": "float" } },
+  "methods": { "set_volume": {
+    "args": [{ "name": "percent", "type": "float" }],
+    "returns": "Result"
+  } },
+  "events": {},
+  "types": {}
+}"#,
+        )
+        .unwrap();
+
+        let mut registry = ModuleRegistry::empty();
+        registry.try_load_module(&dir);
+        let contract = registry
+            .interface_contract("mesh.audio")
+            .expect("validated external contract");
+        assert_eq!(contract.state_fields[0].name, "percent");
+        assert_eq!(contract.methods[0].args[0].arg_type, "float");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 fn is_lua_keyword(s: &str) -> bool {

@@ -16,9 +16,10 @@ availability, profiles own composition, this store owns preference overrides,
 and runtime health is observed state. A settings frontend may present all four
 on one module page without copying them into `settings.json`.
 
-**Status: shipped** for the store itself (§1–§4); **target** for the
-`mesh.settings` service contract, the generated settings UI (§5), and the CLI
-(§7). This replaced the previous multi-file model (`settings-default.json`,
+**Status: shipped** for the store itself (§1–§4), global frontend-prop controls
+in the generated settings UI (§5), and the current shell CLI (§7); **target**
+for the `mesh.settings` service contract, custom/per-instance settings UI, and
+the service-backed CLI. This replaced the previous multi-file model (`settings-default.json`,
 `shell-settings.json`, per-module `config/settings.json`, six-layer stack) —
 those files and their readers are deleted. Schemas no longer come from
 `mesh.provides.settings` (deleted); they derive from props
@@ -176,7 +177,11 @@ brings them back.
 
 ## 5. Generated settings UI
 
-**Status: target** (settings surface module → v1.22).
+**Status: partially shipped.** Exposed props from a frontend module's primary
+component produce typed global controls, effective values, and per-row reset
+actions. Writes are validated and persisted as sparse active-profile overrides.
+Per-instance selection, the remaining generated sections below, and custom
+`settings_ui` mounting are target work.
 
 For every module, the settings surface renders, with zero module-specific
 code:
@@ -193,9 +198,10 @@ code:
   active profile through the appropriate service), capabilities, health, diagnostics
   ([01 §9](01-module-system.md)).
 
-Modules needing a custom layout may ship a `settings_ui` entrypoint rendering
-a `.mesh` component; the props declarations still govern validation and
-persistence.
+Modules needing a custom layout may declare a `settings_ui` entrypoint rendering
+a `.mesh` component. The entrypoint is present in module-graph metadata but is
+not mounted yet; when implemented, props declarations will continue to govern
+validation and persistence.
 
 ## 6. Reading settings from modules
 
