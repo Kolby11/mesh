@@ -17,28 +17,20 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub(crate) const MAX_EFFECT_BLUR_RADIUS: f32 = 96.0;
 
-/// How the painter spends its budget on one blur.
-///
-/// The one lever that measurably changes cost here is how many times the
-/// kernel runs. Resampling the layer to a lower resolution first — the usual
-/// trick — is *not* one: Skia's raster blur already downsamples internally for
-/// wide kernels, so an explicit resample chain only adds passes (measured at
-/// roughly 2x slower; see the rejected-experiments table in
-/// `.planning/log/performance-log.md`).
+/// The one lever that measurably changes blur cost is how many times the
+/// kernel runs. Pre-resampling the layer is *not* one: Skia's raster blur
+/// already downsamples for wide kernels, so an explicit resample chain only
+/// adds passes (~2x slower; see `.planning/log/performance-log.md`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BlurQuality {
-    /// Number of chained blur passes. Each pass runs at
-    /// `sigma / sqrt(passes)` so the total blur matches a single-pass blur of
-    /// the requested radius: more passes buy a smoother falloff, not a wider
-    /// one. Clamped to `1..=MAX_BLUR_PASSES`.
+    /// Each pass runs at `sigma / sqrt(passes)`, so more passes buy a smoother
+    /// falloff, not a wider blur. Clamped to `1..=MAX_BLUR_PASSES`.
     pub passes: u8,
-    /// Blur radii above this are dropped with a diagnostic rather than
-    /// rasterized, bounding the worst frame a stylesheet can ask for.
+    /// Larger radii are dropped with a diagnostic rather than rasterized.
     pub max_radius: f32,
 }
 
-/// Upper bound on [`BlurQuality::passes`]. Beyond three passes the visual
-/// difference stops being measurable while the cost keeps growing.
+/// Beyond three passes the visual difference stops being measurable.
 pub const MAX_BLUR_PASSES: u8 = 3;
 
 impl Default for BlurQuality {
@@ -62,10 +54,9 @@ type GradientShaderCacheKey = (u32, u32, i32, i32);
 #[cfg(test)]
 static GRADIENT_SHADER_CREATIONS: AtomicUsize = AtomicUsize::new(0);
 
-// Cached Skia image keyed by the raw pointer of the underlying
-// `Arc<RgbaImage>` allocation. Holds a strong `Arc` reference in the value so
-// the heap allocation cannot be freed and reallocated at the same address
-// while the cache entry is live (which would silently return the wrong image).
+// Keyed by the `Arc<RgbaImage>` allocation's address, so the value holds a
+// strong reference — otherwise a freed allocation could be reused at the same
+// address and silently return the wrong image.
 struct CachedSkiaImage {
     _keep_alive: Arc<image::RgbaImage>,
     image: skia_safe::Image,
@@ -75,9 +66,8 @@ thread_local! {
     static SKIA_IMAGE_CACHE: RefCell<LruCache<usize, CachedSkiaImage>> =
         RefCell::new(LruCache::new(SKIA_IMAGE_CACHE_CAPACITY));
 
-    // Cache for linear-gradient shaders keyed by (from_rgba, to_rgba, w, h).
-    // The shader is local to the gradient box, so moving same-sized gradients
-    // reuse the same shader instead of churning the cache on every frame.
+    // Keyed by (from_rgba, to_rgba, w, h) rather than position, so a moving
+    // same-sized gradient reuses its shader instead of churning the cache.
     static GRADIENT_SHADER_CACHE: RefCell<LruCache<GradientShaderCacheKey, skia_safe::Shader>> =
         RefCell::new(LruCache::new(GRADIENT_SHADER_CACHE_CAPACITY));
 }
@@ -106,10 +96,8 @@ pub(crate) trait PaintBackend: Send + Sync {
         diagnostics: &mut Vec<PainterDiagnostic>,
     );
 
-    /// Execute commands within an open canvas session so multiple
-    /// invocations within a single paint pass can share one
-    /// `surfaces::wrap_pixels`. Default implementation falls back to
-    /// `execute_commands` against the raw buffer (one wrap per call).
+    /// Lets several invocations in one paint pass share a single
+    /// `surfaces::wrap_pixels`. Defaults to one wrap per call.
     fn execute_commands_in_session(
         &self,
         session: &mut PixelCanvasSession<'_>,
@@ -121,11 +109,9 @@ pub(crate) trait PaintBackend: Send + Sync {
         });
     }
 
-    /// Execute commands within a session whose layer stack outlives this call.
-    ///
-    /// A filtered subtree opens a layer in the command buffer that starts it
-    /// and closes it in a later one, so the open layers cannot live in a local
-    /// of the execute loop the way clips do.
+    /// The layer stack outlives this call: a filtered subtree opens a layer in
+    /// one command buffer and closes it in a later one, so open layers cannot
+    /// live in a local of the execute loop the way clips do.
     fn execute_commands_in_session_with_layers(
         &self,
         session: &mut PixelCanvasSession<'_>,
@@ -136,8 +122,7 @@ pub(crate) trait PaintBackend: Send + Sync {
         self.execute_commands_in_session(session, commands, diagnostics);
     }
 
-    /// Close any layers left open by an unbalanced command stream, restoring
-    /// the canvas to the state it had before the outermost push.
+    /// Restore the canvas to its state before the outermost unbalanced push.
     fn close_open_layers(
         &self,
         _session: &mut PixelCanvasSession<'_>,
@@ -146,9 +131,8 @@ pub(crate) trait PaintBackend: Send + Sync {
         layers.clear();
     }
 
-    /// Draw `source` onto `buffer` at `at`, blurred by `filter`. Used by the
-    /// immediate painter, which rasterizes a filtered subtree into its own
-    /// buffer instead of opening a canvas layer.
+    /// For the immediate painter, which rasterizes a filtered subtree into its
+    /// own buffer instead of opening a canvas layer.
     fn composite_blurred_buffer(
         &self,
         _buffer: &mut PixelBuffer,
@@ -354,15 +338,13 @@ impl PainterLayer {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ActivePainterLayer {
-    /// `None` for a push the backend declined (degenerate bounds, nesting cap).
-    /// The entry is still recorded so the matching pop stays balanced.
+    /// `None` when the backend declined the push; still recorded so the
+    /// matching pop stays balanced.
     save_count: Option<usize>,
 }
 
-/// Layers opened by `PushLayer` and not yet closed by `PopLayer`.
-///
-/// Owned by the render engine for the length of a paint pass because a
-/// filtered subtree spans many command buffers.
+/// Layers opened by `PushLayer` and not yet closed. Owned by the render engine
+/// for a whole paint pass, since a filtered subtree spans many command buffers.
 #[derive(Debug, Default)]
 pub(crate) struct PainterLayerStack {
     layers: SmallVec<[ActivePainterLayer; 4]>,
@@ -385,8 +367,7 @@ impl PainterLayerStack {
         self.layers.pop()
     }
 
-    /// Save count of the outermost open layer, which restores every open layer
-    /// at once.
+    /// Restoring to this count closes every open layer at once.
     fn outermost_save_count(&self) -> Option<usize> {
         self.layers.iter().find_map(|layer| layer.save_count)
     }
@@ -396,9 +377,8 @@ impl PainterLayerStack {
     }
 }
 
-/// How deep filtered subtrees may nest before the painter stops opening
-/// layers. Each level is a full offscreen allocation plus a blur pass over it,
-/// so a runaway nest is a frame-time cliff rather than a visual improvement.
+/// Each nesting level is an offscreen allocation plus a blur pass over it, so
+/// a runaway nest is a frame-time cliff rather than a visual improvement.
 pub(crate) const MAX_BLUR_LAYER_DEPTH: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -826,9 +806,8 @@ impl SkiaPaintBackend {
                     clip,
                 } => match filter {
                     PainterFilter::None => {}
-                    // A blurred element is lowered into PushLayer/PopLayer
-                    // around its whole subtree, which is the only lowering that
-                    // blurs descendants rather than just the node's own shape.
+                    // PushLayer/PopLayer around the whole subtree is the only
+                    // lowering that blurs descendants, not just the node.
                     PainterFilter::Blur(filter) => {
                         diagnostics.push(PainterDiagnostic {
                             backend_id: self.id(),

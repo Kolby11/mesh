@@ -3,17 +3,12 @@ use super::super::cache::*;
 use super::super::declaration::*;
 use super::super::index::*;
 use super::super::matching::*;
-use super::super::state::*;
 use super::super::*;
-use crate::lru::LruCache;
-use crate::style::parse::*;
-use crate::style::*;
 use crate::tree::ElementState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue, prop_variable_key};
-use mesh_core_theme::{Theme, TokenValue};
+use mesh_core_theme::Theme;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 
 // cargo test -p mesh-core-elements --release -- shared_theme_defaults_beat_hashed_deep_clone --ignored --nocapture
 #[test]

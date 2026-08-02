@@ -1,12 +1,8 @@
 use super::super::parse::parse_transition_properties;
 use super::super::*;
-use super::common::*;
 use super::resolution::*;
 use crate::tree::ElementState;
-use mesh_core_component::{
-    parser::parse_component,
-    style::{Declaration, Selector, StyleRule, StyleValue, prop_variable_key},
-};
+use mesh_core_component::style::{Selector, StyleRule, StyleValue};
 
 #[test]
 fn transition_shorthand_parses_comma_separated_items() {

@@ -1,4 +1,4 @@
-/// Pixel buffer for software rendering.
+//! Pixel buffer for software rendering.
 use mesh_core_elements::style::Color;
 use skia_safe::{
     AlphaType, BlendMode, Canvas, ColorType, ImageInfo, Paint, PaintStyle, RRect, Rect, Surface,
@@ -16,7 +16,6 @@ pub struct PixelBuffer {
 }
 
 impl PixelBuffer {
-    /// Create a new buffer filled with transparent black.
     pub fn new(width: u32, height: u32) -> Self {
         let stride = width * 4;
         Self {

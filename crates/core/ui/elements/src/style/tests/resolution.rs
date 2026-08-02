@@ -1,11 +1,7 @@
-use super::super::parse::parse_transition_properties;
 use super::super::*;
 use super::common::*;
 use crate::tree::ElementState;
-use mesh_core_component::{
-    parser::parse_component,
-    style::{Declaration, Selector, StyleRule, StyleValue, prop_variable_key},
-};
+use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 
 #[test]
 fn resolve_node_style_from_rules() {

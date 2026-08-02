@@ -1,0 +1,605 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use mesh_core_elements::style::{
+    BackgroundPaint, BlendMode, Color, Edges, Overflow, TextAlign, TextDirection, TextOverflow,
+};
+use mesh_core_elements::{BoxShadow, VisualFilter};
+use mesh_core_elements::{LayoutRect, NodeId};
+
+use super::build::*;
+use super::subtree::*;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DisplayPrimitiveSlot {
+    Background,
+    Border,
+    Text,
+    Icon,
+    Generic,
+}
+
+pub(super) const DISPLAY_PRIMITIVE_SLOTS: [DisplayPrimitiveSlot; 5] = [
+    DisplayPrimitiveSlot::Background,
+    DisplayPrimitiveSlot::Border,
+    DisplayPrimitiveSlot::Text,
+    DisplayPrimitiveSlot::Icon,
+    DisplayPrimitiveSlot::Generic,
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DisplayListKey {
+    pub node_id: NodeId,
+    pub slot: DisplayPrimitiveSlot,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DamageRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl DamageRect {
+    pub fn area(self) -> u64 {
+        u64::from(self.width) * u64::from(self.height)
+    }
+
+    pub fn intersects(self, other: Self) -> bool {
+        if self.width == 0 || self.height == 0 || other.width == 0 || other.height == 0 {
+            return false;
+        }
+        let self_right = self.x.saturating_add(self.width);
+        let self_bottom = self.y.saturating_add(self.height);
+        let other_right = other.x.saturating_add(other.width);
+        let other_bottom = other.y.saturating_add(other.height);
+        self.x < other_right
+            && self_right > other.x
+            && self.y < other_bottom
+            && self_bottom > other.y
+    }
+
+    pub(super) fn union(self, other: Self) -> Self {
+        if self.width == 0 || self.height == 0 {
+            return other;
+        }
+        if other.width == 0 || other.height == 0 {
+            return self;
+        }
+        let left = self.x.min(other.x);
+        let top = self.y.min(other.y);
+        let right = self
+            .x
+            .saturating_add(self.width)
+            .max(other.x.saturating_add(other.width));
+        let bottom = self
+            .y
+            .saturating_add(self.height)
+            .max(other.y.saturating_add(other.height));
+        Self {
+            x: left,
+            y: top,
+            width: right.saturating_sub(left),
+            height: bottom.saturating_sub(top),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DisplayListMetrics {
+    pub retained_generation: u64,
+    pub entries_total: u64,
+    pub entries_reused: u64,
+    pub entries_rebuilt: u64,
+    pub entries_removed: u64,
+    pub subtree_segments_reused: u64,
+    pub subtree_segments_rebuilt: u64,
+    pub subtree_commands_rebuilt: u64,
+    pub changed_layout_count: u64,
+    pub changed_paint_count: u64,
+    pub effect_overflow_count: u64,
+    pub fallback_promotion_count: u64,
+    pub full_fallback_count: u64,
+    pub broad_dirty_fallback_count: u64,
+    pub damage_rect: DamageRect,
+    pub damage_rect_count: u64,
+    pub damage_area: u64,
+    pub surface_area: u64,
+    pub full_surface_damage: bool,
+    pub partial_present_supported: bool,
+    pub skipped_paint_pixels: u64,
+    pub omitted_subtrees: u64,
+    pub omitted_nodes: u64,
+    pub omitted_commands: u64,
+    pub preclipped_descendants: u64,
+    pub repaint_policy: DisplayListRepaintPolicy,
+    pub filtered_span_count: u64,
+    pub filtered_command_count: u64,
+    pub filtered_commands_skipped: u64,
+    pub filtered_fallback_count: u64,
+    pub batch_count: u64,
+    pub batched_primitives: u64,
+    pub barrier_count: u64,
+    pub barriers: DisplayBatchBarrierCounts,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DisplayListRepaintPolicy {
+    MinimalDamage,
+    BoundingRect,
+    #[default]
+    FullSurface,
+}
+
+impl DisplayListRepaintPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MinimalDamage => "minimal_damage",
+            Self::BoundingRect => "bounding_rect",
+            Self::FullSurface => "full_surface",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DisplayBatchBarrierCounts {
+    pub text: u64,
+    pub icon: u64,
+    pub opacity: u64,
+    pub clip: u64,
+    pub translucency: u64,
+    pub material_change: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DisplayBatchBarrier {
+    Text,
+    Icon,
+    Opacity,
+    Clip,
+    Translucency,
+    MaterialChange,
+}
+
+impl DisplayBatchBarrier {
+    pub(super) fn record(self, counts: &mut DisplayBatchBarrierCounts) {
+        match self {
+            Self::Text => counts.text = counts.text.saturating_add(1),
+            Self::Icon => counts.icon = counts.icon.saturating_add(1),
+            Self::Opacity => counts.opacity = counts.opacity.saturating_add(1),
+            Self::Clip => counts.clip = counts.clip.saturating_add(1),
+            Self::Translucency => counts.translucency = counts.translucency.saturating_add(1),
+            Self::MaterialChange => {
+                counts.material_change = counts.material_change.saturating_add(1);
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct RetainedDisplayList {
+    pub(super) generation: u64,
+    pub(super) retained_tree_generation: Option<u64>,
+    pub(super) root_id: Option<NodeId>,
+    pub(super) surface_size: Option<(u32, u32)>,
+    pub(super) paint_origin: (u32, u32),
+    pub(super) entries: HashMap<DisplayListKey, DisplayListEntry>,
+    pub(super) subtrees: HashMap<NodeId, Arc<RetainedPaintSubtree>>,
+    #[cfg(debug_assertions)]
+    pub(super) ordered_entries_scratch: Vec<(DisplayListKey, DisplayListEntry)>,
+    pub(super) next_entries_scratch: HashMap<DisplayListKey, DisplayListEntry>,
+    pub(super) next_subtrees_scratch: HashMap<NodeId, Arc<RetainedPaintSubtree>>,
+    pub(super) dirty_ancestors_scratch: HashSet<NodeId>,
+    pub(super) ancestor_path_scratch: Vec<NodeId>,
+    pub(super) command_spans: Arc<[RetainedCommandSpan]>,
+    pub(super) paint_commands: Arc<[DisplayPaintCommand]>,
+    pub(super) command_kinds: Arc<[DisplayPaintCommandKind]>,
+    pub(super) backdrop_regions: Vec<DamageRect>,
+    /// Compositor blur regions for `org_kde_kwin_blur`, computed from the full
+    /// widget tree (not the scoped `paint_commands` selection). Deriving them
+    /// from `paint_commands` would drop the blur nodes on partial retained
+    /// updates, yielding an empty region set that flips the compositor to
+    /// whole-surface blur.
+    pub(super) blur_regions: Vec<DamageRect>,
+    /// Extent of every element `filter: blur()` layer in the current list,
+    /// inflated by the blur kernel reach. Damage inside one has to grow to
+    /// cover it, and the layer's command range is replayed as a whole.
+    pub(super) filter_layer_regions: Vec<DamageRect>,
+    /// Command ranges `[start, end)` opened by `PushFilterLayer` and closed by
+    /// `PopFilterLayer`, in paint order. A selection that touches part of a
+    /// range is widened to all of it.
+    pub(super) layer_scopes: Vec<(usize, usize)>,
+    pub(super) last_metrics: DisplayListMetrics,
+    pub(super) last_damage_rects: Vec<DamageRect>,
+}
+
+impl Default for RetainedDisplayList {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            retained_tree_generation: None,
+            root_id: None,
+            surface_size: None,
+            paint_origin: (0.0_f32.to_bits(), 0.0_f32.to_bits()),
+            entries: HashMap::new(),
+            subtrees: HashMap::new(),
+            #[cfg(debug_assertions)]
+            ordered_entries_scratch: Vec::new(),
+            next_entries_scratch: HashMap::new(),
+            next_subtrees_scratch: HashMap::new(),
+            dirty_ancestors_scratch: HashSet::new(),
+            ancestor_path_scratch: Vec::new(),
+            command_spans: Vec::new().into(),
+            paint_commands: Vec::new().into(),
+            command_kinds: Vec::new().into(),
+            backdrop_regions: Vec::new(),
+            blur_regions: Vec::new(),
+            filter_layer_regions: Vec::new(),
+            layer_scopes: Vec::new(),
+            last_metrics: DisplayListMetrics::default(),
+            last_damage_rects: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayPaintCommand {
+    pub node: Arc<DisplayPaintNode>,
+    pub clip: DisplayListClip,
+    pub kind: DisplayPaintCommandKind,
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayPaintNode {
+    pub id: NodeId,
+    pub layout: LayoutRect,
+    pub style: DisplayPaintStyle,
+    pub content: DisplayPaintContent,
+    pub scrollbars: DisplayScrollbars,
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayPaintStyle {
+    pub background_color: Color,
+    pub background_paint: BackgroundPaint,
+    pub border_color: Color,
+    pub border_width: Edges,
+    pub border_radius: f32,
+    pub color: Color,
+    pub padding: Edges,
+    pub overflow_x: Overflow,
+    pub overflow_y: Overflow,
+    pub font_family: Arc<str>,
+    pub font_size: f32,
+    pub font_weight: u16,
+    pub line_height: f32,
+    pub text_align: TextAlign,
+    pub text_overflow: TextOverflow,
+    pub text_direction: TextDirection,
+    pub opacity: f32,
+    pub box_shadow: BoxShadow,
+    pub filter: VisualFilter,
+    pub backdrop_filter: VisualFilter,
+    pub mix_blend_mode: BlendMode,
+    pub icon_fill: Option<f32>,
+    pub icon_weight: Option<f32>,
+    pub icon_grade: Option<f32>,
+    pub icon_optical_size: Option<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DisplayPaintContent {
+    None,
+    Text(DisplayTextPaint),
+    Input(DisplayInputPaint),
+    Slider(DisplaySliderPaint),
+    Icon(DisplayIconPaint),
+    Checkmark(DisplayCheckmarkPaint),
+}
+
+/// The selected-state glyph for a `checkbox`/`radio` element, painted as a
+/// vector path. Only emitted when the control is checked.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DisplayCheckmarkPaint {
+    pub kind: CheckmarkKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CheckmarkKind {
+    /// A check (tick) glyph — used by `checkbox`.
+    Check,
+    /// A filled dot — used by `radio`.
+    Dot,
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayTextPaint {
+    pub text: Arc<str>,
+    pub selection: Option<DisplayTextSelectionPaint>,
+}
+
+impl PartialEq for DisplayTextPaint {
+    fn eq(&self, other: &Self) -> bool {
+        shared_str_eq(&self.text, &other.text) && self.selection == other.selection
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DisplayTextSelectionPaint {
+    pub background: Color,
+    pub foreground: Color,
+    pub anchor_x: f32,
+    pub anchor_y: f32,
+    pub focus_x: f32,
+    pub focus_y: f32,
+    pub text_x: f32,
+    pub text_y: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayInputPaint {
+    pub value: Arc<str>,
+    pub placeholder: Arc<str>,
+    pub mask_text: bool,
+    pub focused: bool,
+}
+
+impl PartialEq for DisplayInputPaint {
+    fn eq(&self, other: &Self) -> bool {
+        shared_str_eq(&self.value, &other.value)
+            && shared_str_eq(&self.placeholder, &other.placeholder)
+            && self.mask_text == other.mask_text
+            && self.focused == other.focused
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DisplaySliderPaint {
+    pub min: f32,
+    pub max: f32,
+    pub value: f32,
+    pub vertical: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayIconPaint {
+    pub src: Option<Arc<str>>,
+    pub name: Option<Arc<str>>,
+    pub size: Option<u32>,
+}
+
+impl PartialEq for DisplayIconPaint {
+    fn eq(&self, other: &Self) -> bool {
+        optional_shared_str_eq(&self.src, &other.src)
+            && optional_shared_str_eq(&self.name, &other.name)
+            && self.size == other.size
+    }
+}
+
+pub(super) fn shared_str_eq(left: &Arc<str>, right: &Arc<str>) -> bool {
+    Arc::ptr_eq(left, right) || left.as_ref() == right.as_ref()
+}
+
+pub(super) fn optional_shared_str_eq(left: &Option<Arc<str>>, right: &Option<Arc<str>>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => shared_str_eq(left, right),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DisplayScrollbars {
+    pub max_x: f32,
+    pub max_y: f32,
+    pub scroll_x: f32,
+    pub scroll_y: f32,
+    pub content_width: f32,
+    pub content_height: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayPaintCommandKind {
+    Node,
+    Scrollbars,
+    /// Opens an offscreen layer that every following command paints into,
+    /// until the matching [`DisplayPaintCommandKind::PopFilterLayer`]. Carries
+    /// the blurred node, whose `style.filter` is the filter to apply, and a
+    /// `clip` already inflated to the subtree's blurred extent.
+    PushFilterLayer,
+    /// Composites the open filter layer onto its parent.
+    PopFilterLayer,
+}
+
+impl DisplayPaintCommandKind {
+    /// Whether this command draws content rather than managing layer scope.
+    pub fn draws_content(self) -> bool {
+        matches!(self, Self::Node | Self::Scrollbars)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DisplayListClip {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct SelectedDisplayListPaint<'a> {
+    pub(super) commands: &'a [DisplayPaintCommand],
+    pub(super) kinds: &'a [DisplayPaintCommandKind],
+    pub(super) selection: SelectedDisplayListSelection,
+    pub(super) metrics: DisplayListMetrics,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum SelectedDisplayListSelection {
+    All,
+    None,
+    Spans {
+        spans: Vec<SelectedCommandSpan>,
+        command_count: usize,
+    },
+}
+
+pub struct SelectedDisplayListPaintIter<'a> {
+    pub(super) commands: &'a [DisplayPaintCommand],
+    pub(super) state: SelectedDisplayListPaintIterState<'a>,
+}
+
+pub struct SelectedDisplayListPaintKindIter<'a> {
+    pub(super) commands: &'a [DisplayPaintCommand],
+    pub(super) kinds: &'a [DisplayPaintCommandKind],
+    pub(super) state: SelectedDisplayListPaintKindIterState<'a>,
+}
+
+pub(super) enum SelectedDisplayListPaintIterState<'a> {
+    All(std::slice::Iter<'a, DisplayPaintCommand>),
+    None,
+    Spans {
+        spans: &'a [SelectedCommandSpan],
+        span_index: usize,
+        command_index: usize,
+    },
+}
+
+pub(super) enum SelectedDisplayListPaintKindIterState<'a> {
+    All {
+        index: usize,
+    },
+    None,
+    Spans {
+        spans: &'a [SelectedCommandSpan],
+        span_index: usize,
+        command_index: usize,
+    },
+}
+
+impl<'a> Iterator for SelectedDisplayListPaintIter<'a> {
+    type Item = &'a DisplayPaintCommand;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.state {
+            SelectedDisplayListPaintIterState::All(iter) => iter.next(),
+            SelectedDisplayListPaintIterState::None => None,
+            SelectedDisplayListPaintIterState::Spans {
+                spans,
+                span_index,
+                command_index,
+            } => loop {
+                let span = spans.get(*span_index)?;
+                if *command_index >= span.end {
+                    *span_index = span_index.saturating_add(1);
+                    continue;
+                }
+                if *command_index < span.start {
+                    *command_index = span.start;
+                }
+                let index = *command_index;
+                *command_index = (*command_index).saturating_add(1);
+                if let Some(command) = self.commands.get(index) {
+                    return Some(command);
+                }
+            },
+        }
+    }
+}
+
+impl<'a> Iterator for SelectedDisplayListPaintKindIter<'a> {
+    type Item = (&'a DisplayPaintCommand, DisplayPaintCommandKind);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.state {
+            SelectedDisplayListPaintKindIterState::All { index } => {
+                let command_index = *index;
+                *index = index.saturating_add(1);
+                Some((
+                    self.commands.get(command_index)?,
+                    *self.kinds.get(command_index)?,
+                ))
+            }
+            SelectedDisplayListPaintKindIterState::None => None,
+            SelectedDisplayListPaintKindIterState::Spans {
+                spans,
+                span_index,
+                command_index,
+            } => loop {
+                let span = spans.get(*span_index)?;
+                if *command_index >= span.end {
+                    *span_index = span_index.saturating_add(1);
+                    continue;
+                }
+                if *command_index < span.start {
+                    *command_index = span.start;
+                }
+                let index = *command_index;
+                *command_index = (*command_index).saturating_add(1);
+                if let (Some(command), Some(kind)) =
+                    (self.commands.get(index), self.kinds.get(index))
+                {
+                    return Some((command, *kind));
+                }
+            },
+        }
+    }
+}
+
+impl<'a> SelectedDisplayListPaint<'a> {
+    pub fn iter(&self) -> SelectedDisplayListPaintIter<'_> {
+        SelectedDisplayListPaintIter {
+            commands: self.commands,
+            state: match &self.selection {
+                SelectedDisplayListSelection::All => {
+                    SelectedDisplayListPaintIterState::All(self.commands.iter())
+                }
+                SelectedDisplayListSelection::None => SelectedDisplayListPaintIterState::None,
+                SelectedDisplayListSelection::Spans { spans, .. } => {
+                    SelectedDisplayListPaintIterState::Spans {
+                        spans,
+                        span_index: 0,
+                        command_index: 0,
+                    }
+                }
+            },
+        }
+    }
+
+    pub fn iter_with_kinds(&self) -> SelectedDisplayListPaintKindIter<'_> {
+        SelectedDisplayListPaintKindIter {
+            commands: self.commands,
+            kinds: self.kinds,
+            state: match &self.selection {
+                SelectedDisplayListSelection::All => {
+                    SelectedDisplayListPaintKindIterState::All { index: 0 }
+                }
+                SelectedDisplayListSelection::None => SelectedDisplayListPaintKindIterState::None,
+                SelectedDisplayListSelection::Spans { spans, .. } => {
+                    SelectedDisplayListPaintKindIterState::Spans {
+                        spans,
+                        span_index: 0,
+                        command_index: 0,
+                    }
+                }
+            },
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match &self.selection {
+            SelectedDisplayListSelection::All => self.commands.len(),
+            SelectedDisplayListSelection::None => 0,
+            SelectedDisplayListSelection::Spans { command_count, .. } => *command_count,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn metrics(&self) -> DisplayListMetrics {
+        self.metrics
+    }
+}

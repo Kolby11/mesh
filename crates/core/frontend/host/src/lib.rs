@@ -18,8 +18,8 @@ pub type SurfaceId = String;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServiceObservationSummary {
     pub update_services: Vec<String>,
-    /// Services whose payload must be retained even before a live runtime has
-    /// observed a field, so lazily-created runtimes can start from real state.
+    /// Retained before any live runtime observes a field, so lazily-created
+    /// runtimes start from real state.
     pub cached_update_services: Vec<String>,
     pub interface_events: Vec<ServiceInterfaceEventSubscription>,
 }
@@ -36,10 +36,8 @@ pub struct ChildSurfaceRequest {
     pub kind: ChildSurfaceKind,
     pub anchor_rect: (i32, i32, i32, i32),
     pub content_size: (u32, u32),
-    /// Extra buffer padding (left, top, right, bottom) beyond `content_size`
-    /// reserved for `box-shadow`/`filter` overshoot in the popover subtree,
-    /// so shadows don't clip at the popup buffer edge. All zero when the
-    /// subtree has no such overshoot.
+    /// Padding beyond `content_size` reserved for `box-shadow`/`filter`
+    /// overshoot, so shadows don't clip at the popup buffer edge.
     pub content_padding: (u32, u32, u32, u32),
     pub placement: PopoverPlacement,
 }
@@ -182,23 +180,19 @@ pub enum CoreRequest {
         surface_id: SurfaceId,
         defer_for_hover_bridge: bool,
     },
-    /// Move a live surface between shell chrome (`zwlr_layer_surface_v1`) and an
-    /// ordinary window (`xdg_toplevel`) without losing component state: the
-    /// component VM, retained tree, Lua state, and service subscriptions all
-    /// survive, only the compositor object is swapped.
+    /// Move a live surface between shell chrome and an ordinary window. The
+    /// component VM, retained tree, Lua state, and subscriptions all survive;
+    /// only the compositor object is swapped.
     SetSurfaceRole {
         surface_id: SurfaceId,
         role: mesh_core_wayland::SurfaceRole,
     },
-    /// Flip a live surface to the other role. Separate from
-    /// [`Self::SetSurfaceRole`] because the current role lives in the shell, so
-    /// a component cannot compute the target itself — the same reason
-    /// [`Self::ToggleSurface`] exists alongside show/hide.
+    /// Separate from [`Self::SetSurfaceRole`] because the current role lives in
+    /// the shell, so a component cannot compute the target itself.
     ToggleSurfaceRole {
         surface_id: SurfaceId,
     },
-    /// Reposition a surface to appear below a trigger element.
-    /// Uses top-left anchor; margin_left/top position the surface precisely.
+    /// Reposition below a trigger element, anchored top-left.
     PositionSurface {
         surface_id: SurfaceId,
         margin_top: i32,
@@ -231,52 +225,42 @@ pub enum CoreRequest {
         module_id: String,
         enabled: bool,
     },
-    /// Set one validated public component prop in the active profile's module
-    /// namespace. `instance_id = None` targets `props.global`; a live instance
-    /// targets `props.instances.<instance-id>`.
+    /// `instance_id = None` targets `props.global`; otherwise
+    /// `props.instances.<instance-id>`.
     SetModuleProp {
         module_id: String,
         instance_id: Option<String>,
         prop: String,
         value: serde_json::Value,
     },
-    /// Remove one public component prop override so its declaration default
-    /// becomes effective again.
+    /// Remove an override so the declaration default applies again.
     UnsetModuleProp {
         module_id: String,
         instance_id: Option<String>,
         prop: String,
     },
-    /// Transactionally replace the running composition and its profile-scoped
-    /// preferences. Candidate modules are prepared before the active pointer
-    /// and visible roots change.
+    /// Transactional: candidates are prepared before the active pointer and
+    /// visible roots change.
     SwitchProfile {
         profile_id: String,
     },
-    /// Show a surface as a popover triggered by a specific element.
-    ///
-    /// The shell records `(trigger_surface, trigger_key)` on the trigger's
-    /// component so Tab from that key transfers focus into the popover. When
-    /// `focus` is true, activation also immediately transfers focus into the
-    /// popover and records the trigger as the return target.
+    /// The shell records `(trigger_surface, trigger_key)` so Tab from that key
+    /// transfers focus into the popover.
     ActivatePopover {
         surface_id: SurfaceId,
         trigger_surface: SurfaceId,
         trigger_key: String,
-        /// If true, activation immediately inserts the popover into the
-        /// keyboard focus chain and records the trigger as its return target.
+        /// Insert into the focus chain immediately, with the trigger as the
+        /// return target.
         focus: bool,
     },
     TransferTabFocus {
         from_surface: SurfaceId,
         to_surface: SurfaceId,
         target: TabFocusTarget,
-        /// When focus enters a popover, the trigger location is recorded
-        /// here so the popover knows where to send focus back on exit.
+        /// Where the popover sends focus back on exit.
         return_target: Option<(SurfaceId, String)>,
-        /// True on entry into a popover that should hide itself when Tab/
-        /// Shift+Tab leaves its chain. The shell stamps this as the
-        /// target's `close_on_focus_leave` flag.
+        /// Hide the popover when Tab or Shift+Tab leaves its chain.
         target_closes_on_leave: bool,
         /// Surface to hide as part of this transfer.
         close_source: Option<SurfaceId>,
@@ -356,11 +340,9 @@ pub trait ShellComponent: Send {
     fn observes_service_event(&self, _event: &ServiceEvent) -> bool {
         true
     }
-    /// Record a service payload for a declared-but-not-yet-read service without
-    /// running the full update path. A surface that has not built its tree yet
-    /// (or whose page component is lazily instantiated) reads no service field,
-    /// so it is not a delivery target — but the payload must still be available
-    /// to seed those runtimes when they are created.
+    /// Record a payload for a declared-but-unread service without the full
+    /// update path. A surface with no tree yet reads no field, so it is not a
+    /// delivery target, but the payload must still seed its runtime later.
     fn cache_service_payload(&mut self, _event: &ServiceEvent) {}
     fn service_observation_summary(&self) -> Option<ServiceObservationSummary> {
         None
@@ -368,32 +350,25 @@ pub trait ShellComponent: Send {
     fn wants_tick(&self) -> bool {
         true
     }
-    /// Return the next time this component needs `tick()` for timer-driven
-    /// work. The default preserves the old roughly-60Hz tick contract for
-    /// components that have not opted into explicit deadlines. Implementations
-    /// can return `None` when they have no pending timer.
+    /// Next `tick()` deadline, or `None` with no pending timer. The default
+    /// keeps the roughly-60Hz contract for components that never opted in.
     fn next_tick_deadline(&self) -> Option<Instant> {
         Some(Instant::now() + Duration::from_millis(16))
     }
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError>;
     fn wants_render(&self) -> bool;
-    /// Request a paint-only frame without implying script, layout, or style changes.
-    /// Shell-owned overlays use this when presentation-only debug state changes.
+    /// A paint-only frame, implying no script, layout, or style change.
     fn request_paint(&mut self) {}
     fn surface_size_changed(&mut self, _width: u32, _height: u32) -> bool {
         false
     }
-    /// The compositor changed the containing toplevel's states (fullscreen,
-    /// maximized, activated, tiled). Returns whether the change is visible to
-    /// this component, i.e. whether a restyle is owed. Only window surfaces
-    /// ever see anything but the default.
+    /// Returns whether a restyle is owed. Only window surfaces ever see
+    /// anything but the default.
     fn surface_window_states_changed(&mut self, _states: WindowStates) -> bool {
         false
     }
-    /// This surface is now realized under `role`. Returns whether the change is
-    /// visible to the component, i.e. whether a restyle is owed — the role is a
-    /// CSS state (`:windowed`) and it inverts how the surface is sized, so both
-    /// directions invalidate.
+    /// Returns whether a restyle is owed. The role is a CSS state
+    /// (`:windowed`) and inverts sizing, so both directions invalidate.
     fn surface_role_changed(&mut self, _role: mesh_core_wayland::SurfaceRole) -> bool {
         false
     }
@@ -401,8 +376,7 @@ pub trait ShellComponent: Send {
     fn surface_role(&self) -> mesh_core_wayland::SurfaceRole {
         mesh_core_wayland::SurfaceRole::Layer
     }
-    /// Whether this surface declared itself promotable, i.e. whether
-    /// [`CoreRequest::SetSurfaceRole`] applies to it at all.
+    /// Whether [`CoreRequest::SetSurfaceRole`] applies to this surface.
     fn surface_promotable(&self) -> bool {
         false
     }
@@ -428,12 +402,9 @@ pub trait ShellComponent: Send {
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         Ok(Vec::new())
     }
-    /// Handle input delivered to a promoted child surface using coordinates
-    /// local to that child surface. Implementations that paint keyed subtrees
-    /// into child surfaces can translate the local input back into their
-    /// retained tree before dispatch. `content_offset` is where the subtree's
-    /// own box starts inside the padded child buffer and must match the offset
-    /// used to paint it, otherwise hit testing is skewed by the padding.
+    /// Input in child-surface-local coordinates. `content_offset` is where the
+    /// subtree's box starts inside the padded child buffer and must match the
+    /// offset it was painted at, or hit testing is skewed by the padding.
     fn handle_child_surface_input(
         &mut self,
         _node_key: &str,
@@ -449,9 +420,7 @@ pub trait ShellComponent: Send {
     fn hovered_target_is_interactive(&self) -> bool {
         false
     }
-    /// Receive a cross-surface Tab focus transfer initiated from another
-    /// component. The default implementation is a no-op so non-frontend
-    /// components can ignore this.
+    /// Cross-surface Tab transfer; a no-op for non-frontend components.
     fn receive_focus_transfer(
         &mut self,
         _target: &TabFocusTarget,
@@ -461,16 +430,14 @@ pub trait ShellComponent: Send {
     }
     /// Drop focus state on a component that just transferred focus away.
     fn release_focus_for_transfer(&mut self) {}
-    /// Record that `trigger_key` in this component's surface activated
-    /// the popover at `popover_surface`.
+    /// Record that `trigger_key` activated the popover at `popover_surface`.
     fn register_popover_trigger(&mut self, _trigger_key: String, _popover_surface: SurfaceId) {}
     /// Drop a previously-registered popover trigger when the popover hides.
     fn unregister_popover_trigger(&mut self, _popover_surface: &str) {}
     /// Override the surface's effective keyboard_mode at runtime.
     fn set_keyboard_mode_override(&mut self, _mode: Option<KeyboardMode>) {}
-    /// Mark the surface as promoted to (or demoted from) an `xdg_popup`. While
-    /// promoted, the surface is positioned by its `xdg_positioner`, so the
-    /// host skips the layer-surface anchor/margin/size configuration path.
+    /// While promoted, the `xdg_positioner` places the surface, so the host
+    /// skips the layer-surface anchor/margin/size path.
     fn set_popup_promoted(&mut self, _promoted: bool) {}
     fn debug_keybinds(&self) -> Vec<mesh_core_debug::DebugKeybindEntry> {
         Vec::new()
@@ -484,8 +451,7 @@ pub trait ShellComponent: Send {
     ) -> Option<mesh_core_debug::ProfilingInvalidationSnapshot> {
         None
     }
-    /// Return the damage rects from the most recent paint for partial presentation.
-    /// An empty Vec means no changed pixels — the caller should skip the present.
+    /// Damage from the most recent paint; empty means skip the present.
     fn take_present_damage(&mut self) -> Vec<DamageRect> {
         Vec::new()
     }

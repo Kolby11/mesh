@@ -1,20 +1,11 @@
 use super::super::attrs::*;
-use super::super::cache::*;
-use super::super::declaration::*;
 use super::super::index::*;
-use super::super::matching::*;
 use super::super::state::*;
 use super::super::*;
 use super::common::*;
-use crate::lru::LruCache;
-use crate::style::parse::*;
-use crate::style::*;
 use crate::tree::ElementState;
-use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue, prop_variable_key};
-use mesh_core_theme::{Theme, TokenValue};
+use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 use std::collections::HashMap;
-use std::rc::Rc;
-use std::sync::Arc;
 
 #[test]
 fn state_to_rules_empty_for_unused_bit() {

@@ -2,7 +2,6 @@ use super::contracts::*;
 use super::snapshot::*;
 use super::validate::*;
 use super::*;
-use super::*;
 use crate::{Dimension, Edges, WidgetScrollMetrics};
 use serde_json::json;
 use std::time::Instant;

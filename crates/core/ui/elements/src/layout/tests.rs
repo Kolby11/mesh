@@ -1,7 +1,6 @@
 use super::lowering::*;
 use super::retained::*;
 use super::*;
-use super::*;
 use crate::style::{AlignSelf, Color, Display, Edges, FlexDirection, Position};
 use std::cell::Cell;
 

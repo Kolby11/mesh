@@ -24,26 +24,28 @@ use cache::*;
 
 /// Resolves style values against a theme's design tokens.
 pub struct StyleResolver<'a> {
-    pub(super) theme: &'a Theme,
+    pub(in crate::style::resolve) theme: &'a Theme,
     /// Per-instance resolved component-prop values, keyed by `prop_variable_key`
     /// (`--mesh-prop-<name>`). Consulted as a read-only fallback after the
     /// per-node custom-variable scratch. Empty without a `<props>` block.
-    pub(super) props: Cow<'a, HashMap<String, StyleValue>>,
-    pub(super) props_fingerprint: u64,
-    pub(super) module_variable_cache: RefCell<HashMap<String, Vec<(String, StyleValue)>>>,
+    pub(in crate::style::resolve) props: Cow<'a, HashMap<String, StyleValue>>,
+    pub(in crate::style::resolve) props_fingerprint: u64,
+    pub(in crate::style::resolve) module_variable_cache:
+        RefCell<HashMap<String, Vec<(String, StyleValue)>>>,
     /// Comparison-keyed front cache for the shared theme-default cache.
     ///
     /// Every node resolves the defaults for its own `(module_id, tag)`, and a
     /// tree walks long runs of the same pair. The map behind this answers in
     /// two SipHash computations of short strings per node; this answers most
     /// nodes in one or two string comparisons instead.
-    pub(super) theme_default_recent: RefCell<Vec<RecentThemeDefaults>>,
-    pub(super) theme_default_diagnostic_cache:
+    pub(in crate::style::resolve) theme_default_recent: RefCell<Vec<RecentThemeDefaults>>,
+    pub(in crate::style::resolve) theme_default_diagnostic_cache:
         RefCell<HashMap<String, ThemeDefaultDiagnosticPrototype>>,
     module_theme_default_diagnostic_cache:
         RefCell<HashMap<String, HashMap<String, ThemeDefaultDiagnosticPrototype>>>,
-    pub(super) theme_reference_cache: RefCell<HashMap<String, Arc<str>>>,
-    pub(super) theme_value_cache: RefCell<HashMap<String, CachedThemeTokenValue>>,
+    pub(in crate::style::resolve) theme_reference_cache: RefCell<HashMap<String, Arc<str>>>,
+    pub(in crate::style::resolve) theme_value_cache:
+        RefCell<HashMap<String, CachedThemeTokenValue>>,
 }
 
 impl<'a> StyleResolver<'a> {

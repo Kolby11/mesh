@@ -30,9 +30,7 @@ pub use render::{
 };
 pub use tags::UiTag;
 
-/// A `VariableStore` overlay used during `{#for}` iteration.
-/// Shadows one variable name with the current loop item value while
-/// delegating everything else to the underlying store.
+/// Shadows one variable with the current `{#for}` item, delegating the rest.
 struct LayeredStore<'a> {
     base: &'a dyn VariableStore,
     item_name: &'a str,
@@ -201,15 +199,12 @@ pub struct CompiledFrontendModule {
     pub manifest: Manifest,
     pub source_path: PathBuf,
     pub component: ComponentFile,
-    /// Local single-file components shipped in `src/components/*.mesh` inside
-    /// the module directory. Keyed by filename stem (e.g. `settings-button`).
+    /// `src/components/*.mesh`, keyed by filename stem.
     pub local_components: std::collections::HashMap<String, mesh_core_component::ComponentFile>,
     /// Explicit component module imports keyed by template alias.
     pub module_component_imports: std::collections::HashMap<String, String>,
-    /// On-disk paths of every `.mesh` source file that contributed to this
-    /// compilation — entrypoint plus every locally imported component. The
-    /// shell's hot-reload watcher mtimes each of these so editing any
-    /// component triggers a recompile, not just the entrypoint.
+    /// Every `.mesh` file that contributed, entrypoint and imports alike. The
+    /// hot-reload watcher mtimes each, so editing any one triggers a recompile.
     pub watched_paths: Vec<PathBuf>,
 }
 
@@ -265,10 +260,9 @@ impl CompiledFrontendModule {
         )
     }
 
-    /// Rebuild only template nodes in `rebuild_node_ids`, reusing clean native
-    /// subtrees from `previous`. Callers must gate this to statically shaped
-    /// templates; component references still execute normally so composition
-    /// bookkeeping and component memo side effects remain authoritative.
+    /// Rebuild only `rebuild_node_ids`, reusing clean native subtrees from
+    /// `previous`. Callers must gate this to statically shaped templates;
+    /// component references still execute so memo side effects stay correct.
     #[allow(clippy::too_many_arguments)]
     pub fn build_tree_with_state_selective(
         &self,
@@ -405,10 +399,8 @@ impl CompiledFrontendModule {
                 .collect();
         }
 
-        // Embedded trees are inserted into a surface tree and laid out there after
-        // composition/finalization. Computing their geometry here is both wasted
-        // work and potentially misleading: it uses the host's full bounds rather
-        // than the embedded node's eventual constraints.
+        // Embedded trees are laid out after composition, against the embedded
+        // node's constraints — not the host's full bounds available here.
         if mode == FrontendRenderMode::Surface {
             LayoutEngine::compute_with_measurer(&mut root, width as f32, height as f32, measurer);
         }
@@ -488,9 +480,8 @@ mod tests {
         }
         assert_eq!(compiled.watched_paths.len(), 7);
 
-        // A hidden, non-docked layer surface is initially laid out against a
-        // 1x1 safety configure. Concrete constraints must still expose the
-        // intended content size so the next configure is not stuck at 1x1.
+        // A hidden layer surface starts against a 1x1 safety configure, so
+        // concrete constraints must still expose the intended content size.
         let tree = compiled.build_preview_tree(&mesh_core_theme::default_theme(), 1, 1);
         let settings_shell =
             first_node_with_class(&tree, "settings-shell").expect("settings-shell node");
@@ -732,8 +723,6 @@ mod tests {
         assert_eq!(store.borrowed_reads.borrow()[0], "payload");
     }
 
-    // Run with:
-    // cargo test -p mesh-core-frontend --release -- eval_expr_borrowed_path_beats_owned_clone --ignored --nocapture
     #[test]
     #[ignore]
     fn eval_expr_borrowed_path_beats_owned_clone() {
@@ -870,8 +859,6 @@ mod tests {
         assert_eq!(expr::eval_expr("not empty", &store), "false");
     }
 
-    // Run with:
-    // cargo test -p mesh-core-frontend --release -- eval_expr_typed_compare_beats_string_parse_compare --ignored --nocapture
     #[test]
     #[ignore]
     fn eval_expr_typed_compare_beats_string_parse_compare() {
@@ -1012,10 +999,8 @@ mod tests {
 
     #[test]
     fn for_node_wrapper_carries_no_padding_or_gap() {
-        // The synthetic <column> wrapper a {#for} block compiles into is
-        // invisible authoring structure, not an author-styled container.
-        // Regression test for a bug where it silently inherited
-        // author-facing column theme defaults, separating every child.
+        // The synthetic {#for} wrapper is invisible structure; it once
+        // inherited author-facing column theme defaults and spaced every child.
         let source = r#"
 <template>
   <box>
@@ -1189,8 +1174,6 @@ mod tests {
         );
     }
 
-    // Run with:
-    // cargo test -p mesh-core-frontend --release -- for_node_borrowed_iterable_beats_owned_array_clone --ignored --nocapture
     #[test]
     #[ignore = "release-only for-loop iterable lookup microbenchmark"]
     fn for_node_borrowed_iterable_beats_owned_array_clone() {
@@ -1368,8 +1351,6 @@ mod tests {
         );
     }
 
-    // Run with:
-    // cargo test -p mesh-core-frontend --release -- embedded_build_layout_deferral_benchmark --ignored --nocapture
     #[test]
     #[ignore = "release-only embedded layout deferral microbenchmark"]
     fn embedded_build_layout_deferral_benchmark() {
@@ -1425,8 +1406,6 @@ mod tests {
         assert!(deferred_time < eager_time);
     }
 
-    // Run with:
-    // cargo test -p mesh-core-frontend --release -- inline_handler_namespacing_beats_post_build_walk --ignored --nocapture
     #[test]
     #[ignore = "release-only embedded handler namespacing microbenchmark"]
     fn inline_handler_namespacing_beats_post_build_walk() {
@@ -1656,8 +1635,7 @@ mod tests {
         }
     }
 
-    /// Container query rules must produce different computed styles when the
-    /// root surface size crosses a declared breakpoint.
+    /// Computed styles must differ across a declared breakpoint.
     #[test]
     fn container_query_applies_different_styles_at_different_root_sizes() {
         let source = r#"
@@ -1680,7 +1658,6 @@ box {
         let compiled = make_test_module(source);
         let theme = mesh_core_theme::default_theme();
 
-        // Narrow — container query does not match.
         let narrow = compiled.build_preview_tree(&theme, 400, 300);
         let narrow_box = find_first_by_tag(&narrow, "box").expect("box node");
         assert_eq!(
@@ -1689,7 +1666,6 @@ box {
             "narrow: container query should not apply"
         );
 
-        // Wide — container query matches.
         let wide = compiled.build_preview_tree(&theme, 600, 300);
         let wide_box = find_first_by_tag(&wide, "box").expect("box node");
         assert_eq!(
@@ -1699,8 +1675,7 @@ box {
         );
     }
 
-    /// max-width container queries invert correctly — they match at small
-    /// sizes and stop matching when the surface grows past the threshold.
+    /// max-width queries match at small sizes and stop past the threshold.
     #[test]
     fn container_query_max_width_inverts_across_breakpoint() {
         let source = r#"
@@ -1721,7 +1696,6 @@ box {
         let compiled = make_test_module(source);
         let theme = mesh_core_theme::default_theme();
 
-        // Narrow — max-width matches.
         let narrow = compiled.build_preview_tree(&theme, 300, 200);
         let narrow_box = find_first_by_tag(&narrow, "box").expect("box node");
         assert_eq!(
@@ -1730,7 +1704,6 @@ box {
             "narrow: max-width query should match"
         );
 
-        // Wide — max-width does not match.
         let wide = compiled.build_preview_tree(&theme, 400, 200);
         let wide_box = find_first_by_tag(&wide, "box").expect("box node");
         assert_eq!(
@@ -1740,8 +1713,7 @@ box {
         );
     }
 
-    /// Building the same module twice with different surface sizes must yield
-    /// independent trees — no shared computed-style state bleeds between calls.
+    /// No shared computed-style state may bleed between builds.
     #[test]
     fn container_query_consecutive_builds_are_independent() {
         let source = r#"

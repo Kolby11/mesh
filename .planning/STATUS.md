@@ -9,8 +9,8 @@ This page describes the present and is meant to be overwritten. History lives in
 
 **A whole-codebase refactor is in flight.** Files over 2000 lines are being
 split and comment volume cut, section by section. Foundation, platform,
-surface-config, and the UI crates are done and verified; frontend, runtime and
-extension, presentation and shell, and tools remain. Record:
+surface-config, the UI crates, and the frontend crates are done and verified;
+runtime and extension, presentation and shell, and tools remain. Record:
 [`log/2026-08.md`](log/2026-08.md).
 
 **Dotted template reads take one root lookup and one leaf clone at most.** The

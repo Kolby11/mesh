@@ -8,9 +8,11 @@ use mesh_core_elements::style::{
 use mesh_core_elements::{
     AccessibilityRole, ElementState, NodeId, WidgetNode, WindowSurfaceState, element_snapshot_json,
 };
+use mesh_core_interaction::ScrollOffsetState;
 #[cfg(test)]
 use mesh_core_interaction::node_is_source;
-use mesh_core_interaction::{ScrollOffsetState, source_element_tag};
+#[cfg(test)]
+use mesh_core_interaction::source_element_tag;
 use mesh_core_render::{RenderObjectDirtySummary, RenderObjectFingerprint};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
 use smallvec::SmallVec;

@@ -1,6 +1,5 @@
 use super::state::*;
 use crate::tree::ElementState;
-use std::hash::Hasher;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StyleNodeAttrs<'a> {

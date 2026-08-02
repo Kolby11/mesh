@@ -1,9 +1,8 @@
-use super::super::parse::parse_transition_properties;
 use super::super::*;
 use crate::tree::ElementState;
 use mesh_core_component::{
     parser::parse_component,
-    style::{Declaration, Selector, StyleRule, StyleValue, prop_variable_key},
+    style::{Selector, StyleRule},
 };
 
 pub(super) fn parse_fixture_style(source: &str) -> Vec<StyleRule> {
