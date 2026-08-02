@@ -32,7 +32,7 @@ pub use proof::{
     FocusedProofDiagnostic, FocusedProofNode, FocusedProofSnapshot, build_accesskit_update,
     build_focused_proof_snapshot,
 };
-pub use render_object::{RenderObjectDirtySummary, RenderObjectTree};
+pub use render_object::{RenderObjectDirtySummary, RenderObjectFingerprint, RenderObjectTree};
 pub use surface::{
     BlurQuality, DebugOverlay, DebugOverlayRestore, DebugPerfHudSnapshot, FrontendRenderEngine,
     GlyphAxes, MAX_BLUR_PASSES, PaintCommandAttribution, PaintCommandClass,

@@ -2,13 +2,16 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use bitflags::bitflags;
-use mesh_core_elements::style::{Color, ComputedStyle, Corners, Dimension, Edges, Transform2D};
+use mesh_core_elements::style::{
+    BackgroundPaint, Color, ComputedStyle, Corners, Dimension, Edges, Transform2D,
+};
 use mesh_core_elements::{
-    ElementState, NodeId, WidgetNode, WindowSurfaceState, element_snapshot_json,
+    AccessibilityRole, ElementState, NodeId, WidgetNode, WindowSurfaceState, element_snapshot_json,
 };
 #[cfg(test)]
 use mesh_core_interaction::node_is_source;
 use mesh_core_interaction::{ScrollOffsetState, source_element_tag};
+use mesh_core_render::{RenderObjectDirtySummary, RenderObjectFingerprint};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
 use smallvec::SmallVec;
 
@@ -39,10 +42,6 @@ impl RetainedTreeDirtySummary {
             || self.attributes > 0
             || self.children > 0
             || self.state > 0
-    }
-
-    pub(super) fn is_structural(self) -> bool {
-        self.inserted > 0 || self.removed > 0 || self.children > 0
     }
 
     fn add_flags(&mut self, flags: RetainedNodeDirtyFlags) {
@@ -100,17 +99,36 @@ pub(super) struct RetainedWidgetTree {
     node_keys: HashMap<NodeId, RetainedNodeKey>,
     dirty: SecondaryMap<RetainedNodeKey, RetainedNodeDirtyFlags>,
     dirty_node_ids: HashSet<NodeId>,
+    render_dirty: RenderObjectDirtySummary,
+    render_dirty_node_ids: HashSet<NodeId>,
     last_dirty: RetainedTreeDirtySummary,
     // Dirty slots are transient but interaction frames repopulate them often.
     // Swap the previous map into scratch so its slot allocation is retained.
     next_dirty_scratch: SecondaryMap<RetainedNodeKey, RetainedNodeDirtyFlags>,
     next_dirty_node_ids_scratch: HashSet<NodeId>,
+    next_render_dirty_node_ids_scratch: HashSet<NodeId>,
     #[cfg(test)]
     last_update_was_scoped: bool,
 }
 
 impl RetainedWidgetTree {
     pub(super) fn update(&mut self, root: &WidgetNode) -> RetainedTreeDirtySummary {
+        self.update_inner(root, true)
+    }
+
+    #[cfg(test)]
+    fn update_without_render_fingerprints(
+        &mut self,
+        root: &WidgetNode,
+    ) -> RetainedTreeDirtySummary {
+        self.update_inner(root, false)
+    }
+
+    fn update_inner(
+        &mut self,
+        root: &WidgetNode,
+        synchronize_render_fingerprints: bool,
+    ) -> RetainedTreeDirtySummary {
         let _span = tracing::debug_span!("retained_tree_update").entered();
         #[cfg(test)]
         {
@@ -121,6 +139,10 @@ impl RetainedWidgetTree {
         next_dirty.clear();
         let mut next_dirty_node_ids = std::mem::take(&mut self.next_dirty_node_ids_scratch);
         next_dirty_node_ids.clear();
+        let mut render_dirty = RenderObjectDirtySummary::default();
+        let mut next_render_dirty_node_ids =
+            std::mem::take(&mut self.next_render_dirty_node_ids_scratch);
+        next_render_dirty_node_ids.clear();
         let retained_len = self.nodes.len();
         if self.update_epoch == u64::MAX {
             self.update_epoch = 0;
@@ -139,6 +161,9 @@ impl RetainedWidgetTree {
             &mut next_dirty,
             &mut next_dirty_node_ids,
             &mut dirty,
+            &mut render_dirty,
+            &mut next_render_dirty_node_ids,
+            synchronize_render_fingerprints,
         );
 
         // A non-structural pass visits exactly the retained slot count and
@@ -155,11 +180,12 @@ impl RetainedWidgetTree {
                 }
                 self.nodes.remove(*key);
                 dirty.removed += 1;
+                render_dirty.removed += 1;
                 false
             });
         }
 
-        if dirty.any() {
+        if dirty.any() || render_dirty.any() {
             self.generation = self.generation.saturating_add(1);
         }
         let previous_dirty = std::mem::replace(&mut self.dirty, next_dirty);
@@ -167,6 +193,10 @@ impl RetainedWidgetTree {
         let previous_dirty_node_ids =
             std::mem::replace(&mut self.dirty_node_ids, next_dirty_node_ids);
         self.next_dirty_node_ids_scratch = previous_dirty_node_ids;
+        let previous_render_dirty_node_ids =
+            std::mem::replace(&mut self.render_dirty_node_ids, next_render_dirty_node_ids);
+        self.next_render_dirty_node_ids_scratch = previous_render_dirty_node_ids;
+        self.render_dirty = render_dirty;
         self.last_dirty = dirty;
         dirty
     }
@@ -229,6 +259,10 @@ impl RetainedWidgetTree {
         next_dirty.clear();
         let mut next_dirty_node_ids = std::mem::take(&mut self.next_dirty_node_ids_scratch);
         next_dirty_node_ids.clear();
+        let mut render_dirty = RenderObjectDirtySummary::default();
+        let mut next_render_dirty_node_ids =
+            std::mem::take(&mut self.next_render_dirty_node_ids_scratch);
+        next_render_dirty_node_ids.clear();
         if self.update_epoch == u64::MAX {
             self.update_epoch = 0;
             for snapshot in self.nodes.values_mut() {
@@ -248,12 +282,15 @@ impl RetainedWidgetTree {
                 &mut next_dirty,
                 &mut next_dirty_node_ids,
                 &mut dirty,
+                &mut render_dirty,
+                &mut next_render_dirty_node_ids,
+                true,
             ) {
                 dirty_nodes.push(node);
             }
         }
 
-        if dirty.any() {
+        if dirty.any() || render_dirty.any() {
             self.generation = self.generation.saturating_add(1);
         }
         let previous_dirty = std::mem::replace(&mut self.dirty, next_dirty);
@@ -261,6 +298,10 @@ impl RetainedWidgetTree {
         let previous_dirty_node_ids =
             std::mem::replace(&mut self.dirty_node_ids, next_dirty_node_ids);
         self.next_dirty_node_ids_scratch = previous_dirty_node_ids;
+        let previous_render_dirty_node_ids =
+            std::mem::replace(&mut self.render_dirty_node_ids, next_render_dirty_node_ids);
+        self.next_render_dirty_node_ids_scratch = previous_render_dirty_node_ids;
+        self.render_dirty = render_dirty;
         self.last_dirty = dirty;
         #[cfg(test)]
         {
@@ -283,6 +324,14 @@ impl RetainedWidgetTree {
     /// downstream synchronization path and do not consume this sparse set.
     pub(super) fn dirty_node_ids(&self) -> &HashSet<NodeId> {
         &self.dirty_node_ids
+    }
+
+    pub(super) fn render_dirty(&self) -> RenderObjectDirtySummary {
+        self.render_dirty
+    }
+
+    pub(super) fn render_dirty_node_ids(&self) -> &HashSet<NodeId> {
+        &self.render_dirty_node_ids
     }
 
     #[cfg(test)]
@@ -384,7 +433,7 @@ impl RetainedWidgetTree {
             let Some(previous) = retained.nodes.get(key) else {
                 return false;
             };
-            let fresh = retained_snapshot(node);
+            let fresh = retained_snapshot_with_render(node, previous.render.clone());
             *total += 1;
             if !visit(node.id, previous, &fresh) {
                 return false;
@@ -457,6 +506,7 @@ struct RetainedNodeSnapshot {
     attributes_hash: u64,
     child_ids: SmallVec<[NodeId; 8]>,
     state: ElementState,
+    render: RenderObjectFingerprint,
     last_seen_epoch: u64,
 }
 
@@ -618,6 +668,9 @@ fn update_retained_snapshots(
     dirty_slots: &mut SecondaryMap<RetainedNodeKey, RetainedNodeDirtyFlags>,
     dirty_node_ids: &mut HashSet<NodeId>,
     dirty: &mut RetainedTreeDirtySummary,
+    render_dirty: &mut RenderObjectDirtySummary,
+    render_dirty_node_ids: &mut HashSet<NodeId>,
+    synchronize_render_fingerprints: bool,
 ) -> usize {
     update_retained_node(
         node,
@@ -627,6 +680,9 @@ fn update_retained_snapshots(
         dirty_slots,
         dirty_node_ids,
         dirty,
+        render_dirty,
+        render_dirty_node_ids,
+        synchronize_render_fingerprints,
     );
 
     let mut visited = 1;
@@ -639,6 +695,9 @@ fn update_retained_snapshots(
             dirty_slots,
             dirty_node_ids,
             dirty,
+            render_dirty,
+            render_dirty_node_ids,
+            synchronize_render_fingerprints,
         );
     }
     visited
@@ -653,9 +712,10 @@ fn update_retained_node(
     dirty_slots: &mut SecondaryMap<RetainedNodeKey, RetainedNodeDirtyFlags>,
     dirty_node_ids: &mut HashSet<NodeId>,
     dirty: &mut RetainedTreeDirtySummary,
+    render_dirty: &mut RenderObjectDirtySummary,
+    render_dirty_node_ids: &mut HashSet<NodeId>,
+    synchronize_render_fingerprints: bool,
 ) -> bool {
-    let mut next = retained_snapshot(node);
-    next.last_seen_epoch = update_epoch;
     match node_keys.get(&node.id).copied() {
         Some(previous_key) => match nodes.get_mut(previous_key) {
             Some(previous) => {
@@ -666,12 +726,34 @@ fn update_retained_node(
                     node.id,
                     node.mesh_key()
                 );
+                let mut next = retained_snapshot_with_render(node, previous.render.clone());
+                next.last_seen_epoch = update_epoch;
                 let (flags, node_state_bits) = previous.diff_flags(&next);
+                let render_changed = if flags.is_empty() || !synchronize_render_fingerprints {
+                    false
+                } else {
+                    next.render = RenderObjectFingerprint::for_node(node, Some(&previous.render));
+                    render_dirty.add_fingerprint_diff(&previous.render, &next.render)
+                };
+                if synchronize_render_fingerprints
+                    && flags.contains(RetainedNodeDirtyFlags::CHILDREN)
+                {
+                    render_dirty.reordered += 1;
+                }
+                if render_changed
+                    || synchronize_render_fingerprints
+                        && flags.contains(RetainedNodeDirtyFlags::CHILDREN)
+                {
+                    render_dirty_node_ids.insert(node.id);
+                }
                 if !flags.is_empty() {
                     dirty.add_flags(flags);
                     dirty.changed_state_bits |= node_state_bits;
                     dirty_slots.insert(previous_key, flags);
                     dirty_node_ids.insert(node.id);
+                    *previous = next;
+                    true
+                } else if render_changed {
                     *previous = next;
                     true
                 } else {
@@ -680,18 +762,26 @@ fn update_retained_node(
                 }
             }
             None => {
+                let mut next = retained_snapshot(node);
+                next.last_seen_epoch = update_epoch;
                 let key = nodes.insert(next);
                 node_keys.insert(node.id, key);
                 dirty_slots.insert(key, RetainedNodeDirtyFlags::INSERTED);
                 dirty.inserted += 1;
+                render_dirty.inserted += 1;
+                render_dirty_node_ids.insert(node.id);
                 true
             }
         },
         None => {
+            let mut next = retained_snapshot(node);
+            next.last_seen_epoch = update_epoch;
             let key = nodes.insert(next);
             node_keys.insert(node.id, key);
             dirty_slots.insert(key, RetainedNodeDirtyFlags::INSERTED);
             dirty.inserted += 1;
+            render_dirty.inserted += 1;
+            render_dirty_node_ids.insert(node.id);
             true
         }
     }
@@ -752,12 +842,20 @@ fn collect_retained_snapshots(
 }
 
 fn retained_snapshot(node: &WidgetNode) -> RetainedNodeSnapshot {
+    retained_snapshot_with_render(node, RenderObjectFingerprint::for_node(node, None))
+}
+
+fn retained_snapshot_with_render(
+    node: &WidgetNode,
+    render: RenderObjectFingerprint,
+) -> RetainedNodeSnapshot {
     RetainedNodeSnapshot {
         layout: layout_fingerprint(node),
         style_hash: style_fingerprint(&node.computed_style),
         attributes_hash: attributes_fingerprint(node),
         child_ids: node.children.iter().map(|child| child.id).collect(),
         state: node.state,
+        render,
         last_seen_epoch: 0,
     }
 }
@@ -796,6 +894,18 @@ fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher) {
     hash_edges(style.margin, hasher);
     hash_edges(style.border_width, hasher);
     hash_color(style.background_color, hasher);
+    match &style.background_paint {
+        BackgroundPaint::None => 0_u8.hash(hasher),
+        BackgroundPaint::Image(source) => {
+            1_u8.hash(hasher);
+            source.path.hash(hasher);
+        }
+        BackgroundPaint::LinearGradient(gradient) => {
+            2_u8.hash(hasher);
+            hash_color(gradient.from, hasher);
+            hash_color(gradient.to, hasher);
+        }
+    }
     hash_color(style.border_color, hasher);
     hash_corners(style.border_radius, hasher);
     style.opacity.to_bits().hash(hasher);
@@ -828,6 +938,14 @@ fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher) {
     style.position.hash(hasher);
     style.mix_blend_mode.hash(hasher);
     style.z_index.hash(hasher);
+    style.box_shadow.offset_x.to_bits().hash(hasher);
+    style.box_shadow.offset_y.to_bits().hash(hasher);
+    style.box_shadow.blur_radius.to_bits().hash(hasher);
+    style.box_shadow.spread_radius.to_bits().hash(hasher);
+    hash_color(style.box_shadow.color, hasher);
+    style.box_shadow.inset.hash(hasher);
+    style.filter.blur_radius.to_bits().hash(hasher);
+    style.backdrop_filter.blur_radius.to_bits().hash(hasher);
     hash_option_f32(style.inset_top, hasher);
     hash_option_f32(style.inset_right, hasher);
     hash_option_f32(style.inset_bottom, hasher);
@@ -863,7 +981,40 @@ fn attributes_fingerprint(node: &WidgetNode) -> u64 {
             hash_json_value(arg, &mut hasher);
         }
     }
+    hash_accessibility_role(&node.accessibility.role, &mut hasher);
+    node.accessibility.label.hash(&mut hasher);
+    node.accessibility.focusable.hash(&mut hasher);
+    node.accessibility.focused.hash(&mut hasher);
     hasher.finish()
+}
+
+fn hash_accessibility_role(role: &AccessibilityRole, hasher: &mut impl Hasher) {
+    match role {
+        AccessibilityRole::Button => 0_u8.hash(hasher),
+        AccessibilityRole::Slider => 1_u8.hash(hasher),
+        AccessibilityRole::Label => 2_u8.hash(hasher),
+        AccessibilityRole::TextInput => 3_u8.hash(hasher),
+        AccessibilityRole::Checkbox => 4_u8.hash(hasher),
+        AccessibilityRole::Switch => 5_u8.hash(hasher),
+        AccessibilityRole::Region => 6_u8.hash(hasher),
+        AccessibilityRole::List => 7_u8.hash(hasher),
+        AccessibilityRole::ListItem => 8_u8.hash(hasher),
+        AccessibilityRole::Image => 9_u8.hash(hasher),
+        AccessibilityRole::Toolbar => 10_u8.hash(hasher),
+        AccessibilityRole::Menu => 11_u8.hash(hasher),
+        AccessibilityRole::MenuItem => 12_u8.hash(hasher),
+        AccessibilityRole::Dialog => 13_u8.hash(hasher),
+        AccessibilityRole::Alert => 14_u8.hash(hasher),
+        AccessibilityRole::Status => 15_u8.hash(hasher),
+        AccessibilityRole::ProgressBar => 16_u8.hash(hasher),
+        AccessibilityRole::Tab => 17_u8.hash(hasher),
+        AccessibilityRole::TabPanel => 18_u8.hash(hasher),
+        AccessibilityRole::Separator => 19_u8.hash(hasher),
+        AccessibilityRole::Custom(value) => {
+            20_u8.hash(hasher);
+            value.hash(hasher);
+        }
+    }
 }
 
 fn is_typed_runtime_annotation_attribute(key: &str) -> bool {
@@ -2251,6 +2402,7 @@ mod tests {
                     attributes_hash: 0,
                     child_ids: SmallVec::new(),
                     state: ElementState::default(),
+                    render: RenderObjectFingerprint::for_node(&WidgetNode::new("box"), None),
                     last_seen_epoch: 0,
                 })
             })
@@ -2308,6 +2460,7 @@ mod tests {
                             focused: index % 3 == 0,
                             ..ElementState::default()
                         },
+                        render: RenderObjectFingerprint::for_node(&WidgetNode::new("box"), None),
                         last_seen_epoch: 0,
                     },
                 )
@@ -2579,6 +2732,125 @@ mod tests {
                 | RetainedNodeDirtyFlags::STYLE
                 | RetainedNodeDirtyFlags::ATTRIBUTES
                 | RetainedNodeDirtyFlags::STATE
+        );
+    }
+
+    #[test]
+    fn retained_widget_tree_owns_render_fingerprint_diff() {
+        use mesh_core_render::RenderObjectTree;
+
+        let mut tree = WidgetNode::new("row");
+        tree.children.push(WidgetNode::new("text"));
+        annotate_with_empty_context(&mut tree);
+
+        let mut retained = RetainedWidgetTree::default();
+        let mut separate = RenderObjectTree::default();
+        retained.update(&tree);
+        assert_eq!(retained.render_dirty(), separate.update(&tree));
+
+        let child = &mut tree.children[0];
+        child.layout.x = 12.0;
+        child.computed_style.background_color = Color::BLACK;
+        child.computed_style.box_shadow.blur_radius = 4.0;
+        child.attributes.insert("content".into(), "changed".into());
+        child.accessibility.role = AccessibilityRole::Label;
+        child.accessibility.label = Some("Changed label".into());
+        child.accessibility.focusable = true;
+
+        retained.update(&tree);
+        assert_eq!(retained.render_dirty(), separate.update(&tree));
+        assert_eq!(retained.render_dirty_node_ids(), separate.dirty_node_ids());
+        assert_eq!(retained.render_dirty().geometry, 1);
+        assert_eq!(retained.render_dirty().material, 1);
+        assert_eq!(retained.render_dirty().text, 1);
+        assert_eq!(retained.render_dirty().accessibility, 1);
+
+        tree.children[0].accessibility.label = Some("Accessibility only".into());
+        retained.update(&tree);
+        assert_eq!(retained.render_dirty(), separate.update(&tree));
+        assert_eq!(retained.render_dirty().accessibility, 1);
+
+        tree.children[0].computed_style.box_shadow.blur_radius = 8.0;
+        retained.update(&tree);
+        assert_eq!(retained.render_dirty(), separate.update(&tree));
+        assert_eq!(retained.render_dirty().material, 1);
+    }
+
+    // cargo test -p mesh-core-shell --release -- retained_single_fingerprint_pass_beats_separate_render_diff --ignored --nocapture
+    #[test]
+    #[ignore = "release-only fused retained/render fingerprint benchmark"]
+    fn retained_single_fingerprint_pass_beats_separate_render_diff() {
+        use mesh_core_render::RenderObjectTree;
+
+        let mut legacy_root = benchmark_plain_tree(4, 5);
+        annotate_with_empty_context(&mut legacy_root);
+        let mut fused_root = legacy_root.clone();
+        let mut legacy_retained = RetainedWidgetTree::default();
+        let mut fused_retained = RetainedWidgetTree::default();
+        let mut separate_render = RenderObjectTree::default();
+        legacy_retained.update_without_render_fingerprints(&legacy_root);
+        fused_retained.update(&fused_root);
+        separate_render.update(&legacy_root);
+
+        let iterations = 2_000_u64;
+        let mut legacy_time = std::time::Duration::ZERO;
+        let mut fused_time = std::time::Duration::ZERO;
+        let mut legacy_changes = 0usize;
+        let mut fused_changes = 0usize;
+        for generation in 2..iterations + 2 {
+            let content = if generation % 2 == 0 { "b" } else { "a" };
+            first_deep_leaf_mut(&mut legacy_root)
+                .attributes
+                .insert("content".into(), content.into());
+            first_deep_leaf_mut(&mut fused_root)
+                .attributes
+                .insert("content".into(), content.into());
+
+            if generation % 2 == 0 {
+                let started = Instant::now();
+                legacy_retained.update_without_render_fingerprints(&legacy_root);
+                legacy_changes += separate_render
+                    .update_for_retained_dirty_nodes(
+                        &legacy_root,
+                        generation,
+                        legacy_retained.dirty_node_ids(),
+                    )
+                    .text;
+                legacy_time += started.elapsed();
+
+                let started = Instant::now();
+                fused_retained.update(&fused_root);
+                fused_changes += fused_retained.render_dirty().text;
+                fused_time += started.elapsed();
+            } else {
+                let started = Instant::now();
+                fused_retained.update(&fused_root);
+                fused_changes += fused_retained.render_dirty().text;
+                fused_time += started.elapsed();
+
+                let started = Instant::now();
+                legacy_retained.update_without_render_fingerprints(&legacy_root);
+                legacy_changes += separate_render
+                    .update_for_retained_dirty_nodes(
+                        &legacy_root,
+                        generation,
+                        legacy_retained.dirty_node_ids(),
+                    )
+                    .text;
+                legacy_time += started.elapsed();
+            }
+        }
+
+        assert_eq!(fused_changes, iterations as usize);
+        assert_eq!(fused_changes, legacy_changes);
+        let speedup = legacy_time.as_secs_f64() / fused_time.as_secs_f64();
+        eprintln!(
+            "retained/render fingerprints over {iterations} one-node-dirty 1,365-node frames: separate {legacy_time:?}; single pass {fused_time:?}; ratio {speedup:.2}x"
+        );
+        eprintln!("MESH_PERF metric=retained_single_fingerprint_speedup value={speedup:.6}");
+        assert!(
+            fused_time * 20 < legacy_time * 19,
+            "single retained fingerprint pass should be at least 5% faster"
         );
     }
 

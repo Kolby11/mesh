@@ -304,7 +304,7 @@ impl InstanceKeyInterner {
 
 use mesh_core_render::{
     DamageRect, DisplayListMetrics, DisplayListRepaintPolicy, DisplayPaintCommand, PixelBuffer,
-    RenderObjectTree, RetainedDisplayList, SharedTextMeasurer, TextCacheMetrics, TextRenderer,
+    RetainedDisplayList, SharedTextMeasurer, TextCacheMetrics, TextRenderer,
 };
 
 const TOOLTIP_OVERLAY_WIDTH: u32 = 352;
@@ -824,7 +824,6 @@ pub(super) struct FrontendSurfaceComponent {
     last_template_build_reused_nodes: usize,
     #[cfg(test)]
     force_full_template_build: bool,
-    retained_render_objects: RenderObjectTree,
     retained_display_list: RetainedDisplayList,
     /// Popup-local display lists keyed by the promoted subtree's stable node id.
     /// These retain the expensive tree-to-paint-command lowering between child
@@ -1108,7 +1107,6 @@ impl FrontendSurfaceComponent {
             last_template_build_reused_nodes: 0,
             #[cfg(test)]
             force_full_template_build: false,
-            retained_render_objects: RenderObjectTree::default(),
             retained_display_list: RetainedDisplayList::default(),
             child_display_lists: RefCell::new(ChildDisplayListCache::default()),
             diagnostics: None,

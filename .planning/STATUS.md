@@ -1,11 +1,20 @@
 # Status
 
-**Updated:** 2026-08-01
+**Updated:** 2026-08-02
 
 This page describes the present and is meant to be overwritten. History lives in
 [`log/`](log/); open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
+
+**The retained widget tree owns the render fingerprint pass.** Each retained
+node snapshot now carries the paint fingerprint and produces the detailed
+render dirty summary/node set while its normal layout/style/attribute diff is
+already visiting that node. Surface components no longer retain or traverse a
+parallel `RenderObjectTree`; display-list sparse reconciliation consumes the
+authoritative retained result. The 1,365-node release gate measured
+1.077–1.085x across repeated interleaved runs (2026-08-02). Record:
+[`log/performance-log.md`](log/performance-log.md).
 
 **Direct service updates re-evaluate only affected static template subtrees.**
 Changed service fields resolve through `NodeServiceFieldDependencies`; clean

@@ -290,7 +290,11 @@ impl RenderObjectTree {
 }
 
 impl RenderObjectDirtySummary {
-    fn add_diff(&mut self, previous: &RenderObjectPaintData, next: &RenderObjectPaintData) -> bool {
+    pub fn add_fingerprint_diff(
+        &mut self,
+        previous: &RenderObjectFingerprint,
+        next: &RenderObjectFingerprint,
+    ) -> bool {
         let mut changed = false;
         if previous.transform != next.transform {
             self.transform += 1;
@@ -329,10 +333,7 @@ impl RenderObjectDirtySummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct RenderObjectPaintData {
-    last_seen_epoch: u64,
-    parent: Option<NodeId>,
-    child_ids: Vec<NodeId>,
+pub struct RenderObjectFingerprint {
     transform: TransformSlot,
     clip: ClipSlot,
     opacity: u32,
@@ -341,6 +342,20 @@ struct RenderObjectPaintData {
     primitive: u64,
     text: TextSlot,
     accessibility: AccessibilitySlot,
+}
+
+impl RenderObjectFingerprint {
+    pub fn for_node(node: &WidgetNode, previous: Option<&Self>) -> Self {
+        render_object_fingerprint(node, previous)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RenderObjectPaintData {
+    last_seen_epoch: u64,
+    parent: Option<NodeId>,
+    child_ids: Vec<NodeId>,
+    fingerprint: RenderObjectFingerprint,
 }
 
 type TransformSlot = (u32, u32, u32, u32, u32);
@@ -383,7 +398,10 @@ fn update_retained_render_objects(
                 dirty.reordered += 1;
             }
             let next = render_object_paint_data(node, parent, Some(current), child_ids);
-            if dirty.add_diff(current, &next) || parent_changed || children_changed {
+            if dirty.add_fingerprint_diff(&current.fingerprint, &next.fingerprint)
+                || parent_changed
+                || children_changed
+            {
                 dirty_nodes.insert(node.id);
             }
             *current = RenderObjectPaintData {
@@ -463,7 +481,7 @@ fn update_dirty_render_object(
     let parent = current.parent;
     let child_ids = std::mem::take(&mut current.child_ids);
     let next = render_object_paint_data(node, parent, Some(current), child_ids);
-    if dirty.add_diff(current, &next) {
+    if dirty.add_fingerprint_diff(&current.fingerprint, &next.fingerprint) {
         dirty_nodes.insert(node.id);
     }
     *current = RenderObjectPaintData {
@@ -478,11 +496,20 @@ fn render_object_paint_data(
     previous: Option<&RenderObjectPaintData>,
     child_ids: Vec<NodeId>,
 ) -> RenderObjectPaintData {
-    let geometry = geometry_slot(node);
     RenderObjectPaintData {
         last_seen_epoch: 0,
         parent,
         child_ids,
+        fingerprint: render_object_fingerprint(node, previous.map(|data| &data.fingerprint)),
+    }
+}
+
+fn render_object_fingerprint(
+    node: &WidgetNode,
+    previous: Option<&RenderObjectFingerprint>,
+) -> RenderObjectFingerprint {
+    let geometry = geometry_slot(node);
+    RenderObjectFingerprint {
         transform: transform_slot(node.computed_style.transform),
         clip: clip_slot(node, geometry),
         opacity: node.computed_style.opacity.to_bits(),
@@ -868,7 +895,10 @@ mod tests {
         let mut copied_changes = 0usize;
         for _ in 0..iterations {
             let before = copied_summary;
-            copied_summary.add_diff(std::hint::black_box(&previous), std::hint::black_box(&next));
+            copied_summary.add_fingerprint_diff(
+                std::hint::black_box(&previous.fingerprint),
+                std::hint::black_box(&next.fingerprint),
+            );
             copied_changes += usize::from(copied_summary != before);
         }
         let copied_time = copied_started.elapsed();
@@ -877,10 +907,10 @@ mod tests {
         let mut direct_summary = RenderObjectDirtySummary::default();
         let mut direct_changes = 0usize;
         for _ in 0..iterations {
-            direct_changes += usize::from(
-                direct_summary
-                    .add_diff(std::hint::black_box(&previous), std::hint::black_box(&next)),
-            );
+            direct_changes += usize::from(direct_summary.add_fingerprint_diff(
+                std::hint::black_box(&previous.fingerprint),
+                std::hint::black_box(&next.fingerprint),
+            ));
         }
         let direct_time = direct_started.elapsed();
 
@@ -1042,18 +1072,30 @@ mod tests {
         let mut tree = RenderObjectTree::default();
         tree.update(&node);
         let first = tree.objects.get(&node.id).expect("first render object");
-        let first_text = Arc::clone(first.text.content.as_ref().expect("text content"));
-        let first_label = Arc::clone(first.accessibility.1.as_ref().expect("label"));
+        let first_text = Arc::clone(
+            first
+                .fingerprint
+                .text
+                .content
+                .as_ref()
+                .expect("text content"),
+        );
+        let first_label = Arc::clone(first.fingerprint.accessibility.1.as_ref().expect("label"));
 
         tree.update(&node);
         let second = tree.objects.get(&node.id).expect("second render object");
         assert!(Arc::ptr_eq(
             &first_text,
-            second.text.content.as_ref().expect("text content")
+            second
+                .fingerprint
+                .text
+                .content
+                .as_ref()
+                .expect("text content")
         ));
         assert!(Arc::ptr_eq(
             &first_label,
-            second.accessibility.1.as_ref().expect("label")
+            second.fingerprint.accessibility.1.as_ref().expect("label")
         ));
     }
 

@@ -11,6 +11,38 @@ Every entry keeps its benchmark numbers so future work can compare against the
 recorded baselines. Sections M–V were focused per-subsystem deep dives; see
 `PERFORMANCE_SECTIONS.md` for the subsystem map.
 
+## 2026-08-02 — retained tree becomes the single render fingerprint pass
+
+area: retained tree, render objects, display list (N)
+
+`RetainedNodeSnapshot` now owns the detailed render fingerprint alongside its
+layout, style, attribute, child, and state fingerprints. When the broad retained
+diff marks a node, that same visit computes the paint-slot delta and publishes
+the authoritative `RenderObjectDirtySummary` plus dirty `NodeId` set. The shell
+no longer owns a parallel `RenderObjectTree`, its duplicate node map/child-id
+storage, or its second full-tree traversal. The retained style and attribute
+fingerprints were extended to cover background paint, shadows, filters, and
+direct accessibility metadata so every render input reliably opens the detailed
+paint diff. Existing display-list sparse entry reconciliation consumes the
+retained result unchanged; structural updates retain its full fallback.
+
+**Measured.** Release under `nix develop` (rustc/cargo 1.94.0), three
+interleaved runs of 2,000 non-structural frames on a 1,365-node five-way tree,
+alternating one deep text leaf between two values. The legacy control performs
+the retained fingerprint walk followed by the independent render-object map
+walk; the new path performs one retained walk and computes the detailed render
+fingerprint only for broadly changed nodes. Separate passes took
+0.727–1.272s; the single pass took 0.675–1.177s, a 1.077–1.085x improvement.
+The checked `retained_single_fingerprint_speedup` gate requires 1.05x.
+
+**Verified.** A parity regression compares the retained-owned dirty summary and
+node set with the former render-object implementation across isolated and
+simultaneous geometry, material, text, and accessibility changes. The 47-test
+invalidation suite, 24 active retained-tree tests, and 13 active render-object
+tests pass.
+Per-node scoping of the retained tree's own traversal and wider generation
+shortcuts remain in the next backlog item.
+
 ## 2026-08-01 — affected static template re-evaluation
 
 area: template evaluation, retained render pipeline

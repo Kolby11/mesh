@@ -115,10 +115,6 @@ gate where the win is structural.
 
 ### Render pipeline
 
-- [ ] Make `RetainedWidgetTree` the single fingerprint pass; the render-object
-      tree and display entries should consume its per-node dirty flags rather
-      than fingerprinting independently (N). Remaining after the sparse-patching
-      work: share the computed fingerprint payloads directly.
 - [ ] Widen generation shortcuts to per-node dirty scoping — scope the retained
       tree's own fingerprint traversal and unify changed-node fingerprints
       across the retained, render, and display layers.

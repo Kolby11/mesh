@@ -75,6 +75,7 @@ run_benchmark mesh-core-elements shared_theme_revision_cache_beats_per_resolver_
 run_benchmark mesh-core-elements bounded_style_cache_p95_beats_flush_all
 run_benchmark mesh-core-shell runtime_style_diagnostic_generation_gate_beats_full_tree_fingerprint
 run_benchmark mesh-core-shell affected_template_eval_beats_full_rebuild
+run_benchmark mesh-core-shell retained_single_fingerprint_pass_beats_separate_render_diff
 
 awk '
   BEGIN { failed = 0 }

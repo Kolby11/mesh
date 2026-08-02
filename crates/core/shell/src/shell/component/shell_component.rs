@@ -17,7 +17,6 @@ impl FrontendSurfaceComponent {
         self.intrinsic_layout_cache = IntrinsicLayoutCache::default();
         self.layout_state = PerSurfaceLayoutState::default();
         self.retained_tree = RetainedWidgetTree::default();
-        self.retained_render_objects = RenderObjectTree::default();
         self.retained_display_list = RetainedDisplayList::default();
         self.pending_service_template_nodes = None;
         self.child_display_lists.get_mut().clear();
@@ -698,29 +697,17 @@ impl ShellComponent for FrontendSurfaceComponent {
             dirty_roots.extend(animation_dirty_roots.drain());
         }
         self.animation_dirty_node_ids_scratch = animation_dirty_roots;
-        let (retained_dirty, retained_dirty_node_refs) =
-            if let Some(dirty_roots) = retained_update_dirty_roots.as_ref() {
-                self.retained_tree
-                    .update_for_dirty_roots_collect(&tree, dirty_roots)
-            } else {
-                (self.retained_tree.update(&tree), None)
-            };
-        let retained_tree_generation = self.retained_tree.generation();
+        // Render fingerprints are synchronized inside the authoritative
+        // retained-tree pass, so this stage now covers that consolidated work.
         let render_object_started = std::time::Instant::now();
-        let render_object_dirty = if retained_dirty.is_structural() {
-            self.retained_render_objects.update(&tree)
-        } else if let Some(dirty_nodes) = retained_dirty_node_refs.as_deref() {
-            self.retained_render_objects
-                .update_for_retained_dirty_node_refs(&tree, retained_tree_generation, dirty_nodes)
+        let retained_dirty = if let Some(dirty_roots) = retained_update_dirty_roots.as_ref() {
+            self.retained_tree
+                .update_for_dirty_roots(&tree, dirty_roots)
         } else {
-            self.retained_render_objects
-                .update_for_retained_dirty_nodes(
-                    &tree,
-                    retained_tree_generation,
-                    self.retained_tree.dirty_node_ids(),
-                )
+            self.retained_tree.update(&tree)
         };
-        drop(retained_dirty_node_refs);
+        let retained_tree_generation = self.retained_tree.generation();
+        let render_object_dirty = self.retained_tree.render_dirty();
         self.record_profiling_stage_with_elapsed(
             mesh_core_debug::ProfilingStage::RenderObjectSync,
             render_object_started.elapsed(),
@@ -763,7 +750,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             &tree,
             retained_tree_generation,
             render_object_dirty,
-            self.retained_render_objects.dirty_node_ids(),
+            self.retained_tree.render_dirty_node_ids(),
             content_width,
             content_height,
             self.surface_pixels_invalid,
@@ -787,7 +774,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             std::mem::take(&mut self.dirty_node_visual_damage_scratch);
         damage_rects_for_node_ids_into(
             &tree,
-            self.retained_render_objects.dirty_node_ids(),
+            self.retained_tree.render_dirty_node_ids(),
             &self.last_visual_damage,
             content_damage,
             &mut dirty_node_visual_damage_rects,
@@ -911,9 +898,9 @@ impl ShellComponent for FrontendSurfaceComponent {
             use_retained_style_path
         );
         tracing::trace!(
-            "retained render objects '{}' generation={} dirty={:?}",
+            "retained render fingerprints '{}' generation={} dirty={:?}",
             self.id(),
-            self.retained_render_objects.generation(),
+            retained_tree_generation,
             render_object_dirty
         );
 
@@ -1363,8 +1350,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         display_list.update_at_for_retained_generation_with_dirty_nodes(
             node,
             retained_generation,
-            self.retained_render_objects.last_dirty(),
-            self.retained_render_objects.dirty_node_ids(),
+            self.retained_tree.render_dirty(),
+            self.retained_tree.render_dirty_node_ids(),
             -bounds.0 + content_offset.0 as f32,
             -bounds.1 + content_offset.1 as f32,
             logical_width,
