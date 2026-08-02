@@ -648,13 +648,18 @@ pub(super) fn runtime_node_id_for_key(key: &str) -> NodeId {
     let mut segments = key.split('/');
     let root = segments.next().unwrap_or(key);
     let mut node_id = stable_runtime_node_id(root);
+    let mut prefix = root.to_owned();
     for segment in segments {
-        let Ok(child_index) = segment.parse::<usize>() else {
-            // Runtime annotation always emits numeric structural segments.
+        prefix.push('/');
+        prefix.push_str(segment);
+        if segment.starts_with("@loop:") {
+            node_id = stable_runtime_node_id(&prefix);
+        } else if let Ok(child_index) = segment.parse::<usize>() {
+            node_id = child_runtime_node_id(node_id, child_index);
+        } else {
             // Keep malformed/test-only keys deterministic and non-zero.
             return stable_runtime_node_id(key);
-        };
-        node_id = child_runtime_node_id(node_id, child_index);
+        }
     }
     node_id
 }
@@ -1493,15 +1498,19 @@ fn annotate_runtime_tree_inner(
         let previous_len = key.len();
         {
             use std::fmt::Write as _;
-            let _ = write!(key, "/{index}");
+            if let Some(loop_identity) = child.loop_identity() {
+                let _ = write!(key, "/@loop:{loop_identity}");
+            } else {
+                let _ = write!(key, "/{index}");
+            }
         }
-        let child_bounds = annotate_runtime_tree_inner(
-            child,
-            key,
-            child_runtime_node_id(node_id, index),
-            context,
-            annotate_overflow,
-        );
+        let child_id = if child.loop_identity().is_some() {
+            stable_runtime_node_id(key)
+        } else {
+            child_runtime_node_id(node_id, index)
+        };
+        let child_bounds =
+            annotate_runtime_tree_inner(child, key, child_id, context, annotate_overflow);
         if let Some(next) = child_bounds {
             children_bounds = Some(match children_bounds {
                 Some(current) => (

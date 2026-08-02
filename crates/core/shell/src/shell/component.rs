@@ -249,7 +249,7 @@ impl InstanceKeyInterner {
     }
 
     fn intern_embedded(&mut self, host: &str, kind: &str, identifier: &str) -> Arc<str> {
-        self.intern_embedded_occurrence(host, kind, identifier, None, None)
+        self.intern_embedded_occurrence(host, kind, identifier, None, None, None)
     }
 
     fn intern_embedded_occurrence(
@@ -259,6 +259,7 @@ impl InstanceKeyInterner {
         identifier: &str,
         duplicate_ordinal: Option<usize>,
         loop_ordinal: Option<usize>,
+        loop_identity: Option<&str>,
     ) -> Arc<str> {
         self.scratch.clear();
         self.scratch
@@ -275,6 +276,10 @@ impl InstanceKeyInterner {
         if let Some(ordinal) = loop_ordinal {
             use std::fmt::Write;
             write!(&mut self.scratch, "@{ordinal}").expect("writing to a String cannot fail");
+        }
+        if let Some(identity) = loop_identity {
+            self.scratch.push_str("@key:");
+            self.scratch.push_str(identity);
         }
         if let Some(key) = self.keys.get(self.scratch.as_str()) {
             return Arc::clone(key);
@@ -777,7 +782,7 @@ pub(super) struct FrontendSurfaceComponent {
     last_tooltip_damage: Option<DamageRect>,
     runtimes: Arc<Mutex<HashMap<Arc<str>, EmbeddedFrontendRuntime>>>,
     instance_keys: RefCell<InstanceKeyInterner>,
-    composition_occurrences: RefCell<HashMap<(Arc<str>, usize), usize>>,
+    composition_occurrences: RefCell<HashMap<(Arc<str>, usize, Option<Arc<str>>), usize>>,
     /// The single Lua realm shared by every component instance in this surface.
     /// Each runtime's `ScriptContext` attaches a clone, so sibling/child
     /// components can hold live `bind:this` references to one another.

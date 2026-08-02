@@ -36,11 +36,13 @@ fn preprocess_control_flow(source: &str) -> String {
                 let inner = rest[..end].trim();
                 if let Some(sep) = inner.find(" in ") {
                     let item = inner[..sep].trim();
-                    let iterable = inner[sep + 4..].trim();
+                    let (iterable, key) = split_for_key(inner[sep + 4..].trim());
                     out.push_str(&format!(
-                        "<mesh-for item=\"{}\" iterable=\"{}\">",
+                        "<mesh-for item=\"{}\" iterable=\"{}\"{}>",
                         xml_attr_escape(item),
-                        xml_attr_escape(iterable)
+                        xml_attr_escape(iterable),
+                        key.map(|key| format!(" key=\"{}\"", xml_attr_escape(key)))
+                            .unwrap_or_default(),
                     ));
                     cf_stack.push("for");
                     remaining = &rest[end + 1..];
@@ -140,6 +142,19 @@ fn preprocess_control_flow(source: &str) -> String {
     }
 
     out
+}
+
+fn split_for_key(value: &str) -> (&str, Option<&str>) {
+    let Some(key_start) = value.find(" key=") else {
+        return (value.trim(), None);
+    };
+    let iterable = value[..key_start].trim();
+    let key = value[key_start + " key=".len()..].trim();
+    let key = key
+        .strip_prefix('{')
+        .and_then(|key| key.strip_suffix('}'))
+        .unwrap_or(key);
+    (iterable, (!key.is_empty()).then_some(key))
 }
 
 /// Find the index of the `}` that closes the outer `{`, depth-aware.
@@ -680,6 +695,7 @@ fn build_template_node(
         return Ok(TemplateNode::For(ForNode {
             item_name,
             iterable,
+            key: find_static_attr(&attributes, "key"),
             children,
         }));
     }

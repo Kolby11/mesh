@@ -531,6 +531,10 @@ pub struct ModuleGraphEntry {
     pub settings_schema: Option<serde_json::Value>,
     /// Effective profile-scoped `props.global` overrides for the module.
     pub settings_values: serde_json::Value,
+    /// Live root-instance ids that may receive a per-instance prop override.
+    pub settings_instances: Vec<String>,
+    /// Effective profile-scoped `props.instances` overrides, keyed by instance id.
+    pub settings_instance_values: serde_json::Value,
     /// Optional module-authored settings component entrypoint.
     pub settings_ui: Option<String>,
     pub provides_i18n: Vec<String>,

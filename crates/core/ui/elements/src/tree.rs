@@ -228,6 +228,9 @@ pub struct WidgetNode {
     pub scroll_metrics: Option<WidgetScrollMetrics>,
     /// Stable runtime identity for this node, kept out of the string attribute map.
     mesh_key: Option<String>,
+    /// Keyed-loop identity for the node's direct placement in its parent.
+    /// Consumed while assigning shell runtime keys and never exposed to styles.
+    loop_identity: Option<Arc<str>>,
     /// Cached split `class` tokens derived from the raw `class` attribute.
     cached_class_attr: Option<String>,
     cached_classes: Vec<String>,
@@ -260,6 +263,7 @@ impl WidgetNode {
             state: ElementState::default(),
             scroll_metrics: None,
             mesh_key: None,
+            loop_identity: None,
             cached_class_attr: None,
             cached_classes: Vec::new(),
             authored: Arc::new(WidgetNodeAuthored {
@@ -321,6 +325,16 @@ impl WidgetNode {
 
     pub fn has_mesh_key(&self) -> bool {
         self.mesh_key().is_some()
+    }
+
+    /// Attach a stable `{#for key=...}` identity to this direct loop child.
+    pub fn set_loop_identity(&mut self, identity: impl Into<Arc<str>>) {
+        self.loop_identity = Some(identity.into());
+    }
+
+    /// The keyed-loop identity used when assigning this node's runtime key.
+    pub fn loop_identity(&self) -> Option<&str> {
+        self.loop_identity.as_deref()
     }
 
     pub fn set_module_id(&mut self, module_id: impl Into<Arc<str>>) {

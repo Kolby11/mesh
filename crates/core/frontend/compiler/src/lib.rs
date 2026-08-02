@@ -35,6 +35,7 @@ struct LayeredStore<'a> {
     base: &'a dyn VariableStore,
     item_name: &'a str,
     item_value: &'a serde_json::Value,
+    loop_identity: Option<String>,
 }
 
 impl VariableStore for LayeredStore<'_> {
@@ -71,6 +72,9 @@ impl VariableStore for LayeredStore<'_> {
         locals.insert(self.item_name.to_owned(), self.item_value.clone());
         locals
     }
+    fn loop_identity(&self) -> Option<&str> {
+        self.loop_identity.as_deref()
+    }
     fn record_template_service_reads(&self, reads: &[(String, String)]) {
         self.base.record_template_service_reads(reads);
     }
@@ -98,6 +102,7 @@ pub trait FrontendCompositionResolver {
         source_ordinal: usize,
         duplicate_ordinal: Option<usize>,
         repeated_by_loop: bool,
+        loop_identity: Option<&str>,
         props: &ComponentCompositionProps,
         prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
         container_width: f32,
@@ -171,6 +176,9 @@ pub fn collect_template_expressions(component: &ComponentFile) -> Vec<String> {
                 }
                 TemplateNode::For(node) => {
                     insert(&node.iterable, seen, out);
+                    if let Some(key) = &node.key {
+                        insert(key, seen, out);
+                    }
                     nodes(&node.children, seen, out);
                 }
                 TemplateNode::Text(_) | TemplateNode::Slot(_) => {}
@@ -349,9 +357,25 @@ impl CompiledFrontendModule {
                 .root
                 .iter()
                 .enumerate()
-                .map(|(index, node)| {
+                .flat_map(|(index, node)| {
+                    if matches!(
+                        node,
+                        mesh_core_component::template::TemplateNode::If(_)
+                            | mesh_core_component::template::TemplateNode::For(_)
+                    ) {
+                        return render::build_widget_nodes(
+                            node,
+                            &self.manifest,
+                            &build_style,
+                            Some(&root.computed_style),
+                            root_context,
+                            state,
+                            instance_key,
+                            composition,
+                        );
+                    }
                     if let Some((previous, rebuild_node_ids)) = selective {
-                        render::build_widget_node_selective(
+                        vec![render::build_widget_node_selective(
                             node,
                             &self.manifest,
                             &build_style,
@@ -362,9 +386,9 @@ impl CompiledFrontendModule {
                             composition,
                             previous.children.get(index),
                             rebuild_node_ids,
-                        )
+                        )]
                     } else {
-                        render::build_widget_node(
+                        vec![render::build_widget_node(
                             node,
                             &self.manifest,
                             &build_style,
@@ -373,7 +397,7 @@ impl CompiledFrontendModule {
                             state,
                             instance_key,
                             composition,
-                        )
+                        )]
                     }
                 })
                 .collect();

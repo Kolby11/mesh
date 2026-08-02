@@ -98,16 +98,23 @@
                             <text class="settings-card-meta">{row.module_id .. ' · ' .. row.name .. row.description}</text>
                         </column>
                         <button
+                            class="settings-secondary-button settings-prop-scope"
+                            hidden={row.scope_hidden}
+                            onclick={onPropScopeNext(row.module_id, row.scope_instance_id, row.instances)}
+                        >
+                            {row.scope_label}
+                        </button>
+                        <button
                             class="settings-secondary-button settings-prop-control"
                             hidden={row.bool_hidden}
-                            onclick={onPropToggle(row.module_id, row.name, row.value)}
+                            onclick={onPropToggle(row.module_id, row.name, row.value, row.scope_instance_id)}
                         >
                             {row.value and t('common.enabled') or t('common.disabled')}
                         </button>
                         <button
                             class="settings-secondary-button settings-prop-control"
                             hidden={row.enum_hidden}
-                            onclick={onPropEnumNext(row.module_id, row.name, row.value, row.options)}
+                            onclick={onPropEnumNext(row.module_id, row.name, row.value, row.options, row.scope_instance_id)}
                         >
                             {row.display_value}
                         </button>
@@ -119,20 +126,20 @@
                             step={row.step}
                             value={row.value}
                             label={row.label}
-                            onchange={onPropNumber(row.module_id, row.name)}
+                            onchange={onPropNumber(row.module_id, row.name, row.scope_instance_id)}
                         />
                         <input
                             class="module-filter settings-prop-control"
                             hidden={row.text_hidden}
                             value={row.display_value}
                             label={row.label}
-                            onchange={onPropText(row.module_id, row.name, row.type)}
+                            onchange={onPropText(row.module_id, row.name, row.type, row.scope_instance_id)}
                         />
                         <text class="settings-value" hidden={row.number_hidden}>{row.display_value}</text>
                         <button
                             class="settings-secondary-button"
                             hidden={row.reset_hidden}
-                            onclick={onPropReset(row.module_id, row.name, row.default)}
+                            onclick={onPropReset(row.module_id, row.name, row.inherited_value, row.scope_instance_id)}
                         >
                             {t('common.reset')}
                         </button>
@@ -179,6 +186,8 @@ local pending_module_enabled = {}
 local provider_notice = ""
 local module_notice = ""
 local pending_props = {}
+selected_prop_scope_module = ""
+selected_prop_scope_instance = ""
 
 local function lower(value)
     return string.lower(tostring(value or ""))
@@ -270,15 +279,15 @@ local function event_value(event)
     return event
 end
 
-local function pending_key(module_id, name)
-    return tostring(module_id) .. "\0" .. tostring(name)
+local function pending_key(module_id, instance_id, name)
+    return tostring(module_id) .. "\0" .. tostring(instance_id or "") .. "\0" .. tostring(name)
 end
 
-local function update_local_prop(module_id, name, value, has_override)
-    local key = pending_key(module_id, name)
+local function update_local_prop(module_id, name, value, has_override, instance_id)
+    local key = pending_key(module_id, instance_id, name)
     pending_props[key] = { value = value, has_override = has_override }
     for _, row in ipairs(prop_rows) do
-        if row.module_id == module_id and row.name == name then
+        if row.module_id == module_id and row.name == name and row.scope_instance_id == (instance_id or "") then
             row.value = value
             row.display_value = tostring(value or "") .. tostring(row.unit or "")
             row.reset_hidden = not has_override
@@ -417,12 +426,31 @@ function render()
         local settings_schema = provides.settings_schema or {}
         local properties = settings_schema.properties or {}
         local overrides = provides.settings_values or {}
+        local instances = provides.settings_instances or {}
+        local instance_overrides = provides.settings_instance_values or {}
+        local selected_instance = selected_prop_scope_module == module_id
+            and selected_prop_scope_instance or ""
+        local selected_exists = selected_instance == ""
+        for _, instance_id in ipairs(instances) do
+            if instance_id == selected_instance then selected_exists = true end
+        end
+        if not selected_exists then
+            selected_instance = ""
+            if selected_prop_scope_module == module_id then
+                selected_prop_scope_module = ""
+                selected_prop_scope_instance = ""
+            end
+        end
         for name, definition in pairs(properties) do
             local prop_type = tostring(definition.type or "string")
-            local override = overrides[name]
+            local inherited_value = overrides[name]
+            if inherited_value == nil then inherited_value = definition.default end
+            local selected_overrides = selected_instance == "" and overrides
+                or (instance_overrides[selected_instance] or {})
+            local override = selected_overrides[name]
             local has_override = override ~= nil
-            local value = has_override and override or definition.default
-            local pending = pending_props[pending_key(module_id, name)]
+            local value = has_override and override or inherited_value
+            local pending = pending_props[pending_key(module_id, selected_instance, name)]
             if pending ~= nil then
                 value = pending.value
                 has_override = pending.has_override
@@ -438,6 +466,7 @@ function render()
                 description = description == "" and "" or (" · " .. description),
                 value = value,
                 default = definition.default,
+                inherited_value = inherited_value,
                 display_value = tostring(value or "") .. tostring(definition.unit or ""),
                 unit = tostring(definition.unit or ""),
                 options = definition.enum or {},
@@ -449,6 +478,12 @@ function render()
                 number_hidden = not bounded_number,
                 text_hidden = prop_type == "bool" or prop_type == "enum" or bounded_number,
                 reset_hidden = not has_override,
+                instances = instances,
+                scope_instance_id = selected_instance,
+                scope_label = selected_instance == "" and t("advanced.scope_global") or selected_instance,
+                scope_hidden = #instances == 0,
+                global_overrides = overrides,
+                instance_overrides = instance_overrides,
             }
         end
     end
@@ -468,53 +503,88 @@ function render()
     modules_notice_separator = module_notice == "" and "" or " · "
 end
 
-function onPropToggle(module_id, name, current)
-    local value = not (current == true)
-    update_local_prop(module_id, name, value, true)
-    mesh.events.publish("shell.set-module-prop", {
-        module_id = module_id, prop = name, value = value,
-    })
+local function publish_prop(channel, module_id, name, value, instance_id)
+    local payload = { module_id = module_id, prop = name }
+    if value ~= nil then payload.value = value end
+    if instance_id ~= nil and instance_id ~= "" then payload.instance_id = instance_id end
+    mesh.events.publish(channel, payload)
 end
 
-function onPropEnumNext(module_id, name, current, options)
+function onPropScopeNext(module_id, current, instances)
+    if type(instances) ~= "table" or #instances == 0 then return end
+    local next_scope = instances[1]
+    if current ~= nil and current ~= "" then
+        next_scope = ""
+        for i, instance_id in ipairs(instances) do
+            if instance_id == current and i < #instances then next_scope = instances[i + 1] end
+        end
+    end
+    selected_prop_scope_module = next_scope == "" and "" or module_id
+    selected_prop_scope_instance = next_scope
+    local updated = {}
+    for _, row in ipairs(prop_rows) do
+        if row.module_id == module_id then
+            local inherited = row.global_overrides[row.name]
+            if inherited == nil then inherited = row.default end
+            local selected_overrides = next_scope == "" and row.global_overrides
+                or (row.instance_overrides[next_scope] or {})
+            local override = selected_overrides[row.name]
+            local has_override = override ~= nil
+            local value = has_override and override or inherited
+            local pending = pending_props[pending_key(module_id, next_scope, row.name)]
+            if pending ~= nil then
+                value = pending.value
+                has_override = pending.has_override
+            end
+            row.scope_instance_id = next_scope
+            row.scope_label = next_scope == "" and t("advanced.scope_global") or next_scope
+            row.inherited_value = inherited
+            row.value = value
+            row.display_value = tostring(value or "") .. tostring(row.unit or "")
+            row.reset_hidden = not has_override
+        end
+        updated[#updated + 1] = row
+    end
+    prop_rows = updated
+end
+
+function onPropToggle(module_id, name, current, instance_id)
+    local value = not (current == true)
+    update_local_prop(module_id, name, value, true, instance_id)
+    publish_prop("shell.set-module-prop", module_id, name, value, instance_id)
+end
+
+function onPropEnumNext(module_id, name, current, options, instance_id)
     if type(options) ~= "table" or #options == 0 then return end
     local index = 0
     for i, option in ipairs(options) do
         if option == current then index = i end
     end
     local value = options[(index % #options) + 1]
-    update_local_prop(module_id, name, value, true)
-    mesh.events.publish("shell.set-module-prop", {
-        module_id = module_id, prop = name, value = value,
-    })
+    update_local_prop(module_id, name, value, true, instance_id)
+    publish_prop("shell.set-module-prop", module_id, name, value, instance_id)
 end
 
-function onPropNumber(module_id, name, event)
+function onPropNumber(module_id, name, instance_id, event)
     local value = tonumber(event_value(event))
     if value == nil then return end
-    update_local_prop(module_id, name, value, true)
-    mesh.events.publish("shell.set-module-prop", {
-        module_id = module_id, prop = name, value = value,
-    })
+    update_local_prop(module_id, name, value, true, instance_id)
+    publish_prop("shell.set-module-prop", module_id, name, value, instance_id)
 end
 
-function onPropText(module_id, name, prop_type, event)
+function onPropText(module_id, name, prop_type, instance_id, event)
     local value = tostring(event_value(event) or "")
     if prop_type == "number" or prop_type == "int" or prop_type == "duration" then
         value = tonumber(value)
         if value == nil then return end
     end
-    update_local_prop(module_id, name, value, true)
-    mesh.events.publish("shell.set-module-prop", {
-        module_id = module_id, prop = name, value = value,
-    })
+    update_local_prop(module_id, name, value, true, instance_id)
+    publish_prop("shell.set-module-prop", module_id, name, value, instance_id)
 end
 
-function onPropReset(module_id, name, default)
-    update_local_prop(module_id, name, default, false)
-    mesh.events.publish("shell.unset-module-prop", {
-        module_id = module_id, prop = name,
-    })
+function onPropReset(module_id, name, inherited_value, instance_id)
+    update_local_prop(module_id, name, inherited_value, false, instance_id)
+    publish_prop("shell.unset-module-prop", module_id, name, nil, instance_id)
 end
 
 function onModuleFilterChange(value)
@@ -602,6 +672,11 @@ end
 
     .settings-prop-control {
         width: 180px;
+        flex-shrink: 0;
+    }
+
+    .settings-prop-scope {
+        max-width: 190px;
         flex-shrink: 0;
     }
 

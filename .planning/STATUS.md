@@ -7,6 +7,23 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Control-flow blocks are layout-transparent.** `{#if}` and `{#for}` now
+expand their active children directly into the surrounding list instead of
+creating synthetic `column` nodes, preserving the parent layout semantics.
+Record: [`log/2026-08.md`](log/2026-08.md).
+
+**Keyed loops preserve component and native-widget state across reorders.**
+`{#for item in items key={item.id}}` partitions component occurrence/memo
+identity and native runtime node identity; unkeyed loops remain positional.
+Record: [`log/2026-08.md`](log/2026-08.md).
+
+**Generated prop controls target individual root instances.** The settings
+frontend cycles each exposed prop between all instances and concrete live
+instance ids, displays the inherited/effective value for that scope, and writes
+or resets sparse `props.instances` overrides through validated typed requests.
+Custom `settings_ui` mounting remains open (2026-08-02). Record:
+[`log/2026-08.md`](log/2026-08.md).
+
 **Transient popups and overlays are shipped.** In-tree `<popover>` content is
 promoted to content-sized, anchored `xdg_popup` child surfaces with custom
 content, routed input, hover/grab dismissal, exclusivity, and compositor-dismiss

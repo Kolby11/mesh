@@ -271,6 +271,20 @@ impl Shell {
                     .pointer("/props/global")
                     .cloned()
                     .unwrap_or_else(|| serde_json::json!({}));
+                let mut settings_instances = self
+                    .components
+                    .iter()
+                    .filter(|runtime| runtime.component.id() == module.id)
+                    .map(|runtime| runtime.surface_id.clone())
+                    .collect::<Vec<_>>();
+                settings_instances.sort();
+                settings_instances.dedup();
+                let settings_instance_values = self
+                    .settings_store
+                    .namespace(&module.id)
+                    .pointer("/props/instances")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
                 let provides_i18n = graph
                     .contributed_i18n()
                     .iter()
@@ -423,6 +437,8 @@ impl Shell {
                     provides_settings,
                     settings_schema: module_settings.map(|settings| settings.schema.clone()),
                     settings_values,
+                    settings_instances,
+                    settings_instance_values,
                     settings_ui: module_settings
                         .and_then(|settings| settings.settings_ui.clone())
                         .or_else(|| module.manifest.mesh.entrypoints.settings_ui.clone()),
@@ -1206,6 +1222,8 @@ fn module_graph_entry_json(entry: &mesh_core_debug::ModuleGraphEntry) -> serde_j
             "settings": entry.provides_settings,
             "settings_schema": entry.settings_schema,
             "settings_values": entry.settings_values,
+            "settings_instances": entry.settings_instances,
+            "settings_instance_values": entry.settings_instance_values,
             "settings_ui": entry.settings_ui,
             "i18n": entry.provides_i18n,
             "required_icons": entry.required_icons,

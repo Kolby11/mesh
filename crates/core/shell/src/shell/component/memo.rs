@@ -33,8 +33,8 @@
 //! private `local` mutated by a handler was never guaranteed to re-render —
 //! without memoization it merely re-evaluated opportunistically on unrelated
 //! rebuilds. Repeated source occurrences and loop-rendered instances have
-//! distinct runtime/cache identities; loop identity remains positional until
-//! keyed list diffing ships.
+//! distinct runtime/cache identities. A `{#for}` can supply `key={expression}`
+//! to retain that identity across reorders; unkeyed loops remain positional.
 
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};

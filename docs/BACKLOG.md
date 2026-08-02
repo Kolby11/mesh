@@ -38,9 +38,9 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
       composition, multiple root instances, scoped preferences, and
       transactional live switching are shipped; the replaceable UI still needs
       service contracts instead of privileged file access. See [`spec/01-module-system.md`](spec/01-module-system.md).
-- [ ] Mount optional `settings_ui` entrypoints and add per-instance selection
-      to generated prop controls. Default controls and profile-scoped global
-      writes are shipped. See [`spec/08-settings.md`](spec/08-settings.md) §5.
+- [ ] Mount optional `settings_ui` entrypoints. Generated global and
+      per-instance prop controls are shipped. See
+      [`spec/08-settings.md`](spec/08-settings.md) §5.
 - [ ] Move the remaining built-in debug and theme/locale service behavior
       behind generic providers. Startup sounds and backend profiling use the
       generic contract/runtime path; core-owned service state still branches.
@@ -119,10 +119,6 @@ gate where the win is structural.
       work. *(detail: "P2 — typing & interning")*
 ### Composition
 
-- [ ] `{#if}` / `{#for}` always wrap children in a synthetic `column` node —
-      needs a fragment / transparent-container concept.
-- [ ] No keyed list diffing; `{#for}` identity is positional. Add `key=`, paired
-      with component memoization.
 
 ### Threading
 

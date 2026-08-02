@@ -229,6 +229,9 @@ impl VariableStore for TrackingVariableStore<'_> {
     fn template_locals(&self) -> serde_json::Map<String, serde_json::Value> {
         self.inner.template_locals()
     }
+    fn loop_identity(&self) -> Option<&str> {
+        self.inner.loop_identity()
+    }
     fn record_template_service_reads(&self, reads: &[(String, String)]) {
         self.reads.borrow_mut().extend_from_slice(reads);
     }
@@ -422,8 +425,8 @@ fn build_widget_tree_from_component_inner(
         let children: Vec<WidgetNode> = template
             .root
             .iter()
-            .map(|node| {
-                build_widget_node(
+            .flat_map(|node| {
+                build_widget_nodes(
                     node,
                     host_manifest,
                     &build_style,
@@ -467,6 +470,121 @@ pub(crate) fn build_widget_node(
         composition,
         None,
     )
+}
+
+/// Build a template node as zero or more layout children. Control-flow nodes
+/// are fragments: their active children join the surrounding parent instead of
+/// introducing an author-invisible flex container.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_widget_nodes(
+    node: &TemplateNode,
+    manifest: &Manifest,
+    build_style: &BuildStyleContext<'_, '_>,
+    parent_style: Option<&ComputedStyle>,
+    container_context: StyleContext,
+    state: Option<&dyn VariableStore>,
+    instance_key: &str,
+    composition: Option<&dyn FrontendCompositionResolver>,
+) -> Vec<WidgetNode> {
+    match node {
+        TemplateNode::If(if_node) => {
+            let show_then = state.is_none_or(|store| {
+                !matches!(
+                    evaluate_template_expression(
+                        &if_node.condition,
+                        Some(store),
+                        instance_key,
+                        composition,
+                    ),
+                    serde_json::Value::Null | serde_json::Value::Bool(false)
+                )
+            });
+            let children = if show_then {
+                &if_node.then_children
+            } else {
+                &if_node.else_children
+            };
+            children
+                .iter()
+                .flat_map(|child| {
+                    build_widget_nodes(
+                        child,
+                        manifest,
+                        build_style,
+                        parent_style,
+                        container_context,
+                        state,
+                        instance_key,
+                        composition,
+                    )
+                })
+                .collect()
+        }
+        TemplateNode::For(for_node) => state
+            .map(|store| {
+                if let Some(composition) = composition {
+                    match evaluate_template_expression(
+                        &for_node.iterable,
+                        Some(store),
+                        instance_key,
+                        Some(composition),
+                    ) {
+                        serde_json::Value::Array(items) => build_for_children(
+                            &items,
+                            for_node,
+                            manifest,
+                            build_style,
+                            parent_style,
+                            container_context,
+                            store,
+                            instance_key,
+                            Some(composition),
+                        ),
+                        _ => Vec::new(),
+                    }
+                } else if let Some(serde_json::Value::Array(items)) =
+                    store.get_ref(&for_node.iterable)
+                {
+                    build_for_children(
+                        items,
+                        for_node,
+                        manifest,
+                        build_style,
+                        parent_style,
+                        container_context,
+                        store,
+                        instance_key,
+                        None,
+                    )
+                } else if let Some(serde_json::Value::Array(items)) = store.get(&for_node.iterable)
+                {
+                    build_for_children(
+                        &items,
+                        for_node,
+                        manifest,
+                        build_style,
+                        parent_style,
+                        container_context,
+                        store,
+                        instance_key,
+                        None,
+                    )
+                } else {
+                    Vec::new()
+                }
+            })
+            .unwrap_or_default(),
+        _ => vec![build_widget_node(
+            node,
+            manifest,
+            build_style,
+            parent_style,
+            container_context,
+            state,
+            instance_key,
+            composition,
+        )],
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -663,7 +781,7 @@ fn build_widget_node_inner(
                             for_node,
                             manifest,
                             build_style,
-                            &node.computed_style,
+                            Some(&node.computed_style),
                             child_context,
                             store,
                             instance_key,
@@ -684,7 +802,7 @@ fn build_widget_node_inner(
                             for_node,
                             manifest,
                             build_style,
-                            &node.computed_style,
+                            Some(&node.computed_style),
                             child_context,
                             store,
                             instance_key,
@@ -700,7 +818,7 @@ fn build_widget_node_inner(
                                 for_node,
                                 manifest,
                                 build_style,
-                                &node.computed_style,
+                                Some(&node.computed_style),
                                 child_context,
                                 store,
                                 instance_key,
@@ -772,7 +890,7 @@ fn build_for_children<'items, I>(
     for_node: &ForNode,
     manifest: &Manifest,
     build_style: &BuildStyleContext<'_, '_>,
-    parent_style: &ComputedStyle,
+    parent_style: Option<&ComputedStyle>,
     child_context: StyleContext,
     store: &dyn VariableStore,
     instance_key: &str,
@@ -786,23 +904,56 @@ where
     // node built so far. The exact child count is known before the first push.
     let items = items.into_iter();
     let mut children = Vec::with_capacity(items.len().saturating_mul(for_node.children.len()));
-    for item_val in items {
+    let mut seen_keyed_identities = HashSet::new();
+    for (item_ordinal, item_val) in items.enumerate() {
+        let loop_identity = for_node
+            .key
+            .as_ref()
+            .map(|key| {
+                let item_store = LayeredStore {
+                    base: store,
+                    item_name: &for_node.item_name,
+                    item_value: item_val,
+                    loop_identity: store.loop_identity().map(str::to_owned),
+                };
+                let key_value =
+                    evaluate_template_expression(key, Some(&item_store), instance_key, composition);
+                let key =
+                    serde_json::to_string(&key_value).unwrap_or_else(|_| item_ordinal.to_string());
+                match store.loop_identity() {
+                    Some(parent) => format!("{parent}/{key}"),
+                    None => key,
+                }
+            })
+            .or_else(|| store.loop_identity().map(str::to_owned));
         let item_store = LayeredStore {
             base: store,
             item_name: &for_node.item_name,
             item_value: item_val,
+            loop_identity,
         };
-        for child in &for_node.children {
-            children.push(build_widget_node(
+        for (child_index, child) in for_node.children.iter().enumerate() {
+            let mut built = build_widget_nodes(
                 child,
                 manifest,
                 build_style,
-                Some(parent_style),
+                parent_style,
                 child_context,
                 Some(&item_store as &dyn VariableStore),
                 instance_key,
                 composition,
-            ));
+            );
+            for (fragment_index, child) in built.iter_mut().enumerate() {
+                if let Some(identity) = item_store.loop_identity() {
+                    let identity = format!("{identity}/{child_index}/{fragment_index}");
+                    if seen_keyed_identities.insert(identity.clone()) {
+                        child.set_loop_identity(identity);
+                    } else {
+                        tracing::warn!(key = %for_node.key.as_deref().unwrap_or_default(), identity, "duplicate keyed loop value; retaining positional identity for this occurrence");
+                    }
+                }
+            }
+            children.extend(built);
         }
     }
     children
@@ -931,9 +1082,21 @@ fn build_element_node(
         .children
         .iter()
         .enumerate()
-        .map(|(index, child)| {
+        .flat_map(|(index, child)| {
+            if matches!(child, TemplateNode::If(_) | TemplateNode::For(_)) {
+                return build_widget_nodes(
+                    child,
+                    manifest,
+                    build_style,
+                    Some(&node.computed_style),
+                    child_context,
+                    state,
+                    instance_key,
+                    composition,
+                );
+            }
             if let Some((_, rebuild_node_ids)) = selective {
-                build_widget_node_inner(
+                vec![build_widget_node_inner(
                     child,
                     manifest,
                     build_style,
@@ -945,9 +1108,9 @@ fn build_element_node(
                     previous_children
                         .and_then(|children| children.get(index))
                         .map(|previous| (previous, rebuild_node_ids)),
-                )
+                )]
             } else {
-                build_widget_node(
+                vec![build_widget_node(
                     child,
                     manifest,
                     build_style,
@@ -956,7 +1119,7 @@ fn build_element_node(
                     state,
                     instance_key,
                     composition,
-                )
+                )]
             }
         })
         .collect();
@@ -1115,6 +1278,7 @@ fn build_component_ref(
             component.source_ordinal,
             component.duplicate_ordinal,
             component.repeated_by_loop,
+            state.and_then(VariableStore::loop_identity),
             &composition_props,
             &prop_handler_calls,
             container_context.container_width,
@@ -1592,6 +1756,7 @@ mod tests {
             _source_ordinal: usize,
             _duplicate_ordinal: Option<usize>,
             _repeated_by_loop: bool,
+            _loop_identity: Option<&str>,
             _props: &ComponentCompositionProps,
             _prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
             _container_width: f32,
@@ -1641,6 +1806,7 @@ mod tests {
             _source_ordinal: usize,
             _duplicate_ordinal: Option<usize>,
             _repeated_by_loop: bool,
+            _loop_identity: Option<&str>,
             _props: &ComponentCompositionProps,
             _prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
             _container_width: f32,
@@ -1699,6 +1865,7 @@ mod tests {
                 _source_ordinal: usize,
                 _duplicate_ordinal: Option<usize>,
                 _repeated_by_loop: bool,
+                _loop_identity: Option<&str>,
                 props: &ComponentCompositionProps,
                 prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
                 _container_width: f32,

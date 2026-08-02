@@ -59,14 +59,17 @@ impl FrontendSurfaceComponent {
         host_instance_key: &str,
         source_ordinal: usize,
         repeated_by_loop: bool,
+        loop_identity: Option<&str>,
     ) -> Option<usize> {
         if !repeated_by_loop {
             return None;
         }
         let host_instance_key = self.instance_keys.borrow_mut().intern(host_instance_key);
+        let loop_identity =
+            loop_identity.map(|identity| self.instance_keys.borrow_mut().intern(identity));
         let mut occurrences = self.composition_occurrences.borrow_mut();
         let next = occurrences
-            .entry((host_instance_key, source_ordinal))
+            .entry((host_instance_key, source_ordinal, loop_identity))
             .or_default();
         let ordinal = *next;
         *next += 1;
@@ -109,13 +112,18 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         source_ordinal: usize,
         duplicate_ordinal: Option<usize>,
         repeated_by_loop: bool,
+        loop_identity: Option<&str>,
         props: &ComponentCompositionProps,
         prop_handler_calls: &BTreeMap<String, EventHandlerCall>,
         container_width: f32,
         container_height: f32,
     ) -> Option<WidgetNode> {
-        let loop_ordinal =
-            self.next_loop_occurrence(host_instance_key, source_ordinal, repeated_by_loop);
+        let loop_ordinal = self.next_loop_occurrence(
+            host_instance_key,
+            source_ordinal,
+            repeated_by_loop,
+            loop_identity,
+        );
         if let Some(entry) = self.frontend_catalog.modules.get(&host.package.id) {
             if let Some(component) = entry.compiled.local_components.get(alias) {
                 let instance_key = self.instance_keys.borrow_mut().intern_embedded_occurrence(
@@ -124,6 +132,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                     alias,
                     duplicate_ordinal,
                     loop_ordinal,
+                    loop_identity,
                 );
                 let props_fingerprint =
                     memo::component_props_fingerprint(props, prop_handler_calls);
@@ -236,6 +245,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             alias,
             duplicate_ordinal,
             loop_ordinal,
+            loop_identity,
         );
         let props_fingerprint = memo::component_props_fingerprint(props, prop_handler_calls);
         if let Some(node) = self.lookup_component_memo(

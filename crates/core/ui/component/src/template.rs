@@ -258,6 +258,8 @@ pub struct IfNode {
 pub struct ForNode {
     pub item_name: String,
     pub iterable: String,
+    /// Optional expression that gives each iteration a stable identity.
+    pub key: Option<String>,
     pub children: Vec<TemplateNode>,
 }
 

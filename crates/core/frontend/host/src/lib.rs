@@ -232,9 +232,11 @@ pub enum CoreRequest {
         enabled: bool,
     },
     /// Set one validated public component prop in the active profile's module
-    /// namespace (`props.global`).
+    /// namespace. `instance_id = None` targets `props.global`; a live instance
+    /// targets `props.instances.<instance-id>`.
     SetModuleProp {
         module_id: String,
+        instance_id: Option<String>,
         prop: String,
         value: serde_json::Value,
     },
@@ -242,6 +244,7 @@ pub enum CoreRequest {
     /// becomes effective again.
     UnsetModuleProp {
         module_id: String,
+        instance_id: Option<String>,
         prop: String,
     },
     /// Transactionally replace the running composition and its profile-scoped

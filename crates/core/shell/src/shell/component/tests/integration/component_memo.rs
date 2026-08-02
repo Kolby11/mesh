@@ -227,6 +227,153 @@ items = { { label = "first" }, { label = "second" } }
     assert_eq!(component.component_memo_hit_count(), hits_before + 2);
 }
 
+#[test]
+fn keyed_loop_components_keep_memo_identity_after_reorder() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    {#for item in items key={item.id}}
+        <Child label={item.label} />
+    {/for}
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+items = { { id = "first", label = "First" }, { id = "second", label = "Second" } }
+</script>
+"#,
+        &[(
+            "Child",
+            r#"
+<template><text content="{label}" /></template>
+<script lang="luau">label = ""</script>
+"#,
+        )],
+    );
+
+    let theme = default_theme();
+    let mut initial = PixelBuffer::new(240, 60);
+    component.paint(&theme, 240, 60, &mut initial, 1.0).unwrap();
+    rebuild(&mut component, 240, 60);
+    let hits_before = component.component_memo_hit_count();
+
+    component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get_mut(PARENT_ID)
+        .unwrap()
+        .script_ctx
+        .set_member_state(
+            "items",
+            serde_json::json!([
+                { "id": "second", "label": "Second" },
+                { "id": "first", "label": "First" }
+            ]),
+        )
+        .unwrap();
+    rebuild(&mut component, 240, 60);
+
+    assert_eq!(component.component_memo_hit_count(), hits_before + 2);
+    assert_eq!(
+        runtime_value(
+            &component,
+            "@test/memo-surface/local:Child@0@key:\"first\"",
+            "label"
+        ),
+        Some(serde_json::json!("First"))
+    );
+    assert_eq!(
+        runtime_value(
+            &component,
+            "@test/memo-surface/local:Child@0@key:\"second\"",
+            "label"
+        ),
+        Some(serde_json::json!("Second"))
+    );
+}
+
+#[test]
+fn keyed_loop_native_inputs_keep_runtime_value_after_reorder() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    {#for item in items key={item.id}}
+        <row><text content={item.id} /><input value={item.id} /></row>
+    {/for}
+</template>
+<script lang="luau">
+items = { { id = "first" }, { id = "second" } }
+</script>
+"#,
+        &[],
+    );
+    let theme = default_theme();
+    let mut initial = PixelBuffer::new(240, 60);
+    component.paint(&theme, 240, 60, &mut initial, 1.0).unwrap();
+
+    let first_input =
+        first_node_with_attr(component.last_tree.as_ref().unwrap(), "value", "first").unwrap();
+    component
+        .input_values
+        .insert(first_input.id, "edited".into());
+    component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get_mut(PARENT_ID)
+        .unwrap()
+        .script_ctx
+        .set_member_state(
+            "items",
+            serde_json::json!([{ "id": "second" }, { "id": "first" }]),
+        )
+        .unwrap();
+
+    rebuild(&mut component, 240, 60);
+    let rebuilt_first =
+        first_node_with_attr(component.last_tree.as_ref().unwrap(), "value", "edited")
+            .expect("keyed first input retains its runtime value");
+    assert!(
+        rebuilt_first
+            .mesh_key()
+            .unwrap()
+            .contains("@loop:\"first\"/0")
+    );
+}
+
+#[test]
+fn control_flow_children_are_layout_transparent() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    <row>
+        <text content="before" />
+        {#if visible}<text content="conditional" />{/if}
+        {#for item in items}<text content={item} />{/for}
+        <text content="after" />
+    </row>
+</template>
+<script lang="luau">
+visible = true
+items = { "first", "second" }
+</script>
+"#,
+        &[],
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 60);
+    component.paint(&theme, 240, 60, &mut buffer, 1.0).unwrap();
+
+    let row = first_node_with_attr(
+        component.last_tree.as_ref().unwrap(),
+        "data-mesh-element",
+        "row",
+    )
+    .unwrap();
+    assert_eq!(row.children.len(), 5);
+    assert!(row.children.iter().all(|child| child.tag == "text"));
+}
+
 // cargo test -p mesh-core-shell --release -- repeated_alias_memoization_beats_forced_misses --ignored --nocapture
 #[test]
 #[ignore = "release-only repeated-alias component memoization benchmark"]

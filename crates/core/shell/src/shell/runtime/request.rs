@@ -805,12 +805,15 @@ impl Shell {
             }
             CoreRequest::SetModuleProp {
                 module_id,
+                instance_id,
                 prop,
                 value,
-            } => self.apply_set_module_prop(&module_id, &prop, Some(value)),
-            CoreRequest::UnsetModuleProp { module_id, prop } => {
-                self.apply_set_module_prop(&module_id, &prop, None)
-            }
+            } => self.apply_set_module_prop(&module_id, instance_id.as_deref(), &prop, Some(value)),
+            CoreRequest::UnsetModuleProp {
+                module_id,
+                instance_id,
+                prop,
+            } => self.apply_set_module_prop(&module_id, instance_id.as_deref(), &prop, None),
             CoreRequest::SwitchProfile { profile_id } => Ok(self.apply_switch_profile(&profile_id)),
             CoreRequest::ToggleDebugOverlay => {
                 self.debug.toggle();

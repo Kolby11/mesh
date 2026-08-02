@@ -16,7 +16,7 @@ availability, profiles own composition, this store owns preference overrides,
 and runtime health is observed state. A settings frontend may present all four
 on one module page without copying them into `settings.json`.
 
-**Status: shipped** for the store itself (§1–§4), global frontend-prop controls
+**Status: shipped** for the store itself (§1–§4), global/per-instance frontend-prop controls
 in the generated settings UI (§5), and the current shell CLI (§7); **target**
 for the `mesh.settings` service contract, custom/per-instance settings UI, and
 the service-backed CLI. This replaced the previous multi-file model (`settings-default.json`,
@@ -178,9 +178,9 @@ brings them back.
 ## 5. Generated settings UI
 
 **Status: partially shipped.** Exposed props from a frontend module's primary
-component produce typed global controls, effective values, and per-row reset
-actions. Writes are validated and persisted as sparse active-profile overrides.
-Per-instance selection, surface/resource editing controls, and custom
+component produce typed global and per-instance controls, effective values, and
+per-row reset actions. Writes are validated and persisted as sparse
+active-profile overrides. Surface/resource editing controls and custom
 `settings_ui` mounting are target work. Module graph inspection is shipped.
 
 For every module, the settings surface renders, with zero module-specific

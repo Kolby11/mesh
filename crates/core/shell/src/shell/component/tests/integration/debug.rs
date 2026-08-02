@@ -580,6 +580,10 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
                                 }
                             },
                             "settings_values": { "blur_enabled": false },
+                            "settings_instances": ["@mesh/navigation-bar#bottom"],
+                            "settings_instance_values": {
+                                "@mesh/navigation-bar#bottom": { "blur_enabled": true }
+                            },
                             "i18n": ["en:config/i18n/en.json"],
                             "required_icons": ["audio-volume-muted"],
                             "optional_icons": []
@@ -806,10 +810,52 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::SetModuleProp { module_id, prop, value }]
+        [CoreRequest::SetModuleProp { module_id, prop, value, instance_id: None }]
             if module_id == "@mesh/navigation-bar"
                 && prop == "blur_enabled"
                 && value == &serde_json::json!(true)
+    ));
+
+    component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/settings/local:AdvancedPage::onPropScopeNext",
+            &[
+                serde_json::json!("@mesh/navigation-bar"),
+                serde_json::json!(""),
+                serde_json::json!(["@mesh/navigation-bar#bottom"]),
+            ],
+        )
+        .unwrap();
+    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    let scoped_text = rendered_text(&component);
+    assert!(
+        scoped_text
+            .iter()
+            .any(|line| line == "@mesh/navigation-bar#bottom"),
+        "instance scope should be rendered after selection: {scoped_text:?}"
+    );
+    let requests = component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/settings/local:AdvancedPage::onPropToggle",
+            &[
+                serde_json::json!("@mesh/navigation-bar"),
+                serde_json::json!("blur_enabled"),
+                serde_json::json!(true),
+                serde_json::json!("@mesh/navigation-bar#bottom"),
+            ],
+        )
+        .unwrap();
+    assert!(matches!(
+        requests.as_slice(),
+        [CoreRequest::SetModuleProp {
+            module_id,
+            prop,
+            value,
+            instance_id: Some(instance_id),
+        }] if module_id == "@mesh/navigation-bar"
+            && instance_id == "@mesh/navigation-bar#bottom"
+            && prop == "blur_enabled"
+            && value == &serde_json::json!(false)
     ));
 
     component

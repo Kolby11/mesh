@@ -978,6 +978,7 @@ local Thing = require("./components/two.mesh")
                     TemplateNode::For(f) => {
                         assert_eq!(f.item_name, "item");
                         assert_eq!(f.iterable, "items");
+                        assert_eq!(f.key, None);
                         assert_eq!(f.children.len(), 1);
                     }
                     other => panic!("expected ForNode, got {other:?}"),
@@ -985,6 +986,21 @@ local Thing = require("./components/two.mesh")
             }
             other => panic!("expected element, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_keyed_for_loop() {
+        let file = parse_component(
+            r#"<template>{#for item in items key={item.id}}<text>{item.name}</text>{/for}</template>"#,
+        )
+        .unwrap();
+        let template = file.template.unwrap();
+        let TemplateNode::For(for_node) = &template.root[0] else {
+            panic!("expected ForNode");
+        };
+        assert_eq!(for_node.item_name, "item");
+        assert_eq!(for_node.iterable, "items");
+        assert_eq!(for_node.key.as_deref(), Some("item.id"));
     }
 
     #[test]

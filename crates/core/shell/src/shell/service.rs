@@ -269,19 +269,31 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
         }
         "shell.set-module-prop" if event.source_module_id == "@mesh/settings" => {
             let module_id = event.payload.get("module_id")?.as_str()?;
+            let instance_id = event
+                .payload
+                .get("instance_id")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
             let prop = event.payload.get("prop")?.as_str()?;
             let value = event.payload.get("value")?.clone();
             Some(CoreRequest::SetModuleProp {
                 module_id: module_id.to_string(),
+                instance_id,
                 prop: prop.to_string(),
                 value,
             })
         }
         "shell.unset-module-prop" if event.source_module_id == "@mesh/settings" => {
             let module_id = event.payload.get("module_id")?.as_str()?;
+            let instance_id = event
+                .payload
+                .get("instance_id")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
             let prop = event.payload.get("prop")?.as_str()?;
             Some(CoreRequest::UnsetModuleProp {
                 module_id: module_id.to_string(),
+                instance_id,
                 prop: prop.to_string(),
             })
         }
@@ -539,13 +551,41 @@ mod tests {
         assert!(matches!(
             requests.as_slice(),
             [
-                CoreRequest::SetModuleProp { module_id, prop, value },
-                CoreRequest::UnsetModuleProp { module_id: unset_module, prop: unset_prop },
+                CoreRequest::SetModuleProp { module_id, prop, value, instance_id: None },
+                CoreRequest::UnsetModuleProp {
+                    module_id: unset_module,
+                    prop: unset_prop,
+                    instance_id: None,
+                },
             ] if module_id == "@mesh/navigation-bar"
                 && prop == "blur_enabled"
                 && value == &serde_json::json!(false)
                 && unset_module == module_id
                 && unset_prop == prop
+        ));
+    }
+
+    #[test]
+    fn settings_prop_events_preserve_instance_scope() {
+        let requests = script_events_to_requests(vec![PublishedEvent {
+            channel: "shell.set-module-prop".into(),
+            payload: serde_json::json!({
+                "module_id": "@mesh/navigation-bar",
+                "instance_id": "@mesh/navigation-bar#bottom",
+                "prop": "blur_enabled",
+                "value": false,
+            }),
+            source_module_id: "@mesh/settings".into(),
+            source_capabilities: Default::default(),
+        }]);
+
+        assert!(matches!(
+            requests.as_slice(),
+            [CoreRequest::SetModuleProp { module_id, instance_id: Some(instance_id), prop, value }]
+                if module_id == "@mesh/navigation-bar"
+                    && instance_id == "@mesh/navigation-bar#bottom"
+                    && prop == "blur_enabled"
+                    && value == &serde_json::json!(false)
         ));
     }
 

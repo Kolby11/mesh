@@ -71,6 +71,10 @@ pub trait VariableStore {
     fn template_locals(&self) -> serde_json::Map<String, serde_json::Value> {
         serde_json::Map::new()
     }
+    /// Stable identity inherited from a keyed `{#for}` iteration, if any.
+    fn loop_identity(&self) -> Option<&str> {
+        None
+    }
     fn record_template_service_reads(&self, reads: &[(String, String)]) {
         let _ = reads;
     }

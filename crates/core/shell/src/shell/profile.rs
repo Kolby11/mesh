@@ -58,6 +58,7 @@ mod tests {
 
         update_module_prop_override(
             &mut namespace,
+            None,
             "blur_enabled",
             Some(serde_json::json!(false)),
         );
@@ -66,10 +67,31 @@ mod tests {
             serde_json::json!({ "density": "compact", "blur_enabled": false })
         );
 
-        update_module_prop_override(&mut namespace, "blur_enabled", None);
-        update_module_prop_override(&mut namespace, "density", None);
+        update_module_prop_override(&mut namespace, None, "blur_enabled", None);
+        update_module_prop_override(&mut namespace, None, "density", None);
         assert!(namespace.get("props").is_none());
         assert_eq!(namespace["surface"]["anchor"], serde_json::json!("top"));
+    }
+
+    #[test]
+    fn instance_prop_updates_preserve_global_values_and_prune_empty_scopes() {
+        let mut namespace = serde_json::json!({
+            "props": { "global": { "density": "compact" } }
+        });
+        update_module_prop_override(
+            &mut namespace,
+            Some("@test/panel#bottom"),
+            "density",
+            Some(serde_json::json!("comfortable")),
+        );
+        assert_eq!(
+            namespace["props"]["instances"]["@test/panel#bottom"]["density"],
+            "comfortable"
+        );
+
+        update_module_prop_override(&mut namespace, Some("@test/panel#bottom"), "density", None);
+        assert!(namespace["props"].get("instances").is_none());
+        assert_eq!(namespace["props"]["global"]["density"], "compact");
     }
 
     #[test]
@@ -120,6 +142,7 @@ impl Shell {
     pub(in crate::shell) fn apply_set_module_prop(
         &mut self,
         module_id: &str,
+        instance_id: Option<&str>,
         prop: &str,
         value: Option<serde_json::Value>,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
@@ -142,17 +165,31 @@ impl Shell {
                 ),
             })?;
 
+        if let Some(instance_id) = instance_id
+            && !self.components.iter().any(|runtime| {
+                runtime.surface_id == instance_id && runtime.component.id() == module_id
+            })
+        {
+            return Err(ShellRunError::FrontendComposition {
+                message: format!("'{instance_id}' is not a live instance of module '{module_id}'"),
+            });
+        }
+
+        let settings_path = instance_id
+            .map(|id| format!("props.instances.{id}"))
+            .unwrap_or_else(|| "props.global".to_string());
+
         if let Some(value) = value.as_ref() {
             let parsed = mesh_core_component::json_to_prop_value_ref(value).ok_or_else(|| {
                 ShellRunError::FrontendComposition {
                     message: format!(
-                        "setting {module_id}.props.global.{prop} must be a string, number, or boolean"
+                        "setting {module_id}.{settings_path}.{prop} must be a string, number, or boolean"
                     ),
                 }
             })?;
             mesh_core_component::validate_prop_value(&definition, &parsed).map_err(|error| {
                 ShellRunError::FrontendComposition {
-                    message: format!("invalid setting {module_id}.props.global.{prop}: {error}"),
+                    message: format!("invalid setting {module_id}.{settings_path}.{prop}: {error}"),
                 }
             })?;
         }
@@ -164,7 +201,7 @@ impl Shell {
                 .settings
                 .entry(module_id.to_string())
                 .or_insert_with(|| serde_json::json!({}));
-            update_module_prop_override(namespace, prop, value);
+            update_module_prop_override(namespace, instance_id, prop, value);
             if namespace.as_object().is_some_and(serde_json::Map::is_empty) {
                 profile.settings.remove(module_id);
             }
@@ -184,7 +221,7 @@ impl Shell {
                     message: format!("failed to load settings for update: {error}"),
                 })?;
             let mut namespace = shared.namespace(module_id);
-            update_module_prop_override(&mut namespace, prop, value);
+            update_module_prop_override(&mut namespace, instance_id, prop, value);
             shared.set_namespace(module_id, namespace);
             shared
                 .save()
@@ -671,6 +708,7 @@ impl Shell {
 
 fn update_module_prop_override(
     namespace: &mut serde_json::Value,
+    instance_id: Option<&str>,
     prop: &str,
     value: Option<serde_json::Value>,
 ) {
@@ -685,23 +723,54 @@ fn update_module_prop_override(
         *props = serde_json::json!({});
     }
     let props_object = props.as_object_mut().expect("object established above");
-    let global = props_object
-        .entry("global".to_string())
-        .or_insert_with(|| serde_json::json!({}));
-    if !global.is_object() {
-        *global = serde_json::json!({});
-    }
-    let global_object = global.as_object_mut().expect("object established above");
-    match value {
-        Some(value) => {
-            global_object.insert(prop.to_string(), value);
+    if let Some(instance_id) = instance_id {
+        let instances = props_object
+            .entry("instances".to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        if !instances.is_object() {
+            *instances = serde_json::json!({});
         }
-        None => {
-            global_object.remove(prop);
+        let instances_object = instances.as_object_mut().expect("object established above");
+        let instance = instances_object
+            .entry(instance_id.to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        if !instance.is_object() {
+            *instance = serde_json::json!({});
         }
-    }
-    if global_object.is_empty() {
-        props_object.remove("global");
+        let instance_object = instance.as_object_mut().expect("object established above");
+        match value {
+            Some(value) => {
+                instance_object.insert(prop.to_string(), value);
+            }
+            None => {
+                instance_object.remove(prop);
+            }
+        }
+        if instance_object.is_empty() {
+            instances_object.remove(instance_id);
+        }
+        if instances_object.is_empty() {
+            props_object.remove("instances");
+        }
+    } else {
+        let global = props_object
+            .entry("global".to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        if !global.is_object() {
+            *global = serde_json::json!({});
+        }
+        let global_object = global.as_object_mut().expect("object established above");
+        match value {
+            Some(value) => {
+                global_object.insert(prop.to_string(), value);
+            }
+            None => {
+                global_object.remove(prop);
+            }
+        }
+        if global_object.is_empty() {
+            props_object.remove("global");
+        }
     }
     if props_object.is_empty() {
         namespace_object.remove("props");
