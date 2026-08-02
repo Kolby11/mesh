@@ -79,8 +79,13 @@ local function connect_popover()
     end
     lang_popover_connected = true
     current_locale_label = popover_flag() or current_locale_label
-    lang_popover.LocaleChanged:on(function()
-        current_locale_label = popover_flag() or current_locale_label
+    lang_popover.LocaleChanged:on(function(event)
+        local flag = event and event.flag
+        if type(flag) == "string" and flag ~= "" then
+            current_locale_label = flag
+        else
+            current_locale_label = popover_flag() or current_locale_label
+        end
     end)
     lang_popover.PopoverEnter:on(function()
         cancel_bridge_close()

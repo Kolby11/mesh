@@ -4119,3 +4119,37 @@ fn pure_public_member_expressions_reuse_unchanged_values() {
     );
     assert_eq!(ctx.template_expression_cache_hits(), 1);
 }
+
+#[test]
+fn template_expression_cache_accumulates_changes_until_template_evaluation() {
+    let mut ctx = ScriptContext::new("@test/template-value-cache", CapabilitySet::new()).unwrap();
+    let expressions = vec!["left".to_string(), "right".to_string()];
+    ctx.compile_and_execute_component(
+        "left = 'a'; right = 'b'; function update_left() left = 'c' end; function update_right() right = 'd' end",
+        &[],
+        &expressions,
+    )
+    .unwrap();
+    ctx.evaluate_template_expression("left", &serde_json::Map::new())
+        .unwrap();
+    ctx.evaluate_template_expression("right", &serde_json::Map::new())
+        .unwrap();
+    ctx.mark_template_dependencies_ready();
+    ctx.state_mut().clear_dirty();
+
+    ctx.call_handler("update_left", &[]).unwrap();
+    ctx.call_handler("update_right", &[]).unwrap();
+
+    assert_eq!(
+        ctx.evaluate_template_expression("left", &serde_json::Map::new())
+            .unwrap()
+            .0,
+        serde_json::json!("c")
+    );
+    assert_eq!(
+        ctx.evaluate_template_expression("right", &serde_json::Map::new())
+            .unwrap()
+            .0,
+        serde_json::json!("d")
+    );
+}

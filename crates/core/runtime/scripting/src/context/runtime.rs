@@ -2261,7 +2261,6 @@ impl ScriptContext {
     /// synced to the template. Local variables are never synced.
     pub(super) fn sync_state_from_lua(&mut self) {
         let _span = tracing::debug_span!("sync_state_from_lua", module = %self.module_id).entered();
-        self.changed_public_members.clear();
         if !self.user_globals_discovered {
             // Full scan: discover all user globals (runs once per load_script).
             let user_globals: Vec<(String, LuaValue)> = self

@@ -22,8 +22,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 ---
 
 ## Shell features
-- [ ] Popups / overlays — transient surfaces with custom content and dismiss
-      behavior → v1.22.
 - [ ] Per-widget promotion — promote a widget *embedded in another surface* into
       its own window, rather than a whole surface. Depends on the shared surface
       VM (the widget does not own a VM today) and on multi-instance frontend

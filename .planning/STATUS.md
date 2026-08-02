@@ -7,6 +7,15 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Transient popups and overlays are shipped.** In-tree `<popover>` content is
+promoted to content-sized, anchored `xdg_popup` child surfaces with custom
+content, routed input, hover/grab dismissal, exclusivity, and compositor-dismiss
+sync. Completion verification fixed child-bound handler arguments crossing a
+component prop and stale Luau expression-cache values across multiple live
+binding synchronizations. Automatic overflow derivation, legacy-popover
+migration, and per-widget toplevel promotion remain open (2026-08-02). Record:
+[`log/2026-08.md`](log/2026-08.md).
+
 **Widget-tree and retained painting share one command builder.** Compatibility
 `render_tree*` callers now build and replay a transient display list, and the
 parallel recursive `WidgetNode` painter has been removed. The retained builder

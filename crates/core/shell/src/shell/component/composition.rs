@@ -493,11 +493,15 @@ fn apply_indexed_prop_handler_calls(
         let Some(call) = calls_by_token.get(handler.as_str()) else {
             continue;
         };
+        let mut args = call.args.clone();
+        if let Some(local_call) = node.event_handler_calls.get(event_name) {
+            args.extend(local_call.args.iter().cloned());
+        }
         handler_calls.push((
             event_name.clone(),
             EventHandlerCall {
                 handler: call.handler.clone(),
-                args: call.args.clone(),
+                args,
             },
         ));
     }
@@ -872,6 +876,40 @@ mod tests {
                 .get("pointerenter")
                 .map(|call| &call.args),
             Some(&vec![serde_json::json!("secondary")])
+        );
+    }
+
+    #[test]
+    fn prop_handler_calls_preserve_child_call_args_after_parent_args() {
+        let mut node = WidgetNode::new("button");
+        node.event_handlers
+            .insert("click".into(), "select-prop-token".into());
+        node.event_handler_calls.insert(
+            "click".into(),
+            EventHandlerCall {
+                handler: "select-prop-token".into(),
+                args: vec![serde_json::json!("item-id")],
+            },
+        );
+        let props = AttributeMap::from([("onSelect".into(), "select-prop-token".into())]);
+        let calls = BTreeMap::from([(
+            "onSelect".into(),
+            EventHandlerCall {
+                handler: HandlerTarget::embedded("parent", "onSelect"),
+                args: vec![serde_json::json!("parent-context")],
+            },
+        )]);
+
+        apply_prop_handler_calls(&mut node, &props, &calls);
+
+        let call = node.event_handler_calls.get("click").expect("click call");
+        assert_eq!(call.handler, HandlerTarget::embedded("parent", "onSelect"));
+        assert_eq!(
+            call.args,
+            vec![
+                serde_json::json!("parent-context"),
+                serde_json::json!("item-id")
+            ]
         );
     }
 

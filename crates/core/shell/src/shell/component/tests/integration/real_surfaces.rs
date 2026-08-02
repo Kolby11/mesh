@@ -2907,48 +2907,6 @@ fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
     );
 }
 
-#[test]
-fn debug_dump_language_popover_fit_sizes() {
-    let theme = default_theme();
-    let mut language =
-        real_frontend_module_component("@mesh/language-popover", audio_network_catalog());
-    language.visible = true;
-    language.set_surface_exiting(false);
-    language
-        .handle_service_event(&ServiceEvent::Updated {
-            service: "mesh.locale".into(),
-            source_module: "@mesh/shell".into(),
-            payload: serde_json::json!({ "locale": "en", "current": "en" }),
-        })
-        .unwrap();
-
-    let mut buffer = PixelBuffer::new(112, 92);
-    language.paint(&theme, 112, 92, &mut buffer, 1.0).unwrap();
-    let tree = language.last_tree.as_ref().unwrap();
-
-    fn dump(node: &WidgetNode, depth: usize) {
-        eprintln!(
-            "{}<{}> class={:?} pos={:?} layout=({:.1},{:.1},{:.1},{:.1}) padding={:?} w/h={:?}/{:?}",
-            "  ".repeat(depth),
-            node.tag,
-            node.attributes.get("class"),
-            node.computed_style.position,
-            node.layout.x,
-            node.layout.y,
-            node.layout.width,
-            node.layout.height,
-            node.computed_style.padding,
-            node.computed_style.width,
-            node.computed_style.height,
-        );
-        for child in &node.children {
-            dump(child, depth + 1);
-        }
-    }
-    dump(tree, 0);
-    panic!("dump above");
-}
-
 /// Which bubble carries the active mark, as its index in the ring.
 fn active_bubble_index(
     component: &FrontendSurfaceComponent,
