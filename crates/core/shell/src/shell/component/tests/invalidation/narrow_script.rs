@@ -214,6 +214,184 @@ end
     assert!(!component.retained_tree.last_update_was_scoped());
 }
 
+fn direct_audio_service_component(
+    static_nodes: usize,
+    dynamic_structure: bool,
+    render_hook: bool,
+) -> FrontendSurfaceComponent {
+    let static_nodes = (0..static_nodes)
+        .map(|index| format!("<text>static row {index}</text>"))
+        .collect::<String>();
+    let conditional = if dynamic_structure {
+        "{#if require('mesh.audio@>=1.0').muted}<text>muted</text>{:else}<text>live</text>{/if}"
+    } else {
+        ""
+    };
+    let render_hook = if render_hook {
+        "function render() end"
+    } else {
+        ""
+    };
+    test_frontend_component_with_catalog(
+        &format!(
+            r#"
+<template><column><text>{{require('mesh.audio@>=1.0').percent}}</text>{conditional}{static_nodes}</column></template>
+<script lang="luau">function init() end {render_hook}</script>
+"#
+        ),
+        audio_network_catalog(),
+        &["service.audio.read"],
+    )
+}
+
+fn apply_audio_update(component: &mut FrontendSurfaceComponent, percent: u64, muted: bool) {
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({ "percent": percent, "muted": muted }),
+        })
+        .unwrap();
+}
+
+fn prime_audio_component(
+    component: &mut FrontendSurfaceComponent,
+    theme: &Theme,
+    buffer: &mut PixelBuffer,
+) {
+    component.paint(theme, 640, 160, buffer, 1.0).unwrap();
+    apply_audio_update(component, 10, false);
+    component.paint(theme, 640, 160, buffer, 1.0).unwrap();
+}
+
+#[test]
+fn service_field_update_reuses_clean_static_template_subtrees() {
+    let mut component = direct_audio_service_component(64, false, false);
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(640, 160);
+    prime_audio_component(&mut component, &theme, &mut buffer);
+    fn service_reads(node: &WidgetNode, output: &mut Vec<(String, String)>) {
+        output.extend(node.service_field_reads.iter().cloned());
+        for child in &node.children {
+            service_reads(child, output);
+        }
+    }
+    let mut reads = Vec::new();
+    service_reads(component.last_tree.as_ref().unwrap(), &mut reads);
+    assert!(
+        !component
+            .node_service_field_deps
+            .nodes_reading_field("audio", "percent")
+            .is_empty(),
+        "template evaluation should publish its direct service-field dependency: {reads:?}"
+    );
+
+    apply_audio_update(&mut component, 20, false);
+    assert!(component.compiled.supports_selective_service_build());
+    assert!(!component.has_render_hooks());
+    assert!(component.pending_service_template_nodes.is_some());
+    component.paint(&theme, 640, 160, &mut buffer, 1.0).unwrap();
+
+    assert!(rendered_text(&component).iter().any(|text| text == "20"));
+    assert!(
+        component.last_template_build_reused_nodes >= 64,
+        "every clean static row should retain its authored payload; reused {}",
+        component.last_template_build_reused_nodes
+    );
+    assert!(component.retained_tree.last_update_was_scoped());
+}
+
+#[test]
+fn dynamic_service_template_keeps_full_evaluation_fallback() {
+    let mut component = direct_audio_service_component(16, true, false);
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(640, 160);
+    prime_audio_component(&mut component, &theme, &mut buffer);
+
+    apply_audio_update(&mut component, 20, true);
+    component.paint(&theme, 640, 160, &mut buffer, 1.0).unwrap();
+
+    let text = rendered_text(&component);
+    assert!(text.iter().any(|text| text == "20"));
+    assert!(text.iter().any(|text| text == "muted"));
+    assert_eq!(component.last_template_build_reused_nodes, 0);
+}
+
+#[test]
+fn service_template_with_render_hook_keeps_full_evaluation_fallback() {
+    let mut component = direct_audio_service_component(16, false, true);
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(640, 160);
+    prime_audio_component(&mut component, &theme, &mut buffer);
+
+    apply_audio_update(&mut component, 20, false);
+    assert!(component.has_render_hooks());
+    component.paint(&theme, 640, 160, &mut buffer, 1.0).unwrap();
+
+    assert!(rendered_text(&component).iter().any(|text| text == "20"));
+    assert_eq!(component.last_template_build_reused_nodes, 0);
+}
+
+// cargo test -p mesh-core-shell --release -- affected_template_eval_beats_full_rebuild --ignored --nocapture
+#[test]
+#[ignore = "release-only affected-template evaluation benchmark"]
+fn affected_template_eval_beats_full_rebuild() {
+    use std::time::{Duration, Instant};
+
+    let mut selective = direct_audio_service_component(1_024, false, false);
+    let mut full = direct_audio_service_component(1_024, false, false);
+    full.force_full_template_build = true;
+    let theme = default_theme();
+    let mut selective_buffer = PixelBuffer::new(640, 160);
+    let mut full_buffer = PixelBuffer::new(640, 160);
+    prime_audio_component(&mut selective, &theme, &mut selective_buffer);
+    prime_audio_component(&mut full, &theme, &mut full_buffer);
+
+    let iterations = 100;
+    let mut selective_time = Duration::ZERO;
+    let mut full_time = Duration::ZERO;
+    for iteration in 0..iterations {
+        let percent = 20 + (iteration % 2) as u64;
+        if iteration % 2 == 0 {
+            let started = Instant::now();
+            apply_audio_update(&mut full, percent, false);
+            full.paint(&theme, 640, 160, &mut full_buffer, 1.0).unwrap();
+            full_time += started.elapsed();
+
+            let started = Instant::now();
+            apply_audio_update(&mut selective, percent, false);
+            selective
+                .paint(&theme, 640, 160, &mut selective_buffer, 1.0)
+                .unwrap();
+            selective_time += started.elapsed();
+        } else {
+            let started = Instant::now();
+            apply_audio_update(&mut selective, percent, false);
+            selective
+                .paint(&theme, 640, 160, &mut selective_buffer, 1.0)
+                .unwrap();
+            selective_time += started.elapsed();
+
+            let started = Instant::now();
+            apply_audio_update(&mut full, percent, false);
+            full.paint(&theme, 640, 160, &mut full_buffer, 1.0).unwrap();
+            full_time += started.elapsed();
+        }
+    }
+
+    assert_eq!(selective_buffer.data, full_buffer.data);
+    assert!(selective.last_template_build_reused_nodes >= 1_024);
+    let speedup = full_time.as_secs_f64() / selective_time.as_secs_f64();
+    eprintln!(
+        "affected template evaluation over {iterations} one-field-dirty 1,026-node service frames: full {full_time:?}; selective {selective_time:?}; ratio {speedup:.3}x"
+    );
+    eprintln!("MESH_PERF metric=affected_template_eval_speedup value={speedup:.6}");
+    assert!(
+        selective_time * 100 < full_time * 99,
+        "affected-template evaluation should improve end-to-end frames by at least 1%"
+    );
+}
+
 // cargo test -p mesh-core-shell --release -- narrow_script_scoped_end_to_end_benchmark --ignored --nocapture
 #[test]
 #[ignore = "release-only end-to-end narrow-script retained-scope benchmark"]

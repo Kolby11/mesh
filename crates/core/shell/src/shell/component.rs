@@ -815,6 +815,15 @@ pub(super) struct FrontendSurfaceComponent {
     /// the animation pass. Any unrelated invalidation clears this marker.
     animation_only_dirty: bool,
     node_service_field_deps: NodeServiceFieldDependencies,
+    /// Template nodes whose tracked service fields changed since the last
+    /// paint. `None` means a narrow invalidation without an authoritative
+    /// service-node scope and therefore requires normal template evaluation.
+    pending_service_template_nodes: Option<HashSet<NodeId>>,
+    selective_service_build_supported: bool,
+    #[cfg(test)]
+    last_template_build_reused_nodes: usize,
+    #[cfg(test)]
+    force_full_template_build: bool,
     retained_render_objects: RenderObjectTree,
     retained_display_list: RetainedDisplayList,
     /// Popup-local display lists keyed by the promoted subtree's stable node id.
@@ -988,6 +997,7 @@ impl FrontendSurfaceComponent {
         let service_payload_capacity = service_payload_cache_capacity(&compiled.manifest);
         let element_metric_usage = element_metric_usage(&compiled);
         let has_animatable_style_rules = compiled_module_has_animatable_style_rules(&compiled);
+        let selective_service_build_supported = compiled.supports_selective_service_build();
         let frontend_catalog_handle = frontend_catalog.into();
         let frontend_catalog_state = frontend_catalog_handle.snapshot();
         let frontend_catalog = frontend_catalog_state.catalog;
@@ -1092,6 +1102,12 @@ impl FrontendSurfaceComponent {
             force_full_retained_update: false,
             animation_only_dirty: false,
             node_service_field_deps: NodeServiceFieldDependencies::default(),
+            pending_service_template_nodes: None,
+            selective_service_build_supported,
+            #[cfg(test)]
+            last_template_build_reused_nodes: 0,
+            #[cfg(test)]
+            force_full_template_build: false,
             retained_render_objects: RenderObjectTree::default(),
             retained_display_list: RetainedDisplayList::default(),
             child_display_lists: RefCell::new(ChildDisplayListCache::default()),
@@ -1211,15 +1227,23 @@ impl FrontendSurfaceComponent {
         // can misjudge damage for content-only changes (e.g. drag-driven
         // continuous text and slider knob updates).
         self.surface_pixels_invalid = true;
+        self.pending_service_template_nodes = None;
         self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
     }
 
-    /// Narrow script invalidation. The template is evaluated normally, then
-    /// the retained tree and display list determine whether the change is
-    /// sparse or structural. Unlike a forced script rebuild, this deliberately
-    /// preserves the existing pixel buffer so sparse damage can be repainted.
+    /// Narrow script invalidation. Direct service-field updates may reuse clean
+    /// static template subtrees; other callers evaluate the template normally.
+    /// The retained tree and display list remain authoritative for sparse versus
+    /// structural fallback and pixel damage.
     pub(super) fn invalidate_script_state_narrow(&mut self) {
         self.invalidate(ComponentDirtyFlags::SCRIPT_NARROW);
+    }
+
+    pub(super) fn invalidate_service_template_nodes(&mut self, nodes: HashSet<NodeId>) {
+        self.pending_service_template_nodes
+            .get_or_insert_with(HashSet::new)
+            .extend(nodes);
+        self.invalidate_script_state_narrow();
     }
 
     pub(super) fn invalidate_interaction_restyle(&mut self) {

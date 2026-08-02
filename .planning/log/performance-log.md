@@ -11,6 +11,39 @@ Every entry keeps its benchmark numbers so future work can compare against the
 recorded baselines. Sections M–V were focused per-subsystem deep dives; see
 `PERFORMANCE_SECTIONS.md` for the subsystem map.
 
+## 2026-08-01 — affected static template re-evaluation
+
+area: template evaluation, retained render pipeline
+
+Direct service-field updates now carry the exact `NodeId` set from
+`NodeServiceFieldDependencies` into `narrow_script_update`. The compiler walks
+only the affected nodes and their ancestors, reusing clean native subtrees via
+the widget tree's copy-on-write payloads. Component references still execute
+their normal resolver so occurrence identity and memo side effects remain
+authoritative. The static-shape eligibility check is cached at component
+construction and source reload rather than scanning the AST on each update.
+
+Dynamic `{#if}` / `{#for}` / slot templates and surfaces with `render()` hooks
+stay on full evaluation because their structural and indirect state
+dependencies are not represented by the node service-field index. The service
+diff now also uses the normalized service name (`audio`, not `mesh.audio`),
+fixing the prior mismatch between event fields and dependency keys.
+
+**Measured.** Release under `nix develop` (rustc/cargo 1.94.0), three repeated
+runs of 100 updates on a statically shaped 1,026-node surface with one direct
+`audio.percent` expression and 1,024 clean text siblings. Each run alternated
+full and selective updates. Full template evaluation plus the complete
+layout/render/present pipeline took 5.090–6.205s; affected evaluation took
+5.001–6.070s, a 1.018–1.030x end-to-end improvement. The checked
+`affected_template_eval_speedup` gate requires 1.01x; its structural regression
+also proves at least 1,024 clean nodes reused their authored payloads.
+
+**Verified.** The focused narrow-script suite passes 11 tests with 3 release
+benchmarks ignored. Dedicated regressions cover direct-field output and reuse,
+dynamic-structure fallback, render-hook fallback, retained scoped diffing, and
+pixel equivalence in the benchmark control. The frontend compiler suite reports
+62 passed, 1 pre-existing shipped-navigation fixture failure, and 20 ignored.
+
 ## 2026-08-01 — retained-update inline scratch revalidation rejected
 
 area: retained render tree (N)

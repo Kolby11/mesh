@@ -14,7 +14,7 @@ use mesh_core_component::{PropValue, PropsBlock};
 use mesh_core_elements::accessibility::AccessibilityInfo;
 use mesh_core_elements::{
     AttrKey, AttributeMap, ComponentCompositionProps, ComputedStyle, EventHandlerCall,
-    HandlerTarget, StyleContext, StyleResolver, StyleRuleIndex, VariableStore, WidgetNode,
+    HandlerTarget, NodeId, StyleContext, StyleResolver, StyleRuleIndex, VariableStore, WidgetNode,
     element_contract_for_tag,
 };
 use mesh_core_module::Manifest;
@@ -22,7 +22,7 @@ use mesh_core_theme::Theme;
 use serde_json;
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 pub(crate) struct BuildStyleContext<'a, 'theme> {
@@ -527,6 +527,63 @@ pub(crate) fn build_widget_node(
     instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
 ) -> WidgetNode {
+    build_widget_node_inner(
+        node,
+        manifest,
+        build_style,
+        parent_style,
+        container_context,
+        state,
+        instance_key,
+        composition,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_widget_node_selective(
+    node: &TemplateNode,
+    manifest: &Manifest,
+    build_style: &BuildStyleContext<'_, '_>,
+    parent_style: Option<&ComputedStyle>,
+    container_context: StyleContext,
+    state: Option<&dyn VariableStore>,
+    instance_key: &str,
+    composition: Option<&dyn FrontendCompositionResolver>,
+    previous: Option<&WidgetNode>,
+    rebuild_node_ids: &HashSet<NodeId>,
+) -> WidgetNode {
+    build_widget_node_inner(
+        node,
+        manifest,
+        build_style,
+        parent_style,
+        container_context,
+        state,
+        instance_key,
+        composition,
+        previous.map(|previous| (previous, rebuild_node_ids)),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_widget_node_inner(
+    node: &TemplateNode,
+    manifest: &Manifest,
+    build_style: &BuildStyleContext<'_, '_>,
+    parent_style: Option<&ComputedStyle>,
+    container_context: StyleContext,
+    state: Option<&dyn VariableStore>,
+    instance_key: &str,
+    composition: Option<&dyn FrontendCompositionResolver>,
+    selective: Option<(&WidgetNode, &HashSet<NodeId>)>,
+) -> WidgetNode {
+    if let Some((previous, rebuild_node_ids)) = selective
+        && !rebuild_node_ids.contains(&previous.id)
+        && template_subtree_is_native(node)
+    {
+        return previous.clone();
+    }
     match node {
         TemplateNode::Element(element) => build_element_node(
             element,
@@ -537,6 +594,7 @@ pub(crate) fn build_widget_node(
             state,
             instance_key,
             composition,
+            selective,
         ),
         TemplateNode::Component(component) => build_component_ref(
             component,
@@ -830,6 +888,7 @@ fn build_element_node(
     state: Option<&dyn VariableStore>,
     instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
+    selective: Option<(&WidgetNode, &HashSet<NodeId>)>,
 ) -> WidgetNode {
     let source_tag = element.tag.as_str();
     // Runtime tags are static strings; keep them borrowed and let the node own
@@ -936,24 +995,63 @@ fn build_element_node(
     node.service_field_reads = tracking_store.map(|t| t.into_reads()).unwrap_or_default();
 
     let child_context = child_style_context(&node.computed_style, container_context);
+    let previous_children: Option<&[WidgetNode]> = selective
+        .map(|(previous, _)| -> &[WidgetNode] { &previous.children })
+        .filter(|children: &&[WidgetNode]| children.len() == element.children.len());
     node.children = element
         .children
         .iter()
-        .map(|child| {
-            build_widget_node(
-                child,
-                manifest,
-                build_style,
-                Some(&node.computed_style),
-                child_context,
-                state,
-                instance_key,
-                composition,
-            )
+        .enumerate()
+        .map(|(index, child)| {
+            if let Some((_, rebuild_node_ids)) = selective {
+                build_widget_node_inner(
+                    child,
+                    manifest,
+                    build_style,
+                    Some(&node.computed_style),
+                    child_context,
+                    state,
+                    instance_key,
+                    composition,
+                    previous_children
+                        .and_then(|children| children.get(index))
+                        .map(|previous| (previous, rebuild_node_ids)),
+                )
+            } else {
+                build_widget_node(
+                    child,
+                    manifest,
+                    build_style,
+                    Some(&node.computed_style),
+                    child_context,
+                    state,
+                    instance_key,
+                    composition,
+                )
+            }
         })
         .collect();
 
     node
+}
+
+pub(crate) fn template_has_dynamic_structure(nodes: &[TemplateNode]) -> bool {
+    nodes.iter().any(|node| match node {
+        TemplateNode::If(_) | TemplateNode::For(_) | TemplateNode::Slot(_) => true,
+        TemplateNode::Element(element) => template_has_dynamic_structure(&element.children),
+        TemplateNode::Component(_) | TemplateNode::Text(_) | TemplateNode::Expr(_) => false,
+    })
+}
+
+fn template_subtree_is_native(node: &TemplateNode) -> bool {
+    match node {
+        TemplateNode::Element(element) => element.children.iter().all(template_subtree_is_native),
+        TemplateNode::Text(_) | TemplateNode::Expr(_) => true,
+        TemplateNode::Component(_)
+        | TemplateNode::If(_)
+        | TemplateNode::For(_)
+        | TemplateNode::Slot(_) => false,
+    }
 }
 
 fn is_inline_template_node(node: &TemplateNode) -> bool {
@@ -1112,6 +1210,7 @@ fn build_component_ref(
         state,
         host_instance_key,
         composition,
+        None,
     );
     node.attributes
         .insert("component".into(), component.name.clone());

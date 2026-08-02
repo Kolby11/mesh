@@ -19,6 +19,7 @@ impl FrontendSurfaceComponent {
         self.retained_tree = RetainedWidgetTree::default();
         self.retained_render_objects = RenderObjectTree::default();
         self.retained_display_list = RetainedDisplayList::default();
+        self.pending_service_template_nodes = None;
         self.child_display_lists.get_mut().clear();
         self.focused_proof_snapshot = None;
         self.last_visual_damage.clear();
@@ -266,22 +267,23 @@ impl ShellComponent for FrontendSurfaceComponent {
         *self.runtimes.lock().unwrap() = runtimes;
         if needs_rebuild {
             self.render_hooks_pending = true;
-            let narrow_eligible = if let Some(ref prev) = previous_payload {
-                let fields = json_field_diff(service, prev, payload);
-                !fields.is_empty()
-                    && fields.iter().any(|(svc, fld)| {
-                        !self
-                            .node_service_field_deps
-                            .nodes_reading_field(svc, fld)
-                            .is_empty()
-                    })
+            let narrow_nodes = if let Some(ref prev) = previous_payload {
+                let fields = json_field_diff(service_name, prev, payload);
+                let mut nodes = HashSet::new();
+                for (service, field) in fields {
+                    nodes.extend(
+                        self.node_service_field_deps
+                            .nodes_reading_field(&service, &field),
+                    );
+                }
+                nodes
             } else {
-                false
+                HashSet::new()
             };
-            if narrow_eligible {
-                self.invalidate_script_state_narrow();
-            } else {
+            if narrow_nodes.is_empty() {
                 self.invalidate_script_state();
+            } else {
+                self.invalidate_service_template_nodes(narrow_nodes);
             }
         }
         Ok(Vec::new())
@@ -1165,6 +1167,7 @@ impl ShellComponent for FrontendSurfaceComponent {
 
         let component_id = self.id().to_string();
         self.compiled = recompiled.into();
+        self.selective_service_build_supported = self.compiled.supports_selective_service_build();
         self.element_metric_usage = element_metric_usage(&self.compiled);
         self.frontend_catalog_handle
             .update_compiled_module(&component_id, self.compiled.clone());

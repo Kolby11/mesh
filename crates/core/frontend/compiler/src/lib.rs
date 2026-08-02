@@ -9,7 +9,7 @@ use mesh_core_component::ComponentFile;
 #[cfg(test)]
 use mesh_core_elements::HandlerTarget;
 use mesh_core_elements::{
-    ComponentCompositionProps, EventHandlerCall, LayoutEngine, StyleContext, StyleResolver,
+    ComponentCompositionProps, EventHandlerCall, LayoutEngine, NodeId, StyleContext, StyleResolver,
     VariableStore, WidgetNode,
 };
 use mesh_core_module::Manifest;
@@ -242,6 +242,70 @@ impl CompiledFrontendModule {
         composition: Option<&dyn FrontendCompositionResolver>,
         measurer: Option<&dyn mesh_core_elements::TextMeasurer>,
     ) -> WidgetNode {
+        self.build_tree_with_state_inner(
+            theme,
+            width,
+            height,
+            state,
+            mode,
+            instance_key,
+            composition,
+            measurer,
+            None,
+        )
+    }
+
+    /// Rebuild only template nodes in `rebuild_node_ids`, reusing clean native
+    /// subtrees from `previous`. Callers must gate this to statically shaped
+    /// templates; component references still execute normally so composition
+    /// bookkeeping and component memo side effects remain authoritative.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_tree_with_state_selective(
+        &self,
+        theme: &Theme,
+        width: u32,
+        height: u32,
+        state: Option<&dyn VariableStore>,
+        mode: FrontendRenderMode,
+        instance_key: &str,
+        composition: Option<&dyn FrontendCompositionResolver>,
+        measurer: Option<&dyn mesh_core_elements::TextMeasurer>,
+        previous: &WidgetNode,
+        rebuild_node_ids: &HashSet<NodeId>,
+    ) -> WidgetNode {
+        self.build_tree_with_state_inner(
+            theme,
+            width,
+            height,
+            state,
+            mode,
+            instance_key,
+            composition,
+            measurer,
+            Some((previous, rebuild_node_ids)),
+        )
+    }
+
+    pub fn supports_selective_service_build(&self) -> bool {
+        self.component
+            .template
+            .as_ref()
+            .is_none_or(|template| !render::template_has_dynamic_structure(&template.root))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_tree_with_state_inner(
+        &self,
+        theme: &Theme,
+        width: u32,
+        height: u32,
+        state: Option<&dyn VariableStore>,
+        mode: FrontendRenderMode,
+        instance_key: &str,
+        composition: Option<&dyn FrontendCompositionResolver>,
+        measurer: Option<&dyn mesh_core_elements::TextMeasurer>,
+        selective: Option<(&WidgetNode, &HashSet<NodeId>)>,
+    ) -> WidgetNode {
         let mut root = WidgetNode::new("surface");
         root.attributes
             .insert("id".into(), self.manifest.package.id.clone());
@@ -284,17 +348,33 @@ impl CompiledFrontendModule {
             root.children = template
                 .root
                 .iter()
-                .map(|node| {
-                    render::build_widget_node(
-                        node,
-                        &self.manifest,
-                        &build_style,
-                        Some(&root.computed_style),
-                        root_context,
-                        state,
-                        instance_key,
-                        composition,
-                    )
+                .enumerate()
+                .map(|(index, node)| {
+                    if let Some((previous, rebuild_node_ids)) = selective {
+                        render::build_widget_node_selective(
+                            node,
+                            &self.manifest,
+                            &build_style,
+                            Some(&root.computed_style),
+                            root_context,
+                            state,
+                            instance_key,
+                            composition,
+                            previous.children.get(index),
+                            rebuild_node_ids,
+                        )
+                    } else {
+                        render::build_widget_node(
+                            node,
+                            &self.manifest,
+                            &build_style,
+                            Some(&root.computed_style),
+                            root_context,
+                            state,
+                            instance_key,
+                            composition,
+                        )
+                    }
                 })
                 .collect();
         }

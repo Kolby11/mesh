@@ -7,6 +7,14 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Direct service updates re-evaluate only affected static template subtrees.**
+Changed service fields resolve through `NodeServiceFieldDependencies`; clean
+native branches retain their copy-on-write widget payloads, while component
+references continue through component memoization. Templates with structural
+directives or render hooks conservatively keep full evaluation. The 1,026-node
+end-to-end gate measured 1.018–1.030x across repeated release runs
+(2026-08-01). Record: [`log/performance-log.md`](log/performance-log.md).
+
 **Scoped retained updates keep their fresh `Vec`.** A reintroduced inline
 `SmallVec` candidate removed one allocation per 13-node sparse-update frame,
 but repeated end-to-end gains were only 1.011–1.075x and could not sustain the

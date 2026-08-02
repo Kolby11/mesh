@@ -115,9 +115,6 @@ gate where the win is structural.
 
 ### Render pipeline
 
-- [ ] Affected-subtree template re-evaluation via `NodeServiceFieldDependencies`
-      — `narrow_script_update` still rebuilds the full tree before diffing
-      → v1.27. *(detail: "P1 — structural render pipeline")*
 - [ ] Make `RetainedWidgetTree` the single fingerprint pass; the render-object
       tree and display entries should consume its per-node dirty flags rather
       than fingerprinting independently (N). Remaining after the sparse-patching

@@ -238,6 +238,17 @@ impl FrontendSurfaceComponent {
         height: u32,
         surface_css_props: &SurfaceCssProps,
     ) -> WidgetNode {
+        self.build_tree_with_surface_css_props_inner(theme, width, height, surface_css_props, None)
+    }
+
+    fn build_tree_with_surface_css_props_inner(
+        &mut self,
+        theme: &Theme,
+        width: u32,
+        height: u32,
+        surface_css_props: &SurfaceCssProps,
+        selective: Option<(&WidgetNode, &HashSet<NodeId>)>,
+    ) -> WidgetNode {
         let _span = tracing::debug_span!("build_tree", surface = %self.id()).entered();
         if self.render_hooks_pending {
             self.call_render_hooks();
@@ -258,16 +269,37 @@ impl FrontendSurfaceComponent {
         self.has_error_placeholders.set(false);
         let measurer = SharedTextMeasurer;
         let tree_build_started = std::time::Instant::now();
-        let mut tree = self.compiled.build_tree_with_state(
-            theme,
-            width,
-            height,
-            Some(&bound),
-            FrontendRenderMode::Surface,
-            self.root_instance_key(),
-            Some(self),
-            Some(&measurer),
-        );
+        let mut tree = if let Some((previous, rebuild_node_ids)) = selective {
+            self.compiled.build_tree_with_state_selective(
+                theme,
+                width,
+                height,
+                Some(&bound),
+                FrontendRenderMode::Surface,
+                self.root_instance_key(),
+                Some(self),
+                Some(&measurer),
+                previous,
+                rebuild_node_ids,
+            )
+        } else {
+            self.compiled.build_tree_with_state(
+                theme,
+                width,
+                height,
+                Some(&bound),
+                FrontendRenderMode::Surface,
+                self.root_instance_key(),
+                Some(self),
+                Some(&measurer),
+            )
+        };
+        #[cfg(test)]
+        {
+            self.last_template_build_reused_nodes = selective
+                .map(|(previous, _)| count_shared_authored_nodes(&tree, previous))
+                .unwrap_or(0);
+        }
         self.record_profiling_stage(
             mesh_core_debug::ProfilingStage::TreeBuild,
             tree_build_started,
@@ -300,15 +332,41 @@ impl FrontendSurfaceComponent {
         height: u32,
         surface_css_props: &SurfaceCssProps,
     ) -> WidgetNode {
-        let tree = self.build_tree_with_surface_css_props(theme, width, height, surface_css_props);
+        let previous = self.last_tree.take();
+        let pending_service_nodes = self.pending_service_template_nodes.take();
         let scope_is_safe = !self.surface_exiting
             && !self.surface_entering
             && self.closing_child_keys.is_empty()
             && self.entering_child_keys.is_empty();
+        let mut selective_rebuild_nodes = pending_service_nodes.clone().unwrap_or_default();
+        if let (Some(previous), Some(_)) = (previous.as_ref(), pending_service_nodes.as_ref()) {
+            let affected = selective_rebuild_nodes.clone();
+            narrow_expand_ancestors(previous, &affected, &mut selective_rebuild_nodes);
+        }
+        let can_selectively_build = scope_is_safe
+            && !selective_rebuild_nodes.is_empty()
+            && self.selective_service_build_supported
+            && !self.has_render_hooks();
+        #[cfg(test)]
+        let can_selectively_build = can_selectively_build && !self.force_full_template_build;
+        let tree = if can_selectively_build {
+            self.build_tree_with_surface_css_props_inner(
+                theme,
+                width,
+                height,
+                surface_css_props,
+                previous
+                    .as_ref()
+                    .map(|previous| (previous, &selective_rebuild_nodes)),
+            )
+        } else {
+            self.build_tree_with_surface_css_props(theme, width, height, surface_css_props)
+        };
         if scope_is_safe
             && let Some(affected) = self
                 .last_tree
                 .as_ref()
+                .or(previous.as_ref())
                 .and_then(|previous| runtime_tree::narrow_script_dirty_roots(previous, &tree))
         {
             if self.profiling_enabled {
@@ -2337,6 +2395,17 @@ pub(super) fn narrow_expand_ancestors(
 ) {
     let mut ancestors = Vec::new();
     narrow_collect_ancestors(tree, affected, &mut ancestors, full_affected);
+}
+
+#[cfg(test)]
+fn count_shared_authored_nodes(current: &WidgetNode, previous: &WidgetNode) -> usize {
+    usize::from(current.shares_authored_payload_with(previous))
+        + current
+            .children
+            .iter()
+            .zip(&previous.children)
+            .map(|(current, previous)| count_shared_authored_nodes(current, previous))
+            .sum::<usize>()
 }
 
 fn narrow_collect_ancestors(

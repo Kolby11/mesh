@@ -141,6 +141,13 @@ impl FrontendSurfaceComponent {
         }
     }
 
+    pub(super) fn has_render_hooks(&self) -> bool {
+        let mut runtimes = self.runtimes.lock().unwrap();
+        runtimes
+            .values_mut()
+            .any(|runtime| runtime.script_ctx.has_handler("render"))
+    }
+
     pub(super) fn call_runtime_render_hook(
         diagnostics: &Option<Diagnostics>,
         runtime: &mut EmbeddedFrontendRuntime,
