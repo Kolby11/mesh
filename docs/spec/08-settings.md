@@ -85,17 +85,17 @@ Rules:
   intent, not something to append to.
 - **Ejectable.** Because the store is sparse, a module the user never
   configured has no block to hand-edit. `mesh-shell config eject <module-id>`
-  materializes that module's *effective* surface placement into its namespace,
-  where it becomes an ordinary override — pinned from then on, like any other
-  stored value. *(Shipped for `surface`; props follow with
-  [03](03-components.md) Phase 1.)*
+  materializes that module's *effective* surface placement and exposed frontend
+  prop values into its namespace, where they become ordinary overrides — pinned
+  from then on, like any other stored value.
 - **Validated.** Every stored value is validated against the owning props
   declaration / core schema. Invalid values are rejected with a diagnostic
   naming the namespace, the key path, the value found, and what to do; the
   stored value is ignored and the declared default applies. A bad settings file
-  is never fatal. *(Shipped for the `shell` namespace and `surface` blocks,
-  including unknown-key detection with a "did you mean" suggestion; `props`
-  values follow with [03](03-components.md) Phase 1.)*
+  is never fatal. This is shipped for the `shell` namespace, `surface` blocks,
+  and frontend component props, including unknown-key detection with a "did you
+  mean" suggestion. Backend and interface props remain target work with
+  [03 §5](03-components.md#5-props-everywhere-non-mesh-modules).
 - **Service-written.** Modules read effective values and subscribe to changes;
   they never mutate another module's settings directly. Settings components,
   CLI adapters, and automation clients write through the selected
@@ -230,7 +230,7 @@ mesh-shell config path                   # the settings file path
 mesh-shell config show [namespace]       # whole document, or one namespace's overrides
 mesh-shell config doctor                 # report values MESH cannot use, and orphaned
                                          # namespaces; exits non-zero on any error
-mesh-shell config eject <module-id>      # materialize effective surface placement (§1)
+mesh-shell config eject <module-id>      # materialize effective surface + exposed props (§1)
 mesh-shell config reset <namespace>      # drop a namespace's overrides
 ```
 

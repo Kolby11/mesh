@@ -159,3 +159,50 @@ fn script_write_to_props_reprojects_into_css() {
         "a script write to props.track_width must reproject into prop(track_width)"
     );
 }
+
+#[test]
+fn settings_reload_drops_an_invalid_override_to_the_declared_default() {
+    let mut component = test_frontend_component(SETTINGS_PROP_SOURCE);
+    let valid = test_settings_store_with(
+        "@test/reactive-surface",
+        serde_json::json!({ "props": { "global": { "anim_ms": 240 } } }),
+    );
+    component.apply_settings(&valid).unwrap();
+
+    let invalid = test_settings_store_with(
+        "@test/reactive-surface",
+        serde_json::json!({ "props": { "global": { "anim_ms": 900 } } }),
+    );
+    component.apply_settings(&invalid).unwrap();
+
+    let props = component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(component.root_instance_key())
+        .and_then(|runtime| runtime.script_ctx.state().get_ref("props").cloned())
+        .expect("runtime props");
+    assert_eq!(props["anim_ms"], serde_json::json!(120.0));
+}
+
+#[test]
+fn settings_reload_preserves_a_higher_precedence_script_prop() {
+    let mut component = test_frontend_component(PROP_WRITE_SOURCE);
+    component.call_namespaced_handler("bump", &[]).unwrap();
+    component.invalidate_script_state();
+
+    let reloaded = test_settings_store_with(
+        "@test/reactive-surface",
+        serde_json::json!({ "props": { "global": { "track_width": "28px" } } }),
+    );
+    component.apply_settings(&reloaded).unwrap();
+
+    let props = component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(component.root_instance_key())
+        .and_then(|runtime| runtime.script_ctx.state().get_ref("props").cloned())
+        .expect("runtime props");
+    assert_eq!(props["track_width"], serde_json::json!("36px"));
+}

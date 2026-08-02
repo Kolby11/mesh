@@ -307,10 +307,22 @@ impl FrontendSurfaceComponent {
         // Falling back to the host surface's settings made an embedded audio,
         // language, or theme module accidentally inherit the navigation bar's
         // global props instead of reading its own namespace.
-        let imported_settings = (manifest.package.id != self.compiled.manifest.package.id)
-            .then(|| self.settings.namespace(&manifest.package.id));
+        let imported_settings =
+            (manifest.package.id != self.compiled.manifest.package.id).then(|| {
+                let state = resolve_frontend_module_settings_with_props(
+                    &manifest.package.id,
+                    self.settings.namespace(&manifest.package.id),
+                    manifest,
+                    component.props.as_ref(),
+                );
+                mesh_core_config::log_settings_diagnostics(
+                    "imported component settings",
+                    &state.diagnostics,
+                );
+                state.effective
+            });
         let settings_json = imported_settings.as_ref().unwrap_or(&self.settings_json);
-        publish_resolved_props(
+        let host_props = publish_resolved_props(
             &mut script_ctx,
             component,
             props,
@@ -381,6 +393,7 @@ impl FrontendSurfaceComponent {
         Ok(EmbeddedFrontendRuntime {
             module_id: component_id,
             script_ctx,
+            host_props,
             cached_state_clone: None,
         })
     }
@@ -1271,9 +1284,22 @@ pub(super) fn publish_resolved_props(
     instance_props: &HashMap<String, serde_json::Value>,
     settings_json: &serde_json::Value,
     instance_key: &str,
-) {
+) -> serde_json::Value {
+    let value = resolved_props_json(component, instance_props, settings_json, instance_key);
+    if let Err(err) = script_ctx.set_member_state("props", value.clone()) {
+        tracing::warn!("failed to publish component props: {err}");
+    }
+    value
+}
+
+pub(super) fn resolved_props_json(
+    component: &mesh_core_component::ComponentFile,
+    instance_props: &HashMap<String, serde_json::Value>,
+    settings_json: &serde_json::Value,
+    instance_key: &str,
+) -> serde_json::Value {
     let Some(block) = &component.props else {
-        return;
+        return serde_json::json!({});
     };
     let mut props = serde_json::Map::new();
     let global_settings = settings_json
@@ -1307,13 +1333,42 @@ pub(super) fn publish_resolved_props(
             props.insert(def.name.clone(), value);
         }
     }
-    // Publish one reactive `props` table: readable as `props.name` in script and,
-    // via `state["props"]`, projected into CSS `prop(name)`. `set_member_state`
-    // installs it on the component's own `_ENV`, so script writes (`props.x = y`)
-    // round-trip back through `sync_state_from_lua` and repaint.
-    if let Err(err) = script_ctx.set_member_state("props", serde_json::Value::Object(props)) {
-        tracing::warn!("failed to publish component props: {err}");
+    serde_json::Value::Object(props)
+}
+
+/// Apply a fresh host-owned prop snapshot without overwriting script values.
+/// A current field equal to the previous host snapshot is still host-owned and
+/// follows the new snapshot; a differing field was assigned by script and wins.
+pub(super) fn merge_reloaded_props(
+    current: Option<&serde_json::Value>,
+    previous_host: &serde_json::Value,
+    next_host: &serde_json::Value,
+) -> serde_json::Value {
+    let mut merged = current
+        .and_then(serde_json::Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let previous = previous_host.as_object().cloned().unwrap_or_default();
+    let next = next_host.as_object().cloned().unwrap_or_default();
+
+    for (name, old_value) in &previous {
+        if merged.get(name) == Some(old_value) {
+            match next.get(name) {
+                Some(value) => {
+                    merged.insert(name.clone(), value.clone());
+                }
+                None => {
+                    merged.remove(name);
+                }
+            }
+        }
     }
+    for (name, value) in next {
+        if !previous.contains_key(&name) && !merged.contains_key(&name) {
+            merged.insert(name, value);
+        }
+    }
+    serde_json::Value::Object(merged)
 }
 
 fn prop_default_to_json(value: &mesh_core_component::PropValue) -> serde_json::Value {

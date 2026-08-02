@@ -1928,6 +1928,7 @@ dependencies = [
 name = "mesh-core-surface-config"
 version = "0.1.0"
 dependencies = [
+ "mesh-core-component",
  "mesh-core-config",
  "mesh-core-module",
  "mesh-core-wayland",
@@ -1961,6 +1962,7 @@ dependencies = [
  "mesh-core-config",
  "mesh-core-debug",
  "mesh-core-diagnostics",
+ "mesh-core-frontend",
  "mesh-core-module",
  "mesh-core-shell",
  "mesh-core-surface-config",

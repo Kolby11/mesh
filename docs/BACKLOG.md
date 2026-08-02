@@ -65,14 +65,6 @@ Remaining:
       values and subscribe to changes, instead of the shell handing each
       component a raw JSON namespace. Prerequisite for a replaceable settings
       module. See [`spec/08-settings.md`](spec/08-settings.md) §1, §6.
-- [ ] Extend `mesh-shell config eject` to props once `<props>` lands — it
-      materializes only `surface` today, so a module's editable knobs still have
-      no discoverable block to hand-edit.
-- [ ] Validate stored `props.*` values once `<props>` lands. Settings validation
-      covers the `shell` namespace and `surface` blocks; prop values pass through
-      unchecked because there is no declaration to check them against yet
-      (`MODULE_NAMESPACE_FIELDS` marks them `Opaque`).
-
 ## Popovers
 
 In-tree `<popover>` nodes are promoted to `xdg_popup` child surfaces, with core

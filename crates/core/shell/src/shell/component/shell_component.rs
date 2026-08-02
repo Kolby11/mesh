@@ -1,6 +1,8 @@
 use super::runtime_tree::RetainedTreeDirtySummary;
 use super::*;
-use crate::shell::component::runtime::script_has_service_read;
+use crate::shell::component::runtime::{
+    merge_reloaded_props, resolved_props_json, script_has_service_read,
+};
 use crate::shell::{ServiceInterfaceEventSubscription, ServiceObservationSummary};
 
 impl FrontendSurfaceComponent {
@@ -1081,10 +1083,11 @@ impl ShellComponent for FrontendSurfaceComponent {
         settings: &Arc<mesh_core_config::SettingsStore>,
     ) -> Result<bool, ComponentError> {
         self.settings = settings.clone();
-        let settings_state = resolve_frontend_module_settings(
+        let settings_state = resolve_frontend_module_settings_with_props(
             &self.settings_namespace,
             self.settings.namespace(&self.settings_namespace),
             &self.compiled.manifest,
+            self.compiled.component.props.as_ref(),
         );
         // Only what this save introduced: re-reporting the rest on every write
         // would bury the one line the user is trying to fix.
@@ -1097,10 +1100,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         );
         self.settings_diagnostics = settings_state.diagnostics;
         let layout_changed = self.surface_layout != settings_state.layout;
-        let settings_changed = self.settings_json != settings_state.raw;
+        let settings_changed = self.settings_json != settings_state.effective;
 
         self.surface_layout = settings_state.layout;
-        self.settings_json = settings_state.raw;
+        self.settings_json = settings_state.effective;
 
         if settings_changed {
             if let Some(runtime) = self
@@ -1109,6 +1112,23 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .unwrap()
                 .get_mut(self.root_instance_key())
             {
+                let next_host_props = resolved_props_json(
+                    &self.compiled.component,
+                    &HashMap::new(),
+                    &self.settings_json,
+                    self.root_instance_key(),
+                );
+                let merged_props = merge_reloaded_props(
+                    runtime.script_ctx.state().get_ref("props"),
+                    &runtime.host_props,
+                    &next_host_props,
+                );
+                if let Err(error) = runtime.script_ctx.set_member_state("props", merged_props) {
+                    tracing::warn!(
+                        "failed to refresh component props after settings reload: {error}"
+                    );
+                }
+                runtime.host_props = next_host_props;
                 runtime
                     .script_ctx
                     .state_mut()

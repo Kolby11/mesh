@@ -738,11 +738,30 @@ fn cmd_config_doctor() {
             continue;
         };
 
+        let compiled = if mesh_core_frontend::is_frontend_module(&module.manifest) {
+            match mesh_core_frontend::compile_frontend_module(&module.manifest, &module.path) {
+                Ok(compiled) => Some(compiled),
+                Err(error) => {
+                    diagnostics.push(mesh_core_config::SettingsDiagnostic::warning(
+                        namespace,
+                        "props",
+                        format!("could not load the component prop declarations: {error}"),
+                        "fix the component source before validating its stored props",
+                    ));
+                    None
+                }
+            }
+        } else {
+            None
+        };
         diagnostics.extend(
-            mesh_core_surface_config::resolve_frontend_module_settings(
+            mesh_core_surface_config::resolve_frontend_module_settings_with_props(
                 namespace,
                 store.namespace(namespace),
                 &module.manifest,
+                compiled
+                    .as_ref()
+                    .and_then(|compiled| compiled.component.props.as_ref()),
             )
             .diagnostics,
         );
@@ -803,7 +822,8 @@ fn count(noun: &str, n: usize) -> String {
     }
 }
 
-/// Materialize a module's effective surface placement into the settings file.
+/// Materialize a module's effective surface placement and exposed prop values
+/// into the settings file.
 ///
 /// The store is sparse by design, so a module the user never touched has no
 /// entry to hand-edit. Ejecting writes the block the module is *currently*
@@ -825,21 +845,42 @@ fn cmd_config_eject(module_id: &str) {
     };
 
     let mut store = load_settings_store();
-    let resolved = mesh_core_surface_config::resolve_frontend_module_settings(
+    let compiled = if mesh_core_frontend::is_frontend_module(&module.manifest) {
+        match mesh_core_frontend::compile_frontend_module(&module.manifest, &module.path) {
+            Ok(compiled) => Some(compiled),
+            Err(error) => {
+                eprintln!("failed to load {module_id} component props: {error}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+    let props_block = compiled
+        .as_ref()
+        .and_then(|compiled| compiled.component.props.as_ref());
+    let resolved = mesh_core_surface_config::resolve_frontend_module_settings_with_props(
         module_id,
         store.namespace(module_id),
         &module.manifest,
+        props_block,
     );
-    let block = mesh_core_surface_config::surface_layout_to_json(&resolved.layout);
+    let surface = mesh_core_surface_config::surface_layout_to_json(&resolved.layout);
+    let props =
+        mesh_core_surface_config::effective_global_props_to_json(props_block, &resolved.props);
 
-    store.merge_namespace(module_id, &serde_json::json!({ "surface": block }));
+    let mut ejected = serde_json::json!({ "surface": surface });
+    if props.as_object().is_some_and(|props| !props.is_empty()) {
+        ejected["props"] = serde_json::json!({ "global": props });
+    }
+    store.merge_namespace(module_id, &ejected);
     if let Err(err) = store.save() {
         eprintln!("failed to write settings: {err}");
         std::process::exit(1);
     }
 
     println!(
-        "ejected {module_id} surface placement into {}",
+        "ejected {module_id} surface placement and exposed props into {}",
         store.path().display()
     );
     println!(
@@ -880,8 +921,8 @@ fn cmd_help() {
     println!("            path                 print the settings file path");
     println!("            show [namespace]     print the whole file, or one namespace");
     println!("            doctor               check the file for values MESH cannot use");
-    println!("            eject <module-id>    write a module's effective surface");
-    println!("                                 placement in, ready to hand-edit");
+    println!("            eject <module-id>    write a module's effective surface and");
+    println!("                                 exposed props, ready to hand-edit");
     println!("            reset <namespace>    drop a namespace's overrides");
     println!("  profile   Manage shell compositions");
     println!("            list                 list profiles (* is active)");

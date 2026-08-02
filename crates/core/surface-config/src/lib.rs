@@ -1,4 +1,9 @@
-use mesh_core_config::validate::{FieldKind, FieldSpec, SettingsDiagnostic, validate_object};
+use mesh_core_component::{
+    PropDef, PropValue, PropsBlock, prop_value_to_json, validate_prop_value,
+};
+use mesh_core_config::validate::{
+    FieldKind, FieldSpec, SettingsDiagnostic, unknown_key_diagnostic_from, validate_object,
+};
 use mesh_core_module::{LocalizedText, Manifest};
 use mesh_core_wayland::{Edge, KeyboardMode, Layer, SurfaceRole, WindowDecorations};
 use std::collections::BTreeMap;
@@ -68,7 +73,11 @@ impl Default for WindowLayoutSettings {
 
 #[derive(Debug, Clone)]
 pub struct FrontendModuleSettingsState {
+    /// The namespace exactly as stored, retained for diagnostics and tooling.
     pub raw: serde_json::Value,
+    /// Runtime-facing namespace with rejected prop values removed so the
+    /// declaration defaults win during precedence resolution.
+    pub effective: serde_json::Value,
     pub layout: SurfaceLayoutSettings,
     pub props: FrontendModulePropSettings,
     /// Stored values this resolution refused, and inert ones it kept.
@@ -197,8 +206,24 @@ pub fn resolve_frontend_module_settings(
     raw: serde_json::Value,
     manifest: &Manifest,
 ) -> FrontendModuleSettingsState {
+    resolve_frontend_module_settings_with_props(namespace, raw, manifest, None)
+}
+
+/// Resolve module settings and validate prop overrides against the primary
+/// component's declarations.
+///
+/// The declaration is optional so non-frontend modules and callers that only
+/// have a manifest can still resolve surface placement. Frontend runtime and
+/// tooling callers should pass the compiled component's `<props>` block.
+pub fn resolve_frontend_module_settings_with_props(
+    namespace: &str,
+    raw: serde_json::Value,
+    manifest: &Manifest,
+    props_block: Option<&PropsBlock>,
+) -> FrontendModuleSettingsState {
     let mut layout = surface_layout_from_manifest(manifest);
-    let (checked_surface, diagnostics) = validate_module_namespace(namespace, &raw, manifest);
+    let (checked_surface, checked_props, diagnostics) =
+        validate_module_namespace(namespace, &raw, manifest, props_block);
     let surface = checked_surface.as_object();
 
     // The user can move a surface between shell chrome and a window
@@ -315,19 +340,49 @@ pub fn resolve_frontend_module_settings(
         layout.blur = blur;
     }
 
-    let props = load_prop_settings(&raw);
+    let props = load_prop_settings(&checked_props);
+    let mut effective = raw.clone();
+    if raw.get("props").is_some() {
+        if let Some(namespace) = effective.as_object_mut() {
+            namespace.insert("props".into(), checked_props);
+        }
+    }
 
     FrontendModuleSettingsState {
         raw,
+        effective,
         layout,
         props,
         diagnostics,
     }
 }
 
+/// Materialize the effective global values of exposed component props.
+///
+/// Declared defaults form the baseline and already-validated stored globals
+/// override them. Props without a default and without an override have no
+/// effective value to eject and are omitted.
+pub fn effective_global_props_to_json(
+    block: Option<&PropsBlock>,
+    stored: &FrontendModulePropSettings,
+) -> serde_json::Value {
+    let mut values = serde_json::Map::new();
+    let Some(block) = block else {
+        return serde_json::Value::Object(values);
+    };
+    for def in block.props.iter().filter(|def| def.expose) {
+        if let Some(value) = stored.global.get(&def.name) {
+            values.insert(def.name.clone(), value.clone());
+        } else if let Some(default) = &def.default {
+            values.insert(def.name.clone(), prop_value_to_json(default));
+        }
+    }
+    serde_json::Value::Object(values)
+}
+
 fn load_prop_settings(raw: &serde_json::Value) -> FrontendModulePropSettings {
     let mut settings = FrontendModulePropSettings::default();
-    let Some(props) = raw.get("props").and_then(serde_json::Value::as_object) else {
+    let Some(props) = raw.as_object() else {
         return settings;
     };
     if let Some(global) = props.get("global").and_then(serde_json::Value::as_object) {
@@ -647,11 +702,9 @@ pub const SURFACE_FIELDS: &[FieldSpec] = &[
 
 /// A module namespace's own top-level keys.
 ///
-/// `props` is deliberately opaque: its declaration is the `<props>` block,
-/// which does not exist yet (`docs/spec/03-components.md`), so there is nothing
-/// to validate names or types against. Only the shape of the scopes themselves
-/// is checked, and prop values pass through unexamined — validating them is a
-/// separate backlog item that lands with `<props>`.
+/// `props` has a component-specific vocabulary, so this static walk checks its
+/// scope shape and [`validate_module_namespace`] performs the declaration-aware
+/// name and value validation afterward.
 pub const MODULE_NAMESPACE_FIELDS: &[FieldSpec] = &[
     FieldSpec::new("surface", FieldKind::Section(SURFACE_FIELDS)),
     FieldSpec::new(
@@ -691,10 +744,19 @@ fn validate_module_namespace(
     namespace: &str,
     raw: &serde_json::Value,
     manifest: &Manifest,
-) -> (serde_json::Value, Vec<SettingsDiagnostic>) {
+    props_block: Option<&PropsBlock>,
+) -> (
+    serde_json::Value,
+    serde_json::Value,
+    Vec<SettingsDiagnostic>,
+) {
     let mut diagnostics = Vec::new();
     if raw.as_object().is_some_and(serde_json::Map::is_empty) {
-        return (serde_json::Value::Null, diagnostics);
+        return (
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+            diagnostics,
+        );
     }
 
     let checked = validate_object(
@@ -705,12 +767,127 @@ fn validate_module_namespace(
         &mut diagnostics,
     );
     let surface = checked.get("surface").cloned().unwrap_or_default();
+    let props = checked
+        .get("props")
+        .map(|value| validate_prop_scopes(namespace, value, props_block, &mut diagnostics))
+        .unwrap_or_default();
 
     if let Some(stored) = raw.get("surface").and_then(serde_json::Value::as_object) {
         report_inert_placement_fields(namespace, stored, &surface, manifest, &mut diagnostics);
     }
 
-    (surface, diagnostics)
+    (surface, props, diagnostics)
+}
+
+fn validate_prop_scopes(
+    namespace: &str,
+    raw: &serde_json::Value,
+    block: Option<&PropsBlock>,
+    diagnostics: &mut Vec<SettingsDiagnostic>,
+) -> serde_json::Value {
+    // A caller without the owning component declaration cannot make a sound
+    // judgment about names or values. The static namespace walk above still
+    // validates the scope shape; preserve its contents until a prop-aware
+    // frontend caller can validate them.
+    let Some(block) = block else {
+        return raw.clone();
+    };
+    let Some(scopes) = raw.as_object() else {
+        return serde_json::Value::Null;
+    };
+    let definitions: Vec<&PropDef> = block.props.iter().filter(|def| def.expose).collect();
+    let mut checked = serde_json::Map::new();
+
+    if let Some(global) = scopes.get("global").and_then(serde_json::Value::as_object) {
+        checked.insert(
+            "global".into(),
+            validate_prop_map(namespace, "props.global", global, &definitions, diagnostics),
+        );
+    }
+    if let Some(instances) = scopes
+        .get("instances")
+        .and_then(serde_json::Value::as_object)
+    {
+        let mut checked_instances = serde_json::Map::new();
+        for (instance_key, values) in instances {
+            let Some(values) = values.as_object() else {
+                continue;
+            };
+            checked_instances.insert(
+                instance_key.clone(),
+                validate_prop_map(
+                    namespace,
+                    &format!("props.instances.{instance_key}"),
+                    values,
+                    &definitions,
+                    diagnostics,
+                ),
+            );
+        }
+        checked.insert(
+            "instances".into(),
+            serde_json::Value::Object(checked_instances),
+        );
+    }
+    serde_json::Value::Object(checked)
+}
+
+fn validate_prop_map(
+    namespace: &str,
+    prefix: &str,
+    values: &serde_json::Map<String, serde_json::Value>,
+    definitions: &[&PropDef],
+    diagnostics: &mut Vec<SettingsDiagnostic>,
+) -> serde_json::Value {
+    let known: Vec<&str> = definitions.iter().map(|def| def.name.as_str()).collect();
+    let mut accepted = serde_json::Map::new();
+    for (name, value) in values {
+        let Some(def) = definitions.iter().find(|def| def.name == *name) else {
+            diagnostics.push(unknown_key_diagnostic_from(namespace, prefix, name, &known));
+            continue;
+        };
+        let prop_value = match value {
+            serde_json::Value::String(value) => Some(PropValue::String(value.clone())),
+            serde_json::Value::Number(value) => value.as_f64().map(PropValue::Number),
+            serde_json::Value::Bool(value) => Some(PropValue::Bool(*value)),
+            serde_json::Value::Null
+            | serde_json::Value::Array(_)
+            | serde_json::Value::Object(_) => None,
+        };
+        let path = format!("{prefix}.{name}");
+        match prop_value.and_then(|value| validate_prop_value(def, &value).ok().map(|_| value)) {
+            Some(_) => {
+                accepted.insert(name.clone(), value.clone());
+            }
+            None => diagnostics.push(SettingsDiagnostic::error(
+                namespace,
+                path,
+                prop_value_error(def, value),
+                "use a value accepted by the component's <props> declaration, or remove the key",
+            )),
+        }
+    }
+    serde_json::Value::Object(accepted)
+}
+
+fn prop_value_error(def: &PropDef, value: &serde_json::Value) -> String {
+    let converted = match value {
+        serde_json::Value::String(value) => Some(PropValue::String(value.clone())),
+        serde_json::Value::Number(value) => value.as_f64().map(PropValue::Number),
+        serde_json::Value::Bool(value) => Some(PropValue::Bool(*value)),
+        _ => None,
+    };
+    converted
+        .and_then(|value| validate_prop_value(def, &value).err())
+        .map(|error| error.message)
+        .unwrap_or_else(|| {
+            format!(
+                "prop `{}` expects a {}, found {}",
+                def.name,
+                def.ty.lua_type(),
+                mesh_core_config::validate::describe(value)
+            )
+        })
 }
 
 /// Warn about stored placement fields the surface's role ignores.
@@ -1220,8 +1397,9 @@ mod tests {
     }
 
     #[test]
-    fn prop_values_are_left_unvalidated() {
-        // There is no declaration to check them against until `<props>` exists.
+    fn callers_without_prop_declarations_preserve_prop_values() {
+        // Backend/interface declarations are still target work. A caller that
+        // cannot supply a declaration must not silently discard their values.
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
         let state = resolve_frontend_module_settings(
             "@mesh/navigation-bar",
@@ -1232,6 +1410,98 @@ mod tests {
         );
 
         assert!(state.diagnostics.is_empty(), "{:#?}", state.diagnostics);
+        assert_eq!(
+            state.props.global.get("anything"),
+            Some(&serde_json::json!([1, "two", null]))
+        );
+    }
+
+    fn declared_props() -> PropsBlock {
+        mesh_core_component::parse_component(
+            r#"
+<props>
+  density: { type: "enum", options: ["compact", "cozy"], default: "cozy" }
+  track_width: { type: "size", default: "20px" }
+  anim_ms: { type: "duration", default: 120, min: 0, max: 600 }
+  internal: { type: "bool", default: true, expose: false }
+</props>
+<template><box /></template>
+"#,
+        )
+        .expect("component")
+        .props
+        .expect("props")
+    }
+
+    #[test]
+    fn declared_props_validate_global_and_instance_overrides() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
+        let props = declared_props();
+        let state = resolve_frontend_module_settings_with_props(
+            "@mesh/test",
+            serde_json::json!({
+                "props": {
+                    "global": {
+                        "density": "dense",
+                        "track_width": "28px",
+                        "anim_ms": 900,
+                        "internal": false,
+                        "track_wdth": "30px"
+                    },
+                    "instances": {
+                        "@mesh/test#top": {
+                            "density": "compact",
+                            "track_width": [28, "px"]
+                        }
+                    }
+                }
+            }),
+            &manifest,
+            Some(&props),
+        );
+
+        assert_eq!(
+            state.props.global,
+            BTreeMap::from([("track_width".into(), serde_json::json!("28px"))])
+        );
+        assert_eq!(
+            state.props.instances["@mesh/test#top"],
+            BTreeMap::from([("density".into(), serde_json::json!("compact"))])
+        );
+        let paths: Vec<_> = state
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.key_path.as_str())
+            .collect();
+        assert!(paths.contains(&"props.global.density"));
+        assert!(paths.contains(&"props.global.anim_ms"));
+        assert!(paths.contains(&"props.global.internal"));
+        assert!(paths.contains(&"props.global.track_wdth"));
+        assert!(paths.contains(&"props.instances.@mesh/test#top.track_width"));
+        assert_eq!(
+            state.effective.pointer("/props/global/track_width"),
+            Some(&serde_json::json!("28px"))
+        );
+        assert!(state.effective.pointer("/props/global/density").is_none());
+        assert!(state.effective.pointer("/props/global/anim_ms").is_none());
+    }
+
+    #[test]
+    fn eject_materializes_exposed_effective_prop_values() {
+        let props = declared_props();
+        let stored = FrontendModulePropSettings {
+            global: BTreeMap::from([("density".into(), serde_json::json!("compact"))]),
+            instances: BTreeMap::new(),
+        };
+
+        assert_eq!(
+            effective_global_props_to_json(Some(&props), &stored),
+            serde_json::json!({
+                "density": "compact",
+                "track_width": "20px",
+                "anim_ms": 120.0
+            })
+        );
     }
 
     #[test]

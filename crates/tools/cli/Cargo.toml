@@ -18,6 +18,7 @@ allocation-profiling = [
 
 [dependencies]
 mesh-core-shell = { workspace = true }
+mesh-core-frontend = { workspace = true }
 mesh-core-module = { workspace = true }
 mesh-core-config = { workspace = true }
 mesh-core-surface-config = { workspace = true }

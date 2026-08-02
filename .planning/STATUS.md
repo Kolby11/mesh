@@ -25,8 +25,11 @@ remain open (2026-08-02). Record: [`log/2026-08.md`](log/2026-08.md).
 **Module props have a generated settings surface.** Installed frontend props
 are projected into the module graph as typed schemas; the settings frontend
 renders controls and reset actions, and privileged writes are validated before
-updating sparse profile-scoped overrides. Custom `settings_ui` mounting and
-per-instance targeting remain open (2026-08-02). Record:
+updating sparse profile-scoped overrides. Hand-edited global and per-instance
+prop overrides now go through the same declarations on startup/reload and in
+`config doctor`; invalid values are ignored so declared defaults win. `config
+eject` materializes effective exposed props alongside surface placement. Custom
+`settings_ui` mounting and per-instance targeting remain open (2026-08-02). Record:
 [`log/2026-08.md`](log/2026-08.md).
 
 **External interface contracts are typed through the editor boundary.** The

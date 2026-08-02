@@ -3,7 +3,7 @@ use super::service::{
     apply_service_update_with_name_and_fingerprint, script_events_to_requests, seed_service_state,
     service_capabilities,
 };
-use super::surface_layout::{SurfaceLayoutSettings, resolve_frontend_module_settings};
+use super::surface_layout::{SurfaceLayoutSettings, resolve_frontend_module_settings_with_props};
 use super::types::{
     ChildSurfaceKind, ChildSurfaceRequest, ComponentContext, ComponentError, ComponentInput,
     ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers, ServiceEvent, ShellComponent,
@@ -965,6 +965,10 @@ impl ElementMetricUsage {
 struct EmbeddedFrontendRuntime {
     module_id: String,
     script_ctx: ScriptContext,
+    /// Last prop snapshot supplied by declaration/settings/instance layers.
+    /// Used on settings reload to distinguish host-owned values from a newer
+    /// script assignment, which has higher precedence and must survive.
+    host_props: serde_json::Value,
     /// Cached clone of the script state, keyed by its mutation generation.
     /// Tree builds need a state snapshot that outlives the runtimes lock;
     /// this avoids re-cloning the full variable map on every frame the
@@ -987,10 +991,11 @@ impl FrontendSurfaceComponent {
         let compiled = compiled.into();
         let settings = settings.into();
         let settings_namespace = compiled.manifest.package.id.clone();
-        let settings_state = resolve_frontend_module_settings(
+        let settings_state = resolve_frontend_module_settings_with_props(
             &settings_namespace,
             settings.namespace(&settings_namespace),
             &compiled.manifest,
+            compiled.component.props.as_ref(),
         );
         mesh_core_config::log_settings_diagnostics("settings", &settings_state.diagnostics);
         let service_payload_capacity = service_payload_cache_capacity(&compiled.manifest);
@@ -1008,7 +1013,7 @@ impl FrontendSurfaceComponent {
             module_dir,
             settings,
             settings_namespace,
-            settings_json: settings_state.raw,
+            settings_json: settings_state.effective,
             settings_diagnostics: settings_state.diagnostics,
             surface_layout: settings_state.layout.clone(),
             keyboard_mode_override: None,
@@ -1162,13 +1167,14 @@ impl FrontendSurfaceComponent {
     pub(super) fn with_instance_id(mut self, instance_id: &str) -> Self {
         self.surface_id = instance_id.to_string();
         self.settings_namespace = instance_id.to_string();
-        let settings_state = resolve_frontend_module_settings(
+        let settings_state = resolve_frontend_module_settings_with_props(
             &self.settings_namespace,
             self.settings.namespace(&self.settings_namespace),
             &self.compiled.manifest,
+            self.compiled.component.props.as_ref(),
         );
         mesh_core_config::log_settings_diagnostics("profile settings", &settings_state.diagnostics);
-        self.settings_json = settings_state.raw;
+        self.settings_json = settings_state.effective;
         self.settings_diagnostics = settings_state.diagnostics;
         self.surface_layout = settings_state.layout;
         self.visible = self.surface_layout.visible_on_start;

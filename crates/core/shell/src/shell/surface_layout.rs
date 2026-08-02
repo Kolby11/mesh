@@ -1,5 +1,7 @@
+#[cfg(test)]
+pub(super) use mesh_core_surface_config::resolve_frontend_module_settings;
 pub(super) use mesh_core_surface_config::{
-    SurfaceLayoutSettings, default_surface_visibility, resolve_frontend_module_settings,
+    SurfaceLayoutSettings, default_surface_visibility, resolve_frontend_module_settings_with_props,
 };
 
 use mesh_core_config::ShellSettings;
