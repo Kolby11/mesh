@@ -47,11 +47,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
       behind generic providers. Startup sounds and backend profiling use the
       generic contract/runtime path; core-owned service state still branches.
       *(detail: "Module system — remaining open follow-ups")*
-- [ ] Show each module's uses/provides graph in settings and diagnostics —
-      required and optional interfaces, active provider, native binaries,
-      capabilities, i18n catalogs, keybinds, health. The debug inspector renders
-      this; the full settings UI still needs per-module controls.
-      *(detail: same section)*
 - [ ] **Deferred — unify the four contribution schemas.** Theme, icons, i18n,
       and keybinds under one `contributes` shape, only where they share honest
       structure. Revisit after profiles land. Capability inference and a

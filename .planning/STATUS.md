@@ -7,6 +7,14 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**The settings frontend exposes the installed graph per module.** Each module
+row expands to required and optional interface bindings, provided interfaces,
+module dependencies, required/optional capabilities, resource packs, native
+binary availability, i18n catalogs, keybinds, and combined health/diagnostics.
+Production `interface=provider` bindings now populate the provider controls as
+well as the details view (2026-08-02). Record:
+[`log/2026-08.md`](log/2026-08.md).
+
 **Core-triggered sound and backend profiling no longer bypass interface
 routing.** `mesh.audio.play_sound` is a declared contract method, startup
 dispatch follows the same capability-checked request path as module calls, and

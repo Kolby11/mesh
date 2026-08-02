@@ -556,12 +556,16 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
                             "i18n_packs": [],
                             "theme_packs": [],
                             "font_packs": [],
+                            "keybinds": ["mute"],
                             "active_providers": [
-                                { "interface": "mesh.audio", "provider": "@mesh/pipewire-audio" }
-                            ]
+                                "mesh.audio=@mesh/pipewire-audio"
+                            ],
+                            "native_binaries": [
+                                { "name": "pactl", "optional": false, "available": true }
+                            ],
+                            "capabilities": ["shell.surface"],
+                            "optional_capabilities": ["service.power.read"]
                         },
-                        "capabilities": ["shell.surface"],
-                        "optional_capabilities": [],
                         "provides": {
                             "interfaces": [],
                             "settings": ["@mesh/navigation-bar"],
@@ -576,8 +580,8 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
                                 }
                             },
                             "settings_values": { "blur_enabled": false },
-                            "i18n": [],
-                            "required_icons": [],
+                            "i18n": ["en:config/i18n/en.json"],
+                            "required_icons": ["audio-volume-muted"],
                             "optional_icons": []
                         },
                         "diagnostics": [],
@@ -759,6 +763,36 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
     assert!(text.iter().any(|line| line == "@mesh/navigation-bar"));
     assert!(text.iter().any(|line| line == "Module preferences"));
     assert!(text.iter().any(|line| line == "Backdrop blur"));
+
+    component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/settings/local:AdvancedPage::onModuleDetails",
+            &[serde_json::json!("@mesh/navigation-bar")],
+        )
+        .unwrap();
+    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    let text = rendered_text(&component);
+    assert!(
+        text.iter().any(|line| {
+            line == "Required interfaces: mesh.audio → @mesh/pipewire-audio, mesh.power → UNAVAILABLE"
+        }),
+        "expanded module details should render required provider bindings: {text:?}"
+    );
+    assert!(
+        text.iter()
+            .any(|line| line
+                == "Capabilities: Required: shell.surface · Optional: service.power.read")
+    );
+    assert!(
+        text.iter()
+            .any(|line| line == "Native binaries: pactl (Available)")
+    );
+    assert!(
+        text.iter()
+            .any(|line| line == "I18n catalogs: en:config/i18n/en.json")
+    );
+    assert!(text.iter().any(|line| line == "Keybinds: mute"));
+    assert!(text.iter().any(|line| line == "Health: Healthy"));
 
     let requests = component
         .call_namespaced_handler(

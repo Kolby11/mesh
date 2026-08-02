@@ -50,14 +50,32 @@
                             </row>
                             <text class="settings-card-meta">{t(row.status) .. row.status_details}</text>
                             <text class="settings-card-meta">{t('advanced.uses') .. ' ' .. row.interface_count .. ' ' .. t('advanced.interface_count') .. ' · ' .. t('advanced.settings') .. ' ' .. t(row.settings_list)}</text>
+                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.required_interfaces') .. ': ' .. row.required_interfaces}</text>
+                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.optional_interfaces') .. ': ' .. row.optional_interfaces}</text>
+                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.provides') .. ': ' .. row.provides}</text>
+                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.module_dependencies') .. ': ' .. row.modules}</text>
+                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.capabilities') .. ': ' .. row.capabilities}</text>
+                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.resources') .. ': ' .. row.resources}</text>
+                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.native_binaries') .. ': ' .. row.native_binaries}</text>
+                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.i18n_catalogs') .. ': ' .. row.i18n_catalogs}</text>
+                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.keybinds') .. ': ' .. row.keybinds}</text>
+                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.health') .. ': ' .. row.health}</text>
                         </column>
-                        <button
-                            class={row.button_class}
-                            hidden={row.action_hidden}
-                            onclick={onModuleToggle(row.module_id, row.enabled)}
-                        >
-                            {t(row.action)}
-                        </button>
+                        <column class="module-actions">
+                            <button
+                                class="settings-secondary-button"
+                                onclick={onModuleDetails(row.module_id)}
+                            >
+                                {t(row.details_action)}
+                            </button>
+                            <button
+                                class={row.button_class}
+                                hidden={row.action_hidden}
+                                onclick={onModuleToggle(row.module_id, row.enabled)}
+                            >
+                                {t(row.action)}
+                            </button>
+                        </column>
                     </list-item>
                 {/for}
             </list>
@@ -147,6 +165,7 @@ module_filter = ""
 provider_rows = {}
 module_rows = {}
 prop_rows = {}
+selected_module_id = ""
 providers_hidden = true
 providers_empty_hidden = false
 modules_hidden = true
@@ -171,7 +190,7 @@ local function list_count(values)
 end
 
 local function join_limited(values, limit)
-    if type(values) ~= "table" or #values == 0 then return "common.none" end
+    if type(values) ~= "table" or #values == 0 then return t("common.none") end
     local out = {}
     for i = 1, math.min(#values, limit) do
         local item = values[i]
@@ -182,6 +201,43 @@ local function join_limited(values, limit)
         end
     end
     if #values > limit then out[#out + 1] = "+" .. tostring(#values - limit) end
+    return table.concat(out, ", ")
+end
+
+local function append_values(out, label, values)
+    if type(values) == "table" and #values > 0 then
+        out[#out + 1] = t(label) .. ": " .. join_limited(values, 6)
+    end
+end
+
+local function provider_binding(value)
+    if type(value) == "table" then
+        return tostring(value.interface or ""), tostring(value.provider or "")
+    end
+    local interface, provider = string.match(tostring(value or ""), "^([^=]+)=(.+)$")
+    return tostring(interface or ""), tostring(provider or "")
+end
+
+local function interface_summary(values, active_providers)
+    if type(values) ~= "table" or #values == 0 then return t("common.none") end
+    local out = {}
+    for _, value in ipairs(values) do
+        local interface = type(value) == "table" and value.interface or value
+        interface = tostring(interface or "")
+        local provider = active_providers[interface]
+        out[#out + 1] = interface .. " → " .. (provider or t("common.unavailable"))
+    end
+    return table.concat(out, ", ")
+end
+
+local function binary_summary(values)
+    if type(values) ~= "table" or #values == 0 then return t("common.none") end
+    local out = {}
+    for _, binary in ipairs(values) do
+        local status = binary.available == true and t("advanced.available") or t("common.unavailable")
+        local optional = binary.optional == true and (", " .. t("advanced.optional")) or ""
+        out[#out + 1] = tostring(binary.name or "") .. " (" .. status .. optional .. ")"
+    end
     return table.concat(out, ", ")
 end
 
@@ -248,8 +304,7 @@ function render()
         local active = uses.active_providers
         if type(active) == "table" then
             for _, pair in ipairs(active) do
-                local interface = tostring(pair.interface or "")
-                local provider = tostring(pair.provider or "")
+                    local interface, provider = provider_binding(pair)
                 if interface ~= "" and provider ~= "" then
                     active_providers[interface] = provider
                     active_provider_modules[provider] = true
@@ -308,6 +363,7 @@ function render()
         local uses = entry.uses or {}
         local provides = entry.provides or {}
         local diagnostics = entry.diagnostics or {}
+        local health = entry.health or {}
         local status = enabled and "common.enabled" or "common.disabled"
         local status_details = #diagnostics > 0
             and (" · " .. join_limited(diagnostics, 2))
@@ -315,6 +371,24 @@ function render()
         local action_allowed = module_id ~= "@mesh/settings"
             and entry.root_layout ~= true
             and not active_provider_modules[module_id]
+        local module_providers = {}
+        for _, binding in ipairs(uses.active_providers or {}) do
+            local interface, provider = provider_binding(binding)
+            if interface ~= "" and provider ~= "" then module_providers[interface] = provider end
+        end
+        local capability_parts = {}
+        append_values(capability_parts, "advanced.required", uses.capabilities or entry.capabilities)
+        append_values(capability_parts, "advanced.optional", uses.optional_capabilities or entry.optional_capabilities)
+        local resource_parts = {}
+        append_values(resource_parts, "advanced.icon_packs", uses.icon_packs)
+        append_values(resource_parts, "advanced.font_packs", uses.font_packs)
+        append_values(resource_parts, "advanced.theme_packs", uses.theme_packs)
+        append_values(resource_parts, "advanced.required_icons", provides.required_icons)
+        append_values(resource_parts, "advanced.provided_themes", provides.themes)
+        local health_parts = {}
+        for _, value in ipairs(health) do health_parts[#health_parts + 1] = tostring(value) end
+        for _, value in ipairs(diagnostics) do health_parts[#health_parts + 1] = tostring(value) end
+        local details_visible = selected_module_id == module_id
         module_rows[#module_rows + 1] = {
             module_id = module_id,
             kind = tostring(entry.kind or "advanced.module"),
@@ -326,6 +400,18 @@ function render()
             action = enabled and "common.disable" or "common.enable",
             action_hidden = not action_allowed,
             button_class = enabled and "settings-danger-button" or "settings-primary-button",
+            details_hidden = not details_visible,
+            details_action = details_visible and "advanced.hide_details" or "advanced.show_details",
+            required_interfaces = interface_summary(uses.interfaces, module_providers),
+            optional_interfaces = interface_summary(uses.optional_interfaces, module_providers),
+            provides = join_limited(provides.interfaces, 8),
+            modules = join_limited(uses.modules, 8),
+            capabilities = #capability_parts == 0 and t("common.none") or table.concat(capability_parts, " · "),
+            resources = #resource_parts == 0 and t("common.none") or table.concat(resource_parts, " · "),
+            native_binaries = binary_summary(uses.native_binaries),
+            i18n_catalogs = join_limited(provides.i18n, 8),
+            keybinds = join_limited(uses.keybinds, 8),
+            health = #health_parts == 0 and t("advanced.healthy") or table.concat(health_parts, ", "),
         }
 
         local settings_schema = provides.settings_schema or {}
@@ -465,6 +551,22 @@ function onModuleToggle(module_id, current_enabled)
         enabled = enabled,
     })
 end
+
+function onModuleDetails(module_id)
+    if selected_module_id == module_id then
+        selected_module_id = ""
+    else
+        selected_module_id = module_id
+    end
+    local updated = {}
+    for _, row in ipairs(module_rows) do
+        local visible = row.module_id == selected_module_id
+        row.details_hidden = not visible
+        row.details_action = visible and "advanced.hide_details" or "advanced.show_details"
+        updated[#updated + 1] = row
+    end
+    module_rows = updated
+end
 </script>
 
 <style>
@@ -478,6 +580,15 @@ end
         align-items: center;
         justify-content: space-between;
         gap: var(--spacing-sm);
+    }
+
+    .module-actions {
+        flex-shrink: 0;
+        gap: var(--spacing-xs);
+    }
+
+    .module-detail {
+        width: 100%;
     }
 
     .settings-prop-card {

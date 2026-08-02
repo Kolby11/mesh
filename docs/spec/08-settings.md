@@ -180,8 +180,8 @@ brings them back.
 **Status: partially shipped.** Exposed props from a frontend module's primary
 component produce typed global controls, effective values, and per-row reset
 actions. Writes are validated and persisted as sparse active-profile overrides.
-Per-instance selection, the remaining generated sections below, and custom
-`settings_ui` mounting are target work.
+Per-instance selection, surface/resource editing controls, and custom
+`settings_ui` mounting are target work. Module graph inspection is shipped.
 
 For every module, the settings surface renders, with zero module-specific
 code:
@@ -194,7 +194,7 @@ code:
 - **Resource chains** — icon/font pack pickers and per-name override pickers
   writing the §1 shapes; the icon picker writes the user icon-pack module
   ([05 §4.2](05-icons.md)).
-- **Module graph info** — uses/provides, active provider selection (writes the
+- **Module graph info (shipped)** — uses/provides, active provider selection (writes the
   active profile through the appropriate service), capabilities, health, diagnostics
   ([01 §9](01-module-system.md)).
 

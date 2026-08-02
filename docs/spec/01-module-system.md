@@ -670,6 +670,8 @@ Discovered → Resolved → Loaded → Initialized → Running ⇄ Suspended →
 
 ## 9. Diagnostics are part of the contract
 
+**Status: shipped.**
+
 Every gap must be visible with a concrete author action: missing providers,
 missing/optional icons, unresolved resources, undeclared events, capability
 misdeclarations, manifest typos, binary availability. Diagnostics name the
