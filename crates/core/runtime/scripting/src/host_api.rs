@@ -28,8 +28,6 @@
 /// ```
 use mesh_core_capability::{Capability, CapabilitySet};
 use std::collections::HashSet;
-// The runtime is interface-first now; mesh.services remains only as a
-// compatibility alias for older scripts.
 
 /// Describes what host APIs should be injected based on capabilities.
 #[derive(Debug)]
@@ -49,7 +47,6 @@ impl HostApiManifest {
         let has_locale_read = caps.is_granted(&Capability::new("locale.read"));
         let has_locale_write = caps.is_granted(&Capability::new("locale.write"));
 
-        // Collect service capabilities and their docs-era interface aliases in one pass.
         let mut service_capabilities = Vec::new();
         let mut interface_capabilities = Vec::new();
         let mut seen_interfaces = HashSet::new();
@@ -75,17 +72,14 @@ impl HostApiManifest {
     }
 }
 
-/// Creates interface proxy tables for Luau scripts.
-///
-/// A proxy wraps async service trait methods into callable functions.
-/// The proxy checks capabilities before each call.
+/// Creates interface proxy tables for Luau scripts: async service methods
+/// become callable functions, capability-checked before each call.
 #[derive(Debug)]
 pub struct InterfaceProxy;
 
 impl InterfaceProxy {
-    /// List which docs-era interfaces are available given the module's capabilities.
-    ///
-    /// E.g., if the module has `service.audio.read`, this returns `["mesh.audio"]`.
+    /// Interfaces the module's capabilities reach — `service.audio.read`
+    /// yields `["mesh.audio"]`.
     pub fn available_interfaces(caps: &CapabilitySet) -> Vec<String> {
         let mut interfaces = Vec::new();
         let mut seen = HashSet::new();
@@ -108,11 +102,9 @@ impl InterfaceProxy {
         }
     }
 
-    /// Check if a specific interface is readable with the current capability set.
-    ///
-    /// This remains permissive for non-core interfaces during the transition;
-    /// richer contract-level capability enforcement will come once interface
-    /// contracts are loaded dynamically.
+    /// Whether the capability set can read an interface. Permissive for
+    /// non-core interfaces; contract-level enforcement lands with dynamically
+    /// loaded interface contracts.
     pub fn can_read(caps: &CapabilitySet, interface: &str) -> bool {
         match interface {
             "mesh.theme" => caps.is_granted(&Capability::new("theme.read")),

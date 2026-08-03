@@ -171,12 +171,10 @@ pub async fn spawn_backend_service(
     loop {
         tokio::select! {
             _ = stream_state.wait_for_event() => {
-                // Group lines by program in arrival order and hand each group
-                // to the script in a single dispatch via `on_stream_batch`
-                // (falling back to `on_stream_line` per line). Multi-line
-                // event formats like pw-mon emit a header plus property
-                // continuations per change; collapsing to a single line per
-                // batch silently dropped the headers scripts filter on.
+                // Group lines by program in arrival order, one dispatch per
+                // group. Multi-line formats like pw-mon emit a header plus
+                // property continuations per change, so collapsing a batch to
+                // one line drops the headers scripts filter on.
                 let lines = stream_state.drain_lines();
                 if lines.is_empty() {
                     continue;

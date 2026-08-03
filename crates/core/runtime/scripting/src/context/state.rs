@@ -5,28 +5,22 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-/// Reactive state exposed to and mutated by Luau scripts.
-///
-/// When a script sets a variable, the state is marked dirty.
-/// The UI layer checks this flag to know when to rebuild the widget tree.
+/// Reactive state exposed to and mutated by Luau scripts. A script write marks
+/// the state dirty, which is how the UI layer knows to rebuild the widget tree.
 pub struct ScriptState {
     pub(super) variables: HashMap<String, Arc<Value>>,
     pub(super) dirty: bool,
-    // Optional proxies that forward get/set to external sources (used by the
-    // host to expose imported component variables as if they lived in the
-    // same namespace). The getter is invoked on reads; the setter, if
-    // provided, is invoked on writes from scripts.
+    // Forward get/set to external sources, so the host can expose imported
+    // component variables as if they lived in this namespace.
     proxies: HashMap<String, Proxy>,
     host_value_fingerprints: HashMap<String, u64>,
-    /// Monotonically increasing counter — incremented whenever a variable
-    /// actually changes. Used by callers to skip expensive re-serialization
-    /// when state is provably unchanged since the last flush.
+    /// Advances whenever a variable actually changes, so callers can skip
+    /// re-serialization when state is provably unchanged since the last flush.
     snapshot_generation: u64,
     cached_snapshot: Mutex<Option<(u64, Value)>>,
-    /// Advances on every observable mutation, including host-value writes and
-    /// proxy registration changes that deliberately do not advance
-    /// `snapshot_generation`. Lets callers cache full-state clones and skip
-    /// re-cloning when nothing could have changed.
+    /// Advances on every observable mutation, including the host-value writes
+    /// and proxy registrations that deliberately leave `snapshot_generation`
+    /// alone, so callers can cache full-state clones safely.
     mutation_generation: u64,
 }
 
@@ -49,18 +43,15 @@ impl ScriptState {
         self.snapshot_generation
     }
 
-    /// Returns true if any proxy is registered on this state. Proxy getters
-    /// are called by external sources and can change without going through
-    /// `set()`, so callers that use `snapshot_generation` for skip logic must
-    /// also check this and always refresh when proxies are present.
+    /// Proxy getters can change without going through `set()`, so callers that
+    /// skip work on `snapshot_generation` must always refresh when this is true.
     pub fn has_proxies(&self) -> bool {
         !self.proxies.is_empty()
     }
 
-    /// Counter that advances on every mutation of any kind (`set`,
-    /// `set_host_value`, proxy register/unregister). Cached clones of this
-    /// state are valid as long as this value is unchanged: proxies are not
-    /// carried by `Clone`, so live proxy reads cannot invalidate a clone.
+    /// Advances on every mutation of any kind. A cached clone stays valid while
+    /// this is unchanged: `Clone` does not carry proxies, so live proxy reads
+    /// cannot invalidate it.
     pub fn mutation_generation(&self) -> u64 {
         self.mutation_generation
     }
@@ -68,9 +59,8 @@ impl ScriptState {
     /// Set a variable and mark state as dirty.
     pub fn set(&mut self, name: impl Into<String>, value: Value) {
         let name = name.into();
-        // If a proxy is registered for this name and exposes a setter,
-        // forward the write to the proxy instead of storing locally. If the
-        // proxy is read-only, fall back to storing locally.
+        // Forward to the proxy's setter when there is one; a read-only proxy
+        // falls back to storing locally.
         if let Some(proxy) = self.proxies.get(&name) {
             if let Some(setter) = &proxy.setter {
                 (setter)(value);
@@ -161,10 +151,9 @@ impl ScriptState {
             .take();
     }
 
-    /// Set a host-maintained variable without requesting a component rebuild.
-    ///
-    /// Used for render-derived values, such as element layout metrics, that
-    /// should be visible to scripts but should not themselves cause a repaint.
+    /// Set a host-maintained variable without requesting a rebuild — for
+    /// render-derived values like layout metrics, which scripts can see but
+    /// which must not themselves cause a repaint.
     pub fn set_host_value(&mut self, name: impl Into<String>, value: Value) {
         let name = name.into();
         if self
@@ -320,8 +309,6 @@ impl Default for ScriptState {
 
 impl VariableStore for ScriptState {
     fn get(&self, name: &str) -> Option<Value> {
-        // If a proxy exists, call its getter, otherwise read from local
-        // variables.
         if let Some(proxy) = self.proxies.get(name) {
             return Some((proxy.getter)());
         }
@@ -336,8 +323,7 @@ impl VariableStore for ScriptState {
     }
 
     fn keys(&self) -> Vec<String> {
-        // Merge local variable keys with proxy keys. Proxies may shadow
-        // local variables.
+        // Proxies may shadow local variables.
         let mut keys: Vec<String> = self.variables.keys().cloned().collect();
         for key in self.proxies.keys() {
             if !self.variables.contains_key(key) {

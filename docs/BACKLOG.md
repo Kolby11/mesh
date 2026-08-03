@@ -45,6 +45,9 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
       behind generic providers. Startup sounds and backend profiling use the
       generic contract/runtime path; core-owned service state still branches.
       *(detail: "Module system — remaining open follow-ups")*
+- [ ] Reject `mesh.surfaceLayout`. It is still parsed as a compatibility input
+      for `mesh.surface`, which contradicts the manifest rule that old inputs
+      get migration diagnostics instead. No shipped module uses it.
 - [ ] **Deferred — unify the four contribution schemas.** Theme, icons, i18n,
       and keybinds under one `contributes` shape, only where they share honest
       structure. Revisit after profiles land. Capability inference and a

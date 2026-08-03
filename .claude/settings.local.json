@@ -193,7 +193,8 @@
       "Read(//home/kolby/.claude/**)",
       "Read(//home/kolby/.claude/plugins/**)",
       "Bash(echo \"fmt rc=$?\")",
-      "Bash(echo \"diffcheck rc=$?\")"
+      "Bash(echo \"diffcheck rc=$?\")",
+      "Bash(xargs cat)"
     ]
   }
 }

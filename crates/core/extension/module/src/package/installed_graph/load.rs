@@ -1,0 +1,312 @@
+use super::super::{
+    InstalledModuleEntry, ModuleManifest, ModuleManifestDiagnostic, ModuleManifestError,
+    ProfilePaths, RootModuleGraphManifest, ShellProfile,
+};
+use super::*;
+use rayon::prelude::*;
+use std::path::{Path, PathBuf};
+
+pub fn load_installed_module_graph(
+    root_module_graph_path: &Path,
+) -> Result<InstalledModuleGraph, ModuleManifestError> {
+    load_installed_module_graph_with(root_module_graph_path, None, load_module_manifests)
+}
+
+/// Resolve the installed graph against an explicit candidate profile without
+/// changing `active-profile`. Live switching uses this to validate and prepare
+/// a complete candidate before committing the pointer.
+pub fn load_installed_module_graph_for_profile(
+    root_module_graph_path: &Path,
+    profile: &ShellProfile,
+) -> Result<InstalledModuleGraph, ModuleManifestError> {
+    load_installed_module_graph_with(root_module_graph_path, Some(profile), load_module_manifests)
+}
+
+fn load_installed_module_graph_with(
+    root_module_graph_path: &Path,
+    candidate_profile: Option<&ShellProfile>,
+    load_manifests: impl Fn(&[PathBuf]) -> Result<Vec<LoadedModuleManifest>, ModuleManifestError>,
+) -> Result<InstalledModuleGraph, ModuleManifestError> {
+    let mut root = RootModuleGraphManifest::from_path(root_module_graph_path)?;
+    let root_dir = root_module_graph_path.parent().ok_or_else(|| {
+        ModuleManifestError::Validation(format!(
+            "root module graph path must have a parent directory: {}",
+            root_module_graph_path.display()
+        ))
+    })?;
+    let modules_dir = root_dir.join(&root.modules_dir);
+    let mut modules = Vec::new();
+
+    if root.modules.is_empty() {
+        // The root graph lists no modules: scan `modulesDir` for `module.json`
+        // and build the installed set from each module's own manifest. The root
+        // file then holds only decisions — `disabled`, `providers`, `layout`,
+        // `theme` — and a discovered module is enabled unless disabled there.
+        let module_dirs = discover_module_dirs(&modules_dir);
+        let loaded_manifests = load_manifests(&module_dirs)?;
+        for (module_dir, loaded) in module_dirs.iter().cloned().zip(loaded_manifests) {
+            let name = loaded.manifest.name.clone();
+            let kind = loaded.manifest.mesh.kind;
+            let relative = module_dir
+                .strip_prefix(&modules_dir)
+                .unwrap_or(&module_dir)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let enabled = !root.disabled.iter().any(|disabled| disabled == &name);
+            root.modules.insert(
+                name,
+                InstalledModuleEntry {
+                    kind,
+                    path: relative,
+                    enabled,
+                },
+            );
+            modules.push(loaded);
+        }
+    } else {
+        let module_dirs = root
+            .modules
+            .values()
+            .map(|entry| modules_dir.join(&entry.path))
+            .collect::<Vec<_>>();
+        modules = load_manifests(&module_dirs)?;
+    }
+
+    // Profiles are opt-in: without an `active-profile` file the root graph's
+    // decisions stay authoritative. Once selected, the profile owns composition
+    // and the installed directory becomes availability only. Dependencies and
+    // sole providers are inferred before enabled contributions are indexed.
+    let active_profile;
+    let profile = if let Some(profile) = candidate_profile {
+        Some(profile)
+    } else {
+        let profile_paths = ProfilePaths::from_root_graph(root_module_graph_path)?;
+        active_profile = profile_paths.load_active()?.map(|(_, profile)| profile);
+        active_profile.as_ref()
+    };
+    if let Some(profile) = profile {
+        let manifests = modules
+            .iter()
+            .map(|loaded| loaded.manifest.clone())
+            .collect::<Vec<_>>();
+        profile.apply_to_root(&mut root, &manifests)?;
+    }
+
+    InstalledModuleGraph::from_parts(root, modules)
+}
+
+#[cfg(test)]
+pub(in crate::package) fn load_installed_module_graph_serial(
+    root_module_graph_path: &Path,
+) -> Result<InstalledModuleGraph, ModuleManifestError> {
+    load_installed_module_graph_with(root_module_graph_path, None, load_module_manifests_serial)
+}
+
+#[cfg(test)]
+pub(in crate::package) fn load_discovered_module_manifests(
+    module_dirs: &[PathBuf],
+) -> Result<Vec<(PathBuf, LoadedModuleManifest)>, ModuleManifestError> {
+    let manifests = load_module_manifests(module_dirs)?;
+    Ok(module_dirs.iter().cloned().zip(manifests).collect())
+}
+
+/// Load ordered module directories without serializing file IO and JSON parsing
+/// on the caller. Indexed parallel iteration preserves the input order.
+pub(in crate::package) fn load_module_manifests(
+    module_dirs: &[PathBuf],
+) -> Result<Vec<LoadedModuleManifest>, ModuleManifestError> {
+    let loaded = module_dirs
+        .par_iter()
+        .map(|module_dir| load_module_manifest(module_dir))
+        .collect::<Vec<_>>();
+    loaded.into_iter().collect()
+}
+
+#[cfg(test)]
+pub(in crate::package) fn load_discovered_module_manifests_serial(
+    module_dirs: &[PathBuf],
+) -> Result<Vec<(PathBuf, LoadedModuleManifest)>, ModuleManifestError> {
+    let manifests = load_module_manifests_serial(module_dirs)?;
+    Ok(module_dirs.iter().cloned().zip(manifests).collect())
+}
+
+#[cfg(test)]
+pub(in crate::package) fn load_module_manifests_serial(
+    module_dirs: &[PathBuf],
+) -> Result<Vec<LoadedModuleManifest>, ModuleManifestError> {
+    module_dirs
+        .iter()
+        .map(|module_dir| load_module_manifest(module_dir))
+        .collect()
+}
+
+/// Recursively find directories under `modules_dir` that contain a
+/// `module.json`. Descent stops once a `module.json` is found, so nested
+/// resources inside a module are never treated as separate modules. Results are
+/// sorted for deterministic ordering.
+pub(in crate::package) fn discover_module_dirs(modules_dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    discover_module_dirs_into(modules_dir, &mut found);
+    found.sort();
+    found
+}
+
+fn discover_module_dirs_into(dir: &Path, found: &mut Vec<PathBuf>) {
+    if dir.join("module.json").is_file() {
+        found.push(dir.to_path_buf());
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            discover_module_dirs_into(&path, found);
+        }
+    }
+}
+
+pub fn load_module_manifest(
+    module_dir: &Path,
+) -> Result<LoadedModuleManifest, ModuleManifestError> {
+    let plugin_json = module_dir.join("plugin.json");
+    if plugin_json.exists() {
+        return Err(ModuleManifestError::Diagnostic {
+            diagnostic: ModuleManifestDiagnostic::error(
+                plugin_json,
+                None,
+                None,
+                "plugin.json is not a supported MESH module manifest",
+                "remove plugin.json or replace it with module.json",
+            ),
+        });
+    }
+
+    let module_json = module_dir.join("module.json");
+    let package_json = module_dir.join("package.json");
+    let mesh_toml = module_dir.join("mesh.toml");
+    let existing = [&module_json, &package_json, &mesh_toml]
+        .into_iter()
+        .filter(|path| path.exists())
+        .collect::<Vec<_>>();
+
+    if existing.len() > 1 {
+        let manifest_names = existing
+            .iter()
+            .filter_map(|path| path.file_name().and_then(|name| name.to_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(ModuleManifestError::Diagnostic {
+            diagnostic: ModuleManifestDiagnostic::error(
+                module_dir,
+                None,
+                None,
+                format!("ambiguous module manifest files found: {manifest_names}"),
+                "keep canonical module.json and remove the old manifest file",
+            ),
+        });
+    }
+
+    if module_json.exists() {
+        let content =
+            std::fs::read_to_string(&module_json).map_err(|source| ModuleManifestError::Io {
+                path: module_json.clone(),
+                source,
+            })?;
+        if crate::manifest::is_canonical_module_json(&content).map_err(|source| {
+            ModuleManifestError::Json {
+                path: module_json.clone(),
+                source,
+            }
+        })? {
+            let mut manifest = ModuleManifest::from_path(&module_json)?;
+            resolve_external_interface_contracts(&mut manifest, module_dir)?;
+            let diagnostics = manifest.localized_text_diagnostics(&module_json);
+            return Ok(LoadedModuleManifest {
+                manifest,
+                path: module_json,
+                source: ModuleManifestSource::CanonicalModuleJson,
+                diagnostics,
+            });
+        }
+
+        return Err(ModuleManifestError::Diagnostic {
+            diagnostic: ModuleManifestDiagnostic::error(
+                &module_json,
+                None,
+                Some("$".into()),
+                "legacy module.json shape uses id/type/api_version fields",
+                "replace legacy module.json fields with canonical name/version/mesh",
+            ),
+        });
+    }
+
+    if package_json.exists() {
+        return Err(ModuleManifestError::Diagnostic {
+            diagnostic: ModuleManifestDiagnostic::error(
+                package_json,
+                None,
+                None,
+                "package.json is a legacy MESH module manifest path",
+                "rename package.json to module.json",
+            ),
+        });
+    }
+
+    if mesh_toml.exists() {
+        return Err(ModuleManifestError::Diagnostic {
+            diagnostic: ModuleManifestDiagnostic::error(
+                mesh_toml,
+                None,
+                None,
+                "mesh.toml is a legacy MESH module manifest path",
+                "replace mesh.toml with canonical module.json",
+            ),
+        });
+    }
+
+    Err(ModuleManifestError::Validation(format!(
+        "no module.json found in {}",
+        module_dir.display()
+    )))
+}
+
+/// Replaces a module-relative external contract reference with its JSON object
+/// before graph construction. Keeping the loaded manifest canonical means the
+/// graph, runtime, and tooling share the existing contract path.
+fn resolve_external_interface_contracts(
+    manifest: &mut ModuleManifest,
+    module_dir: &Path,
+) -> Result<(), ModuleManifestError> {
+    let module_id = manifest.name.clone();
+    let mut declarations = manifest
+        .mesh
+        .interface
+        .iter_mut()
+        .chain(manifest.mesh.interfaces.iter_mut());
+
+    for declaration in &mut declarations {
+        let Some(serde_json::Value::String(relative_path)) = declaration.contract.as_ref() else {
+            continue;
+        };
+        let path = module_dir.join(relative_path);
+        let content = std::fs::read_to_string(&path).map_err(|source| ModuleManifestError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let contract: serde_json::Value =
+            serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
+                path: path.clone(),
+                source,
+            })?;
+        if !contract.is_object() {
+            return Err(ModuleManifestError::Validation(format!(
+                "external contract '{}' for interface {} in module {} must be a JSON object",
+                relative_path, declaration.name, module_id
+            )));
+        }
+        declaration.contract = Some(contract);
+    }
+    Ok(())
+}

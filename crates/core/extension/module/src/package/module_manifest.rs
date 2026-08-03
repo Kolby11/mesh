@@ -245,10 +245,8 @@ impl MeshModuleSection {
         {
             self.entrypoints.main = Some(entry.clone());
         }
-        // Auto-generate the default layout contribution for frontend modules that
-        // set `entry` but omit an explicit `provides.layout` / `contributes.layout`.
-        // This lets simple frontends declare only `entry` rather than also repeating
-        // the same path under `provides.layout`.
+        // Frontends that set `entry` and omit `provides.layout` get the default
+        // layout contribution, so a simple module declares the path only once.
         if self.kind == ModuleKind::Frontend
             && self.contributes.layout.is_empty()
             && self.provides.layout.is_empty()
@@ -260,10 +258,8 @@ impl MeshModuleSection {
                 label: None,
             });
         }
-        // The compact `mesh.surface` block is the canonical author surface for
-        // surface placement/sizing/policy. It supersedes the legacy
-        // `mesh.surfaceLayout` key: when present it becomes `surface_layout`,
-        // the single typed runtime home read by `surface_layout_from_manifest`.
+        // `mesh.surface` is the author-facing block; normalizing it into
+        // `surface_layout` gives `surface_layout_from_manifest` one typed home.
         if let Some(surface) = self.surface.take() {
             self.surface_layout = Some(surface);
         }
@@ -304,12 +300,11 @@ impl MeshModuleSection {
                     "interface modules must declare mesh.interface.version".into(),
                 ));
             }
-            // `mesh.interface.contract` is optional for v0: an interface module
-            // may ship only name/version/domain and let the contract be
-            // inferred from the provider's emitted state. When absent, the
-            // graph reports `missing_interface_contract`; contract-based
-            // validation (capabilities, events) simply does not apply until a
-            // contract exists.
+            // `mesh.interface.contract` is optional: a module may ship only
+            // name/version/domain and let the contract be inferred from the
+            // provider's emitted state. The graph then reports
+            // `missing_interface_contract` and contract-based validation
+            // (capabilities, events) does not apply.
         }
         if !self.interfaces.is_empty() {
             if self.kind != ModuleKind::Backend {

@@ -1,9 +1,5 @@
-/// Legacy typed registry used while Rust-side callers finish migrating to
-/// module-declared interfaces.
-///
-/// The long-term runtime path is contract + provider lookup via the interface
-/// registry. This registry still holds one active typed backend per service so
-/// older Rust integrations can keep working during the transition.
+/// Typed registry holding one active backend per service, for Rust-side callers
+/// that have not moved to contract + provider lookup via the interface registry.
 ///
 /// ```text
 /// Backend module registers:   registry.register_audio(Box::new(PipewireBackend))
@@ -24,10 +20,8 @@ pub struct ServiceEntry {
     pub module_id: String,
 }
 
-/// Central registry that holds one active typed backend per service type.
-///
-/// New frontend modules should prefer `require("mesh.<service>")` and contract
-/// providers. This registry is for compatibility with older Rust call sites.
+/// Holds one active typed backend per service type. Frontend modules should use
+/// `require("mesh.<service>")` and contract providers instead.
 #[derive(Default)]
 pub struct ServiceRegistry {
     services: RwLock<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,
@@ -39,11 +33,7 @@ impl ServiceRegistry {
         Self::default()
     }
 
-    /// Register a backend for a service type.
-    ///
-    /// If a backend for this type is already registered, it is replaced.
-    ///
-    /// # Example
+    /// Register a backend for a service type, replacing any existing one.
     ///
     /// ```ignore
     /// registry.register::<dyn AudioService>(
@@ -78,11 +68,7 @@ impl ServiceRegistry {
         );
     }
 
-    /// Look up the active backend for a service type.
-    ///
-    /// Returns `None` if no backend is registered for this type.
-    ///
-    /// # Example
+    /// The active backend for a service type, or `None`.
     ///
     /// ```ignore
     /// let audio: Arc<dyn AudioService> = registry.get::<dyn AudioService>().unwrap();

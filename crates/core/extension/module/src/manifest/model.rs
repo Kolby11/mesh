@@ -30,8 +30,7 @@ pub struct Manifest {
     pub provides: Vec<ProvidedInterface>,
     #[serde(default)]
     pub interface: Option<InterfaceSection>,
-    /// Inline interface contract declarations from a backend module
-    /// (`mesh.interfaces`): the low-friction contract carrier for
+    /// Inline `mesh.interfaces` contracts: the low-friction carrier for
     /// single-provider domains.
     #[serde(default)]
     pub interfaces: Vec<InterfaceSection>,
@@ -79,7 +78,7 @@ impl Manifest {
             .unwrap_or_default()
     }
 
-    /// Return the primary service declaration for compatibility with the older runtime.
+    /// The primary service declaration, synthesized from `provides` if absent.
     pub fn primary_service(&self) -> Option<ServiceSection> {
         if let Some(service) = &self.service {
             return Some(service.clone());
@@ -119,21 +118,18 @@ impl Manifest {
             .map(|component| component.tag.as_str())
     }
 
-    /// True when the module declares its own top-level surface (anchor, layer,
-    /// size, keyboard mode). A module that only exports an embeddable component
-    /// has no surface of its own.
+    /// True when the module declares its own top-level surface. A module that
+    /// only exports an embeddable component has no surface of its own.
     pub fn declares_surface(&self) -> bool {
         self.surface_layout.is_some()
     }
 
-    /// True when the module is meant to be *embedded* into a host surface rather
-    /// than owning a standalone Wayland surface: it exports a component (so other
-    /// modules can `require` and instantiate it) and declares no `mesh.surface`
-    /// block. The shell must not create a layer surface for such a module; its
-    /// `<popover>`/content is promoted into a child surface of whatever host
-    /// embeds it. Kept explicit (export present *and* surface absent) rather than
-    /// inferred from a missing surface alone, so a frontend module that simply
-    /// forgot its surface block is not silently treated as embeddable.
+    /// True when the module exports a component and declares no `mesh.surface`,
+    /// so it is embedded into a host surface rather than owning one. The shell
+    /// creates no layer surface for it; its `<popover>` content is promoted
+    /// into a child surface of the embedding host. Requiring an export as well
+    /// as an absent surface keeps a frontend that merely forgot its surface
+    /// block from being silently treated as embeddable.
     pub fn is_embeddable_component(&self) -> bool {
         self.exports.component.is_some() && !self.declares_surface()
     }
@@ -244,7 +240,8 @@ impl std::fmt::Display for ModuleType {
     }
 }
 
-/// Legacy single-service declaration used by current `mesh.toml` manifests.
+/// Single-service declaration, collapsed from `mesh.provides` when a module
+/// provides exactly one interface.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceSection {
     pub provides: String,
@@ -253,7 +250,7 @@ pub struct ServiceSection {
     pub priority: u32,
 }
 
-/// New-style backend/interface declaration from `package.json`.
+/// One `mesh.provides` entry: an interface this backend implements.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProvidedInterface {
     pub interface: String,
@@ -732,45 +729,31 @@ pub struct SlotContribution {
     pub id: Option<String>,
 }
 
-/// Surface placement, sizing, and renderer policy.
+/// The typed home for the author-facing `mesh.surface` block.
 ///
-/// This is the typed home for the compact author-facing `mesh.surface` block.
-/// Core owns the canonical defaults (see `generic_surface_layout_fallback` in
-/// `mesh-core-surface-config`); authors declare only the fields they want to
-/// override. The same struct also backs the legacy `mesh.surfaceLayout` key —
-/// `mesh.surface` simply replaces it during manifest normalization.
+/// Core owns the canonical defaults (`generic_surface_layout_fallback` in
+/// `mesh-core-surface-config`); authors declare only overrides.
 ///
-/// This section carries **placement only** — `anchor`, `layer`,
-/// `exclusive_zone`, `keyboard_mode`, `visible_on_start`, and `margins`. Surface
-/// **sizing** (width/height, content-measure policy, clamps) and the show/hide
-/// transition are no longer authored here: they are expressed in the
-/// component's CSS (`width`/`height`/`min-*`/`max-*` on the surface root, a CSS
-/// `transition` on the root) and measured at paint time. See
+/// Placement only. Sizing and the show/hide transition live in the component's
+/// CSS on the surface root and are measured at paint time — see
 /// `docs/spec/03-components.md` §2.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SurfaceLayoutSection {
-    /// Which compositor shell protocol realizes this surface:
-    /// `"layer"` (default, `zwlr_layer_shell_v1` shell chrome) or `"window"`
-    /// (`xdg_toplevel`, an ordinary application window).
+    /// `"layer"` (default, `zwlr_layer_shell_v1` chrome) or `"window"`
+    /// (`xdg_toplevel`).
     ///
-    /// The layer-shell placement fields below (`anchor`, `layer`,
-    /// `exclusive_zone`, `margins`, `keyboard_mode`) have no meaning for a
-    /// window and are rejected as manifest diagnostics rather than ignored —
-    /// the compositor, not MESH, places a toplevel. The window fields
-    /// (`title`, `app_id`, `resizable`, `decorations`) are likewise rejected
-    /// on a layer surface.
+    /// Fields that belong to the other role are rejected as manifest
+    /// diagnostics rather than ignored — the compositor, not MESH, places a
+    /// toplevel.
     #[serde(default)]
     pub role: Option<String>,
-    /// Whether this surface may be moved between roles while it is running
-    /// ("pop out" a panel widget into a window and dock it back).
+    /// Whether the surface may move between roles while running ("pop out" a
+    /// panel widget into a window and dock it back).
     ///
-    /// A promotable surface holds both roles over its life, so it is the one
-    /// case where declaring *both* field sets is meaningful and the
-    /// role-mismatch diagnostic does not apply: `anchor`/`layer`/`margins`
-    /// describe it as chrome, `title`/`appId` describe it as a window, and
-    /// [`Self::role`] says which it starts as. Runtime role changes are refused
-    /// for surfaces that do not declare this — a component laid out for one role
-    /// can look wrong in the other, so the author opts in.
+    /// The one case where declaring *both* field sets is meaningful, so the
+    /// role-mismatch diagnostic does not apply. Runtime role changes are
+    /// refused without this: a component laid out for one role can look wrong
+    /// in the other, so the author opts in.
     #[serde(default)]
     pub promotable: Option<bool>,
     /// Screen edge: "top" | "bottom" | "left" | "right"
@@ -791,11 +774,10 @@ pub struct SurfaceLayoutSection {
     /// "none" | "on_demand" | "exclusive" (durable default; runtime may override)
     #[serde(default)]
     pub keyboard_mode: Option<String>,
-    /// Request compositor background blur for this surface. MESH cannot force
-    /// blur through a Wayland protocol on every compositor (e.g. Hyprland does
-    /// not expose `org_kde_kwin_blur`); instead, when this is true the surface
-    /// is given a `:blur`-suffixed layer-shell namespace that a single
-    /// compositor rule can target (Hyprland: `layerrule = blur, :blur$`).
+    /// Request compositor background blur. No Wayland protocol forces it
+    /// everywhere (Hyprland does not expose `org_kde_kwin_blur`), so this
+    /// instead gives the surface a `:blur`-suffixed layer-shell namespace that
+    /// one compositor rule can target (Hyprland: `layerrule = blur, :blur$`).
     #[serde(default)]
     pub blur: Option<bool>,
     /// Window title (`role: "window"` only). Localizable.
@@ -865,15 +847,12 @@ pub struct AssetsSection {
     pub icons: Option<IconAssets>,
 }
 
-/// Module-shipped icons. Authoring shortcut: `"icons": "assets/icons"` is
-/// equivalent to `"icons": { "path": "assets/icons", "kind": "xdg" }` -
-/// the directory is treated as an XDG icon pack rooted there.
+/// Module-shipped icons. `"icons": "assets/icons"` is shorthand for
+/// `{ "path": "assets/icons", "kind": "xdg" }`.
 ///
-/// For font-glyph icon packs (Nerd Fonts and similar), use the object form
-/// with `kind = "font"` and the in-pack paths to the font file and glyph
-/// map JSON. The shell registers the pack at `<module_id>` so authors can
-/// reference its assets via candidates like `<module_id>:audio-volume-muted`
-/// in `icons.toml`.
+/// Font-glyph packs (Nerd Fonts and similar) use the object form with
+/// `kind = "font"`. The shell registers the pack at `<module_id>`, so its
+/// assets are referenced as `<module_id>:audio-volume-muted`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum IconAssets {
@@ -913,14 +892,10 @@ impl IconAssets {
     }
 }
 
-/// Frontend-side icon configuration declared in `package.json`. Mappings
-/// belong in icon-pack modules — frontends only declare per-icon
-/// **overrides** (an author-side escape hatch for pinning a specific glyph
-/// regardless of the active icon-pack chain) and an opt-out flag for the
-/// shell's implicit default pack.
-///
-/// Override values use the `<pack-id>/<asset-name>` syntax shared with
-/// pack-qualified template names and shell user overrides.
+/// Frontend-side icon configuration. Mappings belong in icon-pack modules;
+/// frontends declare only per-icon overrides — an escape hatch for pinning a
+/// glyph regardless of the active pack chain — and an opt-out from the shell's
+/// implicit default pack. Overrides use the `<pack-id>/<asset-name>` syntax.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IconsSection {
     #[serde(default)]
@@ -938,25 +913,19 @@ impl IconsSection {
     }
 }
 
-/// Icon-pack module section (`mesh.kind = "icon-pack"`). Contains only
-/// the mapping table and metadata — no icon assets are shipped.
+/// Icon-pack module section (`mesh.kind = "icon-pack"`): mapping table and
+/// metadata only, no shipped assets.
 ///
-/// `id` is the short alias used in pack-qualified syntax
-/// (`<pack-id>/<asset-name>`). Distinct from the full module id so the
-/// alias can be short and stable.
-///
-/// `requires` declares system assets the pack expects to resolve against.
-/// All version constraints are **soft** — a missing or older asset logs
-/// a warning at discovery time but never blocks loading.
-///
-/// `axes` declares which variable-font axes the underlying assets
-/// expose; the painter uses this to gate CSS `--icon-*` custom
-/// properties.
-///
-/// `mappings` is a flat 1:1 table from logical name to a target string
-/// of the form `<asset-pack>/<asset-name>` where `asset-pack` is either
-/// an XDG icon theme name installed on the system, an alias declared in
-/// `requires.fonts`, or an absolute file path.
+/// - `id` — short alias for pack-qualified syntax (`<pack-id>/<asset-name>`),
+///   kept distinct from the module id so it can stay short and stable.
+/// - `requires` — system assets the pack resolves against. All version
+///   constraints are **soft**: a missing or older asset warns at discovery but
+///   never blocks loading.
+/// - `axes` — variable-font axes the assets expose; the painter gates CSS
+///   `--icon-*` custom properties on these.
+/// - `mappings` — flat logical name → `<asset-pack>/<asset-name>`, where
+///   `asset-pack` is an installed XDG icon theme, an alias from
+///   `requires.fonts`, or an absolute path.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IconPackSection {
     pub id: String,
@@ -976,11 +945,9 @@ pub struct IconPackRequires {
     pub themes: Vec<IconPackThemeRequirement>,
 }
 
-/// One entry in an icon-pack's `requires.fonts` list. `alias` is the
-/// short name used in mapping targets (`<alias>/<glyph-name>`); `family`
-/// is the fontconfig fallback family; `file` optionally points at a bundled
-/// font inside the module; and `glyph_map` translates glyph names to
-/// codepoints at render time.
+/// One `requires.fonts` entry: `alias` names the font in mapping targets
+/// (`<alias>/<glyph-name>`), `family` is the fontconfig fallback, `file` may
+/// point at a bundled font, and `glyph_map` resolves glyph names to codepoints.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IconPackFontRequirement {
     pub alias: String,

@@ -1,15 +1,13 @@
 //! Long-running subprocess streams for backend modules.
 //!
-//! `mesh.exec_stream(program, args)` spawns a subprocess and asynchronously
-//! reads its stdout line-by-line. Each line is queued in `StreamState`; the
-//! backend service loop drains pending lines on every wakeup and invokes
-//! `on_stream_batch(self, program, lines)` once per program with the full
-//! ordered batch, or falls back to `on_stream_line(self, program, line)` once
-//! per line if only the legacy hook is defined.
+//! `mesh.exec_stream(program, args)` spawns a subprocess and reads its stdout
+//! line-by-line into `StreamState`. The backend service loop drains pending
+//! lines on every wakeup and calls `on_stream_batch(self, program, lines)` once
+//! per program, or `on_stream_line(self, program, line)` per line when only
+//! that hook exists.
 //!
-//! This is the event-driven counterpart to `mesh.exec`. It enables backends to
-//! react to external event sources (e.g. `pactl subscribe`, `pw-mon`,
-//! `journalctl -f`) instead of polling.
+//! The event-driven counterpart to `mesh.exec`: backends react to sources like
+//! `pactl subscribe`, `pw-mon`, or `journalctl -f` instead of polling.
 
 use std::collections::VecDeque;
 use std::process::Stdio;

@@ -3,29 +3,20 @@
 //! Graph scanning cross-checks module scripts against module declarations:
 //! translation keys against the default catalog, published channels against the
 //! shell-owned event namespace, backend events against the interface contract.
+//! Everything goes through a real Luau parser, so a call is a call and a string
+//! is a string — never a substring match over comments or `<style>` blocks.
 //!
-//! Those checks used to be substring searches over the raw file, which is wrong
-//! in both directions. `content.find("t(")` matches the tail of any identifier,
-//! so `string.format("%d%%", x)` and `assert("boom")` were reported as
-//! translation keys; the searches also read comments, string literals, and
-//! `<style>` blocks as if they were code. They now go through a real Luau
-//! parser, so a call is a call and a string is a string.
-//!
-//! A source the parser rejects yields no findings rather than wrong ones. A
-//! module whose script does not parse has a real problem, and the runtime
-//! reports that separately when it loads the script — an advisory graph
-//! diagnostic guessing at half-parsed text would only add noise.
+//! A source the parser rejects yields no findings rather than wrong ones: the
+//! runtime already reports the parse failure when it loads the script.
 
 use full_moon::ast::{Ast, Call, Expression, FunctionArgs, FunctionCall, Index, Prefix, Suffix};
 use full_moon::tokenizer::{TokenReference, TokenType};
 use full_moon::visitors::Visitor;
 
-/// Stack for the parser thread. `full_moon` is recursive descent and its
-/// unoptimized frames are large: a ~1000-line module script needs more than the
-/// 2 MiB a default thread gets in a debug build. A stack overflow aborts the
-/// process instead of returning an error, so this is sized well past anything
-/// a module realistically contains — eight copies of the largest shipped script
-/// concatenated still parse inside 8 MiB.
+/// Stack for the parser thread. `full_moon` is recursive descent with large
+/// unoptimized frames: a ~1000-line script overruns the 2 MiB a default debug
+/// thread gets, and a stack overflow aborts the process rather than erroring.
+/// Sized well past anything a module realistically contains.
 const PARSER_STACK_BYTES: usize = 16 * 1024 * 1024;
 
 /// The Luau in one source file, split by how it has to be parsed.
@@ -48,9 +39,8 @@ pub(crate) struct LuauSources<'a> {
 /// bracket index is not statically resolvable and is skipped.
 ///
 /// Calls whose first argument is not a string literal (`t(key_variable)`,
-/// `publish(prefix .. name)`) contribute nothing. That is deliberate — it is
-/// the same "not checkable statically" answer the old scanners gave, so a
-/// dynamic call site never produces a diagnostic about a key nobody wrote.
+/// `publish(prefix .. name)`) contribute nothing, so a dynamic call site never
+/// produces a diagnostic about a key nobody wrote.
 pub(crate) fn static_call_string_arguments(
     sources: &LuauSources<'_>,
     callees: &[&str],
@@ -201,9 +191,8 @@ mod tests {
 
     #[test]
     fn only_whole_identifier_callees_match() {
-        // The substring scanner this replaced matched the `t(` inside `format(`
-        // and `assert(`, reporting their first string argument as a translation
-        // key. `string.format("%d%%", …)` is live in the shipped navigation bar.
+        // A substring scan would match the `t(` inside `format(` and `assert(`
+        // and report their first argument as a translation key.
         let source = r#"
             local label = string.format("%d%%", value)
             assert("boom")
@@ -314,9 +303,8 @@ mod tests {
 
     #[test]
     fn the_largest_shipped_script_shape_parses_within_the_parser_stack() {
-        // Guards the stack sizing: the parser runs on a fixed stack and an
-        // overflow aborts the process rather than failing the scan. Eight
-        // copies of a large module script is well past anything shipped.
+        // Guards the stack sizing: an overflow aborts the process rather than
+        // failing the scan.
         let statement = "local value = t(\"nav.volume\") .. string.format(\"%d%%\", percent)\n";
         let chunk = statement.repeat(8_000);
 

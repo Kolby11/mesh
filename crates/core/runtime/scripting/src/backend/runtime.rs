@@ -235,12 +235,10 @@ impl BackendScriptContext {
 
     /// Dispatch one wakeup's worth of subprocess lines to the script.
     ///
-    /// If the script defines `on_stream_batch(self, program, lines)`, it is
-    /// called once with the full ordered batch — scripts that only need a
-    /// "something changed" signal can ignore `lines` entirely. Otherwise the
-    /// legacy `on_stream_line(self, program, line)` hook is called once per
-    /// line, preserving the documented per-line semantics. Returns the state
-    /// snapshot taken after the whole batch is processed.
+    /// `on_stream_batch(self, program, lines)` receives the full ordered batch;
+    /// scripts that only need a "something changed" signal can ignore `lines`.
+    /// Otherwise `on_stream_line(self, program, line)` runs once per line.
+    /// Returns the state snapshot taken after the whole batch.
     pub fn run_stream_batch(
         &mut self,
         program: &str,
