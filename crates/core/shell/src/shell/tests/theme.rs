@@ -215,7 +215,7 @@ fn shell_theme_fallback_backend_restart_keeps_latest_state_on_resolved_theme() {
 
 #[test]
 fn settings_theme_reload_syncs_theme_service_state() {
-    let _env_lock = SETTINGS_ENV_LOCK.lock().unwrap();
+    let _env_lock = settings_env_lock();
     let runtime = Runtime::new().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let settings_path = dir.path().join("settings.json");
@@ -244,7 +244,7 @@ fn settings_theme_reload_syncs_theme_service_state() {
     shell.reload_locale_if_settings_changed().unwrap();
 
     assert_eq!(shell.settings.theme.active, "mesh-default-light");
-    assert_eq!(seen_events.lock().unwrap().len(), 1);
+    assert_eq!(recorded_updates_for(&seen_events, "mesh.theme"), 1);
     assert_eq!(
         shell
             .latest_service_state
@@ -311,7 +311,7 @@ fn set_theme_loads_css_package_and_updates_runtime_setting() {
 
 #[test]
 fn settings_theme_reload_publishes_resolved_fallback_theme_state() {
-    let _env_lock = SETTINGS_ENV_LOCK.lock().unwrap();
+    let _env_lock = settings_env_lock();
     let runtime = Runtime::new().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let settings_path = dir.path().join("settings.json");
@@ -341,7 +341,7 @@ fn settings_theme_reload_publishes_resolved_fallback_theme_state() {
 
     assert_eq!(shell.settings.theme.active, "missing-theme");
     assert_eq!(shell.theme.active().id, "mesh-default-dark");
-    assert_eq!(seen_events.lock().unwrap().len(), 1);
+    assert_eq!(recorded_updates_for(&seen_events, "mesh.theme"), 1);
     assert_eq!(
         shell
             .latest_service_state
@@ -353,7 +353,7 @@ fn settings_theme_reload_publishes_resolved_fallback_theme_state() {
 
 #[test]
 fn theme_file_recovery_syncs_mesh_theme_latest_state_and_components() {
-    let _env_lock = SETTINGS_ENV_LOCK.lock().unwrap();
+    let _env_lock = settings_env_lock();
     let runtime = Runtime::new().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let theme_dir = dir.path().join("themes");

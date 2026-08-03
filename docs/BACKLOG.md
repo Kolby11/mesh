@@ -192,15 +192,17 @@ gate where the win is structural.
 
 ### Test debt
 
-- [ ] `mesh-core-elements` style tests fail:
-      `indexed_theme_defaults_reuse_lowered_declarations_per_revision` and
-      `shipped_navigation_style_expected_diagnostics_do_not_block_tokens`.
-      Hidden until 2026-08-03 because the crate's test build did not compile.
-- [ ] `mesh-core-frontend`: `for_node_wrapper_carries_no_padding_or_gap` fails
-      (`compiler/src/lib.rs:1080`), predating the fragment control-flow work.
-- [ ] 20 `mesh-core-shell` tests fail on `main` (theme reload, slider drag,
-      real-surface geometry, debug snapshots). Triage as one batch — the red
+- [ ] 8 `mesh-core-shell` tests still fail (2026-08-04, down from 20; every
+      other crate is green). Remaining: the theme-selector entering-frame pair
+      and the settings tab switch, the debug inspector and
+      `icon_reliability_core_surfaces_proof`, `container_size_restyle_preserves_runtime_and_local_state`,
+      `real_navigation_bar_repaints_existing_transition_state_when_theme_changes_back_to_dark`,
+      and `threshold_narrow_below_half`. Triage the rest of the batch — the red
       baseline is what let the input-region regressions keep landing unnoticed.
+- [ ] `phase26_real_surface_baseline_emits_canonical_proof_measurements` passes
+      single-threaded and fails under the default parallel run ("hover should
+      report icon/image raster cache activity") — it reads a process-wide
+      raster cache another test warms.
 
 ### Startup and catalog
 

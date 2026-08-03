@@ -2,6 +2,17 @@ use super::*;
 
 pub(super) static SETTINGS_ENV_LOCK: Mutex<()> = Mutex::new(());
 
+/// Serialize the tests that mutate process-wide settings environment variables.
+///
+/// The lock guards `()`, so a panic under it leaves nothing inconsistent —
+/// recovering from poisoning keeps one genuine failure from re-reporting itself
+/// as unrelated failures in every test that takes the lock afterwards.
+pub(super) fn settings_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    SETTINGS_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 pub(super) struct EnvGuard {
     pub(super) key: &'static str,
     pub(super) old: Option<String>,
@@ -294,6 +305,25 @@ pub(super) fn service_update(
         source_module: provider_id.to_string(),
         payload,
     }
+}
+
+/// Count the recorded `Updated` events for one interface.
+///
+/// A reload broadcasts every service whose state it touched — a theme reload
+/// also publishes `mesh.settings` — so asserting on the total makes a test
+/// about one service fail when an unrelated service starts broadcasting.
+pub(super) fn recorded_updates_for(
+    events: &Arc<Mutex<Vec<ServiceEvent>>>,
+    interface: &str,
+) -> usize {
+    events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(
+            |event| matches!(event, ServiceEvent::Updated { service, .. } if service == interface),
+        )
+        .count()
 }
 
 pub(super) struct RecordingComponent {

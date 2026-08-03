@@ -913,7 +913,10 @@ fn handlerless_slider_drag_uses_interaction_restyle_not_script_rebuild() {
         20.0,
         &[],
     )]));
-    component.active_slider_id = Some(component.last_tree.as_ref().unwrap().children[0].id);
+    // A hand-built tree carries freshly minted node ids, not the key-derived
+    // ones the retained tree assigns, so track the drag by the node's own id.
+    let slider_id = component.last_tree.as_ref().unwrap().children[0].id;
+    component.active_slider_id = Some(slider_id);
     component.dirty = false;
     component.dirty_types = ComponentDirtyFlags::empty();
 
@@ -926,11 +929,7 @@ fn handlerless_slider_drag_uses_interaction_restyle_not_script_rebuild() {
         )
         .unwrap();
 
-    assert!(
-        component
-            .slider_values
-            .contains_key(&runtime_node_id_for_key("root/0"))
-    );
+    assert!(component.slider_values.contains_key(&slider_id));
     assert!(
         component
             .dirty_types

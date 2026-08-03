@@ -271,6 +271,18 @@ end
             },
         )
         .unwrap();
+    // Choice activation lands on release, so the press alone must not select.
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
 
     assert_eq!(
         runtime_value(&component, "selected_locale"),
@@ -445,7 +457,7 @@ end
             &theme,
             240,
             160,
-            ComponentInput::KeyReleased {
+            ComponentInput::KeyPressed {
                 key: "Enter".into(),
                 modifiers: KeyModifiers {
                     ctrl: true,

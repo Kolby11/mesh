@@ -799,7 +799,11 @@ fn narrow_ancestor_stack_beats_parent_map_benchmark() {
 }
 
 #[test]
-fn targeted_default_merge_only_updates_affected_subtrees() {
+fn targeted_attribute_state_only_updates_affected_subtrees() {
+    // Element tag defaults are resolved during style resolution, not here;
+    // `apply_runtime_attribute_state` owns the attribute-driven layout state,
+    // and this proves it reaches the affected node's whole subtree and nothing
+    // outside it.
     let mut tree = keyed_node(
         "root",
         vec![
@@ -807,28 +811,37 @@ fn targeted_default_merge_only_updates_affected_subtrees() {
             keyed_node("root/1", vec![keyed_node("root/1/0", vec![])]),
         ],
     );
-    tree.children[0].tag = "column".into();
-    tree.children[0].children[0].tag = "text".into();
-    tree.children[0].children[0].computed_style.color = mesh_core_elements::Color::TRANSPARENT;
-    tree.children[1].tag = "column".into();
-    tree.children[1].children[0].tag = "text".into();
-    tree.children[1].children[0].computed_style.color = mesh_core_elements::Color::TRANSPARENT;
+    for branch in 0..2 {
+        for descendant in [None, Some(0)] {
+            let node = match descendant {
+                None => &mut tree.children[branch],
+                Some(child) => &mut tree.children[branch].children[child],
+            };
+            node.attributes.insert("hidden".into(), "true".into());
+        }
+    }
 
     let affected =
         HashSet::from([crate::shell::component::runtime_tree::stable_runtime_node_id("root/0")]);
 
     apply_runtime_attribute_state_for_ids(&mut tree, &affected);
 
+    use mesh_core_elements::style::Display;
+    assert_eq!(tree.children[0].computed_style.display, Display::None);
     assert_eq!(
-        tree.children[0].computed_style.direction,
-        mesh_core_elements::style::FlexDirection::Column
+        tree.children[0].children[0].computed_style.display,
+        Display::None,
+        "the affected node's descendants are updated with it"
     );
-    assert_eq!(tree.children[0].children[0].computed_style.color.a, 255);
-    assert_eq!(
-        tree.children[1].computed_style.direction,
-        mesh_core_elements::style::FlexDirection::Row
+    assert_ne!(
+        tree.children[1].computed_style.display,
+        Display::None,
+        "an unaffected sibling keeps its previous layout state"
     );
-    assert_eq!(tree.children[1].children[0].computed_style.color.a, 0);
+    assert_ne!(
+        tree.children[1].children[0].computed_style.display,
+        Display::None
+    );
 }
 
 // cargo test -p mesh-core-shell --release -- direct_interaction_scope_beats_full_tree_walk --ignored --nocapture

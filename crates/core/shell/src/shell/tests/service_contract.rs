@@ -247,7 +247,12 @@ fn service_command_dispatch_records_debug_method_call() {
 
 #[test]
 fn backend_command_result_records_debug_method_result() {
+    let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
+    // Only the interface's *active* provider records a result, so a stale
+    // provider's late reply cannot rewrite the debug history.
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
     let mut pending = VecDeque::new();
 
     shell

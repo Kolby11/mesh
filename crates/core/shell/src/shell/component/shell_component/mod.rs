@@ -255,14 +255,22 @@ impl ShellComponent for FrontendSurfaceComponent {
             if !has_read {
                 continue;
             }
-            apply_service_update_with_name_and_fingerprint(
+            if apply_service_update_with_name_and_fingerprint(
                 runtime.script_ctx.state_mut(),
                 true,
                 service_name,
                 source_module,
                 payload,
                 payload_fingerprint,
-            );
+            ) {
+                // Template expressions are Luau closures over `_ENV`, so the
+                // trace has to land there too — reaching `ScriptState` alone
+                // renders `{last_service_update.name}` as an empty string.
+                let _ = runtime.script_ctx.seed_context_global(
+                    "last_service_update",
+                    crate::shell::service::service_update_metadata(service_name, source_module),
+                );
+            }
             let state_changed = runtime.script_ctx.state().is_dirty();
             if state_changed || {
                 let previous = runtime.script_ctx.state().get(service_name);

@@ -16,8 +16,23 @@ fn indexed_theme_defaults_reuse_lowered_declarations_per_revision() {
     let first = indexed_theme_defaults(u64::MAX - 1, &defaults);
     let second = indexed_theme_defaults(u64::MAX - 1, &defaults);
     assert!(Arc::ptr_eq(&first, &second));
-    assert!(matches!(&first[0].property, IndexedProperty::Custom(_)));
-    assert!(matches!(&first[1].value, StyleValue::Var(_)));
+    // `ComponentDefaults` preserves insertion order, so match on the declaration
+    // rather than its position: the custom property stays custom and the token
+    // reference stays unresolved until the node resolves it.
+    let custom = first
+        .iter()
+        .find(|declaration| {
+            matches!(&declaration.property, IndexedProperty::Custom(name) if name == "--local-accent")
+        })
+        .expect("custom property is indexed as custom");
+    assert!(matches!(&custom.value, StyleValue::Literal(value) if value == "#445566"));
+    let font_size = first
+        .iter()
+        .find(|declaration| {
+            matches!(&declaration.property, IndexedProperty::Lowered { name, .. } if name == "font-size")
+        })
+        .expect("font-size is lowered");
+    assert!(matches!(&font_size.value, StyleValue::Var(_)));
 
     let changed_revision = indexed_theme_defaults(u64::MAX, &defaults);
     assert!(!Arc::ptr_eq(&first, &changed_revision));

@@ -1205,6 +1205,25 @@ pub(super) fn find_node_by_mesh_key<'a>(node: &'a WidgetNode, key: &str) -> Opti
         .find_map(|child| find_node_by_mesh_key(child, key))
 }
 
+/// Find the first node whose `attr` starts with `prefix` — for attributes that
+/// carry a live value, such as an `aria-label` ending in the current level.
+pub(super) fn first_node_with_attr_prefix<'a>(
+    node: &'a WidgetNode,
+    attr: &str,
+    prefix: &str,
+) -> Option<&'a WidgetNode> {
+    if node
+        .attributes
+        .get(attr)
+        .is_some_and(|candidate| candidate.starts_with(prefix))
+    {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .find_map(|child| first_node_with_attr_prefix(child, attr, prefix))
+}
+
 pub(super) fn first_node_with_attr<'a>(
     node: &'a WidgetNode,
     attr: &str,

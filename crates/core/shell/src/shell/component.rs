@@ -1,7 +1,7 @@
 use super::service::{
     ServiceCapabilities, apply_service_update_with_name,
-    apply_service_update_with_name_and_fingerprint, script_events_to_requests, seed_service_state,
-    service_capabilities,
+    apply_service_update_with_name_and_fingerprint, script_events_to_requests,
+    seed_service_context, service_capabilities,
 };
 use super::surface_layout::{SurfaceLayoutSettings, resolve_frontend_module_settings_with_props};
 use super::types::{
@@ -767,6 +767,12 @@ pub(super) struct FrontendSurfaceComponent {
     /// interaction restyle complete for every supported dynamic pseudo-state.
     previous_active_key: Option<NodeId>,
     previous_checked_values: HashMap<NodeId, bool>,
+    /// Previous slider positions. Unlike the states above these drive no
+    /// pseudo-class — they change the node's *painted content*. A drag that
+    /// moves only the knob leaves every pseudo-state untouched, so without
+    /// this the targeted restyle finds nothing changed and the frame is
+    /// skipped: the knob stops following the pointer.
+    previous_slider_values: HashMap<NodeId, f32>,
     interaction_snapshot_valid: bool,
     hovered_pos: (f32, f32),
     hover_start: Option<std::time::Instant>,
@@ -1080,6 +1086,7 @@ impl FrontendSurfaceComponent {
             previous_focus_visible_key: None,
             previous_active_key: None,
             previous_checked_values: HashMap::new(),
+            previous_slider_values: HashMap::new(),
             interaction_snapshot_valid: false,
             hovered_pos: (0.0, 0.0),
             hover_start: None,

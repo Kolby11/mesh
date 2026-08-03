@@ -279,7 +279,10 @@ impl FrontendSurfaceComponent {
                 .map(|dep| dep.name.clone())
                 .collect(),
         );
-        seed_service_state(script_ctx.state_mut());
+        seed_service_context(&mut script_ctx).map_err(|source| ComponentError::Script {
+            component_id: component_id.clone(),
+            source,
+        })?;
         script_ctx
             .seed_context_global("this", self.module_descriptor_from_manifest(manifest))
             .map_err(|source| ComponentError::Script {

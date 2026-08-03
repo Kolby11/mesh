@@ -413,10 +413,12 @@ fn shipped_navigation_resting_control_buttons_do_not_overlap() {
     // the trigger row's siblings into overlap (the audio/theme/language buttons
     // landing on top of each other). Verify the three trigger buttons tile
     // left-to-right without overlapping.
-    let mut triggers: Vec<(f32, f32)> = ["Open audio controls", "Select theme", "Choose language"]
+    // Matched by prefix: the audio trigger appends the live level to its label
+    // ("Volume", "Volume 64%").
+    let mut triggers: Vec<(f32, f32)> = ["Volume", "Select theme", "Choose language"]
         .into_iter()
         .map(|label| {
-            let button = first_node_with_attr(tree, "aria-label", label)
+            let button = first_node_with_attr_prefix(tree, "aria-label", label)
                 .unwrap_or_else(|| panic!("{label} button"));
             (button.layout.x, button.layout.x + button.layout.width)
         })

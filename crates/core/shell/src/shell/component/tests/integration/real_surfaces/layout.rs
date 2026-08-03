@@ -40,14 +40,14 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
         .as_ref()
         .expect("@mesh/navigation-bar rendered tree");
     let nav_shell =
-        first_node_with_attr(navigation_tree, "class", "nav-shell").expect("navigation shell");
+        first_node_with_class_token(navigation_tree, "nav-shell").expect("navigation shell");
     assert_eq!(
         nav_shell.layout.width.round() as u32,
         960,
         "@mesh/navigation-bar shell background should span the resolved surface width"
     );
     let status_cluster =
-        first_node_with_attr(navigation_tree, "class", "status-cluster").expect("status cluster");
+        first_node_with_class_token(navigation_tree, "status-cluster").expect("status cluster");
     let control_cluster =
         first_node_with_attr(navigation_tree, "ref", "control-cluster").expect("control cluster");
     assert!(
@@ -198,8 +198,7 @@ fn shipped_audio_popover_content_measured_surface_contains_volume_slider() {
         Some("vertical"),
         "audio popover slider should be vertical"
     );
-    let percent =
-        first_node_with_attr(tree, "class", "audio-percent").expect("audio percent label");
+    let percent = first_node_with_class_token(tree, "audio-percent").expect("audio percent label");
     assert!(
         percent.layout.width > 0.0 && percent.layout.height > 0.0,
         "audio percent label should have non-zero layout"

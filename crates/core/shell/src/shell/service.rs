@@ -57,13 +57,29 @@ pub(super) fn service_capabilities(interface: &str) -> Arc<ServiceCapabilities> 
     entry
 }
 
+/// The host-owned trace of which service last delivered an update.
+pub(super) fn service_update_metadata(
+    service_name: &str,
+    source_module: &str,
+) -> serde_json::Value {
+    serde_json::json!({ "name": service_name, "source_module": source_module })
+}
+
 /// Seed a component's script state with default values before the first
 /// service update arrives. This prevents template crashes on first render.
+///
+/// Prefer [`seed_service_context`] for a live runtime: template expressions are
+/// Luau closures over the context's `_ENV`, so a value that reaches only
+/// `ScriptState` is invisible to `{last_service_update.name}`.
 pub(super) fn seed_service_state(state: &mut ScriptState) {
-    state.set(
-        "last_service_update",
-        serde_json::json!({ "name": "", "source_module": "" }),
-    );
+    state.set("last_service_update", service_update_metadata("", ""));
+}
+
+/// Seed `last_service_update` into both a context's script state and its `_ENV`.
+pub(super) fn seed_service_context(
+    script_ctx: &mut mesh_core_scripting::ScriptContext,
+) -> Result<(), mesh_core_scripting::ScriptError> {
+    script_ctx.seed_context_global("last_service_update", service_update_metadata("", ""))
 }
 
 /// Apply a service update payload into a component's script state.
@@ -98,12 +114,15 @@ pub(super) fn apply_service_update_with_name(
     if has_read {
         state.set(
             "last_service_update",
-            serde_json::json!({ "name": service_name, "source_module": source_module }),
+            service_update_metadata(service_name, source_module),
         );
         state.set(service_name, payload.borrow().clone());
     }
 }
 
+/// Returns `true` when the `last_service_update` trace changed, so the caller
+/// can mirror it into the context's `_ENV` without paying a JSON-to-Lua
+/// conversion on every unchanged fan-out probe.
 pub(super) fn apply_service_update_with_name_and_fingerprint(
     state: &mut ScriptState,
     has_read: bool,
@@ -111,16 +130,17 @@ pub(super) fn apply_service_update_with_name_and_fingerprint(
     source_module: &str,
     payload: &serde_json::Value,
     fingerprint: u64,
-) {
-    if has_read {
-        let metadata_fingerprint = service_update_metadata_fingerprint(service_name, source_module);
-        state.set_with_fingerprint_lazy(
-            "last_service_update",
-            metadata_fingerprint,
-            || serde_json::json!({ "name": service_name, "source_module": source_module }),
-        );
-        state.set_with_fingerprint(service_name, payload, fingerprint);
+) -> bool {
+    if !has_read {
+        return false;
     }
+    let metadata_fingerprint = service_update_metadata_fingerprint(service_name, source_module);
+    let metadata_changed =
+        state.set_with_fingerprint_lazy("last_service_update", metadata_fingerprint, || {
+            service_update_metadata(service_name, source_module)
+        });
+    state.set_with_fingerprint(service_name, payload, fingerprint);
+    metadata_changed
 }
 
 fn service_update_metadata_fingerprint(service_name: &str, source_module: &str) -> u64 {

@@ -7,6 +7,32 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**The red test baseline is 23 failures down to 8.** Every workspace crate now
+passes except `mesh-core-shell`, which is 627 passed / 8 failed / 125 ignored.
+Two of the failures were real defects rather than stale expectations:
+
+- **A dragged slider stopped repainting after the first pointer move.** The
+  targeted interaction-restyle path diffs hover/focus/active/checked — a slider
+  value is none of those, it is painted content, so later moves in a drag found
+  nothing changed and kept the previous knob position. The widget tree held the
+  right value the whole time while zero of 38,400 painted bytes differed.
+  `previous_slider_values` now joins the changed-node diff, ungated by selector
+  dependencies.
+- **Host service state never reached the Luau `_ENV`.** Template expressions are
+  Luau closures over `_ENV`, but service updates wrote only to the Rust
+  `ScriptState`, so `{last_service_update.name}` rendered empty while the state
+  said `"audio"`. `seed_service_context` seeds and refreshes the trace in both,
+  and `set_with_fingerprint_lazy` reports whether it installed a value so the
+  `_ENV` write happens only on a real change.
+
+The rest were stale: two `activation` tests had `KeyPressed`/`KeyReleased`
+crossed, assertions outlived the code they described (element defaults moved
+into style resolution, the `{#for}` wrapper is gone, a hover lift moved
+components, a theme reload also broadcasts `mesh.settings`), and exact-match
+`class` lookups missed nodes that gained a second class. A poisoned
+`SETTINGS_ENV_LOCK` was also turning one genuine failure into three.
+Record: [`log/2026-08.md`](log/2026-08.md).
+
 **A surface's paint reserve and its input region are one decision.**
 `SurfacePadding` is a field of `SurfaceConfig`/`PopupConfig`, produced together
 with the inflated size by `surface_geometry_with_overlay_reserve`, and the
@@ -26,11 +52,8 @@ checks both; reverting the fallback to the padded extent fails it with that
 exact figure. Record: [`log/2026-08.md`](log/2026-08.md).
 
 **Cargo verification works again in this checkout** via `nix develop` (the
-earlier missing-linker-wrapper note is stale). It shows a red baseline: 20
-`mesh-core-shell` tests, 2 `mesh-core-elements` style tests, and 1
-`mesh-core-frontend` test fail on `main`. Listed in
-[`docs/BACKLOG.md`](../docs/BACKLOG.md) — that red baseline is why input-region
-regressions kept landing unnoticed.
+earlier missing-linker-wrapper note is stale). The red baseline it exposed has
+now been triaged; see the entry at the top of this section.
 
 **The whole-codebase refactor is done.** Every section — foundation, platform,
 surface-config, UI, frontend, runtime, extension, presentation, shell, and

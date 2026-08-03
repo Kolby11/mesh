@@ -133,6 +133,11 @@ fn shipped_navigation_style_expected_diagnostics_do_not_block_tokens() {
     rules.extend(parse_fixture_style(include_str!(
         "../../../../../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
     )));
+    // The hover lift lives in the settings button since the navigation triggers
+    // stopped sharing one `.nav-button:hover` rule.
+    rules.extend(parse_fixture_style(include_str!(
+        "../../../../../../../modules/frontend/navigation-bar/src/components/settings-button.mesh"
+    )));
 
     let (nav_style, nav_diagnostics) = resolve_class(&resolver, &rules, "nav-shell");
     let (status_style, status_diagnostics) = resolve_class(&resolver, &rules, "status-primary");

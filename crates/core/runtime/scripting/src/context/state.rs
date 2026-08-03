@@ -118,25 +118,27 @@ impl ScriptState {
     }
 
     /// Lazily construct a host-produced reactive value only when its
-    /// fingerprint differs from the installed value.
+    /// fingerprint differs from the installed value. Returns whether the value
+    /// was installed, so hosts can mirror a changed value elsewhere (into a
+    /// Luau `_ENV`, say) without repeating the fingerprint comparison.
     pub fn set_with_fingerprint_lazy(
         &mut self,
         name: &str,
         fingerprint: u64,
         value: impl FnOnce() -> Value,
-    ) {
+    ) -> bool {
         if let Some(proxy) = self.proxies.get(name)
             && let Some(setter) = &proxy.setter
         {
             (setter)(value());
-            return;
+            return true;
         }
         if self
             .host_value_fingerprints
             .get(name)
             .is_some_and(|previous| *previous == fingerprint)
         {
-            return;
+            return false;
         }
 
         self.variables.insert(name.to_owned(), Arc::new(value()));
@@ -149,6 +151,7 @@ impl ScriptState {
             .get_mut()
             .expect("snapshot cache poisoned")
             .take();
+        true
     }
 
     /// Set a host-maintained variable without requesting a rebuild — for

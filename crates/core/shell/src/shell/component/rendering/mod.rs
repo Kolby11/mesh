@@ -745,6 +745,10 @@ impl FrontendSurfaceComponent {
         } else {
             self.previous_checked_values.clear();
         }
+        // Not gated on a selector dependency the way `checked` is: a slider
+        // value is painted content, so it matters whether or not any rule
+        // selects on it.
+        self.previous_slider_values.clone_from(&self.slider_values);
         self.interaction_snapshot_valid = true;
         if ((targeted_interaction_restyle && interaction_snapshot_valid)
             || animation_only_frame
@@ -831,6 +835,19 @@ impl FrontendSurfaceComponent {
                 if self.previous_checked_values.get(node_id) != Some(value) {
                     changed_ids.insert(*node_id);
                 }
+            }
+        }
+
+        // A moved slider knob repaints even when no pseudo-state changed, so
+        // this diff is unconditional — see `previous_slider_values`.
+        for (node_id, value) in &self.previous_slider_values {
+            if self.slider_values.get(node_id) != Some(value) {
+                changed_ids.insert(*node_id);
+            }
+        }
+        for (node_id, value) in &self.slider_values {
+            if self.previous_slider_values.get(node_id) != Some(value) {
+                changed_ids.insert(*node_id);
             }
         }
 

@@ -998,9 +998,11 @@ mod tests {
     }
 
     #[test]
-    fn for_node_wrapper_carries_no_padding_or_gap() {
-        // The synthetic {#for} wrapper is invisible structure; it once
-        // inherited author-facing column theme defaults and spaced every child.
+    fn for_node_children_expand_into_the_parent_without_a_wrapper() {
+        // {#for} is layout-transparent: its active children join the surrounding
+        // list directly. A synthetic `column` wrapper used to stand in for the
+        // block, inheriting author-facing column theme defaults and spacing
+        // every child.
         let source = r#"
 <template>
   <box>
@@ -1061,18 +1063,27 @@ mod tests {
             watched_paths: Vec::new(),
         };
         let tree = compiled.build_preview_tree_with_state(&theme, 400, 300, Some(&store));
-        fn find_column(node: &WidgetNode) -> Option<&WidgetNode> {
-            if node.tag == "column" {
+        fn find_tag<'a>(node: &'a WidgetNode, tag: &str) -> Option<&'a WidgetNode> {
+            if node.tag == tag {
                 return Some(node);
             }
-            node.children.iter().find_map(find_column)
+            node.children.iter().find_map(|child| find_tag(child, tag))
         }
-        let wrapper = find_column(&tree).expect("for-loop wrapper node");
-        assert_eq!(
-            wrapper.computed_style.padding,
-            mesh_core_elements::Edges::zero()
+        assert!(
+            find_tag(&tree, "column").is_none(),
+            "{{#for}} must not introduce a synthetic wrapper node"
         );
-        assert_eq!(wrapper.computed_style.gap, 0.0);
+        let parent = find_tag(&tree, "box").expect("authored box node");
+        assert!(
+            parent.children.iter().all(|child| child.tag == "text"),
+            "loop bodies must be direct children of the authored parent, found {:?}",
+            parent
+                .children
+                .iter()
+                .map(|child| child.tag.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(collect_text_content(parent), vec!["Alice".to_string()]);
     }
 
     #[test]
