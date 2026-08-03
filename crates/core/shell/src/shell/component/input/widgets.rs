@@ -1611,11 +1611,8 @@ fn collect_key_path<'a>(node: &'a WidgetNode, key: &str, path: &mut Vec<&'a str>
 }
 
 /// Fused press-path lookup: returns the click-target key alongside the
-/// focusable-at-point key computed in the same pass. `handle_component_input`
-/// used to call `find_focusable_at` a second time immediately after
-/// `pointer_event_target_key` (once inside it, once explicitly) to decide the
-/// focus target on every press — this returns both from one `find_focusable_at`
-/// walk instead of two.
+/// focusable-at-point key, from one `find_focusable_at` walk rather than the
+/// two a separate focus-target lookup would cost on every press.
 #[cfg(test)]
 pub(in crate::shell::component) fn pointer_event_target_with_focus(
     tree: &WidgetNode,

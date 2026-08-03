@@ -421,10 +421,9 @@ impl FrontendSurfaceComponent {
 
     /// Activation keys and shortcut overrides for the current key event.
     ///
-    /// Read straight off the shared settings store. This used to stat two
-    /// files and reparse them on every key press/release, keyed by mtime;
-    /// the store is already reloaded by the shell's settings watcher, so the
-    /// input path costs no syscalls and cannot go stale.
+    /// Read straight off the shared settings store, which the shell's settings
+    /// watcher already keeps current — the input path costs no syscalls and
+    /// cannot go stale.
     pub(in crate::shell::component) fn current_keyboard_settings(
         &self,
     ) -> mesh_core_config::KeyboardSettings {

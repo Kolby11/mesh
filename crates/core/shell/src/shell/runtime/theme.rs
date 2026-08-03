@@ -304,9 +304,8 @@ impl Shell {
 
     /// Hand the reloaded store to every component.
     ///
-    /// One file holds every namespace, so a single reload here replaces what
-    /// used to be a per-component stat-and-parse poll: components adopt the
-    /// same snapshot the shell just read.
+    /// One file holds every namespace, so a single reload here serves every
+    /// component: they all adopt the snapshot the shell just read.
     pub(in crate::shell) fn apply_settings_to_components(&mut self) -> Result<(), ShellRunError> {
         let store = self.settings_store.clone();
         for runtime in &mut self.components {

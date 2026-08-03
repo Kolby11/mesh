@@ -418,7 +418,8 @@ impl Shell {
                 let physical_w = ((paint_width as f32 * scale).ceil() as u32).max(1);
                 let physical_h = ((paint_height as f32 * scale).ceil() as u32).max(1);
 
-                // Buffer size cap (T-102-05): prevent allocation beyond 512 MB
+                // Cap the buffer allocation so a bad measured size cannot ask
+                // for gigabytes.
                 const MAX_BUFFER_BYTES: u64 = 512 * 1024 * 1024;
                 let requested_bytes = (physical_w as u64) * (physical_h as u64) * 4;
                 if requested_bytes > MAX_BUFFER_BYTES {
@@ -808,9 +809,8 @@ impl Shell {
 
         let mut presented = false;
         let present_started = self.profiling_enabled().then(std::time::Instant::now);
-        // An empty `present_damage` Vec means paint produced no changed pixels,
-        // so skip the present entirely. This mirrors the old `is_some()` gate
-        // (None -> skip) but works with the multi-rect type.
+        // An empty `present_damage` means paint produced no changed pixels, so
+        // skip the present entirely.
         if !visible || !present_damage.is_empty() {
             let present_result = self.presentation_engine.present_with_damage(
                 &surface_id,

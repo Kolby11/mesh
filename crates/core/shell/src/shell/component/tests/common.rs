@@ -396,16 +396,6 @@ pub(super) fn make_network_ctx() -> ScriptContext {
     ctx
 }
 
-pub(super) fn make_panel_ctx() -> ScriptContext {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
-    caps.grant(Capability::new("service.network.read"));
-    caps.grant(Capability::new("service.power.read"));
-    let mut ctx = ScriptContext::new("@mesh/panel", caps).unwrap();
-    ctx.set_interface_catalog(audio_network_power_catalog());
-    ctx
-}
-
 pub(super) fn shipped_component_script(source: &str) -> String {
     parse_component(source)
         .unwrap()
@@ -1153,13 +1143,6 @@ pub(super) fn count_selectable_text_nodes(node: &WidgetNode) -> usize {
         .sum::<usize>()
 }
 
-pub(super) fn contains_interactive_tags(node: &WidgetNode) -> bool {
-    matches!(
-        node.tag.as_str(),
-        "button" | "slider" | "switch" | "checkbox" | "input"
-    ) || node.children.iter().any(contains_interactive_tags)
-}
-
 pub(super) fn child_with_attrs(tag: &str, attrs: &[(&str, &str)]) -> WidgetNode {
     let mut node = WidgetNode::new(tag);
     for (name, value) in attrs {
@@ -1251,15 +1234,6 @@ pub(super) fn collect_text_content(node: &WidgetNode, output: &mut Vec<String>) 
     for child in &node.children {
         collect_text_content(child, output);
     }
-}
-
-pub(super) fn count_tag(node: &WidgetNode, tag: &str) -> usize {
-    usize::from(node.tag == tag)
-        + node
-            .children
-            .iter()
-            .map(|child| count_tag(child, tag))
-            .sum::<usize>()
 }
 
 pub(super) fn rect_matches_bounds(

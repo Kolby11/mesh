@@ -194,7 +194,7 @@ fn shipped_audio_popover_content_measured_surface_contains_volume_slider() {
 
 #[test]
 fn shipped_audio_popover_slider_sizes_from_props() {
-    // Phase 2 reference proof: the shipped @mesh/audio-popover declares its
+    // The shipped @mesh/audio-popover declares its
     // slider track size in a `<props>` block (`track_width` / `track_height`,
     // both `size`) and references them via `prop(...)` in `<style>`. Painting
     // the real module must resolve those props into the slider's computed size.

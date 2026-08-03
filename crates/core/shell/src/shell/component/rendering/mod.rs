@@ -394,9 +394,8 @@ impl FrontendSurfaceComponent {
 
     /// Retained fast path used when only appearance changed (e.g. hover)
     /// without any script-state mutation. Moves the previously built widget
-    /// tree out of `last_tree`, mutates it in place, and returns it for paint.
-    /// This avoids the old clone-the-whole-tree path and establishes the
-    /// retained-tree cache boundary for later dirty-subtree work.
+    /// tree out of `last_tree`, mutates it in place, and returns it for paint,
+    /// so appearance-only frames never clone the tree.
     pub(super) fn restyle_retained_tree(
         &mut self,
         theme: &Theme,
@@ -512,8 +511,8 @@ impl FrontendSurfaceComponent {
             && dirty_types
                 .difference(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS)
                 .is_empty();
-        // Compute affected keys before borrowing index_cache to satisfy the borrow checker.
-        // Collect affected IDs before borrowing index_cache to satisfy the borrow checker.
+        // Collect affected ids before borrowing index_cache, to satisfy the
+        // borrow checker.
         let affected_keys = if targeted_interaction_restyle {
             self.collect_interaction_changed_node_ids()
         } else {
