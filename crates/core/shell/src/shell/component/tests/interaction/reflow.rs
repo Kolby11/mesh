@@ -161,7 +161,9 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 120);
-    component.paint(&theme, 240, 120, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 120), &mut buffer, 1.0)
+        .unwrap();
     let render_count_after_first = runtime_number(&component, "render_count");
     let runtime_count_after_first = component.runtimes.lock().unwrap().len();
 
@@ -170,7 +172,9 @@ end
         .to_vec();
     component.hovered_key = Some("root/0/1".into());
     component.dirty = true;
-    component.paint(&theme, 240, 120, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 120), &mut buffer, 1.0)
+        .unwrap();
 
     assert_eq!(runtime_count_before, runtime_count_after_first);
     assert_eq!(
@@ -261,7 +265,12 @@ end
     let theme = default_theme();
     let mut wide_buffer = PixelBuffer::new(420, 160);
     component
-        .paint(&theme, 420, 160, &mut wide_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(420, 160),
+            &mut wide_buffer,
+            1.0,
+        )
         .unwrap();
     let render_count_after_wide = runtime_number(&component, "render_count");
     let runtime_count_after_wide = component.runtimes.lock().unwrap().len();
@@ -284,7 +293,12 @@ end
     // and requested one surface-config settle frame. Paint again so it stabilises
     // before asserting the component has quiesced.
     component
-        .paint(&theme, 420, 160, &mut wide_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(420, 160),
+            &mut wide_buffer,
+            1.0,
+        )
         .unwrap();
     component.dirty = false;
     assert!(
@@ -297,7 +311,12 @@ end
     assert!(component.wants_render());
     let mut narrow_buffer = PixelBuffer::new(260, 160);
     component
-        .paint(&theme, 260, 160, &mut narrow_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(260, 160),
+            &mut narrow_buffer,
+            1.0,
+        )
         .unwrap();
 
     assert_eq!(
@@ -561,7 +580,9 @@ end
     }
 
     let mut buffer = PixelBuffer::new(240, 40);
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
     let tree = component
         .last_tree
         .as_ref()
@@ -609,7 +630,9 @@ slider {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 40);
 
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
     let initial = buffer.data.clone();
 
     component
@@ -632,7 +655,9 @@ slider {
             ComponentInput::PointerMove { x: 200.0, y: 20.0 },
         )
         .unwrap();
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
     let after_first_drag = buffer.data.clone();
 
     component
@@ -643,7 +668,9 @@ slider {
             ComponentInput::PointerMove { x: 60.0, y: 20.0 },
         )
         .unwrap();
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
     let after_second_drag = buffer.data.clone();
 
     assert_ne!(after_first_drag, initial);
@@ -681,11 +708,15 @@ box {
     let light = themed_primary("test-light", "#c0ffee");
     let mut buffer = PixelBuffer::new(64, 32);
 
-    component.paint(&dark, 64, 32, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&dark, SurfaceExtent::unpadded(64, 32), &mut buffer, 1.0)
+        .unwrap();
     let dark_pixel = buffer_pixel(&buffer, 12, 12);
 
     component.theme_changed().unwrap();
-    component.paint(&light, 64, 32, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&light, SurfaceExtent::unpadded(64, 32), &mut buffer, 1.0)
+        .unwrap();
     let light_pixel = buffer_pixel(&buffer, 12, 12);
 
     assert_ne!(dark_pixel, light_pixel);
@@ -713,13 +744,23 @@ fn real_navigation_bar_repaints_when_theme_changes() {
     let mut buffer = PixelBuffer::new(width, height);
 
     component
-        .paint(&dark, width, height, &mut buffer, 1.0)
+        .paint(
+            &dark,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let dark_snapshot = buffer.data.clone();
 
     component.theme_changed().unwrap();
     component
-        .paint(&light, width, height, &mut buffer, 1.0)
+        .paint(
+            &light,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     assert_ne!(
@@ -739,7 +780,12 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
     let mut buffer = PixelBuffer::new(width, height);
 
     component
-        .paint(&dark, width, height, &mut buffer, 1.0)
+        .paint(
+            &dark,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     component.theme_changed().unwrap();
@@ -756,7 +802,12 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         .unwrap();
     for _ in 0..2 {
         component
-            .paint(&light, width, height, &mut buffer, 1.0)
+            .paint(
+                &light,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
         if !component.wants_immediate_rerender() {
             break;
@@ -787,7 +838,12 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         )
         .unwrap();
     component
-        .paint(&light, width, height, &mut buffer, 1.0)
+        .paint(
+            &light,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     assert!(
         !component.transitions.is_empty(),
@@ -807,7 +863,12 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         })
         .unwrap();
     component
-        .paint(&dark, width, height, &mut buffer, 1.0)
+        .paint(
+            &dark,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     // The shipped nav-shell background is now translucent (rgba(10,10,14,0.75)),

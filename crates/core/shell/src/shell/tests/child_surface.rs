@@ -604,3 +604,47 @@ fn child_surface_input_routes_to_local_child_handler_and_profiles() {
         stage.stage == mesh_core_debug::ProfilingStage::InputHandling && stage.sample_count >= 2
     }));
 }
+
+/// The same rule one level down: a popover's `xdg_popup` buffer is padded for
+/// descendant shadow/filter overshoot, and clicks over that transparent ring
+/// must reach whatever is behind the popover rather than being swallowed by it.
+#[test]
+fn child_popup_input_region_excludes_the_shadow_overshoot_ring() {
+    const CONTENT: (u32, u32) = (72, 32);
+    const PADDING: (u32, u32, u32, u32) = (24, 8, 24, 40);
+
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState {
+        content_padding: PADDING,
+        ..PopoverHarnessState::default()
+    }));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state)));
+
+    render_components_until_child_popup(&mut shell);
+
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    let config = shell
+        .presentation_engine
+        .testing_popup_config(&child_id)
+        .expect("child popover configures an xdg_popup");
+    assert_eq!(
+        config.placement.size,
+        (
+            CONTENT.0 + PADDING.0 + PADDING.2,
+            CONTENT.1 + PADDING.1 + PADDING.3
+        ),
+        "the popup buffer is the content plus its overshoot ring"
+    );
+
+    let region = shell
+        .presentation_engine
+        .input_region(&child_id)
+        .expect("a padded popup must confine its input region");
+    assert_eq!(
+        (region.x, region.y, region.width, region.height),
+        (PADDING.0, PADDING.1, CONTENT.0, CONTENT.1),
+        "input stops at the visible popover content, not at the padded buffer"
+    );
+}

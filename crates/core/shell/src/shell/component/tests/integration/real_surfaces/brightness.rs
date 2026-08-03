@@ -18,7 +18,12 @@ fn shipped_navigation_brightness_uses_one_level_icon_and_scrolls_both_input_kind
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let tree = component
         .last_tree
@@ -134,7 +139,12 @@ fn shipped_navigation_brightness_uses_configured_scroll_sensitivity() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let button = first_node_by_class(
         component.last_tree.as_ref().expect("navigation tree"),
@@ -214,7 +224,12 @@ fn shipped_navigation_brightness_falls_back_for_invalid_scroll_sensitivity() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let button = first_node_by_class(
         component.last_tree.as_ref().expect("navigation tree"),

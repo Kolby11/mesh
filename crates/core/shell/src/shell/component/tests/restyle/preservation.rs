@@ -24,7 +24,9 @@ end
     let mut buffer = PixelBuffer::new(240, 80);
 
     // First paint — no service payload yet.
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
 
     // Apply a service payload directly to the ScriptContext, simulating a
     // backend service emit reaching the frontend runtime.
@@ -40,7 +42,9 @@ end
     component.dirty = true;
 
     // First paint with the service payload — render fires, vol_pct == 72.
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
     let pct_after_payload = runtime_number(&component, "vol_pct");
     assert!(
         (pct_after_payload - 72.0).abs() < 0.1,
@@ -51,7 +55,9 @@ end
     component.hovered_key = Some("root/0".into());
     component.hovered_path = ["root", "root/0"].map(runtime_node_id_for_key).to_vec();
     component.dirty = true;
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
 
     // vol_pct must still reflect the last service update, not be wiped.
     let pct_after_hover_restyle = runtime_number(&component, "vol_pct");
@@ -89,7 +95,9 @@ init_count = init_count + 1
     let mut buffer = PixelBuffer::new(240, 80);
 
     // First paint — runtime is initialized, init_count == 1.
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
     let count_after_first = runtime_number(&component, "init_count");
     let runtime_instances_after_first = component.runtimes.lock().unwrap().len();
     assert_eq!(
@@ -104,7 +112,9 @@ init_count = init_count + 1
     // Trigger a pseudo-state restyle by focusing.
     component.focused_key = Some("root/0".into());
     component.dirty = true;
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
 
     let count_after_focus = runtime_number(&component, "init_count");
     let runtime_instances_after_focus = component.runtimes.lock().unwrap().len();
@@ -170,12 +180,16 @@ text {
     let mut buffer = PixelBuffer::new(240, 300);
 
     // First paint to establish baseline.
-    component.paint(&theme, 240, 300, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 300), &mut buffer, 1.0)
+        .unwrap();
 
     // Trigger a focus-driven pseudo-state restyle.
     component.focused_key = Some("root/0/0".into());
     component.dirty = true;
-    component.paint(&theme, 240, 300, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 300), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component.last_tree.as_ref().unwrap();
 
@@ -240,7 +254,9 @@ fn restyle_state_cleanup_hover_cleared_when_node_removed() {
     let mut buffer = PixelBuffer::new(240, 80);
 
     // First paint to establish the tree structure.
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
 
     // Simulate hovering the second button.
     component.hovered_key = Some("root/0/1".into());
@@ -249,7 +265,9 @@ fn restyle_state_cleanup_hover_cleared_when_node_removed() {
         .to_vec();
     component.hover_start = Some(std::time::Instant::now());
     component.dirty = true;
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component.last_tree.as_ref().unwrap();
     assert!(
@@ -283,7 +301,9 @@ fn restyle_state_cleanup_hover_cleared_when_node_removed() {
         .to_vec();
     component.hover_start = Some(std::time::Instant::now());
     component.dirty = true;
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
 
     // After the paint, the stale hovered_key must be cleared.
     assert!(

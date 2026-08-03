@@ -41,7 +41,12 @@ fn shipped_navigation_icon_rasterizes_pixels_on_real_surface() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -117,7 +122,9 @@ fn shipped_navigation_blur_props_control_radius_background_and_enablement() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(1280, 80);
-    component.paint(&theme, 1280, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(1280, 80), &mut buffer, 1.0)
+        .unwrap();
     let nav = first_node_by_class(component.last_tree.as_ref().unwrap(), "nav-shell").unwrap();
     assert_eq!(nav.computed_style.backdrop_filter.blur_radius, 7.0);
     assert_eq!(nav.computed_style.background_color.r, 1);
@@ -133,7 +140,9 @@ fn shipped_navigation_blur_props_control_radius_background_and_enablement() {
     });
     disabled.runtimes.lock().unwrap().clear();
     disabled.init_root_runtime().unwrap();
-    disabled.paint(&theme, 1280, 80, &mut buffer, 1.0).unwrap();
+    disabled
+        .paint(&theme, SurfaceExtent::unpadded(1280, 80), &mut buffer, 1.0)
+        .unwrap();
     let nav = first_node_by_class(disabled.last_tree.as_ref().unwrap(), "nav-shell").unwrap();
     assert_eq!(nav.computed_style.backdrop_filter.blur_radius, 0.0);
 }

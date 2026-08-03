@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_render::DamageRect;
 
 // ---------------------------------------------------------------------------
 // layer-surface config tests
@@ -13,6 +14,7 @@ fn base_cfg() -> SurfaceConfig {
         size_policy: LayerSurfaceSizePolicy::Fixed,
         width: 280,
         height: 164,
+        padding: SurfacePadding::default(),
         exclusive_zone: 0,
         keyboard_mode: KeyboardMode::OnDemand,
         namespace: "@mesh/audio-popover".into(),
@@ -293,4 +295,80 @@ fn overlay_surface_without_exclusive_zone_uses_minimal_protocol_fallback() {
     cfg.exclusive_zone = 0;
 
     assert_eq!(layer_protocol_size(&cfg), (0, 1));
+}
+
+// ---------------------------------------------------------------------------
+// input region / surface padding
+//
+// A MESH surface is routinely larger than its content — a bar reserves room
+// below itself for tooltips, a popover reserves a ring for shadow overshoot
+// — and the compositor hands MESH every click over that reserve unless the
+// input region excludes it. These pin the derivation that excludes it.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn trailing_padding_confines_input_to_the_content_rect() {
+    // A 56px bar inflated by the 200px tooltip overlay reserve.
+    let padding = SurfacePadding::trailing(0, 200);
+    assert_eq!(
+        padding.content_rect(1920, 256),
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 56,
+        }),
+        "the 200px strip below the bar must fall through to the windows under it"
+    );
+}
+
+#[test]
+fn ring_padding_confines_input_to_the_inset_content_rect() {
+    // A popover whose buffer is padded on all sides for shadow overshoot.
+    let padding = SurfacePadding {
+        left: 24,
+        top: 8,
+        right: 24,
+        bottom: 40,
+    };
+    assert_eq!(
+        padding.content_rect(348, 212),
+        Some(DamageRect {
+            x: 24,
+            y: 8,
+            width: 300,
+            height: 164,
+        }),
+    );
+}
+
+#[test]
+fn zero_padding_leaves_the_whole_surface_taking_input() {
+    assert!(SurfacePadding::default().is_zero());
+    assert_eq!(SurfacePadding::default().content_rect(640, 480), None);
+}
+
+/// A zero-area input region makes a surface completely unclickable, which is
+/// a worse failure than an oversized one and can legitimately happen for a
+/// frame while a surface is still being measured. Degrade to whole-surface
+/// input instead of collapsing.
+#[test]
+fn padding_larger_than_the_surface_does_not_collapse_the_region() {
+    let padding = SurfacePadding::trailing(0, 200);
+    assert_eq!(padding.content_rect(1920, 200), None);
+    assert_eq!(padding.content_rect(1920, 120), None);
+}
+
+/// The reserve carries no protocol request of its own, so `apply_config` is
+/// the only thing that copies it onto the live surface — and it only runs
+/// when the fingerprint says the config changed.
+#[test]
+fn changing_only_the_padding_still_counts_as_a_config_change() {
+    let cfg = base_cfg();
+    let mut padded = cfg.clone();
+    padded.padding = SurfacePadding::trailing(0, 200);
+    assert_ne!(
+        surface_config_fingerprint(&cfg, KeyboardMode::OnDemand),
+        surface_config_fingerprint(&padded, KeyboardMode::OnDemand),
+    );
 }

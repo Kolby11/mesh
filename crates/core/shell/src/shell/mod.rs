@@ -62,7 +62,7 @@ use types::{
 pub use types::{
     ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, KeyModifiers,
     ServiceEvent, ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent,
-    SurfaceId, TabFocusTarget,
+    SurfaceExtent, SurfaceId, TabFocusTarget,
 };
 
 use service::{service_capabilities, service_name_from_interface};

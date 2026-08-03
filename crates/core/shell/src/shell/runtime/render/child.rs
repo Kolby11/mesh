@@ -217,6 +217,15 @@ impl Shell {
 
             let popup_config = PopupConfig {
                 parent_surface_id: parent_surface_id.to_string(),
+                // The reserve travels with the padded size it produced, so the
+                // popup's input region is confined to the visible content and
+                // clicks over the shadow ring reach whatever is behind it.
+                padding: SurfacePadding {
+                    left: pad_left,
+                    top: pad_top,
+                    right: pad_right,
+                    bottom: pad_bottom,
+                },
                 placement: PopupPlacement {
                     anchor_rect: request.anchor_rect,
                     size: padded_size,
@@ -374,8 +383,7 @@ impl Shell {
             }
         }
 
-        let (pad_left, pad_top, pad_right, pad_bottom) =
-            self.components[index].children[child_index].content_padding;
+        let (pad_left, pad_top, ..) = self.components[index].children[child_index].content_padding;
         // `paint_child_surface`'s offset is in the same logical layout units
         // as `-bounds.0`/`-bounds.1` (the renderer applies `scale` to layout
         // + offset together), so this is unscaled padding, not physical px.
@@ -427,20 +435,10 @@ impl Shell {
                 child.target.force_full_present = true;
             }
         }
-        // Restrict pointer input to the true (unpadded) content rect, same
-        // pattern as the parent tooltip surface: the padding exists so
+        // Pointer input is confined to the true (unpadded) content rect by the
+        // `SurfacePadding` this popup was configured with in
+        // `reconcile_child_surface_requests` — the padding exists so
         // shadow/filter overshoot can paint, not to receive input.
-        self.presentation_engine.update_input_region(
-            &self.components[index].children[child_index]
-                .target
-                .surface_id,
-            Some(DamageRect {
-                x: pad_left,
-                y: pad_top,
-                width: width.saturating_sub(pad_left + pad_right),
-                height: height.saturating_sub(pad_top + pad_bottom),
-            }),
-        );
         // Frosted popover content declares `backdrop-filter`; hand the regions
         // to the compositor blur protocol like the parent surface path does.
         let child_blur_regions = self.components[index]

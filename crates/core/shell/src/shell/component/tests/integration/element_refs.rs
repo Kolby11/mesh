@@ -27,7 +27,9 @@ end
     let mut buffer = PixelBuffer::new(200, 60);
 
     // Paint once so element metrics + the ref-name -> node-key map are populated.
-    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(component.focused_key, None);
 
     // The handler focuses the input through its live reference.
@@ -82,7 +84,9 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 60);
-    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .unwrap();
 
     component.call_namespaced_handler("inspect", &[]).unwrap();
     let width = runtime_value(&component, "field_width")
@@ -129,7 +133,9 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 60);
-    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .unwrap();
 
     component.call_namespaced_handler("measure", &[]).unwrap();
     let width = runtime_value(&component, "panel_width")
@@ -174,7 +180,9 @@ end
     let mut buffer = PixelBuffer::new(160, 120);
 
     // Paint once so overflow annotation populates scroll limits and the ref map.
-    component.paint(&theme, 160, 120, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
+        .unwrap();
     // Nothing scrolled yet.
     assert!(component.scroll_offsets.values().all(|o| o.y == 0.0));
 
@@ -222,7 +230,9 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 120);
-    component.paint(&theme, 160, 120, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
+        .unwrap();
 
     // Set the offset through the live reference.
     component.call_namespaced_handler("jump", &[]).unwrap();
@@ -238,7 +248,9 @@ end
     );
 
     // Repaint so the new offset is published, then read it back via scroll_top.
-    component.paint(&theme, 160, 120, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
+        .unwrap();
     component.call_namespaced_handler("read_back", &[]).unwrap();
     let read = runtime_value(&component, "scrolled_top")
         .and_then(|value| value.as_f64())
@@ -275,7 +287,9 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 120);
-    component.paint(&theme, 160, 120, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
+        .unwrap();
 
     component
         .call_namespaced_handler("smooth_jump", &[])
@@ -348,7 +362,9 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 60);
-    component.paint(&theme, 160, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
 
     component.call_namespaced_handler("trigger", &[]).unwrap();
     let clicks = runtime_value(&component, "clicks")
@@ -383,7 +399,9 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 60);
-    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .unwrap();
 
     component.call_namespaced_handler("set_it", &[]).unwrap();
     assert_eq!(
@@ -396,7 +414,9 @@ end
     );
 
     // Repaint so the new value is published, then read it back through the ref.
-    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .unwrap();
     component.call_namespaced_handler("read_it", &[]).unwrap();
     assert_eq!(
         runtime_value(&component, "read_value").and_then(|value| value.as_str().map(String::from)),

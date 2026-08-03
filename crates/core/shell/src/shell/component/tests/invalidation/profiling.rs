@@ -77,7 +77,9 @@ fn phase44_focused_proof_preserves_invalidation_and_damage_payloads() {
     component.set_profiling_enabled(true);
     let mut buffer = PixelBuffer::new(960, 80);
 
-    component.paint(&theme, 960, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .unwrap();
 
     {
         let proof = component
@@ -103,7 +105,12 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
     hover_component.set_profiling_enabled(true);
     let mut hover_buffer = PixelBuffer::new(960, 80);
     hover_component
-        .paint(&theme, 960, 80, &mut hover_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut hover_buffer,
+            1.0,
+        )
         .unwrap();
     hover_component.take_profiling_records();
     hover_component.take_invalidation_snapshot();
@@ -134,7 +141,12 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
         )
         .unwrap();
     hover_component
-        .paint(&theme, 960, 80, &mut hover_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut hover_buffer,
+            1.0,
+        )
         .unwrap();
     let hover_records = hover_component.take_profiling_records();
     let hover_invalidation = hover_component
@@ -157,7 +169,12 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
         .unwrap();
     let mut popover_buffer = PixelBuffer::new(320, 220);
     popover_component
-        .paint(&theme, 320, 220, &mut popover_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(320, 220),
+            &mut popover_buffer,
+            1.0,
+        )
         .unwrap();
     let surface_open_close_records = popover_component.take_profiling_records();
     let surface_open_close_invalidation = popover_component
@@ -192,7 +209,12 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
         )
         .unwrap();
     popover_component
-        .paint(&theme, 320, 220, &mut popover_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(320, 220),
+            &mut popover_buffer,
+            1.0,
+        )
         .unwrap();
     let pointer_update_records = popover_component.take_profiling_records();
     let pointer_update_invalidation = popover_component
@@ -204,7 +226,12 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
     keyboard_component.set_profiling_enabled(true);
     let mut keyboard_buffer = PixelBuffer::new(960, 80);
     keyboard_component
-        .paint(&theme, 960, 80, &mut keyboard_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut keyboard_buffer,
+            1.0,
+        )
         .unwrap();
     keyboard_component.take_profiling_records();
     keyboard_component.take_invalidation_snapshot();
@@ -220,7 +247,12 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
         )
         .unwrap();
     keyboard_component
-        .paint(&theme, 960, 80, &mut keyboard_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut keyboard_buffer,
+            1.0,
+        )
         .unwrap();
     let keyboard_records = keyboard_component.take_profiling_records();
     let keyboard_invalidation = keyboard_component
@@ -232,7 +264,12 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
     backend_component.set_profiling_enabled(true);
     let mut backend_buffer = PixelBuffer::new(960, 80);
     backend_component
-        .paint(&theme, 960, 80, &mut backend_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut backend_buffer,
+            1.0,
+        )
         .unwrap();
     backend_component.take_profiling_records();
     backend_component.take_invalidation_snapshot();
@@ -248,7 +285,12 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
         })
         .unwrap();
     backend_component
-        .paint(&theme, 960, 80, &mut backend_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut backend_buffer,
+            1.0,
+        )
         .unwrap();
     let backend_update_records = backend_component.take_profiling_records();
     let backend_update_invalidation = backend_component
@@ -464,10 +506,20 @@ fn phase98_pixel_equivalence_backend_update() {
     let mut narrow_buffer = PixelBuffer::new(960, 80);
 
     baseline
-        .paint(&theme, 960, 80, &mut baseline_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut baseline_buffer,
+            1.0,
+        )
         .unwrap();
     narrow
-        .paint(&theme, 960, 80, &mut narrow_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut narrow_buffer,
+            1.0,
+        )
         .unwrap();
 
     let payload = serde_json::json!({"available": true, "percent": 55, "muted": false});
@@ -488,10 +540,20 @@ fn phase98_pixel_equivalence_backend_update() {
 
     baseline.invalidate_script_state();
     baseline
-        .paint(&theme, 960, 80, &mut baseline_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut baseline_buffer,
+            1.0,
+        )
         .unwrap();
     narrow
-        .paint(&theme, 960, 80, &mut narrow_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut narrow_buffer,
+            1.0,
+        )
         .unwrap();
 
     let baseline_hash = fnv_hash_buffer(&baseline_buffer);
@@ -510,7 +572,9 @@ fn phase98_profiling_backend_update_reduced_churn() {
     component.set_profiling_enabled(true);
     let mut buffer = PixelBuffer::new(960, 80);
 
-    component.paint(&theme, 960, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .unwrap();
     component.take_profiling_records();
 
     let payload = serde_json::json!({"available": true, "percent": 65, "muted": false});
@@ -522,7 +586,9 @@ fn phase98_profiling_backend_update_reduced_churn() {
         })
         .unwrap();
 
-    component.paint(&theme, 960, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .unwrap();
     let invalidation = component
         .take_invalidation_snapshot()
         .expect("profiling snapshot");

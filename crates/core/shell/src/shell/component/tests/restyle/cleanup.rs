@@ -20,7 +20,9 @@ fn restyle_state_cleanup_focus_cleared_when_node_removed() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 80);
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(
         component.focused_key.is_none(),
@@ -57,7 +59,9 @@ fn restyle_state_cleanup_active_cleared_when_node_removed() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 80);
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(
         component.pointer_down_id.is_none(),
@@ -99,7 +103,9 @@ button:hover {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 80);
 
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
 
     // Both keys are valid — set focus on first, hover on second.
     component.focused_key = Some("root/0/0".into());
@@ -109,7 +115,9 @@ button:hover {
         .to_vec();
     component.pointer_down_id = Some(runtime_node_id_for_key("root/0/0"));
     component.dirty = true;
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
 
     // All valid targets must survive pruning.
     assert_eq!(

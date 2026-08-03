@@ -11,7 +11,12 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -58,7 +63,12 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let requests = component.child_surface_requests();
@@ -146,7 +156,12 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
 
         let mut buffer = PixelBuffer::new(width, height);
         component
-            .paint(&theme, width, height, &mut buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
 
         let tree = component
@@ -200,7 +215,12 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             )
             .unwrap();
         component
-            .paint(&theme, width, height, &mut buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
 
         let tree = component
@@ -315,7 +335,12 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             .handle_input(&theme, width, height, ComponentInput::PointerLeave)
             .unwrap();
         component
-            .paint(&theme, width, height, &mut buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
         let cluster_after_leave = first_node_by_class(
             component
@@ -369,7 +394,12 @@ fn shipped_navigation_resting_control_buttons_do_not_overlap() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component

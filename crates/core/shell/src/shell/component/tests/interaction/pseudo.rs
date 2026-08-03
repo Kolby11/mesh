@@ -149,7 +149,9 @@ input:checked {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 120);
-    component.paint(&theme, 240, 120, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 120), &mut buffer, 1.0)
+        .unwrap();
     let tree = component.last_tree.as_ref().unwrap();
 
     let disabled_button = node_by_mesh_key(tree, "root/0/0");
@@ -211,9 +213,13 @@ fn targeted_restyle_tracks_active_checked_and_focus_visible_changes() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 80);
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
     if component.wants_render() {
-        component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+            .unwrap();
     }
 
     component.pointer_down_id = Some(runtime_node_id_for_key("root/0/0"));
@@ -242,7 +248,9 @@ fn targeted_restyle_tracks_active_checked_and_focus_visible_changes() {
             .contains(&runtime_node_id_for_key("root/0/2"))
     );
     component.invalidate_interaction_restyle();
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component.last_tree.as_ref().unwrap();
     let active_node = node_by_mesh_key(tree, "root/0/0");
@@ -268,7 +276,9 @@ fn targeted_restyle_tracks_active_checked_and_focus_visible_changes() {
         .insert(runtime_node_id_for_key("root/0/1"), false);
     component.focus_visible_key = None;
     component.invalidate_interaction_restyle();
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component.last_tree.as_ref().unwrap();
     assert_eq!(
@@ -985,7 +995,9 @@ fn window_states_project_onto_the_tree_as_css_state() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(400, 300);
-    component.paint(&theme, 400, 300, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
+        .unwrap();
 
     let floating = node_by_mesh_key(component.last_tree.as_ref().unwrap(), "root/0");
     assert!(!floating.state.window.fullscreen);
@@ -1004,7 +1016,9 @@ fn window_states_project_onto_the_tree_as_css_state() {
         "a new set of window states owes the surface a restyle"
     );
     assert!(component.wants_render());
-    component.paint(&theme, 400, 300, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
+        .unwrap();
 
     let filling = node_by_mesh_key(component.last_tree.as_ref().unwrap(), "root/0");
     assert!(filling.state.window.fullscreen);

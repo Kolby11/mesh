@@ -10,7 +10,12 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     {
         let tree = component
@@ -80,7 +85,12 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         "embedded theme selector should open through component state, not legacy surface requests: {activation_requests:?}"
     );
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let child_requests = component.child_surface_requests();
     assert_eq!(
@@ -144,7 +154,12 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     assert!(
         component.child_surface_requests().is_empty(),
@@ -176,7 +191,12 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         })
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -213,7 +233,12 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         "embedded language popover should open through component state, not legacy surface requests: {open_requests:?}"
     );
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let child_requests = component.child_surface_requests();
     assert_eq!(
@@ -293,7 +318,12 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     assert!(
         component.child_surface_requests().is_empty(),
@@ -333,14 +363,24 @@ fn navigation_theme_and_language_popovers_close_when_trigger_hover_leaves() {
             })
             .unwrap();
         component
-            .paint(&theme, width, height, &mut buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
 
         component
             .call_namespaced_handler(enter_handler, &[])
             .unwrap();
         component
-            .paint(&theme, width, height, &mut buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
         assert_eq!(
             component.child_surface_requests().len(),
@@ -352,7 +392,12 @@ fn navigation_theme_and_language_popovers_close_when_trigger_hover_leaves() {
             .call_namespaced_handler(leave_handler, &[])
             .unwrap();
         component
-            .paint(&theme, width, height, &mut buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
         assert_eq!(
             component.child_surface_requests().len(),
@@ -363,7 +408,12 @@ fn navigation_theme_and_language_popovers_close_when_trigger_hover_leaves() {
         std::thread::sleep(Duration::from_millis(220));
         component.tick().unwrap();
         component
-            .paint(&theme, width, height, &mut buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
         assert_eq!(
             component.child_surface_requests().len(),
@@ -374,7 +424,12 @@ fn navigation_theme_and_language_popovers_close_when_trigger_hover_leaves() {
         std::thread::sleep(Duration::from_millis(220));
         component.tick().unwrap();
         component
-            .paint(&theme, width, height, &mut buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
         assert!(
             component.child_surface_requests().is_empty(),
@@ -399,7 +454,12 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
         })
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -431,7 +491,12 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let child_requests = component.child_surface_requests();
     assert_eq!(
@@ -459,7 +524,12 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     assert_eq!(
         component.child_surface_requests().len(),
@@ -481,7 +551,12 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     assert_eq!(
         component.child_surface_requests().len(),
@@ -492,7 +567,12 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
     std::thread::sleep(Duration::from_millis(420));
     component.tick().unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     assert!(
         component.child_surface_requests().is_empty(),
@@ -516,7 +596,12 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
         })
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let enter_handler =
@@ -527,7 +612,12 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
         .call_namespaced_handler(enter_handler, &[])
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let requests = component.child_surface_requests();
     assert_eq!(requests.len(), 1, "language popover should open");
@@ -573,7 +663,12 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
     std::thread::sleep(Duration::from_millis(420));
     component.tick().unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     assert_eq!(
         component.child_surface_requests().len(),
@@ -743,7 +838,12 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -781,7 +881,12 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -811,7 +916,12 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
         .handle_input(&theme, width, height, ComponentInput::PointerLeave)
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let tree = component
         .last_tree
@@ -845,7 +955,12 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -919,7 +1034,9 @@ fn navigation_bar_real_surface_keeps_status_copy_non_selectable() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(420, 80);
-    component.paint(&theme, 420, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(420, 80), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component
         .last_tree
@@ -952,7 +1069,12 @@ fn navigation_bar_keyboard_activation_toggles_volume_mute_on_real_surface() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -1019,7 +1141,12 @@ fn navigation_bar_pointer_activation_toggles_volume_mute() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -1100,7 +1227,12 @@ fn navigation_bar_volume_scroll_changes_level_immediately() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -1201,7 +1333,12 @@ fn navigation_bar_volume_scroll_respects_instance_sensitivity() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -1268,7 +1405,12 @@ fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -1302,7 +1444,12 @@ fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let requests = component
         .handle_input(
@@ -1350,7 +1497,9 @@ fn navigation_bar_keyboard_audio_popover_slider_responds_to_arrow_keys() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 220);
-    component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(320, 220), &mut buffer, 1.0)
+        .unwrap();
     let tree = component
         .last_tree
         .as_ref()
@@ -1402,7 +1551,9 @@ fn phase44_navigation_behavior_survives_focused_proof_path() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(960, 80);
-    component.paint(&theme, 960, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .unwrap();
     assert!(
         component.last_focused_proof_snapshot().is_some(),
         "initial navigation paint should store focused proof evidence"
@@ -1419,7 +1570,9 @@ fn phase44_navigation_behavior_survives_focused_proof_path() {
             },
         )
         .unwrap();
-    component.paint(&theme, 960, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(
         component.last_focused_proof_snapshot().is_some(),

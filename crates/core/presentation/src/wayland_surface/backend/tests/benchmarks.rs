@@ -190,6 +190,7 @@ fn primitive_surface_config_hashing_beats_byte_writes() {
         size_policy: LayerSurfaceSizePolicy::Fixed,
         width: 1_920,
         height: 48,
+        padding: SurfacePadding::default(),
         exclusive_zone: 48,
         keyboard_mode: KeyboardMode::OnDemand,
         namespace: "benchmark".into(),

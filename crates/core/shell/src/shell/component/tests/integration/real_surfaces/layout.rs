@@ -10,7 +10,12 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
     navigation.visible = true;
     let mut navigation_buffer = PixelBuffer::new(960, 80);
     navigation
-        .paint(&theme, 960, 80, &mut navigation_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut navigation_buffer,
+            1.0,
+        )
         .unwrap();
     let navigation_health = format!(
         "{:?}",
@@ -105,7 +110,12 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
         .unwrap();
     let mut audio_buffer = PixelBuffer::new(320, 220);
     audio
-        .paint(&theme, 320, 220, &mut audio_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(320, 220),
+            &mut audio_buffer,
+            1.0,
+        )
         .unwrap();
     let audio_tree = audio
         .last_tree
@@ -130,7 +140,9 @@ fn navigation_bar_keeps_layer_width_dynamic_after_css_measurement() {
     let mut navigation =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     let mut buffer = PixelBuffer::new(960, 80);
-    navigation.paint(&theme, 960, 80, &mut buffer, 1.0).unwrap();
+    navigation
+        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .unwrap();
 
     let mut surface = LayoutRecordingSurface::default();
     navigation.render_layout(&mut surface);
@@ -163,7 +175,9 @@ fn shipped_audio_popover_content_measured_surface_contains_volume_slider() {
         .unwrap();
 
     let mut buffer = PixelBuffer::new(280, 164);
-    audio.paint(&theme, 280, 164, &mut buffer, 1.0).unwrap();
+    audio
+        .paint(&theme, SurfaceExtent::unpadded(280, 164), &mut buffer, 1.0)
+        .unwrap();
 
     // The popover content-measures to its compact vertical slider + percent
     // label rather than the painted surface bounds.
@@ -215,7 +229,9 @@ fn shipped_audio_popover_slider_sizes_from_props() {
         .unwrap();
 
     let mut buffer = PixelBuffer::new(280, 164);
-    audio.paint(&theme, 280, 164, &mut buffer, 1.0).unwrap();
+    audio
+        .paint(&theme, SurfaceExtent::unpadded(280, 164), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = audio.last_tree.as_ref().expect("rendered audio popover");
     let slider = first_node_by_tag(tree, "slider").expect("audio popover volume slider");

@@ -67,7 +67,12 @@ fn rebuild(component: &mut FrontendSurfaceComponent, width: u32, height: u32) ->
     let mut buffer = PixelBuffer::new(width, height);
     component.invalidate_script_state();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     buffer
 }
@@ -113,7 +118,9 @@ label = ""
 
     let theme = default_theme();
     let mut initial = PixelBuffer::new(160, 60);
-    component.paint(&theme, 160, 60, &mut initial, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut initial, 1.0)
+        .unwrap();
     // Warm-up: the second build settles embedded container sizes post-layout.
     let first = rebuild(&mut component, 160, 60);
     let hits_before = component.component_memo_hit_count();
@@ -165,7 +172,9 @@ local Child = require("./components/child.mesh")
 
     let theme = default_theme();
     let mut initial = PixelBuffer::new(240, 60);
-    component.paint(&theme, 240, 60, &mut initial, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
+        .unwrap();
     rebuild(&mut component, 240, 60);
 
     assert_eq!(
@@ -210,7 +219,9 @@ items = { { label = "first" }, { label = "second" } }
 
     let theme = default_theme();
     let mut initial = PixelBuffer::new(240, 60);
-    component.paint(&theme, 240, 60, &mut initial, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
+        .unwrap();
     rebuild(&mut component, 240, 60);
 
     assert_eq!(
@@ -252,7 +263,9 @@ items = { { id = "first", label = "First" }, { id = "second", label = "Second" }
 
     let theme = default_theme();
     let mut initial = PixelBuffer::new(240, 60);
-    component.paint(&theme, 240, 60, &mut initial, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
+        .unwrap();
     rebuild(&mut component, 240, 60);
     let hits_before = component.component_memo_hit_count();
 
@@ -309,7 +322,9 @@ items = { { id = "first" }, { id = "second" } }
     );
     let theme = default_theme();
     let mut initial = PixelBuffer::new(240, 60);
-    component.paint(&theme, 240, 60, &mut initial, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
+        .unwrap();
 
     let first_input =
         first_node_with_attr(component.last_tree.as_ref().unwrap(), "value", "first").unwrap();
@@ -362,7 +377,9 @@ items = { "first", "second" }
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 60);
-    component.paint(&theme, 240, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 60), &mut buffer, 1.0)
+        .unwrap();
 
     let row = first_node_with_attr(
         component.last_tree.as_ref().unwrap(),
@@ -404,7 +421,9 @@ local Child = require("./components/child.mesh")
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(400, 300);
-    component.paint(&theme, 400, 300, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
+        .unwrap();
     rebuild(&mut component, 400, 300);
 
     let iterations = 200;
@@ -519,7 +538,9 @@ fn unchanged_slot_contribution_reuses_memoized_subtree() {
 
     let theme = default_theme();
     let mut initial = PixelBuffer::new(160, 60);
-    component.paint(&theme, 160, 60, &mut initial, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut initial, 1.0)
+        .unwrap();
     rebuild(&mut component, 160, 60);
     let hits_before = component.component_memo_hit_count();
     let second = rebuild(&mut component, 160, 60);
@@ -534,7 +555,9 @@ fn catalog_generation_rebinds_affected_slot_host_and_keeps_root_runtime() {
     let mut component = memo_slot_surface(1);
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 60);
-    component.paint(&theme, 160, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
 
     let root_runtime_generation = component
         .runtimes
@@ -595,7 +618,9 @@ fn catalog_generation_rebinds_affected_slot_host_and_keeps_root_runtime() {
     );
     drop(runtimes);
 
-    component.paint(&theme, 160, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
     assert!(node_with_content(component.last_tree.as_ref().unwrap(), "static slot 0").is_none());
 }
 
@@ -606,7 +631,9 @@ fn slot_memoized_rebuild_beats_full_reeval() {
     let mut component = memo_slot_surface(12);
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(400, 300);
-    component.paint(&theme, 400, 300, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
+        .unwrap();
     rebuild(&mut component, 400, 300);
     let iterations = 200;
 
@@ -678,13 +705,17 @@ label = ""
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 60);
-    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .unwrap();
     // Warm-up: settle container sizes and populate the memo.
     rebuild(&mut component, 200, 60);
     let hits_before = component.component_memo_hit_count();
 
     component.call_namespaced_handler("setLabel", &[]).unwrap();
-    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .unwrap();
 
     // The prop-changed child missed the memo and rebuilt with the new label;
     // the untouched sibling was served from the memo.
@@ -744,7 +775,9 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 60);
-    component.paint(&theme, 160, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
     assert!(
         node_with_content(component.last_tree.as_ref().unwrap(), "0").is_some(),
         "initial grandchild value renders"
@@ -765,7 +798,9 @@ end
             &[],
         )
         .unwrap();
-    component.paint(&theme, 160, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(component.component_memo_hit_count(), hits_before);
     assert!(
         node_with_content(component.last_tree.as_ref().unwrap(), "1").is_some(),
@@ -858,7 +893,9 @@ import MenuPopover from "@mesh/menu-popover"
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 60);
-    component.paint(&theme, 160, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
     assert!(component.has_promoted_popover_wrappers.get());
     // Warm-up: settle container sizes and populate the memo.
     rebuild(&mut component, 160, 60);
@@ -868,7 +905,9 @@ import MenuPopover from "@mesh/menu-popover"
     // promotion presence flag (reset at the top of each surface build) must be
     // replayed so finalize_tree still collapses the wrapper out of flow.
     component.invalidate_script_state();
-    component.paint(&theme, 160, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(component.component_memo_hit_count(), hits_before + 1);
     assert!(
         component.has_promoted_popover_wrappers.get(),
@@ -939,7 +978,9 @@ end
     let iterations = 200;
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(400, 300);
-    component.paint(&theme, 400, 300, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
+        .unwrap();
     rebuild(&mut component, 400, 300);
 
     // Miss path: clear the memo before every rebuild so each child re-runs

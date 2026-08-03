@@ -1,23 +1,39 @@
 use super::*;
 
-/// Extra buffer a parent surface reserves so tooltips can paint outside the
-/// content box.
+/// The compositor-facing size of a parent surface whose content measures
+/// `width` x `height`, together with the [`SurfacePadding`] that size implies.
 ///
-/// Window surfaces get none. A toplevel's size *is* its content size — it is
-/// what the compositor pins, decorates, tiles, and reports — so padding the
+/// **Both halves come from here, and nothing else may inflate a surface.** A
+/// parent surface reserves extra logical pixels so tooltips can paint outside
+/// its content box; those pixels are transparent, and a compositor routes
+/// clicks over them to MESH unless the surface's input region says otherwise.
+/// Returning the inflated size and the reserve as one value is what makes the
+/// two impossible to change independently — the reserve is not an extra step
+/// somebody can forget, it is the second half of the return type. `SurfaceEntry`
+/// then derives the input region from the padding on every commit.
+///
+/// Window surfaces get no reserve. A toplevel's size *is* its content size — it
+/// is what the compositor pins, decorates, tiles, and reports — so padding the
 /// buffer would make the window measurably larger than the UI inside it. A
 /// tooltip that needs to escape a window's bounds is an `xdg_popup`, the same
 /// primitive `<popover>` already promotes to.
-pub(super) fn tooltip_overlay_extra_for_surface(
+pub(super) fn surface_geometry_with_overlay_reserve(
     surface_id: &str,
     role: SurfaceRole,
     width: u32,
     height: u32,
-) -> (u32, u32) {
-    if surface_id == DEBUG_INSPECTOR_SURFACE_ID || role == SurfaceRole::Window {
-        return (0, 0);
-    }
-    component::tooltip_overlay_extra_for_content(width, height)
+) -> (u32, u32, SurfacePadding) {
+    let (extra_w, extra_h) =
+        if surface_id == DEBUG_INSPECTOR_SURFACE_ID || role == SurfaceRole::Window {
+            (0, 0)
+        } else {
+            component::tooltip_overlay_extra_for_content(width, height)
+        };
+    (
+        width.saturating_add(extra_w),
+        height.saturating_add(extra_h),
+        SurfacePadding::trailing(extra_w, extra_h),
+    )
 }
 
 /// Padding compensation for the popup positioner offset along one axis.

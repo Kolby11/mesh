@@ -7,7 +7,7 @@ use super::surface_layout::{SurfaceLayoutSettings, resolve_frontend_module_setti
 use super::types::{
     ChildSurfaceKind, ChildSurfaceRequest, ComponentContext, ComponentError, ComponentInput,
     ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers, ServiceEvent, ShellComponent,
-    TabFocusTarget,
+    SurfaceExtent, TabFocusTarget,
 };
 use mesh_core_config::SettingsStore;
 use mesh_core_interaction::{

@@ -59,7 +59,12 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
         .unwrap();
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     assert_eq!(
@@ -75,7 +80,12 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let requests = component.child_surface_requests();
     let node_key = requests[0].node_key.clone();
@@ -101,7 +111,12 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let option_layout = {
@@ -145,7 +160,12 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
         })
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     assert_eq!(
@@ -168,7 +188,12 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
     component.visible = true;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     component
         .call_namespaced_handler(
@@ -177,7 +202,12 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let requests = component.child_surface_requests();
@@ -233,7 +263,12 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
             )
             .unwrap();
         component
-            .paint(&theme, width, height, &mut buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
         let now = swatches(&component);
         assert_eq!(now.len(), 3, "the window stays three wide: {now:?}");

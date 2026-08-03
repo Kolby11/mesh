@@ -113,6 +113,11 @@ pub struct PopupConfig {
     /// backend). The popup is a Wayland child of this surface.
     pub parent_surface_id: String,
     pub placement: PopupPlacement,
+    /// Which part of `placement.size` is reserve for descendant
+    /// `box-shadow`/`filter` overshoot rather than visible popover content.
+    /// See [`SurfacePadding`](super::SurfacePadding): it is what keeps clicks
+    /// over the transparent ring falling through to whatever is behind it.
+    pub padding: super::SurfacePadding,
     /// Take a compositor input grab (click-to-dismiss-outside + keyboard).
     /// Requires a recent input serial; ignored when no serial is available.
     pub grab: bool,

@@ -6,7 +6,9 @@ fn settings_page_title_keeps_its_full_line_box() {
     let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
     let mut buffer = PixelBuffer::new(920, 900);
 
-    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = settings.last_tree.as_ref().expect("rendered settings tree");
     let title = first_node_with_class_token(tree, "page-title").expect("settings page title");
@@ -27,7 +29,9 @@ fn settings_wrapped_descriptions_expand_to_their_content() {
     let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
     let mut buffer = PixelBuffer::new(920, 900);
 
-    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = settings.last_tree.as_ref().expect("rendered settings tree");
     let settings_description = first_node_with_class_token(tree, "sidebar-foot-copy")
@@ -41,7 +45,9 @@ fn settings_wrapped_descriptions_expand_to_their_content() {
     settings
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
         .unwrap();
-    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = settings
         .last_tree
@@ -70,11 +76,15 @@ fn settings_tab_switch_resets_scroll_and_replaces_the_visible_page() {
     let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
     let mut buffer = PixelBuffer::new(920, 900);
 
-    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
     settings
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showBluetooth", &[])
         .unwrap();
-    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
 
     let scroll_id = first_node_with_attr(
         settings
@@ -99,7 +109,9 @@ fn settings_tab_switch_resets_scroll_and_replaces_the_visible_page() {
         Some(0.0),
         "switching settings pages should reset the shared scroll container"
     );
-    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
 
     let command_text = settings
         .display_list_paint_commands()
@@ -127,7 +139,9 @@ fn settings_scrollbar_is_conditional_on_overflow() {
     let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
     let mut buffer = PixelBuffer::new(920, 900);
 
-    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = settings.last_tree.as_ref().expect("rendered settings tree");
     let scroll =

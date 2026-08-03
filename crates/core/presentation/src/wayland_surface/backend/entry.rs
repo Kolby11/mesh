@@ -125,12 +125,16 @@ pub(in crate::wayland_surface) struct SurfaceEntry {
     pub(in crate::wayland_surface) blur_regions: Vec<DamageRect>,
     pub(in crate::wayland_surface) blur_committed: bool,
     pub(in crate::wayland_surface) blur_region_dirty: bool,
-    /// Desired input region in surface-local logical coordinates. `None`
-    /// means whole-surface input (the wl_surface default). Persisted here and
-    /// applied with the next present commit so it can never be lost to
-    /// call-ordering around configure/remap.
-    pub(in crate::wayland_surface) input_region_rect: Option<DamageRect>,
-    pub(in crate::wayland_surface) input_region_dirty: bool,
+    /// Which part of this surface is paint-only reserve. Copied from the
+    /// config/popup-config that sized the surface, and the *only* input the
+    /// input region is derived from — see [`SurfacePadding`].
+    pub(in crate::wayland_surface) padding: SurfacePadding,
+    /// The input region last committed to the compositor, in surface-local
+    /// logical coordinates. `Some(None)` means "whole-surface input has been
+    /// committed"; the outer `None` means nothing has been committed yet, which
+    /// is what forces a freshly created (or recreated) surface to publish its
+    /// region again instead of inheriting a stale "already applied" belief.
+    pub(in crate::wayland_surface) applied_input_region: Option<Option<DamageRect>>,
     /// The output this surface's `wl_surface` currently overlaps, tracked via
     /// `wl_surface::enter`/`leave`. A surface can technically straddle more
     /// than one output; the most recent `enter` wins, which is exactly what a
@@ -151,6 +155,7 @@ impl SurfaceEntry {
             width: cfg.width.max(1),
             height: cfg.height.max(1),
             config_fingerprint: surface_config_fingerprint(&cfg, applied_keyboard_mode),
+            padding: cfg.padding,
             cfg,
             applied_keyboard_mode,
             configured: false,
@@ -168,14 +173,26 @@ impl SurfaceEntry {
             blur_regions: Vec::new(),
             blur_committed: false,
             blur_region_dirty: false,
-            input_region_rect: None,
-            input_region_dirty: false,
+            applied_input_region: None,
             output: None,
         }
     }
 
     pub(in crate::wayland_surface) fn wl_surface(&self) -> &wl_surface::WlSurface {
         self.role.wl_surface()
+    }
+
+    /// The input region this surface should currently have: its
+    /// compositor-configured size minus the reserve it declared.
+    ///
+    /// Derived on every commit rather than pushed by the shell. A derived value
+    /// cannot be missed by a caller, cannot be dropped because the surface did
+    /// not exist yet, and is automatically re-established when the compositor
+    /// object is torn down and recreated (role swap, window hide/show) — the
+    /// three ways this has regressed before.
+    pub(in crate::wayland_surface) fn content_input_region(&self) -> Option<DamageRect> {
+        self.padding
+            .content_rect(self.width.max(1), self.height.max(1))
     }
 
     pub(super) fn needs_reconfigure(
@@ -188,6 +205,10 @@ impl SurfaceEntry {
     }
 
     pub(super) fn apply_config(&mut self, cfg: SurfaceConfig, keyboard_mode: KeyboardMode) {
+        // Adopt the reserve before anything can return early: the padding is
+        // client-side state with no protocol request of its own, and a config
+        // that changed only the reserve must still reach `content_input_region`.
+        self.padding = cfg.padding;
         // A toplevel takes title/app_id/size-hint requests instead of the
         // layer-shell placement requests, and never invalidates `configured`
         // for them: the compositor is not obliged to answer a title change with

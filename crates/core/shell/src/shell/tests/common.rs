@@ -366,8 +366,7 @@ impl super::types::ShellComponent for RecordingComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: crate::shell::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -475,8 +474,7 @@ impl super::types::ShellComponent for IndexedRecordingComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: crate::shell::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -622,8 +620,7 @@ impl super::types::ShellComponent for FocusRecordingComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: crate::shell::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -692,6 +689,9 @@ pub(super) struct PopoverHarnessState {
     pub(super) node_key: String,
     pub(super) anchor_rect: (i32, i32, i32, i32),
     pub(super) content_size: (u32, u32),
+    /// Reserve around the popover content for descendant shadow/filter
+    /// overshoot: (left, top, right, bottom).
+    pub(super) content_padding: (u32, u32, u32, u32),
     pub(super) painted_nodes: Vec<String>,
     pub(super) exiting_paints: Vec<bool>,
     pub(super) child_inputs: Vec<(String, ComponentInput)>,
@@ -709,6 +709,7 @@ impl Default for PopoverHarnessState {
             node_key: "root/popover".into(),
             anchor_rect: (8, 10, 40, 16),
             content_size: (72, 32),
+            content_padding: (0, 0, 0, 0),
             painted_nodes: Vec::new(),
             exiting_paints: Vec::new(),
             child_inputs: Vec::new(),
@@ -792,8 +793,7 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: crate::shell::types::SurfaceExtent,
         buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -820,7 +820,7 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
             kind: super::types::ChildSurfaceKind::Popover,
             anchor_rect: state.anchor_rect,
             content_size: state.content_size,
-            content_padding: (0, 0, 0, 0),
+            content_padding: state.content_padding,
             placement: mesh_core_elements::PopoverPlacement::default(),
         }]
     }
@@ -972,8 +972,7 @@ impl super::types::ShellComponent for TransitionRecordingComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: crate::shell::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -1067,8 +1066,7 @@ impl super::types::ShellComponent for InputSizeRecordingComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: crate::shell::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -1168,8 +1166,7 @@ impl super::types::ShellComponent for PopupGeometryRecordingComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: crate::shell::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -1258,8 +1255,7 @@ impl super::types::ShellComponent for MeasuredLayerGeometryComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: crate::shell::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -1349,8 +1345,7 @@ impl super::types::ShellComponent for DeadlineTickComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: crate::shell::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -1444,8 +1439,7 @@ impl super::types::ShellComponent for DirtyHiddenComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: crate::shell::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {

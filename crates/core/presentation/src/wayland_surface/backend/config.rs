@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_render::DamageRect;
 use std::hash::{Hash, Hasher};
 
 /// Configuration passed from the shell before each present.
@@ -6,6 +7,75 @@ use std::hash::{Hash, Hasher};
 pub enum LayerSurfaceSizePolicy {
     Fixed,
     Flexible,
+}
+
+/// Logical pixels of a surface that exist only so the client has somewhere to
+/// paint, and which must never take pointer input.
+///
+/// MESH deliberately asks the compositor for surfaces that are *larger* than
+/// their content: a bar reserves room below itself so tooltips can escape its
+/// content box, and a popover reserves a ring so descendant `box-shadow` /
+/// `filter` overshoot has pixels instead of clipping at the buffer edge. Those
+/// reserved pixels are transparent, so a compositor that routes input by
+/// surface bounds hands MESH every click over them and the windows underneath
+/// get a dead zone — the single most-reintroduced bug in this codebase.
+///
+/// The padding therefore travels *with* the size that it inflates, inside
+/// [`SurfaceConfig`] and [`PopupConfig`](super::super::PopupConfig), and the
+/// backend derives the input region from it on every commit. There is no second
+/// call to forget, no shell-side cache that can go stale, and no way for a
+/// surface to be inflated without saying which part of it is reserve: producing
+/// the inflated size and producing this padding is one operation
+/// (`shell::runtime::render::surface_geometry_with_overlay_reserve`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub struct SurfacePadding {
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+}
+
+impl SurfacePadding {
+    /// Reserve on the trailing edges only — the shape a tooltip-overlay bar
+    /// uses, where content sits at the surface origin.
+    pub fn trailing(right: u32, bottom: u32) -> Self {
+        Self {
+            left: 0,
+            top: 0,
+            right,
+            bottom,
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The content rect inside a surface of `width` x `height` logical pixels,
+    /// or `None` when the whole surface is content (an all-zero padding, which
+    /// the caller turns into "reset to the default whole-surface input region").
+    ///
+    /// Padding that would consume the entire surface is ignored rather than
+    /// collapsing the rect: a zero-area input region makes a surface
+    /// completely unclickable, which is a worse failure than a slightly
+    /// oversized one, and it can legitimately happen for one frame while a
+    /// surface is still being measured.
+    pub fn content_rect(&self, width: u32, height: u32) -> Option<DamageRect> {
+        if self.is_zero() {
+            return None;
+        }
+        let content_width = width.saturating_sub(self.left.saturating_add(self.right));
+        let content_height = height.saturating_sub(self.top.saturating_add(self.bottom));
+        if content_width == 0 || content_height == 0 {
+            return None;
+        }
+        Some(DamageRect {
+            x: self.left,
+            y: self.top,
+            width: content_width,
+            height: content_height,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +91,11 @@ pub struct SurfaceConfig {
     pub size_policy: LayerSurfaceSizePolicy,
     pub width: u32,
     pub height: u32,
+    /// Which part of [`Self::width`] x [`Self::height`] is paint-only reserve
+    /// rather than content. See [`SurfacePadding`]: this is what keeps the
+    /// input region confined to the content, and it must be produced by
+    /// whatever produced the inflated size above.
+    pub padding: SurfacePadding,
     pub exclusive_zone: i32,
     pub keyboard_mode: KeyboardMode,
     pub namespace: String,
@@ -44,6 +119,7 @@ impl Default for SurfaceConfig {
             size_policy: LayerSurfaceSizePolicy::Fixed,
             width: 0,
             height: 0,
+            padding: SurfacePadding::default(),
             exclusive_zone: 0,
             keyboard_mode: KeyboardMode::None,
             namespace: "mesh".to_string(),
@@ -128,6 +204,11 @@ pub(in crate::wayland_surface) fn surface_config_fingerprint(
     keyboard_mode_slot(keyboard_mode).hash(&mut hasher);
     cfg.width.hash(&mut hasher);
     cfg.height.hash(&mut hasher);
+    // The reserve carries no protocol request, but it decides the input region,
+    // so a config that changes only the reserve must still reach `apply_config`
+    // (`surface_change_requires_fresh_configure` keeps it from invalidating the
+    // compositor's acked size).
+    cfg.padding.hash(&mut hasher);
     cfg.margin_top.hash(&mut hasher);
     cfg.margin_right.hash(&mut hasher);
     cfg.margin_bottom.hash(&mut hasher);

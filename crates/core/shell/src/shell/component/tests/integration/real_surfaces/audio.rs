@@ -16,14 +16,18 @@ fn audio_popover_theme_repaint_keeps_audio_state_without_available_flag() {
         .unwrap();
 
     let mut buffer = PixelBuffer::new(320, 220);
-    audio.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
+    audio
+        .paint(&theme, SurfaceExtent::unpadded(320, 220), &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(
         runtime_value(&audio, "audio_percent_label"),
         Some(serde_json::json!("50%"))
     );
 
     audio.theme_changed().unwrap();
-    audio.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
+    audio
+        .paint(&theme, SurfaceExtent::unpadded(320, 220), &mut buffer, 1.0)
+        .unwrap();
 
     let text = rendered_text(&audio);
     assert!(
@@ -108,7 +112,12 @@ fn phase44_navigation_audio_surface_emits_focused_proof_snapshot() {
     navigation.visible = true;
     let mut navigation_buffer = PixelBuffer::new(960, 80);
     navigation
-        .paint(&theme, 960, 80, &mut navigation_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut navigation_buffer,
+            1.0,
+        )
         .unwrap();
     assert_phase44_focused_proof_snapshot(&navigation, "navigation bar");
 
@@ -126,7 +135,12 @@ fn phase44_navigation_audio_surface_emits_focused_proof_snapshot() {
         .unwrap();
     let mut audio_buffer = PixelBuffer::new(320, 220);
     audio
-        .paint(&theme, 320, 220, &mut audio_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(320, 220),
+            &mut audio_buffer,
+            1.0,
+        )
         .unwrap();
     assert_phase44_focused_proof_snapshot(&audio, "audio popover");
 }
@@ -246,7 +260,9 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(220, 80);
-    component.paint(&theme, 220, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(220, 80), &mut buffer, 1.0)
+        .unwrap();
     let tree = component.last_tree.as_ref().expect("rendered tree");
     let button = first_node_by_tag(tree, "button").expect("button node");
     let handler = button
@@ -266,7 +282,9 @@ end
     component
         .call_handler_target(&handler, std::slice::from_ref(&click_event))
         .unwrap();
-    component.paint(&theme, 220, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(220, 80), &mut buffer, 1.0)
+        .unwrap();
     let show_requests = component.tick().unwrap();
     assert!(matches!(
         show_requests.as_slice(),
@@ -282,7 +300,9 @@ end
     );
     assert!(runtime_bool(&component, "audio_surface_hidden"));
 
-    component.paint(&theme, 220, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(220, 80), &mut buffer, 1.0)
+        .unwrap();
     let requests = component.tick().unwrap();
     match requests.as_slice() {
         [CoreRequest::HideSurface { surface_id }] => {
@@ -313,7 +333,9 @@ fn shipped_navigation_volume_button_click_toggles_mute() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 80);
-    component.paint(&theme, 320, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(320, 80), &mut buffer, 1.0)
+        .unwrap();
     let health = format!(
         "{:?}",
         component
@@ -384,7 +406,9 @@ fn shipped_navigation_audio_popover_transition_delay_stays_bounded() {
     let mut buffer = PixelBuffer::new(320, 220);
     // The hide transition is now a CSS `transition` on the surface root, read
     // from the last painted root style, so paint once before querying it.
-    component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(320, 220), &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(
         component.hide_transition_ms(),
         120,
@@ -392,7 +416,9 @@ fn shipped_navigation_audio_popover_transition_delay_stays_bounded() {
     );
 
     component.set_surface_exiting(true);
-    component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(320, 220), &mut buffer, 1.0)
+        .unwrap();
     let tree = component
         .last_tree
         .as_ref()
@@ -425,7 +451,12 @@ fn shipped_navigation_volume_scroll_reaches_audio_service_on_first_input() {
     let theme = default_theme();
     let mut nav_buffer = PixelBuffer::new(960, 80);
     navigation
-        .paint(&theme, 960, 80, &mut nav_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut nav_buffer,
+            1.0,
+        )
         .unwrap();
     let tree = navigation
         .last_tree
@@ -486,7 +517,12 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let tree = component
         .last_tree
@@ -509,7 +545,12 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     let slovak_locale = mesh_core_locale::LocaleEngine::new("sk");
     component.locale_changed(&slovak_locale).unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let tree = component
         .last_tree

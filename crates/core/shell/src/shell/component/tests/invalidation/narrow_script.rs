@@ -174,15 +174,21 @@ end
     let mut component = test_frontend_component(&source);
     let theme = themed_primary("test", "#000000");
     let mut buffer = PixelBuffer::new(160, 40);
-    component.paint(&theme, 160, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
+        .unwrap();
     if component.wants_render() {
-        component.paint(&theme, 160, 40, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
+            .unwrap();
     }
 
     component
         .call_namespaced_handler("updateLabel", &[])
         .unwrap();
-    component.paint(&theme, 160, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(component.retained_tree.last_update_was_scoped());
 }
@@ -206,10 +212,14 @@ end
     );
     let theme = themed_primary("test", "#000000");
     let mut buffer = PixelBuffer::new(160, 40);
-    component.paint(&theme, 160, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
+        .unwrap();
 
     component.call_namespaced_handler("hide", &[]).unwrap();
-    component.paint(&theme, 160, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(!component.retained_tree.last_update_was_scoped());
 }
@@ -259,9 +269,13 @@ fn prime_audio_component(
     theme: &Theme,
     buffer: &mut PixelBuffer,
 ) {
-    component.paint(theme, 640, 160, buffer, 1.0).unwrap();
+    component
+        .paint(theme, SurfaceExtent::unpadded(640, 160), buffer, 1.0)
+        .unwrap();
     apply_audio_update(component, 10, false);
-    component.paint(theme, 640, 160, buffer, 1.0).unwrap();
+    component
+        .paint(theme, SurfaceExtent::unpadded(640, 160), buffer, 1.0)
+        .unwrap();
 }
 
 #[test]
@@ -290,7 +304,9 @@ fn service_field_update_reuses_clean_static_template_subtrees() {
     assert!(component.compiled.supports_selective_service_build());
     assert!(!component.has_render_hooks());
     assert!(component.pending_service_template_nodes.is_some());
-    component.paint(&theme, 640, 160, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(rendered_text(&component).iter().any(|text| text == "20"));
     assert!(
@@ -309,7 +325,9 @@ fn dynamic_service_template_keeps_full_evaluation_fallback() {
     prime_audio_component(&mut component, &theme, &mut buffer);
 
     apply_audio_update(&mut component, 20, true);
-    component.paint(&theme, 640, 160, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|text| text == "20"));
@@ -326,7 +344,9 @@ fn service_template_with_render_hook_keeps_full_evaluation_fallback() {
 
     apply_audio_update(&mut component, 20, false);
     assert!(component.has_render_hooks());
-    component.paint(&theme, 640, 160, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(rendered_text(&component).iter().any(|text| text == "20"));
     assert_eq!(component.last_template_build_reused_nodes, 0);
@@ -355,26 +375,48 @@ fn affected_template_eval_beats_full_rebuild() {
         if iteration % 2 == 0 {
             let started = Instant::now();
             apply_audio_update(&mut full, percent, false);
-            full.paint(&theme, 640, 160, &mut full_buffer, 1.0).unwrap();
+            full.paint(
+                &theme,
+                SurfaceExtent::unpadded(640, 160),
+                &mut full_buffer,
+                1.0,
+            )
+            .unwrap();
             full_time += started.elapsed();
 
             let started = Instant::now();
             apply_audio_update(&mut selective, percent, false);
             selective
-                .paint(&theme, 640, 160, &mut selective_buffer, 1.0)
+                .paint(
+                    &theme,
+                    SurfaceExtent::unpadded(640, 160),
+                    &mut selective_buffer,
+                    1.0,
+                )
                 .unwrap();
             selective_time += started.elapsed();
         } else {
             let started = Instant::now();
             apply_audio_update(&mut selective, percent, false);
             selective
-                .paint(&theme, 640, 160, &mut selective_buffer, 1.0)
+                .paint(
+                    &theme,
+                    SurfaceExtent::unpadded(640, 160),
+                    &mut selective_buffer,
+                    1.0,
+                )
                 .unwrap();
             selective_time += started.elapsed();
 
             let started = Instant::now();
             apply_audio_update(&mut full, percent, false);
-            full.paint(&theme, 640, 160, &mut full_buffer, 1.0).unwrap();
+            full.paint(
+                &theme,
+                SurfaceExtent::unpadded(640, 160),
+                &mut full_buffer,
+                1.0,
+            )
+            .unwrap();
             full_time += started.elapsed();
         }
     }
@@ -420,16 +462,38 @@ end
     let mut scoped_buffer = PixelBuffer::new(64, 16);
     let mut full_buffer = PixelBuffer::new(64, 16);
     scoped
-        .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(64, 16),
+            &mut scoped_buffer,
+            1.0,
+        )
         .unwrap();
-    full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+    full.paint(
+        &theme,
+        SurfaceExtent::unpadded(64, 16),
+        &mut full_buffer,
+        1.0,
+    )
+    .unwrap();
     if scoped.wants_render() {
         scoped
-            .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(64, 16),
+                &mut scoped_buffer,
+                1.0,
+            )
             .unwrap();
     }
     if full.wants_render() {
-        full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+        full.paint(
+            &theme,
+            SurfaceExtent::unpadded(64, 16),
+            &mut full_buffer,
+            1.0,
+        )
+        .unwrap();
     }
 
     let iterations = 100;
@@ -440,24 +504,46 @@ end
             let started = Instant::now();
             scoped.call_namespaced_handler("toggleLabel", &[]).unwrap();
             scoped
-                .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+                .paint(
+                    &theme,
+                    SurfaceExtent::unpadded(64, 16),
+                    &mut scoped_buffer,
+                    1.0,
+                )
                 .unwrap();
             scoped_time += started.elapsed();
 
             let started = Instant::now();
             full.call_namespaced_handler("toggleLabel", &[]).unwrap();
-            full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+            full.paint(
+                &theme,
+                SurfaceExtent::unpadded(64, 16),
+                &mut full_buffer,
+                1.0,
+            )
+            .unwrap();
             full_time += started.elapsed();
         } else {
             let started = Instant::now();
             full.call_namespaced_handler("toggleLabel", &[]).unwrap();
-            full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+            full.paint(
+                &theme,
+                SurfaceExtent::unpadded(64, 16),
+                &mut full_buffer,
+                1.0,
+            )
+            .unwrap();
             full_time += started.elapsed();
 
             let started = Instant::now();
             scoped.call_namespaced_handler("toggleLabel", &[]).unwrap();
             scoped
-                .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+                .paint(
+                    &theme,
+                    SurfaceExtent::unpadded(64, 16),
+                    &mut scoped_buffer,
+                    1.0,
+                )
                 .unwrap();
             scoped_time += started.elapsed();
         }

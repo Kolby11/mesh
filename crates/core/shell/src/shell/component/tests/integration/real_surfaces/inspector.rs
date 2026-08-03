@@ -23,7 +23,9 @@ fn debug_inspector_overview_renders_profiling_off_state_on_real_surface() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(360, 640);
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Inspect element"));
@@ -72,7 +74,9 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
         })
         .unwrap();
 
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
     let overview_text = rendered_text(&component);
     assert!(overview_text.iter().any(|line| line == "Overview"));
     assert!(
@@ -84,7 +88,9 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
     let surfaces_text = rendered_text(&component);
     assert!(surfaces_text.iter().any(|line| line == "Surfaces"));
     assert!(
@@ -99,7 +105,9 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
             &[],
         )
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
     let backend_text = rendered_text(&component);
     assert!(backend_text.iter().any(|line| line == "Backend services"));
     assert!(
@@ -111,7 +119,9 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
     let benchmark_text = rendered_text(&component);
     assert!(
         benchmark_text
@@ -160,7 +170,9 @@ fn debug_inspector_hidden_views_do_not_participate_in_layout() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(480, 640);
-    component.paint(&theme, 480, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(480, 640), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component.last_tree.as_ref().expect("rendered inspector");
     let overview = first_node_with_class_token(tree, "overview-view").expect("overview view");
@@ -211,11 +223,15 @@ fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
             }),
         })
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
 
     let empty_text = rendered_text(&component);
     assert!(empty_text.iter().any(|line| line == "Surfaces"));
@@ -269,7 +285,9 @@ fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
             }),
         })
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
 
     let live_text = rendered_text(&component);
     assert!(live_text.iter().any(|line| line == "@mesh/navigation-bar"));

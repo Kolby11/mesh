@@ -14,7 +14,7 @@ use mesh_core_elements::style::BackgroundPaint;
 use mesh_core_elements::{PopoverAnchor, PopoverConstraintAdjustment, PopoverGrab, PopoverGravity};
 use mesh_core_presentation::{
     LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity,
-    PopupPlacement, PresentStatus,
+    PopupPlacement, PresentStatus, SurfacePadding,
 };
 use mesh_core_render::{DamageRect, DisplayPaintCommand};
 use mesh_core_wayland::SurfaceRole;
@@ -217,16 +217,16 @@ impl Shell {
                 // The compositor-facing layer surface is inflated by the
                 // tooltip overlay reserve so tooltips can paint outside the
                 // content box. `surface.width/height` (and everything the
-                // component sees) stay content-sized; pointer input is
-                // confined back to content in `present_surface_target`.
-                let (tooltip_extra_w, tooltip_extra_h) = tooltip_overlay_extra_for_surface(
-                    &surface_id,
-                    surface.role,
-                    surface.width,
-                    surface.height,
-                );
-                let configured_width = surface.width.saturating_add(tooltip_extra_w);
-                let configured_height = surface.height.saturating_add(tooltip_extra_h);
+                // component sees) stay content-sized, and `configured_padding`
+                // travels with the inflated size so the presentation layer can
+                // confine pointer input back to the content rect.
+                let (configured_width, configured_height, configured_padding) =
+                    surface_geometry_with_overlay_reserve(
+                        &surface_id,
+                        surface.role,
+                        surface.width,
+                        surface.height,
+                    );
                 let config_changed = self.components[index]
                     .parent
                     .last_surface_config
@@ -237,6 +237,7 @@ impl Shell {
                             || last.size_policy != size_policy
                             || last.width != configured_width
                             || last.height != configured_height
+                            || last.padding != configured_padding
                             || last.exclusive_zone != surface.exclusive_zone
                             || last.keyboard_mode != surface.keyboard_mode
                             || last.margin_top != surface.margin_top
@@ -256,6 +257,7 @@ impl Shell {
                         size_policy,
                         width: configured_width,
                         height: configured_height,
+                        padding: configured_padding,
                         exclusive_zone: surface.exclusive_zone,
                         keyboard_mode: surface.keyboard_mode,
                         namespace: surface_id.clone(),
@@ -397,11 +399,13 @@ impl Shell {
                 // The paint buffer matches the compositor-configured surface:
                 // content plus the tooltip overlay reserve for parent layer
                 // surfaces. `width`/`height` stay content-sized for the
-                // component-facing notifications and popup config above.
-                (paint_width, paint_height) = if is_popup {
-                    (width, height)
+                // component-facing notifications and popup config above, and
+                // the component is handed both halves so its own unmeasured
+                // fallback can never pick up the reserve.
+                let paint_extent = if is_popup {
+                    SurfaceExtent::unpadded(width, height)
                 } else {
-                    let (extra_w, extra_h) = tooltip_overlay_extra_for_surface(
+                    let (padded_width, padded_height, _) = surface_geometry_with_overlay_reserve(
                         &surface_id,
                         self.surfaces
                             .get(&surface_id)
@@ -410,11 +414,9 @@ impl Shell {
                         width,
                         height,
                     );
-                    (
-                        width.saturating_add(extra_w),
-                        height.saturating_add(extra_h),
-                    )
+                    SurfaceExtent::padded((width, height), (padded_width, padded_height))
                 };
+                (paint_width, paint_height) = paint_extent.padded;
                 let physical_w = ((paint_width as f32 * scale).ceil() as u32).max(1);
                 let physical_h = ((paint_height as f32 * scale).ceil() as u32).max(1);
 
@@ -455,8 +457,7 @@ impl Shell {
                     .component
                     .paint(
                         self.theme.active(),
-                        paint_width,
-                        paint_height,
+                        paint_extent,
                         runtime
                             .parent
                             .paint_buffer
@@ -661,15 +662,15 @@ impl Shell {
                 self.presentation_engine
                     .update_opaque_region(&surface_id, opaque_rect);
 
-                // Restrict pointer input to true content rather than tooltip padding.
-                let input_rect = content_size.map(|(content_w, content_h)| DamageRect {
-                    x: 0,
-                    y: 0,
-                    width: content_w,
-                    height: content_h,
-                });
-                self.presentation_engine
-                    .update_input_region(&surface_id, input_rect);
+                // No input-region push here on purpose. Confining pointer input
+                // to the content rect used to live at this call site, guarded by
+                // the `last_region_state` cache above — and every way that cache
+                // could be warm while the compositor object was not (a surface
+                // recreated for a role swap, a window destroyed on hide, a
+                // present that returned before the region was flushed) brought
+                // back the dead zone under the bar. The reserve now travels with
+                // the size that created it (`SurfacePadding` in the surface
+                // config) and the region is re-derived on every commit.
 
                 let blur_regions = self.components[index]
                     .component

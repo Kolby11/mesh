@@ -598,8 +598,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn paint(
         &mut self,
         theme: &Theme,
-        width: u32,
-        height: u32,
+        extent: SurfaceExtent,
         buffer: &mut PixelBuffer,
         scale: f32,
     ) -> Result<(), ComponentError> {
@@ -608,13 +607,18 @@ impl ShellComponent for FrontendSurfaceComponent {
         // anything during paint (measured_size change, active animation) needs
         // another frame, it sets a flag again and wants_render picks it up.
         let (requested_width, requested_height) = self.requested_layout_size();
+        // The fallback for an unmeasured surface is the *content* extent, never
+        // the padded one. When these were one argument, a surface that had not
+        // measured itself yet fell back to the padded surface and laid its first
+        // frame out — and recorded `last_surface_size` — against the tooltip
+        // reserve, e.g. 1920x201 for a 1920x56 bar.
         let content_width = if requested_width == 0 {
-            width.max(1)
+            extent.content_width().max(1)
         } else {
             requested_width.max(1)
         };
         let content_height = if requested_height == 0 {
-            height.max(1)
+            extent.content_height().max(1)
         } else {
             requested_height.max(1)
         };
@@ -626,8 +630,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         let animation_only_frame = std::mem::take(&mut self.animation_only_dirty);
         let (requires_tree_rebuild, can_use_retained_path, dirty_types, _) =
             self.take_dirty_for_paint();
-        let paint_width = width.max(content_width).max(1);
-        let paint_height = height.max(content_height).max(1);
+        let paint_width = extent.padded_width().max(content_width).max(1);
+        let paint_height = extent.padded_height().max(content_height).max(1);
         // The paint buffer's physical size tracks `paint_width`/`paint_height`
         // (content plus the tooltip overlay reserve, times scale), not the
         // content-only dimensions `observe_surface_size` watches above. A

@@ -206,13 +206,23 @@ fn pick_bubble_option(enter_handler: &str, option_index: usize) -> (Option<usize
         .unwrap();
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     component
         .call_namespaced_handler(enter_handler, &[])
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let requests = component.child_surface_requests();
@@ -247,7 +257,12 @@ fn pick_bubble_option(enter_handler: &str, option_index: usize) -> (Option<usize
             .unwrap();
     }
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     (

@@ -222,3 +222,179 @@ fn blur_settings_clamp_into_painter_quality() {
     assert_eq!(extreme.passes, mesh_core_render::MAX_BLUR_PASSES);
     assert_eq!(extreme.max_radius, 0.0);
 }
+
+// ---------------------------------------------------------------------------
+// Input-region / dead-zone regression tests
+//
+// MESH asks the compositor for surfaces that are *larger* than their content:
+// a bar reserves 200 logical pixels below itself so tooltips can paint outside
+// its content box, and a popover reserves a ring for shadow/filter overshoot.
+// Those pixels are transparent. If the surface's input region does not exclude
+// them, the compositor routes every click over them to MESH and the windows
+// underneath get a dead zone — "the shell blocks a strip under the navigation
+// bar", which has been reintroduced roughly twenty times.
+//
+// The reserve and the input padding now come from one function
+// (`surface_geometry_with_overlay_reserve`) and travel together inside
+// `SurfaceConfig`/`PopupConfig`, and the backend re-derives the region from
+// that padding on every commit. The tests below pin both halves: that the
+// reserve is declared, and that the resulting region is content-sized.
+// ---------------------------------------------------------------------------
+
+/// The whole bug, stated once: an inflated bar surface must not take input over
+/// the strip it reserved for tooltips.
+#[test]
+fn layer_surface_input_region_excludes_the_tooltip_overlay_reserve() {
+    const CONTENT: (u32, u32) = (1920, 56);
+
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
+        "@test/bar",
+        CONTENT,
+        CONTENT,
+    )));
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@test/bar".into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+
+    let cfg = configured_surface(&shell, "@test/bar");
+    assert!(
+        cfg.height > CONTENT.1,
+        "the bar surface is expected to be inflated by the tooltip overlay reserve; \
+         if that reserve is gone this test is measuring nothing: {cfg:?}"
+    );
+
+    let region = shell
+        .presentation_engine
+        .input_region("@test/bar")
+        .expect("an inflated surface must confine its input region");
+    assert_eq!(
+        (region.x, region.y, region.width, region.height),
+        (0, 0, CONTENT.0, CONTENT.1),
+        "pointer input must stop at the content rect; every logical pixel of \
+         {}x{} beyond it is a dead zone over the windows below the bar",
+        cfg.width,
+        cfg.height
+    );
+}
+
+/// The invariant behind the fix, checked over whatever the shell actually
+/// configured rather than over one hand-built case: a surface may only be
+/// inflated if it declares that same inflation as input padding.
+///
+/// This is the test to keep. Any future code that grows a surface — a new
+/// overlay reserve, a drop-shadow margin, a resize grip — trips it unless the
+/// growth is declared, which is exactly the mistake that keeps coming back.
+#[test]
+fn every_configured_surface_declares_its_inflation_as_input_padding() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
+        "@test/bar",
+        (1920, 56),
+        (1920, 56),
+    )));
+    shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
+        "@test/popover",
+        (280, 164),
+        (280, 164),
+    )));
+    for surface_id in ["@test/bar", "@test/popover"] {
+        let mut emitted = shell
+            .apply_request(CoreRequest::ShowSurface {
+                surface_id: surface_id.into(),
+            })
+            .unwrap();
+        shell.drain_requests(&mut emitted).unwrap();
+    }
+    shell.render_components().unwrap();
+
+    let configs = shell.presentation_engine.testing_surface_configs();
+    assert!(
+        !configs.is_empty(),
+        "no surface was configured; the assertions below would be vacuous"
+    );
+    for (surface_id, cfg) in configs {
+        let content = shell
+            .surfaces
+            .get(&surface_id)
+            .map(|surface| (surface.width, surface.height))
+            .unwrap_or_else(|| panic!("configured surface {surface_id} has no shell record"));
+        assert_eq!(
+            (
+                cfg.width - cfg.padding.left - cfg.padding.right,
+                cfg.height - cfg.padding.top - cfg.padding.bottom,
+            ),
+            content,
+            "{surface_id} was configured at {}x{} for {content:?} of content, so \
+             {:?} of that must be declared input padding — otherwise the \
+             difference silently becomes a click dead zone",
+            cfg.width,
+            cfg.height,
+            cfg.padding
+        );
+    }
+}
+
+/// A toplevel's size *is* its content size, so it is never inflated and takes
+/// input over its whole area. Guards the other direction: a change that starts
+/// padding windows would make them unclickable at the edges.
+#[test]
+fn window_surface_is_not_inflated_and_takes_input_over_its_whole_area() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
+        "@test/window",
+        (640, 480),
+        (640, 480),
+    )));
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@test/window".into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell
+        .surfaces
+        .get_mut("@test/window")
+        .expect("surface registered")
+        .role = mesh_core_wayland::SurfaceRole::Window;
+    shell.render_components().unwrap();
+
+    let cfg = configured_surface(&shell, "@test/window");
+    assert_eq!(
+        (cfg.width, cfg.height),
+        (640, 480),
+        "a window is sized by its content, never inflated by an overlay reserve"
+    );
+    assert!(
+        cfg.padding.is_zero(),
+        "an uninflated surface declares no padding: {:?}",
+        cfg.padding
+    );
+    assert!(
+        shell
+            .presentation_engine
+            .input_region("@test/window")
+            .is_none(),
+        "with nothing reserved the whole window takes input"
+    );
+}
+
+fn configured_surface(shell: &Shell, surface_id: &str) -> mesh_core_presentation::SurfaceConfig {
+    shell
+        .presentation_engine
+        .testing_surface_configs()
+        .into_iter()
+        .find(|(id, _)| id == surface_id)
+        .unwrap_or_else(|| panic!("{surface_id} was never configured"))
+        .1
+}

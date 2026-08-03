@@ -16,7 +16,9 @@ fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_sta
     {
         let theme = default_theme();
         let mut buffer = PixelBuffer::new(360, 720);
-        component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+            .unwrap();
     }
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -94,14 +96,18 @@ fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_sta
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(360, 640);
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
     component
         .call_namespaced_handler(
             "__mesh_embed__::@mesh/debug-inspector::showBackendServices",
             &[],
         )
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Backend services"));
@@ -152,7 +158,9 @@ fn debug_inspector_surfaces_view_renders_retained_paint_filtering_counters() {
     {
         let theme = default_theme();
         let mut buffer = PixelBuffer::new(360, 720);
-        component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+            .unwrap();
     }
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -221,11 +229,15 @@ fn debug_inspector_surfaces_view_renders_retained_paint_filtering_counters() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(360, 640);
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Surfaces"));
@@ -250,7 +262,9 @@ fn debug_inspector_modules_view_renders_uses_provides_graph() {
     {
         let theme = default_theme();
         let mut buffer = PixelBuffer::new(360, 720);
-        component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+            .unwrap();
     }
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -329,11 +343,15 @@ fn debug_inspector_modules_view_renders_uses_provides_graph() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(360, 720);
-    component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+        .unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showModules", &[])
         .unwrap();
-    component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+        .unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Modules"));
@@ -353,7 +371,9 @@ fn debug_inspector_modules_view_renders_uses_provides_graph() {
             &[serde_json::json!({ "value": "pipewire" })],
         )
         .unwrap();
-    component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+        .unwrap();
     let filtered_text = rendered_text(&component);
     assert!(
         filtered_text
@@ -530,7 +550,9 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
     {
         let theme = default_theme();
         let mut buffer = PixelBuffer::new(920, 700);
-        component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+            .unwrap();
     }
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -716,7 +738,9 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(920, 700);
-    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Settings"));
@@ -732,7 +756,9 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
         .unwrap();
-    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .unwrap();
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "64%"));
     assert!(text.iter().any(|line| line == "Active audio provider"));
@@ -758,7 +784,9 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAdvanced", &[])
         .unwrap();
-    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .unwrap();
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Active providers"));
     assert!(text.iter().any(|line| line == "mesh.audio"));
@@ -774,7 +802,9 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
             &[serde_json::json!("@mesh/navigation-bar")],
         )
         .unwrap();
-    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .unwrap();
     let text = rendered_text(&component);
     assert!(
         text.iter().any(|line| {
@@ -826,7 +856,9 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
             ],
         )
         .unwrap();
-    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .unwrap();
     let scoped_text = rendered_text(&component);
     assert!(
         scoped_text
@@ -861,7 +893,9 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
         .unwrap();
-    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .unwrap();
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Color theme"));
     assert!(text.iter().any(|line| line == "Language"));
@@ -926,7 +960,9 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
 
     let slovak_locale = mesh_core_locale::LocaleEngine::new("sk");
     component.locale_changed(&slovak_locale).unwrap();
-    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .unwrap();
     let text = rendered_text(&component);
     assert!(
         text.iter().any(|line| line == "Farebná téma"),
@@ -938,7 +974,9 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
         .unwrap();
-    component.paint(&theme, 920, 700, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .unwrap();
     let text = rendered_text(&component);
     assert!(
         text.iter().any(|line| line == "Aktívny poskytovateľ zvuku"),
@@ -1021,11 +1059,15 @@ fn debug_inspector_benchmark_view_renders_canonical_rows_when_profiling_off() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 640);
-    component.paint(&theme, 320, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(320, 640), &mut buffer, 1.0)
+        .unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
         .unwrap();
-    component.paint(&theme, 320, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(320, 640), &mut buffer, 1.0)
+        .unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Benchmark / Interaction"));
@@ -1070,7 +1112,9 @@ fn debug_inspector_benchmark_view_renders_waiting_rows_when_profiling_live_witho
     {
         let theme = default_theme();
         let mut buffer = PixelBuffer::new(360, 720);
-        component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+            .unwrap();
     }
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -1104,11 +1148,15 @@ fn debug_inspector_benchmark_view_renders_waiting_rows_when_profiling_live_witho
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 640);
-    component.paint(&theme, 320, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(320, 640), &mut buffer, 1.0)
+        .unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
         .unwrap();
-    component.paint(&theme, 320, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(320, 640), &mut buffer, 1.0)
+        .unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Benchmark / Interaction"));
@@ -1141,7 +1189,9 @@ fn debug_inspector_renders_allocator_mode_and_per_surface_counts() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(360, 720);
-    component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+        .unwrap();
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.debug".into(),
@@ -1190,14 +1240,18 @@ fn debug_inspector_renders_allocator_mode_and_per_surface_counts() {
         })
         .unwrap();
 
-    component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+        .unwrap();
     let overview_text = rendered_text(&component);
     assert!(overview_text.iter().any(|line| line == "4.0 KiB / 12 ops"));
 
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
         .unwrap();
-    component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+        .unwrap();
     let surface_text = rendered_text(&component);
     assert!(
         surface_text
@@ -1216,7 +1270,9 @@ fn debug_inspector_benchmark_view_renders_populated_benchmark_result_rows() {
     {
         let theme = default_theme();
         let mut buffer = PixelBuffer::new(360, 720);
-        component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+            .unwrap();
     }
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -1302,11 +1358,15 @@ fn debug_inspector_benchmark_view_renders_populated_benchmark_result_rows() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 720);
-    component.paint(&theme, 320, 720, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(320, 720), &mut buffer, 1.0)
+        .unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
         .unwrap();
-    component.paint(&theme, 320, 720, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(320, 720), &mut buffer, 1.0)
+        .unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Benchmark / Interaction"));

@@ -144,6 +144,11 @@ impl WaylandSurfaceBackend {
                     // Re-commit to re-map the surface and prompt the compositor to
                     // send a fresh configure event before we attach a buffer.
                     entry.apply_config(cfg, effective_keyboard_mode);
+                } else {
+                    // Identical config: the reserve is identical too, but assign
+                    // it anyway so the entry's padding can never drift from the
+                    // last config the shell sent.
+                    entry.padding = cfg.padding;
                 }
             }
             None => {
@@ -301,8 +306,11 @@ impl WaylandSurfaceBackend {
         config: PopupConfig,
     ) -> Result<(), PresentationError> {
         // An existing popup is repositioned in place rather than recreated, so
-        // anchor moves (exclusive-zone/output changes) don't tear it down.
-        if self.state.surfaces.contains_key(surface_id) {
+        // anchor moves (exclusive-zone/output changes) don't tear it down. The
+        // shadow/overshoot reserve travels with the placement size, so adopt it
+        // on the same path that adopts the new size.
+        if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
+            entry.padding = config.padding;
             self.reposition_popup(surface_id, &config.placement);
             return Ok(());
         }
@@ -388,6 +396,10 @@ impl WaylandSurfaceBackend {
         let cfg = SurfaceConfig {
             width: config.placement.size.0,
             height: config.placement.size.1,
+            // `placement.size` is the *padded* buffer: the popover content plus
+            // the ring reserved for descendant shadow/filter overshoot. Carry
+            // that reserve so the entry confines input to the visible content.
+            padding: config.padding,
             ..SurfaceConfig::default()
         };
         let entry = SurfaceEntry::new(

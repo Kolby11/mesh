@@ -4,7 +4,8 @@ use mesh_core_debug::{
     BenchmarkScenarioId, BenchmarkScenarioStatus, DebugBenchmarkRunState, ProfilingBackendStage,
 };
 use mesh_core_presentation::{
-    LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement,
+    LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity,
+    PopupPlacement, SurfacePadding,
 };
 
 /// One main-loop tick (~60 Hz). Coalescable commands fire on the leading
@@ -461,8 +462,12 @@ impl Shell {
                 edge: surface.edge,
                 layer: surface.layer.unwrap_or(Layer::Top),
                 size_policy,
+                // Content-sized: this path re-sends placement/keyboard state
+                // for an already-sized surface and never applies the tooltip
+                // overlay reserve, so nothing of it is input-inert padding.
                 width: surface.width,
                 height: surface.height,
+                padding: SurfacePadding::default(),
                 exclusive_zone: surface.exclusive_zone,
                 keyboard_mode,
                 namespace: surface_id.to_string(),
@@ -481,6 +486,7 @@ impl Shell {
                 size_policy: LayerSurfaceSizePolicy::Fixed,
                 width: 1,
                 height: 1,
+                padding: SurfacePadding::default(),
                 exclusive_zone: 0,
                 keyboard_mode: mesh_core_wayland::KeyboardMode::None,
                 namespace: surface_id.to_string(),
@@ -732,6 +738,9 @@ impl Shell {
                     };
                     let popup_config = PopupConfig {
                         parent_surface_id: trigger_surface.clone(),
+                        // A promoted popover surface carries no overshoot ring:
+                        // its size is its content.
+                        padding: SurfacePadding::default(),
                         placement: PopupPlacement {
                             anchor_rect: (anchor_x, 0, anchor_w, trigger_exclusive_zone),
                             size: (1, 1),

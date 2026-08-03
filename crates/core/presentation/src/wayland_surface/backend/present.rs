@@ -151,12 +151,20 @@ impl WaylandSurfaceBackend {
                 entry.blur_region_dirty = false;
             }
         }
-        // Apply the persisted input region as pending state so the present
-        // commit below carries it. Doing this every time it is dirty (rather
-        // than fire-and-forget at update time) guarantees it lands on a
-        // mapped, configured surface regardless of configure/remap ordering.
-        if entry.input_region_dirty {
-            match entry.input_region_rect {
+        // Derive the input region from the reserve this surface declared and
+        // apply it as pending state so the present commit below carries it.
+        //
+        // Recomputed on every present rather than pushed by a separate shell
+        // call: the reserve is what makes the surface bigger than its content,
+        // so re-deriving here is the invariant "a surface never takes input
+        // over pixels it only reserved for painting" being enforced at the one
+        // place that can enforce it. Comparing against the last committed value
+        // keeps it to one protocol request per actual change, and an entry that
+        // was destroyed and recreated (role swap, window hide/show) starts with
+        // `applied_input_region: None` and so republishes automatically.
+        let desired_input_region = entry.content_input_region();
+        if entry.applied_input_region != Some(desired_input_region) {
+            match desired_input_region {
                 Some(rect) => {
                     if let Ok(region) = Region::new(&state.compositor_state) {
                         region.add(
@@ -168,19 +176,19 @@ impl WaylandSurfaceBackend {
                         entry
                             .wl_surface()
                             .set_input_region(Some(region.wl_region()));
-                        entry.input_region_dirty = false;
+                        entry.applied_input_region = Some(desired_input_region);
                     }
                 }
                 None => {
                     entry.wl_surface().set_input_region(None);
-                    entry.input_region_dirty = false;
+                    entry.applied_input_region = Some(desired_input_region);
                 }
             }
         }
         // Window geometry rides the same commit as the buffer, so the
         // compositor never sees a frame whose declared window rect disagrees
         // with the pixels in it.
-        entry.apply_window_geometry(entry.input_region_rect.unwrap_or(DamageRect {
+        entry.apply_window_geometry(desired_input_region.unwrap_or(DamageRect {
             x: 0,
             y: 0,
             width: logical_w,
@@ -233,25 +241,11 @@ impl WaylandSurfaceBackend {
         wl_surface.set_opaque_region(Some(region.wl_region()));
     }
 
-    /// Restrict the surface's input (pointer/touch) region to `input_rect` in
-    /// surface-local logical coordinates. Surfaces allocate extra buffer space
-    /// below/around their content for tooltip overlays; without an explicit
-    /// input region the compositor routes clicks over that whole extra area to
-    /// this surface, creating a dead zone where clicks never reach the windows
-    /// underneath. `None` resets to the default (whole-surface input).
-    pub(crate) fn update_input_region(&mut self, surface_id: &str, input_rect: Option<DamageRect>) {
-        let Some(entry) = self.state.surfaces.get_mut(surface_id) else {
-            return;
-        };
-        let input_rect = input_rect.filter(|r| r.width > 0 && r.height > 0);
-        if entry.input_region_rect == input_rect && !entry.input_region_dirty {
-            return;
-        }
-        // Store only; the region is applied together with the present commit
-        // (`apply_pending_input_region`) so it always lands on a mapped
-        // surface and survives configure/remap ordering.
-        entry.input_region_rect = input_rect;
-        entry.input_region_dirty = true;
+    /// The input region currently derived for a surface, for tests and
+    /// diagnostics. `None` for an unknown surface or one whose whole area is
+    /// content.
+    pub(crate) fn input_region(&self, surface_id: &str) -> Option<DamageRect> {
+        self.state.surfaces.get(surface_id)?.content_input_region()
     }
 
     /// Set the logical-coordinate blur regions for a surface.
