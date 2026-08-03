@@ -487,8 +487,7 @@ impl super::types::ShellComponent for RecordingComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: super::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -596,8 +595,7 @@ impl super::types::ShellComponent for IndexedRecordingComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: super::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -743,8 +741,7 @@ impl super::types::ShellComponent for FocusRecordingComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: super::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -813,6 +810,9 @@ struct PopoverHarnessState {
     node_key: String,
     anchor_rect: (i32, i32, i32, i32),
     content_size: (u32, u32),
+    /// Reserve around the popover content for descendant shadow/filter
+    /// overshoot: (left, top, right, bottom).
+    content_padding: (u32, u32, u32, u32),
     painted_nodes: Vec<String>,
     exiting_paints: Vec<bool>,
     child_inputs: Vec<(String, ComponentInput)>,
@@ -830,6 +830,7 @@ impl Default for PopoverHarnessState {
             node_key: "root/popover".into(),
             anchor_rect: (8, 10, 40, 16),
             content_size: (72, 32),
+            content_padding: (0, 0, 0, 0),
             painted_nodes: Vec::new(),
             exiting_paints: Vec::new(),
             child_inputs: Vec::new(),
@@ -913,8 +914,7 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: super::types::SurfaceExtent,
         buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -941,7 +941,7 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
             kind: super::types::ChildSurfaceKind::Popover,
             anchor_rect: state.anchor_rect,
             content_size: state.content_size,
-            content_padding: (0, 0, 0, 0),
+            content_padding: state.content_padding,
             placement: mesh_core_elements::PopoverPlacement::default(),
         }]
     }
@@ -1093,8 +1093,7 @@ impl super::types::ShellComponent for TransitionRecordingComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: super::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -1185,8 +1184,7 @@ impl super::types::ShellComponent for InputSizeRecordingComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: super::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -1282,8 +1280,7 @@ impl super::types::ShellComponent for PopupGeometryRecordingComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: super::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -1368,8 +1365,7 @@ impl super::types::ShellComponent for MeasuredLayerGeometryComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: super::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -1459,8 +1455,7 @@ impl super::types::ShellComponent for DeadlineTickComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: super::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -1554,8 +1549,7 @@ impl super::types::ShellComponent for DirtyHiddenComponent {
     fn paint(
         &mut self,
         _theme: &mesh_core_theme::Theme,
-        _width: u32,
-        _height: u32,
+        _extent: super::types::SurfaceExtent,
         _buffer: &mut mesh_core_render::PixelBuffer,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
@@ -9195,6 +9189,226 @@ fn wayland_parent_input_uses_content_size_not_tooltip_inflated_surface_size() {
         vec![(100, 50)],
         "parent input must rebuild/hit-test against the real content size, not the tooltip-padded buffer"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Input-region / dead-zone regression tests
+//
+// MESH asks the compositor for surfaces that are *larger* than their content:
+// a bar reserves 200 logical pixels below itself so tooltips can paint outside
+// its content box, and a popover reserves a ring for shadow/filter overshoot.
+// Those pixels are transparent. If the surface's input region does not exclude
+// them, the compositor routes every click over them to MESH and the windows
+// underneath get a dead zone — "the shell blocks a strip under the navigation
+// bar", which has been reintroduced roughly twenty times.
+//
+// The reserve and the input padding now come from one function
+// (`surface_geometry_with_overlay_reserve`) and travel together inside
+// `SurfaceConfig`/`PopupConfig`, and the backend re-derives the region from
+// that padding on every commit. The tests below pin both halves: that the
+// reserve is declared, and that the resulting region is content-sized.
+// ---------------------------------------------------------------------------
+
+/// The whole bug, stated once: an inflated bar surface must not take input over
+/// the strip it reserved for tooltips.
+#[test]
+fn layer_surface_input_region_excludes_the_tooltip_overlay_reserve() {
+    const CONTENT: (u32, u32) = (1920, 56);
+
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
+        "@test/bar",
+        CONTENT,
+        CONTENT,
+    )));
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@test/bar".into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+
+    let cfg = configured_surface(&shell, "@test/bar");
+    assert!(
+        cfg.height > CONTENT.1,
+        "the bar surface is expected to be inflated by the tooltip overlay reserve; \
+         if that reserve is gone this test is measuring nothing: {cfg:?}"
+    );
+
+    let region = shell
+        .presentation_engine
+        .input_region("@test/bar")
+        .expect("an inflated surface must confine its input region");
+    assert_eq!(
+        (region.x, region.y, region.width, region.height),
+        (0, 0, CONTENT.0, CONTENT.1),
+        "pointer input must stop at the content rect; every logical pixel of \
+         {}x{} beyond it is a dead zone over the windows below the bar",
+        cfg.width,
+        cfg.height
+    );
+}
+
+/// The invariant behind the fix, checked over whatever the shell actually
+/// configured rather than over one hand-built case: a surface may only be
+/// inflated if it declares that same inflation as input padding.
+///
+/// This is the test to keep. Any future code that grows a surface — a new
+/// overlay reserve, a drop-shadow margin, a resize grip — trips it unless the
+/// growth is declared, which is exactly the mistake that keeps coming back.
+#[test]
+fn every_configured_surface_declares_its_inflation_as_input_padding() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
+        "@test/bar",
+        (1920, 56),
+        (1920, 56),
+    )));
+    shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
+        "@test/popover",
+        (280, 164),
+        (280, 164),
+    )));
+    for surface_id in ["@test/bar", "@test/popover"] {
+        let mut emitted = shell
+            .apply_request(CoreRequest::ShowSurface {
+                surface_id: surface_id.into(),
+            })
+            .unwrap();
+        shell.drain_requests(&mut emitted).unwrap();
+    }
+    shell.render_components().unwrap();
+
+    let configs = shell.presentation_engine.testing_surface_configs();
+    assert!(
+        !configs.is_empty(),
+        "no surface was configured; the assertions below would be vacuous"
+    );
+    for (surface_id, cfg) in configs {
+        let content = shell
+            .surfaces
+            .get(&surface_id)
+            .map(|surface| (surface.width, surface.height))
+            .unwrap_or_else(|| panic!("configured surface {surface_id} has no shell record"));
+        assert_eq!(
+            (
+                cfg.width - cfg.padding.left - cfg.padding.right,
+                cfg.height - cfg.padding.top - cfg.padding.bottom,
+            ),
+            content,
+            "{surface_id} was configured at {}x{} for {content:?} of content, so \
+             {:?} of that must be declared input padding — otherwise the \
+             difference silently becomes a click dead zone",
+            cfg.width,
+            cfg.height,
+            cfg.padding
+        );
+    }
+}
+
+/// A toplevel's size *is* its content size, so it is never inflated and takes
+/// input over its whole area. Guards the other direction: a change that starts
+/// padding windows would make them unclickable at the edges.
+#[test]
+fn window_surface_is_not_inflated_and_takes_input_over_its_whole_area() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
+        "@test/window",
+        (640, 480),
+        (640, 480),
+    )));
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@test/window".into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell
+        .surfaces
+        .get_mut("@test/window")
+        .expect("surface registered")
+        .role = mesh_core_wayland::SurfaceRole::Window;
+    shell.render_components().unwrap();
+
+    let cfg = configured_surface(&shell, "@test/window");
+    assert_eq!(
+        (cfg.width, cfg.height),
+        (640, 480),
+        "a window is sized by its content, never inflated by an overlay reserve"
+    );
+    assert!(
+        cfg.padding.is_zero(),
+        "an uninflated surface declares no padding: {:?}",
+        cfg.padding
+    );
+    assert!(
+        shell
+            .presentation_engine
+            .input_region("@test/window")
+            .is_none(),
+        "with nothing reserved the whole window takes input"
+    );
+}
+
+/// The same rule one level down: a popover's `xdg_popup` buffer is padded for
+/// descendant shadow/filter overshoot, and clicks over that transparent ring
+/// must reach whatever is behind the popover rather than being swallowed by it.
+#[test]
+fn child_popup_input_region_excludes_the_shadow_overshoot_ring() {
+    const CONTENT: (u32, u32) = (72, 32);
+    const PADDING: (u32, u32, u32, u32) = (24, 8, 24, 40);
+
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState {
+        content_padding: PADDING,
+        ..PopoverHarnessState::default()
+    }));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state)));
+
+    render_components_until_child_popup(&mut shell);
+
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    let config = shell
+        .presentation_engine
+        .testing_popup_config(&child_id)
+        .expect("child popover configures an xdg_popup");
+    assert_eq!(
+        config.placement.size,
+        (
+            CONTENT.0 + PADDING.0 + PADDING.2,
+            CONTENT.1 + PADDING.1 + PADDING.3
+        ),
+        "the popup buffer is the content plus its overshoot ring"
+    );
+
+    let region = shell
+        .presentation_engine
+        .input_region(&child_id)
+        .expect("a padded popup must confine its input region");
+    assert_eq!(
+        (region.x, region.y, region.width, region.height),
+        (PADDING.0, PADDING.1, CONTENT.0, CONTENT.1),
+        "input stops at the visible popover content, not at the padded buffer"
+    );
+}
+
+fn configured_surface(shell: &Shell, surface_id: &str) -> mesh_core_presentation::SurfaceConfig {
+    shell
+        .presentation_engine
+        .testing_surface_configs()
+        .into_iter()
+        .find(|(id, _)| id == surface_id)
+        .unwrap_or_else(|| panic!("{surface_id} was never configured"))
+        .1
 }
 
 #[test]

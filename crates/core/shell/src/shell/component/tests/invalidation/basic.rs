@@ -109,7 +109,9 @@ function changeLabel() label = "done" end
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 60);
-    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .unwrap();
     let dirty_types_before = component.dirty_types;
 
     component
@@ -168,13 +170,19 @@ function update() label = "after" end
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(640, 160);
-    component.paint(&theme, 640, 160, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .unwrap();
     while component.wants_render() {
-        component.paint(&theme, 640, 160, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+            .unwrap();
     }
 
     component.call_namespaced_handler("update", &[]).unwrap();
-    component.paint(&theme, 640, 160, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .unwrap();
     let snapshot = component
         .take_invalidation_snapshot()
         .expect("handler paint records invalidation");
@@ -206,17 +214,39 @@ function toggle() expanded = not expanded end
     let mut narrow_buffer = PixelBuffer::new(320, 100);
     let mut full_buffer = PixelBuffer::new(320, 100);
     narrow
-        .paint(&theme, 320, 100, &mut narrow_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(320, 100),
+            &mut narrow_buffer,
+            1.0,
+        )
         .unwrap();
-    full.paint(&theme, 320, 100, &mut full_buffer, 1.0).unwrap();
+    full.paint(
+        &theme,
+        SurfaceExtent::unpadded(320, 100),
+        &mut full_buffer,
+        1.0,
+    )
+    .unwrap();
 
     narrow.call_namespaced_handler("toggle", &[]).unwrap();
     full.call_namespaced_handler("toggle", &[]).unwrap();
     full.invalidate_script_state();
     narrow
-        .paint(&theme, 320, 100, &mut narrow_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(320, 100),
+            &mut narrow_buffer,
+            1.0,
+        )
         .unwrap();
-    full.paint(&theme, 320, 100, &mut full_buffer, 1.0).unwrap();
+    full.paint(
+        &theme,
+        SurfaceExtent::unpadded(320, 100),
+        &mut full_buffer,
+        1.0,
+    )
+    .unwrap();
 
     assert_eq!(narrow_buffer.data, full_buffer.data);
     let snapshot = narrow
@@ -256,20 +286,40 @@ function update() label0 = label0 == "row 00" and "changed" or "row 00" end
     let mut uncached_sparse_buffer = PixelBuffer::new(800, 1000);
     let mut full_buffer = PixelBuffer::new(800, 1000);
     narrow
-        .paint(&theme, 800, 1000, &mut narrow_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(800, 1000),
+            &mut narrow_buffer,
+            1.0,
+        )
         .unwrap();
     uncached_sparse
-        .paint(&theme, 800, 1000, &mut uncached_sparse_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(800, 1000),
+            &mut uncached_sparse_buffer,
+            1.0,
+        )
         .unwrap();
-    full.paint(&theme, 800, 1000, &mut full_buffer, 1.0)
-        .unwrap();
+    full.paint(
+        &theme,
+        SurfaceExtent::unpadded(800, 1000),
+        &mut full_buffer,
+        1.0,
+    )
+    .unwrap();
 
     let iterations = 200;
     let started = Instant::now();
     for _ in 0..iterations {
         narrow.call_namespaced_handler("update", &[]).unwrap();
         narrow
-            .paint(&theme, 800, 1000, &mut narrow_buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(800, 1000),
+                &mut narrow_buffer,
+                1.0,
+            )
             .unwrap();
         black_box(&narrow_buffer);
     }
@@ -290,7 +340,12 @@ function update() label0 = label0 == "row 00" and "changed" or "row 00" end
             .script_ctx
             .clear_template_expression_cache();
         uncached_sparse
-            .paint(&theme, 800, 1000, &mut uncached_sparse_buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(800, 1000),
+                &mut uncached_sparse_buffer,
+                1.0,
+            )
             .unwrap();
         black_box(&uncached_sparse_buffer);
     }
@@ -308,8 +363,13 @@ function update() label0 = label0 == "row 00" and "changed" or "row 00" end
             .script_ctx
             .clear_template_expression_cache();
         full.invalidate_script_state();
-        full.paint(&theme, 800, 1000, &mut full_buffer, 1.0)
-            .unwrap();
+        full.paint(
+            &theme,
+            SurfaceExtent::unpadded(800, 1000),
+            &mut full_buffer,
+            1.0,
+        )
+        .unwrap();
         black_box(&full_buffer);
     }
     let full_time = started.elapsed();
@@ -359,10 +419,20 @@ function update() {handler_body} end
     let mut unbound_buffer = PixelBuffer::new(200, 60);
     let mut bound_buffer = PixelBuffer::new(200, 60);
     unbound
-        .paint(&theme, 200, 60, &mut unbound_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(200, 60),
+            &mut unbound_buffer,
+            1.0,
+        )
         .unwrap();
     bound
-        .paint(&theme, 200, 60, &mut bound_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(200, 60),
+            &mut bound_buffer,
+            1.0,
+        )
         .unwrap();
     for _ in 0..4 {
         if !unbound.wants_render() && !bound.wants_render() {
@@ -370,12 +440,22 @@ function update() {handler_body} end
         }
         if unbound.wants_render() {
             unbound
-                .paint(&theme, 200, 60, &mut unbound_buffer, 1.0)
+                .paint(
+                    &theme,
+                    SurfaceExtent::unpadded(200, 60),
+                    &mut unbound_buffer,
+                    1.0,
+                )
                 .unwrap();
         }
         if bound.wants_render() {
             bound
-                .paint(&theme, 200, 60, &mut bound_buffer, 1.0)
+                .paint(
+                    &theme,
+                    SurfaceExtent::unpadded(200, 60),
+                    &mut bound_buffer,
+                    1.0,
+                )
                 .unwrap();
         }
     }
@@ -387,7 +467,12 @@ function update() {handler_body} end
         unbound.call_namespaced_handler("update", &[]).unwrap();
         if unbound.wants_render() {
             unbound
-                .paint(&theme, 200, 60, &mut unbound_buffer, 1.0)
+                .paint(
+                    &theme,
+                    SurfaceExtent::unpadded(200, 60),
+                    &mut unbound_buffer,
+                    1.0,
+                )
                 .unwrap();
             unbound_paints += 1;
         }
@@ -401,7 +486,12 @@ function update() {handler_body} end
         bound.call_namespaced_handler("update", &[]).unwrap();
         if bound.wants_render() {
             bound
-                .paint(&theme, 200, 60, &mut bound_buffer, 1.0)
+                .paint(
+                    &theme,
+                    SurfaceExtent::unpadded(200, 60),
+                    &mut bound_buffer,
+                    1.0,
+                )
                 .unwrap();
             bound_paints += 1;
         }
@@ -463,14 +553,18 @@ fn targeted_interaction_restyle_uses_scoped_retained_fingerprinting() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
 
     component.hovered_path = ["root", "root/0", "root/0/0"]
         .map(runtime_node_id_for_key)
         .to_vec();
     component.hovered_key = Some("root/0/0".into());
     component.invalidate_interaction_restyle();
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(component.retained_tree.last_update_was_scoped());
 }
@@ -493,14 +587,18 @@ fn targeted_interaction_animation_merges_scoped_retained_roots() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
 
     component.hovered_path = ["root", "root/0", "root/0/0"]
         .map(runtime_node_id_for_key)
         .to_vec();
     component.hovered_key = Some("root/0/0".into());
     component.invalidate_interaction_restyle();
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(component.transitions.has_active(Instant::now()));
     assert!(component.retained_tree.last_update_was_scoped());
@@ -522,9 +620,20 @@ scroll { width: 80px; height: 40px; overflow-y: auto; }
     let mut scoped_buffer = PixelBuffer::new(80, 40);
     let mut full_buffer = PixelBuffer::new(80, 40);
     scoped
-        .paint(&theme, 80, 40, &mut scoped_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(80, 40),
+            &mut scoped_buffer,
+            1.0,
+        )
         .unwrap();
-    full.paint(&theme, 80, 40, &mut full_buffer, 1.0).unwrap();
+    full.paint(
+        &theme,
+        SurfaceExtent::unpadded(80, 40),
+        &mut full_buffer,
+        1.0,
+    )
+    .unwrap();
 
     scoped.scroll_offsets.insert(
         runtime_node_id_for_key("root/0"),
@@ -537,9 +646,20 @@ scroll { width: 80px; height: 40px; overflow-y: auto; }
     scoped.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
     full.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
     scoped
-        .paint(&theme, 80, 40, &mut scoped_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(80, 40),
+            &mut scoped_buffer,
+            1.0,
+        )
         .unwrap();
-    full.paint(&theme, 80, 40, &mut full_buffer, 1.0).unwrap();
+    full.paint(
+        &theme,
+        SurfaceExtent::unpadded(80, 40),
+        &mut full_buffer,
+        1.0,
+    )
+    .unwrap();
 
     assert!(scoped.retained_tree.last_update_was_scoped());
     assert_eq!(
@@ -567,9 +687,20 @@ fn paint_only_scoped_retained_end_to_end_benchmark() {
     let mut scoped_buffer = PixelBuffer::new(64, 16);
     let mut full_buffer = PixelBuffer::new(64, 16);
     scoped
-        .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(64, 16),
+            &mut scoped_buffer,
+            1.0,
+        )
         .unwrap();
-    full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+    full.paint(
+        &theme,
+        SurfaceExtent::unpadded(64, 16),
+        &mut full_buffer,
+        1.0,
+    )
+    .unwrap();
 
     let iterations = 150;
     let mut scoped_time = Duration::ZERO;
@@ -579,24 +710,46 @@ fn paint_only_scoped_retained_end_to_end_benchmark() {
             let started = Instant::now();
             scoped.invalidate_paint();
             scoped
-                .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+                .paint(
+                    &theme,
+                    SurfaceExtent::unpadded(64, 16),
+                    &mut scoped_buffer,
+                    1.0,
+                )
                 .unwrap();
             scoped_time += started.elapsed();
 
             let started = Instant::now();
             full.invalidate_paint();
-            full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+            full.paint(
+                &theme,
+                SurfaceExtent::unpadded(64, 16),
+                &mut full_buffer,
+                1.0,
+            )
+            .unwrap();
             full_time += started.elapsed();
         } else {
             let started = Instant::now();
             full.invalidate_paint();
-            full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+            full.paint(
+                &theme,
+                SurfaceExtent::unpadded(64, 16),
+                &mut full_buffer,
+                1.0,
+            )
+            .unwrap();
             full_time += started.elapsed();
 
             let started = Instant::now();
             scoped.invalidate_paint();
             scoped
-                .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+                .paint(
+                    &theme,
+                    SurfaceExtent::unpadded(64, 16),
+                    &mut scoped_buffer,
+                    1.0,
+                )
                 .unwrap();
             scoped_time += started.elapsed();
         }
@@ -621,13 +774,17 @@ fn surface_transition_annotation_forces_full_retained_fingerprinting() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
 
     component.surface_entering = true;
     component.hovered_path = ["root", "root/0"].map(runtime_node_id_for_key).to_vec();
     component.hovered_key = Some("root/0".into());
     component.invalidate_interaction_restyle();
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(!component.retained_tree.last_update_was_scoped());
 }
@@ -710,9 +867,13 @@ surface { width: 200px; height: 80px; }
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 80);
-    component.paint(&theme, 200, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+        .unwrap();
     if component.wants_render() {
-        component.paint(&theme, 200, 80, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+            .unwrap();
     }
     assert!(!component.wants_render());
 
@@ -746,9 +907,13 @@ button:hover { background: #444444; }
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 48);
-    component.paint(&theme, 120, 48, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 48), &mut buffer, 1.0)
+        .unwrap();
     if component.wants_render() {
-        component.paint(&theme, 120, 48, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(120, 48), &mut buffer, 1.0)
+            .unwrap();
     }
     assert!(!component.wants_render());
 
@@ -881,9 +1046,13 @@ surface { width: 1000px; height: 80px; }
     let run = |force_state_agnostic_focus: bool| {
         let mut component = test_frontend_component(&source);
         let mut buffer = PixelBuffer::new(1000, 80);
-        component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+            .unwrap();
         if component.wants_render() {
-            component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+            component
+                .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                .unwrap();
         }
         if force_state_agnostic_focus {
             component.cached_restyle_state_dependencies.focus = true;
@@ -897,7 +1066,9 @@ surface { width: 1000px; height: 80px; }
                 "root/0/249".into()
             });
             component.invalidate_interaction_restyle();
-            component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+            component
+                .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                .unwrap();
         }
         started.elapsed()
     };
@@ -1003,9 +1174,13 @@ surface { width: 1000px; height: 80px; }
     let run = |force_old_restyle: bool| {
         let mut component = test_frontend_component(&source);
         let mut buffer = PixelBuffer::new(1000, 80);
-        component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+            .unwrap();
         if component.wants_render() {
-            component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+            component
+                .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                .unwrap();
         }
         let started = Instant::now();
         for iteration in 0..iterations {
@@ -1017,7 +1192,9 @@ surface { width: 1000px; height: 80px; }
                 component.invalidate_interaction_restyle();
             }
             if component.wants_render() {
-                component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+                component
+                    .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                    .unwrap();
             }
         }
         started.elapsed()
@@ -1057,9 +1234,13 @@ surface { width: 1000px; height: 80px; }
     let run = |force_state_agnostic_restyle: bool| {
         let mut component = test_frontend_component(&source);
         let mut buffer = PixelBuffer::new(1000, 80);
-        component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+            .unwrap();
         if component.wants_render() {
-            component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+            component
+                .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                .unwrap();
         }
         let started = Instant::now();
         for iteration in 0..iterations {
@@ -1071,7 +1252,9 @@ surface { width: 1000px; height: 80px; }
                 component.invalidate_interaction_restyle();
             }
             if component.wants_render() {
-                component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+                component
+                    .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                    .unwrap();
             }
         }
         started.elapsed()
@@ -1111,9 +1294,13 @@ surface { width: 1000px; height: 80px; }
     let run = |force_old_fallback: bool| {
         let mut component = test_frontend_component(&source);
         let mut buffer = PixelBuffer::new(1000, 80);
-        component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+            .unwrap();
         if component.wants_render() {
-            component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+            component
+                .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                .unwrap();
         }
 
         let started = Instant::now();
@@ -1124,7 +1311,9 @@ surface { width: 1000px; height: 80px; }
             component.focused_key = None;
             component.interaction_snapshot_valid = !force_old_fallback;
             component.invalidate_interaction_restyle();
-            component.paint(&theme, 1000, 80, &mut buffer, 1.0).unwrap();
+            component
+                .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                .unwrap();
         }
         started.elapsed()
     };
@@ -1184,12 +1373,16 @@ fn phase18_script_and_text_invalidations_take_full_rebuild_paint_path() {
     let mut buffer = PixelBuffer::new(160, 48);
 
     component.set_profiling_enabled(true);
-    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .unwrap();
     component.take_invalidation_snapshot();
     component.take_profiling_records();
 
     component.invalidate_interaction_restyle();
-    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .unwrap();
     let restyle_snapshot = component
         .take_invalidation_snapshot()
         .expect("restyle paint should record invalidation");
@@ -1204,7 +1397,9 @@ fn phase18_script_and_text_invalidations_take_full_rebuild_paint_path() {
     );
 
     component.invalidate_script_state();
-    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .unwrap();
     let script_snapshot = component
         .take_invalidation_snapshot()
         .expect("script paint should record invalidation");
@@ -1220,7 +1415,9 @@ fn phase18_script_and_text_invalidations_take_full_rebuild_paint_path() {
     );
 
     component.invalidate_text_state();
-    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .unwrap();
     let text_snapshot = component
         .take_invalidation_snapshot()
         .expect("text paint should record invalidation");
@@ -1278,7 +1475,9 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 80);
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(
         first_node_by_tag(component.last_tree.as_ref().unwrap(), "text")
             .unwrap()
@@ -1295,7 +1494,9 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
         "source reload must drop the stale retained widget tree"
     );
 
-    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(
         first_node_by_tag(component.last_tree.as_ref().unwrap(), "text")
             .unwrap()
@@ -1375,7 +1576,9 @@ local Child = require("./components/child.mesh")
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(100, 40);
-    component.paint(&theme, 100, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(100, 40), &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(
         first_node_by_class(component.last_tree.as_ref().unwrap(), "reload-style-target")
             .unwrap()
@@ -1395,7 +1598,9 @@ local Child = require("./components/child.mesh")
         "source reload must discard style indexes built from the old component source"
     );
 
-    component.paint(&theme, 100, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(100, 40), &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(
         first_node_by_class(component.last_tree.as_ref().unwrap(), "reload-style-target")
             .unwrap()
@@ -1415,7 +1620,9 @@ fn retained_paint_path_records_phase26_cpu_attribution_stages() {
     let mut buffer = PixelBuffer::new(160, 48);
 
     component.set_profiling_enabled(true);
-    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .unwrap();
 
     let stages: std::collections::HashSet<_> = component
         .take_profiling_records()

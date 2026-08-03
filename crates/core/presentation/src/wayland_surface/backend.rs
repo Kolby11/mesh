@@ -11,6 +11,75 @@ pub enum LayerSurfaceSizePolicy {
     Flexible,
 }
 
+/// Logical pixels of a surface that exist only so the client has somewhere to
+/// paint, and which must never take pointer input.
+///
+/// MESH deliberately asks the compositor for surfaces that are *larger* than
+/// their content: a bar reserves room below itself so tooltips can escape its
+/// content box, and a popover reserves a ring so descendant `box-shadow` /
+/// `filter` overshoot has pixels instead of clipping at the buffer edge. Those
+/// reserved pixels are transparent, so a compositor that routes input by
+/// surface bounds hands MESH every click over them and the windows underneath
+/// get a dead zone — the single most-reintroduced bug in this codebase.
+///
+/// The padding therefore travels *with* the size that it inflates, inside
+/// [`SurfaceConfig`] and [`PopupConfig`], and the backend derives the input
+/// region from it on every commit. There is no second call to forget, no
+/// shell-side cache that can go stale, and no way for a surface to be inflated
+/// without saying which part of it is reserve: producing the inflated size and
+/// producing this padding is one operation
+/// (`shell::runtime::render::surface_geometry_with_overlay_reserve`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub struct SurfacePadding {
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+}
+
+impl SurfacePadding {
+    /// Reserve on the trailing edges only — the shape a tooltip-overlay bar
+    /// uses, where content sits at the surface origin.
+    pub fn trailing(right: u32, bottom: u32) -> Self {
+        Self {
+            left: 0,
+            top: 0,
+            right,
+            bottom,
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The content rect inside a surface of `width` x `height` logical pixels,
+    /// or `None` when the whole surface is content (an all-zero padding, which
+    /// the caller turns into "reset to the default whole-surface input region").
+    ///
+    /// Padding that would consume the entire surface is ignored rather than
+    /// collapsing the rect: a zero-area input region makes a surface
+    /// completely unclickable, which is a worse failure than a slightly
+    /// oversized one, and it can legitimately happen for one frame while a
+    /// surface is still being measured.
+    pub fn content_rect(&self, width: u32, height: u32) -> Option<DamageRect> {
+        if self.is_zero() {
+            return None;
+        }
+        let content_width = width.saturating_sub(self.left.saturating_add(self.right));
+        let content_height = height.saturating_sub(self.top.saturating_add(self.bottom));
+        if content_width == 0 || content_height == 0 {
+            return None;
+        }
+        Some(DamageRect {
+            x: self.left,
+            y: self.top,
+            width: content_width,
+            height: content_height,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SurfaceConfig {
     /// Which compositor protocol realizes the surface. `Layer` uses every
@@ -24,6 +93,11 @@ pub struct SurfaceConfig {
     pub size_policy: LayerSurfaceSizePolicy,
     pub width: u32,
     pub height: u32,
+    /// Which part of [`Self::width`] x [`Self::height`] is paint-only reserve
+    /// rather than content. See [`SurfacePadding`]: this is what keeps the
+    /// input region confined to the content, and it must be produced by
+    /// whatever produced the inflated size above.
+    pub padding: SurfacePadding,
     pub exclusive_zone: i32,
     pub keyboard_mode: KeyboardMode,
     pub namespace: String,
@@ -47,6 +121,7 @@ impl Default for SurfaceConfig {
             size_policy: LayerSurfaceSizePolicy::Fixed,
             width: 0,
             height: 0,
+            padding: SurfacePadding::default(),
             exclusive_zone: 0,
             keyboard_mode: KeyboardMode::None,
             namespace: "mesh".to_string(),
@@ -253,12 +328,16 @@ pub(super) struct SurfaceEntry {
     pub(super) blur_regions: Vec<DamageRect>,
     pub(super) blur_committed: bool,
     pub(super) blur_region_dirty: bool,
-    /// Desired input region in surface-local logical coordinates. `None`
-    /// means whole-surface input (the wl_surface default). Persisted here and
-    /// applied with the next present commit so it can never be lost to
-    /// call-ordering around configure/remap.
-    pub(super) input_region_rect: Option<DamageRect>,
-    pub(super) input_region_dirty: bool,
+    /// Which part of this surface is paint-only reserve. Copied from the
+    /// config/popup-config that sized the surface, and the *only* input the
+    /// input region is derived from — see [`SurfacePadding`].
+    pub(super) padding: SurfacePadding,
+    /// The input region last committed to the compositor, in surface-local
+    /// logical coordinates. `Some(None)` means "whole-surface input has been
+    /// committed"; the outer `None` means nothing has been committed yet, which
+    /// is what forces a freshly created (or recreated) surface to publish its
+    /// region again instead of inheriting a stale "already applied" belief.
+    applied_input_region: Option<Option<DamageRect>>,
     /// The output this surface's `wl_surface` currently overlaps, tracked via
     /// `wl_surface::enter`/`leave`. A surface can technically straddle more
     /// than one output; the most recent `enter` wins, which is exactly what a
@@ -309,6 +388,7 @@ impl SurfaceEntry {
             width: cfg.width.max(1),
             height: cfg.height.max(1),
             config_fingerprint: surface_config_fingerprint(&cfg, applied_keyboard_mode),
+            padding: cfg.padding,
             cfg,
             applied_keyboard_mode,
             configured: false,
@@ -326,8 +406,7 @@ impl SurfaceEntry {
             blur_regions: Vec::new(),
             blur_committed: false,
             blur_region_dirty: false,
-            input_region_rect: None,
-            input_region_dirty: false,
+            applied_input_region: None,
             output: None,
         }
     }
@@ -336,12 +415,29 @@ impl SurfaceEntry {
         self.role.wl_surface()
     }
 
+    /// The input region this surface should currently have: its
+    /// compositor-configured size minus the reserve it declared.
+    ///
+    /// Derived on every commit rather than pushed by the shell. A derived value
+    /// cannot be missed by a caller, cannot be dropped because the surface did
+    /// not exist yet, and is automatically re-established when the compositor
+    /// object is torn down and recreated (role swap, window hide/show) — the
+    /// three ways this has regressed before.
+    pub(super) fn content_input_region(&self) -> Option<DamageRect> {
+        self.padding
+            .content_rect(self.width.max(1), self.height.max(1))
+    }
+
     fn needs_reconfigure(&self, cfg: &SurfaceConfig, keyboard_mode: KeyboardMode) -> bool {
         !self.configured
             || self.config_fingerprint != surface_config_fingerprint(cfg, keyboard_mode)
     }
 
     fn apply_config(&mut self, cfg: SurfaceConfig, keyboard_mode: KeyboardMode) {
+        // Adopt the reserve before anything can return early: the padding is
+        // client-side state with no protocol request of its own, and a config
+        // that changed only the reserve must still reach `content_input_region`.
+        self.padding = cfg.padding;
         // A toplevel takes title/app_id/size-hint requests instead of the
         // layer-shell placement requests, and never invalidates `configured`
         // for them: the compositor is not obliged to answer a title change with
@@ -646,6 +742,11 @@ pub(super) fn surface_config_fingerprint(cfg: &SurfaceConfig, keyboard_mode: Key
     keyboard_mode_slot(keyboard_mode).hash(&mut hasher);
     cfg.width.hash(&mut hasher);
     cfg.height.hash(&mut hasher);
+    // The reserve carries no protocol request, but it decides the input region,
+    // so a config that changes only the reserve must still reach `apply_config`
+    // (`surface_change_requires_fresh_configure` keeps it from invalidating the
+    // compositor's acked size).
+    cfg.padding.hash(&mut hasher);
     cfg.margin_top.hash(&mut hasher);
     cfg.margin_right.hash(&mut hasher);
     cfg.margin_bottom.hash(&mut hasher);
@@ -1166,6 +1267,11 @@ impl WaylandSurfaceBackend {
                     // Re-commit to re-map the surface and prompt the compositor to
                     // send a fresh configure event before we attach a buffer.
                     entry.apply_config(cfg, effective_keyboard_mode);
+                } else {
+                    // Identical config: the reserve is identical too, but assign
+                    // it anyway so the entry's padding can never drift from the
+                    // last config the shell sent.
+                    entry.padding = cfg.padding;
                 }
             }
             None => {
@@ -1325,8 +1431,11 @@ impl WaylandSurfaceBackend {
         config: PopupConfig,
     ) -> Result<(), PresentationError> {
         // An existing popup is repositioned in place rather than recreated, so
-        // anchor moves (exclusive-zone/output changes) don't tear it down.
-        if self.state.surfaces.contains_key(surface_id) {
+        // anchor moves (exclusive-zone/output changes) don't tear it down. The
+        // shadow/overshoot reserve travels with the placement size, so adopt it
+        // on the same path that adopts the new size.
+        if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
+            entry.padding = config.padding;
             self.reposition_popup(surface_id, &config.placement);
             return Ok(());
         }
@@ -1412,6 +1521,10 @@ impl WaylandSurfaceBackend {
         let cfg = SurfaceConfig {
             width: config.placement.size.0,
             height: config.placement.size.1,
+            // `placement.size` is the *padded* buffer: the popover content plus
+            // the ring reserved for descendant shadow/filter overshoot. Carry
+            // that reserve so the entry confines input to the visible content.
+            padding: config.padding,
             ..SurfaceConfig::default()
         };
         let entry = SurfaceEntry::new(
@@ -1739,12 +1852,20 @@ impl WaylandSurfaceBackend {
                 entry.blur_region_dirty = false;
             }
         }
-        // Apply the persisted input region as pending state so the present
-        // commit below carries it. Doing this every time it is dirty (rather
-        // than fire-and-forget at update time) guarantees it lands on a
-        // mapped, configured surface regardless of configure/remap ordering.
-        if entry.input_region_dirty {
-            match entry.input_region_rect {
+        // Derive the input region from the reserve this surface declared and
+        // apply it as pending state so the present commit below carries it.
+        //
+        // Recomputed on every present rather than pushed by a separate shell
+        // call: the reserve is what makes the surface bigger than its content,
+        // so re-deriving here is the invariant "a surface never takes input
+        // over pixels it only reserved for painting" being enforced at the one
+        // place that can enforce it. Comparing against the last committed value
+        // keeps it to one protocol request per actual change, and an entry that
+        // was destroyed and recreated (role swap, window hide/show) starts with
+        // `applied_input_region: None` and so republishes automatically.
+        let desired_input_region = entry.content_input_region();
+        if entry.applied_input_region != Some(desired_input_region) {
+            match desired_input_region {
                 Some(rect) => {
                     if let Ok(region) = Region::new(&state.compositor_state) {
                         region.add(
@@ -1756,19 +1877,19 @@ impl WaylandSurfaceBackend {
                         entry
                             .wl_surface()
                             .set_input_region(Some(region.wl_region()));
-                        entry.input_region_dirty = false;
+                        entry.applied_input_region = Some(desired_input_region);
                     }
                 }
                 None => {
                     entry.wl_surface().set_input_region(None);
-                    entry.input_region_dirty = false;
+                    entry.applied_input_region = Some(desired_input_region);
                 }
             }
         }
         // Window geometry rides the same commit as the buffer, so the
         // compositor never sees a frame whose declared window rect disagrees
         // with the pixels in it.
-        entry.apply_window_geometry(entry.input_region_rect.unwrap_or(DamageRect {
+        entry.apply_window_geometry(desired_input_region.unwrap_or(DamageRect {
             x: 0,
             y: 0,
             width: logical_w,
@@ -1821,25 +1942,11 @@ impl WaylandSurfaceBackend {
         wl_surface.set_opaque_region(Some(region.wl_region()));
     }
 
-    /// Restrict the surface's input (pointer/touch) region to `input_rect` in
-    /// surface-local logical coordinates. Surfaces allocate extra buffer space
-    /// below/around their content for tooltip overlays; without an explicit
-    /// input region the compositor routes clicks over that whole extra area to
-    /// this surface, creating a dead zone where clicks never reach the windows
-    /// underneath. `None` resets to the default (whole-surface input).
-    pub(crate) fn update_input_region(&mut self, surface_id: &str, input_rect: Option<DamageRect>) {
-        let Some(entry) = self.state.surfaces.get_mut(surface_id) else {
-            return;
-        };
-        let input_rect = input_rect.filter(|r| r.width > 0 && r.height > 0);
-        if entry.input_region_rect == input_rect && !entry.input_region_dirty {
-            return;
-        }
-        // Store only; the region is applied together with the present commit
-        // (`apply_pending_input_region`) so it always lands on a mapped
-        // surface and survives configure/remap ordering.
-        entry.input_region_rect = input_rect;
-        entry.input_region_dirty = true;
+    /// The input region currently derived for a surface, for tests and
+    /// diagnostics. `None` for an unknown surface or one whose whole area is
+    /// content.
+    pub(crate) fn input_region(&self, surface_id: &str) -> Option<DamageRect> {
+        self.state.surfaces.get(surface_id)?.content_input_region()
     }
 
     /// Set the logical-coordinate blur regions for a surface.
@@ -2499,6 +2606,82 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
+    // input region / surface padding
+    //
+    // A MESH surface is routinely larger than its content — a bar reserves room
+    // below itself for tooltips, a popover reserves a ring for shadow overshoot
+    // — and the compositor hands MESH every click over that reserve unless the
+    // input region excludes it. These pin the derivation that excludes it.
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn trailing_padding_confines_input_to_the_content_rect() {
+        // A 56px bar inflated by the 200px tooltip overlay reserve.
+        let padding = SurfacePadding::trailing(0, 200);
+        assert_eq!(
+            padding.content_rect(1920, 256),
+            Some(DamageRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 56,
+            }),
+            "the 200px strip below the bar must fall through to the windows under it"
+        );
+    }
+
+    #[test]
+    fn ring_padding_confines_input_to_the_inset_content_rect() {
+        // A popover whose buffer is padded on all sides for shadow overshoot.
+        let padding = SurfacePadding {
+            left: 24,
+            top: 8,
+            right: 24,
+            bottom: 40,
+        };
+        assert_eq!(
+            padding.content_rect(348, 212),
+            Some(DamageRect {
+                x: 24,
+                y: 8,
+                width: 300,
+                height: 164,
+            }),
+        );
+    }
+
+    #[test]
+    fn zero_padding_leaves_the_whole_surface_taking_input() {
+        assert!(SurfacePadding::default().is_zero());
+        assert_eq!(SurfacePadding::default().content_rect(640, 480), None);
+    }
+
+    /// A zero-area input region makes a surface completely unclickable, which is
+    /// a worse failure than an oversized one and can legitimately happen for a
+    /// frame while a surface is still being measured. Degrade to whole-surface
+    /// input instead of collapsing.
+    #[test]
+    fn padding_larger_than_the_surface_does_not_collapse_the_region() {
+        let padding = SurfacePadding::trailing(0, 200);
+        assert_eq!(padding.content_rect(1920, 200), None);
+        assert_eq!(padding.content_rect(1920, 120), None);
+    }
+
+    /// The reserve carries no protocol request of its own, so `apply_config` is
+    /// the only thing that copies it onto the live surface — and it only runs
+    /// when the fingerprint says the config changed.
+    #[test]
+    fn changing_only_the_padding_still_counts_as_a_config_change() {
+        let cfg = base_cfg();
+        let mut padded = cfg.clone();
+        padded.padding = SurfacePadding::trailing(0, 200);
+        assert_ne!(
+            surface_config_fingerprint(&cfg, KeyboardMode::OnDemand),
+            surface_config_fingerprint(&padded, KeyboardMode::OnDemand),
+        );
+    }
+
+    // ---------------------------------------------------------------------------
     // layer-surface config tests
     // ---------------------------------------------------------------------------
 
@@ -2511,6 +2694,7 @@ mod tests {
             size_policy: LayerSurfaceSizePolicy::Fixed,
             width: 280,
             height: 164,
+            padding: SurfacePadding::default(),
             exclusive_zone: 0,
             keyboard_mode: KeyboardMode::OnDemand,
             namespace: "@mesh/audio-popover".into(),
@@ -3270,6 +3454,7 @@ mod tests {
             size_policy: LayerSurfaceSizePolicy::Fixed,
             width: 1_920,
             height: 48,
+            padding: SurfacePadding::default(),
             exclusive_zone: 48,
             keyboard_mode: KeyboardMode::OnDemand,
             namespace: "benchmark".into(),

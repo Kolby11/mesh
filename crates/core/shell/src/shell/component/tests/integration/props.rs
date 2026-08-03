@@ -31,7 +31,9 @@ fn prop_default_projects_to_css_and_is_readable_in_script() {
     let mut component = test_frontend_component(PROP_SOURCE);
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 80);
-    component.paint(&theme, 200, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component.last_tree.as_ref().unwrap();
     let slider = first_node_by_class(tree, "slider").expect("slider node");
@@ -80,7 +82,9 @@ fn settings_props_apply_global_and_per_instance_precedence() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 80);
-    component.paint(&theme, 200, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+        .unwrap();
 
     let slider = first_node_by_class(component.last_tree.as_ref().unwrap(), "slider").unwrap();
     assert_eq!(
@@ -101,7 +105,9 @@ fn duration_prop_projects_to_css_milliseconds() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 80);
-    component.paint(&theme, 200, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+        .unwrap();
 
     let panel = first_node_by_class(component.last_tree.as_ref().unwrap(), "panel").unwrap();
     assert!(
@@ -140,7 +146,9 @@ fn script_write_to_props_reprojects_into_css() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 80);
 
-    component.paint(&theme, 200, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+        .unwrap();
     let slider = first_node_by_class(component.last_tree.as_ref().unwrap(), "slider").unwrap();
     assert_eq!(
         slider.computed_style.width,
@@ -150,7 +158,9 @@ fn script_write_to_props_reprojects_into_css() {
     // A script write to props.track_width must round-trip to state and reproject.
     component.call_namespaced_handler("bump", &[]).unwrap();
     component.invalidate_script_state();
-    component.paint(&theme, 200, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+        .unwrap();
 
     let slider = first_node_by_class(component.last_tree.as_ref().unwrap(), "slider").unwrap();
     assert_eq!(

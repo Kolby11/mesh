@@ -10,7 +10,7 @@ use mesh_core_wayland::WindowStates;
 pub use dev_window::{DevWindowEvent as WindowEvent, DevWindowKeyEvent as WindowKeyEvent, KeyMods};
 pub use wayland_surface::{
     LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity,
-    PopupPlacement, SurfaceConfig,
+    PopupPlacement, SurfaceConfig, SurfacePadding,
 };
 
 use dev_window::DevWindowBackend;
@@ -94,6 +94,7 @@ enum Backend {
 struct TestingBackend {
     popup_supported: bool,
     popup_configs: HashMap<String, PopupConfig>,
+    surface_configs: HashMap<String, SurfaceConfig>,
     destroyed_popups: Vec<String>,
     destroyed_surfaces: Vec<String>,
     dismissed_popups: Vec<String>,
@@ -228,8 +229,27 @@ impl PresentationEngine {
     }
 
     pub fn configure(&mut self, surface_id: &str, cfg: SurfaceConfig) {
-        if let Backend::WaylandSurface(bridge) = &mut self.backend {
-            bridge.configure(surface_id, cfg);
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.configure(surface_id, cfg),
+            Backend::DevWindow(_) => {}
+            Backend::Testing(backend) => {
+                backend.surface_configs.insert(surface_id.to_string(), cfg);
+            }
+        }
+    }
+
+    /// Every surface config this engine has been given, newest per surface.
+    /// Testing backend only; lets a test assert what geometry the shell asked
+    /// the compositor for and what part of it was declared reserve.
+    #[doc(hidden)]
+    pub fn testing_surface_configs(&self) -> Vec<(String, SurfaceConfig)> {
+        match &self.backend {
+            Backend::Testing(backend) => backend
+                .surface_configs
+                .iter()
+                .map(|(id, cfg)| (id.clone(), cfg.clone()))
+                .collect(),
+            _ => Vec::new(),
         }
     }
 
@@ -474,12 +494,32 @@ impl PresentationEngine {
         }
     }
 
-    /// Restrict the surface's input region (logical coordinates) so clicks over
-    /// the tooltip-overlay buffer padding fall through to the windows beneath.
-    /// `None` resets to whole-surface input.
-    pub fn update_input_region(&mut self, surface_id: &str, input_rect: Option<DamageRect>) {
-        if let Backend::WaylandSurface(bridge) = &mut self.backend {
-            bridge.update_input_region(surface_id, input_rect);
+    /// The pointer/touch input region currently in force for a surface, in
+    /// surface-local logical coordinates. `None` means the whole surface takes
+    /// input (the `wl_surface` default).
+    ///
+    /// There is deliberately no setter. A surface's input region is *derived*
+    /// from the reserve it declared in its [`SurfaceConfig`]/[`PopupConfig`]
+    /// (see [`SurfacePadding`]) so that inflating a surface and confining its
+    /// input cannot come apart — they are the same decision, expressed once.
+    /// This accessor exists so tests can assert the result.
+    pub fn input_region(&self, surface_id: &str) -> Option<DamageRect> {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.input_region(surface_id),
+            Backend::DevWindow(_) => None,
+            Backend::Testing(backend) => backend
+                .surface_configs
+                .get(surface_id)
+                .and_then(|cfg| {
+                    cfg.padding
+                        .content_rect(cfg.width.max(1), cfg.height.max(1))
+                })
+                .or_else(|| {
+                    backend.popup_configs.get(surface_id).and_then(|cfg| {
+                        cfg.padding
+                            .content_rect(cfg.placement.size.0.max(1), cfg.placement.size.1.max(1))
+                    })
+                }),
         }
     }
 

@@ -123,7 +123,9 @@ fn settings_page_title_keeps_its_full_line_box() {
     let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
     let mut buffer = PixelBuffer::new(920, 900);
 
-    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = settings.last_tree.as_ref().expect("rendered settings tree");
     let title = first_node_with_class_token(tree, "page-title").expect("settings page title");
@@ -144,7 +146,9 @@ fn settings_wrapped_descriptions_expand_to_their_content() {
     let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
     let mut buffer = PixelBuffer::new(920, 900);
 
-    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = settings.last_tree.as_ref().expect("rendered settings tree");
     let settings_description = first_node_with_class_token(tree, "sidebar-foot-copy")
@@ -158,7 +162,9 @@ fn settings_wrapped_descriptions_expand_to_their_content() {
     settings
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
         .unwrap();
-    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = settings
         .last_tree
@@ -187,11 +193,15 @@ fn settings_tab_switch_resets_scroll_and_replaces_the_visible_page() {
     let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
     let mut buffer = PixelBuffer::new(920, 900);
 
-    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
     settings
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showBluetooth", &[])
         .unwrap();
-    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
 
     let scroll_id = first_node_with_attr(
         settings
@@ -216,7 +226,9 @@ fn settings_tab_switch_resets_scroll_and_replaces_the_visible_page() {
         Some(0.0),
         "switching settings pages should reset the shared scroll container"
     );
-    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
 
     let command_text = settings
         .display_list_paint_commands()
@@ -244,7 +256,9 @@ fn settings_scrollbar_is_conditional_on_overflow() {
     let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
     let mut buffer = PixelBuffer::new(920, 900);
 
-    settings.paint(&theme, 920, 900, &mut buffer, 1.0).unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = settings.last_tree.as_ref().expect("rendered settings tree");
     let scroll =
@@ -266,7 +280,12 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
     navigation.visible = true;
     let mut navigation_buffer = PixelBuffer::new(960, 80);
     navigation
-        .paint(&theme, 960, 80, &mut navigation_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut navigation_buffer,
+            1.0,
+        )
         .unwrap();
     let navigation_health = format!(
         "{:?}",
@@ -361,7 +380,12 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
         .unwrap();
     let mut audio_buffer = PixelBuffer::new(320, 220);
     audio
-        .paint(&theme, 320, 220, &mut audio_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(320, 220),
+            &mut audio_buffer,
+            1.0,
+        )
         .unwrap();
     let audio_tree = audio
         .last_tree
@@ -386,7 +410,9 @@ fn navigation_bar_keeps_layer_width_dynamic_after_css_measurement() {
     let mut navigation =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     let mut buffer = PixelBuffer::new(960, 80);
-    navigation.paint(&theme, 960, 80, &mut buffer, 1.0).unwrap();
+    navigation
+        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .unwrap();
 
     let mut surface = LayoutRecordingSurface::default();
     navigation.render_layout(&mut surface);
@@ -419,7 +445,9 @@ fn shipped_audio_popover_content_measured_surface_contains_volume_slider() {
         .unwrap();
 
     let mut buffer = PixelBuffer::new(280, 164);
-    audio.paint(&theme, 280, 164, &mut buffer, 1.0).unwrap();
+    audio
+        .paint(&theme, SurfaceExtent::unpadded(280, 164), &mut buffer, 1.0)
+        .unwrap();
 
     // The popover content-measures to its compact vertical slider + percent
     // label rather than the painted surface bounds.
@@ -471,7 +499,9 @@ fn shipped_audio_popover_slider_sizes_from_props() {
         .unwrap();
 
     let mut buffer = PixelBuffer::new(280, 164);
-    audio.paint(&theme, 280, 164, &mut buffer, 1.0).unwrap();
+    audio
+        .paint(&theme, SurfaceExtent::unpadded(280, 164), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = audio.last_tree.as_ref().expect("rendered audio popover");
     let slider = first_node_by_tag(tree, "slider").expect("audio popover volume slider");
@@ -522,7 +552,7 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
 
     let mut buffer = PixelBuffer::new(112, 92);
     theme_selector
-        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
     let entering_tree = theme_selector
         .last_tree
@@ -565,7 +595,7 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
     );
 
     theme_selector
-        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
     let launched_tree = theme_selector
         .last_tree
@@ -596,7 +626,7 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
     );
 
     theme_selector
-        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
     let replay_tree = theme_selector
         .last_tree
@@ -621,12 +651,12 @@ fn set_closing_child_keys_scopes_exit_transition_to_popover_subtree_only() {
 
     let mut buffer = PixelBuffer::new(112, 92);
     theme_selector
-        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
     // Settle past the entering frame so the baseline paint below isn't itself
     // carrying `mesh-surface-entering`.
     theme_selector
-        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
 
     let popover_key = theme_selector
@@ -642,7 +672,7 @@ fn set_closing_child_keys_scopes_exit_transition_to_popover_subtree_only() {
     // its own CSS exit transition still has time left to run.
     theme_selector.set_closing_child_keys([popover_key.clone()].into_iter().collect());
     theme_selector
-        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
 
     let exiting_tree = theme_selector
@@ -668,7 +698,7 @@ fn set_closing_child_keys_scopes_exit_transition_to_popover_subtree_only() {
     // paint — it does not retroactively rewind the in-flight transition.
     theme_selector.set_closing_child_keys(std::collections::HashSet::new());
     theme_selector
-        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
     let reopened_tree = theme_selector
         .last_tree
@@ -694,7 +724,7 @@ fn set_entering_child_keys_scopes_entrance_to_popover_subtree_only() {
 
     let mut buffer = PixelBuffer::new(112, 92);
     theme_selector
-        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
     let popover_key = theme_selector
         .last_tree
@@ -706,7 +736,7 @@ fn set_entering_child_keys_scopes_entrance_to_popover_subtree_only() {
 
     theme_selector.set_entering_child_keys([popover_key].into_iter().collect());
     theme_selector
-        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
 
     let tree = theme_selector.last_tree.as_ref().expect("entering tree");
@@ -734,7 +764,7 @@ fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
 
     let mut buffer = PixelBuffer::new(112, 92);
     theme_selector
-        .paint(&theme, 112, 92, &mut buffer, 1.0)
+        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
     let tree = theme_selector
         .last_tree
@@ -811,7 +841,12 @@ fn shipped_language_popover_cycles_three_bubble_options_on_scroll() {
         .unwrap();
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     component
@@ -821,7 +856,12 @@ fn shipped_language_popover_cycles_three_bubble_options_on_scroll() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let requests = component.child_surface_requests();
     assert_eq!(
@@ -863,7 +903,12 @@ fn shipped_language_popover_cycles_three_bubble_options_on_scroll() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let labels = bubble_option_labels(&component, &node_key, content_offset);
@@ -965,7 +1010,12 @@ fn shipped_language_popover_rotates_on_two_finger_trackpad_scroll() {
         .unwrap();
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     component
         .call_namespaced_handler(
@@ -974,7 +1024,12 @@ fn shipped_language_popover_rotates_on_two_finger_trackpad_scroll() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let requests = component.child_surface_requests();
@@ -1006,7 +1061,12 @@ fn shipped_language_popover_rotates_on_two_finger_trackpad_scroll() {
             .unwrap();
     }
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     assert_eq!(
         bubble_option_labels(&component, &node_key, content_offset),
@@ -1031,7 +1091,12 @@ fn shipped_language_popover_rotates_on_two_finger_trackpad_scroll() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let after = bubble_option_labels(&component, &node_key, content_offset);
     assert_ne!(
@@ -1073,14 +1138,18 @@ fn audio_popover_theme_repaint_keeps_audio_state_without_available_flag() {
         .unwrap();
 
     let mut buffer = PixelBuffer::new(320, 220);
-    audio.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
+    audio
+        .paint(&theme, SurfaceExtent::unpadded(320, 220), &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(
         runtime_value(&audio, "audio_percent_label"),
         Some(serde_json::json!("50%"))
     );
 
     audio.theme_changed().unwrap();
-    audio.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
+    audio
+        .paint(&theme, SurfaceExtent::unpadded(320, 220), &mut buffer, 1.0)
+        .unwrap();
 
     let text = rendered_text(&audio);
     assert!(
@@ -1165,7 +1234,12 @@ fn phase44_navigation_audio_surface_emits_focused_proof_snapshot() {
     navigation.visible = true;
     let mut navigation_buffer = PixelBuffer::new(960, 80);
     navigation
-        .paint(&theme, 960, 80, &mut navigation_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut navigation_buffer,
+            1.0,
+        )
         .unwrap();
     assert_phase44_focused_proof_snapshot(&navigation, "navigation bar");
 
@@ -1183,7 +1257,12 @@ fn phase44_navigation_audio_surface_emits_focused_proof_snapshot() {
         .unwrap();
     let mut audio_buffer = PixelBuffer::new(320, 220);
     audio
-        .paint(&theme, 320, 220, &mut audio_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(320, 220),
+            &mut audio_buffer,
+            1.0,
+        )
         .unwrap();
     assert_phase44_focused_proof_snapshot(&audio, "audio popover");
 }
@@ -1303,7 +1382,9 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(220, 80);
-    component.paint(&theme, 220, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(220, 80), &mut buffer, 1.0)
+        .unwrap();
     let tree = component.last_tree.as_ref().expect("rendered tree");
     let button = first_node_by_tag(tree, "button").expect("button node");
     let handler = button
@@ -1323,7 +1404,9 @@ end
     component
         .call_handler_target(&handler, std::slice::from_ref(&click_event))
         .unwrap();
-    component.paint(&theme, 220, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(220, 80), &mut buffer, 1.0)
+        .unwrap();
     let show_requests = component.tick().unwrap();
     assert!(matches!(
         show_requests.as_slice(),
@@ -1339,7 +1422,9 @@ end
     );
     assert!(runtime_bool(&component, "audio_surface_hidden"));
 
-    component.paint(&theme, 220, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(220, 80), &mut buffer, 1.0)
+        .unwrap();
     let requests = component.tick().unwrap();
     match requests.as_slice() {
         [CoreRequest::HideSurface { surface_id }] => {
@@ -1370,7 +1455,9 @@ fn shipped_navigation_volume_button_click_toggles_mute() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 80);
-    component.paint(&theme, 320, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(320, 80), &mut buffer, 1.0)
+        .unwrap();
     let health = format!(
         "{:?}",
         component
@@ -1441,7 +1528,9 @@ fn shipped_navigation_audio_popover_transition_delay_stays_bounded() {
     let mut buffer = PixelBuffer::new(320, 220);
     // The hide transition is now a CSS `transition` on the surface root, read
     // from the last painted root style, so paint once before querying it.
-    component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(320, 220), &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(
         component.hide_transition_ms(),
         120,
@@ -1449,7 +1538,9 @@ fn shipped_navigation_audio_popover_transition_delay_stays_bounded() {
     );
 
     component.set_surface_exiting(true);
-    component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(320, 220), &mut buffer, 1.0)
+        .unwrap();
     let tree = component
         .last_tree
         .as_ref()
@@ -1482,7 +1573,12 @@ fn shipped_navigation_volume_scroll_reaches_audio_service_on_first_input() {
     let theme = default_theme();
     let mut nav_buffer = PixelBuffer::new(960, 80);
     navigation
-        .paint(&theme, 960, 80, &mut nav_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(960, 80),
+            &mut nav_buffer,
+            1.0,
+        )
         .unwrap();
     let tree = navigation
         .last_tree
@@ -1543,7 +1639,12 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let tree = component
         .last_tree
@@ -1566,7 +1667,12 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     let slovak_locale = mesh_core_locale::LocaleEngine::new("sk");
     component.locale_changed(&slovak_locale).unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let tree = component
         .last_tree
@@ -1651,7 +1757,12 @@ fn shipped_navigation_brightness_uses_one_level_icon_and_scrolls_both_input_kind
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let tree = component
         .last_tree
@@ -1767,7 +1878,12 @@ fn shipped_navigation_brightness_uses_configured_scroll_sensitivity() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let button = first_node_by_class(
         component.last_tree.as_ref().expect("navigation tree"),
@@ -1847,7 +1963,12 @@ fn shipped_navigation_brightness_falls_back_for_invalid_scroll_sensitivity() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let button = first_node_by_class(
         component.last_tree.as_ref().expect("navigation tree"),
@@ -1946,7 +2067,12 @@ fn shipped_navigation_icon_rasterizes_pixels_on_real_surface() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -2022,7 +2148,9 @@ fn shipped_navigation_blur_props_control_radius_background_and_enablement() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(1280, 80);
-    component.paint(&theme, 1280, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(1280, 80), &mut buffer, 1.0)
+        .unwrap();
     let nav = first_node_by_class(component.last_tree.as_ref().unwrap(), "nav-shell").unwrap();
     assert_eq!(nav.computed_style.backdrop_filter.blur_radius, 7.0);
     assert_eq!(nav.computed_style.background_color.r, 1);
@@ -2038,7 +2166,9 @@ fn shipped_navigation_blur_props_control_radius_background_and_enablement() {
     });
     disabled.runtimes.lock().unwrap().clear();
     disabled.init_root_runtime().unwrap();
-    disabled.paint(&theme, 1280, 80, &mut buffer, 1.0).unwrap();
+    disabled
+        .paint(&theme, SurfaceExtent::unpadded(1280, 80), &mut buffer, 1.0)
+        .unwrap();
     let nav = first_node_by_class(disabled.last_tree.as_ref().unwrap(), "nav-shell").unwrap();
     assert_eq!(nav.computed_style.backdrop_filter.blur_radius, 0.0);
 }
@@ -2054,7 +2184,12 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -2101,7 +2236,12 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let requests = component.child_surface_requests();
@@ -2189,7 +2329,12 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
 
         let mut buffer = PixelBuffer::new(width, height);
         component
-            .paint(&theme, width, height, &mut buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
 
         let tree = component
@@ -2243,7 +2388,12 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             )
             .unwrap();
         component
-            .paint(&theme, width, height, &mut buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
 
         let tree = component
@@ -2358,7 +2508,12 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             .handle_input(&theme, width, height, ComponentInput::PointerLeave)
             .unwrap();
         component
-            .paint(&theme, width, height, &mut buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
         let cluster_after_leave = first_node_by_class(
             component
@@ -2412,7 +2567,12 @@ fn shipped_navigation_resting_control_buttons_do_not_overlap() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let tree = component
@@ -2645,7 +2805,9 @@ fn debug_inspector_overview_renders_profiling_off_state_on_real_surface() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(360, 640);
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Inspect element"));
@@ -2694,7 +2856,9 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
         })
         .unwrap();
 
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
     let overview_text = rendered_text(&component);
     assert!(overview_text.iter().any(|line| line == "Overview"));
     assert!(
@@ -2706,7 +2870,9 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
     let surfaces_text = rendered_text(&component);
     assert!(surfaces_text.iter().any(|line| line == "Surfaces"));
     assert!(
@@ -2721,7 +2887,9 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
             &[],
         )
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
     let backend_text = rendered_text(&component);
     assert!(backend_text.iter().any(|line| line == "Backend services"));
     assert!(
@@ -2733,7 +2901,9 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
     let benchmark_text = rendered_text(&component);
     assert!(
         benchmark_text
@@ -2782,7 +2952,9 @@ fn debug_inspector_hidden_views_do_not_participate_in_layout() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(480, 640);
-    component.paint(&theme, 480, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(480, 640), &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component.last_tree.as_ref().expect("rendered inspector");
     let overview = first_node_with_class_token(tree, "overview-view").expect("overview view");
@@ -2833,11 +3005,15 @@ fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
             }),
         })
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
 
     let empty_text = rendered_text(&component);
     assert!(empty_text.iter().any(|line| line == "Surfaces"));
@@ -2891,7 +3067,9 @@ fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
             }),
         })
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .unwrap();
 
     let live_text = rendered_text(&component);
     assert!(live_text.iter().any(|line| line == "@mesh/navigation-bar"));
@@ -2959,13 +3137,23 @@ fn pick_bubble_option(enter_handler: &str, option_index: usize) -> (Option<usize
         .unwrap();
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     component
         .call_namespaced_handler(enter_handler, &[])
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let requests = component.child_surface_requests();
@@ -3000,7 +3188,12 @@ fn pick_bubble_option(enter_handler: &str, option_index: usize) -> (Option<usize
             .unwrap();
     }
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     (
@@ -3068,7 +3261,12 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
         .unwrap();
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     assert_eq!(
@@ -3084,7 +3282,12 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let requests = component.child_surface_requests();
     let node_key = requests[0].node_key.clone();
@@ -3110,7 +3313,12 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let option_layout = {
@@ -3154,7 +3362,12 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
         })
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     assert_eq!(
@@ -3186,7 +3399,12 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
     component.visible = true;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     component
         .call_namespaced_handler(
@@ -3195,7 +3413,12 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let requests = component.child_surface_requests();
@@ -3251,7 +3474,12 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
             )
             .unwrap();
         component
-            .paint(&theme, width, height, &mut buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
         let now = swatches(&component);
         assert_eq!(now.len(), 3, "the window stays three wide: {now:?}");

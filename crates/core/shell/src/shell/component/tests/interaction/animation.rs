@@ -242,10 +242,14 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(96, 32);
-    component.paint(&theme, 96, 32, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(96, 32), &mut buffer, 1.0)
+        .unwrap();
     // Every surface content-measures now; the first paint records measured_size
     // and requests one surface-config settle frame. Paint again so it stabilises.
-    component.paint(&theme, 96, 32, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(96, 32), &mut buffer, 1.0)
+        .unwrap();
     component.dirty = false;
 
     assert!(
@@ -292,7 +296,9 @@ end
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 48);
-    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .unwrap();
 
     let key = "root/0::pulse".to_string();
     let preserved_start = Instant::now()
@@ -305,7 +311,9 @@ end
         .started_at = preserved_start;
 
     component.call_namespaced_handler("onClick", &[]).unwrap();
-    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .unwrap();
 
     assert_eq!(
         component
@@ -339,7 +347,9 @@ fn keyframe_animation_finite_completion_stops_render_requests() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
     assert!(component.wants_render());
 
     let key = "root/0::pulse".to_string();
@@ -351,7 +361,9 @@ fn keyframe_animation_finite_completion_stops_render_requests() {
         .checked_sub(Duration::from_millis(200))
         .expect("monotonic instant subtraction");
     component.dirty = false;
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
     component.dirty = false;
 
     assert!(!component.wants_render());
@@ -385,7 +397,9 @@ fn keyframe_animation_name_change_restarts_timeline() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 48);
-    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .unwrap();
 
     let original_start = Instant::now()
         .checked_sub(Duration::from_millis(400))
@@ -443,7 +457,9 @@ fn keyframe_animation_infinite_keeps_render_requests_active() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
 
     component
         .keyframe_animations
@@ -453,7 +469,9 @@ fn keyframe_animation_infinite_keeps_render_requests_active() {
         .checked_sub(Duration::from_millis(200))
         .expect("monotonic instant subtraction");
     component.dirty = false;
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
     component.dirty = false;
 
     assert!(component.wants_render());
@@ -480,10 +498,14 @@ fn animation_only_tick_uses_scoped_retained_fingerprinting() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(component.animation_only_dirty);
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(component.retained_tree.last_update_was_scoped());
 }
@@ -497,7 +519,9 @@ fn smooth_scroll_animation_uses_scoped_retained_fingerprinting() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(80, 40);
-    component.paint(&theme, 80, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(80, 40), &mut buffer, 1.0)
+        .unwrap();
 
     component.scroll_animations.insert(
         runtime_node_id_for_key("root/0"),
@@ -511,7 +535,9 @@ fn smooth_scroll_animation_uses_scoped_retained_fingerprinting() {
         },
     );
     component.invalidate_animation_style_path(ComponentDirtyFlags::VISUAL_REPAINT);
-    component.paint(&theme, 80, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(80, 40), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(component.retained_tree.last_update_was_scoped());
 }
@@ -529,12 +555,16 @@ fn external_invalidation_cancels_animation_only_retained_scope() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
     assert!(component.animation_only_dirty);
 
     component.invalidate_surface_config();
     assert!(!component.animation_only_dirty);
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(!component.retained_tree.last_update_was_scoped());
 }
@@ -554,15 +584,37 @@ fn animation_scoped_retained_diff_matches_full_pipeline() {
     let mut scoped_buffer = PixelBuffer::new(120, 40);
     let mut full_buffer = PixelBuffer::new(120, 40);
     scoped
-        .paint(&theme, 120, 40, &mut scoped_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(120, 40),
+            &mut scoped_buffer,
+            1.0,
+        )
         .unwrap();
-    full.paint(&theme, 120, 40, &mut full_buffer, 1.0).unwrap();
+    full.paint(
+        &theme,
+        SurfaceExtent::unpadded(120, 40),
+        &mut full_buffer,
+        1.0,
+    )
+    .unwrap();
 
     full.animation_only_dirty = false;
     scoped
-        .paint(&theme, 120, 40, &mut scoped_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(120, 40),
+            &mut scoped_buffer,
+            1.0,
+        )
         .unwrap();
-    full.paint(&theme, 120, 40, &mut full_buffer, 1.0).unwrap();
+    full.paint(
+        &theme,
+        SurfaceExtent::unpadded(120, 40),
+        &mut full_buffer,
+        1.0,
+    )
+    .unwrap();
 
     assert!(scoped.retained_tree.last_update_was_scoped());
     assert!(!full.retained_tree.last_update_was_scoped());
@@ -598,9 +650,20 @@ fn animation_scoped_retained_end_to_end_benchmark() {
     let mut scoped_buffer = PixelBuffer::new(64, 16);
     let mut full_buffer = PixelBuffer::new(64, 16);
     scoped
-        .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(64, 16),
+            &mut scoped_buffer,
+            1.0,
+        )
         .unwrap();
-    full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+    full.paint(
+        &theme,
+        SurfaceExtent::unpadded(64, 16),
+        &mut full_buffer,
+        1.0,
+    )
+    .unwrap();
 
     let iterations = 250;
     let mut scoped_time = Duration::ZERO;
@@ -609,23 +672,45 @@ fn animation_scoped_retained_end_to_end_benchmark() {
         if iteration % 2 == 0 {
             let started = Instant::now();
             scoped
-                .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+                .paint(
+                    &theme,
+                    SurfaceExtent::unpadded(64, 16),
+                    &mut scoped_buffer,
+                    1.0,
+                )
                 .unwrap();
             scoped_time += started.elapsed();
 
             full.animation_only_dirty = false;
             let started = Instant::now();
-            full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+            full.paint(
+                &theme,
+                SurfaceExtent::unpadded(64, 16),
+                &mut full_buffer,
+                1.0,
+            )
+            .unwrap();
             full_time += started.elapsed();
         } else {
             full.animation_only_dirty = false;
             let started = Instant::now();
-            full.paint(&theme, 64, 16, &mut full_buffer, 1.0).unwrap();
+            full.paint(
+                &theme,
+                SurfaceExtent::unpadded(64, 16),
+                &mut full_buffer,
+                1.0,
+            )
+            .unwrap();
             full_time += started.elapsed();
 
             let started = Instant::now();
             scoped
-                .paint(&theme, 64, 16, &mut scoped_buffer, 1.0)
+                .paint(
+                    &theme,
+                    SurfaceExtent::unpadded(64, 16),
+                    &mut scoped_buffer,
+                    1.0,
+                )
                 .unwrap();
             scoped_time += started.elapsed();
         }
@@ -659,7 +744,9 @@ fn keyframe_animation_missing_name_records_diagnostic() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
 
     let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
     assert_eq!(diagnostics.error_count(), 1);
@@ -695,7 +782,9 @@ fn animation_token_runtime_diagnostic_reaches_component() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
-    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
 
     let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
     assert!(diagnostics.error_count() >= 1);

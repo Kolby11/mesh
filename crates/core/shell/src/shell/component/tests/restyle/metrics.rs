@@ -40,14 +40,18 @@ end
     // Pre-hover paint: button is 40px wide, no hover state yet.
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 60);
-    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .unwrap();
 
     // Simulate a hover over the button region.  The button key is "root/0/0"
     // (surface → column/row → button, index 0 in the single-child template).
     component.hovered_path = ["root", "root/0"].map(runtime_node_id_for_key).to_vec();
     component.hovered_key = Some("root/0".into());
     component.dirty = true;
-    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .unwrap();
 
     // After the hover restyle the button should be 80px wide.
     let tree = component.last_tree.as_ref().unwrap();
@@ -123,7 +127,9 @@ button:focus {
     let mut buffer = PixelBuffer::new(200, 60);
 
     // First paint: no focus — button width should be 40px in metrics.
-    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .unwrap();
     let width_before = {
         let runtimes = component.runtimes.lock().unwrap();
         let state = runtimes.get(component.id()).unwrap().script_ctx.state();
@@ -137,7 +143,9 @@ button:focus {
     // Focus the button and repaint.
     component.focused_key = Some("root/0".into());
     component.dirty = true;
-    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .unwrap();
     let width_after = {
         let runtimes = component.runtimes.lock().unwrap();
         let state = runtimes.get(component.id()).unwrap().script_ctx.state();
@@ -189,7 +197,9 @@ button:focus {
     let mut buffer = PixelBuffer::new(300, 80);
 
     // Paint without focus.
-    component.paint(&theme, 300, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(300, 80), &mut buffer, 1.0)
+        .unwrap();
     let tree_unfocused = component.last_tree.as_ref().unwrap().clone();
     let a11y_unfocused = AccessibilityTree::from_widget_tree(&tree_unfocused);
 
@@ -209,7 +219,9 @@ button:focus {
     // Focus the button and repaint.
     component.focused_key = Some("root/0".into());
     component.dirty = true;
-    component.paint(&theme, 300, 80, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(300, 80), &mut buffer, 1.0)
+        .unwrap();
     let tree_focused = component.last_tree.as_ref().unwrap().clone();
     let a11y_focused = AccessibilityTree::from_widget_tree(&tree_focused);
 
@@ -245,5 +257,67 @@ button:focus {
     assert!(
         focused_button.state.focused,
         "WidgetNode.state.focused must be true for the focused button"
+    );
+}
+
+/// An unmeasured surface must lay out — and record — its *content* extent, not
+/// the padded buffer it happens to be painting into.
+///
+/// A parent layer surface is deliberately configured larger than its content so
+/// tooltips have pixels outside the content box (200 logical px below a bar).
+/// `paint` used to receive one extent for both, and fell back to it whenever
+/// `requested_layout_size()` was still `(0, 0)` — which is exactly the first
+/// frame of every surface. A 1920x56 bar therefore laid its first frame out at
+/// 1920x256 and recorded that as its content size.
+#[test]
+fn first_paint_lays_out_against_content_extent_not_the_tooltip_reserve() {
+    const CONTENT: (u32, u32) = (1920, 56);
+    const RESERVE: u32 = 200;
+
+    let mut component = test_frontend_component(
+        r#"
+<style>
+box {
+  width: 100%;
+  height: 100%;
+  background-color: #101010;
+}
+</style>
+<template><box /></template>
+"#,
+    );
+    assert_eq!(
+        component.requested_layout_size(),
+        (0, 0),
+        "the fallback this test exercises only runs while nothing is measured yet"
+    );
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(CONTENT.0, CONTENT.1 + RESERVE);
+    component
+        .paint(
+            &theme,
+            SurfaceExtent::padded(CONTENT, (CONTENT.0, CONTENT.1 + RESERVE)),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+
+    assert_eq!(
+        component.last_surface_size,
+        Some(CONTENT),
+        "the reserve is buffer space, never content: recording it here is what \
+         fed an inflated height into layout and the shell's own size cache"
+    );
+
+    let root = component
+        .last_tree
+        .as_ref()
+        .expect("first paint builds a tree");
+    assert!(
+        (root.layout.height - CONTENT.1 as f32).abs() < 1.0,
+        "a `height: 100%` root resolves against the content extent; got {} for \
+         {CONTENT:?} of content plus {RESERVE}px of reserve",
+        root.layout.height
     );
 }

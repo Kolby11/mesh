@@ -66,7 +66,9 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 40);
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
@@ -75,7 +77,9 @@ end
         })
         .unwrap();
 
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
 
     assert_eq!(
         runtime_value(&component, "audio_tooltip"),
@@ -106,7 +110,9 @@ fn raw_service_state_update_schedules_repaint_without_proxy_tracking() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 40);
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
     component.dirty = false;
 
     component
@@ -121,7 +127,9 @@ fn raw_service_state_update_schedules_repaint_without_proxy_tracking() {
         component.wants_render(),
         "raw ScriptState changes should schedule repaint even without proxy tracking"
     );
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
     let tree = component.last_tree.as_ref().unwrap();
     fn first_title(node: &WidgetNode) -> Option<&str> {
         node.attributes
@@ -163,7 +171,9 @@ end
     // live service event flows in.
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 40);
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
@@ -171,7 +181,9 @@ end
             payload: serde_json::json!({ "percent": 73, "muted": false }),
         })
         .unwrap();
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
 
     assert_eq!(
         runtime_value(&component, "volumeLevel"),
@@ -220,7 +232,9 @@ end
             payload: serde_json::json!({ "percent": 20, "muted": false }),
         })
         .unwrap();
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
     component.clear_runtime_dirty_states();
     component.dirty = false;
     component.render_hooks_pending = false;
@@ -249,7 +263,9 @@ end
         component.wants_render(),
         "changing audio.state.percent should schedule a repaint"
     );
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(
         runtime_value(&component, "volumeLevel"),
         Some(serde_json::json!(35))
@@ -271,7 +287,9 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 40);
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
 
     let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
     assert_eq!(diagnostics.error_count(), 1);

@@ -66,11 +66,7 @@ impl Shell {
         &self,
         candidate: &mut BackendLaunchCandidate,
     ) {
-        Self::apply_runtime_settings(
-            candidate,
-            &self.theme.active().id,
-            self.locale.current(),
-        );
+        Self::apply_runtime_settings(candidate, &self.theme.active().id, self.locale.current());
     }
 
     pub(in crate::shell) fn apply_runtime_settings(

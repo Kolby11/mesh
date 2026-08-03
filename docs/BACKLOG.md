@@ -167,6 +167,33 @@ gate where the win is structural.
 - [ ] Rotation transforms allocate a temp `PixelBuffer` and repaint the subtree
       per frame. Low priority until rotation ships; scratch-buffer reuse was
       measured and rejected (see log).
+- [ ] A promoted popover's first layout runs against the `(1, 1)`
+      `PopupPlacement` placeholder, so intrinsic cross-axis sizing measures
+      itself to 1px and stays there (see log, 2026-08-03). Measure the first
+      frame against a generous bound (the output, or the parent surface)
+      before the `xdg_popup` is created.
+
+### Layout authoring
+
+- [ ] `width: fit-content` silently degrades to `auto`, which the surface
+      root's `align-items: stretch` then stretches — the opposite of what the
+      author asked for. `layout.rs` already records
+      `"content dimension mapped through Taffy measurement"`; either surface it
+      as a module diagnostic or make `fit-content` resolve like `fit`.
+      `@mesh/audio-popover`'s root still uses it and only escapes the collapse
+      because its `min-width`/`max-width` happen to bracket the intended size.
+
+### Test debt
+
+- [ ] `mesh-core-elements` style tests fail:
+      `indexed_theme_defaults_reuse_lowered_declarations_per_revision` and
+      `shipped_navigation_style_expected_diagnostics_do_not_block_tokens`.
+      Hidden until 2026-08-03 because the crate's test build did not compile.
+- [ ] `mesh-core-frontend`: `for_node_wrapper_carries_no_padding_or_gap` fails
+      (`compiler/src/lib.rs:1080`), predating the fragment control-flow work.
+- [ ] 20 `mesh-core-shell` tests fail on `main` (theme reload, slider drag,
+      real-surface geometry, debug snapshots). Triage as one batch — the red
+      baseline is what let the input-region regressions keep landing unnoticed.
 
 ### Startup and catalog
 

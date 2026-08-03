@@ -194,8 +194,15 @@ end
 
 <style>
 .qs-shell {
-    width: fit-content;
-    height: fit-content;
+    /* Sized to the bounding box of the panel instead of a hardcoded size —
+    <popover> isn't a container tag, so it needs the fit value explicitly
+    (box/row/column default to it). `fit-content` is not the same thing: it
+    maps to Taffy `auto`, which the surface root's `align-items: stretch`
+    then pins to the *available* width. A promoted popover's first paint has
+    only the 1x1 placeholder to measure against, so `fit-content` collapsed
+    this panel to a 1px sliver and kept it there. */
+    width: fit;
+    height: fit;
     padding: var(--spacing-xs);
     background: transparent;
     opacity: 1;

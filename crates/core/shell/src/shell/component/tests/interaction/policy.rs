@@ -67,7 +67,9 @@ text {
         })
         .unwrap();
     for _ in 0..2 {
-        component.paint(&dark, 160, 48, &mut buffer, 1.0).unwrap();
+        component
+            .paint(&dark, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+            .unwrap();
         if !component.wants_immediate_rerender() {
             break;
         }
@@ -86,12 +88,16 @@ text {
             }),
         })
         .unwrap();
-    component.paint(&light, 160, 48, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&light, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .unwrap();
     assert!(
         component.wants_immediate_rerender(),
         "render state sync should request the same-frame rerender that used to erase damage"
     );
-    component.paint(&light, 160, 48, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&light, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .unwrap();
 
     assert!(
         !component.take_present_damage().is_empty(),
@@ -141,7 +147,9 @@ slider {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 40);
 
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
     component
         .handle_input(
             &theme,
@@ -154,7 +162,9 @@ slider {
             },
         )
         .unwrap();
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
     let after_first_drag = buffer.data.clone();
 
     component
@@ -165,7 +175,9 @@ slider {
             ComponentInput::PointerMove { x: 60.0, y: 20.0 },
         )
         .unwrap();
-    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
 
     assert_ne!(
         buffer.data, after_first_drag,
@@ -194,7 +206,12 @@ fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
         })
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     // The audio popover slider is vertical: top = max (100%), bottom = 0%.
@@ -216,7 +233,12 @@ fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     component
@@ -231,7 +253,12 @@ fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
         })
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     // Slider value is rendered in percent (0..100). The in-flight drag (~80)
@@ -267,7 +294,12 @@ fn audio_popover_first_slider_grab_dispatches_change() {
         })
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     // Vertical slider: 70% is 30% down from the top.
@@ -332,7 +364,12 @@ fn audio_popover_drag_keeps_fractional_slider_value_visible() {
         })
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     // Vertical slider: drag to ~73% (27% down from the top).
@@ -353,7 +390,12 @@ fn audio_popover_drag_keeps_fractional_slider_value_visible() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     // Slider value is rendered in percent (0..100); the drag position must stay
@@ -389,7 +431,12 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
         })
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
@@ -422,7 +469,12 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     component
@@ -437,7 +489,12 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
         })
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -456,7 +513,12 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
     // on the backend value and the preserved override is released.
     for _ in 0..3 {
         component
-            .paint(&theme, width, height, &mut buffer, 1.0)
+            .paint(
+                &theme,
+                SurfaceExtent::unpadded(width, height),
+                &mut buffer,
+                1.0,
+            )
             .unwrap();
     }
 
@@ -491,7 +553,12 @@ fn audio_popover_slider_keyboard_still_steps_after_mouse_drag() {
         })
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
@@ -524,7 +591,12 @@ fn audio_popover_slider_keyboard_still_steps_after_mouse_drag() {
         )
         .unwrap();
     component
-        .paint(&theme, width, height, &mut buffer, 1.0)
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     let requests = component
@@ -937,7 +1009,9 @@ fn handlerless_slider_drag_retained_paint_beats_script_rebuild() {
             component.dirty_types = ComponentDirtyFlags::empty();
             component.invalidate_script_state();
         }
-        component.paint(theme, 640, 480, buffer, 1.0).unwrap();
+        component
+            .paint(theme, SurfaceExtent::unpadded(640, 480), buffer, 1.0)
+            .unwrap();
     }
 
     let source = slider_surface_source(96);
@@ -946,8 +1020,20 @@ fn handlerless_slider_drag_retained_paint_beats_script_rebuild() {
     let mut new = test_frontend_component(&source);
     let mut old_buffer = PixelBuffer::new(640, 480);
     let mut new_buffer = PixelBuffer::new(640, 480);
-    old.paint(&theme, 640, 480, &mut old_buffer, 1.0).unwrap();
-    new.paint(&theme, 640, 480, &mut new_buffer, 1.0).unwrap();
+    old.paint(
+        &theme,
+        SurfaceExtent::unpadded(640, 480),
+        &mut old_buffer,
+        1.0,
+    )
+    .unwrap();
+    new.paint(
+        &theme,
+        SurfaceExtent::unpadded(640, 480),
+        &mut new_buffer,
+        1.0,
+    )
+    .unwrap();
 
     let iterations = 200;
     let old_started = std::time::Instant::now();

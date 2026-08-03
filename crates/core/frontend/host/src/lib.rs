@@ -50,6 +50,71 @@ pub enum ChildSurfaceKind {
     Overflow,
 }
 
+/// The two sizes a surface paints against, which are not the same size.
+///
+/// `content` is the UI's own extent: what the component lays out into, what the
+/// shell records as the surface size, and what input coordinates are relative
+/// to. `padded` is the buffer the compositor was actually configured with —
+/// `content` plus whatever reserve the surface declared so tooltips and
+/// descendant `box-shadow`/`filter` overshoot have pixels outside the content
+/// box (`SurfacePadding` in `mesh-core-presentation`).
+///
+/// They are one argument because collapsing them into one number is how the
+/// reserve leaked into layout: [`ShellComponent::paint`] used to take a single
+/// extent and fall back to it whenever nothing was measured yet, so a shipped
+/// bar laid its first frame out against a surface 200 logical pixels taller
+/// than the bar and recorded that as its content size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SurfaceExtent {
+    /// Logical size of the content itself.
+    pub content: (u32, u32),
+    /// Logical size of the buffer, i.e. `content` plus its declared reserve.
+    /// Never smaller than `content`.
+    pub padded: (u32, u32),
+}
+
+impl SurfaceExtent {
+    /// A surface whose buffer is exactly its content: windows, popups with no
+    /// overshoot ring, the debug inspector, and any caller that never inflates.
+    pub fn unpadded(width: u32, height: u32) -> Self {
+        Self {
+            content: (width, height),
+            padded: (width, height),
+        }
+    }
+
+    /// `content` painted into a buffer of `padded`. The reserve is whatever
+    /// `padded` has beyond `content`; a `padded` smaller than `content` is a
+    /// caller bug and is clamped up rather than silently cropping the UI.
+    pub fn padded(content: (u32, u32), padded: (u32, u32)) -> Self {
+        Self {
+            content,
+            padded: (padded.0.max(content.0), padded.1.max(content.1)),
+        }
+    }
+
+    pub fn content_width(&self) -> u32 {
+        self.content.0
+    }
+
+    pub fn content_height(&self) -> u32 {
+        self.content.1
+    }
+
+    pub fn padded_width(&self) -> u32 {
+        self.padded.0
+    }
+
+    pub fn padded_height(&self) -> u32 {
+        self.padded.1
+    }
+
+    /// Whether any of this surface is paint-only reserve.
+    pub fn has_reserve(&self) -> bool {
+        self.padded != self.content
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ComponentContext {
     pub component_id: String,
@@ -407,11 +472,13 @@ pub trait ShellComponent: Send {
         false
     }
     fn render(&mut self, surface: &mut dyn ShellSurface) -> Result<(), ComponentError>;
+    /// Paint one frame. `extent` carries the content size and the padded buffer
+    /// size separately — see [`SurfaceExtent`]; laying out against the padded
+    /// size is the bug that type exists to prevent.
     fn paint(
         &mut self,
         theme: &Theme,
-        width: u32,
-        height: u32,
+        extent: SurfaceExtent,
         buffer: &mut PixelBuffer,
         scale: f32,
     ) -> Result<(), ComponentError>;

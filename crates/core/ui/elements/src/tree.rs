@@ -468,6 +468,7 @@ mod tests {
             state: node.state,
             scroll_metrics: node.scroll_metrics,
             mesh_key: node.mesh_key.clone(),
+            loop_identity: node.loop_identity.clone(),
             cached_class_attr: node.cached_class_attr.clone(),
             cached_classes: node.cached_classes.clone(),
             authored: Arc::new((*node.authored).clone()),

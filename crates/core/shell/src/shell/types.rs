@@ -1,8 +1,8 @@
 pub use mesh_core_frontend_host::{
     ChildSurfaceKind, ChildSurfaceRequest, ComponentContext, ComponentError, ComponentInput,
     ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers, ServiceEvent,
-    ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent, SurfaceId,
-    TabFocusTarget,
+    ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent, SurfaceExtent,
+    SurfaceId, TabFocusTarget,
 };
 use mesh_core_presentation::{LayerSurfaceSizePolicy, PopupConfig, SurfaceConfig};
 use mesh_core_render::{DamageRect, PixelBuffer};

@@ -1,11 +1,36 @@
 # Status
 
-**Updated:** 2026-08-02
+**Updated:** 2026-08-03
 
 This page describes the present and is meant to be overwritten. History lives in
 [`log/`](log/); open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
+
+**A surface's paint reserve and its input region are one decision.**
+`SurfacePadding` is a field of `SurfaceConfig`/`PopupConfig`, produced together
+with the inflated size by `surface_geometry_with_overlay_reserve`, and the
+Wayland `SurfaceEntry` derives its input region from that padding on every
+commit. `PresentationEngine::update_input_region` no longer exists: there is no
+second call to forget and no shell-side cache that can be warm while the
+compositor object is not. This closes the "shell blocks a strip under the
+navigation bar" dead-zone class. Record: [`log/2026-08.md`](log/2026-08.md).
+
+**A surface's content extent and its buffer extent are separate arguments.**
+`ShellComponent::paint` takes one `SurfaceExtent { content, padded }` instead of
+a single `width`/`height` that meant the padded surface when allocating and the
+content size when nothing was measured yet. An unmeasured 1920x56 bar used to
+lay its first frame out — and record `last_surface_size` — at 1920x256. The
+regression paints at `SurfaceExtent::padded((1920, 56), (1920, 256))` and
+checks both; reverting the fallback to the padded extent fails it with that
+exact figure. Record: [`log/2026-08.md`](log/2026-08.md).
+
+**Cargo verification works again in this checkout** via `nix develop` (the
+earlier missing-linker-wrapper note is stale). It shows a red baseline: 20
+`mesh-core-shell` tests, 2 `mesh-core-elements` style tests, and 1
+`mesh-core-frontend` test fail on `main`. Listed in
+[`docs/BACKLOG.md`](../docs/BACKLOG.md) — that red baseline is why input-region
+regressions kept landing unnoticed.
 
 **The retained Taffy node map is authoritative through incremental layout.**
 Fresh, dirty, and structural paths write layouts through the per-surface map;
