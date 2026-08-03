@@ -9,9 +9,9 @@ This page describes the present and is meant to be overwritten. History lives in
 
 **A whole-codebase refactor is in flight.** Files over 2000 lines are being
 split and comment volume cut, section by section. Foundation, platform,
-surface-config, the UI crates, the frontend crates, and now the runtime and
-extension crates are done and verified; presentation and shell, and tools
-remain. Eight files still exceed 2000 lines, all inside those sections. Record:
+surface-config, the UI crates, the frontend crates, the runtime and extension
+crates, and now presentation are done and verified; shell and tools remain.
+Seven files still exceed 2000 lines, all inside the shell crate. Record:
 [`log/2026-08.md`](log/2026-08.md).
 
 **Dotted template reads take one root lookup and one leaf clone at most.** The

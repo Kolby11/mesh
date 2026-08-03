@@ -122,7 +122,6 @@ pub struct PopupConfig {
     pub grab_serial: Option<u32>,
 }
 
-/// Map a [`PopupAnchor`] onto the Wayland `xdg_positioner` anchor enum.
 pub(super) fn map_anchor(anchor: PopupAnchor) -> xdg_positioner::Anchor {
     use xdg_positioner::Anchor;
     match anchor {
@@ -138,7 +137,6 @@ pub(super) fn map_anchor(anchor: PopupAnchor) -> xdg_positioner::Anchor {
     }
 }
 
-/// Map a [`PopupGravity`] onto the Wayland `xdg_positioner` gravity enum.
 pub(super) fn map_gravity(gravity: PopupGravity) -> xdg_positioner::Gravity {
     use xdg_positioner::Gravity;
     match gravity {
@@ -154,8 +152,6 @@ pub(super) fn map_gravity(gravity: PopupGravity) -> xdg_positioner::Gravity {
     }
 }
 
-/// Map a [`PopupConstraint`] onto the Wayland `xdg_positioner`
-/// constraint-adjustment bitflags.
 pub(super) fn map_constraint(constraint: PopupConstraint) -> xdg_positioner::ConstraintAdjustment {
     use xdg_positioner::ConstraintAdjustment;
     let mut adjustment = ConstraintAdjustment::None;

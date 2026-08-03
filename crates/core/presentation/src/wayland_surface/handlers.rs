@@ -23,7 +23,7 @@ impl CompositorHandler for State {
         if entry.fractional_scale.is_some() {
             return;
         }
-        // T-102-01: Clamp to 1..=3 to prevent extreme scale values from
+        // Clamp to 1..=3 to prevent extreme scale values from
         // malicious compositors that could cause zero-size or overflow buffers.
         let new_scale = new_factor.clamp(1, 3) as f32;
         if (entry.scale - new_scale).abs() > f32::EPSILON {
@@ -556,7 +556,7 @@ impl Dispatch<WpFractionalScaleV1, String, State> for State {
         let wp_fractional_scale_v1::Event::PreferredScale { scale } = event else {
             return;
         };
-        // T-102-02: Clamp preferred_scale to 60..=480 (0.5x to 4.0x) to
+        // Clamp preferred_scale to 60..=480 (0.5x to 4.0x) to
         // prevent extreme values from a malicious compositor. Values outside
         // this range are silently ignored.
         let clamped = scale.clamp(60, 480);
