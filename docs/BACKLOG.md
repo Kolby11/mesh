@@ -48,6 +48,10 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 - [ ] Reject `mesh.surfaceLayout`. It is still parsed as a compatibility input
       for `mesh.surface`, which contradicts the manifest rule that old inputs
       get migration diagnostics instead. No shipped module uses it.
+- [ ] Stop the LSP treating `package.json` and `mesh.toml` as MESH manifests.
+      `is_manifest_uri` serves `package.json` as a module manifest and
+      `find_module_root` accepts either as a module root, which contradicts the
+      canonical `module.json`-only rule.
 - [ ] **Deferred — unify the four contribution schemas.** Theme, icons, i18n,
       and keybinds under one `contributes` shape, only where they share honest
       structure. Revisit after profiles land. Capability inference and a
@@ -176,6 +180,16 @@ gate where the win is structural.
 - [ ] Narrow frontend catalog index rebuilds to graph deltas. Compiled sources
       now survive live graph changes by manifest/source fingerprint, but slot
       and validation indexes still rebuild across the catalog.
+
+### Dead code
+
+- [ ] Decide the fate of the render and authoring-scan functions the 2026-08
+      refactors orphaned. `mesh-core-render`'s recursive-painter era leaves 20
+      unused items (`draw_named_icon`, `draw_font_glyph`, `TooltipRenderState`,
+      the `painter/text.rs` and `painter/widgets.rs` render methods), and
+      `installed_graph/scan.rs` keeps three substring extractors the AST scan
+      replaced. Either they are public API worth documenting as such, or they
+      should go — right now they are 23 dead-code warnings.
 
 ### Architecture
 

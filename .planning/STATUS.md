@@ -7,12 +7,17 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
-**A whole-codebase refactor is in flight.** Files over 2000 lines are being
-split and comment volume cut, section by section. Foundation, platform,
-surface-config, the UI crates, the frontend crates, the runtime and extension
-crates, and now presentation are done and verified; shell and tools remain.
-Seven files still exceed 2000 lines, all inside the shell crate. Record:
-[`log/2026-08.md`](log/2026-08.md).
+**The whole-codebase refactor is done.** Every section — foundation, platform,
+surface-config, UI, frontend, runtime, extension, presentation, shell, and
+tools — has been split and verified. **No file in the workspace exceeds 2000
+lines**, down from a 9411-line worst case. Test counts are identical to the
+pre-refactor baseline in every affected crate. Records:
+[`log/2026-08.md`](log/2026-08.md), parts 1-5.
+
+Two findings were filed rather than changed, both behavior questions: the LSP
+still accepts `package.json`/`mesh.toml` as MESH manifests, and parts 1-3
+orphaned 23 items that now warn as dead code. Both are in
+[`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 **Dotted template reads take one root lookup and one leaf clone at most.** The
 compiler no longer probes synthetic dotted keys or allocates a temporary path

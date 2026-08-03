@@ -35,7 +35,6 @@ fn hover_template(content: &str, offset: usize) -> Option<String> {
         return None;
     }
 
-    // Check for tag name
     if let Some(tag) = TAG_DEFS.iter().find(|t| t.name == word) {
         let inherits = tag.inherited_base_names();
         let inherits_line = if inherits.is_empty() {
@@ -49,7 +48,6 @@ fn hover_template(content: &str, offset: usize) -> Option<String> {
         ));
     }
 
-    // Check for universal / event attribute
     for attr in crate::knowledge::tags::UNIVERSAL_ATTRS {
         if attr.name == word {
             return Some(format!(
@@ -122,7 +120,6 @@ fn hover_style(doc: &Document, content: &str, offset: usize) -> Option<String> {
 }
 
 fn hover_script(doc: &Document, content: &str, offset: usize) -> Option<String> {
-    // Try to match "mesh.xxx.yyy" pattern around the cursor
     let before = &content[..offset.min(content.len())];
     let after = &content[offset.min(content.len())..];
 
@@ -165,7 +162,6 @@ fn hover_script(doc: &Document, content: &str, offset: usize) -> Option<String> 
         }
     }
 
-    // Look for full mesh.xxx.yyy path
     if token.starts_with("mesh.") {
         let api_path = token.trim_start_matches("mesh.");
         if let Some(entry) = MESH_API_ENTRIES.iter().find(|e| e.path == api_path) {

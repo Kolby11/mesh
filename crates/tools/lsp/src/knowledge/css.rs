@@ -450,7 +450,6 @@ pub static CSS_PROPERTIES: &[CssProp] = &[
             "border-radius",
         ],
     },
-    // Animation metadata; Phase 12 owns scheduling and keyframes.
     CssProp {
         name: "animation",
         description: "Practical animation shorthand stored as metadata only.",

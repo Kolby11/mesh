@@ -155,7 +155,7 @@ fn node_from_kind(kind: &'static FieldKind, path: &str, found: &Discovered) -> N
         ),
         // Props: their declaration is the component's `<props>` block, which
         // the LSP does not read yet, so anything goes rather than everything
-        // being flagged (spec 03 phase 1 lands the real schema).
+        // being flagged. See `docs/spec/03-components.md`.
         FieldKind::Opaque => map(doc, "object", scalar("A declared prop value.", "any")),
     }
 }
