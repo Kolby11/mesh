@@ -1261,3 +1261,30 @@ pub(super) fn count_tag(node: &WidgetNode, tag: &str) -> usize {
             .map(|child| count_tag(child, tag))
             .sum::<usize>()
 }
+
+pub(super) fn rect_matches_bounds(
+    rect: (i32, i32, i32, i32),
+    bounds: (f32, f32, f32, f32),
+) -> bool {
+    let left = bounds.0.floor() as i32;
+    let top = bounds.1.floor() as i32;
+    let right = bounds.2.ceil() as i32;
+    let bottom = bounds.3.ceil() as i32;
+    rect == (left, top, (right - left).max(1), (bottom - top).max(1))
+}
+
+pub(super) fn first_node_with_class_token<'a>(
+    node: &'a WidgetNode,
+    token: &str,
+) -> Option<&'a WidgetNode> {
+    if node
+        .attributes
+        .get("class")
+        .is_some_and(|class| class.split_whitespace().any(|part| part == token))
+    {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .find_map(|child| first_node_with_class_token(child, token))
+}

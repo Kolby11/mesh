@@ -3,7 +3,6 @@ use super::*;
 pub(super) use crate::shell::{CoreRequest, KeyModifiers};
 pub(super) use mesh_core_elements::Color;
 pub(super) use mesh_core_elements::LayoutRect;
-pub(super) use mesh_core_elements::style::Display;
 pub(super) use mesh_core_service::InterfaceCatalog;
 pub(super) use std::collections::HashMap;
 pub(super) use std::path::PathBuf;
@@ -39,8 +38,11 @@ pub(super) fn annotate_runtime_tree(
     crate::shell::component::runtime_tree::annotate_runtime_tree(node, key, &mut context);
 }
 
+mod activation;
 mod animation;
 mod diagnostics;
+mod gestures;
+mod keybinds;
 mod navigation;
 mod policy;
 mod pseudo;
