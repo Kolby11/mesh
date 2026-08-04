@@ -72,15 +72,17 @@
                         <text class="page-title">{t(page_title)}</text>
                         <text class="page-subtitle">{t(page_subtitle)}</text>
                     </column>
-                    <button class="header-button pop-out-button" onclick={onPopOut} aria-label={t('settings.pop_out')}>
-                        <icon name="window-new" size="18" />
-                    </button>
-                    <button class="header-button dock-back-button" onclick={onDockBack} aria-label={t('settings.dock_back')}>
-                        <icon name="window-restore" size="18" />
-                    </button>
-                    <button class="header-button close-button" onclick={onClose} aria-label={t('settings.close')}>
-                        <icon name="window-close" size="18" />
-                    </button>
+                    <row class="settings-header-actions">
+                        <button class="header-button pop-out-button" onclick={onPopOut} aria-label={t('settings.pop_out')}>
+                            <icon name="window-new" size="18" />
+                        </button>
+                        <button class="header-button dock-back-button" onclick={onDockBack} aria-label={t('settings.dock_back')}>
+                            <icon name="window-restore" size="18" />
+                        </button>
+                        <button class="header-button close-button" onclick={onClose} aria-label={t('settings.close')}>
+                            <icon name="window-close" size="18" />
+                        </button>
+                    </row>
                 </row>
 
                 <scroll ref="settings_scroll" class="settings-scroll">
@@ -424,6 +426,11 @@ end
     .header-button:hover {
         background: var(--color-surface-container-high);
         color: var(--color-on-surface);
+    }
+
+    .settings-header-actions {
+        align-items: center;
+        gap: var(--spacing-xs);
     }
 
     .close-button:hover {
