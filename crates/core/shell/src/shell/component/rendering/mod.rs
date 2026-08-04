@@ -437,7 +437,9 @@ impl FrontendSurfaceComponent {
         self.retained_update_dirty_roots = None;
         // Advance smooth-scroll animations before annotation reads scroll_offsets,
         // so the eased offset lands in this frame's `_mesh_scroll_*` attributes.
-        self.advance_scroll_animations(std::time::Instant::now());
+        let now = std::time::Instant::now();
+        self.advance_scroll_animations(now);
+        self.advance_scroll_inertia(now);
         let mut annotation_context = RuntimeAnnotationContext::new(
             self.focused_id
                 .or_else(|| self.focused_key.as_deref().map(runtime_node_id_for_key)),
@@ -675,8 +677,21 @@ impl FrontendSurfaceComponent {
             );
         }
         if tree.tag == "surface" {
-            tree.computed_style.width = mesh_core_elements::Dimension::Px(width as f32);
-            tree.computed_style.height = mesh_core_elements::Dimension::Px(height as f32);
+            // `auto` on an axis the shell has no size for yet: a definite box
+            // built from the stand-in size shrinks the content to fit it (a
+            // 56px bar in a 1px surface lays out 1px tall), and that collapsed
+            // layout is exactly what `measure_content_size` then reports as
+            // the surface's content size.
+            tree.computed_style.width = if self.unmeasured_root_axes.0 {
+                mesh_core_elements::Dimension::Auto
+            } else {
+                mesh_core_elements::Dimension::Px(width as f32)
+            };
+            tree.computed_style.height = if self.unmeasured_root_axes.1 {
+                mesh_core_elements::Dimension::Auto
+            } else {
+                mesh_core_elements::Dimension::Px(height as f32)
+            };
         }
 
         // Re-apply the out-of-flow collapse for promoted `<popover>` wrappers. The

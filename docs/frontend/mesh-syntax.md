@@ -391,7 +391,7 @@ function onSearchClose()
 end
 
 function onSelectResult()
-    refs.active_result:scroll_into_view()  -- scroll the list so the row is visible
+    refs.active_result:scroll_into_view()  -- smoothly reveal the row
 end
 
 function onResetList()
@@ -399,7 +399,6 @@ function onResetList()
 end
 
 function onSmoothReveal()
-    refs.active_result:scroll_into_view({ smooth = true })  -- animated reveal
     refs.result_list:scroll_to(0, { smooth = true, duration = 300 })
 end
 ```
@@ -409,14 +408,15 @@ end
 | `:focus()`              | Routes through the canonical focus path (fires `onfocus`).     |
 | `:blur()`               | Clears focus if this element currently holds it (fires `onblur`). |
 | `:click()`              | Synthesizes a click on the node through the real dispatch path (fires `onclick`, or activation handlers for menu/list items). |
-| `:scroll_into_view()`   | Scrolls each scrollable ancestor just enough to reveal the element (CSS "nearest" alignment; handles nested scroll regions). |
+| `:scroll_into_view()`   | Smoothly scrolls each scrollable ancestor just enough to reveal the element (CSS "nearest" alignment; handles nested scroll regions). |
 | `:scroll_to(top[,left])`| Sets this element's own scroll offset (DOM `element.scrollTop`), clamped to its scrollable range; omitted axes stay put. |
 | `:set_value(text)`      | Sets an input's text (DOM `input.value = ...`); does not fire `oninput`/`onchange`. Equivalent to `refs.x.value = text`. |
 
 Both scroll methods accept a trailing **options table** `{ smooth = true,
-duration = <ms> }` (DOM `behavior: "smooth"`). With `smooth`, the offset eases
-to the target (`EaseOut`, default 250 ms) instead of snapping; a later instant
-scroll on the same container cancels the animation.
+duration = <ms> }` (DOM `behavior: "smooth"`). `scroll_into_view` is smooth by
+default; pass `{ smooth = false }` for an immediate reveal. `scroll_to` remains
+immediate by default and opts into easing with `{ smooth = true }`. A later
+instant scroll on the same container cancels the animation.
 
 Scroll position and extent are readable live on the reference:
 `refs.x.scroll_top` / `scroll_left` (current offset), `refs.x.scroll_height` /

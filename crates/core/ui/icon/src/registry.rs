@@ -297,19 +297,22 @@ impl IconRegistry {
             return found;
         }
 
-        // 4. Effective dependency chain
-        if let Some(frontend) = frontend {
-            for pack_module_id in
-                frontend.effective_chain(self.shell_default_pack_module.as_deref())
-            {
-                let Some(pack_id) = self.pack_id_by_module.get(&pack_module_id) else {
-                    continue;
-                };
-                if let Some(found) =
+        // 4. Effective dependency chain. A chain entry may be a MESH icon-pack
+        // module or a system XDG theme id selected directly by the user.
+        let chain = frontend
+            .map(|frontend| frontend.effective_chain(self.shell_default_pack_module.as_deref()))
+            .unwrap_or_else(|| self.shell_default_pack_module.iter().cloned().collect());
+        for chain_id in chain {
+            if let Some(pack_id) = self.pack_id_by_module.get(&chain_id)
+                && let Some(found) =
                     self.try_pack_lookup(pack_id, semantic_name, semantic_name, size, &mut tried)
-                {
-                    return found;
-                }
+            {
+                return found;
+            }
+            if let Some(found) =
+                self.try_system_pack_lookup(&chain_id, semantic_name, size, &mut tried)
+            {
+                return found;
             }
         }
 
@@ -351,6 +354,25 @@ impl IconRegistry {
             tried,
             &format!("pack:{pack_id}"),
         )
+    }
+
+    fn try_system_pack_lookup(
+        &self,
+        pack_id: &str,
+        semantic_name: &str,
+        size: u32,
+        tried: &mut Vec<String>,
+    ) -> Option<IconResolution> {
+        let pack = self.config.pack(pack_id)?;
+        let mapping = format!("system-pack:{pack_id}/{semantic_name}");
+        tried.push(mapping.clone());
+        let target = xdg::find_icon_in_pack(pack, semantic_name, size)?;
+        Some(IconResolution::Found {
+            semantic_name: semantic_name.into(),
+            candidate: mapping,
+            target,
+            multicolor: false,
+        })
     }
 
     /// Resolve an `<asset-pack>/<asset-name>` (or bare path) target into
@@ -695,5 +717,34 @@ nothing = ["system:nothing"]
             panic!("expected file target");
         };
         assert!(path.ends_with("default.svg"), "got {}", path.display());
+    }
+
+    #[test]
+    fn system_xdg_theme_can_be_the_shell_default_without_a_mesh_module() {
+        let td = tempdir().unwrap();
+        let theme = td.path().join("Ocean");
+        fs::create_dir_all(&theme).unwrap();
+        fs::write(
+            theme.join("settings.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>"#,
+        )
+        .unwrap();
+
+        let mut reg = registry();
+        reg.register_pack(IconPackRoot {
+            id: "Ocean".into(),
+            root: Some(theme),
+            theme: "Ocean".into(),
+            kind: crate::IconPackKind::Xdg,
+        })
+        .unwrap();
+        reg.set_shell_default_pack(Some("Ocean".into()));
+        reg.set_frontend_bindings("settings", FrontendIconBindings::default());
+
+        let result = reg.resolve_for_module("settings", "settings", 8);
+        let ResolvedTarget::File(path) = result.target().unwrap() else {
+            panic!("expected file target");
+        };
+        assert!(path.ends_with("settings.svg"), "got {}", path.display());
     }
 }

@@ -77,6 +77,9 @@ owning the hover bridge, one-open-per-trigger exclusivity, and compositor
 dismiss sync. *(detail: "Embeddable popovers via `<popover>` surface
 promotion")*
 
+- [ ] Fix transient-surface reuse after dismissal: Settings cannot reopen after
+      its window closes, and Quick Settings dismisses while crossing from its
+      trigger into the popup instead of honoring the hover bridge.
 - [ ] Derive `Overflow` child surfaces automatically, beyond explicit
       `<popover>` — if inline UI escapes its parent buffer, the shell should
       derive the surface rather than requiring manifest geometry.

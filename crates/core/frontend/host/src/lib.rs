@@ -64,7 +64,10 @@ pub enum ChildSurfaceKind {
 /// than the bar and recorded that as its content size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SurfaceExtent {
-    /// Logical size of the content itself.
+    /// Logical size of the content itself. `0` on an axis means the shell has
+    /// no size for it yet — the compositor has not configured the surface and
+    /// nothing has been measured — and is NOT a request to lay out against
+    /// zero. See [`SurfaceExtent::content_width_known`].
     pub content: (u32, u32),
     /// Logical size of the buffer, i.e. `content` plus its declared reserve.
     /// Never smaller than `content`.
@@ -105,6 +108,23 @@ impl SurfaceExtent {
 
     pub fn padded_height(&self) -> u32 {
         self.padded.1
+    }
+
+    /// Whether the shell actually knows this axis, as opposed to having no
+    /// size for it yet.
+    ///
+    /// An unknown axis must not become a definite layout box: a surface root
+    /// pinned to a fabricated 1px collapses shrinkable content to 1px, and
+    /// that collapsed measurement is what the surface then reports as its
+    /// content size — permanently, since a nonzero size stops being dynamic.
+    /// [`ShellComponent::paint`] lays an unknown axis out as `auto` instead,
+    /// which is what content measurement means in the first place.
+    pub fn content_width_known(&self) -> bool {
+        self.content.0 > 0
+    }
+
+    pub fn content_height_known(&self) -> bool {
+        self.content.1 > 0
     }
 
     /// Whether any of this surface is paint-only reserve.
@@ -281,6 +301,12 @@ pub enum CoreRequest {
     },
     SetLocale {
         locale: String,
+    },
+    SetIconTheme {
+        theme_id: String,
+    },
+    SetFontFamily {
+        family: String,
     },
     SetProvider {
         interface: String,

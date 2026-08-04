@@ -26,7 +26,52 @@ fn theme_preview_palette(theme: &mesh_core_theme::Theme) -> serde_json::Value {
     })
 }
 
+fn system_resources_json(settings: &ShellSettings) -> serde_json::Value {
+    let resources = mesh_core_resources::system_resource_catalog();
+    serde_json::json!({
+        "active_icon_theme": settings.icons.default_pack,
+        "active_font_family": settings.fonts.ui_family,
+        "icon_themes": resources.icon_themes.iter().filter(|theme| !theme.hidden).map(|theme| serde_json::json!({
+            "id": theme.id,
+            "name": theme.name,
+            "path": theme.path,
+            "inherits": theme.inherits,
+        })).collect::<Vec<_>>(),
+        "font_families": resources.font_families.iter().map(|family| serde_json::json!({
+            "name": family.name,
+            "face_count": family.face_count,
+            "monospace": family.monospace,
+        })).collect::<Vec<_>>(),
+    })
+}
+
 impl Shell {
+    fn persist_shell_appearance_override(&mut self, patch: serde_json::Value) {
+        // Keep the live effective store in sync immediately, then persist the
+        // same sparse override to the shared store. Profile-owned overrides
+        // remain a separate composition concern; this is the global picker.
+        let mut effective = self.settings_store.as_ref().clone();
+        effective.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &patch);
+        self.settings_store = Arc::new(effective);
+
+        let path = self.settings_watch.path.clone();
+        let result = SettingsStore::load_from(&path).and_then(|mut shared| {
+            shared.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &patch);
+            shared.save()
+        });
+        match result {
+            Ok(()) => {
+                self.settings_watch.modified_at = std::fs::metadata(&path)
+                    .ok()
+                    .and_then(|metadata| metadata.modified().ok());
+            }
+            Err(error) => tracing::warn!(
+                "failed to persist shell appearance setting to {}: {error}",
+                path.display()
+            ),
+        }
+    }
+
     /// Publish the effective settings snapshot through the ordinary interface
     /// path. Consumers observe one revisioned value and never need the
     /// settings-file path or a raw component namespace injected by the shell.
@@ -73,8 +118,9 @@ impl Shell {
         }
 
         let old_theme_id = self.theme.active().id.clone();
-        let theme = mesh_core_theme::load_theme_from_path(&self.theme_watch.path)
+        let mut theme = mesh_core_theme::load_theme_from_path(&self.theme_watch.path)
             .map_err(ShellRunError::Theme)?;
+        apply_font_family(&mut theme, self.settings.fonts.ui_family.as_deref());
         tracing::info!(
             "reloaded active theme '{}' from {}",
             theme.id,
@@ -130,6 +176,10 @@ impl Shell {
         }
         tracing::info!("active theme changed to '{theme_id}'");
         self.settings.theme.active = theme_id.to_string();
+        apply_font_family(
+            self.theme.active_mut(),
+            self.settings.fonts.ui_family.as_deref(),
+        );
         let path = mesh_core_theme::theme_path_for_id(theme_id);
         let modified_at = std::fs::metadata(&path)
             .ok()
@@ -137,6 +187,56 @@ impl Shell {
         self.theme_watch = ThemeWatchState { path, modified_at };
         self.mark_components_theme_changed()?;
         self.sync_theme_service_state(theme_id)
+    }
+
+    pub(in crate::shell) fn apply_set_icon_theme(
+        &mut self,
+        theme_id: &str,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let theme_id = theme_id.trim();
+        let available = mesh_core_resources::system_resource_catalog()
+            .icon_themes
+            .iter()
+            .any(|theme| theme.id == theme_id && !theme.hidden);
+        if !available {
+            tracing::warn!("cannot select unavailable system icon theme '{theme_id}'");
+            return Ok(VecDeque::new());
+        }
+        self.settings.icons.default_pack = Some(theme_id.to_owned());
+        self.persist_shell_appearance_override(serde_json::json!({
+            "icons": { "default_pack": theme_id }
+        }));
+        mesh_core_icon::set_default_shell_pack(Some(theme_id.to_owned()));
+        self.mark_components_theme_changed()?;
+        let active_theme_id = self.theme.active().id.clone();
+        let mut requests = self.sync_theme_service_state(&active_theme_id)?;
+        requests.extend(self.sync_settings_service_state()?);
+        Ok(requests)
+    }
+
+    pub(in crate::shell) fn apply_set_font_family(
+        &mut self,
+        family: &str,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let family = family.trim();
+        let available = mesh_core_resources::system_resource_catalog()
+            .font_families
+            .iter()
+            .any(|candidate| candidate.name == family);
+        if !available {
+            tracing::warn!("cannot select unavailable system font family '{family}'");
+            return Ok(VecDeque::new());
+        }
+        self.settings.fonts.ui_family = Some(family.to_owned());
+        self.persist_shell_appearance_override(serde_json::json!({
+            "fonts": { "ui_family": family }
+        }));
+        apply_font_family(self.theme.active_mut(), Some(family));
+        self.mark_components_theme_changed()?;
+        let active_theme_id = self.theme.active().id.clone();
+        let mut requests = self.sync_theme_service_state(&active_theme_id)?;
+        requests.extend(self.sync_settings_service_state()?);
+        Ok(requests)
     }
 
     pub(in crate::shell) fn sync_theme_service_state(
@@ -183,6 +283,7 @@ impl Shell {
             "is_dark": is_dark,
             "themes": themes,
             "available": available,
+            "system_resources": system_resources_json(&self.settings),
         });
         // The shell derives the system theme snapshot, but the selected
         // provider owns the interface state. Publishing under that provider
@@ -258,11 +359,14 @@ impl Shell {
 
         let old_theme = self.settings.theme.clone();
         let old_i18n = self.settings.i18n.clone();
+        let old_icons = self.settings.icons.clone();
+        let old_fonts = self.settings.fonts.clone();
         let new_i18n = &new_settings.i18n;
         let locale_changed = old_i18n.locale != new_i18n.locale
             || old_i18n.fallback_locale != new_i18n.fallback_locale;
 
-        let theme_changed = old_theme.active != new_settings.theme.active;
+        let theme_changed =
+            old_theme.active != new_settings.theme.active || old_fonts != new_settings.fonts;
         if theme_changed {
             let (theme, theme_watch) = load_active_theme(&new_settings);
             let active_theme_id = theme.active().id.clone();
@@ -275,6 +379,13 @@ impl Shell {
             self.theme_watch = theme_watch;
             self.mark_components_theme_changed()?;
             requests.extend(self.sync_theme_service_state(&active_theme_id)?);
+        }
+
+        if old_icons != new_settings.icons {
+            mesh_core_icon::set_default_shell_pack(new_settings.icons.default_pack.clone());
+            if !theme_changed {
+                self.mark_components_theme_changed()?;
+            }
         }
 
         if locale_changed {

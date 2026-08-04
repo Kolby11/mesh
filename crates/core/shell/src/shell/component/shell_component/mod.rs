@@ -513,6 +513,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             || !self.transitions.is_empty()
             || self.has_active_keyframe_animation
             || !self.scroll_animations.is_empty()
+            || !self.scroll_inertia.is_empty()
             || !self.closing_child_keys.is_empty()
             || !self.entering_child_keys.is_empty()
     }
@@ -630,6 +631,17 @@ impl ShellComponent for FrontendSurfaceComponent {
         } else {
             requested_height.max(1)
         };
+        // An axis with neither a measurement of its own nor a size from the
+        // shell has no layout box yet. The numbers above still stand in for it
+        // (the buffer and the damage rects need real pixels), but the surface
+        // root lays it out as `auto` so this paint measures what the content
+        // wants instead of what the placeholder allows — a 56px bar in a 1px
+        // stand-in surface measures 1px, and `render_layout` would then send
+        // that 1px on to the compositor as the bar's height, for good.
+        self.unmeasured_root_axes = (
+            requested_width == 0 && !extent.content_width_known(),
+            requested_height == 0 && !extent.content_height_known(),
+        );
         // Observe the content size BEFORE snapshotting dirty flags: a size
         // change raises STYLE|LAYOUT|PAINT|METRICS, and this very paint is the
         // one that rebuilds at the new size — snapshotting first would leave

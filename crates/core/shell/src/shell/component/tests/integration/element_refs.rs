@@ -148,7 +148,7 @@ end
 }
 
 #[test]
-fn refs_scroll_into_view_scrolls_the_container_to_reveal_the_target() {
+fn refs_scroll_into_view_smoothly_scrolls_the_container_to_reveal_the_target() {
     // A script calling `refs.<name>:scroll_into_view()` enqueues an element action
     // that the shell turns into scroll-offset adjustments on the real overflowing
     // container, routed through the same scroll_offsets map the wheel uses.
@@ -188,16 +188,31 @@ end
 
     component.call_namespaced_handler("reveal", &[]).unwrap();
 
-    // The target sits at ~200px inside a 60px scroll viewport (content 240px), so
-    // the container must scroll its trailing edge into view.
-    let scrolled = component
-        .scroll_offsets
-        .values()
-        .any(|offset| offset.y > 1.0);
+    // The target sits at ~200px inside a 60px scroll viewport (content 240px).
+    // Reveal is smooth by default, so it registers a target without snapping.
+    let animation = *component
+        .scroll_animations
+        .get(&runtime_node_id_for_key("root/0"))
+        .expect("scroll_into_view should register a smooth animation");
     assert!(
-        scrolled,
-        "scroll_into_view should move the container offset, got {:?}",
+        animation.target.y > 1.0,
+        "scroll_into_view should target the revealed position"
+    );
+    assert!(
+        component
+            .scroll_offsets
+            .values()
+            .all(|offset| offset.y < 1.0),
+        "scroll_into_view should not snap, got {:?}",
         component.scroll_offsets
+    );
+    component.advance_scroll_animations(animation.start_time + animation.duration);
+    assert!(
+        component
+            .scroll_offsets
+            .get(&runtime_node_id_for_key("root/0"))
+            .is_some_and(|offset| offset.y > 1.0),
+        "the smooth reveal should settle at the target"
     );
 }
 
@@ -336,6 +351,185 @@ end
     assert!(
         component.scroll_animations.is_empty(),
         "animation should be dropped once settled"
+    );
+}
+
+fn scroll_interaction_component() -> FrontendSurfaceComponent {
+    test_frontend_component(
+        r#"
+<style>
+scroll { width: 100px; height: 100px; overflow-y: auto; }
+.content { width: 100px; height: 400px; flex-shrink: 0; }
+</style>
+<template>
+    <scroll><box class="content" /></scroll>
+</template>
+"#,
+    )
+}
+
+#[test]
+fn scrollbar_thumb_can_be_dragged_with_the_pointer() {
+    let mut component = scroll_interaction_component();
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 120);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 120), &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = component.last_tree.as_ref().expect("painted tree");
+    let viewport = first_node_by_tag(tree, "scroll").expect("scroll viewport");
+    let x = viewport.layout.x + viewport.layout.width - 7.0;
+    let initial_hit = mesh_core_interaction::find_scrollbar_at(tree, x, viewport.layout.y + 10.0)
+        .expect("painted vertical scrollbar");
+    assert!(initial_hit.on_thumb);
+    let press_y = initial_hit.thumb_start + initial_hit.thumb_extent / 2.0;
+
+    component
+        .handle_input(
+            &theme,
+            120,
+            120,
+            ComponentInput::PointerButton {
+                x,
+                y: press_y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    assert!(component.active_scrollbar_drag.is_some());
+
+    component
+        .handle_input(
+            &theme,
+            120,
+            120,
+            ComponentInput::PointerMove {
+                x,
+                y: initial_hit.track_start + initial_hit.track_extent,
+            },
+        )
+        .unwrap();
+    let offset = component
+        .scroll_offsets
+        .get(&initial_hit.node_id)
+        .copied()
+        .unwrap_or_default();
+    assert!(
+        (offset.y - initial_hit.max_scroll).abs() < 0.1,
+        "dragging the thumb to the end should reach max scroll: {offset:?}"
+    );
+
+    component
+        .handle_input(
+            &theme,
+            120,
+            120,
+            ComponentInput::PointerButton {
+                x,
+                y: initial_hit.track_start + initial_hit.track_extent,
+                pressed: false,
+            },
+        )
+        .unwrap();
+    assert!(component.active_scrollbar_drag.is_none());
+}
+
+#[test]
+fn wheel_scroll_eases_instead_of_snapping() {
+    let mut component = scroll_interaction_component();
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 120);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 120), &mut buffer, 1.0)
+        .unwrap();
+
+    component
+        .handle_input(
+            &theme,
+            120,
+            120,
+            ComponentInput::Scroll {
+                x: 20.0,
+                y: 20.0,
+                dx: 0.0,
+                dy: -1.0,
+            },
+        )
+        .unwrap();
+    let viewport_id = runtime_node_id_for_key("root/0");
+    let animation = component
+        .scroll_animations
+        .get(&viewport_id)
+        .expect("wheel input should create a short easing animation");
+    assert!((animation.target.y - 28.0).abs() < 0.1);
+    assert!(
+        component
+            .scroll_offsets
+            .get(&viewport_id)
+            .is_none_or(|offset| offset.y < 1.0),
+        "wheel input should not snap to its target"
+    );
+}
+
+#[test]
+fn touchpad_scroll_is_pixel_precise_and_keeps_moving_after_a_flick() {
+    let mut component = scroll_interaction_component();
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 120);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 120), &mut buffer, 1.0)
+        .unwrap();
+
+    component
+        .handle_input(
+            &theme,
+            120,
+            120,
+            ComponentInput::TwoFingerScroll {
+                x: 20.0,
+                y: 20.0,
+                dx: 0.0,
+                dy: -12.0,
+            },
+        )
+        .unwrap();
+    component
+        .handle_input(
+            &theme,
+            120,
+            120,
+            ComponentInput::TwoFingerScroll {
+                x: 20.0,
+                y: 20.0,
+                dx: 0.0,
+                dy: -12.0,
+            },
+        )
+        .unwrap();
+    let viewport_id = runtime_node_id_for_key("root/0");
+    let direct = component
+        .scroll_offsets
+        .get(&viewport_id)
+        .copied()
+        .unwrap_or_default();
+    assert!(
+        (direct.y - 24.0).abs() < 0.1,
+        "touchpad pixels should map one-to-one, got {direct:?}"
+    );
+    let inertia = *component
+        .scroll_inertia
+        .get(&viewport_id)
+        .expect("a touchpad flick should retain velocity");
+    component.advance_scroll_inertia(inertia.last_input + Duration::from_millis(100));
+    let carried = component
+        .scroll_offsets
+        .get(&viewport_id)
+        .copied()
+        .unwrap_or_default();
+    assert!(
+        carried.y > direct.y,
+        "momentum should carry the viewport after finger input: {direct:?} -> {carried:?}"
     );
 }
 

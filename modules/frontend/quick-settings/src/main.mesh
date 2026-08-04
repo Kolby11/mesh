@@ -1,19 +1,18 @@
 <template>
   <popover
+    open={open}
     class="qs-shell"
     aria-label="Quick Settings"
+    anchor-ref="settingsButton"
+    anchor="bottom"
+    gravity="bottom"
+    onpointerenter={onPopoverEnter}
+    onpointerleave={onPopoverLeave}
   >
     <column class="qs-panel">
 
       <row class="qs-header">
         <text class="qs-title">Quick Settings</text>
-        <spacer />
-        <button class="qs-close-btn" onclick={onOpenSettings} aria-label="Open settings">
-          <icon name="preferences-system" size="16" />
-        </button>
-        <button class="qs-close-btn" onclick={onClose} aria-label="Close">
-          <icon name="window-close" size="16" />
-        </button>
       </row>
 
       <row class="qs-control-row">
@@ -65,6 +64,7 @@
 </template>
 
 <script lang="luau">
+open = false
 volume_percent   = 0
 volume_label     = "0%"
 volume_icon      = "audio-volume-muted"
@@ -182,13 +182,12 @@ function onLangSk()
     mesh.locale.set("sk")
 end
 
-function onClose()
-    mesh.popover.hide("@mesh/quick-settings")
+function onPopoverEnter(event)
+    self.PopoverEnter:fire(event)
 end
 
-function onOpenSettings()
-    mesh.events.publish("shell.show-surface", { surface_id = "@mesh/settings" })
-    mesh.popover.hide("@mesh/quick-settings")
+function onPopoverLeave(event)
+    self.PopoverLeave:fire(event)
 end
 </script>
 
@@ -235,24 +234,6 @@ end
 .qs-title {
     font-size: var(--typography-size-md);
     font-weight: 700;
-    color: var(--color-on-surface);
-}
-
-.qs-close-btn {
-    width: 28px;
-    height: 28px;
-    justify-content: center;
-    align-items: center;
-    border-radius: var(--radius-full);
-    background: transparent;
-    color: var(--color-on-surface-variant);
-    border-width: 0;
-    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                color var(--animation-duration-short) var(--animation-curves-bezier-standard);
-}
-
-.qs-close-btn:hover {
-    background: var(--color-surface-container-high);
     color: var(--color-on-surface);
 }
 

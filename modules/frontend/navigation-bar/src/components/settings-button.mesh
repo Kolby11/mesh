@@ -1,6 +1,7 @@
 <template>
   <stack class="nav-button-shell">
     <button
+      ref="settingsButton"
       class="nav-button"
       onclick={onOpenSettings}
       onpointerenter={onSettingsEnter}
@@ -13,7 +14,7 @@
     >
       <icon class="nav-button-glyph" name="preferences-system" size="18" />
     </button>
-    <QuickSettings hidden={settings_surface_hidden} />
+    <QuickSettings bind:this={quick_settings} />
   </stack>
 </template>
 
@@ -21,11 +22,28 @@
 local t = import("mesh.i18n", "t")
 local QuickSettings = require("@mesh/quick-settings")
 
-settings_surface_id = "@mesh/quick-settings"
 settings_surface_hidden = true
 settings_aria_expanded = "false"
 settings_tooltip = t('nav.open_settings')
 settings_tooltip_disabled = "false"
+
+quick_settings = nil
+local quick_settings_connected = false
+local CLOSE_BRIDGE_KEY = "quick-settings-close"
+local CLOSE_BRIDGE_DELAY_MS = 400
+local connect_quick_settings
+
+local function cancel_bridge_close()
+    mesh.events.publish("shell.cancel-handler", { key = CLOSE_BRIDGE_KEY })
+end
+
+local function schedule_bridge_close()
+    mesh.events.publish("shell.schedule-handler", {
+        key = CLOSE_BRIDGE_KEY,
+        handler = "closeSettingsBridge",
+        delay_ms = CLOSE_BRIDGE_DELAY_MS,
+    })
+end
 
 -- The quick-settings popup is a promoted child surface that covers the space
 -- the tooltip would occupy. Leaving the tooltip live while the popup is open
@@ -43,14 +61,10 @@ local function sync_trigger_state()
 end
 
 local function show_settings_selector(event)
-    if settings_surface_hidden then
-        mesh.events.publish("shell.position-surface", {
-            surface_id = settings_surface_id,
-            margin_top = 0,
-            margin_left = tonumber((event.current_target.position or {}).margin_left) or 0,
-        })
-        local focus = event.trigger ~= nil and event.trigger.type == "keyboard"
-        mesh.popover.activate(settings_surface_id, event, { focus = focus })
+    if quick_settings and settings_surface_hidden then
+        connect_quick_settings()
+        cancel_bridge_close()
+        quick_settings.open = true
         settings_surface_hidden = false
         sync_trigger_state()
     end
@@ -58,10 +72,33 @@ end
 
 local function hide_settings_selector(bridge)
     if not settings_surface_hidden then
-        mesh.popover.hide(settings_surface_id, { bridge = bridge == true })
+        if bridge == true then
+            schedule_bridge_close()
+            return
+        end
+        cancel_bridge_close()
+        quick_settings.open = false
         settings_surface_hidden = true
         sync_trigger_state()
     end
+end
+
+connect_quick_settings = function()
+    if quick_settings == nil or quick_settings_connected then
+        return
+    end
+    quick_settings_connected = true
+    quick_settings.PopoverEnter:on(onQuickSettingsEnter)
+    quick_settings.PopoverLeave:on(function()
+        schedule_bridge_close()
+    end)
+    quick_settings.CloseRequested:on(function()
+        hide_settings_selector(false)
+    end)
+end
+
+function render(self)
+    connect_quick_settings()
 end
 
 function onOpenSettings()
@@ -69,16 +106,29 @@ function onOpenSettings()
     -- quick-settings popup remains the lightweight hover surface.
     mesh.events.publish("shell.show-surface", { surface_id = "@mesh/settings" })
     hide_settings_selector(false)
+    -- Settings owns focus once its window opens. Leaving focus on the launcher
+    -- makes it look permanently active while the separate window is visible.
+    refs.settingsButton:blur()
 end
 
 -- Hover opens quick settings; leaving the trigger starts a core-owned hover
 -- bridge so the pointer can cross into the promoted popup.
 function onSettingsEnter(event)
+    connect_quick_settings()
+    cancel_bridge_close()
     show_settings_selector(event)
 end
 
 function onSettingsLeave()
     hide_settings_selector(true)
+end
+
+function onQuickSettingsEnter()
+    cancel_bridge_close()
+end
+
+function closeSettingsBridge()
+    hide_settings_selector(false)
 end
 </script>
 

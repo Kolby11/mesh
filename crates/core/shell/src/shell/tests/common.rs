@@ -555,6 +555,7 @@ pub(super) struct FocusRecordingComponent {
     pub(super) popover_margin_left: i32,
     pub(super) role: mesh_core_wayland::SurfaceRole,
     pub(super) promotable: bool,
+    pub(super) always_render: bool,
 }
 
 impl FocusRecordingComponent {
@@ -565,6 +566,7 @@ impl FocusRecordingComponent {
             popover_margin_left: 0,
             role: mesh_core_wayland::SurfaceRole::Layer,
             promotable: false,
+            always_render: false,
         }
     }
 
@@ -584,6 +586,17 @@ impl FocusRecordingComponent {
     ) -> Self {
         Self {
             popover_margin_left,
+            ..Self::new(surface_id, state)
+        }
+    }
+
+    pub(super) fn rendering_window(
+        surface_id: &str,
+        state: Arc<Mutex<FocusRecordingState>>,
+    ) -> Self {
+        Self {
+            role: mesh_core_wayland::SurfaceRole::Window,
+            always_render: true,
             ..Self::new(surface_id, state)
         }
     }
@@ -637,7 +650,7 @@ impl super::types::ShellComponent for FocusRecordingComponent {
     }
 
     fn wants_render(&self) -> bool {
-        false
+        self.always_render
     }
 
     fn render(

@@ -30,6 +30,40 @@
         </column>
 
         <column class="settings-section">
+            <text class="settings-section-title">{t('appearance.icons')}</text>
+            <text class="settings-section-copy">{t('appearance.icons.copy')}</text>
+            <scroll class="settings-list resource-list">
+                {#for row in icon_theme_rows key={row.id}}
+                    <button class={row.button_class} onclick={onIconThemeSelect(row.id)}>
+                        <column class="settings-card-copy">
+                            <text class="settings-card-title">{row.name}</text>
+                            <text class="settings-card-meta">{row.detail}</text>
+                        </column>
+                        <text class="language-check" hidden={row.check_hidden}>{t('common.selected')}</text>
+                    </button>
+                {/for}
+            </scroll>
+            <button class="settings-secondary-button" hidden={icon_more_hidden} onclick={onShowMoreIcons}>{t('appearance.show_more')}</button>
+        </column>
+
+        <column class="settings-section">
+            <text class="settings-section-title">{t('appearance.fonts')}</text>
+            <text class="settings-section-copy">{t('appearance.fonts.copy')}</text>
+            <scroll class="settings-list resource-list">
+                {#for row in font_rows key={row.name}}
+                    <button class={row.button_class} style={row.preview_style} onclick={onFontSelect(row.name)}>
+                        <column class="settings-card-copy">
+                            <text class="settings-card-title">{row.name}</text>
+                            <text class="settings-card-meta">{row.detail}</text>
+                        </column>
+                        <text class="language-check" hidden={row.check_hidden}>{t('common.selected')}</text>
+                    </button>
+                {/for}
+            </scroll>
+            <button class="settings-secondary-button" hidden={font_more_hidden} onclick={onShowMoreFonts}>{t('appearance.show_more')}</button>
+        </column>
+
+        <column class="settings-section">
             <text class="settings-section-title">{t('appearance.language')}</text>
             <text class="settings-section-copy">{t('appearance.language.copy')}</text>
             <column class="settings-list">
@@ -61,6 +95,14 @@
                     <text class="settings-info-label">{t('common.locale')}</text>
                     <text class="settings-info-value">{locale_value}</text>
                 </row>
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('appearance.icons')}</text>
+                    <text class="settings-info-value">{icon_theme_value}</text>
+                </row>
+                <row class="settings-info-row">
+                    <text class="settings-info-label">{t('appearance.fonts')}</text>
+                    <text class="settings-info-value">{font_value}</text>
+                </row>
             </column>
         </column>
     </column>
@@ -76,10 +118,20 @@ local t = import("mesh.i18n", "t")
 theme_value = "mesh-default-dark"
 locale_value = "en"
 theme_rows = {}
+icon_theme_rows = {}
+font_rows = {}
+icon_theme_value = "hicolor"
+font_value = "system-ui"
+icon_more_hidden = true
+font_more_hidden = true
 english_class = "language-option language-option-active"
 slovak_class = "language-option"
 english_check_hidden = false
 slovak_check_hidden = true
+
+local RESOURCE_PAGE_SIZE = 24
+local icon_limit = RESOURCE_PAGE_SIZE
+local font_limit = RESOURCE_PAGE_SIZE
 
 local function fallback_preview_palette(theme_id)
     local id = string.lower(tostring(theme_id or ""))
@@ -172,18 +224,23 @@ local function installed_themes()
         end
     end
 
-    -- Merge the module graph even when the service has already published a
-    -- partial registry. During startup the service may initially contain only
-    -- the active theme, while the graph already knows every installed theme.
-    local graph = debug_service and debug_service.module_graph or {}
-    if type(graph) == "table" then
-        for _, entry in ipairs(graph) do
-            if entry.enabled ~= false then
-                local provided = (entry.provides or {}).themes
-                if type(provided) == "table" then
-                    for _, candidate in ipairs(provided) do
-                        add_theme(candidate)
-                    end
+    -- The graph can enrich a provider snapshot that has only published its
+    -- active theme so far. Debug is optional in isolated component hosts, so
+    -- read it behind pcall rather than turning Appearance into a hard debug
+    -- dependency.
+    local graph = {}
+    local graph_ok, graph_value = pcall(function()
+        return debug_service and debug_service.module_graph or {}
+    end)
+    if graph_ok and type(graph_value) == "table" then
+        graph = graph_value
+    end
+    for _, entry in ipairs(graph) do
+        if entry.enabled ~= false then
+            local provided = (entry.provides or {}).themes
+            if type(provided) == "table" then
+                for _, candidate in ipairs(provided) do
+                    add_theme(candidate)
                 end
             end
         end
@@ -231,6 +288,57 @@ local function sync_locale(locale)
     slovak_check_hidden = not slovak
 end
 
+local function sync_system_resources()
+    local resources = theme and theme.system_resources or {}
+    icon_theme_value = tostring(resources.active_icon_theme or "hicolor")
+    font_value = tostring(resources.active_font_family or "system-ui")
+
+    local icons = {}
+    icon_more_hidden = true
+    for index, candidate in ipairs(resources.icon_themes or {}) do
+        if index <= icon_limit then
+            local id = tostring(candidate.id or "")
+            local inherits = candidate.inherits or {}
+            icons[index] = {
+                id = id,
+                name = tostring(candidate.name or id),
+                detail = #inherits > 0
+                    and (id .. " · " .. t('appearance.inherits') .. " " .. table.concat(inherits, ", "))
+                    or id,
+                button_class = id == icon_theme_value
+                    and "resource-option language-option language-option-active"
+                    or "resource-option language-option",
+                check_hidden = id ~= icon_theme_value,
+            }
+        else
+            icon_more_hidden = false
+        end
+    end
+    icon_theme_rows = icons
+
+    local fonts = {}
+    font_more_hidden = true
+    for index, candidate in ipairs(resources.font_families or {}) do
+        if index <= font_limit then
+            local name = tostring(candidate.name or "")
+            local face_count = tonumber(candidate.face_count or 0) or 0
+            local kind = candidate.monospace and t('appearance.font.monospace') or t('appearance.font.proportional')
+            fonts[index] = {
+                name = name,
+                detail = kind .. " · " .. tostring(face_count) .. " " .. t('appearance.font.faces'),
+                preview_style = "font-family: '" .. string.gsub(name, "'", "\\'") .. "'",
+                button_class = name == font_value
+                    and "resource-option language-option language-option-active"
+                    or "resource-option language-option",
+                check_hidden = name ~= font_value,
+            }
+        else
+            font_more_hidden = false
+        end
+    end
+    font_rows = fonts
+end
+
 function render()
     local current_theme = "mesh-default-dark"
     if theme then
@@ -241,6 +349,7 @@ function render()
     end
     sync_theme(current_theme)
     sync_locale(mesh.locale.current() or "en")
+    sync_system_resources()
 end
 
 function onThemeSelect(theme_id)
@@ -255,6 +364,30 @@ end
 -- ID-based handler above.
 function onThemeDark() onThemeSelect("mesh-default-dark") end
 function onThemeLight() onThemeSelect("mesh-default-light") end
+
+function onIconThemeSelect(theme_id)
+    local selected = tostring(theme_id or "")
+    if selected == "" then return end
+    icon_theme_value = selected
+    mesh.events.publish("shell.set-icon-theme", { theme_id = selected })
+end
+
+function onFontSelect(family)
+    local selected = tostring(family or "")
+    if selected == "" then return end
+    font_value = selected
+    mesh.events.publish("shell.set-font-family", { family = selected })
+end
+
+function onShowMoreIcons()
+    icon_limit = icon_limit + RESOURCE_PAGE_SIZE
+    sync_system_resources()
+end
+
+function onShowMoreFonts()
+    font_limit = font_limit + RESOURCE_PAGE_SIZE
+    sync_system_resources()
+end
 
 function onLocaleEnglish()
     sync_locale("en")
@@ -378,6 +511,12 @@ end
     .language-option-active {
         border-color: var(--color-primary);
         background: var(--color-secondary-container);
+    }
+
+    .resource-list {
+        height: auto;
+        max-height: 360px;
+        overflow-y: auto;
     }
 
 </style>

@@ -802,6 +802,8 @@ impl Shell {
             ),
             CoreRequest::SetTheme { theme_id } => self.apply_set_theme(&theme_id),
             CoreRequest::SetLocale { locale } => self.apply_set_locale(&locale),
+            CoreRequest::SetIconTheme { theme_id } => self.apply_set_icon_theme(&theme_id),
+            CoreRequest::SetFontFamily { family } => self.apply_set_font_family(&family),
             CoreRequest::SetProvider {
                 interface,
                 provider_id,
@@ -1668,6 +1670,10 @@ impl Shell {
         visible: bool,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         if !visible {
+            let is_window = self
+                .surfaces
+                .get(&surface_id)
+                .is_some_and(|surface| surface.role == mesh_core_wayland::SurfaceRole::Window);
             if let Some(index) = self
                 .components
                 .iter()
@@ -1691,6 +1697,17 @@ impl Shell {
                     }
                 }
                 self.destroy_all_child_surfaces(index);
+                if is_window {
+                    // A hidden xdg_toplevel is destroyed rather than detached.
+                    // Invalidate the shell-side description of that object at
+                    // the same boundary so the next show must configure and
+                    // fully present a replacement.
+                    self.presentation_engine.destroy_surface(&surface_id);
+                    let target = &mut self.components[index].parent;
+                    target.last_surface_config = None;
+                    target.known_surface_size = None;
+                    target.force_full_present = true;
+                }
             }
             if let Some(previous_mode) = self.transfer_owned_keyboard_modes.remove(&surface_id) {
                 if let Some(surface) = self.surfaces.get_mut(&surface_id) {
@@ -1772,6 +1789,8 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::ServiceCommand { .. } => "service_command",
         CoreRequest::WriteClipboard { .. } => "write_clipboard",
         CoreRequest::SetTheme { .. } => "set_theme",
+        CoreRequest::SetIconTheme { .. } => "set_icon_theme",
+        CoreRequest::SetFontFamily { .. } => "set_font_family",
         CoreRequest::SetLocale { .. } => "set_locale",
         CoreRequest::SetProvider { .. } => "set_provider",
         CoreRequest::SetModuleEnabled { .. } => "set_module_enabled",

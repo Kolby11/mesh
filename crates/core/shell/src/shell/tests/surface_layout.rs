@@ -284,6 +284,41 @@ fn layer_surface_input_region_excludes_the_tooltip_overlay_reserve() {
     );
 }
 
+#[test]
+fn first_dynamic_layer_configure_uses_measured_content_not_one_pixel_fallback() {
+    const CONTENT: (u32, u32) = (1920, 56);
+
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
+        "@test/kde-navigation",
+        CONTENT,
+        (CONTENT.0, 1),
+    )));
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@test/kde-navigation".into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+
+    shell.render_components().unwrap();
+
+    let configured_sizes = shell
+        .presentation_engine
+        .testing_surface_config_history()
+        .iter()
+        .filter(|(id, _)| id == "@test/kde-navigation")
+        .map(|(_, cfg)| (cfg.width, cfg.height))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        configured_sizes,
+        [(CONTENT.0, CONTENT.1 + 200)],
+        "the compositor must never see the transient 1px content + 200px reserve geometry"
+    );
+}
+
 /// The invariant behind the fix, checked over whatever the shell actually
 /// configured rather than over one hand-built case: a surface may only be
 /// inflated if it declares that same inflation as input padding.

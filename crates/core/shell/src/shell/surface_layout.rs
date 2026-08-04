@@ -5,13 +5,15 @@ pub(super) use mesh_core_surface_config::{
 };
 
 use mesh_core_config::ShellSettings;
-use mesh_core_theme::{ThemeEngine, default_theme, load_theme_from_path, theme_path_for_id};
+use mesh_core_theme::{
+    Theme, ThemeEngine, TokenValue, default_theme, load_theme_from_path, theme_path_for_id,
+};
 
 use super::types::ThemeWatchState;
 
 pub(super) fn load_active_theme(settings: &ShellSettings) -> (ThemeEngine, ThemeWatchState) {
     let theme_path = theme_path_for_id(&settings.theme.active);
-    let theme = match load_theme_from_path(&theme_path) {
+    let mut theme = match load_theme_from_path(&theme_path) {
         Ok(theme) => theme,
         Err(err) => {
             tracing::warn!(
@@ -22,6 +24,7 @@ pub(super) fn load_active_theme(settings: &ShellSettings) -> (ThemeEngine, Theme
             default_theme()
         }
     };
+    apply_font_family(&mut theme, settings.fonts.ui_family.as_deref());
     let modified_at = std::fs::metadata(&theme_path)
         .ok()
         .and_then(|metadata| metadata.modified().ok());
@@ -33,4 +36,18 @@ pub(super) fn load_active_theme(settings: &ShellSettings) -> (ThemeEngine, Theme
             modified_at,
         },
     )
+}
+
+pub(super) fn apply_font_family(theme: &mut Theme, family: Option<&str>) {
+    let Some(family) = family.map(str::trim).filter(|family| !family.is_empty()) else {
+        return;
+    };
+    let tokens = theme.tokens_mut();
+    for token in [
+        "typography.family",
+        "typography.family.brand",
+        "typography.family.plain",
+    ] {
+        tokens.insert(token.into(), TokenValue::String(family.into()));
+    }
 }

@@ -1,5 +1,29 @@
 # MESH Performance Log
 
+## 2026-08-04 — bounded Appearance resource materialization
+
+area: settings frontend, component tree size
+
+The Appearance page now materializes installed icon themes and font families
+in 24-row increments. Each list keeps the complete service catalog available
+through a localized **Show more** control, while the initial Settings tree pays
+style, layout, retained-diff, and paint costs only for the first visible-sized
+batch. A regression publishes 240 icon themes and 240 font families and checks
+that the initial tree contains exactly 48 resource option rows.
+
+**Measured.** Release under `nix develop` (rustc/cargo 1.94.0), five samples of
+24 Settings page switches across all six pages after publishing the 240+240
+resource catalog. Eager materialization took 2.738–2.791s (median 2.764s) and
+produced a 2,710-node tree; bounded materialization took 174.038–264.745ms
+(median 177.284ms) and produced a 550-node tree. Median page-switch throughput
+improved 15.59x and the retained tree was 4.93x smaller. The checked
+`settings_appearance_resource_lists_are_bounded` gate pins the 24+24 initial
+row bound.
+
+**Verified.** The bounded-catalog regression and the shipped Settings
+backend/Appearance integration test pass in release. The latter covers theme,
+icon-theme, and font selection requests with the richer service catalog.
+
 ## 2026-08-02 — Frontend catalog compilation reuse
 
 `working tree` · area: frontend catalog

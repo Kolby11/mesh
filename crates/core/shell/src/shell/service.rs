@@ -259,6 +259,20 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
             .map(|locale| CoreRequest::SetLocale {
                 locale: locale.to_string(),
             }),
+        "shell.set-icon-theme" if event.source_module_id == "@mesh/settings" => event
+            .payload
+            .get("theme_id")
+            .and_then(|value| value.as_str())
+            .map(|theme_id| CoreRequest::SetIconTheme {
+                theme_id: theme_id.to_string(),
+            }),
+        "shell.set-font-family" if event.source_module_id == "@mesh/settings" => event
+            .payload
+            .get("family")
+            .and_then(|value| value.as_str())
+            .map(|family| CoreRequest::SetFontFamily {
+                family: family.to_string(),
+            }),
         "shell.set-provider" if event.source_module_id == "@mesh/settings" => {
             let interface = event
                 .payload
@@ -582,6 +596,32 @@ mod tests {
                 && value == &serde_json::json!(false)
                 && unset_module == module_id
                 && unset_prop == prop
+        ));
+    }
+
+    #[test]
+    fn settings_resource_events_map_to_typed_requests() {
+        let requests = script_events_to_requests(vec![
+            PublishedEvent {
+                channel: "shell.set-icon-theme".into(),
+                payload: serde_json::json!({ "theme_id": "Papirus-Dark" }),
+                source_module_id: "@mesh/settings".into(),
+                source_capabilities: Default::default(),
+            },
+            PublishedEvent {
+                channel: "shell.set-font-family".into(),
+                payload: serde_json::json!({ "family": "Noto Sans" }),
+                source_module_id: "@mesh/settings".into(),
+                source_capabilities: Default::default(),
+            },
+        ]);
+
+        assert!(matches!(
+            requests.as_slice(),
+            [
+                CoreRequest::SetIconTheme { theme_id },
+                CoreRequest::SetFontFamily { family },
+            ] if theme_id == "Papirus-Dark" && family == "Noto Sans"
         ));
     }
 

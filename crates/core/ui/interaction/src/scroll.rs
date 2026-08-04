@@ -13,6 +13,36 @@ pub struct ScrollableHit {
     pub max_y: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollbarAxis {
+    Horizontal,
+    Vertical,
+}
+
+/// Logical geometry for a painted scrollbar under the pointer. The renderer
+/// paints a narrow six-pixel bar; hit testing adds a small inward slop so the
+/// thumb remains practical to grab without changing its visual weight.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScrollbarHit {
+    pub node_id: NodeId,
+    pub axis: ScrollbarAxis,
+    pub track_start: f32,
+    pub track_extent: f32,
+    pub thumb_start: f32,
+    pub thumb_extent: f32,
+    pub max_scroll: f32,
+    pub on_thumb: bool,
+}
+
+const SCROLLBAR_INSET: f32 = 4.0;
+const SCROLLBAR_THICKNESS: f32 = 6.0;
+const SCROLLBAR_MIN_THUMB: f32 = 18.0;
+const SCROLLBAR_HIT_SLOP: f32 = 4.0;
+
+pub fn find_scrollbar_at(node: &WidgetNode, x: f32, y: f32) -> Option<ScrollbarHit> {
+    find_scrollbar_at_with_offset(node, x, y, 0.0, 0.0)
+}
+
 pub fn find_scrollable_at_with_limits(node: &WidgetNode, x: f32, y: f32) -> Option<ScrollableHit> {
     find_scrollable_at_with_offset(node, x, y, 0.0, 0.0)
 }
@@ -179,6 +209,154 @@ fn find_scrollable_at_with_offset(
     }
 
     None
+}
+
+fn find_scrollbar_at_with_offset(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<ScrollbarHit> {
+    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
+    let inside_self = layout_contains_with_offset(node, x, y, offset_x, offset_y);
+    if !inside_self && node_clips_children(node) {
+        return None;
+    }
+
+    // Scrollbars paint after their contents, so the container's own bar wins
+    // over a descendant that happens to reach the same edge.
+    if inside_self && let Some(hit) = scrollbar_hit_for_node(node, x, y, offset_x, offset_y) {
+        return Some(hit);
+    }
+
+    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
+    for child in node.children.iter().rev() {
+        if let Some(hit) =
+            find_scrollbar_at_with_offset(child, x, y, child_offset_x, child_offset_y)
+        {
+            return Some(hit);
+        }
+    }
+    None
+}
+
+fn scrollbar_hit_for_node(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<ScrollbarHit> {
+    let scroll = node.resolved_scroll_metrics();
+    let show_vertical = node.computed_style.overflow_y.always_shows_scrollbar()
+        || (node
+            .computed_style
+            .overflow_y
+            .shows_scrollbar_when_overflowing()
+            && scroll.max_y > f32::EPSILON);
+    let show_horizontal = node.computed_style.overflow_x.always_shows_scrollbar()
+        || (node
+            .computed_style
+            .overflow_x
+            .shows_scrollbar_when_overflowing()
+            && scroll.max_x > f32::EPSILON);
+    if !show_vertical && !show_horizontal {
+        return None;
+    }
+
+    let left = node.layout.x + offset_x;
+    let top = node.layout.y + offset_y;
+    let width = node.layout.width.max(1.0);
+    let height = node.layout.height.max(1.0);
+
+    if show_vertical {
+        let track_extent = (height
+            - SCROLLBAR_INSET * 2.0
+            - if show_horizontal {
+                SCROLLBAR_THICKNESS + SCROLLBAR_INSET
+            } else {
+                0.0
+            })
+        .max(SCROLLBAR_THICKNESS);
+        let track_start = top + SCROLLBAR_INSET;
+        let track_cross = left + width - SCROLLBAR_INSET - SCROLLBAR_THICKNESS;
+        if x >= track_cross - SCROLLBAR_HIT_SLOP
+            && x <= track_cross + SCROLLBAR_THICKNESS + SCROLLBAR_HIT_SLOP
+            && y >= track_start
+            && y <= track_start + track_extent
+        {
+            let thumb_extent = scrollbar_thumb_extent(
+                (height / scroll.content_height.max(height)) * track_extent,
+                track_extent,
+            );
+            let thumb_range = (track_extent - thumb_extent).max(0.0);
+            let thumb_start = track_start
+                + if scroll.max_y <= f32::EPSILON {
+                    0.0
+                } else {
+                    (scroll.y / scroll.max_y) * thumb_range
+                };
+            return Some(ScrollbarHit {
+                node_id: node.id,
+                axis: ScrollbarAxis::Vertical,
+                track_start,
+                track_extent,
+                thumb_start,
+                thumb_extent,
+                max_scroll: scroll.max_y,
+                on_thumb: y >= thumb_start && y <= thumb_start + thumb_extent,
+            });
+        }
+    }
+
+    if show_horizontal {
+        let track_extent = (width
+            - SCROLLBAR_INSET * 2.0
+            - if show_vertical {
+                SCROLLBAR_THICKNESS + SCROLLBAR_INSET
+            } else {
+                0.0
+            })
+        .max(SCROLLBAR_THICKNESS);
+        let track_start = left + SCROLLBAR_INSET;
+        let track_cross = top + height - SCROLLBAR_INSET - SCROLLBAR_THICKNESS;
+        if y >= track_cross - SCROLLBAR_HIT_SLOP
+            && y <= track_cross + SCROLLBAR_THICKNESS + SCROLLBAR_HIT_SLOP
+            && x >= track_start
+            && x <= track_start + track_extent
+        {
+            let thumb_extent = scrollbar_thumb_extent(
+                (width / scroll.content_width.max(width)) * track_extent,
+                track_extent,
+            );
+            let thumb_range = (track_extent - thumb_extent).max(0.0);
+            let thumb_start = track_start
+                + if scroll.max_x <= f32::EPSILON {
+                    0.0
+                } else {
+                    (scroll.x / scroll.max_x) * thumb_range
+                };
+            return Some(ScrollbarHit {
+                node_id: node.id,
+                axis: ScrollbarAxis::Horizontal,
+                track_start,
+                track_extent,
+                thumb_start,
+                thumb_extent,
+                max_scroll: scroll.max_x,
+                on_thumb: x >= thumb_start && x <= thumb_start + thumb_extent,
+            });
+        }
+    }
+    None
+}
+
+fn scrollbar_thumb_extent(raw_extent: f32, track_extent: f32) -> f32 {
+    let track_extent = track_extent.max(1.0);
+    raw_extent
+        .round()
+        .clamp(SCROLLBAR_MIN_THUMB.min(track_extent), track_extent)
 }
 
 /// Measure a surface's content size for the compositor.

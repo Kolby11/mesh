@@ -7,9 +7,10 @@ instead of logical icon names, **font-pack modules** instead of icon packs,
 same chain/override/settings idioms. One mental model, two resources. MESH
 ships no fonts; fontconfig is the authority for what is installed.
 
-**Status: target** — the v1 scope is deliberately minimal (§8): font packs
-register files/families with the text renderer at load, roles surface as
-`--font-*` tokens, one settings knob picks the default UI family. Fallback
+**Status: partially shipped** — MESH enumerates every system font through
+fontdb/fontconfig, exposes the catalog to settings, and applies the selected
+exact family live through the shell typography tokens. Font-pack role mapping,
+pack-qualified references, and per-module chains remain target work. Fallback
 chains per script are deferred.
 
 ## 1. Three layers
@@ -98,7 +99,7 @@ Via the settings store ([08](08-settings.md)):
 
 ```json
 {
-  "shell": { "fonts": { "packs": ["@mesh/fonts-default"], "ui_family": "body" } },
+  "shell": { "fonts": { "packs": ["@mesh/fonts-default"], "ui_family": "Inter" } },
   "@mesh/navigation-bar": {
     "fonts": { "use_packs": ["@mesh/fonts-compact"],
                "overrides": { "label": "default/caption" } }
@@ -107,8 +108,9 @@ Via the settings store ([08](08-settings.md)):
 ```
 
 `shell.fonts.packs` prepends to every consumer's chain; `use_packs` replaces
-per module; `overrides` is the per-role user knob. `ui_family` is the single
-v1 "default UI font" setting.
+per module; `overrides` is the per-role user knob. `ui_family` is the shipped
+v1 "default UI font" setting and names an exact installed family; role-based
+values begin once font-pack mapping ships.
 
 ## 6. Resolution order
 

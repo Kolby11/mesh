@@ -74,7 +74,57 @@ impl FrontendSurfaceComponent {
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         match input {
             ComponentInput::PointerButton { x, y, pressed } => {
+                if !pressed && self.active_scrollbar_drag.take().is_some() {
+                    self.invalidate_paint();
+                    return Ok(Vec::new());
+                }
                 if pressed {
+                    if let Some(hit) = find_scrollbar_at(tree, x, y) {
+                        self.scroll_animations.remove(&hit.node_id);
+                        self.scroll_inertia.remove(&hit.node_id);
+                        let pointer = match hit.axis {
+                            ScrollbarAxis::Horizontal => x,
+                            ScrollbarAxis::Vertical => y,
+                        };
+                        if hit.on_thumb {
+                            self.active_scrollbar_drag = Some(ScrollbarDragState {
+                                node_id: hit.node_id,
+                                axis: hit.axis,
+                                grab_offset: pointer - hit.thumb_start,
+                                track_start: hit.track_start,
+                                track_extent: hit.track_extent,
+                                thumb_extent: hit.thumb_extent,
+                                max_scroll: hit.max_scroll,
+                            });
+                        } else {
+                            let thumb_range = (hit.track_extent - hit.thumb_extent).max(0.0);
+                            let ratio = if thumb_range <= f32::EPSILON {
+                                0.0
+                            } else {
+                                ((pointer - hit.track_start - hit.thumb_extent / 2.0) / thumb_range)
+                                    .clamp(0.0, 1.0)
+                            };
+                            let current = self
+                                .scroll_offsets
+                                .get(&hit.node_id)
+                                .copied()
+                                .unwrap_or_default();
+                            let mut target = current;
+                            match hit.axis {
+                                ScrollbarAxis::Horizontal => target.x = ratio * hit.max_scroll,
+                                ScrollbarAxis::Vertical => target.y = ratio * hit.max_scroll,
+                            }
+                            self.apply_scroll_target(
+                                hit.node_id,
+                                current,
+                                target,
+                                &serde_json::json!({ "smooth": true, "duration": 180 }),
+                            );
+                        }
+                        self.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
+                        return Ok(Vec::new());
+                    }
+
                     if let Some(selection_key) = selectable_text_target_key(tree, x, y) {
                         let requests = self.set_focus_target(tree, None, false)?;
                         self.pointer_down_id = None;
@@ -262,6 +312,34 @@ impl FrontendSurfaceComponent {
                 }
             }
             ComponentInput::PointerMove { x, y } => {
+                if let Some(drag) = self.active_scrollbar_drag {
+                    let pointer = match drag.axis {
+                        ScrollbarAxis::Horizontal => x,
+                        ScrollbarAxis::Vertical => y,
+                    };
+                    let thumb_range = (drag.track_extent - drag.thumb_extent).max(0.0);
+                    let ratio = if thumb_range <= f32::EPSILON {
+                        0.0
+                    } else {
+                        ((pointer - drag.grab_offset - drag.track_start) / thumb_range)
+                            .clamp(0.0, 1.0)
+                    };
+                    let mut offset = self
+                        .scroll_offsets
+                        .get(&drag.node_id)
+                        .copied()
+                        .unwrap_or_default();
+                    match drag.axis {
+                        ScrollbarAxis::Horizontal => offset.x = ratio * drag.max_scroll,
+                        ScrollbarAxis::Vertical => offset.y = ratio * drag.max_scroll,
+                    }
+                    self.scroll_offsets.insert(drag.node_id, offset);
+                    self.scroll_animations.remove(&drag.node_id);
+                    self.scroll_inertia.remove(&drag.node_id);
+                    self.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
+                    return Ok(Vec::new());
+                }
+
                 if let Some(slider_key) = self
                     .active_slider_id
                     .and_then(|node_id| find_node_by_id(tree, node_id))
@@ -405,14 +483,27 @@ impl FrontendSurfaceComponent {
                 }
 
                 if let Some(scroll_hit) = find_scrollable_at_with_limits(tree, x, y) {
-                    let current = self.scroll_offsets.entry(scroll_hit.node_id).or_default();
-                    let next_x = (current.x - dx * 28.0).clamp(0.0, scroll_hit.max_x);
-                    let next_y = (current.y - dy * 28.0).clamp(0.0, scroll_hit.max_y);
-                    if (next_x - current.x).abs() > f32::EPSILON
-                        || (next_y - current.y).abs() > f32::EPSILON
-                    {
-                        current.x = next_x;
-                        current.y = next_y;
+                    self.scroll_inertia.remove(&scroll_hit.node_id);
+                    let current = self
+                        .scroll_offsets
+                        .get(&scroll_hit.node_id)
+                        .copied()
+                        .unwrap_or_default();
+                    let base = self
+                        .scroll_animations
+                        .get(&scroll_hit.node_id)
+                        .map(|animation| animation.target)
+                        .unwrap_or(current);
+                    let target = ScrollOffsetState {
+                        x: (base.x - dx * 28.0).clamp(0.0, scroll_hit.max_x),
+                        y: (base.y - dy * 28.0).clamp(0.0, scroll_hit.max_y),
+                    };
+                    if self.apply_scroll_target(
+                        scroll_hit.node_id,
+                        current,
+                        target,
+                        &serde_json::json!({ "smooth": true, "duration": 140 }),
+                    ) {
                         self.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
                     }
                 }
@@ -427,14 +518,77 @@ impl FrontendSurfaceComponent {
                 // A surface that does not opt into `ontwofingerscroll` keeps
                 // the existing continuous-scroll behavior.
                 if let Some(scroll_hit) = find_scrollable_at_with_limits(tree, x, y) {
-                    let current = self.scroll_offsets.entry(scroll_hit.node_id).or_default();
-                    let next_x = (current.x - dx * 28.0).clamp(0.0, scroll_hit.max_x);
-                    let next_y = (current.y - dy * 28.0).clamp(0.0, scroll_hit.max_y);
-                    if (next_x - current.x).abs() > f32::EPSILON
-                        || (next_y - current.y).abs() > f32::EPSILON
-                    {
-                        current.x = next_x;
-                        current.y = next_y;
+                    let now = Instant::now();
+                    self.scroll_animations.remove(&scroll_hit.node_id);
+                    let current = self
+                        .scroll_offsets
+                        .get(&scroll_hit.node_id)
+                        .copied()
+                        .unwrap_or_default();
+                    let next = ScrollOffsetState {
+                        x: (current.x - dx).clamp(0.0, scroll_hit.max_x),
+                        y: (current.y - dy).clamp(0.0, scroll_hit.max_y),
+                    };
+                    let moved = ScrollOffsetState {
+                        x: next.x - current.x,
+                        y: next.y - current.y,
+                    };
+                    if moved.x.abs() > f32::EPSILON || moved.y.abs() > f32::EPSILON {
+                        let previous = self
+                            .scroll_inertia
+                            .get(&scroll_hit.node_id)
+                            .copied()
+                            .filter(|inertia| {
+                                now.saturating_duration_since(inertia.last_input)
+                                    <= Duration::from_millis(80)
+                            });
+                        let sample_seconds = previous
+                            .map(|inertia| {
+                                now.saturating_duration_since(inertia.last_input)
+                                    .as_secs_f32()
+                                    .clamp(0.008, 0.05)
+                            })
+                            .unwrap_or(1.0 / 60.0);
+                        let sample = ScrollOffsetState {
+                            x: (moved.x / sample_seconds).clamp(-5_000.0, 5_000.0),
+                            y: (moved.y / sample_seconds).clamp(-5_000.0, 5_000.0),
+                        };
+                        let blend_axis = |old: f32, new: f32| {
+                            if old * new <= 0.0 {
+                                new
+                            } else {
+                                old * 0.6 + new * 0.4
+                            }
+                        };
+                        let old_velocity =
+                            previous.map(|inertia| inertia.velocity).unwrap_or_default();
+                        self.scroll_offsets.insert(scroll_hit.node_id, next);
+                        self.scroll_inertia.insert(
+                            scroll_hit.node_id,
+                            ScrollInertia {
+                                velocity: ScrollOffsetState {
+                                    x: if moved.x.abs() <= f32::EPSILON {
+                                        0.0
+                                    } else {
+                                        blend_axis(old_velocity.x, sample.x)
+                                    },
+                                    y: if moved.y.abs() <= f32::EPSILON {
+                                        0.0
+                                    } else {
+                                        blend_axis(old_velocity.y, sample.y)
+                                    },
+                                },
+                                samples: previous
+                                    .map(|inertia| inertia.samples.saturating_add(1))
+                                    .unwrap_or(1),
+                                travel: previous.map(|inertia| inertia.travel).unwrap_or(0.0)
+                                    + moved.x.hypot(moved.y),
+                                last_input: now,
+                                last_tick: now,
+                                max_x: scroll_hit.max_x,
+                                max_y: scroll_hit.max_y,
+                            },
+                        );
                         self.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
                     }
                 }

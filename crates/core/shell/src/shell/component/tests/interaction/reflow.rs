@@ -724,6 +724,51 @@ box {
 }
 
 #[test]
+fn theme_change_repaints_scrollbar_colors() {
+    let mut component = test_frontend_component(
+        r#"
+<style>
+scroll {
+  width: 48px;
+  height: 48px;
+  overflow-y: scroll;
+  color: var(--color-primary);
+}
+box {
+  width: 48px;
+  height: 96px;
+  flex-shrink: 0;
+}
+</style>
+<template>
+  <scroll><box /></scroll>
+</template>
+"#,
+    );
+    let dark = themed_primary("test-dark", "#112233");
+    let light = themed_primary("test-light", "#c0ffee");
+    let mut buffer = PixelBuffer::new(64, 64);
+
+    component
+        .paint(&dark, SurfaceExtent::unpadded(64, 64), &mut buffer, 1.0)
+        .unwrap();
+    let dark_scrollbar = buffer_pixel(&buffer, 40, 32);
+
+    component.theme_changed().unwrap();
+    component
+        .paint(&light, SurfaceExtent::unpadded(64, 64), &mut buffer, 1.0)
+        .unwrap();
+    let light_scrollbar = buffer_pixel(&buffer, 40, 32);
+
+    assert_ne!(dark_scrollbar, light_scrollbar);
+    assert_ne!(
+        light_scrollbar,
+        [0x8f, 0x87, 0x9c, 0xff],
+        "scrollbars must use the active theme instead of the former fixed thumb color"
+    );
+}
+
+#[test]
 fn real_navigation_bar_repaints_when_theme_changes() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());

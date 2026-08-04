@@ -1,25 +1,10 @@
 use crate::config::{IconPackKind, IconPackRoot};
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Standard XDG base directories where icon packs may be installed.
 /// User-local entries come first so they win over system packs with the
 /// same id when both are present.
-fn xdg_icon_base_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Some(home) = dirs_home() {
-        dirs.push(home.join(".local/share/icons"));
-        dirs.push(home.join(".icons"));
-    }
-    dirs.push(PathBuf::from("/usr/share/icons"));
-    dirs.push(PathBuf::from("/usr/share/pixmaps"));
-    dirs.into_iter().filter(|p| p.is_dir()).collect()
-}
-
-fn dirs_home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
-}
-
 /// Discover icon packs installed in the standard XDG locations. Returns
 /// every pack found — packs with an explicit `mesh-pack.json` first, then
 /// implicit XDG packs (directories with an `index.theme` but no MESH
@@ -29,7 +14,7 @@ pub fn discover_xdg_packs() -> Vec<IconPackRoot> {
     let mut packs = Vec::new();
     let mut seen_ids = std::collections::HashSet::new();
 
-    for base in xdg_icon_base_dirs() {
+    for base in mesh_core_resources::xdg_icon_base_dirs() {
         let entries = match std::fs::read_dir(&base) {
             Ok(entries) => entries,
             Err(_) => continue,

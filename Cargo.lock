@@ -1757,6 +1757,7 @@ dependencies = [
  "anyhow",
  "dirs",
  "icon",
+ "mesh-core-resources",
  "serde",
  "serde_json",
  "tempfile",
@@ -1847,6 +1848,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mesh-core-resources"
+version = "0.1.0"
+dependencies = [
+ "fontdb 0.23.0",
+ "tempfile",
+]
+
+[[package]]
 name = "mesh-core-runtime"
 version = "0.1.0"
 dependencies = [
@@ -1908,6 +1917,7 @@ dependencies = [
  "mesh-core-module",
  "mesh-core-presentation",
  "mesh-core-render",
+ "mesh-core-resources",
  "mesh-core-scripting",
  "mesh-core-service",
  "mesh-core-surface-config",

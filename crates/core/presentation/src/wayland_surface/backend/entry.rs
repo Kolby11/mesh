@@ -337,7 +337,8 @@ impl SurfaceEntry {
         width: u32,
         height: u32,
         damage: &[DamageRect],
-    ) -> Result<(usize, SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]>), PresentationError> {
+    ) -> Result<Option<(usize, SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]>)>, PresentationError>
+    {
         let width = width.max(1);
         let height = height.max(1);
         let full = full_damage(width, height);
@@ -378,15 +379,17 @@ impl SurfaceEntry {
                 // frame's damage. We must report the region we actually copied
                 // into this buffer, otherwise the compositor may keep showing
                 // stale pixels outside `frame_damage`.
-                return Ok((index, copy_damage));
+                return Ok(Some((index, copy_damage)));
             }
         }
 
         if self.shm_buffers.len() >= SHM_BUFFER_POOL_MAX {
-            return Err(PresentationError::BufferAlloc(format!(
-                "all {SHM_BUFFER_POOL_MAX} SHM buffers are busy for {}x{} surface",
-                width, height
-            )));
+            // The compositor still owns every slot. No allocation failed: this
+            // is ordinary Wayland backpressure (notably for occluded/offscreen
+            // surfaces whose frame callbacks and releases may be throttled).
+            // Let the present boundary return NotReady so the shell retains
+            // this frame's damage and retries after dispatching more events.
+            return Ok(None);
         }
 
         let index = self.shm_buffers.len();
@@ -404,7 +407,7 @@ impl SurfaceEntry {
             pending_damage: SmallVec::new(),
         });
         self.next_shm_buffer = (index + 1) % self.shm_buffers.len();
-        Ok((index, smallvec![full]))
+        Ok(Some((index, smallvec![full])))
     }
 
     pub(super) fn attach_shm_buffer(

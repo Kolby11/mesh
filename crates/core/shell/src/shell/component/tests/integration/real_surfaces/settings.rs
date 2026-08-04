@@ -152,3 +152,150 @@ fn settings_scrollbar_is_conditional_on_overflow() {
         "the settings scrollbar should appear only when its content overflows"
     );
 }
+
+fn count_tree_nodes(node: &WidgetNode) -> usize {
+    1 + node.children.iter().map(count_tree_nodes).sum::<usize>()
+}
+
+fn count_class_token(node: &WidgetNode, token: &str) -> usize {
+    usize::from(
+        node.attributes
+            .get("class")
+            .is_some_and(|classes| classes.split_whitespace().any(|class| class == token)),
+    ) + node
+        .children
+        .iter()
+        .map(|child| count_class_token(child, token))
+        .sum::<usize>()
+}
+
+fn seed_large_settings_resource_catalog(settings: &mut FrontendSurfaceComponent) {
+    let icon_themes = (0..240)
+        .map(|index| {
+            serde_json::json!({
+                "id": format!("icon-theme-{index:03}"),
+                "name": format!("Icon Theme {index:03}"),
+                "inherits": ["hicolor"]
+            })
+        })
+        .collect::<Vec<_>>();
+    let font_families = (0..240)
+        .map(|index| {
+            serde_json::json!({
+                "name": format!("Font Family {index:03}"),
+                "face_count": 4,
+                "monospace": index % 5 == 0
+            })
+        })
+        .collect::<Vec<_>>();
+    settings
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.theme".into(),
+            source_module: "@mesh/core-settings".into(),
+            payload: serde_json::json!({
+                "current": "mesh-default-dark",
+                "theme_id": "mesh-default-dark",
+                "is_dark": true,
+                "themes": [{ "id": "mesh-default-dark", "label": "MESH Dark" }],
+                "available": ["mesh-default-dark"],
+                "system_resources": {
+                    "active_icon_theme": "icon-theme-000",
+                    "active_font_family": "Font Family 000",
+                    "icon_themes": icon_themes,
+                    "font_families": font_families
+                }
+            }),
+        })
+        .unwrap();
+    settings.invalidate_script_state();
+}
+
+#[test]
+fn settings_appearance_resource_lists_are_bounded() {
+    let theme = default_theme();
+    let mut settings =
+        real_frontend_module_component("@mesh/settings", super::super::debug::settings_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
+    seed_large_settings_resource_catalog(&mut settings);
+    settings
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
+        .unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
+    let appearance_tree = settings
+        .last_tree
+        .as_ref()
+        .expect("rendered Appearance tree");
+    assert_eq!(
+        count_class_token(appearance_tree, "resource-option"),
+        48,
+        "Appearance should instantiate only one 24-row window per large resource catalog"
+    );
+}
+
+// cargo test -p mesh-core-shell --release -- settings_active_page_switch_cost --ignored --nocapture
+#[test]
+#[ignore = "release-only real Settings page-switch benchmark"]
+fn settings_active_page_switch_cost() {
+    const SWITCHES: usize = 24;
+    let theme = default_theme();
+    let handlers = [
+        "showWifi",
+        "showAudio",
+        "showBluetooth",
+        "showAppearance",
+        "showDevice",
+        "showAdvanced",
+    ];
+    let mut samples = Vec::new();
+    let mut node_counts = Vec::new();
+
+    for sample in 0..5 {
+        let mut settings = real_frontend_module_component(
+            "@mesh/settings",
+            super::super::debug::settings_catalog(),
+        );
+        let mut buffer = PixelBuffer::new(920, 900);
+        settings
+            .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .unwrap();
+        seed_large_settings_resource_catalog(&mut settings);
+        settings
+            .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .unwrap();
+
+        let started = std::time::Instant::now();
+        for index in 0..SWITCHES {
+            let handler = handlers[(index + sample) % handlers.len()];
+            let namespaced = format!("__mesh_embed__::@mesh/settings::{handler}");
+            settings.call_namespaced_handler(&namespaced, &[]).unwrap();
+            settings
+                .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+                .unwrap();
+            std::hint::black_box(settings.display_list_paint_commands().len());
+        }
+        samples.push(started.elapsed());
+        node_counts.push(count_tree_nodes(
+            settings.last_tree.as_ref().expect("rendered Settings tree"),
+        ));
+    }
+
+    samples.sort_unstable();
+    node_counts.sort_unstable();
+    eprintln!(
+        "Settings {SWITCHES}-page switch samples: {:?}..{:?}, median {:?}; final tree nodes {}..{}",
+        samples[0],
+        samples[samples.len() - 1],
+        samples[samples.len() / 2],
+        node_counts[0],
+        node_counts[node_counts.len() - 1],
+    );
+    eprintln!(
+        "MESH_PERF metric=settings_page_switch_ms value={:.3}",
+        samples[samples.len() / 2].as_secs_f64() * 1000.0
+    );
+}

@@ -248,7 +248,8 @@ impl Shell {
                             || last.role != surface.role
                             || last.window != surface.window
                     });
-                if config_changed && !is_popup {
+                let defer_first_layer_configure = first_layer_configure && rerender_attempts == 0;
+                if config_changed && !is_popup && !defer_first_layer_configure {
                     let cfg = SurfaceConfig {
                         role: surface.role,
                         window: surface.window.clone(),
@@ -305,6 +306,11 @@ impl Shell {
                 // visibly grows on the next open.
                 let defer_popup_create =
                     is_popup && self.components[index].component.needs_content_measure();
+                // Whether each axis below is a size the shell actually has
+                // (compositor configure, declared placement, or a completed
+                // measurement) rather than a placeholder standing in for one.
+                let mut width_known;
+                let mut height_known;
                 if is_popup {
                     // A popup's size must come from the component's own
                     // CSS-measured content size, NOT the presentation surface
@@ -321,6 +327,8 @@ impl Shell {
                     // `render_layout`, which is skipped for promoted popups.)
                     let (measured_w, measured_h) =
                         self.components[index].component.declared_or_measured_size();
+                    width_known = measured_w > 0;
+                    height_known = measured_h > 0;
                     width = measured_w.max(1);
                     height = measured_h.max(1);
                 } else {
@@ -332,22 +340,29 @@ impl Shell {
                     };
                     let (fallback_width, fallback_height) =
                         self.components[index].component.declared_or_measured_size();
-                    width = if inner_requested_width == 0 {
+                    // `None` is "this axis has no size yet", which is not the
+                    // same statement as the 1px stand-in the paint buffer
+                    // needs: it travels on to `paint` through the extent so
+                    // the surface root lays that axis out as `auto` instead of
+                    // collapsing its content into one pixel.
+                    let resolved_width = if inner_requested_width == 0 {
                         dynamic_size
                             .map(|(w, _)| w)
                             .or((fallback_width > 0).then_some(fallback_width))
-                            .unwrap_or(1)
                     } else {
-                        inner_requested_width.max(1)
+                        Some(inner_requested_width)
                     };
-                    height = if inner_requested_height == 0 {
+                    let resolved_height = if inner_requested_height == 0 {
                         dynamic_size
                             .map(|(_, h)| h)
                             .or((fallback_height > 0).then_some(fallback_height))
-                            .unwrap_or(1)
                     } else {
-                        inner_requested_height.max(1)
+                        Some(inner_requested_height)
                     };
+                    width_known = resolved_width.is_some();
+                    height_known = resolved_height.is_some();
+                    width = resolved_width.unwrap_or(1).max(1);
+                    height = resolved_height.unwrap_or(1).max(1);
                 }
                 // A window surface sizes in the opposite direction to a layer
                 // surface: once the compositor has decided a size (tiling
@@ -359,6 +374,8 @@ impl Shell {
                 {
                     width = window_width.max(1);
                     height = window_height.max(1);
+                    width_known = true;
+                    height_known = true;
                 }
                 let resolved_size = (width, height);
                 if self.components[index].parent.known_surface_size != Some(resolved_size) {
@@ -402,8 +419,17 @@ impl Shell {
                 // component-facing notifications and popup config above, and
                 // the component is handed both halves so its own unmeasured
                 // fallback can never pick up the reserve.
+                // An axis the shell could not resolve is handed over as `0`
+                // ("no size yet"), never as the 1px stand-in the buffer below
+                // is allocated with: `paint` lays an unknown axis out as
+                // `auto` and measures the content, rather than pinning the
+                // surface root to one pixel and measuring the collapse.
+                let extent_content = (
+                    if width_known { width } else { 0 },
+                    if height_known { height } else { 0 },
+                );
                 let paint_extent = if is_popup {
-                    SurfaceExtent::unpadded(width, height)
+                    SurfaceExtent::padded(extent_content, (width, height))
                 } else {
                     let (padded_width, padded_height, _) = surface_geometry_with_overlay_reserve(
                         &surface_id,
@@ -414,7 +440,7 @@ impl Shell {
                         width,
                         height,
                     );
-                    SurfaceExtent::padded((width, height), (padded_width, padded_height))
+                    SurfaceExtent::padded(extent_content, (padded_width, padded_height))
                 };
                 (paint_width, paint_height) = paint_extent.padded;
                 let physical_w = ((paint_width as f32 * scale).ceil() as u32).max(1);

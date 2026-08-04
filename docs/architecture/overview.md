@@ -66,6 +66,7 @@ replaceable modules with no hidden privilege.
 | Abstraction | Ownership | Purpose |
 | --- | --- | --- |
 | `ModuleManifest` | `mesh-core-module` | Canonical `module.json` representation |
+| `SystemResourceCatalog` | `mesh-core-resources` | Cached host XDG icon themes and font families |
 | `InstalledModuleGraph` | `mesh-core-module` | Resolved modules, interfaces, providers, and diagnostics |
 | `InterfaceContract` | `mesh-core-service` | Typed service state, methods, events, and shared types |
 | `ScriptContext` | `mesh-core-scripting` | Isolated frontend Luau execution context |
@@ -109,7 +110,7 @@ still target architecture.
 ```text
 crates/
   core/
-    foundation/     cross-cutting contracts and data
+    foundation/     cross-cutting contracts, data, and host resource discovery
     extension/      modules and service interfaces
     ui/             components, elements, interaction, animation
     frontend/       compilation, hosting, rendering

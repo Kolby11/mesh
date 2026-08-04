@@ -16,8 +16,9 @@ pub use hit_test::{
     pointer_hit_test, pointer_press_hit, source_element_tag,
 };
 pub use scroll::{
-    ScrollableHit, annotate_overflow_node, annotate_overflow_tree, find_scrollable_at,
-    find_scrollable_at_with_limits, measure_content_size, scroll_into_view_offsets, scroll_limits,
+    ScrollableHit, ScrollbarAxis, ScrollbarHit, annotate_overflow_node, annotate_overflow_tree,
+    find_scrollable_at, find_scrollable_at_with_limits, find_scrollbar_at, measure_content_size,
+    scroll_into_view_offsets, scroll_limits,
 };
 
 pub type ContentBounds = (f32, f32, f32, f32);

@@ -222,6 +222,16 @@ impl FrontendSurfaceComponent {
                     // wheel handler mutates. Geometry lives in mesh-core-interaction.
                     if let Some(key) = ref_keys.get(&action.target) {
                         let updates = scroll_into_view_offsets(tree, key, &self.scroll_offsets);
+                        let default_options;
+                        let options = if action.options.get("smooth").is_some() {
+                            &action.options
+                        } else {
+                            default_options = serde_json::json!({
+                                "smooth": true,
+                                "duration": 220,
+                            });
+                            &default_options
+                        };
                         let mut moved = false;
                         for (container_key, target) in updates {
                             let current = self
@@ -229,12 +239,8 @@ impl FrontendSurfaceComponent {
                                 .get(&container_key)
                                 .copied()
                                 .unwrap_or_default();
-                            moved |= self.apply_scroll_target(
-                                container_key,
-                                current,
-                                target,
-                                &action.options,
-                            );
+                            moved |=
+                                self.apply_scroll_target(container_key, current, target, options);
                         }
                         if moved {
                             self.invalidate(
@@ -293,7 +299,13 @@ impl FrontendSurfaceComponent {
         if (target.x - current.x).abs() < f32::EPSILON
             && (target.y - current.y).abs() < f32::EPSILON
         {
-            return false;
+            let cancelled_animation = self.scroll_animations.remove(&node_id).is_some();
+            let cancelled_inertia = self.scroll_inertia.remove(&node_id).is_some();
+            let cancelled = cancelled_animation || cancelled_inertia;
+            if cancelled {
+                self.scroll_offsets.insert(node_id, current);
+            }
+            return cancelled;
         }
 
         let smooth = options
@@ -301,6 +313,7 @@ impl FrontendSurfaceComponent {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
         if smooth {
+            self.scroll_inertia.remove(&node_id);
             let duration_ms = options
                 .get("duration")
                 .and_then(serde_json::Value::as_f64)
@@ -318,6 +331,7 @@ impl FrontendSurfaceComponent {
         } else {
             // A snap supersedes any in-flight smooth scroll on the same container.
             self.scroll_animations.remove(&node_id);
+            self.scroll_inertia.remove(&node_id);
             self.scroll_offsets.insert(node_id, target);
         }
         true
@@ -362,6 +376,93 @@ impl FrontendSurfaceComponent {
         // flag schedules the next frame via the cheap restyle path — mirroring
         // how keyframe animations re-arm themselves.
         if !self.scroll_animations.is_empty() {
+            self.invalidate_style_path(ComponentDirtyFlags::VISUAL_REPAINT);
+        }
+    }
+
+    /// Advance touchpad momentum using a frame-rate-independent exponential
+    /// decay. Direct finger input owns the offset while events arrive; after a
+    /// short quiet period the last measured velocity carries the scroll on and
+    /// naturally settles at a boundary.
+    pub(super) fn advance_scroll_inertia(&mut self, now: std::time::Instant) {
+        const START_DELAY: Duration = Duration::from_millis(34);
+        const FRICTION_PER_SECOND: f32 = 6.5;
+        const STOP_VELOCITY: f32 = 12.0;
+
+        if self.scroll_inertia.is_empty() {
+            return;
+        }
+
+        let mut finished = Vec::new();
+        let mut updates = Vec::new();
+        for (node_id, inertia) in &mut self.scroll_inertia {
+            if now.saturating_duration_since(inertia.last_input) < START_DELAY {
+                inertia.last_tick = now;
+                continue;
+            }
+            if inertia.samples < 2 && inertia.travel < 16.0 {
+                finished.push(*node_id);
+                continue;
+            }
+
+            let dt = now
+                .saturating_duration_since(inertia.last_tick)
+                .as_secs_f32()
+                .min(0.05);
+            inertia.last_tick = now;
+            if dt <= f32::EPSILON {
+                continue;
+            }
+
+            let decay = (-FRICTION_PER_SECOND * dt).exp();
+            let average_scale = if FRICTION_PER_SECOND > f32::EPSILON {
+                (1.0 - decay) / FRICTION_PER_SECOND
+            } else {
+                dt
+            };
+            let current = self
+                .scroll_offsets
+                .get(node_id)
+                .copied()
+                .unwrap_or_default();
+            let mut next = ScrollOffsetState {
+                x: (current.x + inertia.velocity.x * average_scale).clamp(0.0, inertia.max_x),
+                y: (current.y + inertia.velocity.y * average_scale).clamp(0.0, inertia.max_y),
+            };
+            inertia.velocity.x *= decay;
+            inertia.velocity.y *= decay;
+
+            if (next.x <= 0.0 && inertia.velocity.x < 0.0)
+                || (next.x >= inertia.max_x && inertia.velocity.x > 0.0)
+            {
+                inertia.velocity.x = 0.0;
+                next.x = next.x.clamp(0.0, inertia.max_x);
+            }
+            if (next.y <= 0.0 && inertia.velocity.y < 0.0)
+                || (next.y >= inertia.max_y && inertia.velocity.y > 0.0)
+            {
+                inertia.velocity.y = 0.0;
+                next.y = next.y.clamp(0.0, inertia.max_y);
+            }
+
+            if (next.x - current.x).abs() > f32::EPSILON
+                || (next.y - current.y).abs() > f32::EPSILON
+            {
+                updates.push((*node_id, next));
+            }
+            if inertia.velocity.x.abs() < STOP_VELOCITY && inertia.velocity.y.abs() < STOP_VELOCITY
+            {
+                finished.push(*node_id);
+            }
+        }
+
+        for (node_id, offset) in updates {
+            self.scroll_offsets.insert(node_id, offset);
+        }
+        for node_id in finished {
+            self.scroll_inertia.remove(&node_id);
+        }
+        if !self.scroll_inertia.is_empty() {
             self.invalidate_style_path(ComponentDirtyFlags::VISUAL_REPAINT);
         }
     }

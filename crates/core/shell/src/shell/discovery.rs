@@ -235,6 +235,7 @@ impl Shell {
                 ("is_dark", "boolean"),
                 ("themes", "object[]"),
                 ("available", "string[]"),
+                ("system_resources", "object"),
             ],
         ));
         interfaces.register_contract(builtin_state_contract(

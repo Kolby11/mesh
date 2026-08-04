@@ -95,6 +95,7 @@ struct TestingBackend {
     popup_supported: bool,
     popup_configs: HashMap<String, PopupConfig>,
     surface_configs: HashMap<String, SurfaceConfig>,
+    surface_config_history: Vec<(String, SurfaceConfig)>,
     destroyed_popups: Vec<String>,
     destroyed_surfaces: Vec<String>,
     dismissed_popups: Vec<String>,
@@ -233,6 +234,9 @@ impl PresentationEngine {
             Backend::WaylandSurface(bridge) => bridge.configure(surface_id, cfg),
             Backend::DevWindow(_) => {}
             Backend::Testing(backend) => {
+                backend
+                    .surface_config_history
+                    .push((surface_id.to_string(), cfg.clone()));
                 backend.surface_configs.insert(surface_id.to_string(), cfg);
             }
         }
@@ -250,6 +254,17 @@ impl PresentationEngine {
                 .map(|(id, cfg)| (id.clone(), cfg.clone()))
                 .collect(),
             _ => Vec::new(),
+        }
+    }
+
+    /// Every surface config in call order. Testing backend only; unlike
+    /// `testing_surface_configs`, this preserves superseded geometry so tests
+    /// can catch transient compositor requests.
+    #[doc(hidden)]
+    pub fn testing_surface_config_history(&self) -> &[(String, SurfaceConfig)] {
+        match &self.backend {
+            Backend::Testing(backend) => &backend.surface_config_history,
+            _ => &[],
         }
     }
 

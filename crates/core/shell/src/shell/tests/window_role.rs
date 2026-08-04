@@ -10,10 +10,11 @@ fn window_close_request_hides_the_surface_and_keeps_the_component() {
     shell.presentation_engine =
         mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
     let state = Arc::new(Mutex::new(FocusRecordingState::default()));
-    shell.register_component(Box::new(FocusRecordingComponent::new(
+    shell.register_component(Box::new(FocusRecordingComponent::rendering_window(
         "@mesh/settings",
         state,
     )));
+    shell.surfaces.get_mut("@mesh/settings").unwrap().role = mesh_core_wayland::SurfaceRole::Window;
 
     let mut emitted = shell
         .apply_request(CoreRequest::ShowSurface {
@@ -21,6 +22,11 @@ fn window_close_request_hides_the_surface_and_keeps_the_component() {
         })
         .unwrap();
     shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+    let initial_configures = shell
+        .presentation_engine
+        .testing_surface_config_history()
+        .len();
     assert!(
         shell
             .core
@@ -48,6 +54,46 @@ fn window_close_request_hides_the_surface_and_keeps_the_component() {
             .iter()
             .any(|runtime| runtime.surface_id == "@mesh/settings"),
         "closing a window must not tear down its component"
+    );
+    assert_eq!(
+        shell.presentation_engine.testing_destroyed_surfaces(),
+        ["@mesh/settings"],
+        "hiding a window must destroy the compositor object"
+    );
+    let runtime = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.surface_id == "@mesh/settings")
+        .expect("settings component after close");
+    assert!(
+        runtime.parent.last_surface_config.is_none(),
+        "the cached config describes the destroyed window and must be invalidated"
+    );
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@mesh/settings".into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+
+    assert!(
+        shell
+            .presentation_engine
+            .testing_surface_config_history()
+            .len()
+            > initial_configures,
+        "re-showing a destroyed window must configure a replacement object"
+    );
+    assert_eq!(
+        shell
+            .presentation_engine
+            .testing_presented_surfaces()
+            .last()
+            .map(String::as_str),
+        Some("@mesh/settings"),
+        "the replacement window must be presented"
     );
 }
 

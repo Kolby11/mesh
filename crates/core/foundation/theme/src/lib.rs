@@ -406,6 +406,10 @@ impl ThemeEngine {
         &self.active
     }
 
+    pub fn active_mut(&mut self) -> &mut Theme {
+        &mut self.active
+    }
+
     pub fn register_theme(&mut self, theme: Theme) {
         self.available.push(theme);
     }

@@ -177,6 +177,7 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
             ("is_dark", "boolean"),
             ("themes", "object[]"),
             ("available", "string[]"),
+            ("system_resources", "object"),
         ]
         .into_iter()
         .map(|(name, field_type)| ContractStateField {
@@ -665,6 +666,7 @@ pub(super) fn real_frontend_module_component(
     let audio_popover_dir = root.join("modules/frontend/audio-popover");
     let language_popover_dir = root.join("modules/frontend/language-popover");
     let theme_selector_dir = root.join("modules/frontend/theme-selector");
+    let quick_settings_dir = root.join("modules/frontend/quick-settings");
     let debug_inspector_dir = root.join("modules/frontend/debug-inspector");
     let settings_dir = root.join("modules/frontend/settings");
 
@@ -680,6 +682,9 @@ pub(super) fn real_frontend_module_component(
             .manifest;
     let theme_selector_manifest = mesh_core_module::manifest::load_manifest(&theme_selector_dir)
         .expect("theme selector manifest")
+        .manifest;
+    let quick_settings_manifest = mesh_core_module::manifest::load_manifest(&quick_settings_dir)
+        .expect("quick settings manifest")
         .manifest;
     let debug_inspector_manifest = mesh_core_module::manifest::load_manifest(&debug_inspector_dir)
         .expect("debug inspector manifest")
@@ -853,6 +858,18 @@ pub(super) fn real_frontend_module_component(
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
     };
+    let quick_settings_compiled = CompiledFrontendModule {
+        manifest: quick_settings_manifest,
+        source_path: quick_settings_dir.join("src/main.mesh"),
+        component: parse_component(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../modules/frontend/quick-settings/src/main.mesh"
+        )))
+        .unwrap(),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
+    };
     let debug_inspector_compiled = CompiledFrontendModule {
         manifest: debug_inspector_manifest,
         source_path: debug_inspector_dir.join("src/main.mesh"),
@@ -948,6 +965,13 @@ pub(super) fn real_frontend_module_component(
                 },
             ),
             (
+                "@mesh/quick-settings".into(),
+                FrontendCatalogEntry {
+                    module_dir: quick_settings_dir.clone(),
+                    compiled: quick_settings_compiled.clone().into(),
+                },
+            ),
+            (
                 "@mesh/debug-inspector".into(),
                 FrontendCatalogEntry {
                     module_dir: debug_inspector_dir.clone(),
@@ -976,6 +1000,7 @@ pub(super) fn real_frontend_module_component(
         ("@mesh/audio-popover", &audio_popover_dir),
         ("@mesh/language-popover", &language_popover_dir),
         ("@mesh/theme-selector", &theme_selector_dir),
+        ("@mesh/quick-settings", &quick_settings_dir),
         ("@mesh/debug-inspector", &debug_inspector_dir),
         ("@mesh/settings", &settings_dir),
     ] {
@@ -1000,6 +1025,8 @@ pub(super) fn real_frontend_module_component(
         (language_popover_compiled, language_popover_dir)
     } else if module_id == "@mesh/theme-selector" {
         (theme_selector_compiled, theme_selector_dir)
+    } else if module_id == "@mesh/quick-settings" {
+        (quick_settings_compiled, quick_settings_dir)
     } else if module_id == "@mesh/debug-inspector" {
         (debug_inspector_compiled, debug_inspector_dir)
     } else if module_id == "@mesh/settings" {

@@ -158,6 +158,42 @@ fn navigation_bar_keeps_layer_width_dynamic_after_css_measurement() {
     );
 }
 
+/// The first frame of a dynamic layer surface has no size at all: the
+/// compositor has not configured it and nothing has been measured. The shell
+/// hands `paint` a 1px stand-in for the buffer and marks the axis unknown in
+/// the extent. If that stand-in reaches layout as a definite surface box, the
+/// bar's 56px root shrinks into it, `render_layout` sends 1px to the
+/// compositor as the bar's height, and it never recovers — a nonzero size
+/// stops being dynamic, so the compositor's size is never consulted again.
+/// Live symptom: a 1920x201 layer surface (1px of content plus the 200px
+/// tooltip reserve) with no visible bar in it.
+#[test]
+fn unmeasured_navigation_bar_measures_its_own_height_not_the_placeholder() {
+    let theme = default_theme();
+    let mut navigation =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    let mut buffer = PixelBuffer::new(1, 201);
+    navigation
+        .paint(
+            &theme,
+            // What `render_components` passes before the first configure:
+            // no content size on either axis, a buffer of the 1px stand-in
+            // plus the tooltip reserve.
+            SurfaceExtent::padded((0, 0), (1, 201)),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+
+    let mut surface = LayoutRecordingSurface::default();
+    navigation.render_layout(&mut surface);
+    let (_, height) = surface.size.expect("navigation layout sets a surface size");
+    assert_eq!(
+        height, 56,
+        "an unmeasured bar must measure its declared 56px root, not collapse into the stand-in"
+    );
+}
+
 #[test]
 fn shipped_audio_popover_content_measured_surface_contains_volume_slider() {
     let theme = default_theme();

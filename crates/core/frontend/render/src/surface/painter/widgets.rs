@@ -11,6 +11,17 @@ fn scrollbar_thumb_extent(raw_extent: f32, track_extent: i32, scale: f32) -> i32
     (raw_extent.round() as i32).clamp(min_extent, track_extent)
 }
 
+/// Scrollbars inherit the scroll element's resolved foreground color, rather
+/// than carrying a second, hard-coded palette in the renderer. This keeps
+/// theme tokens and module CSS authoritative for both the thumb and track.
+fn scrollbar_colors(color: Color) -> (Color, Color) {
+    let with_alpha = |factor: f32| Color {
+        a: ((color.a as f32) * factor).round().clamp(0.0, 255.0) as u8,
+        ..color
+    };
+    (with_alpha(0.20), with_alpha(0.64))
+}
+
 fn push_slider_commands(
     commands: &mut Vec<PainterCommand>,
     is_vertical: bool,
@@ -614,8 +625,10 @@ impl FrontendRenderEngine {
         let inset = (4.0 * scale).round().max(2.0) as i32;
         let thickness = (6.0 * scale).round().max(4.0) as i32;
         let radius = (thickness as f32 / 2.0).max(2.0);
-        let track_color = Color::from_hex("#24202b").unwrap_or(Color::BLACK);
-        let thumb_color = Color::from_hex("#8f879c").unwrap_or(Color::WHITE);
+        let (track_color, thumb_color) = scrollbar_colors(opacity_color(
+            node.computed_style.color,
+            node.computed_style.opacity,
+        ));
 
         if show_vertical {
             let viewport_height = bounds.height.max(1) as f32;
@@ -743,8 +756,7 @@ impl FrontendRenderEngine {
         let inset = (4.0 * scale).round().max(2.0) as i32;
         let thickness = (6.0 * scale).round().max(4.0) as i32;
         let radius = (thickness as f32 / 2.0).max(2.0);
-        let track_color = Color::from_hex("#24202b").unwrap_or(Color::BLACK);
-        let thumb_color = Color::from_hex("#8f879c").unwrap_or(Color::WHITE);
+        let (track_color, thumb_color) = scrollbar_colors(node.style.color);
 
         if show_vertical {
             let viewport_height = bounds.height.max(1) as f32;
@@ -852,5 +864,27 @@ impl FrontendRenderEngine {
                 intersect_clip(clip, bounds),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scrollbar_colors_preserve_the_resolved_theme_color() {
+        let source = Color {
+            r: 0xc0,
+            g: 0xff,
+            b: 0xee,
+            a: 255,
+        };
+        let (track, thumb) = scrollbar_colors(source);
+
+        assert_eq!((track.r, track.g, track.b, track.a), (0xc0, 0xff, 0xee, 51));
+        assert_eq!(
+            (thumb.r, thumb.g, thumb.b, thumb.a),
+            (0xc0, 0xff, 0xee, 163)
+        );
     }
 }

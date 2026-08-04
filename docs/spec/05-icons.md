@@ -146,6 +146,11 @@ normal XDG theme.
 
 **Status: target shape** (via the settings store, [08](08-settings.md)).
 
+The shipped v1 system picker enumerates every visible XDG theme and writes its
+id to `shell.icons.default_pack`; the resolver accepts that id directly without
+requiring a wrapper MESH module. The ordered `packs` shape below remains the
+target for mixing MESH mapping packs with system themes.
+
 ```json
 {
   "shell": {

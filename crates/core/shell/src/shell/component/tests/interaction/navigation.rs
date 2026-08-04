@@ -867,17 +867,15 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
         "the resting settings trigger should carry a tooltip"
     );
 
-    let (left, top, right, bottom) =
-        find_node_bounds_by_key(tree, &settings_key, 0.0, 0.0).expect("settings bounds");
+    let enter_handler =
+        "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onSettingsEnter";
     component
-        .handle_input(
-            &theme,
-            width,
-            height,
-            ComponentInput::PointerMove {
-                x: (left + right) * 0.5,
-                y: (top + bottom) * 0.5,
-            },
+        .call_namespaced_handler(
+            enter_handler,
+            &[serde_json::json!({
+                "current_target": { "position": { "margin_left": 0 } },
+                "trigger": { "type": "pointer" }
+            })],
         )
         .unwrap();
     component
@@ -901,7 +899,11 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
     assert_eq!(
         settings_button.attributes.get("title").map(String::as_str),
         Some(""),
-        "hovering should clear the settings tooltip text"
+        "hovering should clear the settings tooltip text; diagnostics={:?}",
+        component
+            .diagnostics
+            .as_ref()
+            .map(|diagnostics| diagnostics.health())
     );
     assert_eq!(
         settings_button
@@ -911,9 +913,15 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
         Some("true"),
         "hovering should disable the settings tooltip"
     );
-
+    assert_eq!(
+        component.child_surface_requests().len(),
+        1,
+        "hovering the trigger should author one Quick Settings child"
+    );
+    let leave_handler =
+        "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onSettingsLeave";
     component
-        .handle_input(&theme, width, height, ComponentInput::PointerLeave)
+        .call_namespaced_handler(leave_handler, &[])
         .unwrap();
     component
         .paint(
@@ -923,26 +931,30 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
             1.0,
         )
         .unwrap();
-    let tree = component
-        .last_tree
-        .as_ref()
-        .expect("navigation tree after leaving settings");
-    let settings_button =
-        find_node_by_key(tree, &settings_key).expect("settings button after leave");
-    assert!(
-        settings_button
-            .attributes
-            .get("title")
-            .is_some_and(|title| !title.is_empty()),
-        "closing the popup should restore the settings tooltip"
+    assert_eq!(
+        component.child_surface_requests().len(),
+        1,
+        "trigger leave must preserve the Quick Settings child during the bridge"
     );
-    assert_ne!(
-        settings_button
-            .attributes
-            .get("data-tooltip-disabled")
-            .map(String::as_str),
-        Some("true"),
-        "closing the popup should re-enable the settings tooltip"
+    let popup_enter_handler =
+        "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onQuickSettingsEnter";
+    component
+        .call_namespaced_handler(popup_enter_handler, &[])
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(420));
+    component.tick().unwrap();
+    component
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    assert_eq!(
+        component.child_surface_requests().len(),
+        1,
+        "entering Quick Settings must cancel the authored close timer and preserve the child"
     );
 }
 
@@ -1010,9 +1022,25 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
         requests.as_slice(),
         [CoreRequest::ShowSurface { surface_id }] if surface_id == "@mesh/settings"
     ));
-    assert_eq!(
-        component.focused_key.as_deref(),
-        Some(settings_key.as_str())
+    assert_eq!(component.focused_key, None);
+    component
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    assert!(
+        !component
+            .last_tree
+            .as_ref()
+            .and_then(|tree| first_node_with_click_handler(
+                tree,
+                "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onOpenSettings",
+            ))
+            .is_some_and(|button| button.state.active || button.state.focused),
+        "opening Settings must clear the launcher's active and focused state"
     );
 }
 

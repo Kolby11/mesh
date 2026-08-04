@@ -6,14 +6,20 @@
   },
   "schemaVersion": 1,
   "shell": {
+    "fonts": {
+      "ui_family": "FreeSans"
+    },
     "icons": {
-      "default_pack": "@mesh/icons-material-symbols"
+      "default_pack": "Bibata-Original-Amber"
+    },
+    "render": {
+      "blur": {
+        "max_radius": 96,
+        "passes": 2
+      }
     },
     "theme": {
       "active": "gruvbox-dark"
-    },
-    "render": {
-      "blur": { "passes": 2, "max_radius": 96 }
     }
   }
 }

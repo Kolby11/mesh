@@ -37,6 +37,8 @@ pub struct ShellSettings {
     #[serde(default)]
     pub icons: IconSettings,
     #[serde(default)]
+    pub fonts: FontSettings,
+    #[serde(default)]
     pub tooltip: TooltipSettings,
     #[serde(default)]
     pub render: RenderSettings,
@@ -91,6 +93,10 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
         FieldKind::Section(&[FieldSpec::new("default_pack", FieldKind::Str)]),
     ),
     FieldSpec::new(
+        "fonts",
+        FieldKind::Section(&[FieldSpec::new("ui_family", FieldKind::Str)]),
+    ),
+    FieldSpec::new(
         "render",
         FieldKind::Section(&[FieldSpec::new(
             "blur",
@@ -132,6 +138,14 @@ fn tooltip_position_is_valid(value: &str) -> bool {
 pub struct IconSettings {
     #[serde(default)]
     pub default_pack: Option<String>,
+}
+
+/// The system font family used for shell typography. Individual components
+/// can still select another family or a semantic font-pack role explicitly.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct FontSettings {
+    #[serde(default)]
+    pub ui_family: Option<String>,
 }
 
 /// User overrides layered on the frontend manifest, read from the module's own

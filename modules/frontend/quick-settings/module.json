@@ -4,7 +4,7 @@
   "description": "Quick settings panel with volume, brightness, theme and language controls.",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "component",
     "uses": {
       "modules": {
         "@mesh/settings": ">=0.1.0"
@@ -30,12 +30,6 @@
       ]
     },
     "entry": "src/main.mesh",
-    "surface": {
-      "anchor": "top",
-      "layer": "overlay",
-      "keyboard_mode": "on_demand",
-      "visible_on_start": false
-    },
     "accessibility": {
       "role": "dialog"
     }

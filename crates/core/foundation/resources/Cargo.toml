@@ -1,0 +1,11 @@
+[package]
+name = "mesh-core-resources"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fontdb = "0.23"
+
+[dev-dependencies]
+tempfile = "3"

@@ -7,8 +7,50 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
-**The red test baseline is 23 failures down to 8.** Every workspace crate now
-passes except `mesh-core-shell`, which is 627 passed / 8 failed / 125 ignored.
+**Appearance no longer expands every installed icon theme and font into the
+Settings tree at once.** Each resource list materializes 24 rows initially and
+adds another batch through a localized Show more control. A 240-icon-theme plus
+240-font-family release workload reduced the retained tree from 2,710 to 550
+nodes and improved the median 24-tab-switch run from 2.764s to 177.284ms
+(15.59x). Record: [`log/performance-log.md`](log/performance-log.md).
+
+**Scrolling now distinguishes wheels, touchpads, and scrollbar drags.** Wheel
+steps ease over a short target animation; touchpad pixels stay direct under the
+fingers and carry momentum after a flick; scrollbar thumbs capture pointer
+drags and track clicks ease toward their destination. `scroll_into_view()` is
+smooth by default, while explicit instant behavior remains available. Record:
+[`log/2026-08.md`](log/2026-08.md).
+
+**Scrollbar colors now inherit each scroll element's resolved foreground
+color.** The renderer no longer uses a fixed dark palette, so theme changes and
+module CSS recolor both the thumb and track. Record:
+[`log/2026-08.md`](log/2026-08.md).
+
+**System-installed icons and fonts are first-class appearance resources.** The
+shell catalogs the full XDG icon-theme path and fontdb system families once,
+publishes them through `mesh.theme`, and the Appearance page lists and previews
+them. An XDG theme can be selected directly without a MESH wrapper module, and
+font selection rewrites the live shell typography tokens. Font-pack role
+mapping and ordered font chains remain target work. Record:
+[`log/2026-08.md`](log/2026-08.md).
+
+**An axis with no size is not a small size.** The navigation bar rendered as a
+1920x201 layer surface painting nothing (1px of content plus the 200px tooltip
+reserve) on Hyprland and KDE alike. A surface's first frame has no size on
+either axis, and the 1px stand-in the buffer needs was being stamped onto the
+synthetic surface root as a definite box — so a 56px bar laid out 1px tall,
+`render_layout` sent that 1px on as the surface height, and a nonzero height
+stops being dynamic, pinning the bar there for the life of the process.
+`SurfaceExtent.content` now carries `0` for an unresolved axis and the surface
+root is laid out `auto` there. Live: 1920x256 from one configure, bar fully
+painted, no SHM exhaustion. Records: [`log/2026-08.md`](log/2026-08.md),
+[`debug/kde-navigation-shm-buffers.md`](debug/kde-navigation-shm-buffers.md).
+The same run on KDE is still worth doing, since only the fingerprint was
+reproduced here, not the KDE session.
+
+**The red test baseline is 8 failures.** Every workspace crate now
+passes except `mesh-core-shell`, which is 628 passed / 9 failed / 125 ignored —
+the eight below plus the documented parallel-only phase26 raster-cache test.
 Two of the failures were real defects rather than stale expectations:
 
 - **A dragged slider stopped repainting after the first pointer move.** The

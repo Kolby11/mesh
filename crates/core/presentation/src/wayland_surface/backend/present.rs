@@ -99,13 +99,16 @@ impl WaylandSurfaceBackend {
             // skip gate in render.rs), upload the full buffer.
             shm_copy_damage.push(full_damage(physical_w, physical_h));
         }
-        let (buffer_index, copy_damage) = entry.copy_into_shm_buffer(
+        let Some((buffer_index, copy_damage)) = entry.copy_into_shm_buffer(
             pool,
             &buffer.data,
             physical_w,
             physical_h,
             &shm_copy_damage,
-        )?;
+        )?
+        else {
+            return Ok(PresentStatus::NotReady);
+        };
         // Commit the kde_blur region before the wl_surface commit below.
         if entry.blur_region_dirty {
             if !entry.blur_regions.is_empty() {

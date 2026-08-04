@@ -26,6 +26,7 @@ members = [
     "crates/core/runtime/backend",
     "crates/tools/cli",
     "crates/core/foundation/debug",
+    "crates/core/foundation/resources",
     "crates/tools/lsp",
 ]
 
@@ -73,6 +74,7 @@ mesh-core-render = { path = "crates/core/frontend/render" }
 mesh-core-presentation = { path = "crates/core/presentation" }
 mesh-core-backend = { path = "crates/core/runtime/backend" }
 mesh-core-debug = { path = "crates/core/foundation/debug" }
+mesh-core-resources = { path = "crates/core/foundation/resources" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

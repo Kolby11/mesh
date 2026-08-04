@@ -53,7 +53,7 @@ use mesh_core_presentation::{
 };
 use mesh_core_render::{DebugOverlay, PixelBuffer};
 use sounds::{SoundKind, shell_sound_request};
-use surface_layout::{default_surface_visibility, load_active_theme};
+use surface_layout::{apply_font_family, default_surface_visibility, load_active_theme};
 use types::{
     CommandThrottleState, CompiledContractField, ComponentRuntime, ContractValidationCache,
     LatestServiceState, ServiceCommandMsg, ServiceDeliveryIndex, SettingsWatchState,

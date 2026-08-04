@@ -11,11 +11,12 @@ use super::types::{
 };
 use mesh_core_config::SettingsStore;
 use mesh_core_interaction::{
-    collect_focus_traversal, find_click_handler, find_event_handler, find_node_bounds_by_key,
-    find_node_by_key, find_node_path_at, find_node_with_bounds_by_key, find_nodes_by_keys,
-    find_scrollable_at_with_limits, is_input_key, is_slider_key, measure_content_size,
-    next_focus_target, node_is_source, pointer_event_handler_hit, pointer_press_hit,
-    scroll_into_view_offsets, scroll_limits, source_element_tag,
+    ScrollbarAxis, collect_focus_traversal, find_click_handler, find_event_handler,
+    find_node_bounds_by_key, find_node_by_key, find_node_path_at, find_node_with_bounds_by_key,
+    find_nodes_by_keys, find_scrollable_at_with_limits, find_scrollbar_at, is_input_key,
+    is_slider_key, measure_content_size, next_focus_target, node_is_source,
+    pointer_event_handler_hit, pointer_press_hit, scroll_into_view_offsets, scroll_limits,
+    source_element_tag,
 };
 mod animation;
 mod catalog;
@@ -373,6 +374,28 @@ pub(super) struct ScrollAnimation {
     pub(super) target: ScrollOffsetState,
     pub(super) start_time: std::time::Instant,
     pub(super) duration: std::time::Duration,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ScrollbarDragState {
+    pub(super) node_id: NodeId,
+    pub(super) axis: ScrollbarAxis,
+    pub(super) grab_offset: f32,
+    pub(super) track_start: f32,
+    pub(super) track_extent: f32,
+    pub(super) thumb_extent: f32,
+    pub(super) max_scroll: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ScrollInertia {
+    pub(super) velocity: ScrollOffsetState,
+    pub(super) samples: u8,
+    pub(super) travel: f32,
+    pub(super) last_input: Instant,
+    pub(super) last_tick: Instant,
+    pub(super) max_x: f32,
+    pub(super) max_y: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -748,6 +771,11 @@ pub(super) struct FrontendSurfaceComponent {
     /// `scroll_offsets` until it settles, then is dropped. Started by
     /// `refs.x:scroll_to(.., { smooth = true })` / `:scroll_into_view({ smooth })`.
     pub(super) scroll_animations: HashMap<NodeId, ScrollAnimation>,
+    /// Pixel-precise touchpad motion that continues briefly after a finger
+    /// lift, decaying until it settles or reaches a scroll boundary.
+    pub(super) scroll_inertia: HashMap<NodeId, ScrollInertia>,
+    /// Pointer capture for dragging a painted scrollbar thumb.
+    pub(super) active_scrollbar_drag: Option<ScrollbarDragState>,
     // Hover tracking for CSS :hover and tooltip system.
     hovered_key: Option<String>,
     hovered_path: Vec<NodeId>,
@@ -804,6 +832,10 @@ pub(super) struct FrontendSurfaceComponent {
     /// paint captures the new theme into `active_theme`.
     active_theme_stale: Cell<bool>,
     measured_size: Option<(u32, u32)>,
+    /// Per axis: this paint has no size for the surface, only a stand-in, so
+    /// the synthetic surface root is laid out `auto` on that axis and the
+    /// content measures itself. Written by `paint`, read by `finalize_tree`.
+    unmeasured_root_axes: (bool, bool),
     last_surface_size: Option<(u32, u32)>,
     /// The compositor's toplevel states for this surface, projected onto every
     /// node at annotation time so `:fullscreen`, `:maximized`, `:activated`,
@@ -1077,6 +1109,8 @@ impl FrontendSurfaceComponent {
             scroll_offsets: HashMap::new(),
             scheduled_handlers: HashMap::new(),
             scroll_animations: HashMap::new(),
+            scroll_inertia: HashMap::new(),
+            active_scrollbar_drag: None,
             hovered_key: None,
             hovered_path: Vec::new(),
             hovered_event_path: Vec::new(),
@@ -1103,6 +1137,7 @@ impl FrontendSurfaceComponent {
             active_theme: RefCell::new(Arc::new(default_theme())),
             active_theme_stale: Cell::new(true),
             measured_size: None,
+            unmeasured_root_axes: (false, false),
             last_surface_size: None,
             window_states: WindowSurfaceState::default(),
             last_painted_buffer_size: None,

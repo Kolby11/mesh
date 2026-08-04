@@ -417,7 +417,7 @@ fn debug_inspector_modules_view_renders_uses_provides_graph() {
     );
 }
 
-fn settings_catalog() -> InterfaceCatalog {
+pub(in crate::shell) fn settings_catalog() -> InterfaceCatalog {
     let mut catalog = debug_catalog();
     for (interface, base_module) in [
         ("mesh.theme", "@mesh/theme-interface"),
@@ -720,7 +720,21 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
                 ],
                 "available": [
                     "gruvbox-dark"
-                ]
+                ],
+                "system_resources": {
+                    "active_icon_theme": "Papirus-Dark",
+                    "active_font_family": "Noto Sans",
+                    "icon_themes": [{
+                        "id": "Papirus-Dark",
+                        "name": "Papirus Dark",
+                        "inherits": ["Papirus", "hicolor"]
+                    }],
+                    "font_families": [{
+                        "name": "Noto Sans",
+                        "face_count": 4,
+                        "monospace": false
+                    }]
+                }
             }),
         })
         .unwrap();
@@ -902,6 +916,8 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
     assert!(text.iter().any(|line| line == "MESH Default Dark"));
     assert!(text.iter().any(|line| line == "MESH Default Light"));
     assert!(text.iter().any(|line| line == "Gruvbox Dark"));
+    assert!(text.iter().any(|line| line == "Papirus Dark"));
+    assert!(text.iter().any(|line| line == "Noto Sans"));
     first_node_with_attr(
         component
             .last_tree
@@ -993,6 +1009,28 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         [CoreRequest::SetTheme { theme_id }] => assert_eq!(theme_id, "mesh-default-light"),
         other => panic!("expected theme change request, got {other:?}"),
     }
+
+    let requests = component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/settings/local:AppearancePage::onIconThemeSelect",
+            &[serde_json::json!("Papirus-Dark")],
+        )
+        .unwrap();
+    assert!(matches!(
+        requests.as_slice(),
+        [CoreRequest::SetIconTheme { theme_id }] if theme_id == "Papirus-Dark"
+    ));
+
+    let requests = component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/settings/local:AppearancePage::onFontSelect",
+            &[serde_json::json!("Noto Sans")],
+        )
+        .unwrap();
+    assert!(matches!(
+        requests.as_slice(),
+        [CoreRequest::SetFontFamily { family }] if family == "Noto Sans"
+    ));
 
     let requests = component
         .call_namespaced_handler(
