@@ -5,13 +5,6 @@ use mesh_core_component::{
 use std::collections::HashMap;
 use std::path::Path;
 
-pub(crate) fn extract_icon_names_from_mesh_source(content: &str) -> Vec<String> {
-    let Ok(component) = parse_component(content) else {
-        return Vec::new();
-    };
-    extract_icon_names_from_component(&component)
-}
-
 fn extract_icon_names_from_component(component: &ComponentFile) -> Vec<String> {
     let mut names = Vec::new();
     let Some(template) = &component.template else {
@@ -82,13 +75,6 @@ const MESH_SCANNED_CALLEES: [&str; 2] = ["t", "mesh.events.publish"];
 /// Both halves of the file run Luau — the `<script>` chunk and every template
 /// expression (`{t('nav.volume') .. suffix}`) — so both are collected and
 /// handed to the parser together.
-pub(crate) fn extract_mesh_static_calls(content: &str) -> MeshStaticCalls {
-    let Ok(component) = parse_component(content) else {
-        return MeshStaticCalls::default();
-    };
-    extract_mesh_static_calls_from_component(&component)
-}
-
 fn extract_mesh_static_calls_from_component(component: &ComponentFile) -> MeshStaticCalls {
     let mut sources = luau_scan::LuauSources::default();
     if let Some(script) = &component.script {
@@ -111,12 +97,12 @@ fn extract_mesh_static_calls_from_component(component: &ComponentFile) -> MeshSt
 
 #[cfg(test)]
 pub(crate) fn extract_t_keys_from_mesh_source(content: &str) -> Vec<String> {
-    extract_mesh_static_calls(content).t_keys
+    scan_mesh_source(content).static_calls.t_keys
 }
 
 #[cfg(test)]
 pub(crate) fn extract_mesh_event_publish_channels(content: &str) -> Vec<String> {
-    extract_mesh_static_calls(content).publish_channels
+    scan_mesh_source(content).static_calls.publish_channels
 }
 
 /// Interface events a backend `.luau` file emits with a static name. Backend
@@ -255,13 +241,6 @@ pub(crate) fn extract_frontend_interface_event_subscriptions(
     subscriptions.sort();
     subscriptions.dedup();
     subscriptions
-}
-
-pub(crate) fn extract_keybind_subscriptions_from_mesh_source(content: &str) -> Vec<(String, bool)> {
-    let Ok(component) = parse_component(content) else {
-        return Vec::new();
-    };
-    extract_keybind_subscriptions_from_component(&component)
 }
 
 fn extract_keybind_subscriptions_from_component(component: &ComponentFile) -> Vec<(String, bool)> {

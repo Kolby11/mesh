@@ -1,4 +1,4 @@
-//! Language support for MESH `module.json` / `package.json` manifests.
+//! Language support for canonical MESH `module.json` manifests.
 //!
 //! Two manifest flavors share the same `name`/`version`/`mesh` envelope:
 //! per-module manifests ([`ManifestFlavor::Module`]) and the workspace root
@@ -16,10 +16,7 @@ pub use schema::ManifestFlavor;
 
 /// True if `uri` points at a manifest file the LSP should serve as JSON.
 pub fn is_manifest_uri(uri: &Url) -> bool {
-    matches!(
-        uri.path().rsplit('/').next(),
-        Some("module.json") | Some("package.json")
-    )
+    matches!(uri.path().rsplit('/').next(), Some("module.json"))
 }
 
 /// A parsed-on-demand manifest document.
@@ -145,6 +142,20 @@ mod tests {
         let labels = complete_at(r#"{ "|" }"#);
         assert!(labels.contains(&"name".to_string()));
         assert!(labels.contains(&"mesh".to_string()));
+    }
+
+    #[test]
+    fn only_canonical_module_json_is_a_manifest_document() {
+        for name in ["package.json", "mesh.toml"] {
+            let uri = Url::parse(&format!("file:///m/{name}")).unwrap();
+            assert!(
+                !is_manifest_uri(&uri),
+                "{name} must not receive MESH manifest support"
+            );
+        }
+        assert!(is_manifest_uri(
+            &Url::parse("file:///m/module.json").expect("canonical manifest URI")
+        ));
     }
 
     #[test]

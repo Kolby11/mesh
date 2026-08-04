@@ -382,7 +382,6 @@ fn mesh_section() -> Node {
             field("icons", false, scalar("Icon set contents.", "object")),
             field("icon_pack", false, scalar("Icon pack metadata.", "object")),
             field("surface", false, surface_layout_node()),
-            field("surfaceLayout", false, surface_layout_node()),
             field(
                 "accessibility",
                 false,

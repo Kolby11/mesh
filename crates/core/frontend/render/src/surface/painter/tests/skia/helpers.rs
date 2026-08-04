@@ -49,19 +49,21 @@ fn painter_helper_lowering_routes_effect_helpers_through_command_backend() {
     let clip = full_clip(32, 32);
 
     engine.fill_rounded_rect_clipped(&mut buffer, rect, 6.0, Color::WHITE, clip);
-    engine.draw_box_shadow(
+    engine.execute_painter_commands(
         &mut buffer,
-        rect,
-        6.0,
-        BoxShadow {
-            offset_x: 2.0,
-            offset_y: 2.0,
-            blur_radius: 4.0,
-            spread_radius: 1.0,
-            color: Color::BLACK,
-            inset: false,
-        },
-        clip,
+        &[PainterCommand::DrawShadow {
+            rect,
+            radius: 6.0,
+            shadow: BoxShadow {
+                offset_x: 2.0,
+                offset_y: 2.0,
+                blur_radius: 4.0,
+                spread_radius: 1.0,
+                color: Color::BLACK,
+                inset: false,
+            },
+            clip,
+        }],
     );
 
     let commands = recorded.recorded_commands();

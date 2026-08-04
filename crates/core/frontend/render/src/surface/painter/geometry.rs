@@ -48,15 +48,3 @@ pub(super) fn opacity_color(color: Color, opacity: f32) -> Color {
         ..color
     }
 }
-
-pub(super) fn node_attr_f32(node: &WidgetNode, key: &str) -> f32 {
-    node.attributes
-        .get(key)
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0)
-}
-
-pub(super) fn node_clips_children(node: &WidgetNode) -> bool {
-    node.computed_style.overflow_x != Overflow::Visible
-        || node.computed_style.overflow_y != Overflow::Visible
-}

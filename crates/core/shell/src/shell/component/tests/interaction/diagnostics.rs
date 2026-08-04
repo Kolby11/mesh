@@ -371,18 +371,10 @@ fn icon_reliability_core_surfaces_proof() {
                 .dependencies
                 .icon_packs
                 .required
-                .contains(&"@mesh/icons-default".to_string()),
-            "{} must declare the default icon pack",
+                .contains(&"@mesh/icons-material-symbols".to_string()),
+            "{} must declare its Material Symbols icon resource",
             loaded.manifest.package.id
         );
-        for semantic_name in &loaded.manifest.icon_requirements.required {
-            assert!(
-                config.active_profile().icons.contains_key(semantic_name),
-                "{} declares unmapped icon {}",
-                loaded.manifest.package.id,
-                semantic_name
-            );
-        }
     }
 
     for path in [

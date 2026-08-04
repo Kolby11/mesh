@@ -19,11 +19,10 @@ pub struct ModuleManifest {
 
 impl ModuleManifest {
     pub fn from_json_str(input: &str) -> Result<Self, ModuleManifestError> {
-        let mut parsed: Self =
-            serde_json::from_str(input).map_err(|source| ModuleManifestError::Json {
-                path: PathBuf::from("<inline>"),
-                source,
-            })?;
+        let path = PathBuf::from("<inline>");
+        reject_legacy_surface_layout(input, &path)?;
+        let mut parsed: Self = serde_json::from_str(input)
+            .map_err(|source| ModuleManifestError::Json { path, source })?;
         parsed.normalize();
         parsed.validate()?;
         Ok(parsed)
@@ -34,6 +33,7 @@ impl ModuleManifest {
             path: path.to_path_buf(),
             source,
         })?;
+        reject_legacy_surface_layout(&content, path)?;
         let mut parsed: Self =
             serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
                 path: path.to_path_buf(),
@@ -230,12 +230,43 @@ pub struct MeshModuleSection {
     /// `surface_layout`, the single typed runtime home.
     #[serde(default)]
     pub surface: Option<manifest::SurfaceLayoutSection>,
-    /// Legacy non-user renderer hints. Superseded by `surface`; kept so older
-    /// manifests still parse. When `surface` is present it wins.
-    #[serde(default, rename = "surfaceLayout", alias = "surface_layout")]
+    /// Internal normalized representation of `mesh.surface`. This must never
+    /// deserialize directly: `mesh.surfaceLayout` was a legacy compatibility
+    /// input and receives a migration diagnostic before manifest parsing.
+    #[serde(skip_deserializing)]
     pub surface_layout: Option<manifest::SurfaceLayoutSection>,
     #[serde(default)]
     pub experimental: serde_json::Value,
+}
+
+fn reject_legacy_surface_layout(input: &str, path: &Path) -> Result<(), ModuleManifestError> {
+    let document: serde_json::Value =
+        serde_json::from_str(input).map_err(|source| ModuleManifestError::Json {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let Some(mesh) = document.get("mesh").and_then(serde_json::Value::as_object) else {
+        return Ok(());
+    };
+    let Some(field) = ["surfaceLayout", "surface_layout"]
+        .into_iter()
+        .find(|field| mesh.contains_key(*field))
+    else {
+        return Ok(());
+    };
+    let module_id = document
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    Err(ModuleManifestError::Diagnostic {
+        diagnostic: ModuleManifestDiagnostic::error(
+            path,
+            module_id,
+            Some(format!("mesh.{field}")),
+            format!("mesh.{field} is a legacy surface declaration and is not supported"),
+            "replace mesh.surfaceLayout with mesh.surface",
+        ),
+    })
 }
 
 impl MeshModuleSection {

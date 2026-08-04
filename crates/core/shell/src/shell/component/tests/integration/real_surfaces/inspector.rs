@@ -136,7 +136,7 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
     for label in [
         "Hover",
         "Surface open/close",
-        "Pointer-driven update",
+        "Pointer move",
         "Keyboard traversal",
         "Backend-driven update",
     ] {

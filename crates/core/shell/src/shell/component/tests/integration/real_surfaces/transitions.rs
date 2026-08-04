@@ -5,6 +5,7 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
     let theme = default_theme();
     let mut theme_selector =
         real_frontend_module_component("@mesh/theme-selector", audio_network_catalog());
+    theme_selector.popup_promoted = true;
     theme_selector.visible = true;
     theme_selector.set_surface_exiting(false);
 
@@ -104,6 +105,7 @@ fn set_closing_child_keys_scopes_exit_transition_to_popover_subtree_only() {
     let theme = default_theme();
     let mut theme_selector =
         real_frontend_module_component("@mesh/theme-selector", audio_network_catalog());
+    theme_selector.popup_promoted = true;
     theme_selector.visible = true;
     theme_selector.set_surface_exiting(false);
 
@@ -217,6 +219,7 @@ fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
     let theme = default_theme();
     let mut theme_selector =
         real_frontend_module_component("@mesh/theme-selector", audio_network_catalog());
+    theme_selector.popup_promoted = true;
     theme_selector.visible = true;
     theme_selector.set_surface_exiting(false);
 

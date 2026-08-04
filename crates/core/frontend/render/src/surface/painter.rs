@@ -27,7 +27,7 @@ use mesh_core_elements::tree::WidgetNode;
 use mesh_core_elements::{BoxShadow, VisualFilter};
 
 pub(crate) use geometry::ClipRect;
-use geometry::{clip_to_tuple, dim_color, intersect_clip, node_attr_f32, opacity_color};
+use geometry::{clip_to_tuple, dim_color, intersect_clip, opacity_color};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PainterBackendSnapshot {
@@ -80,44 +80,6 @@ impl TooltipPaintColors {
             a: 0xff,
         },
     };
-}
-
-/// Where a tooltip should appear relative to the hovered element.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TooltipAnchor {
-    /// Centered below the element (default)
-    #[default]
-    BottomCenter,
-    /// Centered above the element
-    TopCenter,
-    /// Centered to the left of the element
-    LeftCenter,
-    /// Centered to the right of the element
-    RightCenter,
-    /// Offset from cursor (legacy behavior: cursor + (14, 18))
-    CursorBottomRight,
-    /// Follows the cursor as it moves within the element
-    CursorFollow,
-}
-
-/// Pre-computed positioning, sizing, and animation state for a tooltip frame.
-#[derive(Debug, Clone)]
-pub struct TooltipRenderState {
-    pub text: String,
-    pub anchor: TooltipAnchor,
-    /// Bounding box of the hovered element in surface coordinates: (left, top, right, bottom).
-    pub element_bounds: Option<(f32, f32, f32, f32)>,
-    /// Cursor position in surface coordinates.
-    pub cursor_x: f32,
-    pub cursor_y: f32,
-    /// Final pixel position of the tooltip top-left corner after positioning and flipping.
-    pub paint_x: i32,
-    pub paint_y: i32,
-    /// Measured width and height of the tooltip box in pixels.
-    pub box_w: i32,
-    pub box_h: i32,
-    /// Opacity for fade-in animation (0.0 = invisible, 1.0 = fully opaque).
-    pub opacity: f32,
 }
 
 pub struct FrontendRenderEngine {
@@ -302,26 +264,6 @@ impl FrontendRenderEngine {
         }
     }
 
-    /// Composites an already-rasterized subtree buffer back onto `buffer`,
-    /// blurred at the engine's configured quality.
-    pub(super) fn composite_blurred_buffer(
-        &self,
-        buffer: &mut PixelBuffer,
-        source: &PixelBuffer,
-        at: (i32, i32),
-        filter: VisualFilter,
-        clip: ClipRect,
-    ) {
-        self.paint_backend.composite_blurred_buffer(
-            buffer,
-            source,
-            at,
-            filter,
-            self.blur_quality.get(),
-            clip,
-        );
-    }
-
     /// Close any layers the command stream left open, so a clipped or
     /// truncated replay cannot leak an open `save_layer` into the next pass.
     pub(super) fn close_painter_layers(&self, session: &mut PixelCanvasSession<'_>) {
@@ -426,156 +368,6 @@ impl FrontendRenderEngine {
                 clip,
             }],
         );
-    }
-
-    pub(super) fn stroke_rounded_rect_clipped(
-        &self,
-        buffer: &mut PixelBuffer,
-        rect: ClipRect,
-        radius: f32,
-        stroke_width: i32,
-        color: Color,
-        clip: ClipRect,
-    ) -> bool {
-        let before = self.painter_diagnostics().len();
-        self.execute_painter_commands(
-            buffer,
-            &[PainterCommand::DrawRoundedRect {
-                rect,
-                radius,
-                paint: PainterPaint::stroke(color, stroke_width as f32),
-                clip,
-            }],
-        );
-        self.painter_diagnostics().len() == before
-    }
-
-    pub(super) fn draw_box_shadow(
-        &self,
-        buffer: &mut PixelBuffer,
-        rect: ClipRect,
-        radius: f32,
-        shadow: BoxShadow,
-        clip: ClipRect,
-    ) {
-        if shadow.is_none() || shadow.inset {
-            return;
-        }
-        self.execute_painter_commands(
-            buffer,
-            &[PainterCommand::DrawShadow {
-                rect,
-                radius,
-                shadow,
-                clip,
-            }],
-        );
-    }
-
-    pub(super) fn draw_background_paint(
-        &self,
-        buffer: &mut PixelBuffer,
-        paint: &BackgroundPaint,
-        rect: ClipRect,
-        radius: f32,
-        clip: ClipRect,
-    ) {
-        let command = match paint {
-            BackgroundPaint::None => return,
-            BackgroundPaint::Image(source) => PainterCommand::DrawImage {
-                image: PainterImage {
-                    source: PainterImageSource::Path(source.path.clone()),
-                },
-                rect,
-                paint: PainterPaint::fill(Color::WHITE),
-                clip,
-            },
-            BackgroundPaint::LinearGradient(gradient) => PainterCommand::DrawLinearGradient {
-                gradient: PainterLinearGradient {
-                    from: gradient.from,
-                    to: gradient.to,
-                },
-                rect,
-                radius,
-                clip,
-            },
-        };
-        self.execute_painter_commands(buffer, &[command]);
-    }
-
-    pub(super) fn stroke_rounded_rect_clipped_in_session(
-        &self,
-        session: &mut PixelCanvasSession<'_>,
-        rect: ClipRect,
-        radius: f32,
-        stroke_width: i32,
-        color: Color,
-        clip: ClipRect,
-    ) -> bool {
-        let before = self.painter_diagnostics().len();
-        self.execute_painter_commands_in_session(
-            session,
-            &[PainterCommand::DrawRoundedRect {
-                rect,
-                radius,
-                paint: PainterPaint::stroke(color, stroke_width as f32),
-                clip,
-            }],
-        );
-        self.painter_diagnostics().len() == before
-    }
-
-    pub(super) fn draw_box_shadow_in_session(
-        &self,
-        session: &mut PixelCanvasSession<'_>,
-        rect: ClipRect,
-        radius: f32,
-        shadow: BoxShadow,
-        clip: ClipRect,
-    ) {
-        if shadow.is_none() || shadow.inset {
-            return;
-        }
-        self.execute_painter_commands_in_session(
-            session,
-            &[PainterCommand::DrawShadow {
-                rect,
-                radius,
-                shadow,
-                clip,
-            }],
-        );
-    }
-
-    pub(super) fn draw_background_paint_in_session(
-        &self,
-        session: &mut PixelCanvasSession<'_>,
-        paint: &BackgroundPaint,
-        rect: ClipRect,
-        radius: f32,
-        clip: ClipRect,
-    ) {
-        let command = match paint {
-            BackgroundPaint::None => return,
-            BackgroundPaint::Image(source) => PainterCommand::DrawImage {
-                image: PainterImage {
-                    source: PainterImageSource::Path(source.path.clone()),
-                },
-                rect,
-                paint: PainterPaint::fill(Color::WHITE),
-                clip,
-            },
-            BackgroundPaint::LinearGradient(gradient) => PainterCommand::DrawLinearGradient {
-                gradient: PainterLinearGradient {
-                    from: gradient.from,
-                    to: gradient.to,
-                },
-                rect,
-                radius,
-                clip,
-            },
-        };
-        self.execute_painter_commands_in_session(session, &[command]);
     }
 
     pub fn reset_text_cache_metrics(&self) {

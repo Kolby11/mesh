@@ -358,11 +358,20 @@ end
         Some("73.00")
     );
     assert!(node_by_mesh_key(narrow_tree, "root/0/2").state.checked);
+    let retained_scroll = component
+        .scroll_offsets
+        .get(&runtime_node_id_for_key("root/0/3"))
+        .expect("scroll offset must survive a container-size restyle");
+    assert!(
+        retained_scroll.y > 0.0,
+        "a resized viewport may clamp the offset, but must not reset it"
+    );
     assert_eq!(
         node_by_mesh_key(narrow_tree, "root/0/3")
             .resolved_scroll_metrics()
             .y,
-        14.0
+        retained_scroll.y,
+        "the restyled scroll node must expose the retained, clamped offset"
     );
 }
 
@@ -870,6 +879,8 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
     .expect("rendered theme button");
     let button_sample_x = (theme_button.layout.x + 6.0).round() as u32;
     let button_sample_y = (theme_button.layout.y + 6.0).round() as u32;
+    let button_center_x = theme_button.layout.x + theme_button.layout.width * 0.5;
+    let button_center_y = theme_button.layout.y + theme_button.layout.height * 0.5;
 
     component
         .handle_input(
@@ -877,8 +888,20 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
             width,
             height,
             ComponentInput::PointerMove {
-                x: theme_button.layout.x + theme_button.layout.width * 0.5,
-                y: theme_button.layout.y + theme_button.layout.height * 0.5,
+                x: button_center_x,
+                y: button_center_y,
+            },
+        )
+        .unwrap();
+    component
+        .handle_input(
+            &light,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x: button_center_x,
+                y: button_center_y,
+                pressed: true,
             },
         )
         .unwrap();
@@ -892,7 +915,7 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         .unwrap();
     assert!(
         !component.transitions.is_empty(),
-        "hovering the theme button should leave transition state to invalidate"
+        "pressing the theme button should leave transition state to invalidate"
     );
 
     component.theme_changed().unwrap();
@@ -916,17 +939,17 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         )
         .unwrap();
 
-    // The shipped nav-shell background is now translucent (rgba(10,10,14,0.75)),
+    // The shipped nav-shell background is translucent (rgba(10,10,14,0.36)),
     // so the immediate dark repaint resolves to this value rather than the old
     // opaque surface color. The point is that it repaints dark (not stale light).
     assert_eq!(
         buffer_pixel(&buffer, 8, 8),
-        [14, 10, 10, 191],
+        [5, 4, 4, 92],
         "already-painted navigation shell should repaint to dark surface immediately"
     );
     assert_eq!(
         buffer_pixel(&buffer, button_sample_x, button_sample_y),
-        [0x58, 0x44, 0x4a, 0xff],
-        "theme button hover state should repaint with the dark hover palette, not stale light colors"
+        [0xa4, 0x50, 0x67, 0xff],
+        "theme button active state should repaint with the dark palette, not stale light colors"
     );
 }

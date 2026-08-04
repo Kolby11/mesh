@@ -18,7 +18,7 @@ fn graph_diagnostics_report_frontend_surface_contract_gaps() {
     assert!(graph.diagnostics().iter().any(|diagnostic| {
         diagnostic.module_id == "@mesh/surface"
             && diagnostic.status == "missing_frontend_surface_layout"
-            && diagnostic.message.contains("mesh.surfaceLayout")
+            && diagnostic.message.contains("mesh.surface")
     }));
     assert!(graph.diagnostics().iter().any(|diagnostic| {
         diagnostic.module_id == "@mesh/surface"

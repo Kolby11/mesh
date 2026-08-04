@@ -140,6 +140,7 @@ fn compact_surface_block_normalizes_into_surface_layout() {
     }
   }
 }
+
 "#;
     let manifest = ModuleManifest::from_json_str(content).unwrap();
     // The compact `mesh.surface` block is moved into the single typed
@@ -155,6 +156,34 @@ fn compact_surface_block_normalizes_into_surface_layout() {
     assert_eq!(surface.exclusive_zone, Some(48));
     assert_eq!(surface.keyboard_mode.as_deref(), Some("on_demand"));
     assert_eq!(surface.visible_on_start, Some(true));
+}
+
+#[test]
+fn module_manifest_rejects_legacy_surface_layout_with_migration_diagnostic() {
+    let content = r#"
+{
+  "name": "@mesh/panel",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "surfaceLayout": { "anchor": "top" }
+  }
+}
+"#;
+
+    let err = ModuleManifest::from_json_str(content).unwrap_err();
+    let ModuleManifestError::Diagnostic { diagnostic } = err else {
+        panic!("legacy surface layout should emit a migration diagnostic");
+    };
+    assert_eq!(diagnostic.severity, ModuleManifestDiagnosticSeverity::Error);
+    assert_eq!(diagnostic.module_id.as_deref(), Some("@mesh/panel"));
+    assert_eq!(diagnostic.field_path.as_deref(), Some("mesh.surfaceLayout"));
+    assert!(diagnostic.message.contains("legacy surface declaration"));
+    assert_eq!(
+        diagnostic.suggested_action,
+        "replace mesh.surfaceLayout with mesh.surface"
+    );
 }
 
 #[test]

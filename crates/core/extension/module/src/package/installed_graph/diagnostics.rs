@@ -394,7 +394,7 @@ fn diagnose_frontend_surfaces(
                 contribution_id: Some(surface.source.scoped_id.clone()),
                 status: "missing_frontend_surface_layout".into(),
                 message: format!(
-                    "frontend module {} has a main entrypoint but does not declare mesh.surfaceLayout",
+                    "frontend module {} has a main entrypoint but does not declare mesh.surface",
                     surface.module_id
                 ),
             });

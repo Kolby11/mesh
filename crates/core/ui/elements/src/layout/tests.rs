@@ -259,6 +259,23 @@ fn fit_sizing_does_not_double_count_trailing_padding() {
 }
 
 #[test]
+fn fit_content_layout_mode_shrinks_a_cross_axis_surface_root() {
+    let mut root = make_node("column", Dimension::Px(200.0), Dimension::Px(100.0));
+    root.computed_style.direction = FlexDirection::Column;
+
+    let mut panel = make_node("column", Dimension::Fit, Dimension::Fit);
+    panel.computed_style.direction = FlexDirection::Column;
+    panel.computed_style.align_self = AlignSelf::Start;
+    panel.children = vec![make_node("text", Dimension::Px(80.0), Dimension::Px(20.0))].into();
+    root.children = vec![panel].into();
+
+    LayoutEngine::compute(&mut root, 200.0, 100.0);
+
+    assert_eq!(root.children[0].layout.width, 80.0);
+    assert_eq!(root.children[0].layout.height, 20.0);
+}
+
+#[test]
 fn absolute_child_positioned_from_insets() {
     use crate::style::Position;
 

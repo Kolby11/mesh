@@ -121,10 +121,7 @@ fn resolve_local_component_path(doc: &Document, path: &str) -> Option<PathBuf> {
 fn find_module_root(path: &Path) -> Option<PathBuf> {
     let mut current = path.parent()?;
     loop {
-        if current.join("module.json").exists()
-            || current.join("package.json").exists()
-            || current.join("mesh.toml").exists()
-        {
+        if current.join("module.json").exists() {
             return Some(current.to_path_buf());
         }
         current = current.parent()?;

@@ -354,10 +354,7 @@ fn shipped_frontend_translation_keys_are_declared() {
 #[test]
 #[ignore = "release-only graph-scan cost measurement"]
 fn shipped_module_luau_scan_cost() {
-    use crate::package::installed_graph::{
-        extract_icon_names_from_mesh_source, extract_keybind_subscriptions_from_mesh_source,
-        extract_mesh_static_calls, scan_mesh_source,
-    };
+    use crate::package::installed_graph::scan_mesh_source;
     use std::time::Instant;
 
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
@@ -368,17 +365,6 @@ fn shipped_module_luau_scan_cost() {
         .map(|path| fs::read_to_string(path).unwrap())
         .collect();
     let lines: usize = contents.iter().map(|c| c.lines().count()).sum();
-
-    let legacy_started = Instant::now();
-    let mut legacy_found = 0;
-    for content in &contents {
-        let calls = extract_mesh_static_calls(content);
-        legacy_found += extract_icon_names_from_mesh_source(content).len()
-            + calls.t_keys.len()
-            + calls.publish_channels.len()
-            + extract_keybind_subscriptions_from_mesh_source(content).len();
-    }
-    let legacy = legacy_started.elapsed();
 
     use rayon::prelude::*;
     let shared_started = Instant::now();
@@ -394,9 +380,8 @@ fn shipped_module_luau_scan_cost() {
         .sum();
     let shared = shared_started.elapsed();
 
-    assert_eq!(legacy_found, shared_found);
     eprintln!(
-        "scanned {} .mesh files ({lines} lines), {shared_found} static scan facts: legacy triple-parse {legacy:?}, shared parse {shared:?}",
+        "scanned {} .mesh files ({lines} lines), {shared_found} static scan facts: shared parse {shared:?}",
         contents.len()
     );
 }

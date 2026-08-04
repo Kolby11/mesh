@@ -115,10 +115,14 @@ fn threshold_narrow_below_half() {
     let tree1 = component.build_tree(&theme, 100, 100);
     let _ = component.retained_tree.update(&tree1);
 
-    let mut component2 = test_frontend_component(
-        "<template><box><text>x</text><text>b</text><text>c</text><text>d</text><text>e</text></box></template>",
-    );
-    let tree2 = component2.build_tree(&theme, 100, 100);
+    // Model the narrow-script case directly: one existing text node changes
+    // while the retained tree identity and all unrelated node state remain.
+    // Building a second component introduces unrelated runtime differences,
+    // which does not exercise the threshold this test is meant to cover.
+    let mut tree2 = tree1.clone();
+    tree2.children[0].children[0]
+        .attributes
+        .insert("content".into(), "x".into());
 
     let result = component.retained_tree.narrow_script_diff(&tree2);
     assert!(
@@ -126,7 +130,6 @@ fn threshold_narrow_below_half() {
         "diff must succeed (structurally identical trees)"
     );
     let (affected, total) = result.unwrap();
-
     assert!(
         affected.len() >= 1,
         "at least the changed text node should be marked"

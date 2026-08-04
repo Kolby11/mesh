@@ -843,8 +843,8 @@ pub(super) fn parse_dimension(s: &str) -> Dimension {
     let s = s.trim();
     match s {
         "auto" => Dimension::Auto,
-        "content" | "fit-content" | "max-content" | "min-content" => Dimension::Content,
-        "fit" => Dimension::Fit,
+        "content" | "max-content" | "min-content" => Dimension::Content,
+        "fit" | "fit-content" => Dimension::Fit,
         _ if s.ends_with('%') => Dimension::Percent(s.trim_end_matches('%').parse().unwrap_or(0.0)),
         _ => Dimension::Px(parse_px(s)),
     }

@@ -45,13 +45,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
       behind generic providers. Startup sounds and backend profiling use the
       generic contract/runtime path; core-owned service state still branches.
       *(detail: "Module system — remaining open follow-ups")*
-- [ ] Reject `mesh.surfaceLayout`. It is still parsed as a compatibility input
-      for `mesh.surface`, which contradicts the manifest rule that old inputs
-      get migration diagnostics instead. No shipped module uses it.
-- [ ] Stop the LSP treating `package.json` and `mesh.toml` as MESH manifests.
-      `is_manifest_uri` serves `package.json` as a module manifest and
-      `find_module_root` accepts either as a module root, which contradicts the
-      canonical `module.json`-only rule.
 - [ ] **Deferred — unify the four contribution schemas.** Theme, icons, i18n,
       and keybinds under one `contributes` shape, only where they share honest
       structure. Revisit after profiles land. Capability inference and a
@@ -77,9 +70,6 @@ owning the hover bridge, one-open-per-trigger exclusivity, and compositor
 dismiss sync. *(detail: "Embeddable popovers via `<popover>` surface
 promotion")*
 
-- [ ] Fix transient-surface reuse after dismissal: Settings cannot reopen after
-      its window closes, and Quick Settings dismisses while crossing from its
-      trigger into the popup instead of honoring the hover bridge.
 - [ ] Derive `Overflow` child surfaces automatically, beyond explicit
       `<popover>` — if inline UI escapes its parent buffer, the shell should
       derive the surface rather than requiring manifest geometry.
@@ -183,25 +173,8 @@ gate where the win is structural.
       frame against a generous bound (the output, or the parent surface)
       before the `xdg_popup` is created.
 
-### Layout authoring
-
-- [ ] `width: fit-content` silently degrades to `auto`, which the surface
-      root's `align-items: stretch` then stretches — the opposite of what the
-      author asked for. `layout.rs` already records
-      `"content dimension mapped through Taffy measurement"`; either surface it
-      as a module diagnostic or make `fit-content` resolve like `fit`.
-      `@mesh/audio-popover`'s root still uses it and only escapes the collapse
-      because its `min-width`/`max-width` happen to bracket the intended size.
-
 ### Test debt
 
-- [ ] 8 `mesh-core-shell` tests still fail (2026-08-04, down from 20; every
-      other crate is green). Remaining: the theme-selector entering-frame pair
-      and the settings tab switch, the debug inspector and
-      `icon_reliability_core_surfaces_proof`, `container_size_restyle_preserves_runtime_and_local_state`,
-      `real_navigation_bar_repaints_existing_transition_state_when_theme_changes_back_to_dark`,
-      and `threshold_narrow_below_half`. Triage the rest of the batch — the red
-      baseline is what let the input-region regressions keep landing unnoticed.
 - [ ] `phase26_real_surface_baseline_emits_canonical_proof_measurements` passes
       single-threaded and fails under the default parallel run ("hover should
       report icon/image raster cache activity") — it reads a process-wide

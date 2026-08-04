@@ -1,9 +1,8 @@
 use crate::package::installed_graph::extract_backend_emit_event_names;
 use crate::package::installed_graph::extract_frontend_interface_event_subscriptions;
-use crate::package::installed_graph::extract_icon_names_from_mesh_source;
-use crate::package::installed_graph::extract_keybind_subscriptions_from_mesh_source;
 use crate::package::installed_graph::extract_mesh_event_publish_channels;
 use crate::package::installed_graph::extract_t_keys_from_mesh_source;
+use crate::package::installed_graph::scan_mesh_source;
 
 #[test]
 fn extract_icon_names_from_mesh_source_finds_static_names() {
@@ -15,7 +14,7 @@ fn extract_icon_names_from_mesh_source_finds_static_names() {
   </row>
 </template>
 "#;
-    let names = extract_icon_names_from_mesh_source(src);
+    let names = scan_mesh_source(src).icon_names;
     assert!(names.contains(&"audio-volume-high".into()));
     assert!(names.contains(&"battery-full".into()));
 }
@@ -30,7 +29,7 @@ fn extract_icon_names_ignores_dynamic_expressions() {
   </row>
 </template>
 "#;
-    let names = extract_icon_names_from_mesh_source(src);
+    let names = scan_mesh_source(src).icon_names;
     assert!(!names.iter().any(|n| n.contains('{')));
     assert!(names.contains(&"audio-volume-muted".into()));
 }
@@ -50,7 +49,7 @@ fn extract_icon_names_from_mesh_source_walks_control_flow_branches() {
 </template>
 "#;
     assert_eq!(
-        extract_icon_names_from_mesh_source(src),
+        scan_mesh_source(src).icon_names,
         vec![
             "audio-volume-high".to_string(),
             "audio-volume-muted".to_string(),
@@ -163,7 +162,7 @@ fn extract_keybind_subscriptions_from_mesh_source_finds_static_actions() {
   <button keybind="{dynamic_id}" onkeybind={onDynamic}></button>
 </template>
 "#;
-    let subscriptions = extract_keybind_subscriptions_from_mesh_source(src);
+    let subscriptions = scan_mesh_source(src).keybind_subscriptions;
     assert_eq!(
         subscriptions,
         vec![("mute".to_string(), true), ("open".to_string(), false)]
@@ -177,7 +176,7 @@ fn extract_keybind_subscriptions_handles_quoted_angle_brackets_in_tag() {
   <button title="2 < 3" keybind="open" data-note="x > y" onkeybind={onOpen}></button>
 </template>
 "#;
-    let subscriptions = extract_keybind_subscriptions_from_mesh_source(src);
+    let subscriptions = scan_mesh_source(src).keybind_subscriptions;
     assert_eq!(subscriptions, vec![("open".to_string(), true)]);
 }
 
@@ -203,7 +202,7 @@ local ActionButton = require("./action-button.mesh")
 "#;
 
     assert_eq!(
-        extract_keybind_subscriptions_from_mesh_source(src),
+        scan_mesh_source(src).keybind_subscriptions,
         vec![
             ("component".to_string(), true),
             ("mute".to_string(), true),
@@ -221,6 +220,10 @@ fn extract_keybind_subscriptions_ignores_dynamic_and_malformed_sources() {
   <button keybind="invalid.action" onkeybind={onInvalid}></button>
 </template>
 "#;
-    assert!(extract_keybind_subscriptions_from_mesh_source(dynamic).is_empty());
-    assert!(extract_keybind_subscriptions_from_mesh_source("<template><button").is_empty());
+    assert!(scan_mesh_source(dynamic).keybind_subscriptions.is_empty());
+    assert!(
+        scan_mesh_source("<template><button")
+            .keybind_subscriptions
+            .is_empty()
+    );
 }

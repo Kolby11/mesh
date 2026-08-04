@@ -1282,7 +1282,7 @@ fn size_constraints_accept_every_dimension_form() {
         (
             "max-width",
             StyleValue::Literal("fit-content".into()),
-            Dimension::Content,
+            Dimension::Fit,
         ),
     ];
 
@@ -1297,6 +1297,23 @@ fn size_constraints_accept_every_dimension_form() {
         };
         assert_eq!(actual, expected, "{property}: {value:?}");
     }
+}
+
+#[test]
+fn fit_content_uses_the_content_bounds_layout_mode() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let mut style = ComputedStyle::default();
+
+    apply_declaration(
+        &mut style,
+        "width",
+        &StyleValue::Literal("fit-content".into()),
+        &resolver,
+        &HashMap::new(),
+    );
+
+    assert_eq!(style.width, Dimension::Fit);
 }
 
 // cargo test -p mesh-core-elements --release -- animation_keyword_token_resolution_beats_string_clone --ignored --nocapture

@@ -194,7 +194,7 @@ impl LanguageServer for Backend {
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = &params.text_document.uri;
-        // Manifest documents (module.json/package.json) are not `.mesh` files;
+        // Manifest documents (module.json) are not `.mesh` files;
         // leave them to a JSON formatter.
         if manifest::is_manifest_uri(uri) || settings::is_settings_uri(uri) {
             return Ok(None);
