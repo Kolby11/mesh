@@ -55,6 +55,29 @@ impl Shell {
                 self.components[index]
                     .component
                     .surface_window_states_changed(states);
+                // The compositor's configured size has to cross the gate for the
+                // same reason the states do — and it is the more urgent of the
+                // two. During an interactive resize the pointer is grabbed by
+                // the compositor, so a window under the drag receives *no* input
+                // events: a resize configure is the only thing happening, and if
+                // it does not dirty the component nothing re-lays-out until the
+                // drag ends. The compositor meanwhile scales the last committed
+                // buffer to the window box it is dragging, which is what makes
+                // the whole surface — text, borders, background fills — appear
+                // stretched until release. Observing the size here re-measures
+                // and repaints per configure instead, so what the compositor
+                // scales is never more than a frame stale.
+                if let Some((width, height)) =
+                    self.presentation_engine.window_configured_size(&surface_id)
+                {
+                    let resolved_size = (width.max(1), height.max(1));
+                    if self.components[index].parent.known_surface_size != Some(resolved_size) {
+                        self.components[index].parent.known_surface_size = Some(resolved_size);
+                        self.components[index]
+                            .component
+                            .surface_size_changed(resolved_size.0, resolved_size.1);
+                    }
+                }
             }
             if !self.components[index].component.wants_render() {
                 continue;
