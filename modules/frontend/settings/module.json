@@ -36,7 +36,10 @@
         "theme.write",
         "locale.read",
         "locale.write"
-      ]
+      ],
+      "modules": {
+        "@mesh/shell-ui-interface": ">=1.0.0"
+      }
     },
     "i18n": {
       "defaultLocale": "en"
@@ -97,6 +100,12 @@
       "role": "dialog",
       "label": "Settings",
       "description": "Manage connectivity, audio, appearance, device details, modules, and providers"
+    },
+    "hosts": {
+      "mesh.settings.page": {
+        "version": ">=1.0",
+        "layout": "column"
+      }
     }
   }
 }

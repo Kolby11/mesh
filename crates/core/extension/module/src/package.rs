@@ -1,9 +1,12 @@
+mod composition;
 mod error;
 mod installed_graph;
+mod lock;
 mod luau_scan;
 mod module_manifest;
 mod paths;
 mod profile;
+mod resolution;
 mod root;
 mod util;
 
@@ -15,9 +18,12 @@ pub(crate) use util::{
     parse_module_entrypoint, validate_modules_dir, validate_relative_path,
 };
 
+pub use composition::*;
 pub use error::*;
 pub use installed_graph::*;
+pub use lock::*;
 pub use module_manifest::*;
 pub use paths::*;
 pub use profile::*;
+pub use resolution::*;
 pub use root::*;

@@ -30,7 +30,7 @@ mod tests {
         .unwrap();
         let profile = ShellProfile::from_json_str(
             r#"{
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "roots": {},
                 "settings": {
                     "shell": { "theme": { "active": "mesh-default-dark" } },
@@ -103,7 +103,7 @@ mod tests {
         .unwrap();
         let profile = ShellProfile::from_json_str(
             r#"{
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "roots": {
                     "@test/panel#bottom": {
                         "module": "@test/panel",

@@ -28,7 +28,8 @@ fn bind_live_surface(parent_src: &str, child_src: &str) -> FrontendSurfaceCompon
                 compiled: compiled.clone().into(),
             },
         )]),
-        slot_contributions: HashMap::new(),
+        extension_point_contributions: HashMap::new(),
+        extension_point_entries: HashMap::new(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,

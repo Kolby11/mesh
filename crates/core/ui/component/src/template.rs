@@ -257,7 +257,10 @@ pub struct ForNode {
 /// A slot for projected content.
 #[derive(Debug, Clone)]
 pub struct SlotNode {
-    pub name: Option<String>,
+    /// The extension point contract name this slot hosts. Slots are keyed by
+    /// contract, never by module id, so a host can be replaced without
+    /// breaking its contributors.
+    pub extension_point: Option<String>,
 }
 
 /// A reference to a child component.

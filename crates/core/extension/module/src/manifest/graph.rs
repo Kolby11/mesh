@@ -27,17 +27,15 @@ where
     module_ids.sort();
 
     fn adjacency(manifest: &Manifest, known_modules: &HashMap<String, &Manifest>) -> Vec<String> {
+        // Extension-point contributions deliberately contribute no edge: a
+        // contributor targets the point's *contract*, not the hosting module,
+        // so host↔contributor pairs are not cycles and must not be rejected as
+        // such.
         let mut neighbors: Vec<String> = manifest
             .required_module_dependencies()
             .into_iter()
             .filter(|module_id| known_modules.contains_key(module_id))
             .collect();
-        neighbors.extend(
-            manifest
-                .slot_host_dependencies()
-                .into_iter()
-                .filter(|module_id| known_modules.contains_key(module_id)),
-        );
         neighbors.sort();
         neighbors.dedup();
         neighbors

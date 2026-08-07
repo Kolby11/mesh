@@ -780,7 +780,7 @@ fn icons_default_module_parses_as_icon_pack() {
 fn manifest_with_dependencies(
     id: &str,
     dependencies: &[(&str, bool)],
-    slot_contributions: &[&str],
+    extension_point_contributions: &[&str],
 ) -> Manifest {
     Manifest {
         package: ModuleSection {
@@ -815,7 +815,6 @@ fn manifest_with_dependencies(
         capabilities: CapabilitiesSection::default(),
         entrypoints: EntrypointsSection {
             main: Some("src/main.mesh".into()),
-            settings_ui: None,
         },
         accessibility: None,
         keybinds: KeybindsSection::default(),
@@ -827,10 +826,20 @@ fn manifest_with_dependencies(
         interfaces: Vec::new(),
         extensions: Vec::new(),
         exports: ExportsSection::default(),
-        provides_slots: HashMap::new(),
-        slot_contributions: slot_contributions
+        hosted_extension_points: HashMap::new(),
+        extension_point_contributions: extension_point_contributions
             .iter()
-            .map(|slot_id| ((*slot_id).to_string(), vec![SlotContribution::default()]))
+            .map(|point| {
+                (
+                    (*point).to_string(),
+                    vec![ExtensionPointContribution {
+                        id: "contribution".into(),
+                        entry: "src/contribution.mesh".into(),
+                        order: None,
+                        props: serde_json::Map::new(),
+                    }],
+                )
+            })
             .collect(),
         assets: None,
         icons: None,
@@ -862,15 +871,16 @@ fn ignores_optional_dependencies_for_cycle_detection() {
     validate_module_dependency_graph([&a, &b]).unwrap();
 }
 
+/// A host and its contributor are not a dependency cycle.
+///
+/// The contributor targets the point's *contract*, not the hosting module, so
+/// the adapter pattern — a settings host that renders a page contributed by a
+/// module which itself depends on the host's own module — must load. Keying
+/// slots by module id used to make this an unloadable cycle.
 #[test]
-fn detects_cycles_through_slot_hosts() {
+fn host_and_contributor_are_not_a_dependency_cycle() {
     let a = manifest_with_dependencies("@mesh/a", &[("@mesh/b", false)], &[]);
-    let b = manifest_with_dependencies("@mesh/b", &[], &["@mesh/a:main"]);
+    let b = manifest_with_dependencies("@mesh/b", &[], &["mesh.settings.page"]);
 
-    let err = validate_module_dependency_graph([&a, &b]).unwrap_err();
-    match err {
-        DependencyGraphError::Cycle { cycle } => {
-            assert_eq!(cycle, vec!["@mesh/a", "@mesh/b", "@mesh/a"]);
-        }
-    }
+    validate_module_dependency_graph([&a, &b]).unwrap();
 }

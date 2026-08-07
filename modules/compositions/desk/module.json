@@ -1,0 +1,36 @@
+{
+  "name": "@mesh/desk",
+  "version": "1.0.0",
+  "description": "The default MESH desktop composition: a top navigation bar and a settings window, bound to the PipeWire and backlight providers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "composition",
+    "uses": {
+      "modules": {
+        "@mesh/navigation-bar": ">=0.1.0",
+        "@mesh/settings": ">=0.1.0"
+      }
+    },
+    "compose": {
+      "roots": {
+        "@mesh/navigation-bar#default": {
+          "module": "@mesh/navigation-bar",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/settings#default": {
+          "module": "@mesh/settings",
+          "entrypoint": "main",
+          "active": true
+        }
+      },
+      "providers": {
+        "mesh.audio": "@mesh/pipewire-audio",
+        "mesh.brightness": "@mesh/backlight-brightness"
+      },
+      "resources": {
+        "icons": ["@mesh/icons-default"]
+      }
+    }
+  }
+}

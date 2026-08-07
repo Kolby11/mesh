@@ -429,10 +429,10 @@ impl FrontendSurfaceComponent {
         Ok(())
     }
 
-    pub(super) fn ensure_runtime(
+    pub(super) fn ensure_runtime_for_compiled(
         &self,
         instance_key: &str,
-        module_id: &str,
+        compiled: &mesh_core_frontend::CompiledFrontendModule,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<(), ComponentError> {
         {
@@ -443,13 +443,7 @@ impl FrontendSurfaceComponent {
             }
         }
 
-        let Some(entry) = self.frontend_catalog.modules.get(module_id) else {
-            return Err(ComponentError::Failed {
-                component_id: self.id().to_string(),
-                message: format!("missing embedded frontend module '{module_id}'"),
-            });
-        };
-        let mut runtime = self.create_runtime(instance_key, &entry.compiled, props)?;
+        let mut runtime = self.create_runtime(instance_key, compiled, props)?;
         Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
         apply_runtime_props(&mut runtime, props, false);
         self.runtimes.lock().unwrap().insert(
@@ -571,20 +565,42 @@ impl FrontendSurfaceComponent {
             return self.build_error_widget(format!("composition cycle blocked for '{module_id}'"));
         }
 
-        if let Err(err) = self.ensure_runtime(instance_key, module_id, props) {
-            return self.build_error_widget(err.to_string());
-        }
-
         let Some(entry) = self.frontend_catalog.modules.get(module_id) else {
             return self.build_error_widget(format!("missing embedded module '{module_id}'"));
         };
+        self.render_embedded_compiled_instance(
+            instance_key,
+            module_id,
+            &entry.compiled,
+            props,
+            container_width,
+            container_height,
+        )
+    }
+
+    pub(super) fn render_embedded_compiled_instance(
+        &self,
+        instance_key: &str,
+        module_id: &str,
+        compiled: &mesh_core_frontend::CompiledFrontendModule,
+        props: &HashMap<String, serde_json::Value>,
+        container_width: f32,
+        container_height: f32,
+    ) -> WidgetNode {
+        if render_stack_contains_cycle(&self.render_stack.borrow(), module_id) {
+            return self.build_error_widget(format!("composition cycle blocked for '{module_id}'"));
+        }
+
+        if let Err(err) = self.ensure_runtime_for_compiled(instance_key, compiled, props) {
+            return self.build_error_widget(err.to_string());
+        }
 
         let state = self.runtime_state(instance_key).unwrap_or_default();
         let bound = LocaleBoundState::new(&state, &self.locale);
         let active_theme = self.active_theme.borrow().clone();
         self.render_stack.borrow_mut().push(module_id.to_string());
         let measurer = SharedTextMeasurer;
-        let mut tree = entry.compiled.build_tree_with_state(
+        let mut tree = compiled.build_tree_with_state(
             &active_theme,
             container_width.max(0.0).ceil() as u32,
             container_height.max(0.0).ceil() as u32,
@@ -596,7 +612,7 @@ impl FrontendSurfaceComponent {
         );
         super::composition::annotate_source_file(
             &mut tree,
-            &entry.compiled.source_path.display().to_string(),
+            &compiled.source_path.display().to_string(),
         );
         self.render_stack.borrow_mut().pop();
         tree

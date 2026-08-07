@@ -1,6 +1,7 @@
 use super::super::{
     InterfaceRelationship, ModuleKind, ModuleManifest, ModuleManifestDiagnostic,
-    ModuleManifestError, RootModuleGraphManifest, parse_module_entrypoint,
+    ModuleManifestError, ResolutionOutcome, RootModuleGraphManifest, SlotOverride,
+    apply_slot_override, parse_module_entrypoint, resolve_closure,
 };
 use super::*;
 use crate::manifest;
@@ -34,13 +35,34 @@ pub struct InstalledModuleGraph {
     diagnostics: Vec<ModuleGraphDiagnostic>,
     health: Vec<ModuleGraphHealthRecord>,
     contributions: ModuleContributionIndex,
+    resolution: ResolutionOutcome,
+    /// Host↔contribution matching for every declared extension point, keyed by
+    /// `(host module id, point contract name)`.
+    extension_points: HashMap<(String, String), Vec<ResolvedExtensionPointContribution>>,
     layout_entrypoint: Option<ResolvedLayoutEntrypoint>,
+}
+
+/// What the active composition contributes to graph resolution beyond the
+/// module set: how it arranges extension points, and which user overrides it no
+/// longer has a home for.
+#[derive(Debug, Clone, Default)]
+pub struct CompositionContext {
+    pub slots: std::collections::BTreeMap<String, SlotOverride>,
+    pub orphaned_overrides: Vec<String>,
 }
 
 impl InstalledModuleGraph {
     pub fn from_parts(
+        root: RootModuleGraphManifest,
+        modules: Vec<LoadedModuleManifest>,
+    ) -> Result<Self, ModuleManifestError> {
+        Self::from_parts_with_composition(root, modules, CompositionContext::default())
+    }
+
+    pub fn from_parts_with_composition(
         mut root: RootModuleGraphManifest,
         modules: Vec<LoadedModuleManifest>,
+        composition: CompositionContext,
     ) -> Result<Self, ModuleManifestError> {
         root.validate()?;
         let mut loaded_by_id = HashMap::new();
@@ -334,6 +356,64 @@ impl InstalledModuleGraph {
             }
         }
 
+        let (mut extension_points, extension_point_diagnostics) =
+            resolve_extension_points(&contributions);
+        manual_diagnostics.extend(extension_point_diagnostics);
+
+        // The composition has the last word on the UI its members contribute:
+        // it may replace a page, hide one, or fix the order without editing any
+        // member module.
+        for ((_, point), entries) in extension_points.iter_mut() {
+            let Some(over) = composition.slots.get(point.as_str()) else {
+                continue;
+            };
+            apply_slot_override(
+                entries,
+                over,
+                |entry| entry.source_module_id.clone(),
+                |entry, module_id| entry.source_module_id = module_id,
+            );
+        }
+        // A user override with no matching root is retained, never dropped: an
+        // upstream rename must not silently discard the user's work.
+        for instance_id in &composition.orphaned_overrides {
+            manual_diagnostics.push(ModuleGraphDiagnostic {
+                module_id: instance_id
+                    .split('#')
+                    .next()
+                    .unwrap_or(instance_id)
+                    .to_string(),
+                contribution_id: Some(instance_id.clone()),
+                status: "orphaned_profile_override".into(),
+                message: format!(
+                    "profile override for {instance_id} has no matching root in the active composition; it is retained. Clear it with `mesh profile prune`"
+                ),
+            });
+        }
+
+        // Version resolution over the enabled closure. One version per module
+        // id is not a limitation MESH could lift: the id is also the settings
+        // namespace and the surface instance key.
+        let enabled_manifests = graph_modules
+            .values()
+            .filter(|module| module.enabled)
+            .map(|module| &module.manifest)
+            .collect::<Vec<_>>();
+        let enabled_ids = graph_modules
+            .values()
+            .filter(|module| module.enabled)
+            .map(|module| module.id.as_str())
+            .collect::<Vec<_>>();
+        let resolution = resolve_closure(enabled_ids, enabled_manifests);
+        for conflict in &resolution.conflicts {
+            manual_diagnostics.push(ModuleGraphDiagnostic {
+                module_id: conflict.module_id.clone(),
+                contribution_id: Some(format!("{}:version", conflict.module_id)),
+                status: "module_version_conflict".into(),
+                message: conflict.message(),
+            });
+        }
+
         let interface_guidance = build_interface_guidance(&interface_declarations);
         let diagnostics = build_graph_diagnostics(
             &graph_modules,
@@ -366,6 +446,8 @@ impl InstalledModuleGraph {
             diagnostics,
             health,
             contributions,
+            resolution,
+            extension_points,
             layout_entrypoint,
         })
     }
@@ -541,6 +623,51 @@ impl InstalledModuleGraph {
 
     pub fn icon_pack_contributions(&self) -> &[ContributedIconPack] {
         &self.contributions.icon_packs
+    }
+
+    /// Version resolution over the enabled closure: shared versions, conflicts,
+    /// and required modules that are not installed.
+    pub fn resolution(&self) -> &ResolutionOutcome {
+        &self.resolution
+    }
+
+    pub fn declared_extension_points(&self) -> &[DeclaredExtensionPoint] {
+        &self.contributions.extension_points
+    }
+
+    pub fn extension_point_hosts(&self) -> &[ExtensionPointHost] {
+        &self.contributions.extension_point_hosts
+    }
+
+    /// Contributions this host should render at `point`, in render order.
+    pub fn extension_point_contributions(
+        &self,
+        host_module_id: &str,
+        point: &str,
+    ) -> &[ResolvedExtensionPointContribution] {
+        self.extension_points
+            .get(&(host_module_id.to_string(), point.to_string()))
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    /// The entry `module_id` actually renders at `point`, after composition
+    /// overrides. `None` means it contributes nothing there — either it never
+    /// did, or a composition suppressed it.
+    pub fn resolved_contribution_entry(&self, module_id: &str, point: &str) -> Option<&str> {
+        self.extension_points
+            .iter()
+            .filter(|((_, resolved_point), _)| resolved_point == point)
+            .flat_map(|(_, contributions)| contributions.iter())
+            .find(|contribution| contribution.source_module_id == module_id)
+            .map(|contribution| contribution.entry.as_str())
+    }
+
+    /// Every resolved contribution, for catalog compilation and change diffing.
+    pub fn all_extension_point_contributions(
+        &self,
+    ) -> &HashMap<(String, String), Vec<ResolvedExtensionPointContribution>> {
+        &self.extension_points
     }
 
     /// Typed contracts parsed from declared interface contract JSON, keyed by

@@ -38,9 +38,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
       composition, multiple root instances, scoped preferences, and
       transactional live switching are shipped; the replaceable UI still needs
       service contracts instead of privileged file access. See [`spec/01-module-system.md`](spec/01-module-system.md).
-- [ ] Mount optional `settings_ui` entrypoints. Generated global and
-      per-instance prop controls are shipped. See
-      [`spec/08-settings.md`](spec/08-settings.md) §5.
 - [ ] Move the remaining built-in debug and theme/locale service behavior
       behind generic providers. Startup sounds and backend profiling use the
       generic contract/runtime path; core-owned service state still branches.
@@ -63,6 +60,7 @@ Remaining:
       values and subscribe to changes, instead of the shell handing each
       component a raw JSON namespace. Prerequisite for a replaceable settings
       module. See [`spec/08-settings.md`](spec/08-settings.md) §1, §6.
+
 ## Popovers
 
 In-tree `<popover>` nodes are promoted to `xdg_popup` child surfaces, with core

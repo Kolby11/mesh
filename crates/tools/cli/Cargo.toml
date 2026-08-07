@@ -25,6 +25,7 @@ mesh-core-surface-config = { workspace = true }
 mesh-core-diagnostics = { workspace = true }
 mesh-core-debug = { workspace = true }
 mesh-core-capability = { workspace = true }
+mesh-core-service = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

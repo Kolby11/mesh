@@ -22,10 +22,12 @@
 /// - A **backend module** provides an implementation of that contract.
 /// - A **frontend module** consumes the interface through runtime bindings.
 /// - The **registry** tracks discovered contracts and providers.
+pub mod compatibility;
 pub mod contract;
 pub mod interface;
 pub mod registry;
 
+pub use compatibility::{CompatibilityClass, ContractChange, ContractDiff, diff_contracts};
 pub use contract::{
     BaseType, ContractCapabilities, ContractError, ContractStateField, InterfaceArgument,
     InterfaceContract, InterfaceEvent, InterfaceMethod, InterfaceTypeDef, StateBinding, TypeExpr,

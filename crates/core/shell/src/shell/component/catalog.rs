@@ -16,21 +16,26 @@ use rayon::prelude::*;
 use super::memo;
 use crate::shell::ShellRunError;
 
+/// Compile a module's primary entry plus every extension point contribution it
+/// declares.
+///
+/// A contribution is a module-owned component with the same import and
+/// authoring rules as `main`, so it is compiled eagerly — an invalid page must
+/// not lurk until a host happens to mount it. Its dependency paths join the
+/// module's watch set, so editing one triggers catalog validation and reload.
 fn compile_module_entrypoints(
     manifest: &mesh_core_module::Manifest,
     module_dir: &std::path::Path,
 ) -> Result<CompiledFrontendModule, CompileFrontendError> {
     let mut compiled = compile_frontend_module(manifest, module_dir)?;
-    // `settings_ui` is not a surface, but it is still a module-owned component
-    // with the same import and authoring rules as `main`. Compile it here so an
-    // invalid optional settings page cannot lurk until a future mount path
-    // reaches it. Its dependency paths also join the main module's watch set,
-    // ensuring an edit triggers catalog validation and reload.
-    if let Some(entrypoint) = manifest.entrypoints.settings_ui.as_deref() {
-        let settings_ui = compile_frontend_entrypoint(manifest, module_dir, entrypoint)?;
-        for path in settings_ui.watched_paths {
-            if !compiled.watched_paths.contains(&path) {
-                compiled.watched_paths.push(path);
+    for contributions in manifest.extension_point_contributions.values() {
+        for contribution in contributions {
+            let contributed =
+                compile_frontend_entrypoint(manifest, module_dir, &contribution.entry)?;
+            for path in contributed.watched_paths {
+                if !compiled.watched_paths.contains(&path) {
+                    compiled.watched_paths.push(path);
+                }
             }
         }
     }
@@ -40,7 +45,27 @@ fn compile_module_entrypoints(
 #[derive(Debug, Clone, Default)]
 pub(in crate::shell) struct FrontendCatalog {
     pub(super) modules: HashMap<String, FrontendCatalogEntry>,
-    pub(super) slot_contributions: HashMap<String, Vec<ResolvedSlotContribution>>,
+    /// Contributions each host renders, keyed by
+    /// [`extension_point_key`]`(host module id, point contract name)`.
+    ///
+    /// The core matches hosts to contributions by contract only; no module id
+    /// appears in this file.
+    pub(super) extension_point_contributions:
+        HashMap<String, Vec<ResolvedExtensionPointContribution>>,
+    /// Compiled contribution components, keyed by [`contribution_entry_key`].
+    /// Each is an alternate root of its *contributing* module, so it runs with
+    /// that module's VM, capabilities, and settings namespace.
+    pub(super) extension_point_entries: HashMap<String, SharedCompiledFrontendModule>,
+}
+
+/// Index key for the contributions one host renders at one extension point.
+pub(super) fn extension_point_key(host_module_id: &str, point: &str) -> String {
+    format!("{host_module_id}\u{1}{point}")
+}
+
+/// Index key for one contribution's compiled component.
+pub(super) fn contribution_entry_key(source_module_id: &str, contribution_id: &str) -> String {
+    format!("{source_module_id}\u{1}{contribution_id}")
 }
 
 #[derive(Debug, Clone)]
@@ -92,6 +117,23 @@ fn compile_catalog_entry(
     })
 }
 
+/// Compile one extension point contribution as an alternate root of its
+/// contributing module.
+fn compile_contribution_entry(
+    module_id: &str,
+    module: &ModuleInstance,
+    entry: &str,
+) -> Result<SharedCompiledFrontendModule, ShellRunError> {
+    let compiled =
+        compile_frontend_entrypoint(&module.manifest, &module.path, entry).map_err(|source| {
+            ShellRunError::FrontendCompile {
+                module_id: module_id.to_string(),
+                source,
+            }
+        })?;
+    Ok(compiled.into())
+}
+
 /// Copy-on-write handle for a compiled frontend module.
 ///
 /// Production code treats compiled source as immutable and cloning this handle
@@ -130,9 +172,8 @@ impl DerefMut for SharedCompiledFrontendModule {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct ResolvedSlotContribution {
+pub(super) struct ResolvedExtensionPointContribution {
     pub(super) source_module_id: String,
-    pub(super) widget_id: String,
     pub(super) contribution_id: String,
     pub(super) order: i64,
     pub(super) props_fingerprint: u64,
@@ -236,19 +277,20 @@ fn catalog_changes(
         }
     }
 
-    let mut changed_slots = HashSet::new();
-    for slot_id in previous
-        .slot_contributions
+    let mut changed_extension_points = HashSet::new();
+    for key in previous
+        .extension_point_contributions
         .keys()
-        .chain(next.slot_contributions.keys())
+        .chain(next.extension_point_contributions.keys())
     {
-        if previous.slot_contributions.get(slot_id) != next.slot_contributions.get(slot_id) {
-            changed_slots.insert(slot_id.clone());
+        if previous.extension_point_contributions.get(key)
+            != next.extension_point_contributions.get(key)
+        {
+            changed_extension_points.insert(key.clone());
             for catalog in [previous, next] {
-                if let Some(contributions) = catalog.slot_contributions.get(slot_id) {
+                if let Some(contributions) = catalog.extension_point_contributions.get(key) {
                     for contribution in contributions {
                         changed.insert(contribution.source_module_id.clone());
-                        changed.insert(contribution.widget_id.clone());
                     }
                 }
             }
@@ -256,7 +298,8 @@ fn catalog_changes(
     }
 
     // Walk the reverse composition graph. A module is affected when it imports
-    // an affected component, or when one of the slots it hosts changed.
+    // an affected component, or when one of the extension points it hosts
+    // changed.
     let mut affected = changed.clone();
     loop {
         let mut discovered = Vec::new();
@@ -270,13 +313,15 @@ fn catalog_changes(
                     .module_component_imports
                     .values()
                     .any(|dependency| affected.contains(dependency));
-                let slot_affected = entry
+                let hosted_point_affected = entry
                     .compiled
                     .manifest
-                    .provides_slots
+                    .hosted_extension_points
                     .keys()
-                    .any(|name| changed_slots.contains(&format!("{module_id}:{name}")));
-                if imports_affected || slot_affected {
+                    .any(|point| {
+                        changed_extension_points.contains(&extension_point_key(module_id, point))
+                    });
+                if imports_affected || hosted_point_affected {
                     discovered.push(module_id.clone());
                 }
             }
@@ -349,48 +394,74 @@ impl FrontendCatalog {
 
         let mut catalog = Self {
             modules: compiled_entries.into_iter().collect(),
-            slot_contributions: HashMap::new(),
+            extension_point_contributions: HashMap::new(),
+            extension_point_entries: HashMap::new(),
         };
 
-        for (module_id, entry) in &catalog.modules {
-            if graph
-                .and_then(|graph| graph.module(module_id))
-                .is_some_and(|module| !module.enabled)
+        // Host↔contribution matching is the graph's job: it owns the contract
+        // declarations, the version check, and the enabled set. The catalog only
+        // compiles what the graph resolved, so no module id is named here.
+        let module_instances: HashMap<&str, &ModuleInstance> = frontend_modules
+            .iter()
+            .map(|(module_id, module)| (module_id.as_str(), *module))
+            .collect();
+        if let Some(graph) = graph {
+            for ((host_module_id, point), contributions) in
+                graph.all_extension_point_contributions()
             {
-                continue;
-            }
-            for (slot_id, contributions) in &entry.compiled.manifest.slot_contributions {
-                let bucket = catalog
-                    .slot_contributions
-                    .entry(slot_id.clone())
-                    .or_default();
-                for (index, contribution) in contributions.iter().enumerate() {
+                if !catalog.modules.contains_key(host_module_id) {
+                    continue;
+                }
+                let mut resolved = Vec::with_capacity(contributions.len());
+                for contribution in contributions {
+                    let Some(module) = module_instances.get(contribution.source_module_id.as_str())
+                    else {
+                        continue;
+                    };
+                    let entry_key = contribution_entry_key(
+                        &contribution.source_module_id,
+                        &contribution.contribution_id,
+                    );
+                    if !catalog.extension_point_entries.contains_key(&entry_key) {
+                        // Reuse an unchanged compilation across graph-only
+                        // rebuilds, on the same terms as the primary entry.
+                        let reused = previous
+                            .and_then(|catalog| catalog.extension_point_entries.get(&entry_key))
+                            .filter(|compiled| {
+                                compiled.source_path == module.path.join(&contribution.entry)
+                                    && compiled.source_fingerprint.is_some_and(|fingerprint| {
+                                        source_fingerprint(&compiled.watched_paths)
+                                            == Some(fingerprint)
+                                    })
+                            })
+                            .cloned();
+                        let compiled = match reused {
+                            Some(compiled) => compiled,
+                            None => compile_contribution_entry(
+                                &contribution.source_module_id,
+                                module,
+                                &contribution.entry,
+                            )?,
+                        };
+                        catalog
+                            .extension_point_entries
+                            .insert(entry_key.clone(), compiled);
+                    }
                     let props = contribution.props.clone();
-                    bucket.push(ResolvedSlotContribution {
-                        source_module_id: module_id.clone(),
-                        widget_id: contribution
-                            .widget
-                            .clone()
-                            .unwrap_or_else(|| module_id.clone()),
-                        contribution_id: contribution
-                            .id
-                            .clone()
-                            .unwrap_or_else(|| format!("{module_id}:{slot_id}:{index}")),
-                        order: contribution.order.unwrap_or(0),
+                    resolved.push(ResolvedExtensionPointContribution {
+                        source_module_id: contribution.source_module_id.clone(),
+                        contribution_id: contribution.contribution_id.clone(),
+                        order: contribution.order,
                         props_fingerprint: memo::slot_props_fingerprint(&props),
                         props,
                     });
                 }
+                if !resolved.is_empty() {
+                    catalog
+                        .extension_point_contributions
+                        .insert(extension_point_key(host_module_id, point), resolved);
+                }
             }
-        }
-
-        for contributions in catalog.slot_contributions.values_mut() {
-            contributions.sort_by(|left, right| {
-                left.order
-                    .cmp(&right.order)
-                    .then_with(|| left.widget_id.cmp(&right.widget_id))
-                    .then_with(|| left.contribution_id.cmp(&right.contribution_id))
-            });
         }
 
         for (module_id, entry) in &catalog.modules {
@@ -430,11 +501,40 @@ impl FrontendCatalog {
         Ok(catalog)
     }
 
-    pub(super) fn slot_contributions_for(&self, slot_id: &str) -> &[ResolvedSlotContribution] {
-        self.slot_contributions
-            .get(slot_id)
+    pub(super) fn extension_point_contributions_for(
+        &self,
+        host_module_id: &str,
+        point: &str,
+    ) -> &[ResolvedExtensionPointContribution] {
+        self.extension_point_contributions
+            .get(&extension_point_key(host_module_id, point))
             .map(Vec::as_slice)
             .unwrap_or(&[])
+    }
+
+    /// Compiled contribution roots belonging to `module_id`.
+    ///
+    /// A contribution's own local components and component imports live in its
+    /// own compilation, not in the module's primary entry, so alias resolution
+    /// inside a contribution must look here too.
+    pub(super) fn contribution_entries_for(
+        &self,
+        module_id: &str,
+    ) -> impl Iterator<Item = &SharedCompiledFrontendModule> {
+        let prefix = format!("{module_id}\u{1}");
+        self.extension_point_entries
+            .iter()
+            .filter(move |(key, _)| key.starts_with(&prefix))
+            .map(|(_, compiled)| compiled)
+    }
+
+    pub(super) fn contribution_entry(
+        &self,
+        source_module_id: &str,
+        contribution_id: &str,
+    ) -> Option<&SharedCompiledFrontendModule> {
+        self.extension_point_entries
+            .get(&contribution_entry_key(source_module_id, contribution_id))
     }
 
     pub(in crate::shell) fn top_level_surfaces(&self) -> Vec<FrontendCatalogEntry> {
@@ -524,7 +624,15 @@ impl FrontendCatalog {
         let Some(entry) = self.modules.get(&host.package.id) else {
             return Err("host module is not loaded".into());
         };
-        let Some(module_id) = entry.compiled.module_component_imports.get(alias) else {
+        let module_id = entry
+            .compiled
+            .module_component_imports
+            .get(alias)
+            .or_else(|| {
+                self.contribution_entries_for(&host.package.id)
+                    .find_map(|compiled| compiled.module_component_imports.get(alias))
+            });
+        let Some(module_id) = module_id else {
             return Err(format!(
                 "no explicit component import for alias '{alias}'; add a script import such as local {alias} = require(\"@scope/module\")"
             ));
@@ -604,6 +712,37 @@ mod performance_tests {
             &*surface.compiled,
             &*catalog_entry.compiled,
         ));
+    }
+
+    /// The Stage 1 gate at the catalog boundary: a module's contributed page is
+    /// compiled and mounted with no module id hardcoded in the shell.
+    #[test]
+    fn contributed_settings_pages_mount_through_the_extension_point() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let graph = mesh_core_module::package::load_installed_module_graph(
+            &workspace_root.join("config/module.json"),
+        )
+        .expect("shipped graph loads");
+        let modules = shipped_frontend_modules();
+        let catalog = FrontendCatalog::from_modules(&modules, Some(&graph)).unwrap();
+
+        let contributions =
+            catalog.extension_point_contributions_for("@mesh/settings", "mesh.settings.page");
+        assert!(
+            contributions.iter().any(|contribution| {
+                contribution.source_module_id == "@mesh/navigation-bar"
+                    && contribution.contribution_id == "navigation-bar"
+            }),
+            "the settings host should receive the contributed page"
+        );
+
+        let compiled = catalog
+            .contribution_entry("@mesh/navigation-bar", "navigation-bar")
+            .expect("the contribution compiles as its own root");
+        assert_eq!(
+            compiled.source_path,
+            workspace_root.join("modules/frontend/navigation-bar/src/settings.mesh")
+        );
     }
 
     #[test]

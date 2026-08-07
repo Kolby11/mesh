@@ -180,8 +180,9 @@ brings them back.
 **Status: partially shipped.** Exposed props from a frontend module's primary
 component produce typed global and per-instance controls, effective values, and
 per-row reset actions. Writes are validated and persisted as sparse
-active-profile overrides. Surface/resource editing controls and custom
-`settings_ui` mounting are target work. Module graph inspection is shipped.
+active-profile overrides. Surface/resource editing controls remain target work;
+contributed settings pages, composition overrides, and module graph inspection
+are shipped.
 
 For every module, the settings surface renders, with zero module-specific
 code:
@@ -198,10 +199,28 @@ code:
   active profile through the appropriate service), capabilities, health, diagnostics
   ([01 §9](01-module-system.md)).
 
-Modules needing a custom layout may declare a `settings_ui` entrypoint rendering
-a `.mesh` component. The entrypoint is present in module-graph metadata but is
-not mounted yet; when implemented, props declarations will continue to govern
-validation and persistence.
+### Which layout renders — one precedence ladder
+
+**Status: shipped.**
+
+```
+composition slot override  >  module-provided page  >  generated-from-props fallback
+```
+
+- The **generated fallback** stays. Without it a third-party module has zero
+  settings UI until someone writes an adapter — worse centralization than a
+  hardcoded host.
+- A **module-provided page** is an ordinary `mesh.settings.page` contribution
+  ([01 §4.3](01-module-system.md)): the module's opinion, not a privilege. Its
+  props declarations still govern validation and persistence.
+- A **composition** may `replace`, `suppress`, and `order` pages
+  ([01 §5.2](01-module-system.md)), so a shell family can restyle or replace
+  `@mesh/audio`'s page without touching the audio module.
+
+A module whose page was suppressed reads as having none, so the host falls back
+to the generated rows for it rather than showing nothing. There is no
+`settings_ui` entrypoint: it was the module-keyed spelling of a contribution
+that now has a contract-keyed one.
 
 ## 6. Reading settings from modules
 

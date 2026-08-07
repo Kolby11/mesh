@@ -20,10 +20,12 @@ replacement debt, never public synonyms.
 | Term | Definition |
 | ---- | ---------- |
 | module | Installable, configurable MESH unit (`module.json` at its root). |
-| module kind | The module's primary role: `frontend`, `backend`, `interface`, `component`, `library`, `theme`, `icon-pack`, `font-pack`, `language-pack`. |
+| module kind | The module's primary role: `frontend`, `backend`, `interface`, `component`, `composition`, `library`, `theme`, `icon-pack`, `font-pack`, `language-pack`. |
 | element | Base UI primitive exposed by MESH core (`box`, `button`, `icon`, …). |
 | component | User-authored reusable `.mesh` unit composed from elements/components. |
 | interface | Named, versioned contract: state fields, methods, events, types, consumer capabilities. Data, not code. |
+| extension point | Named, versioned UI contract: a region one module hosts and other modules fill (§4.3). |
+| composition | Installable module selecting roots, providers, resources, and slot arrangement (§5.2). |
 | provider | Backend module implementation of an interface. |
 | contribution | Something a module adds to the installed graph (`mesh.provides.*`). |
 | dependency | Something a module needs (`mesh.uses.*`). |
@@ -137,6 +139,7 @@ generations in `model.rs`) are deleted outright.
 | `backend` | Provider implementing interfaces (Luau `main.luau`) | `mesh.implements`, `mesh.uses.binaries`, in-script `props {}` |
 | `interface` | Data-only contract package | `mesh.interface` |
 | `component` | Embeddable `.mesh` component; **no** `mesh.surface`; consumed via `require("@scope/name")` | — |
+| `composition` | An installable shell composition: roots, provider bindings, resources, extension point arrangement | `mesh.compose`, `mesh.extends` |
 | `library` | Importable Luau helpers; grants no capabilities | `mesh.provides.libraries` |
 | `theme` | Theme tokens + component defaults (CSS) | `mesh.provides.themes` — see [04](04-styling.md) |
 | `icon-pack` | Semantic icon name → asset mappings | `mesh.icon_pack` — see [05](05-icons.md) |
@@ -427,7 +430,93 @@ different model; give a `reason`). When an enabled independent interface
 shares a domain with a base one, the graph records soft "consider extending"
 guidance — discoverability pressure, never a load error.
 
-### 4.3 Events — one communication primitive
+### 4.3 Extension points — UI contracts
+
+**Status: shipped.**
+
+A service interface lets a frontend depend on a *contract* instead of a backend
+module id. An **extension point** is the same idea for UI: a named, versioned
+contract naming a region one module renders and other modules fill.
+
+Extension points are declared by `interface` modules, for the same reason
+service contracts are — they are data, they are versioned, and both sides must
+depend on the contract without depending on each other. An interface module may
+declare extension points, a service contract, or both.
+
+```json
+{
+  "name": "@mesh/shell-ui-interface",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "extensionPoints": {
+      "mesh.settings.page": {
+        "version": "1.0",
+        "multiple": true,
+        "props": [
+          { "name": "namespace", "type": "string" },
+          { "name": "title", "type": "string" },
+          { "name": "icon", "type": "string?" }
+        ]
+      }
+    }
+  }
+}
+```
+
+A **host** declares which points it renders and lays them out. Hosting is
+explicit and versioned because a host renders another module's UI inside its own
+surface — a trust decision, never an inference:
+
+```json
+"hosts": { "mesh.settings.page": { "version": ">=1.0", "layout": "column" } }
+```
+
+```html
+<slot extension-point="mesh.settings.page" />
+```
+
+A **contributor** names the point, never the host:
+
+```json
+"provides": {
+  "extensionPoints": {
+    "mesh.settings.page": [
+      { "id": "audio", "entry": "src/settings.mesh", "order": 100,
+        "props": { "title": { "t": "audio.settings.title", "fallback": "Audio" } } }
+    ]
+  }
+}
+```
+
+Rules:
+
+- **Contract names, never module ids.** `mesh.settings.page` is valid;
+  `@mesh/settings:custom-settings` is rejected. Replacing the settings frontend
+  must not break every contributed page.
+- A contribution's `entry` is a `.mesh` component compiled as an **alternate
+  root of the contributing module**: its own VM, its own capabilities, its own
+  settings namespace, rendered inside the host's tree. A broken contribution
+  gets the bounded error placeholder (§8) and cannot blank its host.
+- A contribution resolves into **every** enabled host of that point. Two
+  settings frontends both receive the pages; that is correct, not a conflict.
+- Render order is `(order, source module id, contribution id)` — deterministic
+  across rebuilds.
+- `multiple: false` means at most one contribution; more is
+  `extension_point_overfilled`.
+- Contribution props are typechecked against the declaration using the same
+  type grammar as service contracts (§4).
+- **A contribution creates no dependency edge on the host.** The edge terminates
+  at the contract, so a host that itself depends on a contributor is not a
+  cycle. Module-keyed slots made that adapter pattern unloadable.
+
+Diagnostics: `unknown_extension_point`, `extension_point_version_mismatch`,
+`invalid_extension_point_props`, `extension_point_overfilled`, and the
+informational `unhosted_contribution` (a valid state when the host is installed
+but not composed).
+
+### 4.4 Events — one communication primitive
 
 Methods are request/response. **Everything asynchronous is a typed event on a
 named channel.** There is no second messaging mechanism.
@@ -454,7 +543,7 @@ declared payload schemas and drops invalid events with a
 **Status: shipped.**
 
 This section describes the current repository graph. Named shell profiles in
-§5.2 are the accepted target composition model.
+§5.2 are the shipped composition model.
 
 Backends declare provider records:
 
@@ -515,12 +604,98 @@ key scopes surface bookkeeping, the settings namespace (per-instance props,
 [08 §3](08-settings.md)), and `self.storage`. No new mechanism — the existing
 per-instance scoping keys on.
 
-### 5.2 Shell profiles and live switching
+### 5.2 Composition modules
+
+**Status: shipped.**
+
+A profile alone is a config file: no version, no dependencies, no lock entry,
+no capability review. A **composition module** is a profile that is also a
+module, so a whole shell family can be installed, published, pinned, updated,
+rolled back, and forked with the machinery modules already have.
+
+```json
+{
+  "name": "@alice/desk",
+  "version": "2.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "composition",
+    "extends": "@mesh/desk",
+    "uses": {
+      "modules": { "@mesh/navigation-bar": "^3.0.0" },
+      "sources": {
+        "@mesh/navigation-bar": { "git": "https://github.com/mesh/navigation-bar", "ref": "v3" }
+      }
+    },
+    "compose": {
+      "roots": {
+        "@mesh/navigation-bar#top": { "module": "@mesh/navigation-bar",
+                                      "surface": { "anchor": "top" } }
+      },
+      "providers": { "mesh.audio": "@mesh/pipewire-audio" },
+      "resources": { "theme": "@alice/desk-theme", "icons": ["@mesh/icons-default"] },
+      "slots": {
+        "mesh.settings.page": {
+          "replace":  { "@mesh/audio": "@alice/desk-audio-page" },
+          "suppress": ["@mesh/navigation-bar"],
+          "order":    ["@alice/desk-audio-page", "@mesh/network"]
+        }
+      },
+      "settings": { "shell": { "i18n": { "locale": "en-US" } } }
+    }
+  }
+}
+```
+
+Rules:
+
+- **A composition binds; it never owns.** It selects a provider, it does not
+  contain one. Backends are effectively machine singletons while compositions
+  are swappable, so a family that owned its audio backend would restart audio on
+  every switch. Durable service data stays shared; configuration stays scoped.
+- **A composition holds no privilege.** `mesh.uses.capabilities` on a
+  composition is a hard error. It can only select among what its members already
+  declare; install shows the union of the closure as a capability diff. Without
+  this a composition becomes the privileged layer replaceable modules exist to
+  avoid.
+- A composition declares no `entry`, no `mesh.surface`, and no `mesh.implements`.
+- `extends` forks a family: the base composition's decisions plus the deltas you
+  disagree with. Cycles are rejected.
+- `mesh.uses.sources` says where to fetch a dependency that is not installed. A
+  registry later fills the same map from an index.
+
+### 5.3 Shell profiles and live switching
 
 **Status: shipped** for profile documents, scoped preferences, multiple root
-instances, activation closure, and transactional live switching. Typed
-profile/package service contracts for replaceable settings frontends remain
-target behavior.
+instances, activation closure, transactional live switching, and composition
+instantiation. Typed profile/package service contracts for replaceable settings
+frontends remain target behavior.
+
+A profile is an **instance of a composition plus the user's deltas**:
+
+```json
+{
+  "schemaVersion": 2,
+  "from": { "module": "@alice/desk", "version": "2.1.0" },
+  "roots":    { "@mesh/navigation-bar#top": { "active": false } },
+  "settings": { "shell": { "i18n": { "locale": "sk-SK" } } }
+}
+```
+
+`from` is optional: a profile without it is a hand-built composition — every
+field is the whole decision rather than a delta. Layering runs base composition
+→ derived composition → profile, most specific winning per field, with two
+deliberate exceptions:
+
+- **Ordered resource chains replace rather than merge.** An icon or font chain
+  is an ordered fallback list; interleaving two orderings has no meaning.
+- **A user may deactivate an inherited root but not delete it.** Deletion is not
+  expressible in a delta layer, and an update would resurrect it anyway.
+
+A user override keyed to a root the composition no longer declares is
+**retained and reported** (`orphaned_profile_override`), never dropped —
+discarding it would lose the user's work on every upstream rename.
+`mesh profile prune` clears them on request.
 
 Profiles are stored as `profiles/<id>.json`; `active-profile` contains the
 selected id. Their positive root list is not an installed-module allow-list:

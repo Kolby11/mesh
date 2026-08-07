@@ -439,9 +439,15 @@ impl Shell {
                     settings_values,
                     settings_instances,
                     settings_instance_values,
-                    settings_ui: module_settings
-                        .and_then(|settings| settings.settings_ui.clone())
-                        .or_else(|| module.manifest.mesh.entrypoints.settings_ui.clone()),
+                    // Report the page that will actually render: a composition
+                    // may have suppressed or replaced the module's own, and the
+                    // generated fallback keys off this being absent.
+                    settings_page: graph
+                        .resolved_contribution_entry(
+                            &module.id,
+                            mesh_core_module::package::SETTINGS_PAGE_POINT,
+                        )
+                        .map(str::to_string),
                     provides_i18n,
                     provides_themes,
                     provides_theme_labels,
@@ -1224,7 +1230,7 @@ fn module_graph_entry_json(entry: &mesh_core_debug::ModuleGraphEntry) -> serde_j
             "settings_values": entry.settings_values,
             "settings_instances": entry.settings_instances,
             "settings_instance_values": entry.settings_instance_values,
-            "settings_ui": entry.settings_ui,
+            "settings_page": entry.settings_page,
             "i18n": entry.provides_i18n,
             "required_icons": entry.required_icons,
             "optional_icons": entry.optional_icons,

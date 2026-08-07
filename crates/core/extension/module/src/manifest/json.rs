@@ -1,10 +1,11 @@
 use super::{
     AccessibilitySection, AssetsSection, BinaryDependency, CapabilitiesSection,
     CompatibilitySection, DependenciesSection, DependencySpec, EntrypointsSection, ExportsSection,
-    ExtensionSection, FontDependency, I18nSection, IconPackSection, IconRequirementsSection,
-    IconsSection, InterfaceDependency, InterfaceSection, KeybindsSection, Manifest, ModuleSection,
-    ModuleType, NativeDependency, OptionalDependencyGroup, ProvidedInterface, SlotContribution,
-    SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
+    ExtensionPointContribution, ExtensionSection, FontDependency, HostedExtensionPoint,
+    I18nSection, IconPackSection, IconRequirementsSection, IconsSection, InterfaceDependency,
+    InterfaceSection, KeybindsSection, Manifest, ModuleSection, ModuleType, NativeDependency,
+    OptionalDependencyGroup, ProvidedInterface, SurfaceLayoutSection, ThemeDefaultsSection,
+    ThemeSection,
 };
 use mesh_core_theme::TokenValue;
 use serde::Deserialize;
@@ -52,9 +53,9 @@ pub(super) struct JsonManifest {
     #[serde(default)]
     exports: ExportsSection,
     #[serde(default)]
-    provides_slots: HashMap<String, SlotDefinition>,
+    hosted_extension_points: HashMap<String, HostedExtensionPoint>,
     #[serde(default)]
-    slot_contributions: HashMap<String, Vec<SlotContribution>>,
+    extension_point_contributions: HashMap<String, Vec<ExtensionPointContribution>>,
     #[serde(default)]
     assets: Option<AssetsSection>,
     #[serde(default)]
@@ -97,8 +98,8 @@ impl JsonManifest {
             interfaces: Vec::new(),
             extensions: self.extensions,
             exports: self.exports,
-            provides_slots: self.provides_slots,
-            slot_contributions: self.slot_contributions,
+            hosted_extension_points: self.hosted_extension_points,
+            extension_point_contributions: self.extension_point_contributions,
             assets: self.assets,
             icons: self.icons,
             icon_pack: self.icon_pack,

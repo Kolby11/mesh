@@ -146,11 +146,12 @@
                     </list-item>
                 {/for}
             </list>
-            <empty-state class="settings-empty-state" hidden={props_empty_hidden}>
-                <text class="settings-card-title">{t('advanced.no_module_preferences')}</text>
-                <text class="settings-section-copy">{t('advanced.no_module_preferences.copy')}</text>
-            </empty-state>
-        </column>
+        <empty-state class="settings-empty-state" hidden={props_empty_hidden}>
+            <text class="settings-card-title">{t('advanced.no_module_preferences')}</text>
+            <text class="settings-section-copy">{t('advanced.no_module_preferences.copy')}</text>
+        </empty-state>
+        <slot extension-point="mesh.settings.page" />
+    </column>
     </column>
 </template>
 
@@ -424,7 +425,15 @@ function render()
         }
 
         local settings_schema = provides.settings_schema or {}
-        local properties = settings_schema.properties or {}
+        -- Precedence: a module that contributes its own `mesh.settings.page`
+        -- owns its layout, so the generated rows step aside. The schema still
+        -- governs validation and persistence either way. A composition that
+        -- suppressed or replaced that page has already been applied upstream,
+        -- so `settings_page` reflects what will actually render.
+        local properties = {}
+        if provides.settings_page == nil then
+            properties = settings_schema.properties or {}
+        end
         local overrides = provides.settings_values or {}
         local instances = provides.settings_instances or {}
         local instance_overrides = provides.settings_instance_values or {}

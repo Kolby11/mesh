@@ -240,7 +240,8 @@ end
                 },
             ),
         ]),
-        slot_contributions: HashMap::new(),
+        extension_point_contributions: HashMap::new(),
+        extension_point_entries: HashMap::new(),
     };
     let mut component = FrontendSurfaceComponent::new(
         root_compiled,

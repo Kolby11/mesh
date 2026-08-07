@@ -9,20 +9,24 @@
       "modules": {
         "@mesh/language-popover": ">=0.1.0",
         "@mesh/theme-selector": ">=0.1.0",
-        "@mesh/quick-settings": ">=0.1.0"
+        "@mesh/quick-settings": ">=0.1.0",
+        "@mesh/shell-ui-interface": ">=1.0.0"
       },
       "interfaces": {
         "mesh.audio": ">=1.0",
         "mesh.power": ">=1.0",
         "mesh.wm": ">=1.0",
-        "mesh.theme": ">=1.0"
+        "mesh.theme": ">=1.0",
+        "mesh.settings": ">=1.0"
       },
       "optionalInterfaces": {
         "mesh.brightness": ">=1.0",
         "mesh.media": ">=1.0"
       },
       "resources": {
-        "icons": ["@mesh/icons-material-symbols"]
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
       },
       "capabilities": [
         "shell.surface",
@@ -34,6 +38,7 @@
         "service.wm.read",
         "service.wm.control",
         "service.media.read",
+        "service.settings.read",
         "theme.read",
         "locale.read",
         "locale.write"
@@ -128,6 +133,19 @@
             }
           }
         }
+      },
+      "extensionPoints": {
+        "mesh.settings.page": [
+          {
+            "id": "navigation-bar",
+            "entry": "src/settings.mesh",
+            "order": 100,
+            "props": {
+              "namespace": "@mesh/navigation-bar",
+              "title": "Navigation bar"
+            }
+          }
+        ]
       }
     },
     "accessibility": {

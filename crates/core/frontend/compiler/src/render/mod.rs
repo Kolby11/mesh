@@ -583,12 +583,12 @@ fn build_widget_node_inner(
             node
         }
         TemplateNode::Slot(slot) => {
-            let slot_definition = slot
-                .name
+            let hosted = slot
+                .extension_point
                 .as_ref()
-                .and_then(|name| manifest.provides_slots.get(name));
-            let layout = slot_definition
-                .and_then(|definition| definition.layout.as_deref())
+                .and_then(|point| manifest.hosted_extension_points.get(point));
+            let layout = hosted
+                .and_then(|hosted| hosted.layout.as_deref())
                 .unwrap_or("row");
             let tag = match layout {
                 "column" => "column",
@@ -600,7 +600,9 @@ fn build_widget_node_inner(
             attach_module_id(&mut node, &manifest.package.id);
             node.attributes.insert(
                 "slot".into(),
-                slot.name.clone().unwrap_or_else(|| "default".into()),
+                slot.extension_point
+                    .clone()
+                    .unwrap_or_else(|| "default".into()),
             );
             node.computed_style = slot_style(tag);
             let child_context = child_style_context(&node.computed_style, container_context);
@@ -608,11 +610,11 @@ fn build_widget_node_inner(
                 let mut children = composition.render_slot(
                     manifest,
                     instance_key,
-                    slot.name.as_deref(),
+                    slot.extension_point.as_deref(),
                     child_context.container_width,
                     child_context.container_height,
                 );
-                if let Some(max) = slot_definition.and_then(|definition| definition.max) {
+                if let Some(max) = hosted.and_then(|hosted| hosted.max) {
                     children.truncate(max as usize);
                 }
                 node.children = children.into();

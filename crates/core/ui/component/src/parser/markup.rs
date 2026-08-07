@@ -713,8 +713,8 @@ fn build_template_node(
     }
 
     if tag == "slot" {
-        let name = attributes.iter().find_map(|attribute| {
-            if attribute.name != "name" {
+        let extension_point = attributes.iter().find_map(|attribute| {
+            if attribute.name != "extension-point" {
                 return None;
             }
 
@@ -724,7 +724,7 @@ fn build_template_node(
             }
         });
 
-        return Ok(TemplateNode::Slot(SlotNode { name }));
+        return Ok(TemplateNode::Slot(SlotNode { extension_point }));
     }
 
     let tag_kind = crate::template::SourceTag::from_tag_name(&tag);

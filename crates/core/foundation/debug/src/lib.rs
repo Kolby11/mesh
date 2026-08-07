@@ -532,7 +532,8 @@ pub struct ModuleGraphEntry {
     pub settings_instances: Vec<String>,
     /// Effective `props.instances` overrides, keyed by instance id.
     pub settings_instance_values: serde_json::Value,
-    pub settings_ui: Option<String>,
+    /// Module-authored settings page contributed to `mesh.settings.page`.
+    pub settings_page: Option<String>,
     pub provides_i18n: Vec<String>,
     pub provides_themes: Vec<String>,
     pub provides_theme_labels: Vec<Option<String>>,

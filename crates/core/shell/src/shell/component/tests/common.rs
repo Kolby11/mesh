@@ -432,7 +432,6 @@ pub(super) fn minimal_test_manifest(id: &str) -> Manifest {
         capabilities: CapabilitiesSection::default(),
         entrypoints: EntrypointsSection {
             main: Some("src/main.mesh".into()),
-            settings_ui: None,
         },
         accessibility: None,
         keybinds: mesh_core_module::KeybindsSection::default(),
@@ -444,8 +443,8 @@ pub(super) fn minimal_test_manifest(id: &str) -> Manifest {
         interfaces: Vec::new(),
         extensions: Vec::new(),
         exports: ExportsSection::default(),
-        provides_slots: HashMap::new(),
-        slot_contributions: HashMap::new(),
+        hosted_extension_points: HashMap::new(),
+        extension_point_contributions: HashMap::new(),
         assets: None,
         icons: None,
         icon_pack: None,
@@ -493,7 +492,8 @@ pub(super) fn test_frontend_component_with_local_components(
                 compiled: compiled.clone().into(),
             },
         )]),
-        slot_contributions: HashMap::new(),
+        extension_point_contributions: HashMap::new(),
+        extension_point_entries: HashMap::new(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,
@@ -528,7 +528,8 @@ pub(super) fn test_frontend_component_with_manifest(
     };
     let catalog = FrontendCatalog {
         modules: HashMap::new(),
-        slot_contributions: HashMap::new(),
+        extension_point_contributions: HashMap::new(),
+        extension_point_entries: HashMap::new(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,
@@ -593,7 +594,8 @@ pub(super) fn test_frontend_component_with_required_icons(
     };
     let catalog = FrontendCatalog {
         modules: HashMap::new(),
-        slot_contributions: HashMap::new(),
+        extension_point_contributions: HashMap::new(),
+        extension_point_entries: HashMap::new(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,
@@ -634,7 +636,8 @@ pub(super) fn test_frontend_component_with_catalog(
     };
     let catalog = FrontendCatalog {
         modules: HashMap::new(),
-        slot_contributions: HashMap::new(),
+        extension_point_contributions: HashMap::new(),
+        extension_point_entries: HashMap::new(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,
@@ -986,7 +989,8 @@ pub(super) fn real_frontend_module_component(
                 },
             ),
         ]),
-        slot_contributions: HashMap::new(),
+        extension_point_contributions: HashMap::new(),
+        extension_point_entries: HashMap::new(),
     };
 
     // Mirror the shell's graph i18n wiring so component `t(...)` calls resolve

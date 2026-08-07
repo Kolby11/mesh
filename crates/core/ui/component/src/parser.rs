@@ -900,7 +900,7 @@ local Thing = require("./components/two.mesh")
         let source = r#"
 <template>
   <box>
-    <slot name="sidebar"/>
+    <slot extension-point="mesh.settings.page"/>
   </box>
 </template>
 "#;
@@ -908,7 +908,9 @@ local Thing = require("./components/two.mesh")
         let tmpl = file.template.unwrap();
         match &tmpl.root[0] {
             TemplateNode::Element(el) => match &el.children[0] {
-                TemplateNode::Slot(slot) => assert_eq!(slot.name.as_deref(), Some("sidebar")),
+                TemplateNode::Slot(slot) => {
+                    assert_eq!(slot.extension_point.as_deref(), Some("mesh.settings.page"))
+                }
                 other => panic!("expected slot node, got {other:?}"),
             },
             other => panic!("expected element node, got {other:?}"),

@@ -9,13 +9,14 @@ installer checks" and "what the runtime verifies".
 
 ## 1. Installer v1 — path + Git, editable source
 
-**Status: partially shipped.** Local-path and Git installation (including an
-optional `#ref` and resolved-revision provenance in `mesh.lock`), capability
-gates, kind-aware frontend activation, profile commands, validation, and
-rollback of a failed staged copy are available through `mesh-shell`.
-Updates/uninstall and the replaceable package-service contract remain target
-behavior. A CLI or package component is a client of that service, not a
-privileged management layer.
+**Status: partially shipped.** Local-path and Git installation, composition
+installation, capability gates, kind-aware activation, profile commands,
+validation, `mesh.lock` v2 (version, source, resolved revision, content digest,
+requesters), `update`/`rollback`/`uninstall`/`lock verify`, the interface
+compatibility gate, and capability re-approval are available through
+`mesh-shell`. The replaceable package-service contract remains target behavior.
+A CLI or package component is a client of that service, not a privileged
+management layer.
 
 v1 deliberately ships without a registry, package archives, or signing. The
 design must not block them (§6), but the first installer is:
@@ -23,7 +24,11 @@ design must not block them (§6), but the first installer is:
 ```
 mesh install <path>              # copy a local module directory into the modules dir
 mesh install <git-url>[#ref]     # clone a module repo into the modules dir
-mesh uninstall <module-id>
+mesh update [<module-id>|--all]  # fetch candidates, gate, then commit (§1.3)
+     [--dry-run] [--keep|--replace]
+mesh rollback [<generation>]     # restore a previous lock generation
+mesh lock verify                 # recompute digests; report local edits
+mesh uninstall <module-id>       # refuses while something still requires it
 mesh profile add <profile> <module-id>     # add a root or provider choice
 mesh profile remove <profile> <module-id>  # unwire it from that profile
 mesh list                        # installed modules, kinds, versions, health
@@ -44,10 +49,10 @@ Semantics:
   resources, and scoped overrides belong to named profiles
   ([01 §5.2](01-module-system.md)). The modules directory is available source,
   not a list of running units.
-- **Updates preserve edits.** `mesh.lock` records source provenance and the
-  resolved revision. An update never silently discards local changes; it must
-  keep the local tree, merge/rebase explicitly, or replace only after the user
-  chooses that action.
+- **Updates preserve edits.** `mesh.lock` records a content digest of the
+  installed tree, so *"has the user edited this?"* is decidable rather than
+  assumed. An update never silently discards local changes: it refuses by
+  default and requires `--keep` (pin it) or `--replace` (discard) explicitly.
 - **Dependencies are reported, not fetched.** v1 does not resolve transitive
   module dependencies from a registry; it validates that `mesh.uses.modules`
   and `mesh.uses.interfaces` are satisfiable by what is installed and prints
@@ -101,6 +106,73 @@ $ mesh install ~/src/pulseaudio-audio
 The sole compatible implementer of an interface may be auto-selected; an
 explicit profile binding is required where several modules implement one
 interface.
+
+### 1.3 The update transaction
+
+**Status: shipped.**
+
+An update is a transaction with a pre-commit refusal point, not a fetch. Every
+step before the commit can refuse without touching the running shell:
+
+1. **Resolve candidates.** For each git source, fetch the ref and read
+   `git show <rev>:module.json` — the candidate version without a checkout. A
+   revision is reproducible but has no update semantics; the version is what
+   answers *"is there a compatible newer release"*.
+2. **Build the candidate closure** (one version per module id, [01 §5.2](01-module-system.md)).
+3. **Interface compatibility gate.** For every consumer, diff the
+   `InterfaceContract` between locked and candidate. Because contracts are
+   **data**, this runs without executing a line of module code:
+
+   | Change | Class |
+   | --- | --- |
+   | added state field / method / event / optional trailing argument | additive |
+   | removed or renamed state field, method, event, or payload field | breaking |
+   | changed type of an existing field, argument, or return | breaking |
+   | required argument added | breaking |
+   | newly required consumer capability | breaking |
+
+4. **Capability diff.** New `elevated`/`high` capabilities anywhere in the
+   closure require explicit re-approval, exactly as at install.
+5. **Local-edit gate.** Any module whose recomputed digest differs from the lock
+   is reported and not overwritten.
+6. **Commit**, in order: source, then the lock generation, then the profile
+   switch. A **lock write failure fails the transaction** — the lock is the
+   rollback record, so a composition whose lock did not land cannot be rolled
+   back. This is why the earlier warn-and-continue behavior was removed.
+7. **Rollback.** `mesh rollback` restores a previous lock generation and
+   re-materializes its revisions. Trees are re-fetched by revision rather than
+   archived: git is content-addressed, so the revision is an exact and cheap way
+   back. The last ten generations are kept under
+   `~/.local/state/mesh/lock-history/`.
+
+`--dry-run` prints the resolution, the contract diff, and the capability diff
+without staging anything. It is the primary review surface.
+
+### 1.4 `mesh.lock`
+
+**Status: shipped.**
+
+```json
+{
+  "schemaVersion": 2,
+  "generation": 7,
+  "composition": { "module": "@alice/desk", "version": "2.1.0" },
+  "modules": {
+    "@mesh/navigation-bar": {
+      "version": "3.1.0",
+      "source": { "kind": "git", "url": "https://github.com/mesh/navigation-bar", "reference": "v3" },
+      "revision": "abc123…",
+      "digest": "sha256:…",
+      "requestedBy": ["@alice/desk"]
+    }
+  }
+}
+```
+
+`digest` hashes relative path, executable bit, and bytes of every source file in
+sorted order, excluding `.git`. Compiled output lives in `~/.cache/mesh` and
+never inside a module directory, so an ordinary shell run cannot make a module
+read as edited. `requestedBy` is what lets `uninstall` refuse safely.
 
 ## 2. Directories
 

@@ -1,6 +1,9 @@
 use super::*;
 use crate::shell::ComponentContext;
-use crate::shell::component::catalog::{FrontendCatalog, ResolvedSlotContribution};
+use crate::shell::component::catalog::{
+    FrontendCatalog, ResolvedExtensionPointContribution, contribution_entry_key,
+    extension_point_key,
+};
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_frontend::CompiledFrontendModule;
 use mesh_core_render::PixelBuffer;
@@ -30,7 +33,8 @@ fn memo_surface(parent_src: &str, locals: &[(&str, &str)]) -> FrontendSurfaceCom
                 compiled: compiled.clone().into(),
             },
         )]),
-        slot_contributions: HashMap::new(),
+        extension_point_contributions: HashMap::new(),
+        extension_point_entries: HashMap::new(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,
@@ -452,14 +456,19 @@ local Child = require("./components/child.mesh")
 }
 
 fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
+    const POINT: &str = "test.memo.slot";
     let mut parent_manifest = minimal_test_manifest(PARENT_ID);
-    parent_manifest
-        .provides_slots
-        .insert("main".into(), mesh_core_module::SlotDefinition::default());
+    parent_manifest.hosted_extension_points.insert(
+        POINT.into(),
+        mesh_core_module::HostedExtensionPoint::default(),
+    );
     let parent_compiled = CompiledFrontendModule {
         manifest: parent_manifest,
         source_path: PathBuf::from("src/main.mesh"),
-        component: parse_component("<template><slot name=\"main\"/></template>").unwrap(),
+        component: parse_component(&format!(
+            "<template><slot extension-point=\"{POINT}\"/></template>"
+        ))
+        .unwrap(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
@@ -467,7 +476,7 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
     let widget_id = "@test/memo-slot-widget";
     let mut widget_manifest = minimal_test_manifest(widget_id);
     widget_manifest.package.module_type = mesh_core_module::ModuleType::Widget;
-    let widget_compiled = CompiledFrontendModule {
+    let contribution_compiled = CompiledFrontendModule {
         manifest: widget_manifest,
         source_path: PathBuf::from("src/main.mesh"),
         component: parse_component("<template><text content=\"{label}\"/></template>").unwrap(),
@@ -476,33 +485,23 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
         watched_paths: Vec::new(),
     };
     let catalog = FrontendCatalog {
-        modules: HashMap::from([
-            (
-                PARENT_ID.into(),
-                FrontendCatalogEntry {
-                    module_dir: PathBuf::from("."),
-                    compiled: parent_compiled.clone().into(),
-                },
-            ),
-            (
-                widget_id.into(),
-                FrontendCatalogEntry {
-                    module_dir: PathBuf::from("."),
-                    compiled: widget_compiled.into(),
-                },
-            ),
-        ]),
-        slot_contributions: HashMap::from([(
-            format!("{PARENT_ID}:main"),
+        modules: HashMap::from([(
+            PARENT_ID.into(),
+            FrontendCatalogEntry {
+                module_dir: PathBuf::from("."),
+                compiled: parent_compiled.clone().into(),
+            },
+        )]),
+        extension_point_contributions: HashMap::from([(
+            extension_point_key(PARENT_ID, POINT),
             (0..contribution_count)
                 .map(|index| {
                     let props = serde_json::Map::from_iter([(
                         "label".into(),
                         serde_json::Value::String(format!("static slot {index}")),
                     )]);
-                    ResolvedSlotContribution {
-                        source_module_id: "@test/contributor".into(),
-                        widget_id: widget_id.into(),
+                    ResolvedExtensionPointContribution {
+                        source_module_id: widget_id.into(),
                         contribution_id: format!("status-{index}"),
                         order: index as i64,
                         props_fingerprint: crate::shell::component::memo::slot_props_fingerprint(
@@ -513,6 +512,14 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
                 })
                 .collect(),
         )]),
+        extension_point_entries: (0..contribution_count)
+            .map(|index| {
+                (
+                    contribution_entry_key(widget_id, &format!("status-{index}")),
+                    contribution_compiled.clone().into(),
+                )
+            })
+            .collect(),
     };
     let mut component = FrontendSurfaceComponent::new(
         parent_compiled,
@@ -578,7 +585,7 @@ fn catalog_generation_rebinds_affected_slot_host_and_keeps_root_runtime() {
     );
 
     let mut next_catalog = (*component.frontend_catalog).clone();
-    next_catalog.slot_contributions.clear();
+    next_catalog.extension_point_contributions.clear();
     component
         .frontend_catalog_handle
         .replace(next_catalog, None);
@@ -586,7 +593,7 @@ fn catalog_generation_rebinds_affected_slot_host_and_keeps_root_runtime() {
     assert_eq!(
         component
             .frontend_catalog
-            .slot_contributions_for(&format!("{PARENT_ID}:main"))
+            .extension_point_contributions_for(PARENT_ID, "test.memo.slot")
             .len(),
         1,
         "the surface keeps its coherent old snapshot until notification"
@@ -595,7 +602,7 @@ fn catalog_generation_rebinds_affected_slot_host_and_keeps_root_runtime() {
     assert!(
         component
             .frontend_catalog
-            .slot_contributions_for(&format!("{PARENT_ID}:main"))
+            .extension_point_contributions_for(PARENT_ID, "test.memo.slot")
             .is_empty()
     );
 
@@ -873,7 +880,8 @@ import MenuPopover from "@mesh/menu-popover"
                 },
             ),
         ]),
-        slot_contributions: HashMap::new(),
+        extension_point_contributions: HashMap::new(),
+        extension_point_entries: HashMap::new(),
     };
     let mut component = FrontendSurfaceComponent::new(
         parent_compiled,

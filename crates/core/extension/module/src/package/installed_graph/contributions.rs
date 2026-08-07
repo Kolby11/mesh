@@ -58,6 +58,9 @@ pub struct ModuleContributionIndex {
     pub(in crate::package) keybinds: Vec<ContributedKeybindAction>,
     pub(in crate::package) icon_requirements: Vec<ContributedIconRequirement>,
     pub(in crate::package) icon_packs: Vec<ContributedIconPack>,
+    pub(in crate::package) extension_points: Vec<DeclaredExtensionPoint>,
+    pub(in crate::package) extension_point_hosts: Vec<ExtensionPointHost>,
+    pub(in crate::package) extension_point_contributions: Vec<ContributedExtensionPoint>,
 }
 
 impl ModuleContributionIndex {
@@ -112,14 +115,43 @@ impl ModuleContributionIndex {
                     surface_layout: manifest.mesh.surface_layout.clone(),
                 });
             }
-            if let Some(path) = &manifest.mesh.entrypoints.settings_ui {
-                validate_relative_path("frontend settings entrypoint", path)?;
-                self.frontend_entrypoints
-                    .push(ContributedFrontendEntrypoint {
-                        source: ContributionSource::new(module, "settings-ui"),
+        }
+        for (point_name, declaration) in &manifest.mesh.extension_points {
+            self.extension_points.push(DeclaredExtensionPoint {
+                source: ContributionSource::new(module, point_name),
+                module_id: module_id.into(),
+                name: point_name.clone(),
+                version: declaration.version.clone(),
+                multiple: declaration.multiple,
+                props: declaration
+                    .props
+                    .iter()
+                    .map(|prop| (prop.name.clone(), prop.prop_type.clone()))
+                    .collect(),
+            });
+        }
+        for (point_name, hosted) in &manifest.mesh.hosts {
+            self.extension_point_hosts.push(ExtensionPointHost {
+                source: ContributionSource::new(module, point_name),
+                module_id: module_id.into(),
+                name: point_name.clone(),
+                version_req: hosted.version.clone(),
+                layout: hosted.layout.clone(),
+                max: hosted.max,
+            });
+        }
+        for (point_name, contributions) in &manifest.mesh.contributes.extension_points {
+            for contribution in contributions {
+                validate_relative_path("extension point contribution entry", &contribution.entry)?;
+                self.extension_point_contributions
+                    .push(ContributedExtensionPoint {
+                        source: ContributionSource::new(module, &contribution.id),
                         module_id: module_id.into(),
-                        kind: FrontendEntrypointKind::SettingsUi,
-                        path: path.clone(),
+                        point: point_name.clone(),
+                        id: contribution.id.clone(),
+                        entry: contribution.entry.clone(),
+                        order: contribution.order.unwrap_or(0),
+                        props: contribution.props.clone(),
                     });
             }
         }
@@ -185,7 +217,7 @@ impl ModuleContributionIndex {
                 module_id: module_id.into(),
                 namespace: settings.namespace.clone(),
                 schema: settings.schema.clone(),
-                settings_ui: manifest.mesh.entrypoints.settings_ui.clone(),
+                settings_page: settings_page_entry(manifest),
             });
         }
         if let Some(schema) = derived_props_schema {
@@ -194,7 +226,7 @@ impl ModuleContributionIndex {
                 module_id: module_id.into(),
                 namespace: module_id.into(),
                 schema,
-                settings_ui: manifest.mesh.entrypoints.settings_ui.clone(),
+                settings_page: settings_page_entry(manifest),
             });
         }
         for (action_id, action) in &manifest.mesh.keybinds.actions {
@@ -241,7 +273,6 @@ impl ModuleContributionIndex {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrontendEntrypointKind {
     Main,
-    SettingsUi,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -364,9 +395,10 @@ pub struct ContributedSettingsSchema {
     pub module_id: String,
     pub namespace: String,
     pub schema: serde_json::Value,
-    /// Optional module-authored settings component that replaces the generated
-    /// layout while retaining this schema for validation and persistence.
-    pub settings_ui: Option<String>,
+    /// Module-authored settings page, when this module contributes one to
+    /// `mesh.settings.page`. It replaces the generated layout while this schema
+    /// still governs validation and persistence.
+    pub settings_page: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -408,6 +440,261 @@ pub struct ContributedIconRequirement {
     pub module_id: String,
     pub name: String,
     pub required: bool,
+}
+
+/// Host↔contribution matching for every declared extension point.
+///
+/// Runs on the graph's enabled set: a host that is installed but not composed
+/// receives nothing, and its contributions report `unhosted_contribution`
+/// rather than disappearing silently.
+pub(in crate::package) fn resolve_extension_points(
+    contributions: &ModuleContributionIndex,
+) -> (
+    HashMap<(String, String), Vec<ResolvedExtensionPointContribution>>,
+    Vec<super::ModuleGraphDiagnostic>,
+) {
+    use mesh_core_service::{parse_contract_version, parse_version_req};
+
+    let mut diagnostics = Vec::new();
+    let declarations: HashMap<&str, &DeclaredExtensionPoint> = contributions
+        .extension_points
+        .iter()
+        .map(|declaration| (declaration.name.as_str(), declaration))
+        .collect();
+
+    let mut hosts: Vec<&ExtensionPointHost> = Vec::new();
+    for host in &contributions.extension_point_hosts {
+        let Some(declaration) = declarations.get(host.name.as_str()) else {
+            diagnostics.push(super::ModuleGraphDiagnostic {
+                module_id: host.module_id.clone(),
+                contribution_id: Some(format!("{}:hosts:{}", host.module_id, host.name)),
+                status: "unknown_extension_point".into(),
+                message: format!(
+                    "{} hosts extension point {}, which no installed interface module declares",
+                    host.module_id, host.name
+                ),
+            });
+            continue;
+        };
+        if let Some(requirement) = &host.version_req
+            && let (Some(request), Some(declared)) = (
+                parse_version_req(requirement),
+                parse_contract_version(&declaration.version),
+            )
+            && !request.matches(&declared)
+        {
+            diagnostics.push(super::ModuleGraphDiagnostic {
+                module_id: host.module_id.clone(),
+                contribution_id: Some(format!("{}:hosts:{}", host.module_id, host.name)),
+                status: "extension_point_version_mismatch".into(),
+                message: format!(
+                    "{} hosts {} {requirement}, but the declared version is {}",
+                    host.module_id, host.name, declaration.version
+                ),
+            });
+            continue;
+        }
+        hosts.push(host);
+    }
+
+    let mut resolved: HashMap<(String, String), Vec<ResolvedExtensionPointContribution>> =
+        HashMap::new();
+    for contribution in &contributions.extension_point_contributions {
+        let Some(declaration) = declarations.get(contribution.point.as_str()) else {
+            diagnostics.push(super::ModuleGraphDiagnostic {
+                module_id: contribution.module_id.clone(),
+                contribution_id: Some(format!(
+                    "{}:extension-point:{}",
+                    contribution.module_id, contribution.id
+                )),
+                status: "unknown_extension_point".into(),
+                message: format!(
+                    "{} contributes to extension point {}, which no installed interface module declares",
+                    contribution.module_id, contribution.point
+                ),
+            });
+            continue;
+        };
+        if let Some(error) = extension_point_prop_error(declaration, contribution) {
+            diagnostics.push(super::ModuleGraphDiagnostic {
+                module_id: contribution.module_id.clone(),
+                contribution_id: Some(format!(
+                    "{}:extension-point:{}",
+                    contribution.module_id, contribution.id
+                )),
+                status: "invalid_extension_point_props".into(),
+                message: error,
+            });
+            continue;
+        }
+
+        let matching_hosts = hosts
+            .iter()
+            .filter(|host| host.name == contribution.point)
+            .collect::<Vec<_>>();
+        if matching_hosts.is_empty() {
+            diagnostics.push(super::ModuleGraphDiagnostic {
+                module_id: contribution.module_id.clone(),
+                contribution_id: Some(format!(
+                    "{}:extension-point:{}",
+                    contribution.module_id, contribution.id
+                )),
+                status: "unhosted_contribution".into(),
+                message: format!(
+                    "{} contributes '{}' to {}, but no enabled module hosts that point",
+                    contribution.module_id, contribution.id, contribution.point
+                ),
+            });
+            continue;
+        }
+        for host in matching_hosts {
+            resolved
+                .entry((host.module_id.clone(), contribution.point.clone()))
+                .or_default()
+                .push(ResolvedExtensionPointContribution {
+                    host_module_id: host.module_id.clone(),
+                    point: contribution.point.clone(),
+                    source_module_id: contribution.module_id.clone(),
+                    contribution_id: contribution.id.clone(),
+                    entry: contribution.entry.clone(),
+                    order: contribution.order,
+                    props: contribution.props.clone(),
+                });
+        }
+    }
+
+    // Deterministic render order, so a rebuild never reshuffles a settings page.
+    for entries in resolved.values_mut() {
+        entries.sort_by(|left, right| {
+            left.order
+                .cmp(&right.order)
+                .then_with(|| left.source_module_id.cmp(&right.source_module_id))
+                .then_with(|| left.contribution_id.cmp(&right.contribution_id))
+        });
+    }
+    for ((host_module_id, point), entries) in &resolved {
+        let Some(declaration) = declarations.get(point.as_str()) else {
+            continue;
+        };
+        if !declaration.multiple && entries.len() > 1 {
+            diagnostics.push(super::ModuleGraphDiagnostic {
+                module_id: host_module_id.clone(),
+                contribution_id: Some(format!("{host_module_id}:hosts:{point}")),
+                status: "extension_point_overfilled".into(),
+                message: format!(
+                    "{point} accepts one contribution, but {} modules contribute to {host_module_id}: {}",
+                    entries.len(),
+                    entries
+                        .iter()
+                        .map(|entry| entry.source_module_id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            });
+        }
+    }
+
+    (resolved, diagnostics)
+}
+
+fn extension_point_prop_error(
+    declaration: &DeclaredExtensionPoint,
+    contribution: &ContributedExtensionPoint,
+) -> Option<String> {
+    use mesh_core_service::TypeExpr;
+
+    for (name, value) in &contribution.props {
+        let Some((_, type_expression)) = declaration
+            .props
+            .iter()
+            .find(|(declared, _)| declared == name)
+        else {
+            return Some(format!(
+                "contribution '{}' passes prop '{name}', which {} does not declare",
+                contribution.id, declaration.name
+            ));
+        };
+        match TypeExpr::parse(type_expression) {
+            Ok(expression) if expression.matches(value) => {}
+            Ok(_) => {
+                return Some(format!(
+                    "contribution '{}' prop '{name}' does not match declared type {type_expression}",
+                    contribution.id
+                ));
+            }
+            // An unparseable declared type is the interface module's bug and is
+            // already reported there; do not blame the contributor for it.
+            Err(_) => {}
+        }
+    }
+    None
+}
+
+/// The entry of this module's own `mesh.settings.page` contribution, if any.
+fn settings_page_entry(manifest: &ModuleManifest) -> Option<String> {
+    manifest
+        .mesh
+        .contributes
+        .extension_points
+        .get(SETTINGS_PAGE_POINT)?
+        .first()
+        .map(|contribution| contribution.entry.clone())
+}
+
+/// The extension point a settings frontend hosts. Named here only to relate a
+/// module's own page back to its schema for diagnostics — host matching itself
+/// never names a module.
+pub const SETTINGS_PAGE_POINT: &str = "mesh.settings.page";
+
+/// An extension point contract declared by an interface module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclaredExtensionPoint {
+    pub source: ContributionSource,
+    pub module_id: String,
+    pub name: String,
+    pub version: String,
+    pub multiple: bool,
+    /// Declared prop name → type expression, in the interface type grammar.
+    pub props: Vec<(String, String)>,
+}
+
+/// A module that renders contributions to an extension point.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionPointHost {
+    pub source: ContributionSource,
+    pub module_id: String,
+    pub name: String,
+    pub version_req: Option<String>,
+    pub layout: Option<String>,
+    pub max: Option<u32>,
+}
+
+/// A module's contribution to an extension point, before host matching.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContributedExtensionPoint {
+    pub source: ContributionSource,
+    pub module_id: String,
+    pub point: String,
+    pub id: String,
+    pub entry: String,
+    pub order: i64,
+    pub props: serde_json::Map<String, serde_json::Value>,
+}
+
+/// One contribution matched to one host, in render order.
+///
+/// A contribution resolves into *every* enabled host of its point: two settings
+/// frontends both receive the pages, which is the correct behavior and needs no
+/// special case.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedExtensionPointContribution {
+    pub host_module_id: String,
+    pub point: String,
+    pub source_module_id: String,
+    pub contribution_id: String,
+    pub entry: String,
+    pub order: i64,
+    pub props: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

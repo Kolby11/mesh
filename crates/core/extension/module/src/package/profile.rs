@@ -9,7 +9,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 1;
+pub const PROFILE_SCHEMA_VERSION: u32 = 2;
 pub const DEFAULT_PROFILE_ID: &str = "default";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +17,11 @@ pub const DEFAULT_PROFILE_ID: &str = "default";
 pub struct ShellProfile {
     #[serde(default = "default_profile_schema_version")]
     pub schema_version: u32,
+    /// The composition module this profile instantiates. Absent means a
+    /// hand-built composition: every field below is the whole decision rather
+    /// than a delta over an installed composition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<super::CompositionRef>,
     #[serde(default)]
     pub roots: BTreeMap<String, ProfileRootInstance>,
     #[serde(default)]
@@ -32,7 +37,7 @@ pub struct ShellProfile {
     pub settings: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProfileRootInstance {
     pub module: String,
@@ -45,7 +50,7 @@ pub struct ProfileRootInstance {
     pub surface: Option<SurfaceLayoutSection>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProfileResources {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -113,10 +118,23 @@ impl ShellProfile {
         Ok(profile)
     }
 
+    /// This profile's own decisions, as a composition layer.
+    pub fn as_composition_spec(&self) -> super::CompositionSpec {
+        super::CompositionSpec {
+            roots: self.roots.clone(),
+            background_services: self.background_services.clone(),
+            providers: self.providers.clone(),
+            resources: self.resources.clone(),
+            slots: BTreeMap::new(),
+            settings: self.settings.clone(),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), ModuleManifestError> {
         if self.schema_version != PROFILE_SCHEMA_VERSION {
             return Err(ModuleManifestError::Validation(format!(
-                "unsupported profile schemaVersion {}; supported version is {PROFILE_SCHEMA_VERSION}",
+                "unsupported profile schemaVersion {}; supported version is {PROFILE_SCHEMA_VERSION}. \
+                 Schema 2 adds the optional `from` composition reference; set \"schemaVersion\": {PROFILE_SCHEMA_VERSION} to migrate an otherwise valid profile",
                 self.schema_version
             )));
         }
@@ -127,6 +145,9 @@ impl ShellProfile {
                     "profile root {instance_id} has an empty entrypoint"
                 )));
             }
+        }
+        if let Some(from) = &self.from {
+            validate_module_ids([&from.module].into_iter(), "from")?;
         }
         validate_module_ids(self.background_services.iter(), "backgroundServices")?;
         validate_module_ids(self.providers.values(), "providers")?;
@@ -311,6 +332,7 @@ impl Default for ShellProfile {
     fn default() -> Self {
         Self {
             schema_version: PROFILE_SCHEMA_VERSION,
+            from: None,
             roots: BTreeMap::new(),
             background_services: BTreeSet::new(),
             providers: BTreeMap::new(),
@@ -482,7 +504,7 @@ fn validate_profile_id(profile_id: &str) -> Result<(), ModuleManifestError> {
     Ok(())
 }
 
-fn atomic_write(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> {
+pub(super) fn atomic_write(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| ModuleManifestError::Io {
             path: parent.to_path_buf(),
@@ -607,7 +629,7 @@ mod tests {
     fn profile_settings_are_sparse_namespaced_objects() {
         let profile = ShellProfile::from_json_str(
             r#"{
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "settings": {
                     "shell": { "i18n": { "locale": "sk-SK" } },
                     "@me/panel#work": { "props": { "global": { "dense": true } } }
@@ -618,7 +640,7 @@ mod tests {
         assert_eq!(profile.settings["shell"]["i18n"]["locale"], "sk-SK");
         assert!(
             ShellProfile::from_json_str(
-                r#"{"schemaVersion":1,"settings":{"shell":"not-an-object"}}"#
+                r#"{"schemaVersion":2,"settings":{"shell":"not-an-object"}}"#
             )
             .is_err()
         );

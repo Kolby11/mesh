@@ -1,0 +1,33 @@
+{
+  "name": "@mesh/shell-ui-interface",
+  "version": "1.0.0",
+  "description": "UI extension point contracts: the named regions a host surface renders foreign module UI into.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "extensionPoints": {
+      "mesh.settings.page": {
+        "version": "1.0",
+        "description": "A settings page mounted into a settings frontend. Any module may contribute one; any settings frontend may host the point.",
+        "multiple": true,
+        "props": [
+          {
+            "name": "namespace",
+            "type": "string",
+            "description": "Settings namespace the page reads and writes; defaults to the contributing module id"
+          },
+          {
+            "name": "title",
+            "type": "string",
+            "description": "Page title shown by the host"
+          },
+          {
+            "name": "icon",
+            "type": "string?",
+            "description": "Semantic icon name for the host's navigation"
+          }
+        ]
+      }
+    }
+  }
+}

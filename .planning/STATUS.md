@@ -1,11 +1,25 @@
 # Status
 
-**Updated:** 2026-08-04
+**Updated:** 2026-08-07
 
 This page describes the present and is meant to be overwritten. History lives in
 [`log/`](log/); open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
+
+**Compositions are modules and extension points are contracts.** All five
+stages landed. Slots keyed by module id are gone, and with them the hardcoded
+`@mesh/settings` host in `catalog.rs`: a host declares `mesh.hosts`, a
+contributor names the point, and the core matches them without knowing either
+party. `kind: "composition"` makes a whole shell family installable, pinnable,
+updatable, and forkable via `extends`; a profile is now that composition plus
+the user's deltas. `mesh.lock` v2 carries version, content digest, and
+requesters, written transactionally, so `mesh update` can diff interface
+contracts as data, refuse breaking or unapproved changes before committing, and
+`mesh rollback` can restore a generation. Record:
+[`log/2026-08.md`](log/2026-08.md). Still open: the `mesh.settings` service and
+typed profile/package services that a fully replaceable settings frontend needs
+([`docs/BACKLOG.md`](../docs/BACKLOG.md)).
 
 **In flight: phase26 raster-cache test isolation.** Its canonical measurement
 passes serially but shares a process-wide icon/image cache with parallel tests.
@@ -160,7 +174,9 @@ Record: [`log/2026-08.md`](log/2026-08.md).
 frontend cycles each exposed prop between all instances and concrete live
 instance ids, displays the inherited/effective value for that scope, and writes
 or resets sparse `props.instances` overrides through validated typed requests.
-Custom `settings_ui` mounting remains open (2026-08-02). Record:
+Optional module-owned `settings_ui` entrypoints now compile into the frontend
+catalog and mount through the Settings surface's `custom-settings` slot.
+Record:
 [`log/2026-08.md`](log/2026-08.md).
 
 **Transient popups and overlays are shipped.** In-tree `<popover>` content is
@@ -199,8 +215,9 @@ renders controls and reset actions, and privileged writes are validated before
 updating sparse profile-scoped overrides. Hand-edited global and per-instance
 prop overrides now go through the same declarations on startup/reload and in
 `config doctor`; invalid values are ignored so declared defaults win. `config
-eject` materializes effective exposed props alongside surface placement. Custom
-`settings_ui` mounting and per-instance targeting remain open (2026-08-02). Record:
+eject` materializes effective exposed props alongside surface placement.
+Optional module-owned `settings_ui` mounting is shipped; per-instance targeting
+remains open (2026-08-07). Record:
 [`log/2026-08.md`](log/2026-08.md).
 
 **External interface contracts are typed through the editor boundary.** The

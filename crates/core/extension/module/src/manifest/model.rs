@@ -38,10 +38,12 @@ pub struct Manifest {
     pub extensions: Vec<ExtensionSection>,
     #[serde(default)]
     pub exports: ExportsSection,
+    /// Extension points this module hosts, keyed by contract name.
     #[serde(default)]
-    pub provides_slots: HashMap<String, SlotDefinition>,
+    pub hosted_extension_points: HashMap<String, HostedExtensionPoint>,
+    /// Contributions this module makes, keyed by extension point contract name.
     #[serde(default)]
-    pub slot_contributions: HashMap<String, Vec<SlotContribution>>,
+    pub extension_point_contributions: HashMap<String, Vec<ExtensionPointContribution>>,
     #[serde(default)]
     pub assets: Option<AssetsSection>,
     #[serde(default)]
@@ -100,14 +102,6 @@ impl Manifest {
             .iter()
             .filter(|(_, spec)| !spec.is_optional())
             .map(|(module_id, _)| module_id.clone())
-            .collect()
-    }
-
-    pub fn slot_host_dependencies(&self) -> Vec<String> {
-        self.slot_contributions
-            .keys()
-            .filter_map(|slot_id| slot_id.split_once(':').map(|(module_id, _)| module_id))
-            .map(ToString::to_string)
             .collect()
     }
 
@@ -221,6 +215,7 @@ pub enum ModuleType {
     Interface,
     Library,
     Component,
+    Composition,
 }
 
 impl std::fmt::Display for ModuleType {
@@ -236,6 +231,7 @@ impl std::fmt::Display for ModuleType {
             Self::Interface => write!(f, "interface"),
             Self::Library => write!(f, "library"),
             Self::Component => write!(f, "component"),
+            Self::Composition => write!(f, "composition"),
         }
     }
 }
@@ -402,8 +398,6 @@ impl CapabilitiesSection {
 pub struct EntrypointsSection {
     #[serde(default)]
     pub main: Option<String>,
-    #[serde(default)]
-    pub settings_ui: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -701,32 +695,38 @@ pub struct ComponentExport {
     pub tag: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SlotDefinition {
+/// A UI extension point this module hosts.
+///
+/// The key is the point's contract name (`mesh.settings.page`), never a module
+/// id, so a host can be replaced without breaking its contributors. Hosting is
+/// declared explicitly because a host renders another module's UI inside its
+/// own surface — that is a trust decision, not an inference.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct HostedExtensionPoint {
+    /// Accepted contract version range; `None` means any version.
     #[serde(default)]
-    pub accepts: Option<String>,
+    pub version: Option<String>,
+    /// How the host lays contributions out: `row` (default), `column`, `stack`.
     #[serde(default)]
     pub layout: Option<String>,
+    /// Cap on rendered contributions.
     #[serde(default)]
     pub max: Option<u32>,
-    #[serde(default)]
-    pub min: Option<u32>,
-    #[serde(default)]
-    pub default: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SlotContribution {
-    #[serde(default)]
-    pub widget: Option<String>,
-    #[serde(default)]
-    pub props: serde_json::Map<String, serde_json::Value>,
+/// One module's contribution to an extension point.
+///
+/// `entry` is a module-relative `.mesh` component compiled as an alternate root
+/// of the contributing module: it runs in its own VM with its own capabilities
+/// and settings namespace, inside the host's tree.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ExtensionPointContribution {
+    pub id: String,
+    pub entry: String,
     #[serde(default)]
     pub order: Option<i64>,
     #[serde(default)]
-    pub when: Option<String>,
-    #[serde(default)]
-    pub id: Option<String>,
+    pub props: serde_json::Map<String, serde_json::Value>,
 }
 
 /// The typed home for the author-facing `mesh.surface` block.
@@ -737,7 +737,7 @@ pub struct SlotContribution {
 /// Placement only. Sizing and the show/hide transition live in the component's
 /// CSS on the surface root and are measured at paint time — see
 /// `docs/spec/03-components.md` §2.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SurfaceLayoutSection {
     /// `"layer"` (default, `zwlr_layer_shell_v1` chrome) or `"window"`
     /// (`xdg_toplevel`).
@@ -829,7 +829,7 @@ impl SurfaceLayoutSection {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SurfaceMargins {
     #[serde(default)]
     pub top: i32,

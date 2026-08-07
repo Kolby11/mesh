@@ -1455,7 +1455,8 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
     let compiled = compile_frontend_module(&manifest, module_dir).unwrap();
     let catalog = FrontendCatalog {
         modules: Default::default(),
-        slot_contributions: Default::default(),
+        extension_point_contributions: Default::default(),
+        extension_point_entries: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,
@@ -1556,7 +1557,8 @@ local Child = require("./components/child.mesh")
                 compiled: compiled.clone().into(),
             },
         )]),
-        slot_contributions: Default::default(),
+        extension_point_contributions: Default::default(),
+        extension_point_entries: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,

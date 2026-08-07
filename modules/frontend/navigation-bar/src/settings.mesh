@@ -1,0 +1,22 @@
+<template>
+    <column class="settings-section">
+        <text class="settings-section-title">Navigation bar</text>
+        <text class="settings-section-copy">This module contributes its own settings surface.</text>
+        <text class="settings-card-meta">{settings_revision}</text>
+    </column>
+</template>
+
+<script lang="luau">
+local settings = require("mesh.settings")
+settings_revision = ""
+
+function render()
+    settings_revision = tostring(settings.revision or "")
+end
+</script>
+
+<style>
+    .settings-section {
+        width: 100%;
+    }
+</style>

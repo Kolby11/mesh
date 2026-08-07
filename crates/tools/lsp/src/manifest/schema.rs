@@ -6,7 +6,7 @@
 //! manifest key completion, hover documentation, and unknown-key / enum
 //! diagnostics. When the runtime schema changes, update this tree to match.
 
-use crate::json::schema::{Kind, Node, field, obj, scalar};
+use crate::json::schema::{Kind, Node, enumeration, field, obj, scalar};
 
 /// Build a node from this file's `&'static str` literals.
 fn node(doc: &'static str, type_hint: &'static str, kind: Kind) -> Node {
@@ -38,6 +38,7 @@ pub const MODULE_KINDS: &[&str] = &[
     "language-pack",
     "library",
     "component",
+    "composition",
 ];
 
 /// A curated set of well-known capability strings. Capabilities are extensible
@@ -282,14 +283,11 @@ fn mesh_section() -> Node {
                 false,
                 obj(
                     "Named entrypoints for the module.",
-                    vec![
-                        field("main", false, scalar("Primary entrypoint path.", "path")),
-                        field(
-                            "settingsUi",
-                            false,
-                            scalar("Settings UI entrypoint path.", "path"),
-                        ),
-                    ],
+                    vec![field(
+                        "main",
+                        false,
+                        scalar("Primary entrypoint path.", "path"),
+                    )],
                 ),
             ),
             field(
@@ -299,6 +297,59 @@ fn mesh_section() -> Node {
                     "Declarative keybind metadata, keyed by action id.",
                     "object",
                     Kind::Map(Box::new(keybind_node())),
+                ),
+            ),
+            field(
+                "extensionPoints",
+                false,
+                node(
+                    "UI extension point contracts declared by this interface module. \
+                     Keyed by dotted contract name (`mesh.settings.page`), never by \
+                     module id, so a host can be replaced without breaking contributors.",
+                    "object",
+                    Kind::Map(Box::new(extension_point_declaration_node())),
+                ),
+            ),
+            field(
+                "hosts",
+                false,
+                node(
+                    "Extension points this module renders contributions into. Hosting \
+                     is explicit because a host renders another module's UI inside its \
+                     own surface.",
+                    "object",
+                    Kind::Map(Box::new(obj(
+                        "How this host accepts and lays out contributions.",
+                        vec![
+                            field(
+                                "version",
+                                false,
+                                scalar("Accepted contract version range.", "string"),
+                            ),
+                            field(
+                                "layout",
+                                false,
+                                enumeration(
+                                    "How contributions are laid out.",
+                                    &["row", "column", "stack"],
+                                ),
+                            ),
+                            field(
+                                "max",
+                                false,
+                                scalar("Cap on rendered contributions.", "integer"),
+                            ),
+                        ],
+                    ))),
+                ),
+            ),
+            field("compose", false, compose_node()),
+            field(
+                "extends",
+                false,
+                scalar(
+                    "Composition modules only: the composition this one refines.",
+                    "string",
                 ),
             ),
             field("dependencies", false, mesh_dependencies()),
@@ -520,10 +571,246 @@ fn mesh_dependencies() -> Node {
     )
 }
 
+fn extension_point_declaration_node() -> Node {
+    obj(
+        "One UI extension point contract.",
+        vec![
+            field("version", true, scalar("Contract version.", "string")),
+            field(
+                "description",
+                false,
+                scalar("What this point is for.", "string"),
+            ),
+            field(
+                "multiple",
+                false,
+                scalar(
+                    "Whether every contribution renders (default true) or only the \
+                     highest-precedence one.",
+                    "boolean",
+                ),
+            ),
+            field(
+                "props",
+                false,
+                node(
+                    "Props the host passes to each contribution.",
+                    "array",
+                    Kind::Array(Box::new(obj(
+                        "A declared prop.",
+                        vec![
+                            field("name", true, scalar("Prop name.", "string")),
+                            field(
+                                "type",
+                                true,
+                                scalar("Type expression in the contract grammar.", "string"),
+                            ),
+                            field("description", false, scalar("What it carries.", "string")),
+                        ],
+                    ))),
+                ),
+            ),
+        ],
+    )
+}
+
+fn compose_node() -> Node {
+    obj(
+        "Composition modules only: what this composition selects. A composition \
+         binds providers and composes roots; it never owns them.",
+        vec![
+            field(
+                "roots",
+                false,
+                node(
+                    "Root component instances, keyed `module-id#instance-id`.",
+                    "object",
+                    Kind::Map(Box::new(obj(
+                        "A root instance.",
+                        vec![
+                            field("module", true, scalar("Module id.", "string")),
+                            field("entrypoint", false, scalar("Entrypoint id.", "string")),
+                            field(
+                                "active",
+                                false,
+                                scalar("Whether it is composed.", "boolean"),
+                            ),
+                            field(
+                                "surface",
+                                false,
+                                node(
+                                    "Sparse placement override; omitted fields inherit \
+                                     the module's `mesh.surface`.",
+                                    "object",
+                                    Kind::Map(Box::new(scalar("Placement value.", "any"))),
+                                ),
+                            ),
+                        ],
+                    ))),
+                ),
+            ),
+            field(
+                "backgroundServices",
+                false,
+                node(
+                    "Backend modules started with this composition.",
+                    "array",
+                    Kind::Array(Box::new(scalar("Module id.", "string"))),
+                ),
+            ),
+            field(
+                "providers",
+                false,
+                node(
+                    "Explicit provider bindings, interface name to module id. Needed \
+                     only where several modules implement one interface.",
+                    "object",
+                    Kind::Map(Box::new(scalar("Provider module id.", "string"))),
+                ),
+            ),
+            field(
+                "resources",
+                false,
+                obj(
+                    "Resource selections. Ordered chains replace rather than merge.",
+                    vec![
+                        field("theme", false, scalar("Active theme module id.", "string")),
+                        field(
+                            "icons",
+                            false,
+                            node(
+                                "Ordered icon pack chain.",
+                                "array",
+                                Kind::Array(Box::new(scalar("Module id.", "string"))),
+                            ),
+                        ),
+                        field(
+                            "fonts",
+                            false,
+                            node(
+                                "Ordered font pack chain.",
+                                "array",
+                                Kind::Array(Box::new(scalar("Module id.", "string"))),
+                            ),
+                        ),
+                        field(
+                            "languages",
+                            false,
+                            node(
+                                "Ordered language pack chain.",
+                                "array",
+                                Kind::Array(Box::new(scalar("Module id.", "string"))),
+                            ),
+                        ),
+                    ],
+                ),
+            ),
+            field(
+                "slots",
+                false,
+                node(
+                    "Per-extension-point overrides: how this composition rearranges \
+                     the UI its members contribute, without editing any member.",
+                    "object",
+                    Kind::Map(Box::new(obj(
+                        "Overrides for one extension point.",
+                        vec![
+                            field(
+                                "replace",
+                                false,
+                                node(
+                                    "Contributing module id to replacement module id.",
+                                    "object",
+                                    Kind::Map(Box::new(scalar("Replacement module id.", "string"))),
+                                ),
+                            ),
+                            field(
+                                "suppress",
+                                false,
+                                node(
+                                    "Contributing modules whose contributions are hidden.",
+                                    "array",
+                                    Kind::Array(Box::new(scalar("Module id.", "string"))),
+                                ),
+                            ),
+                            field(
+                                "order",
+                                false,
+                                node(
+                                    "Explicit render order by contributing module id.",
+                                    "array",
+                                    Kind::Array(Box::new(scalar("Module id.", "string"))),
+                                ),
+                            ),
+                        ],
+                    ))),
+                ),
+            ),
+            field(
+                "settings",
+                false,
+                node(
+                    "Composition-scoped sparse settings, by namespace.",
+                    "object",
+                    Kind::Map(Box::new(scalar("Namespace object.", "object"))),
+                ),
+            ),
+        ],
+    )
+}
+
 fn mesh_contributes(doc: &'static str) -> Node {
     obj(
         doc,
         vec![
+            field(
+                "extensionPoints",
+                false,
+                node(
+                    "Contributions to extension points hosted by other modules, keyed \
+                     by the point's contract name. A contribution names the point, \
+                     never the host.",
+                    "object",
+                    Kind::Map(Box::new(node(
+                        "Contributions to one extension point.",
+                        "array",
+                        Kind::Array(Box::new(obj(
+                            "One contribution.",
+                            vec![
+                                field(
+                                    "id",
+                                    true,
+                                    scalar("Contribution id, unique per module.", "string"),
+                                ),
+                                field(
+                                    "entry",
+                                    true,
+                                    scalar(
+                                        "Module-relative `.mesh` component, compiled as an \
+                                         alternate root of this module.",
+                                        "path",
+                                    ),
+                                ),
+                                field(
+                                    "order",
+                                    false,
+                                    scalar("Render order within the point.", "integer"),
+                                ),
+                                field(
+                                    "props",
+                                    false,
+                                    node(
+                                        "Props passed to the contribution, typechecked \
+                                         against the point's declaration.",
+                                        "object",
+                                        Kind::Map(Box::new(scalar("Prop value.", "any"))),
+                                    ),
+                                ),
+                            ],
+                        ))),
+                    ))),
+                ),
+            ),
             field(
                 "layout",
                 false,

@@ -8,14 +8,6 @@ use mesh_core_module::ModuleType;
 
 use super::{FrontendSurfaceComponent, memo};
 
-fn slot_id(module_id: &str, slot_name: &str) -> String {
-    let mut id = String::with_capacity(module_id.len() + 1 + slot_name.len());
-    id.push_str(module_id);
-    id.push(':');
-    id.push_str(slot_name);
-    id
-}
-
 impl FrontendSurfaceComponent {
     fn record_component_instance_build(
         &self,
@@ -124,68 +116,81 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             repeated_by_loop,
             loop_identity,
         );
-        if let Some(entry) = self.frontend_catalog.modules.get(&host.package.id) {
-            if let Some(component) = entry.compiled.local_components.get(alias) {
-                let instance_key = self.instance_keys.borrow_mut().intern_embedded_occurrence(
-                    host_instance_key,
-                    "local",
-                    alias,
-                    duplicate_ordinal,
-                    loop_ordinal,
-                    loop_identity,
-                );
-                let props_fingerprint =
-                    memo::component_props_fingerprint(props, prop_handler_calls);
-                if let Some(node) = self.lookup_component_memo(
-                    &instance_key,
-                    props_fingerprint,
-                    container_width,
-                    container_height,
-                ) {
-                    self.record_avoided_component_build();
-                    return Some(node);
-                }
-                let marks_before = self.memo_effect_marks();
-                let build_started = self.profiling_enabled.then(std::time::Instant::now);
-                let bind_this = props.bind_this.clone();
-                let props_json = runtime_props_json(&props.values);
-                let mut node = self.render_local_component(
-                    &entry.compiled.manifest,
-                    alias,
-                    component,
-                    &instance_key,
-                    &props_json,
-                    container_width,
-                    container_height,
-                    entry
-                        .compiled
-                        .component
-                        .style
-                        .as_ref()
-                        .map(|style| style.rules.as_slice())
-                        .unwrap_or(&[]),
-                );
-                let source_path = local_component_source_path(&entry.compiled, alias);
-                annotate_source_file(&mut node, &source_path);
-                apply_prop_handler_calls(&mut node, &props.values, prop_handler_calls);
-                if let Some(binding) = bind_this.and_then(|value| simple_state_binding(&value)) {
-                    self.bind_child_instance(host_instance_key, &binding, &instance_key);
-                }
-                self.store_component_memo(
-                    &instance_key,
-                    props_fingerprint,
-                    container_width,
-                    container_height,
-                    marks_before,
-                    &node,
-                );
-                self.record_component_instance_build(
-                    &instance_key,
-                    &entry.compiled.manifest.package.id,
-                    build_started,
-                );
+        let primary_compiled = self
+            .frontend_catalog
+            .modules
+            .get(&host.package.id)
+            .map(|entry| &entry.compiled);
+        // A contribution root carries its own local components, so resolve the
+        // alias against whichever of this module's compiled roots declares it.
+        let local_compiled = primary_compiled
+            .filter(|compiled| compiled.local_components.contains_key(alias))
+            .or_else(|| {
+                self.frontend_catalog
+                    .contribution_entries_for(&host.package.id)
+                    .find(|compiled| compiled.local_components.contains_key(alias))
+            })
+            .or(primary_compiled);
+        if let Some(compiled) = local_compiled
+            && let Some(component) = compiled.local_components.get(alias)
+        {
+            let instance_key = self.instance_keys.borrow_mut().intern_embedded_occurrence(
+                host_instance_key,
+                "local",
+                alias,
+                duplicate_ordinal,
+                loop_ordinal,
+                loop_identity,
+            );
+            let props_fingerprint = memo::component_props_fingerprint(props, prop_handler_calls);
+            if let Some(node) = self.lookup_component_memo(
+                &instance_key,
+                props_fingerprint,
+                container_width,
+                container_height,
+            ) {
+                self.record_avoided_component_build();
                 return Some(node);
             }
+            let marks_before = self.memo_effect_marks();
+            let build_started = self.profiling_enabled.then(std::time::Instant::now);
+            let bind_this = props.bind_this.clone();
+            let props_json = runtime_props_json(&props.values);
+            let mut node = self.render_local_component(
+                &compiled.manifest,
+                alias,
+                component,
+                &instance_key,
+                &props_json,
+                container_width,
+                container_height,
+                compiled
+                    .component
+                    .style
+                    .as_ref()
+                    .map(|style| style.rules.as_slice())
+                    .unwrap_or(&[]),
+            );
+            let source_path = local_component_source_path(compiled, alias);
+            annotate_source_file(&mut node, &source_path);
+            apply_prop_handler_calls(&mut node, &props.values, prop_handler_calls);
+            if let Some(binding) = bind_this.and_then(|value| simple_state_binding(&value)) {
+                self.bind_child_instance(host_instance_key, &binding, &instance_key);
+            }
+            self.store_component_memo(
+                &instance_key,
+                props_fingerprint,
+                container_width,
+                container_height,
+                marks_before,
+                &node,
+            );
+            self.record_component_instance_build(
+                &instance_key,
+                &compiled.manifest.package.id,
+                build_started,
+            );
+            return Some(node);
         }
 
         let module_id = match self
@@ -309,46 +314,38 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         &self,
         host: &mesh_core_module::Manifest,
         host_instance_key: &str,
-        slot_name: Option<&str>,
+        extension_point: Option<&str>,
         container_width: f32,
         container_height: f32,
     ) -> Vec<WidgetNode> {
-        let Some(slot_name) = slot_name else {
+        let Some(extension_point) = extension_point else {
             return Vec::new();
         };
+        // A host renders only points it declares. An undeclared `<slot>` is a
+        // graph diagnostic, not a silently empty region.
+        if !host.hosted_extension_points.contains_key(extension_point) {
+            return Vec::new();
+        }
 
-        let slot_id = slot_id(&host.package.id, slot_name);
-        let accepts_widget = host
-            .provides_slots
-            .get(slot_name)
-            .and_then(|definition| definition.accepts.as_deref())
-            .map(|accepts| accepts == "widget")
-            .unwrap_or(false);
-
-        let contributions = self.frontend_catalog.slot_contributions_for(&slot_id);
+        let contributions = self
+            .frontend_catalog
+            .extension_point_contributions_for(&host.package.id, extension_point);
         let mut nodes = Vec::with_capacity(contributions.len());
         for contribution in contributions {
-            let Some(entry) = self.frontend_catalog.modules.get(&contribution.widget_id) else {
+            let Some(compiled) = self.frontend_catalog.contribution_entry(
+                &contribution.source_module_id,
+                &contribution.contribution_id,
+            ) else {
                 nodes.push(self.build_error_widget(format!(
-                    "slot '{slot_id}' references missing module '{}'",
-                    contribution.widget_id
+                    "extension point '{extension_point}' has no compiled entry for '{}' from '{}'",
+                    contribution.contribution_id, contribution.source_module_id
                 )));
                 continue;
             };
 
-            let module_type = entry.compiled.manifest.package.module_type;
-            if accepts_widget && !matches!(module_type, ModuleType::Widget | ModuleType::Component)
-            {
-                nodes.push(self.build_error_widget(format!(
-                    "slot '{slot_id}' accepts widgets, but '{}' is {}",
-                    contribution.widget_id, module_type
-                )));
-                continue;
-            }
-
             let instance_key = self.instance_keys.borrow_mut().intern_slot(
                 host_instance_key,
-                slot_name,
+                extension_point,
                 &contribution.contribution_id,
             );
             let mut node = if let Some(node) = self.lookup_component_memo(
@@ -367,9 +364,10 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                     .iter()
                     .map(|(key, value)| (key.clone(), value.clone()))
                     .collect();
-                let node = self.render_embedded_instance(
+                let node = self.render_embedded_compiled_instance(
                     &instance_key,
-                    &contribution.widget_id,
+                    &contribution.source_module_id,
+                    compiled,
                     &props_json,
                     container_width,
                     container_height,
@@ -384,7 +382,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 );
                 self.record_component_instance_build(
                     &instance_key,
-                    &contribution.widget_id,
+                    &contribution.source_module_id,
                     build_started,
                 );
                 node
@@ -559,42 +557,6 @@ mod tests {
             &*interner.intern_embedded("@mesh/panel/local:Toolbar", "import", "audio_controls"),
             "@mesh/panel/local:Toolbar/import:audio_controls"
         );
-        assert_eq!(
-            slot_id("@mesh/panel", "primary_actions"),
-            "@mesh/panel:primary_actions"
-        );
-    }
-
-    // cargo test -p mesh-core-shell --release -- slot_instance_key_interning_beats_rebuilding_benchmark --ignored --nocapture
-    #[test]
-    #[ignore = "release-only slot instance-key construction microbenchmark"]
-    fn slot_instance_key_interning_beats_rebuilding_benchmark() {
-        let host = "@mesh/panel/local:Toolbar/import:StatusCluster";
-        let slot = "primary_actions";
-        let contribution = "network-status-very-long-contribution-identifier";
-        let iterations = 1_000_000;
-
-        let old_started = Instant::now();
-        let mut old_total = 0usize;
-        for _ in 0..iterations {
-            old_total ^= std::hint::black_box(format!("{host}/slot:{slot}/{contribution}").len());
-        }
-        let old_time = old_started.elapsed();
-
-        let new_started = Instant::now();
-        let mut new_total = 0usize;
-        let mut interner = super::super::InstanceKeyInterner::default();
-        for _ in 0..iterations {
-            new_total ^= std::hint::black_box(interner.intern_slot(host, slot, contribution).len());
-        }
-        let new_time = new_started.elapsed();
-
-        eprintln!(
-            "slot instance key: rebuild {old_time:?}; interned {new_time:?}; ratio {:.2}x",
-            old_time.as_secs_f64() / new_time.as_secs_f64()
-        );
-        assert_eq!(old_total, new_total);
-        assert!(new_time < old_time);
     }
 
     // cargo test -p mesh-core-shell --release -- unmatched_prop_handler_calls_skip_presized_vec --ignored --nocapture
@@ -688,36 +650,6 @@ mod tests {
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_tree.event_handlers, new_tree.event_handlers);
-        assert!(new_time < old_time);
-    }
-
-    // cargo test -p mesh-core-shell --release -- slot_id_presizing_beats_format_benchmark --ignored --nocapture
-    #[test]
-    #[ignore = "release-only slot id construction microbenchmark"]
-    fn slot_id_presizing_beats_format_benchmark() {
-        let module_id = "@mesh/panel/local:StatusCluster/import:NetworkControls";
-        let name = "primary_actions";
-        let iterations = 1_000_000;
-
-        let old_started = Instant::now();
-        let mut old_total = 0usize;
-        for _ in 0..iterations {
-            old_total ^= std::hint::black_box(format!("{module_id}:{name}").len());
-        }
-        let old_time = old_started.elapsed();
-
-        let new_started = Instant::now();
-        let mut new_total = 0usize;
-        for _ in 0..iterations {
-            new_total ^= std::hint::black_box(slot_id(module_id, name).len());
-        }
-        let new_time = new_started.elapsed();
-
-        eprintln!(
-            "slot id: format {old_time:?}; presized {new_time:?}; ratio {:.2}x",
-            old_time.as_secs_f64() / new_time.as_secs_f64()
-        );
-        assert_eq!(old_total, new_total);
         assert!(new_time < old_time);
     }
 

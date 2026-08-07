@@ -105,7 +105,15 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
         frontend_contributes,
     );
     frontend.manifest.mesh.entrypoints.main = Some("src/main.mesh".into());
-    frontend.manifest.mesh.entrypoints.settings_ui = Some("src/settings.mesh".into());
+    frontend.manifest.mesh.contributes.extension_points.insert(
+        "mesh.settings.page".into(),
+        vec![crate::manifest::ExtensionPointContribution {
+            id: "example-widget".into(),
+            entry: "src/settings.mesh".into(),
+            order: None,
+            props: serde_json::Map::new(),
+        }],
+    );
     declare_frontend_surface_contract(&mut frontend);
     frontend.manifest.mesh.keybinds.actions.insert(
         "mute".into(),
@@ -188,7 +196,9 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
         InstalledModuleGraph::from_parts(root, vec![frontend, icon_pack, backend, interface])
             .unwrap();
 
-    assert_eq!(graph.frontend_entrypoints().len(), 2);
+    // A settings page is a contribution to an extension point, not a second
+    // frontend entrypoint.
+    assert_eq!(graph.frontend_entrypoints().len(), 1);
     assert_eq!(graph.frontend_surfaces().len(), 1);
     assert_eq!(graph.frontend_surfaces()[0].path, "src/main.mesh");
     assert_eq!(
@@ -205,7 +215,7 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
         "@mesh/example-widget"
     );
     assert_eq!(
-        graph.settings_schemas()[0].settings_ui.as_deref(),
+        graph.settings_schemas()[0].settings_page.as_deref(),
         Some("src/settings.mesh")
     );
     let keybind = &graph.keybind_actions()[0];

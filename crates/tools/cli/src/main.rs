@@ -1,3 +1,5 @@
+mod update;
+
 use mesh_core_module::ModuleType;
 use mesh_core_shell::{Shell, default_ipc_socket_path};
 use serde::{Deserialize, Serialize};
@@ -34,6 +36,10 @@ fn main() {
         Some("config") => cmd_config(&args[2..]),
         Some("profile") => cmd_profile(&args[2..]),
         Some("install") => cmd_install(&args[2..]),
+        Some("update") => cmd_update(&args[2..]),
+        Some("rollback") => cmd_rollback(&args[2..]),
+        Some("uninstall") => cmd_uninstall(&args[2..]),
+        Some("lock") => cmd_lock(&args[2..]),
         Some("status") => cmd_status(),
         Some("version") => cmd_version(),
         Some("help") | Some("--help") | Some("-h") => cmd_help(),
@@ -447,8 +453,37 @@ fn cmd_profile(args: &[String]) {
                 .unwrap_or_else(|error| exit_error(error));
             println!("removed {namespace} settings from profile {profile_id}");
         }
+        Some("prune") => {
+            let profile_id = required_arg(args, 1, "mesh-shell profile prune <profile>");
+            let root_path = root_module_graph_path();
+            let graph = mesh_core_module::package::load_installed_module_graph(&root_path)
+                .unwrap_or_else(|error| exit_error(error));
+            let mut profile = paths
+                .load(profile_id)
+                .unwrap_or_else(|error| exit_error(error));
+            let manifests = graph
+                .modules()
+                .into_iter()
+                .map(|module| module.manifest.clone())
+                .collect::<Vec<_>>();
+            let resolved =
+                mesh_core_module::package::resolve_composition(&profile, manifests.iter())
+                    .unwrap_or_else(|error| exit_error(error));
+            if resolved.orphaned_overrides.is_empty() {
+                println!("profile {profile_id} has no orphaned overrides");
+                return;
+            }
+            for instance_id in &resolved.orphaned_overrides {
+                profile.roots.remove(instance_id);
+                profile.settings.remove(instance_id);
+                println!("pruned {instance_id}");
+            }
+            paths
+                .save(profile_id, &profile)
+                .unwrap_or_else(|error| exit_error(error));
+        }
         Some(other) => exit_error(format!(
-            "unknown profile subcommand: {other}\nsubcommands: list, create, use, show, add, enable, disable, remove, set, unset"
+            "unknown profile subcommand: {other}\nsubcommands: list, create, use, show, add, enable, disable, remove, set, unset, prune"
         )),
     }
 }
@@ -527,10 +562,64 @@ fn cmd_install(args: &[String]) {
             return Err("installed module kind changed while copying".into());
         }
 
-        if args.iter().any(|arg| arg == "--available-only")
-            || manifest.mesh.kind != mesh_core_module::package::ModuleKind::Frontend
+        use mesh_core_module::package::ModuleKind;
+
+        // Installing a composition selects it: the profile records `from` and
+        // inherits its roots, bindings, resources, and slot arrangement. It
+        // creates no root of its own — a composition binds, it never owns.
+        if manifest.mesh.kind == ModuleKind::Composition
+            && !args.iter().any(|arg| arg == "--available-only")
         {
-            persist_git_provenance(config_dir, &manifest.name, source.provenance());
+            let paths = profile_paths();
+            let profile_id = args
+                .iter()
+                .position(|arg| arg == "--profile")
+                .and_then(|index| args.get(index + 1))
+                .cloned()
+                .or_else(|| paths.active_profile_id().ok().flatten())
+                .unwrap_or_else(|| mesh_core_module::package::DEFAULT_PROFILE_ID.to_string());
+            let mut profile = paths
+                .load_or_default(&profile_id)
+                .map_err(|error| error.to_string())?;
+            profile.from = Some(mesh_core_module::package::CompositionRef {
+                module: manifest.name.clone(),
+                version: Some(manifest.version.clone()),
+            });
+            paths
+                .save(&profile_id, &profile)
+                .map_err(|error| error.to_string())?;
+            if paths
+                .active_profile_id()
+                .map_err(|error| error.to_string())?
+                .is_none()
+            {
+                paths
+                    .set_active(&profile_id)
+                    .map_err(|error| error.to_string())?;
+            }
+            record_lock_entry(
+                config_dir,
+                &manifest.name,
+                &manifest.version,
+                &destination,
+                &source,
+            )?;
+            return Ok(Some(format!(
+                "composition {} in profile {profile_id}",
+                manifest.name
+            )));
+        }
+
+        if args.iter().any(|arg| arg == "--available-only")
+            || manifest.mesh.kind != ModuleKind::Frontend
+        {
+            record_lock_entry(
+                config_dir,
+                &manifest.name,
+                &manifest.version,
+                &destination,
+                &source,
+            )?;
             return Ok(None);
         }
 
@@ -543,7 +632,13 @@ fn cmd_install(args: &[String]) {
         let profile_id = explicit_profile.or_else(|| paths.active_profile_id().ok().flatten());
         let Some(profile_id) = profile_id else {
             // Legacy auto-discovery already activates new modules by default.
-            persist_git_provenance(config_dir, &manifest.name, source.provenance());
+            record_lock_entry(
+                config_dir,
+                &manifest.name,
+                &manifest.version,
+                &destination,
+                &source,
+            )?;
             return Ok(Some("legacy root graph (auto-enabled)".into()));
         };
         let mut profile = paths
@@ -584,7 +679,13 @@ fn cmd_install(args: &[String]) {
                 return Err(error.to_string());
             }
         }
-        persist_git_provenance(config_dir, &manifest.name, source.provenance());
+        record_lock_entry(
+            config_dir,
+            &manifest.name,
+            &manifest.version,
+            &destination,
+            &source,
+        )?;
         Ok(Some(format!("{instance_id} in profile {profile_id}")))
     })();
 
@@ -655,13 +756,6 @@ impl InstallSource {
         }
     }
 
-    fn provenance(&self) -> Option<&GitProvenance> {
-        match self {
-            Self::Local(_) => None,
-            Self::Git { provenance, .. } => Some(provenance),
-        }
-    }
-
     fn place_at(&self, destination: &std::path::Path) -> Result<(), String> {
         match self {
             Self::Local(path) => {
@@ -689,12 +783,6 @@ struct GitProvenance {
     source: String,
     requested_ref: Option<String>,
     revision: String,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct MeshLock {
-    #[serde(default)]
-    git: std::collections::BTreeMap<String, GitProvenance>,
 }
 
 fn install_source(source: &str, modules_dir: &std::path::Path) -> Result<InstallSource, String> {
@@ -795,42 +883,221 @@ fn command_error(output: &std::process::Output) -> String {
     }
 }
 
-fn write_git_provenance(
+/// Record an installed module in `mesh.lock`.
+///
+/// The lock is the rollback record, so a write failure fails the install rather
+/// than being reported as a warning after the fact.
+fn record_lock_entry(
     config_dir: &std::path::Path,
     module_id: &str,
-    provenance: &GitProvenance,
+    version: &str,
+    installed_at: &std::path::Path,
+    source: &InstallSource,
 ) -> Result<(), String> {
+    use mesh_core_module::package::{LockedModule, MeshLock, ModuleSource, module_tree_digest};
+
     let path = config_dir.join("mesh.lock");
-    let mut lock = if path.exists() {
-        let content = std::fs::read_to_string(&path)
-            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-        serde_json::from_str(&content)
-            .map_err(|error| format!("failed to parse {}: {error}", path.display()))?
-    } else {
-        MeshLock::default()
+    let history = lock_history_dir(config_dir);
+    let mut lock = MeshLock::load_or_default(&path).map_err(|error| error.to_string())?;
+    let digest = module_tree_digest(installed_at).map_err(|error| error.to_string())?;
+    let (module_source, revision) = match source {
+        InstallSource::Local(path) => (
+            ModuleSource::Path {
+                path: path.display().to_string(),
+            },
+            None,
+        ),
+        InstallSource::Git { provenance, .. } => (
+            ModuleSource::Git {
+                url: provenance.source.clone(),
+                reference: provenance.requested_ref.clone(),
+            },
+            Some(provenance.revision.clone()),
+        ),
     };
-    lock.git.insert(module_id.to_string(), provenance.clone());
-    let content = serde_json::to_string_pretty(&lock)
-        .map_err(|error| format!("failed to serialize {}: {error}", path.display()))?
-        + "\n";
-    let temporary = path.with_extension("lock.tmp");
-    std::fs::write(&temporary, content)
-        .map_err(|error| format!("failed to write {}: {error}", temporary.display()))?;
-    std::fs::rename(&temporary, &path)
-        .map_err(|error| format!("failed to replace {}: {error}", path.display()))
+    lock.modules.insert(
+        module_id.to_string(),
+        LockedModule {
+            version: version.to_string(),
+            source: module_source,
+            revision,
+            digest,
+            requested_by: Default::default(),
+        },
+    );
+    MeshLock::archive(&path, &history).map_err(|error| error.to_string())?;
+    lock.save(&path).map_err(|error| error.to_string())
 }
 
-fn persist_git_provenance(
-    config_dir: &std::path::Path,
-    module_id: &str,
-    provenance: Option<&GitProvenance>,
-) {
-    if let Some(provenance) = provenance
-        && let Err(error) = write_git_provenance(config_dir, module_id, provenance)
-    {
-        // Source is installed and validated already; do not turn an incidental
-        // lock-write failure into a broken profile/module transaction.
-        eprintln!("warning: installed {module_id}, but could not record Git provenance: {error}");
+fn lock_history_dir(config_dir: &std::path::Path) -> std::path::PathBuf {
+    config_dir.join("lock-history")
+}
+
+/// Resolve `(root graph path, config dir, modules dir)` for lock-aware commands.
+fn lock_paths() -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let root_path = root_module_graph_path();
+    let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
+        .unwrap_or_else(|error| exit_error(error));
+    let config_dir = root_path
+        .parent()
+        .expect("root graph path has a parent directory")
+        .to_path_buf();
+    let modules_dir = config_dir.join(&root.modules_dir);
+    (root_path, config_dir, modules_dir)
+}
+
+fn installed_manifests(
+    root_path: &std::path::Path,
+) -> std::collections::BTreeMap<String, mesh_core_module::package::ModuleManifest> {
+    mesh_core_module::package::load_installed_module_graph(root_path)
+        .map(|graph| {
+            graph
+                .modules()
+                .into_iter()
+                .map(|module| (module.id.clone(), module.manifest.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn cmd_update(args: &[String]) {
+    use update::EditPolicy;
+
+    let (root_path, config_dir, modules_dir) = lock_paths();
+    let lock_path = config_dir.join("mesh.lock");
+    let mut lock = mesh_core_module::package::MeshLock::load_or_default(&lock_path)
+        .unwrap_or_else(|error| exit_error(error));
+
+    let policy = if args.iter().any(|arg| arg == "--replace") {
+        EditPolicy::Replace
+    } else if args.iter().any(|arg| arg == "--keep") {
+        EditPolicy::Keep
+    } else {
+        EditPolicy::Refuse
+    };
+    let dry_run = args.iter().any(|arg| arg == "--dry-run");
+    let only = args
+        .iter()
+        .find(|arg| arg.starts_with('@'))
+        .map(String::as_str);
+
+    let installed = installed_manifests(&root_path);
+    let plan = update::plan_update(&modules_dir, &lock, only, policy, &installed)
+        .unwrap_or_else(|error| exit_error(error));
+
+    let changed = plan.changed().collect::<Vec<_>>();
+    if changed.is_empty() && !plan.is_refused() {
+        println!("everything is already at its locked revision");
+        return;
+    }
+    for candidate in &changed {
+        println!(
+            "{}: {} → {} ({})",
+            candidate.module_id,
+            candidate.locked.version,
+            candidate.candidate_version,
+            candidate.candidate_revision.as_deref().unwrap_or("?")
+        );
+    }
+
+    // Everything that can refuse runs before anything is written.
+    for module_id in &plan.edited {
+        eprintln!(
+            "{module_id} has local edits since it was installed; \
+             repeat with --merge to rebase them, --keep to pin it, or --replace to discard them"
+        );
+    }
+    for breaking in &plan.breaking {
+        eprintln!("breaking: {breaking}");
+    }
+    for (module_id, capability, level) in &plan.capability_additions {
+        eprintln!("{module_id} now requests {level:?} capability {capability}");
+    }
+    if plan.is_refused() {
+        exit_error("update refused; nothing was changed");
+    }
+    if dry_run {
+        println!("dry run: no source, lock, or profile was changed");
+        return;
+    }
+
+    let updated = update::commit_update(&modules_dir, &config_dir, &mut lock, &plan)
+        .unwrap_or_else(|error| exit_error(error));
+    for entry in updated {
+        println!("updated {entry}");
+    }
+    println!("lock generation {}", lock.generation);
+}
+
+fn cmd_rollback(args: &[String]) {
+    let (_, config_dir, modules_dir) = lock_paths();
+    let generation = args.first().and_then(|arg| arg.parse::<u64>().ok());
+    let restored = update::rollback(&modules_dir, &config_dir, generation)
+        .unwrap_or_else(|error| exit_error(error));
+    for entry in restored {
+        println!("{entry}");
+    }
+}
+
+fn cmd_uninstall(args: &[String]) {
+    let module_id = required_arg(args, 0, "mesh-shell uninstall <module-id>");
+    let (_, config_dir, modules_dir) = lock_paths();
+    let lock_path = config_dir.join("mesh.lock");
+    let mut lock = mesh_core_module::package::MeshLock::load_or_default(&lock_path)
+        .unwrap_or_else(|error| exit_error(error));
+
+    let dependents = update::dependents(module_id, &lock);
+    if !dependents.is_empty() && !args.iter().any(|arg| arg == "--force") {
+        exit_error(format!(
+            "{module_id} is still required by {}; remove those first or repeat with --force",
+            dependents.join(", ")
+        ));
+    }
+
+    let installed_at = modules_dir.join(module_id.trim_start_matches('@'));
+    if installed_at.exists() {
+        std::fs::remove_dir_all(&installed_at).unwrap_or_else(|error| {
+            exit_error(format!(
+                "failed to remove {}: {error}",
+                installed_at.display()
+            ))
+        });
+    }
+    lock.modules.remove(module_id);
+    let history = config_dir.join("lock-history");
+    mesh_core_module::package::MeshLock::archive(&lock_path, &history)
+        .unwrap_or_else(|error| exit_error(error));
+    lock.save(&lock_path)
+        .unwrap_or_else(|error| exit_error(error));
+    println!("uninstalled {module_id}");
+}
+
+fn cmd_lock(args: &[String]) {
+    match args.first().map(String::as_str) {
+        Some("verify") | None => {
+            let (_, config_dir, modules_dir) = lock_paths();
+            let lock =
+                mesh_core_module::package::MeshLock::load_or_default(&config_dir.join("mesh.lock"))
+                    .unwrap_or_else(|error| exit_error(error));
+            let results = update::verify(&modules_dir, &lock);
+            if results.is_empty() {
+                println!("no locked modules");
+                return;
+            }
+            let mut edited = 0;
+            for (module_id, is_edited) in results {
+                if is_edited {
+                    edited += 1;
+                    println!("edited   {module_id}");
+                } else {
+                    println!("verified {module_id}");
+                }
+            }
+            println!("{edited} module(s) differ from their locked digest");
+        }
+        Some(other) => exit_error(format!(
+            "unknown lock subcommand: {other}\nsubcommands: verify"
+        )),
     }
 }
 
@@ -1132,6 +1399,13 @@ fn cmd_help() {
     println!("            remove <profile> <module#instance>");
     println!("            set <profile> <namespace> <json>  set scoped preferences");
     println!("            unset <profile> <namespace>      clear scoped preferences");
+    println!("            prune <profile>      drop overrides the composition no longer has");
+    println!("  install   Install a module or composition from a path or git URL");
+    println!("  update    Update locked modules to their source's current revision");
+    println!("            [<module-id>] [--dry-run] [--keep|--replace]");
+    println!("  rollback  Restore the previous lock generation [<generation>]");
+    println!("  uninstall Remove a module [--force]");
+    println!("  lock      verify   recompute digests and report local edits");
     println!(
         "  install <path-or-git-url>[#ref]  Install a module; frontends are added to the active profile"
     );
@@ -1162,18 +1436,46 @@ mod tests {
     }
 
     #[test]
-    fn mesh_lock_round_trips_git_provenance() {
-        let mut lock = MeshLock::default();
-        lock.git.insert(
-            "@example/widget".to_string(),
-            GitProvenance {
+    fn installing_records_version_source_and_digest_in_the_lock() {
+        use mesh_core_module::package::{MeshLock, ModuleSource};
+
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!("mesh-cli-lock-{nonce}"));
+        let installed = config_dir.join("modules/example/widget");
+        std::fs::create_dir_all(&installed).unwrap();
+        std::fs::write(
+            installed.join("module.json"),
+            r#"{"name":"@example/widget"}"#,
+        )
+        .unwrap();
+
+        let source = InstallSource::Git {
+            checkout: installed.clone(),
+            provenance: GitProvenance {
                 source: "https://example.invalid/widgets.git".to_string(),
                 requested_ref: Some("main".to_string()),
                 revision: "abc123".to_string(),
             },
+        };
+        record_lock_entry(&config_dir, "@example/widget", "1.2.3", &installed, &source).unwrap();
+
+        let lock = MeshLock::from_path(&config_dir.join("mesh.lock")).unwrap();
+        let entry = &lock.modules["@example/widget"];
+        assert_eq!(entry.version, "1.2.3");
+        assert_eq!(entry.revision.as_deref(), Some("abc123"));
+        assert!(entry.digest.starts_with("sha256:"));
+        assert_eq!(
+            entry.source,
+            ModuleSource::Git {
+                url: "https://example.invalid/widgets.git".into(),
+                reference: Some("main".into()),
+            }
         );
-        let decoded: MeshLock =
-            serde_json::from_str(&serde_json::to_string(&lock).unwrap()).unwrap();
-        assert_eq!(decoded.git["@example/widget"].revision, "abc123");
+        assert_eq!(lock.generation, 1);
+
+        std::fs::remove_dir_all(&config_dir).ok();
     }
 }

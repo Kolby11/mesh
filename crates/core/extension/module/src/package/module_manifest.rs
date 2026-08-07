@@ -157,7 +157,6 @@ impl ModuleManifest {
             capabilities: mesh.capabilities,
             entrypoints: manifest::EntrypointsSection {
                 main: mesh.entrypoints.main,
-                settings_ui: mesh.entrypoints.settings_ui,
             },
             accessibility: mesh.accessibility,
             keybinds: mesh.keybinds,
@@ -169,8 +168,8 @@ impl ModuleManifest {
             interfaces,
             extensions: Vec::new(),
             exports: manifest::ExportsSection::default(),
-            provides_slots: HashMap::new(),
-            slot_contributions: HashMap::new(),
+            hosted_extension_points: mesh.hosts,
+            extension_point_contributions: mesh.contributes.extension_points,
             assets,
             icons: mesh.icons,
             icon_pack: mesh.icon_pack,
@@ -217,6 +216,23 @@ pub struct MeshModuleSection {
     pub theme: Option<manifest::ThemeSection>,
     #[serde(default)]
     pub contributes: MeshContributes,
+    /// Extension points **declared** by this module. Only `interface` modules
+    /// may declare them: an extension point is a contract, like an interface,
+    /// and lives with the other data-only contracts.
+    #[serde(default, rename = "extensionPoints", alias = "extension_points")]
+    pub extension_points: HashMap<String, MeshExtensionPointDeclaration>,
+    /// Composition modules only: what this composition selects.
+    #[serde(default)]
+    pub compose: Option<super::CompositionSpec>,
+    /// Composition modules only: the composition this one refines. Forking a
+    /// shell family is `extends` plus the deltas you disagree with.
+    #[serde(default)]
+    pub extends: Option<String>,
+    /// Extension points this module **hosts** — renders foreign contributions
+    /// into. Keyed by contract name, never by module id, so a host can be
+    /// replaced without breaking contributors.
+    #[serde(default)]
+    pub hosts: HashMap<String, manifest::HostedExtensionPoint>,
     #[serde(default)]
     pub icons: Option<manifest::IconsSection>,
     #[serde(default)]
@@ -318,9 +334,12 @@ impl MeshModuleSection {
             ));
         }
         self.i18n.validate()?;
-        if self.kind == ModuleKind::Interface && self.interface.is_none() {
+        if self.kind == ModuleKind::Interface
+            && self.interface.is_none()
+            && self.extension_points.is_empty()
+        {
             return Err(ModuleManifestError::Validation(
-                "interface modules must declare mesh.interface".into(),
+                "interface modules must declare mesh.interface or mesh.extensionPoints".into(),
             ));
         }
         self.uses.validate()?;
@@ -358,6 +377,59 @@ impl MeshModuleSection {
                     )));
                 }
             }
+        }
+        if self.kind == ModuleKind::Composition {
+            // A composition selects among what its members already declare. If
+            // it could request capabilities of its own it would become the
+            // privileged layer that replaceable modules exist to avoid.
+            if !self.uses.capabilities.is_empty()
+                || !self.uses.optional_capabilities.is_empty()
+                || !self.capabilities.required.is_empty()
+                || !self.capabilities.optional.is_empty()
+            {
+                return Err(ModuleManifestError::Validation(
+                    "composition modules must not request capabilities; a composition selects among what its members declare".into(),
+                ));
+            }
+            if self.entry.is_some() || self.entrypoints.main.is_some() {
+                return Err(ModuleManifestError::Validation(
+                    "composition modules have no entry; they compose other modules' roots".into(),
+                ));
+            }
+            if self.surface.is_some() || self.surface_layout.is_some() {
+                return Err(ModuleManifestError::Validation(
+                    "composition modules declare no mesh.surface; placement belongs to the roots they compose".into(),
+                ));
+            }
+            if !self.implements.is_empty() {
+                return Err(ModuleManifestError::Validation(
+                    "composition modules implement no interfaces; they bind providers instead"
+                        .into(),
+                ));
+            }
+        } else {
+            if self.compose.is_some() {
+                return Err(ModuleManifestError::Validation(
+                    "mesh.compose is only supported for composition modules".into(),
+                ));
+            }
+            if self.extends.is_some() {
+                return Err(ModuleManifestError::Validation(
+                    "mesh.extends is only supported for composition modules".into(),
+                ));
+            }
+        }
+        if !self.extension_points.is_empty() && self.kind != ModuleKind::Interface {
+            return Err(ModuleManifestError::Validation(
+                "mesh.extensionPoints is only supported for interface modules; an extension point is a contract, like an interface".into(),
+            ));
+        }
+        for (point_name, declaration) in &self.extension_points {
+            validate_extension_point_name("mesh.extensionPoints", point_name)?;
+            declaration.validate(point_name)?;
+        }
+        for point_name in self.hosts.keys() {
+            validate_extension_point_name("mesh.hosts", point_name)?;
         }
         if self.kind == ModuleKind::Library && !self.capabilities.required.is_empty() {
             return Err(ModuleManifestError::Validation(
@@ -569,6 +641,10 @@ pub enum ModuleKind {
     LanguagePack,
     Interface,
     Library,
+    /// An installable shell composition: which root components run, which
+    /// providers are bound, which resources apply, and how extension points are
+    /// arranged. It *binds*, it never *owns* — see `package::composition`.
+    Composition,
     /// Embeddable component module — has an entry `.mesh` file consumed by other
     /// modules via `require("@scope/name")` but owns no shell surface of its own.
     /// No `mesh.surface` block is required or allowed.
@@ -587,6 +663,7 @@ impl From<ModuleType> for ModuleKind {
             ModuleType::Interface => Self::Interface,
             ModuleType::Library => Self::Library,
             ModuleType::Component => Self::Component,
+            ModuleType::Composition => Self::Composition,
         }
     }
 }
@@ -603,6 +680,7 @@ impl From<ModuleKind> for ModuleType {
             ModuleKind::Interface => Self::Interface,
             ModuleKind::Library => Self::Library,
             ModuleKind::Component => Self::Component,
+            ModuleKind::Composition => Self::Composition,
         }
     }
 }
@@ -629,8 +707,6 @@ impl ModuleRepository {
 pub struct MeshEntrypoints {
     #[serde(default)]
     pub main: Option<String>,
-    #[serde(default)]
-    pub settings_ui: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -643,6 +719,11 @@ pub struct MeshUses {
     pub optional_interfaces: HashMap<String, String>,
     #[serde(default)]
     pub resources: MeshResourceUses,
+    /// Where to fetch a dependency that is not installed yet. Without a
+    /// registry a version range needs somewhere to resolve against; a registry
+    /// later fills this same map from an index.
+    #[serde(default)]
+    pub sources: HashMap<String, super::SourceSpec>,
     #[serde(default)]
     pub capabilities: Vec<String>,
     #[serde(
@@ -673,6 +754,9 @@ impl MeshUses {
     fn validate(&self) -> Result<(), ModuleManifestError> {
         for module_id in self.modules.keys() {
             validate_module_dependency_id("mesh.uses.modules", module_id)?;
+        }
+        for module_id in self.sources.keys() {
+            validate_module_dependency_id("mesh.uses.sources", module_id)?;
         }
         for module_id in self
             .resources
@@ -987,6 +1071,86 @@ impl MeshInterfaceDeclaration {
     }
 }
 
+/// A UI extension point declaration: the contract between a host that renders
+/// a region and the modules that fill it.
+///
+/// Declared by `interface` modules for the same reason service contracts are —
+/// it is data, it is versioned, and both sides must be able to depend on it
+/// without depending on each other.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MeshExtensionPointDeclaration {
+    pub version: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Whether a host renders every contribution (`true`, the default) or only
+    /// the highest-precedence one.
+    #[serde(default = "default_true")]
+    pub multiple: bool,
+    /// Props the host passes to each contribution, typed with the same grammar
+    /// as interface contracts.
+    #[serde(default)]
+    pub props: Vec<MeshExtensionPointProp>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MeshExtensionPointProp {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub prop_type: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+impl MeshExtensionPointDeclaration {
+    fn validate(&self, point_name: &str) -> Result<(), ModuleManifestError> {
+        if self.version.trim().is_empty() {
+            return Err(ModuleManifestError::Validation(format!(
+                "mesh.extensionPoints '{point_name}' must declare a version"
+            )));
+        }
+        for prop in &self.props {
+            if prop.name.trim().is_empty() {
+                return Err(ModuleManifestError::Validation(format!(
+                    "mesh.extensionPoints '{point_name}' has a prop with an empty name"
+                )));
+            }
+            if prop.prop_type.trim().is_empty() {
+                return Err(ModuleManifestError::Validation(format!(
+                    "mesh.extensionPoints '{point_name}' prop '{}' must declare a type",
+                    prop.name
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Extension point names share the interface-name shape: dotted contract names,
+/// never module ids. Keeping them in one namespace is deliberate — a host
+/// depending on `@mesh/settings:custom-settings` is the coupling this replaces.
+fn validate_extension_point_name(field: &str, value: &str) -> Result<(), ModuleManifestError> {
+    if value.trim().is_empty() {
+        return Err(ModuleManifestError::Validation(format!(
+            "{field} entries cannot be empty"
+        )));
+    }
+    if value.starts_with('@') {
+        return Err(ModuleManifestError::Validation(format!(
+            "{field} entry '{value}' must be an extension point contract name; module ids are not extension points"
+        )));
+    }
+    if !value.contains('.') {
+        return Err(ModuleManifestError::Validation(format!(
+            "{field} entry '{value}' must use a dotted contract name such as mesh.settings.page"
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum InterfaceRelationship {
@@ -1014,6 +1178,10 @@ impl From<crate::manifest::ProvidedInterface> for MeshProvidesDeclaration {
 pub struct MeshProvides {
     #[serde(default)]
     pub layout: Vec<LayoutContribution>,
+    /// Contributions to extension points hosted by other modules, keyed by the
+    /// point's contract name.
+    #[serde(default, rename = "extensionPoints", alias = "extension_points")]
+    pub extension_points: HashMap<String, Vec<manifest::ExtensionPointContribution>>,
     #[serde(default)]
     pub settings: Option<SettingsContribution>,
     #[serde(default)]
@@ -1032,6 +1200,7 @@ impl MeshProvides {
     fn validate(&self) -> Result<(), ModuleManifestError> {
         MeshContributes {
             layout: self.layout.clone(),
+            extension_points: self.extension_points.clone(),
             settings: self.settings.clone(),
             themes: self.themes.clone(),
             icons: self.icons.clone(),
@@ -1047,6 +1216,8 @@ impl MeshProvides {
 pub struct MeshContributes {
     #[serde(default)]
     pub layout: Vec<LayoutContribution>,
+    #[serde(default, rename = "extensionPoints", alias = "extension_points")]
+    pub extension_points: HashMap<String, Vec<manifest::ExtensionPointContribution>>,
     #[serde(default)]
     pub settings: Option<SettingsContribution>,
     #[serde(default)]
@@ -1063,6 +1234,17 @@ pub struct MeshContributes {
 
 impl MeshContributes {
     fn validate(&self) -> Result<(), ModuleManifestError> {
+        for (point, contributions) in &self.extension_points {
+            validate_extension_point_name("mesh.provides.extensionPoints", point)?;
+            for contribution in contributions {
+                if contribution.id.trim().is_empty() {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "mesh.provides.extensionPoints '{point}' has a contribution with an empty id"
+                    )));
+                }
+                validate_relative_path("extension point contribution entry", &contribution.entry)?;
+            }
+        }
         for contribution in &self.layout {
             validate_relative_path("layout entrypoint", &contribution.entrypoint)?;
             if let Some(label) = &contribution.label {
@@ -1093,6 +1275,12 @@ impl MeshContributes {
 
     fn merge_provides(&mut self, provides: &MeshProvides) {
         self.layout.extend(provides.layout.iter().cloned());
+        for (point, contributions) in &provides.extension_points {
+            self.extension_points
+                .entry(point.clone())
+                .or_default()
+                .extend(contributions.iter().cloned());
+        }
         self.themes.extend(provides.themes.iter().cloned());
         self.icons.extend(provides.icons.iter().cloned());
         self.fonts.extend(provides.fonts.iter().cloned());

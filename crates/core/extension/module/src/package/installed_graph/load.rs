@@ -1,7 +1,8 @@
 use super::super::{
     InstalledModuleEntry, ModuleManifest, ModuleManifestDiagnostic, ModuleManifestError,
-    ProfilePaths, RootModuleGraphManifest, ShellProfile,
+    ProfilePaths, RootModuleGraphManifest, ShellProfile, resolve_composition,
 };
+use super::graph::CompositionContext;
 use super::*;
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
@@ -84,15 +85,23 @@ fn load_installed_module_graph_with(
         active_profile = profile_paths.load_active()?.map(|(_, profile)| profile);
         active_profile.as_ref()
     };
+    // A profile is a composition instance: resolve its `from` chain first, so
+    // the composition's roots, bindings, and slot arrangement are in effect
+    // before the activation closure runs. A profile with no `from` resolves to
+    // itself.
+    let mut composition = CompositionContext::default();
     if let Some(profile) = profile {
         let manifests = modules
             .iter()
             .map(|loaded| loaded.manifest.clone())
             .collect::<Vec<_>>();
-        profile.apply_to_root(&mut root, &manifests)?;
+        let resolved = resolve_composition(profile, manifests.iter())?;
+        composition.slots = resolved.spec.slots.clone();
+        composition.orphaned_overrides = resolved.orphaned_overrides.clone();
+        resolved.to_profile().apply_to_root(&mut root, &manifests)?;
     }
 
-    InstalledModuleGraph::from_parts(root, modules)
+    InstalledModuleGraph::from_parts_with_composition(root, modules, composition)
 }
 
 #[cfg(test)]

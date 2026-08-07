@@ -1,6 +1,7 @@
 mod common;
 mod contributions;
 mod diagnostics;
+mod extension_points;
 mod graph;
 mod interfaces;
 mod loading;

@@ -13,6 +13,7 @@ mesh-core-service = { workspace = true }
 mesh-core-theme = { workspace = true }
 
 serde = { workspace = true }
+sha2 = { workspace = true }
 serde_json = { workspace = true }
 rayon = { workspace = true }
 full_moon = { workspace = true }
