@@ -1223,6 +1223,10 @@ impl super::types::ShellComponent for PopupGeometryRecordingComponent {
     fn declared_or_measured_size(&self) -> (u32, u32) {
         self.declared_size
     }
+
+    fn needs_content_measure(&self) -> bool {
+        self.declared_size == (0, 0)
+    }
 }
 
 pub(super) struct MeasuredLayerGeometryComponent {

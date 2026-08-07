@@ -287,6 +287,40 @@ fn absolute_child_escaping_root_derives_overflow_surface_request() {
 }
 
 #[test]
+fn nested_absolute_child_escaping_root_derives_overflow_surface_request() {
+    let mut root = keyed_node("row", "root", 0.0, 0.0, 120.0, 40.0);
+    let mut wrapper = keyed_node("box", "root/wrapper", 0.0, 0.0, 120.0, 40.0);
+    let mut overlay = keyed_node("box", "root/wrapper/overlay", 96.0, 8.0, 64.0, 24.0);
+    overlay.computed_style.position = mesh_core_elements::style::Position::Absolute;
+    wrapper.children.push(overlay);
+    root.children.push(wrapper);
+
+    let mut requests = Vec::new();
+    collect_child_surface_requests(&root, &root, &mut requests);
+
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].kind, ChildSurfaceKind::Overflow);
+    assert_eq!(requests[0].node_key, "root/wrapper/overlay");
+    assert_eq!(requests[0].anchor_rect, (96, 8, 64, 24));
+}
+
+#[test]
+fn clipped_absolute_descendant_stays_in_parent_surface() {
+    let mut root = keyed_node("row", "root", 0.0, 0.0, 120.0, 40.0);
+    let mut clipped = keyed_node("box", "root/clipped", 0.0, 0.0, 120.0, 40.0);
+    clipped.computed_style.overflow_x = mesh_core_elements::style::Overflow::Hidden;
+    let mut overlay = keyed_node("box", "root/clipped/overlay", 96.0, 8.0, 64.0, 24.0);
+    overlay.computed_style.position = mesh_core_elements::style::Position::Absolute;
+    clipped.children.push(overlay);
+    root.children.push(clipped);
+
+    let mut requests = Vec::new();
+    collect_child_surface_requests(&root, &root, &mut requests);
+
+    assert!(requests.is_empty());
+}
+
+#[test]
 fn child_surface_input_is_translated_from_popup_local_coordinates() {
     let input = translate_child_surface_input(
         ComponentInput::PointerButton {

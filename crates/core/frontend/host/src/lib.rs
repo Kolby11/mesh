@@ -72,6 +72,11 @@ pub struct SurfaceExtent {
     /// Logical size of the buffer, i.e. `content` plus its declared reserve.
     /// Never smaller than `content`.
     pub padded: (u32, u32),
+    /// The content values are generous bounds for an intrinsic first layout,
+    /// rather than sizes the shell is allowed to stamp onto the surface root.
+    /// This is used while a promoted popup is measuring before its first
+    /// `xdg_popup` configure.
+    intrinsic_bound: bool,
 }
 
 impl SurfaceExtent {
@@ -81,6 +86,7 @@ impl SurfaceExtent {
         Self {
             content: (width, height),
             padded: (width, height),
+            intrinsic_bound: false,
         }
     }
 
@@ -91,6 +97,21 @@ impl SurfaceExtent {
         Self {
             content,
             padded: (padded.0.max(content.0), padded.1.max(content.1)),
+            intrinsic_bound: false,
+        }
+    }
+
+    /// Lay out against `bound`, but keep both axes semantically unknown so an
+    /// intrinsic root can measure its content instead of becoming permanently
+    /// pinned to the bound. The bound is still large enough to avoid the
+    /// `(1, 1)` placeholder collapsing cross-axis content on a popup's first
+    /// frame.
+    pub fn intrinsic(bound: (u32, u32)) -> Self {
+        let bound = (bound.0.max(1), bound.1.max(1));
+        Self {
+            content: bound,
+            padded: bound,
+            intrinsic_bound: true,
         }
     }
 
@@ -120,11 +141,11 @@ impl SurfaceExtent {
     /// [`ShellComponent::paint`] lays an unknown axis out as `auto` instead,
     /// which is what content measurement means in the first place.
     pub fn content_width_known(&self) -> bool {
-        self.content.0 > 0
+        self.content.0 > 0 && !self.intrinsic_bound
     }
 
     pub fn content_height_known(&self) -> bool {
-        self.content.1 > 0
+        self.content.1 > 0 && !self.intrinsic_bound
     }
 
     /// Whether any of this surface is paint-only reserve.

@@ -10,6 +10,7 @@
         "@mesh/language-popover": ">=0.1.0",
         "@mesh/theme-selector": ">=0.1.0",
         "@mesh/quick-settings": ">=0.1.0",
+        "@mesh/audio-popover": ">=0.1.0",
         "@mesh/shell-ui-interface": ">=1.0.0"
       },
       "interfaces": {

@@ -50,6 +50,20 @@ fn prop_default_projects_to_css_and_is_readable_in_script() {
     );
 }
 
+#[test]
+fn component_runtime_does_not_inject_raw_settings_global() {
+    let component = test_frontend_component(PROP_SOURCE);
+    let has_raw_settings = component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(component.root_instance_key())
+        .and_then(|runtime| runtime.script_ctx.state().get_ref("settings"))
+        .is_some();
+
+    assert!(!has_raw_settings);
+}
+
 const SETTINGS_PROP_SOURCE: &str = r#"
 <props>
   track_width: { type: "size", default: "20px" }

@@ -26,56 +26,72 @@ pub(super) fn collect_child_surface_requests(
     }
 
     // A positioned overlay cannot be painted beyond its parent SHM buffer.
-    // Promote only direct, absolutely positioned root children for now: this
-    // covers inline overlay UI without mistaking normal flow, scrolling, or a
-    // nested clipped region for a new Wayland surface. Explicit `<popover>`
-    // nodes above retain their authored anchor/grab behavior.
+    // Explicit `<popover>` nodes above retain their authored anchor/grab
+    // behavior; other absolutely positioned descendants are derived from
+    // their actual escape bounds below.
     if std::ptr::eq(root, node) {
-        for child in &node.children {
-            if source_element_tag(child) == "popover"
-                || child.computed_style.position != mesh_core_elements::style::Position::Absolute
-            {
-                continue;
-            }
-            let Some(node_key) = child.mesh_key() else {
-                continue;
-            };
-            let Some(bounds) = find_node_bounds_by_key(root, node_key, 0.0, 0.0) else {
-                continue;
-            };
-            let root_bounds = (
-                root.layout.x,
-                root.layout.y,
-                root.layout.x + root.layout.width,
-                root.layout.y + root.layout.height,
-            );
-            if bounds.0 >= root_bounds.0
-                && bounds.1 >= root_bounds.1
-                && bounds.2 <= root_bounds.2
-                && bounds.3 <= root_bounds.3
-            {
-                continue;
-            }
-            let mut placement = PopoverPlacement::default();
-            placement.anchor = mesh_core_elements::PopoverAnchor::TopLeft;
-            placement.gravity = mesh_core_elements::PopoverGravity::TopLeft;
-            requests.push(ChildSurfaceRequest {
-                node_key: node_key.to_string(),
-                kind: ChildSurfaceKind::Overflow,
-                anchor_rect: bounds_to_i32_rect(bounds),
-                content_size: (
-                    child.layout.width.ceil().max(1.0) as u32,
-                    child.layout.height.ceil().max(1.0) as u32,
-                ),
-                content_padding: popover_content_padding(child),
-                placement,
-            });
-        }
+        let root_bounds = (
+            root.layout.x,
+            root.layout.y,
+            root.layout.x + root.layout.width,
+            root.layout.y + root.layout.height,
+        );
+        collect_overflow_surface_requests(root, root, root_bounds, false, requests);
     }
 
     for child in &node.children {
         collect_child_surface_requests(root, child, requests);
     }
+}
+
+fn collect_overflow_surface_requests(
+    root: &WidgetNode,
+    node: &WidgetNode,
+    root_bounds: (f32, f32, f32, f32),
+    clipped_by_ancestor: bool,
+    requests: &mut Vec<ChildSurfaceRequest>,
+) {
+    let children_clipped = clipped_by_ancestor
+        || node.computed_style.overflow_x.clips_contents()
+        || node.computed_style.overflow_y.clips_contents();
+
+    for child in &node.children {
+        // An explicit popover owns its whole subtree in the promoted surface;
+        // its internal positioned elements must not also become siblings of
+        // that popup on the parent surface.
+        if source_element_tag(child) == "popover" {
+            continue;
+        }
+
+        if !children_clipped
+            && child.computed_style.position == mesh_core_elements::style::Position::Absolute
+            && let Some(node_key) = child.mesh_key()
+            && let Some(bounds) = find_node_bounds_by_key(root, node_key, 0.0, 0.0)
+            && bounds_escape_container(bounds, root_bounds)
+        {
+            let mut placement = PopoverPlacement::default();
+            placement.anchor = mesh_core_elements::PopoverAnchor::TopLeft;
+            placement.gravity = mesh_core_elements::PopoverGravity::TopLeft;
+            let anchor_rect = bounds_to_i32_rect(bounds);
+            requests.push(ChildSurfaceRequest {
+                node_key: node_key.to_string(),
+                kind: ChildSurfaceKind::Overflow,
+                anchor_rect,
+                content_size: (anchor_rect.2 as u32, anchor_rect.3 as u32),
+                content_padding: popover_content_padding(child),
+                placement,
+            });
+        }
+
+        collect_overflow_surface_requests(root, child, root_bounds, children_clipped, requests);
+    }
+}
+
+fn bounds_escape_container(bounds: (f32, f32, f32, f32), container: (f32, f32, f32, f32)) -> bool {
+    bounds.0 < container.0
+        || bounds.1 < container.1
+        || bounds.2 > container.2
+        || bounds.3 > container.3
 }
 
 pub(super) fn popover_anchor_bounds(

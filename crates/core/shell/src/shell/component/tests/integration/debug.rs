@@ -1141,7 +1141,7 @@ fn debug_inspector_benchmark_view_renders_canonical_rows_when_profiling_off() {
     for title in [
         "Idle scheduler",
         "Hover",
-        "Surface open/close",
+        "Audio popover open/close",
         "Pointer move",
         "Text update",
         "Scroll",
@@ -1236,7 +1236,7 @@ fn debug_inspector_benchmark_view_renders_waiting_rows_when_profiling_live_witho
     for title in [
         "Idle scheduler",
         "Hover",
-        "Surface open/close",
+        "Audio popover open/close",
         "Pointer move",
         "Text update",
         "Scroll",
@@ -1359,7 +1359,7 @@ fn debug_inspector_benchmark_view_renders_populated_benchmark_result_rows() {
                     "message": "Polling steadily",
                     "failure_count": 0
                 }],
-                "active_surfaces": ["@mesh/navigation-bar", "@mesh/audio-popover"],
+                "active_surfaces": ["@mesh/navigation-bar"],
                 "benchmarks": {
                     "scenarios": [
                         {
@@ -1374,11 +1374,11 @@ fn debug_inspector_benchmark_view_renders_populated_benchmark_result_rows() {
                         {
                             "id": "surface_open_close",
                             "label": "Surface open/close",
-                            "target": "@mesh/audio-popover",
+                            "target": "@mesh/navigation-bar audio controls",
                             "status": "Complete",
                             "primary_metric": "total_surface_render: 140us",
                             "secondary_metric": "redraw_count: 2",
-                            "hint": "Open and close @mesh/audio-popover while profiling is live"
+                            "hint": "Open and close the navigation-bar audio popover while profiling is live"
                         },
                         {
                             "id": "pointer_update",

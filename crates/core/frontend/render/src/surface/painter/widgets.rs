@@ -22,6 +22,8 @@ fn scrollbar_colors(color: Color) -> (Color, Color) {
     (with_alpha(0.20), with_alpha(0.64))
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn push_slider_commands(
     commands: &mut Vec<PainterCommand>,
     is_vertical: bool,
@@ -122,6 +124,8 @@ fn push_slider_commands(
 }
 
 impl FrontendRenderEngine {
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub(super) fn render_input_node(
         &self,
         node: &WidgetNode,
@@ -294,6 +298,8 @@ impl FrontendRenderEngine {
         }
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub(super) fn render_slider_node(
         &self,
         node: &WidgetNode,
@@ -350,6 +356,8 @@ impl FrontendRenderEngine {
         self.execute_painter_commands(buffer, &commands);
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub(super) fn render_display_slider_node(
         &self,
         node: &DisplayPaintNode,
@@ -499,6 +507,8 @@ impl FrontendRenderEngine {
         }
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub(super) fn render_icon_node(
         &self,
         node: &WidgetNode,
@@ -589,6 +599,8 @@ impl FrontendRenderEngine {
         }
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub(super) fn render_scrollbars(
         &self,
         node: &WidgetNode,

@@ -25,6 +25,8 @@ pub(super) trait TextRenderCache {
         max_width: Option<f32>,
     ) -> (f32, f32);
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     #[allow(clippy::too_many_arguments)]
     fn render_clipped(
         &self,
@@ -107,6 +109,8 @@ impl TextRenderCache for TextRenderer {
         )
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     fn render_clipped(
         &self,
         text: &str,
@@ -239,6 +243,8 @@ impl TextRenderCache for SharedTextMeasurer {
         )
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     fn render_clipped(
         &self,
         text: &str,

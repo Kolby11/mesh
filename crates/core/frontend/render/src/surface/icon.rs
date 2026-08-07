@@ -1,6 +1,10 @@
-use super::glyph::{GlyphAxes, draw_font_glyph, draw_font_glyph_on_canvas};
+#[cfg(test)]
+use super::PixelBuffer;
+use super::PixelCanvasSession;
+#[cfg(test)]
+use super::glyph::draw_font_glyph;
+use super::glyph::{GlyphAxes, draw_font_glyph_on_canvas};
 use super::profiling;
-use super::{PixelBuffer, PixelCanvasSession};
 use image::imageops::FilterType;
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
@@ -434,6 +438,7 @@ fn blit_variant_on_canvas(canvas: &Canvas, variant: &RasterVariant, dest_x: i32,
     );
 }
 
+#[cfg(test)]
 fn blit_variant(buffer: &mut PixelBuffer, variant: &RasterVariant, dest_x: i32, dest_y: i32) {
     let src_x = (-dest_x).max(0) as u32;
     let src_y = (-dest_y).max(0) as u32;
@@ -600,6 +605,7 @@ fn variant_from_pixmap(
     variant_from_bgra(width, height, pixels)
 }
 
+#[cfg(test)]
 pub fn draw_icon_from_path(
     buffer: &mut PixelBuffer,
     path: &Path,
@@ -612,6 +618,7 @@ pub fn draw_icon_from_path(
     draw_icon_from_path_with_options(buffer, path, dest_x, dest_y, dest_w, dest_h, tint, false);
 }
 
+#[cfg(test)]
 pub fn draw_icon_from_path_with_options(
     buffer: &mut PixelBuffer,
     path: &Path,
@@ -709,6 +716,7 @@ fn resolve_file_variant(
 /// Draw the built-in "missing icon" glyph. Rasterizes the embedded SVG via
 /// resvg and tints it with the icon's text color, so it follows the same
 /// theming rules as a regular monochrome icon.
+#[cfg(test)]
 pub fn draw_missing_icon_fallback(
     buffer: &mut PixelBuffer,
     dest_x: i32,
@@ -753,6 +761,7 @@ fn resolve_missing_icon_variant(dest_w: i32, dest_h: i32, tint: Color) -> Option
     Some(variant)
 }
 
+#[cfg(test)]
 pub fn draw_named_icon(
     buffer: &mut PixelBuffer,
     name: &str,
@@ -780,6 +789,7 @@ pub fn draw_named_icon(
 /// wide profile defaults and finally the built-in missing-icon glyph.
 /// `axes` carries CSS `--icon-*` values for variable-font axis settings;
 /// pass [`GlyphAxes::default()`] when no axis state is available.
+#[cfg(test)]
 pub fn draw_named_icon_for_module(
     buffer: &mut PixelBuffer,
     module_id: &str,
@@ -962,6 +972,7 @@ fn draw_named_icon_with_registry(
 /// axis values (parsed from CSS `--icon-*` custom properties). Axes are
 /// silently ignored for file targets and for font targets whose pack
 /// doesn't declare support for the requested axis.
+#[cfg(test)]
 pub fn draw_icon_resolution_with_axes(
     buffer: &mut PixelBuffer,
     resolution: IconResolution,

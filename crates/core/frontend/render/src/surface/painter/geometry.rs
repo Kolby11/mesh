@@ -40,6 +40,7 @@ pub(super) fn dim_color(color: Color, factor: f32) -> Color {
     }
 }
 
+#[cfg(test)]
 pub(super) fn opacity_color(color: Color, opacity: f32) -> Color {
     Color {
         a: ((color.a as f32) * opacity.clamp(0.0, 1.0))

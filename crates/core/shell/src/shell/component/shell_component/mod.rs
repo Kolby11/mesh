@@ -1163,10 +1163,6 @@ impl ShellComponent for FrontendSurfaceComponent {
                     );
                 }
                 runtime.host_props = next_host_props;
-                runtime
-                    .script_ctx
-                    .state_mut()
-                    .set("settings", self.settings_json.clone());
             }
         }
 

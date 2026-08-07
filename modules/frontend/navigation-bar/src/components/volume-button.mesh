@@ -5,28 +5,111 @@ scroll_sensitivity: { type: "number", default: 5, min: 1, max: 100, step: 1 }
 <template>
     <stack class="nav-button-shell">
         <button
-            ref="volume-button"
+            ref="volumeButton"
             class="nav-button"
             keybind="mute"
             onclick={onAudioToggle}
+            onpointerenter={onVolumeEnter}
+            onpointerleave={onVolumeLeave}
             onscroll={onVolumeScroll}
             ontwofingerscroll={onVolumeScroll}
             onkeybind={onMuteKeybind}
+            aria-haspopup="true"
+            aria-expanded={audio_aria_expanded}
             title={audio_tooltip_value == '' and t(audio_tooltip_key) or t(audio_tooltip_key) .. ' ' .. audio_tooltip_value}
             aria-label={audio_tooltip_value == '' and t('nav.volume') or t('nav.volume') .. ' ' .. audio_tooltip_value}
         >
             <icon class="nav-button-glyph" name={icon_name} size="18" />
         </button>
+        <AudioPopover bind:this={audio_popover} />
     </stack>
 </template>
 
 <script lang="luau">
 local audio = require("mesh.audio")
+local AudioPopover = require("@mesh/audio-popover")
 
 icon_name = "audio-volume-muted"
 audio_tooltip_key = "nav.volume_unavailable"
 audio_tooltip_value = ""
 audio_percent = 0
+audio_popover = nil
+audio_popover_connected = false
+audio_surface_hidden = true
+audio_aria_expanded = "false"
+audio_pointer_inside = false
+audio_dragging = false
+local CLOSE_BRIDGE_KEY = "audio-popover-close"
+local CLOSE_BRIDGE_DELAY_MS = 400
+local do_close
+
+local function cancel_bridge_close()
+    mesh.events.publish("shell.cancel-handler", { key = CLOSE_BRIDGE_KEY })
+end
+
+local function schedule_bridge_close()
+    mesh.events.publish("shell.schedule-handler", {
+        key = CLOSE_BRIDGE_KEY,
+        handler = "closeAudioPopoverBridge",
+        delay_ms = CLOSE_BRIDGE_DELAY_MS,
+    })
+end
+
+local function sync_trigger_state()
+    audio_aria_expanded = audio_surface_hidden and "false" or "true"
+end
+
+local function connect_audio_popover()
+    if audio_popover == nil or audio_popover_connected then
+        return
+    end
+    audio_popover_connected = true
+    audio_popover.PopoverEnter:on(function()
+        audio_pointer_inside = true
+        cancel_bridge_close()
+    end)
+    audio_popover.PopoverLeave:on(function()
+        audio_pointer_inside = false
+        if not audio_dragging then
+            schedule_bridge_close()
+        end
+    end)
+    audio_popover.DragStart:on(function()
+        audio_dragging = true
+        cancel_bridge_close()
+    end)
+    audio_popover.DragEnd:on(function()
+        audio_dragging = false
+        if not audio_pointer_inside then
+            schedule_bridge_close()
+        end
+    end)
+    audio_popover.CloseRequested:on(function()
+        do_close()
+    end)
+    audio_popover.KeyboardDismissRequested:on(function()
+        do_close()
+    end)
+end
+
+local function do_open()
+    connect_audio_popover()
+    if audio_popover and audio_surface_hidden then
+        cancel_bridge_close()
+        audio_popover.open = true
+        audio_surface_hidden = false
+        sync_trigger_state()
+    end
+end
+
+do_close = function()
+    cancel_bridge_close()
+    if audio_popover and not audio_surface_hidden then
+        audio_popover.open = false
+        audio_surface_hidden = true
+        sync_trigger_state()
+    end
+end
 
 local function normalized_scroll_sensitivity()
     local amount = tonumber(props and props.scroll_sensitivity)
@@ -79,6 +162,7 @@ if audio and audio.VolumeChanged then
 end
 
 function render(self)
+    connect_audio_popover()
     if not audio or audio.available == false then
         icon_name = "audio-volume-muted"
         audio_tooltip_key = "nav.audio_service_unavailable"
@@ -96,6 +180,23 @@ function render(self)
     end
     local muted = audio.muted or false
     update_audio_copy(percent, muted)
+end
+
+function onVolumeEnter(event)
+    audio_pointer_inside = true
+    cancel_bridge_close()
+    do_open()
+end
+
+function onVolumeLeave()
+    audio_pointer_inside = false
+    if not audio_surface_hidden and not audio_dragging then
+        schedule_bridge_close()
+    end
+end
+
+function closeAudioPopoverBridge()
+    do_close()
 end
 
 function onAudioToggle()

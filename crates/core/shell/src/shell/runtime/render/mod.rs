@@ -329,6 +329,17 @@ impl Shell {
                 // visibly grows on the next open.
                 let defer_popup_create =
                     is_popup && self.components[index].component.needs_content_measure();
+                // A promoted popup has no compositor size before its first
+                // configure. Its positioner starts with a 1x1 protocol-safe
+                // placeholder, but using that as the layout bound collapses
+                // intrinsic cross-axis content and makes the 1px result a
+                // fixed point. Use the already-configured parent surface as a
+                // generous measurement bound; `SurfaceExtent::intrinsic`
+                // keeps it semantically unknown so the root can still shrink
+                // to its content.
+                let popup_measurement_bound = defer_popup_create
+                    .then(|| self.popup_intrinsic_measurement_bound(index))
+                    .flatten();
                 // Whether each axis below is a size the shell actually has
                 // (compositor configure, declared placement, or a completed
                 // measurement) rather than a placeholder standing in for one.
@@ -354,6 +365,14 @@ impl Shell {
                     height_known = measured_h > 0;
                     width = measured_w.max(1);
                     height = measured_h.max(1);
+                    if let Some((bound_width, bound_height)) = popup_measurement_bound {
+                        if !width_known {
+                            width = bound_width.max(1);
+                        }
+                        if !height_known {
+                            height = bound_height.max(1);
+                        }
+                    }
                 } else {
                     let dynamic_size = if inner_requested_width == 0 || inner_requested_height == 0
                     {
@@ -448,11 +467,23 @@ impl Shell {
                 // `auto` and measures the content, rather than pinning the
                 // surface root to one pixel and measuring the collapse.
                 let extent_content = (
-                    if width_known { width } else { 0 },
-                    if height_known { height } else { 0 },
+                    if width_known || popup_measurement_bound.is_some() {
+                        width
+                    } else {
+                        0
+                    },
+                    if height_known || popup_measurement_bound.is_some() {
+                        height
+                    } else {
+                        0
+                    },
                 );
                 let paint_extent = if is_popup {
-                    SurfaceExtent::padded(extent_content, (width, height))
+                    if popup_measurement_bound.is_some() && (!width_known || !height_known) {
+                        SurfaceExtent::intrinsic((width, height))
+                    } else {
+                        SurfaceExtent::padded(extent_content, (width, height))
+                    }
                 } else {
                     let (padded_width, padded_height, _) = surface_geometry_with_overlay_reserve(
                         &surface_id,
@@ -943,5 +974,47 @@ impl Shell {
             self.components[index].parent.known_surface_size = Some(size);
         }
         Ok(size)
+    }
+
+    fn popup_intrinsic_measurement_bound(&self, index: usize) -> Option<(u32, u32)> {
+        let parent_surface_id = self.components[index]
+            .parent
+            .popup_config
+            .as_ref()?
+            .parent_surface_id
+            .as_str();
+        let compositor_size = self
+            .presentation_engine
+            .surface_size_if_known(parent_surface_id);
+        let shell_size = self
+            .surfaces
+            .get(parent_surface_id)
+            .map(|surface| (surface.width, surface.height));
+
+        match (shell_size, compositor_size) {
+            (Some((shell_width, shell_height)), Some((compositor_width, compositor_height))) => {
+                // The shell-side stub carries content dimensions, while the
+                // presentation config may include a transparent overlay
+                // reserve. Prefer the former whenever it is known and use the
+                // compositor only to fill a dynamic/span axis.
+                Some((
+                    if shell_width > 0 {
+                        shell_width
+                    } else {
+                        compositor_width
+                    }
+                    .max(1),
+                    if shell_height > 0 {
+                        shell_height
+                    } else {
+                        compositor_height
+                    }
+                    .max(1),
+                ))
+            }
+            (Some(size), _) if size.0 > 0 || size.1 > 0 => Some((size.0.max(1), size.1.max(1))),
+            (None, Some(size)) => Some((size.0.max(1), size.1.max(1))),
+            (None, None) | (Some(_), None) => None,
+        }
     }
 }

@@ -5,6 +5,7 @@
 //! icon's tint color, so glyphs flow through the same theme-token coloring
 //! path as monochrome SVG icons.
 
+#[cfg(test)]
 use super::PixelBuffer;
 use super::profiling;
 use mesh_core_elements::lru::LruCache;
@@ -209,6 +210,7 @@ fn quantize(value: Option<f32>) -> i32 {
 /// rectangle, recoloring the alpha mask to `tint`. Returns `false` when the
 /// glyph couldn't be rasterized (font missing, unmapped codepoint, color
 /// glyph) so the caller can fall back to the built-in missing-icon glyph.
+#[cfg(test)]
 pub fn draw_font_glyph(
     buffer: &mut PixelBuffer,
     font_path: &Path,

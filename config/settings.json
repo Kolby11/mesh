@@ -7,10 +7,10 @@
   "schemaVersion": 1,
   "shell": {
     "fonts": {
-      "ui_family": "CaskaydiaCove NF"
+      "ui_family": "FantasqueSansM Nerd Font"
     },
     "icons": {
-      "default_pack": "breeze_cursors"
+      "default_pack": "Bibata-Original-Classic"
     },
     "render": {
       "blur": {

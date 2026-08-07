@@ -9,8 +9,11 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
 
 <template>
     <popover
-        bind:this={popover}
+        open={open}
         class="audio-popover-shell"
+        anchor-ref="volumeButton"
+        anchor="bottom"
+        gravity="bottom"
         onpointerenter={onPopoverEnter}
         onpointerleave={onPopoverLeave}
         aria-label="Audio controls"
@@ -34,6 +37,7 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
 <script lang="luau">
 local audio = require("mesh.audio")
 
+open = false
 audio_percent_label = "--%"
 slider_value = 0
 volume_dragging = false
@@ -104,6 +108,9 @@ end
 
 function onVolumeChange(value)
     local pct = clamp_percent(value)
+    if not volume_dragging then
+        self.DragStart:fire()
+    end
     volume_dragging = true
     pending_slider_value = pct
     sync_audio_copy(pct)
@@ -119,19 +126,19 @@ function onVolumeRelease(value)
     volume_dragging = false
     pending_slider_value = clamp_percent(value)
     last_sent_slider_value = nil
+    self.DragEnd:fire()
 end
 
--- Hovering the popover cancels the trigger's pending close; leaving it closes.
--- Never close mid-drag so the slider stays usable if the pointer strays.
+-- The owning trigger controls `open`; these events let it maintain the hover
+-- bridge while the same VM keeps slider drag capture alive across the popup.
 function onPopoverEnter(event)
-    mesh.popover.activate("@mesh/audio-popover", event, { focus = false })
+    self.PopoverEnter:fire(event)
 end
 
-function onPopoverLeave()
-    if volume_dragging then
-        return
+function onPopoverLeave(event)
+    if not volume_dragging then
+        self.PopoverLeave:fire(event)
     end
-    mesh.popover.hide("@mesh/audio-popover")
 end
 </script>
 

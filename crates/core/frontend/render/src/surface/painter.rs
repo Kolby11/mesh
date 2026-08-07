@@ -27,7 +27,9 @@ use mesh_core_elements::tree::WidgetNode;
 use mesh_core_elements::{BoxShadow, VisualFilter};
 
 pub(crate) use geometry::ClipRect;
-use geometry::{clip_to_tuple, dim_color, intersect_clip, opacity_color};
+#[cfg(test)]
+use geometry::opacity_color;
+use geometry::{clip_to_tuple, dim_color, intersect_clip};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PainterBackendSnapshot {

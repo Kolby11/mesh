@@ -1,7 +1,6 @@
 {
   "mesh": {
     "disabled": [
-      "@mesh/audio-popover",
       "@mesh/debug-inspector",
       "@mesh/language-popover",
       "@mesh/text-selection-proof",

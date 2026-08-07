@@ -400,6 +400,77 @@ fn shipped_navigation_volume_button_click_toggles_mute() {
 }
 
 #[test]
+fn shipped_navigation_volume_hover_opens_embedded_audio_popover() {
+    let mut navigation =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    navigation.visible = true;
+
+    let theme = default_theme();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    navigation
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+
+    let tree = navigation
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation bar");
+    let volume_button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
+    )
+    .expect("volume button");
+    let bounds = find_node_bounds_by_key(
+        tree,
+        volume_button.mesh_key().expect("volume button key"),
+        0.0,
+        0.0,
+    )
+    .expect("volume button bounds");
+
+    navigation
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerMove {
+                x: (bounds.0 + bounds.2) / 2.0,
+                y: (bounds.1 + bounds.3) / 2.0,
+            },
+        )
+        .unwrap();
+    navigation
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+
+    let requests = navigation.child_surface_requests();
+    assert_eq!(
+        requests.len(),
+        1,
+        "audio hover should derive one popup: {requests:?}"
+    );
+    assert_eq!(requests[0].kind, ChildSurfaceKind::Popover);
+    assert!(!requests[0].node_key.is_empty());
+    assert!(
+        rect_matches_bounds(requests[0].anchor_rect, bounds),
+        "audio popup should anchor to the volume button bounds {bounds:?}, got {:?}",
+        requests[0].anchor_rect
+    );
+}
+
+#[test]
 fn shipped_navigation_audio_popover_transition_delay_stays_bounded() {
     let mut component =
         real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());

@@ -365,8 +365,8 @@ local benchmark_definitions = {
     },
     {
         id = "surface_open_close",
-        title = "Surface open/close",
-        target = "@mesh/audio-popover",
+        title = "Audio popover open/close",
+        target = "@mesh/navigation-bar audio controls",
     },
     {
         id = "pointer_update",

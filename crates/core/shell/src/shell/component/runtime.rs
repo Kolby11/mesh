@@ -417,9 +417,8 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn init_root_runtime(&self) -> Result<(), ComponentError> {
-        let mut props = HashMap::new();
-        props.insert("settings".into(), self.settings_json.clone());
-        let runtime = self.create_runtime(self.root_instance_key(), &self.compiled, &props)?;
+        let runtime =
+            self.create_runtime(self.root_instance_key(), &self.compiled, &HashMap::new())?;
         self.runtimes.lock().unwrap().insert(
             self.instance_keys
                 .borrow_mut()

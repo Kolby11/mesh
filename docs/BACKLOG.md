@@ -54,27 +54,12 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 The single sparse store shipped 2026-07-30: one `config/settings.json`
 namespaced by `shell` / module id / interface id, replacing `shell-settings.json`,
 `settings-default.json`, and the per-module `config/settings.json` files.
-Remaining:
-
-- [ ] Stop injecting each component's settings namespace as a `settings` prop.
-      Reads are published as revisioned `mesh.settings` state and writes are
-      typed service methods, but `publish_resolved_props` still hands every
-      component a raw JSON namespace it did not ask for. Components should read
-      the service they declare. See [`spec/08-settings.md`](spec/08-settings.md) §1, §6.
-
 ## Popovers
 
 In-tree `<popover>` nodes are promoted to `xdg_popup` child surfaces, with core
 owning the hover bridge, one-open-per-trigger exclusivity, and compositor
 dismiss sync. *(detail: "Embeddable popovers via `<popover>` surface
 promotion")*
-
-- [ ] Derive `Overflow` child surfaces automatically, beyond explicit
-      `<popover>` — if inline UI escapes its parent buffer, the shell should
-      derive the surface rather than requiring manifest geometry.
-- [ ] Migrate the remaining production popovers off the legacy separate-module
-      path, starting with audio once drag and capture state is represented in
-      core.
 
 ## Performance
 
@@ -157,43 +142,18 @@ gate where the win is structural.
       reconciliation.
 
 ### Presentation
-- [ ] Batch Wayland commits and event-queue progress per shell frame — the
-      per-surface path flushes the queue each time, repeating connection work
-      and obstructing the planned parallel present split.
 - [ ] Direct Skia paint into the mapped SHM canvas for full-present frames,
       keeping `PixelBuffer` as the retained compare copy (H). Design:
       [`.planning/todos/pending/2026-08-02-direct-shm-paint.md`](../.planning/todos/pending/2026-08-02-direct-shm-paint.md).
 - [ ] Rotation transforms allocate a temp `PixelBuffer` and repaint the subtree
       per frame. Low priority until rotation ships; scratch-buffer reuse was
       measured and rejected (see log).
-- [ ] A promoted popover's first layout runs against the `(1, 1)`
-      `PopupPlacement` placeholder, so intrinsic cross-axis sizing measures
-      itself to 1px and stays there (see log, 2026-08-03). Measure the first
-      frame against a generous bound (the output, or the parent surface)
-      before the `xdg_popup` is created.
-
-### Test debt
-
-- [ ] `phase26_real_surface_baseline_emits_canonical_proof_measurements` passes
-      single-threaded and fails under the default parallel run ("hover should
-      report icon/image raster cache activity") — it reads a process-wide
-      raster cache another test warms.
 
 ### Startup and catalog
 
 - [ ] Narrow frontend catalog index rebuilds to graph deltas. Compiled sources
       now survive live graph changes by manifest/source fingerprint, but slot
       and validation indexes still rebuild across the catalog.
-
-### Dead code
-
-- [ ] Decide the fate of the render and authoring-scan functions the 2026-08
-      refactors orphaned. `mesh-core-render`'s recursive-painter era leaves 20
-      unused items (`draw_named_icon`, `draw_font_glyph`, `TooltipRenderState`,
-      the `painter/text.rs` and `painter/widgets.rs` render methods), and
-      `installed_graph/scan.rs` keeps three substring extractors the AST scan
-      replaced. Either they are public API worth documenting as such, or they
-      should go — right now they are 23 dead-code warnings.
 
 ### Architecture
 

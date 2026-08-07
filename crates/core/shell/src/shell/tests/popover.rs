@@ -121,6 +121,59 @@ fn promoted_popover_config_uses_content_size_not_stale_surface_size() {
 }
 
 #[test]
+fn promoted_popover_first_measurement_uses_parent_surface_bound() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let trigger_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/navigation-bar",
+        trigger_state,
+    )));
+    shell.register_component(Box::new(PopupGeometryRecordingComponent::new(
+        "@mesh/intrinsic-popover",
+        (0, 0),
+        (240, 154),
+    )));
+    // The trigger is already mapped on a real shell, so its configured
+    // surface is the useful intrinsic measurement bound before the popup has
+    // its own xdg_popup configure.
+    let trigger = shell
+        .surfaces
+        .get_mut("@mesh/navigation-bar")
+        .expect("trigger surface should be registered");
+    trigger.width = 1920;
+    trigger.height = 56;
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::ActivatePopover {
+            surface_id: "@mesh/intrinsic-popover".into(),
+            trigger_surface: "@mesh/navigation-bar".into(),
+            trigger_key: "theme-button".into(),
+            focus: false,
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+
+    let runtime = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.surface_id == "@mesh/intrinsic-popover")
+        .expect("intrinsic popup runtime should be registered");
+    let buffer = runtime
+        .parent
+        .paint_buffer
+        .as_ref()
+        .expect("first popup measurement should allocate a paint buffer");
+    assert_eq!(
+        (buffer.width, buffer.height),
+        (1920, 56),
+        "first popup layout must use the parent bound, not the 1x1 positioner placeholder"
+    );
+}
+
+#[test]
 fn layer_surface_config_uses_content_size_not_stale_surface_size_on_first_show() {
     let mut shell = Shell::new();
     shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
