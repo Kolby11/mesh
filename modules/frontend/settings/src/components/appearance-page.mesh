@@ -357,7 +357,7 @@ function onThemeSelect(theme_id)
     local selected = tostring(theme_id or "")
     if selected == "" then return end
     sync_theme(selected)
-    mesh.events.publish("shell.set-theme", { theme_id = selected })
+    mesh.events.publish("mesh.theme.set_theme", { theme_id = selected })
 end
 
 -- Keep the former fixed-theme handlers available to callers compiled against
@@ -370,14 +370,14 @@ function onIconThemeSelect(theme_id)
     local selected = tostring(theme_id or "")
     if selected == "" then return end
     icon_theme_value = selected
-    mesh.events.publish("shell.set-icon-theme", { theme_id = selected })
+    mesh.events.publish("mesh.theme.set_icon_theme", { theme_id = selected })
 end
 
 function onFontSelect(family)
     local selected = tostring(family or "")
     if selected == "" then return end
     font_value = selected
-    mesh.events.publish("shell.set-font-family", { family = selected })
+    mesh.events.publish("mesh.theme.set_font_family", { family = selected })
 end
 
 function onShowMoreIcons()

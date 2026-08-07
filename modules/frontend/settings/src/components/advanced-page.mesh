@@ -560,7 +560,7 @@ end
 function onPropToggle(module_id, name, current, instance_id)
     local value = not (current == true)
     update_local_prop(module_id, name, value, true, instance_id)
-    publish_prop("shell.set-module-prop", module_id, name, value, instance_id)
+    publish_prop("mesh.settings.set_prop", module_id, name, value, instance_id)
 end
 
 function onPropEnumNext(module_id, name, current, options, instance_id)
@@ -571,14 +571,14 @@ function onPropEnumNext(module_id, name, current, options, instance_id)
     end
     local value = options[(index % #options) + 1]
     update_local_prop(module_id, name, value, true, instance_id)
-    publish_prop("shell.set-module-prop", module_id, name, value, instance_id)
+    publish_prop("mesh.settings.set_prop", module_id, name, value, instance_id)
 end
 
 function onPropNumber(module_id, name, instance_id, event)
     local value = tonumber(event_value(event))
     if value == nil then return end
     update_local_prop(module_id, name, value, true, instance_id)
-    publish_prop("shell.set-module-prop", module_id, name, value, instance_id)
+    publish_prop("mesh.settings.set_prop", module_id, name, value, instance_id)
 end
 
 function onPropText(module_id, name, prop_type, instance_id, event)
@@ -588,12 +588,12 @@ function onPropText(module_id, name, prop_type, instance_id, event)
         if value == nil then return end
     end
     update_local_prop(module_id, name, value, true, instance_id)
-    publish_prop("shell.set-module-prop", module_id, name, value, instance_id)
+    publish_prop("mesh.settings.set_prop", module_id, name, value, instance_id)
 end
 
 function onPropReset(module_id, name, inherited_value, instance_id)
     update_local_prop(module_id, name, inherited_value, false, instance_id)
-    publish_prop("shell.unset-module-prop", module_id, name, nil, instance_id)
+    publish_prop("mesh.settings.unset_prop", module_id, name, nil, instance_id)
 end
 
 function onModuleFilterChange(value)
@@ -614,7 +614,7 @@ function onProviderNext(interface, current)
     local provider_id = candidates[(index % #candidates) + 1]
     pending_providers[interface] = provider_id
     provider_notice = "advanced.switching_live"
-    mesh.events.publish("shell.set-provider", {
+    mesh.events.publish("mesh.packages.set_provider", {
         interface = interface,
         provider_id = provider_id,
     })
@@ -625,7 +625,7 @@ function onModuleToggle(module_id, current_enabled)
     local enabled = not current_enabled
     pending_module_enabled[module_id] = enabled
     module_notice = "advanced.applying_live"
-    mesh.events.publish("shell.set-module-enabled", {
+    mesh.events.publish("mesh.packages.set_module_enabled", {
         module_id = module_id,
         enabled = enabled,
     })

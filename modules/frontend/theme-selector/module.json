@@ -16,7 +16,8 @@
         ]
       },
       "capabilities": [
-        "theme.read"
+        "theme.read",
+        "service.theme.control"
       ]
     },
     "iconRequirements": {

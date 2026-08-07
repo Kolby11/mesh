@@ -304,3 +304,80 @@ fn command_state_binding_updates_non_audio_service() {
         "matching provider confirmation must clear the generic state binding"
     );
 }
+
+/// A shell-provided interface has no backend command queue, so the dispatcher
+/// must answer it directly. Before core interfaces were routed, this returned
+/// `service_unavailable` because `service_handlers` only knows Luau backends.
+#[test]
+fn a_core_provided_command_is_applied_by_the_shell_itself() {
+    let mut shell = Shell::new();
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.theme.control",
+    ));
+    let before = shell.theme.active().id.clone();
+
+    let result = shell.dispatch_service_command(
+        "mesh.theme",
+        "set_theme",
+        &serde_json::json!({ "theme_id": "mesh-default-light" }),
+        "@mesh/any-module-at-all",
+        &capabilities,
+    );
+
+    assert_eq!(result["ok"], serde_json::json!(true));
+    assert_eq!(result["status"], serde_json::json!("applied"));
+    assert_eq!(shell.theme.active().id, "mesh-default-light");
+    assert_ne!(
+        shell.theme.active().id,
+        before,
+        "the command must change real shell state, not just report success"
+    );
+}
+
+/// The capability is the whole gate. No module id is consulted, so a
+/// third-party settings frontend has exactly the same reach as `@mesh/settings`.
+#[test]
+fn a_core_provided_command_without_its_capability_is_denied() {
+    let mut shell = Shell::new();
+    let before = shell.theme.active().id.clone();
+
+    let result = shell.dispatch_service_command(
+        "mesh.theme",
+        "set_theme",
+        &serde_json::json!({ "theme_id": "mesh-default-light" }),
+        "@mesh/settings",
+        &mesh_core_capability::CapabilitySet::new(),
+    );
+
+    assert_eq!(result["ok"], serde_json::json!(false));
+    assert_eq!(result["error"], serde_json::json!("capability_denied"));
+    assert_eq!(
+        shell.theme.active().id,
+        before,
+        "a denied command must not change shell state"
+    );
+}
+
+/// Argument extraction is strict: a payload that does not match the declared
+/// contract is an unsupported command, not a command applied with a default.
+#[test]
+fn a_core_provided_command_with_a_malformed_payload_changes_nothing() {
+    let mut shell = Shell::new();
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.theme.control",
+    ));
+    let before = shell.theme.active().id.clone();
+
+    let result = shell.dispatch_service_command(
+        "mesh.theme",
+        "set_theme",
+        &serde_json::json!({ "theme_id": "   " }),
+        "@mesh/settings",
+        &capabilities,
+    );
+
+    assert_eq!(result["ok"], serde_json::json!(false));
+    assert_eq!(shell.theme.active().id, before);
+}

@@ -236,7 +236,7 @@ function onSelectTheme(theme_id)
     pending_theme = theme_id
     set_current_theme(theme_id)
     sync_options(theme_id)
-    mesh.events.publish("shell.set-theme", { theme_id = theme_id })
+    mesh.events.publish("mesh.theme.set_theme", { theme_id = theme_id })
 end
 
 -- Scrolling turns the ring one theme at a time, and keeps the popover alive:

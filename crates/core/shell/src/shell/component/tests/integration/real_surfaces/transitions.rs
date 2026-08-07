@@ -269,7 +269,11 @@ fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
     assert!(
         requests.iter().any(|request| matches!(
             request,
-            CoreRequest::SetTheme { theme_id } if theme_id == "mesh-default-dark"
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.theme"
+                    && command == "set_theme"
+                    && payload.get("theme_id")
+                        == Some(&serde_json::json!("mesh-default-dark"))
         )),
         "first entering-frame click should reach the theme handler: {requests:?}"
     );

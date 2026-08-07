@@ -10,7 +10,9 @@
         "mesh.debug": ">=1.0",
         "mesh.theme": ">=1.0",
         "mesh.locale": ">=1.0",
-        "mesh.audio": ">=1.0"
+        "mesh.audio": ">=1.0",
+        "mesh.settings": ">=1.0",
+        "mesh.packages": ">=1.0"
       },
       "optionalInterfaces": {
         "mesh.network": ">=1.0",
@@ -33,9 +35,13 @@
         "service.bluetooth.control",
         "service.device.read",
         "theme.read",
-        "theme.write",
         "locale.read",
-        "locale.write"
+        "locale.write",
+        "service.theme.control",
+        "service.settings.read",
+        "service.settings.control",
+        "service.packages.read",
+        "service.packages.control"
       ],
       "modules": {
         "@mesh/shell-ui-interface": ">=1.0.0"

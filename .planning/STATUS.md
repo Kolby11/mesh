@@ -7,6 +7,30 @@ This page describes the present and is meant to be overwritten. History lives in
 
 ## Now
 
+**Composition and configuration writes are capability-gated contracts.** Stage 1
+took the hardcoded `@mesh/settings` out of `catalog.rs`; the same literal was
+still in `service.rs`, gating seven reserved `shell.*` channels on the
+publishing module's *name*. A replacement settings frontend could be mounted and
+then silently do nothing, because every write it issued was dropped by a string
+comparison. Those channels are gone. `mesh.packages` (new),
+`mesh.settings`, and `mesh.theme` carry the writes as declared methods, so they
+flow through the existing generic path and are refused with a diagnostic naming
+the missing capability. `dispatch_service_command` now answers shell-provided
+interfaces itself instead of assuming every interface has a Luau backend.
+
+Two findings fell out. `theme.write` was declared High-privilege and enforced
+nowhere — `shell.set-theme` was ungated, so any module could restyle the whole
+shell; theme writes now require `service.theme.control` and `theme.write` is
+deleted. Conversely `shell.set-locale` *was* correctly gated, at the
+`mesh.locale.set` host-API boundary, so it was restored after removing it broke
+three locale tests. Record: [`log/2026-08.md`](log/2026-08.md).
+
+Still open: `publish_resolved_props` injects each component's namespace as a raw
+`settings` prop, and install/uninstall are not yet `mesh.packages` methods. Both
+are in [`docs/BACKLOG.md`](../docs/BACKLOG.md). `shell.open-debug-source` is
+still keyed on `@mesh/debug-inspector`; that id has six sites in the shell and
+stays with the built-in-debug backlog item.
+
 **Compositions are modules and extension points are contracts.** All five
 stages landed. Slots keyed by module id are gone, and with them the hardcoded
 `@mesh/settings` host in `catalog.rs`: a host declares `mesh.hosts`, a

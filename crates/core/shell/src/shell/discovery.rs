@@ -58,6 +58,22 @@ fn builtin_state_contract(
     interface: &str,
     fields: &[(&str, &str)],
 ) -> mesh_core_service::InterfaceContract {
+    builtin_contract(interface, fields, &[])
+}
+
+/// A core-provided contract: state fields the shell emits, plus the methods it
+/// answers itself.
+///
+/// The shell is the provider for these interfaces, so the methods here are the
+/// public, capability-gated way for any module to change composition and
+/// configuration. Declaring them as a contract rather than a reserved channel
+/// is what makes the settings frontend replaceable: the caller needs
+/// `service.<name>.control`, not a particular module id.
+fn builtin_contract(
+    interface: &str,
+    fields: &[(&str, &str)],
+    methods: &[(&str, &[(&str, &str)])],
+) -> mesh_core_service::InterfaceContract {
     mesh_core_service::InterfaceContract {
         interface: interface.to_string(),
         version: mesh_core_service::parse_contract_version("1.0")
@@ -70,7 +86,24 @@ fn builtin_state_contract(
                 description: None,
             })
             .collect(),
-        methods: Vec::new(),
+        methods: methods
+            .iter()
+            .map(|(name, args)| mesh_core_service::InterfaceMethod {
+                name: (*name).to_string(),
+                args: args
+                    .iter()
+                    .map(|(arg, arg_type)| mesh_core_service::InterfaceArgument {
+                        name: (*arg).to_string(),
+                        arg_type: (*arg_type).to_string(),
+                    })
+                    .collect(),
+                returns: Some("Result".to_string()),
+                // These land in the shell synchronously; there is no backend
+                // queue to coalesce against and no optimistic state to bind.
+                coalesce: false,
+                state_binding: None,
+            })
+            .collect(),
         events: Vec::new(),
         types: HashMap::new(),
         capabilities: mesh_core_service::ContractCapabilities::default(),
@@ -227,7 +260,7 @@ impl Shell {
         };
 
         let interfaces = InterfaceRegistry::new();
-        interfaces.register_contract(builtin_state_contract(
+        interfaces.register_contract(builtin_contract(
             "mesh.theme",
             &[
                 ("current", "string"),
@@ -237,14 +270,61 @@ impl Shell {
                 ("available", "string[]"),
                 ("system_resources", "object"),
             ],
+            &[
+                ("set_theme", &[("theme_id", "string")]),
+                ("set_icon_theme", &[("theme_id", "string")]),
+                ("set_font_family", &[("family", "string")]),
+            ],
         ));
+        // Locale writes stay on the `mesh.locale.set` host API, which already
+        // enforces `locale.write`. A second, service-shaped way in would mean
+        // two capability names for one operation.
         interfaces.register_contract(builtin_state_contract(
             "mesh.locale",
             &[("current", "string"), ("locale", "string")],
         ));
-        interfaces.register_contract(builtin_state_contract(
+        interfaces.register_contract(builtin_contract(
             "mesh.settings",
             &[("revision", "string"), ("namespaces", "object")],
+            &[
+                (
+                    "set_prop",
+                    &[
+                        ("module_id", "string"),
+                        ("instance_id", "string?"),
+                        ("prop", "string"),
+                        ("value", "any"),
+                    ],
+                ),
+                (
+                    "unset_prop",
+                    &[
+                        ("module_id", "string"),
+                        ("instance_id", "string?"),
+                        ("prop", "string"),
+                    ],
+                ),
+            ],
+        ));
+        interfaces.register_contract(builtin_contract(
+            "mesh.packages",
+            &[
+                ("modules", "object[]"),
+                ("providers", "object"),
+                ("profiles", "string[]"),
+                ("active_profile", "string"),
+            ],
+            &[
+                (
+                    "set_module_enabled",
+                    &[("module_id", "string"), ("enabled", "boolean")],
+                ),
+                (
+                    "set_provider",
+                    &[("interface", "string"), ("provider_id", "string")],
+                ),
+                ("switch_profile", &[("profile_id", "string")]),
+            ],
         ));
         interfaces.register(InterfaceProvider {
             interface: mesh_core_debug::DEBUG_INTERFACE.to_string(),
@@ -276,6 +356,14 @@ impl Shell {
             base_module: Some("@mesh/settings-interface".to_string()),
             provider_module: "@mesh/shell".to_string(),
             backend_name: "Shell Settings Store".to_string(),
+            priority: 200,
+        });
+        interfaces.register(InterfaceProvider {
+            interface: "mesh.packages".to_string(),
+            version: Some("1.0".to_string()),
+            base_module: Some("@mesh/packages-interface".to_string()),
+            provider_module: "@mesh/shell".to_string(),
+            backend_name: "Shell Package Graph".to_string(),
             priority: 200,
         });
 

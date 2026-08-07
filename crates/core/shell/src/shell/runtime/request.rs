@@ -972,7 +972,36 @@ impl Shell {
         }
 
         let interface = interface_canonical.as_ref();
-        let mut dispatch_result = if self.service_handlers.contains_key(interface) {
+        // Interfaces the shell provides itself answer here rather than on a
+        // backend command queue. The capability check above already ran, so a
+        // caller reaches this point exactly when it holds
+        // `service.<name>.control` — no module id is consulted.
+        let mut dispatch_result = if let Some(request) =
+            core_service_request(interface_canonical.as_ref(), command, payload)
+        {
+            match self.apply_request(request) {
+                Ok(follow_ups) => {
+                    // Drained into `pending` at the top of the next frame, the
+                    // same path a profile switch already uses.
+                    self.deferred_requests.extend(follow_ups);
+                    serde_json::json!({ "ok": true, "status": "applied" })
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    tracing::warn!(
+                        interface,
+                        command,
+                        error = %message,
+                        "core service command failed"
+                    );
+                    serde_json::json!({
+                        "ok": false,
+                        "error": message,
+                        "status": "failed",
+                    })
+                }
+            }
+        } else if self.service_handlers.contains_key(interface) {
             let coalesce = self.service_command_is_coalescable(interface, command);
             if coalesce {
                 let key = (interface.to_string(), command.to_string());
@@ -1773,6 +1802,69 @@ impl Shell {
             emitted.extend(self.set_surface_visibility_now(surface_id, false)?);
         }
         Ok(emitted)
+    }
+}
+
+/// Translate a command on a shell-provided interface into the core request that
+/// performs it.
+///
+/// Returns `None` for every interface a backend module owns, which is what
+/// routes those to the ordinary command queue instead. Argument extraction is
+/// strict: a command whose payload does not match the declared contract yields
+/// `None` and is reported as an unsupported command rather than applied with a
+/// silently defaulted value.
+fn core_service_request(
+    interface: &str,
+    command: &str,
+    payload: &serde_json::Value,
+) -> Option<CoreRequest> {
+    let text = |key: &str| {
+        payload
+            .get(key)
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+    };
+    let optional_text = |key: &str| {
+        payload
+            .get(key)
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+    };
+
+    match (interface, command) {
+        ("mesh.theme", "set_theme") => Some(CoreRequest::SetTheme {
+            theme_id: text("theme_id")?,
+        }),
+        ("mesh.theme", "set_icon_theme") => Some(CoreRequest::SetIconTheme {
+            theme_id: text("theme_id")?,
+        }),
+        ("mesh.theme", "set_font_family") => Some(CoreRequest::SetFontFamily {
+            family: text("family")?,
+        }),
+        ("mesh.settings", "set_prop") => Some(CoreRequest::SetModuleProp {
+            module_id: text("module_id")?,
+            instance_id: optional_text("instance_id"),
+            prop: text("prop")?,
+            value: payload.get("value")?.clone(),
+        }),
+        ("mesh.settings", "unset_prop") => Some(CoreRequest::UnsetModuleProp {
+            module_id: text("module_id")?,
+            instance_id: optional_text("instance_id"),
+            prop: text("prop")?,
+        }),
+        ("mesh.packages", "set_module_enabled") => Some(CoreRequest::SetModuleEnabled {
+            module_id: text("module_id")?,
+            enabled: payload.get("enabled")?.as_bool()?,
+        }),
+        ("mesh.packages", "set_provider") => Some(CoreRequest::SetProvider {
+            interface: text("interface")?,
+            provider_id: text("provider_id")?,
+        }),
+        ("mesh.packages", "switch_profile") => Some(CoreRequest::SwitchProfile {
+            profile_id: text("profile_id")?,
+        }),
+        _ => None,
     }
 }
 

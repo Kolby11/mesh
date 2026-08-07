@@ -525,11 +525,16 @@ named channel.** There is no second messaging mechanism.
   provider publishes; payloads validate against the contract. Frontends
   subscribe via direct named channels on the proxy
   (`audio.VolumeChanged:on(fn)`).
-- **Unowned shell channels** (`shell.toggle-surface`, `shell.set-theme`, …)
+- **Unowned shell channels** (`shell.toggle-surface`, `shell.show-surface`, …)
   are published through `mesh.events` by any module holding the capability.
   Interface-domain commands must go through the interface proxy, not raw
   channel publishes (`raw_interface_domain_event_publish` diagnostic);
   unknown `shell.*` publishes report `unknown_shell_event_publish`.
+
+  `shell.*` carries **surface and debug requests only**. Changing composition
+  or configuration is not a shell channel: those are methods on core-provided
+  interfaces (§5.4), because a channel cannot express argument types, cannot
+  be capability-checked per operation, and cannot report a malformed payload.
 
 Static analysis of `.mesh`/`.luau` sources checks emitted events against the
 provider's contract (`undeclared_interface_event_emit`) and static frontend
@@ -751,6 +756,35 @@ objects. Failure before commit leaves the active profile untouched.
 `mesh-shell profile use <id>` requests that transaction from a running shell
 over its private IPC socket; when no shell is running it updates the pointer for
 the next start. `profile set` and `profile unset` edit sparse profile settings.
+
+### 5.4 Core-provided interfaces
+
+**Status: shipped.**
+
+The shell is the provider for four interfaces. They are declared, resolved, and
+capability-checked exactly like a backend module's, and they are how a module
+changes composition or configuration:
+
+| Interface | Methods | Capability |
+| --- | --- | --- |
+| `mesh.packages` | `set_module_enabled`, `set_provider`, `switch_profile` | `service.packages.control` |
+| `mesh.settings` | `set_prop`, `unset_prop` | `service.settings.control` |
+| `mesh.theme` | `set_theme`, `set_icon_theme`, `set_font_family` | `service.theme.control` |
+| `mesh.locale` | — (state only) | — |
+
+The capability is the whole gate. **No module id is consulted**, so a
+third-party settings frontend that declares `service.packages.control` has the
+same reach as `@mesh/settings`, and `@mesh/settings` without the capability has
+none. This is what makes the settings experience replaceable rather than merely
+mountable.
+
+Locale is state-only on purpose: `mesh.locale.set` is a host API that already
+enforces `locale.write`. Adding a service method would create a second
+capability name for one write.
+
+A command whose payload does not match the declared arguments is reported as
+unsupported and applied nowhere — core-provided methods never substitute a
+default for a malformed argument.
 
 ## 6. Scripting model
 

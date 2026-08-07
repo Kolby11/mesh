@@ -21,8 +21,9 @@ impl Capability {
     pub fn privilege_level(&self) -> PrivilegeLevel {
         match self.0.as_str() {
             // High privilege
-            "exec.command" | "shell.screenshot" | "dbus.system" | "net.socket" | "theme.write"
-            | "locale.write" => PrivilegeLevel::High,
+            "exec.command" | "shell.screenshot" | "dbus.system" | "net.socket" | "locale.write" => {
+                PrivilegeLevel::High
+            }
             s if s.starts_with("exec.") && s != "exec.launch-app" => PrivilegeLevel::High,
 
             // Elevated privilege

@@ -245,99 +245,16 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                 focus,
             })
         }
-        "shell.set-theme" => event
-            .payload
-            .get("theme_id")
-            .and_then(|v| v.as_str())
-            .map(|id| CoreRequest::SetTheme {
-                theme_id: id.to_string(),
-            }),
+        // Emitted by the `mesh.locale.set` host API, which enforces
+        // `locale.write` before it publishes. The gate is at that boundary, so
+        // this arm stays a plain channel rather than becoming a service method
+        // — a second route in would mean two capability names for one write.
         "shell.set-locale" => event
             .payload
             .get("locale")
             .and_then(|v| v.as_str())
             .map(|locale| CoreRequest::SetLocale {
                 locale: locale.to_string(),
-            }),
-        "shell.set-icon-theme" if event.source_module_id == "@mesh/settings" => event
-            .payload
-            .get("theme_id")
-            .and_then(|value| value.as_str())
-            .map(|theme_id| CoreRequest::SetIconTheme {
-                theme_id: theme_id.to_string(),
-            }),
-        "shell.set-font-family" if event.source_module_id == "@mesh/settings" => event
-            .payload
-            .get("family")
-            .and_then(|value| value.as_str())
-            .map(|family| CoreRequest::SetFontFamily {
-                family: family.to_string(),
-            }),
-        "shell.set-provider" if event.source_module_id == "@mesh/settings" => {
-            let interface = event
-                .payload
-                .get("interface")
-                .and_then(|value| value.as_str())?;
-            let provider_id = event
-                .payload
-                .get("provider_id")
-                .and_then(|value| value.as_str())?;
-            Some(CoreRequest::SetProvider {
-                interface: interface.to_string(),
-                provider_id: provider_id.to_string(),
-            })
-        }
-        "shell.set-module-enabled" if event.source_module_id == "@mesh/settings" => {
-            let module_id = event
-                .payload
-                .get("module_id")
-                .and_then(|value| value.as_str())?;
-            let enabled = event
-                .payload
-                .get("enabled")
-                .and_then(|value| value.as_bool())?;
-            Some(CoreRequest::SetModuleEnabled {
-                module_id: module_id.to_string(),
-                enabled,
-            })
-        }
-        "shell.set-module-prop" if event.source_module_id == "@mesh/settings" => {
-            let module_id = event.payload.get("module_id")?.as_str()?;
-            let instance_id = event
-                .payload
-                .get("instance_id")
-                .and_then(|value| value.as_str())
-                .map(str::to_string);
-            let prop = event.payload.get("prop")?.as_str()?;
-            let value = event.payload.get("value")?.clone();
-            Some(CoreRequest::SetModuleProp {
-                module_id: module_id.to_string(),
-                instance_id,
-                prop: prop.to_string(),
-                value,
-            })
-        }
-        "shell.unset-module-prop" if event.source_module_id == "@mesh/settings" => {
-            let module_id = event.payload.get("module_id")?.as_str()?;
-            let instance_id = event
-                .payload
-                .get("instance_id")
-                .and_then(|value| value.as_str())
-                .map(str::to_string);
-            let prop = event.payload.get("prop")?.as_str()?;
-            Some(CoreRequest::UnsetModuleProp {
-                module_id: module_id.to_string(),
-                instance_id,
-                prop: prop.to_string(),
-            })
-        }
-        "shell.switch-profile" if event.source_module_id == "@mesh/settings" => event
-            .payload
-            .get("profile_id")
-            .and_then(|value| value.as_str())
-            .filter(|profile_id| !profile_id.trim().is_empty())
-            .map(|profile_id| CoreRequest::SwitchProfile {
-                profile_id: profile_id.to_string(),
             }),
         "shell.toggle-debug-overlay" => Some(CoreRequest::ToggleDebugOverlay),
         "shell.toggle-debug-layout-bounds" => Some(CoreRequest::ToggleDebugLayoutBounds),
@@ -501,171 +418,204 @@ mod tests {
         }
     }
 
+    /// Composition and configuration writes are ordinary service commands, so
+    /// a caller is admitted by the capability it holds. Any module granted
+    /// `service.packages.control` can select a provider — being `@mesh/settings`
+    /// is neither necessary nor sufficient.
+    fn event_with(
+        channel: &str,
+        payload: serde_json::Value,
+        module: &str,
+        granted: &[&str],
+    ) -> PublishedEvent {
+        let mut capabilities = mesh_core_capability::CapabilitySet::new();
+        for capability in granted {
+            capabilities.grant(Capability::new(*capability));
+        }
+        PublishedEvent {
+            channel: channel.into(),
+            payload,
+            source_module_id: module.into(),
+            source_capabilities: capabilities,
+        }
+    }
+
     #[test]
-    fn settings_provider_event_maps_to_provider_selection_request() {
-        let requests = script_events_to_requests(vec![PublishedEvent {
-            channel: "shell.set-provider".into(),
-            payload: serde_json::json!({
+    fn provider_selection_is_a_capability_gated_service_command() {
+        let requests = script_events_to_requests(vec![event_with(
+            "mesh.packages.set_provider",
+            serde_json::json!({
                 "interface": "mesh.audio",
                 "provider_id": "@mesh/pulseaudio-audio",
             }),
-            source_module_id: "@mesh/settings".into(),
-            source_capabilities: Default::default(),
-        }]);
+            "@mesh/some-third-party-settings",
+            &["service.packages.control"],
+        )]);
 
         assert!(matches!(
             requests.as_slice(),
-            [CoreRequest::SetProvider { interface, provider_id }]
-                if interface == "mesh.audio" && provider_id == "@mesh/pulseaudio-audio"
+            [CoreRequest::ServiceCommand { interface, command, .. }]
+                if interface == "mesh.packages" && command == "set_provider"
         ));
     }
 
     #[test]
-    fn non_settings_module_cannot_select_provider() {
-        let requests = script_events_to_requests(vec![PublishedEvent {
-            channel: "shell.set-provider".into(),
-            payload: serde_json::json!({
+    fn a_module_without_the_packages_capability_cannot_select_a_provider() {
+        let requests = script_events_to_requests(vec![event_with(
+            "mesh.packages.set_provider",
+            serde_json::json!({
                 "interface": "mesh.audio",
                 "provider_id": "@mesh/pulseaudio-audio",
             }),
-            source_module_id: "@mesh/navigation-bar".into(),
-            source_capabilities: Default::default(),
-        }]);
+            "@mesh/navigation-bar",
+            &[],
+        )]);
 
         assert!(matches!(
             requests.as_slice(),
             [CoreRequest::PublishDiagnostics { message }]
-                if message.contains("shell.set-provider")
+                if message.contains("service.packages.control")
         ));
     }
 
+    /// The old gate keyed on module id, so being named `@mesh/settings` was
+    /// enough. It is now neither here nor there: the capability decides.
     #[test]
-    fn settings_module_enabled_event_maps_to_config_request() {
-        let requests = script_events_to_requests(vec![PublishedEvent {
-            channel: "shell.set-module-enabled".into(),
-            payload: serde_json::json!({
-                "module_id": "@mesh/audio-popover",
-                "enabled": false,
-            }),
-            source_module_id: "@mesh/settings".into(),
-            source_capabilities: Default::default(),
-        }]);
+    fn the_settings_module_id_grants_nothing_by_itself() {
+        let requests = script_events_to_requests(vec![event_with(
+            "mesh.packages.set_module_enabled",
+            serde_json::json!({ "module_id": "@mesh/audio-popover", "enabled": false }),
+            "@mesh/settings",
+            &[],
+        )]);
 
         assert!(matches!(
             requests.as_slice(),
-            [CoreRequest::SetModuleEnabled { module_id, enabled: false }]
-                if module_id == "@mesh/audio-popover"
+            [CoreRequest::PublishDiagnostics { message }]
+                if message.contains("service.packages.control")
         ));
     }
 
     #[test]
-    fn settings_prop_events_map_to_typed_requests() {
+    fn module_enabled_command_carries_its_payload_through() {
+        let requests = script_events_to_requests(vec![event_with(
+            "mesh.packages.set_module_enabled",
+            serde_json::json!({ "module_id": "@mesh/audio-popover", "enabled": false }),
+            "@mesh/settings",
+            &["service.packages.control"],
+        )]);
+
+        assert!(matches!(
+            requests.as_slice(),
+            [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+                if interface == "mesh.packages"
+                    && command == "set_module_enabled"
+                    && payload == &serde_json::json!({
+                        "module_id": "@mesh/audio-popover",
+                        "enabled": false,
+                    })
+        ));
+    }
+
+    #[test]
+    fn prop_writes_are_settings_service_commands() {
         let requests = script_events_to_requests(vec![
-            PublishedEvent {
-                channel: "shell.set-module-prop".into(),
-                payload: serde_json::json!({
+            event_with(
+                "mesh.settings.set_prop",
+                serde_json::json!({
                     "module_id": "@mesh/navigation-bar",
                     "prop": "blur_enabled",
                     "value": false,
                 }),
-                source_module_id: "@mesh/settings".into(),
-                source_capabilities: Default::default(),
-            },
-            PublishedEvent {
-                channel: "shell.unset-module-prop".into(),
-                payload: serde_json::json!({
+                "@mesh/settings",
+                &["service.settings.control"],
+            ),
+            event_with(
+                "mesh.settings.unset_prop",
+                serde_json::json!({
                     "module_id": "@mesh/navigation-bar",
                     "prop": "blur_enabled",
                 }),
-                source_module_id: "@mesh/settings".into(),
-                source_capabilities: Default::default(),
-            },
+                "@mesh/settings",
+                &["service.settings.control"],
+            ),
         ]);
 
         assert!(matches!(
             requests.as_slice(),
             [
-                CoreRequest::SetModuleProp { module_id, prop, value, instance_id: None },
-                CoreRequest::UnsetModuleProp {
-                    module_id: unset_module,
-                    prop: unset_prop,
-                    instance_id: None,
-                },
-            ] if module_id == "@mesh/navigation-bar"
-                && prop == "blur_enabled"
-                && value == &serde_json::json!(false)
-                && unset_module == module_id
-                && unset_prop == prop
+                CoreRequest::ServiceCommand { interface, command, .. },
+                CoreRequest::ServiceCommand { interface: unset_interface, command: unset_command, .. },
+            ] if interface == "mesh.settings"
+                && command == "set_prop"
+                && unset_interface == interface
+                && unset_command == "unset_prop"
         ));
     }
 
     #[test]
-    fn settings_resource_events_map_to_typed_requests() {
+    fn appearance_writes_are_theme_service_commands() {
         let requests = script_events_to_requests(vec![
-            PublishedEvent {
-                channel: "shell.set-icon-theme".into(),
-                payload: serde_json::json!({ "theme_id": "Papirus-Dark" }),
-                source_module_id: "@mesh/settings".into(),
-                source_capabilities: Default::default(),
-            },
-            PublishedEvent {
-                channel: "shell.set-font-family".into(),
-                payload: serde_json::json!({ "family": "Noto Sans" }),
-                source_module_id: "@mesh/settings".into(),
-                source_capabilities: Default::default(),
-            },
+            event_with(
+                "mesh.theme.set_icon_theme",
+                serde_json::json!({ "theme_id": "Papirus-Dark" }),
+                "@mesh/settings",
+                &["service.theme.control"],
+            ),
+            event_with(
+                "mesh.theme.set_font_family",
+                serde_json::json!({ "family": "Noto Sans" }),
+                "@mesh/settings",
+                &["service.theme.control"],
+            ),
         ]);
 
         assert!(matches!(
             requests.as_slice(),
             [
-                CoreRequest::SetIconTheme { theme_id },
-                CoreRequest::SetFontFamily { family },
-            ] if theme_id == "Papirus-Dark" && family == "Noto Sans"
+                CoreRequest::ServiceCommand { command, .. },
+                CoreRequest::ServiceCommand { command: font_command, .. },
+            ] if command == "set_icon_theme" && font_command == "set_font_family"
+        ));
+    }
+
+    /// Changing the theme used to require no capability at all: `shell.set-theme`
+    /// was ungated, so any module could restyle the whole shell.
+    #[test]
+    fn setting_the_theme_now_requires_a_capability() {
+        let requests = script_events_to_requests(vec![event_with(
+            "mesh.theme.set_theme",
+            serde_json::json!({ "theme_id": "mesh-default-dark" }),
+            "@mesh/some-widget",
+            &[],
+        )]);
+
+        assert!(matches!(
+            requests.as_slice(),
+            [CoreRequest::PublishDiagnostics { message }]
+                if message.contains("service.theme.control")
         ));
     }
 
     #[test]
-    fn settings_prop_events_preserve_instance_scope() {
-        let requests = script_events_to_requests(vec![PublishedEvent {
-            channel: "shell.set-module-prop".into(),
-            payload: serde_json::json!({
+    fn prop_writes_preserve_instance_scope() {
+        let requests = script_events_to_requests(vec![event_with(
+            "mesh.settings.set_prop",
+            serde_json::json!({
                 "module_id": "@mesh/navigation-bar",
                 "instance_id": "@mesh/navigation-bar#bottom",
                 "prop": "blur_enabled",
                 "value": false,
             }),
-            source_module_id: "@mesh/settings".into(),
-            source_capabilities: Default::default(),
-        }]);
+            "@mesh/settings",
+            &["service.settings.control"],
+        )]);
 
         assert!(matches!(
             requests.as_slice(),
-            [CoreRequest::SetModuleProp { module_id, instance_id: Some(instance_id), prop, value }]
-                if module_id == "@mesh/navigation-bar"
-                    && instance_id == "@mesh/navigation-bar#bottom"
-                    && prop == "blur_enabled"
-                    && value == &serde_json::json!(false)
-        ));
-    }
-
-    #[test]
-    fn non_settings_module_cannot_write_module_props() {
-        let requests = script_events_to_requests(vec![PublishedEvent {
-            channel: "shell.set-module-prop".into(),
-            payload: serde_json::json!({
-                "module_id": "@mesh/navigation-bar",
-                "prop": "blur_enabled",
-                "value": false,
-            }),
-            source_module_id: "@mesh/navigation-bar".into(),
-            source_capabilities: Default::default(),
-        }]);
-
-        assert!(matches!(
-            requests.as_slice(),
-            [CoreRequest::PublishDiagnostics { message }]
-                if message.contains("shell.set-module-prop")
+            [CoreRequest::ServiceCommand { payload, .. }]
+                if payload.get("instance_id")
+                    == Some(&serde_json::json!("@mesh/navigation-bar#bottom"))
         ));
     }
 

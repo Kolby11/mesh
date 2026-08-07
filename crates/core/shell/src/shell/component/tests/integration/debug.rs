@@ -854,10 +854,14 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::SetModuleProp { module_id, prop, value, instance_id: None }]
-            if module_id == "@mesh/navigation-bar"
-                && prop == "blur_enabled"
-                && value == &serde_json::json!(true)
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+            if interface == "mesh.settings"
+                && command == "set_prop"
+                && payload.get("module_id")
+                    == Some(&serde_json::json!("@mesh/navigation-bar"))
+                && payload.get("prop") == Some(&serde_json::json!("blur_enabled"))
+                && payload.get("value") == Some(&serde_json::json!(true))
+                && payload.get("instance_id").is_none()
     ));
 
     component
@@ -893,15 +897,15 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::SetModuleProp {
-            module_id,
-            prop,
-            value,
-            instance_id: Some(instance_id),
-        }] if module_id == "@mesh/navigation-bar"
-            && instance_id == "@mesh/navigation-bar#bottom"
-            && prop == "blur_enabled"
-            && value == &serde_json::json!(false)
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+            if interface == "mesh.settings"
+                && command == "set_prop"
+                && payload.get("module_id")
+                    == Some(&serde_json::json!("@mesh/navigation-bar"))
+                && payload.get("instance_id")
+                    == Some(&serde_json::json!("@mesh/navigation-bar#bottom"))
+                && payload.get("prop") == Some(&serde_json::json!("blur_enabled"))
+                && payload.get("value") == Some(&serde_json::json!(false))
     ));
 
     component
@@ -1006,7 +1010,18 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         )
         .unwrap();
     match requests.as_slice() {
-        [CoreRequest::SetTheme { theme_id }] => assert_eq!(theme_id, "mesh-default-light"),
+        [
+            CoreRequest::ServiceCommand {
+                interface,
+                command,
+                payload,
+                ..
+            },
+        ] => {
+            assert_eq!(interface, "mesh.theme");
+            assert_eq!(command, "set_theme");
+            assert_eq!(payload["theme_id"], serde_json::json!("mesh-default-light"));
+        }
         other => panic!("expected theme change request, got {other:?}"),
     }
 
@@ -1018,7 +1033,10 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::SetIconTheme { theme_id }] if theme_id == "Papirus-Dark"
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+            if interface == "mesh.theme"
+                && command == "set_icon_theme"
+                && payload.get("theme_id") == Some(&serde_json::json!("Papirus-Dark"))
     ));
 
     let requests = component
@@ -1029,7 +1047,10 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::SetFontFamily { family }] if family == "Noto Sans"
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+            if interface == "mesh.theme"
+                && command == "set_font_family"
+                && payload.get("family") == Some(&serde_json::json!("Noto Sans"))
     ));
 
     let requests = component
@@ -1043,8 +1064,12 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::SetProvider { interface, provider_id }]
-            if interface == "mesh.audio" && provider_id == "@mesh/pulseaudio-audio"
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+            if interface == "mesh.packages"
+                && command == "set_provider"
+                && payload.get("interface") == Some(&serde_json::json!("mesh.audio"))
+                && payload.get("provider_id")
+                    == Some(&serde_json::json!("@mesh/pulseaudio-audio"))
     ));
 
     let requests = component
@@ -1058,8 +1083,12 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::SetModuleEnabled { module_id, enabled: false }]
-            if module_id == "@mesh/pulseaudio-audio"
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+            if interface == "mesh.packages"
+                && command == "set_module_enabled"
+                && payload.get("module_id")
+                    == Some(&serde_json::json!("@mesh/pulseaudio-audio"))
+                && payload.get("enabled") == Some(&serde_json::json!(false))
     ));
 
     let requests = component

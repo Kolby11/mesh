@@ -17,9 +17,13 @@ and runtime health is observed state. A settings frontend may present all four
 on one module page without copying them into `settings.json`.
 
 **Status: shipped** for the store itself (§1–§4), global/per-instance frontend-prop controls
-in the generated settings UI (§5), and the current shell CLI (§7); **target**
-for the `mesh.settings` service contract, custom/per-instance settings UI, and
-the service-backed CLI. This replaced the previous multi-file model (`settings-default.json`,
+in the generated settings UI (§5), the current shell CLI (§7), and the
+`mesh.settings` service contract — reads are a revisioned state broadcast and
+writes are the capability-gated `set_prop`/`unset_prop` methods
+([01 §5.4](01-module-system.md)); **target** for retiring the injected
+`settings` prop (components still receive their namespace as a prop rather than
+reading the service they declare), custom/per-instance settings UI, and the
+service-backed CLI. This replaced the previous multi-file model (`settings-default.json`,
 `shell-settings.json`, per-module `config/settings.json`, six-layer stack) —
 those files and their readers are deleted. Schemas no longer come from
 `mesh.provides.settings` (deleted); they derive from props

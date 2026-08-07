@@ -26,7 +26,8 @@
         "service.brightness.control",
         "theme.read",
         "locale.read",
-        "locale.write"
+        "locale.write",
+        "service.theme.control"
       ]
     },
     "entry": "src/main.mesh",

@@ -34,10 +34,10 @@ The 2026-06-18 redesign largely shipped: canonical `module.json` with
 `mesh.uses` / `mesh.provides` / `mesh.implements`, the graph as single source of
 truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
-- [ ] Expose typed profile/package services to the settings frontend. Named
-      composition, multiple root instances, scoped preferences, and
-      transactional live switching are shipped; the replaceable UI still needs
-      service contracts instead of privileged file access. See [`spec/01-module-system.md`](spec/01-module-system.md).
+- [ ] Expose install and uninstall through `mesh.packages`. Provider selection,
+      module enable/disable, and profile switching are typed service methods;
+      adding and removing modules is still CLI-only, so a settings frontend
+      cannot offer it. See [`spec/01-module-system.md`](spec/01-module-system.md).
 - [ ] Move the remaining built-in debug and theme/locale service behavior
       behind generic providers. Startup sounds and backend profiling use the
       generic contract/runtime path; core-owned service state still branches.
@@ -56,10 +56,11 @@ namespaced by `shell` / module id / interface id, replacing `shell-settings.json
 `settings-default.json`, and the per-module `config/settings.json` files.
 Remaining:
 
-- [ ] Expose the store as the `mesh.settings` service so modules read effective
-      values and subscribe to changes, instead of the shell handing each
-      component a raw JSON namespace. Prerequisite for a replaceable settings
-      module. See [`spec/08-settings.md`](spec/08-settings.md) §1, §6.
+- [ ] Stop injecting each component's settings namespace as a `settings` prop.
+      Reads are published as revisioned `mesh.settings` state and writes are
+      typed service methods, but `publish_resolved_props` still hands every
+      component a raw JSON namespace it did not ask for. Components should read
+      the service they declare. See [`spec/08-settings.md`](spec/08-settings.md) §1, §6.
 
 ## Popovers
 

@@ -137,7 +137,10 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     assert!(
         selection_requests.iter().any(|request| matches!(
             request,
-            CoreRequest::SetTheme { theme_id } if theme_id == "solarized-dark"
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.theme"
+                    && command == "set_theme"
+                    && payload.get("theme_id") == Some(&serde_json::json!("solarized-dark"))
         )),
         "Enter on a focused theme option should select it: {selection_requests:?}"
     );
