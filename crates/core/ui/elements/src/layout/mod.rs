@@ -353,6 +353,62 @@ impl LayoutEngine {
         intrinsic_cache: &mut IntrinsicLayoutCache,
         measurer: Option<&dyn TextMeasurer>,
     ) {
+        Self::compute_incremental_with_dirty_sources(
+            root,
+            state,
+            available_width,
+            available_height,
+            dirty_layout,
+            dirty_structural,
+            dirty_node_ids,
+            None,
+            intrinsic_cache,
+            measurer,
+        );
+    }
+
+    /// Compute layout using owned snapshots of the nodes whose layout inputs
+    /// changed. The snapshots are intentionally owned because the caller's
+    /// live tree must be mutably borrowed for Taffy's layout write-back.
+    /// `WidgetNode` uses copy-on-write authored and child payloads, so this is
+    /// proportional to the sparse dirty set rather than the whole tree.
+    pub fn compute_incremental_with_dirty_node_snapshots(
+        root: &mut WidgetNode,
+        state: &mut PerSurfaceLayoutState,
+        available_width: f32,
+        available_height: f32,
+        dirty_layout: bool,
+        dirty_structural: bool,
+        dirty_node_snapshots: Option<&[WidgetNode]>,
+        intrinsic_cache: &mut IntrinsicLayoutCache,
+        measurer: Option<&dyn TextMeasurer>,
+    ) {
+        Self::compute_incremental_with_dirty_sources(
+            root,
+            state,
+            available_width,
+            available_height,
+            dirty_layout,
+            dirty_structural,
+            None,
+            dirty_node_snapshots,
+            intrinsic_cache,
+            measurer,
+        );
+    }
+
+    fn compute_incremental_with_dirty_sources(
+        root: &mut WidgetNode,
+        state: &mut PerSurfaceLayoutState,
+        available_width: f32,
+        available_height: f32,
+        dirty_layout: bool,
+        dirty_structural: bool,
+        dirty_node_ids: Option<&HashSet<NodeId>>,
+        dirty_node_snapshots: Option<&[WidgetNode]>,
+        intrinsic_cache: &mut IntrinsicLayoutCache,
+        measurer: Option<&dyn TextMeasurer>,
+    ) {
         if !state.valid {
             compute_fresh_retained_layout(
                 root,
@@ -401,7 +457,11 @@ impl LayoutEngine {
         }
 
         let mut report = TaffyLayoutReport::default();
-        update_retained_node_styles(root, state, dirty_layout, dirty_node_ids, &mut report);
+        if let Some(dirty_node_snapshots) = dirty_node_snapshots {
+            update_retained_node_snapshots(state, dirty_layout, dirty_node_snapshots, &mut report);
+        } else {
+            update_retained_node_styles(root, state, dirty_layout, dirty_node_ids, &mut report);
+        }
 
         if available_changed || dirty_layout {
             let available_space = taffy_available_space(available_width, available_height);

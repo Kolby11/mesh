@@ -767,7 +767,7 @@ changes composition or configuration:
 
 | Interface | Methods | Capability |
 | --- | --- | --- |
-| `mesh.packages` | `set_module_enabled`, `set_provider`, `switch_profile` | `service.packages.control` |
+| `mesh.packages` | `install`, `uninstall`, `set_module_enabled`, `set_provider`, `switch_profile` | `service.packages.control` |
 | `mesh.settings` | `set_prop`, `unset_prop` | `service.settings.control` |
 | `mesh.theme` | `set_theme`, `set_icon_theme`, `set_font_family` | `service.theme.control` |
 | `mesh.locale` | — (state only) | — |

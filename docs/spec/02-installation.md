@@ -9,14 +9,13 @@ installer checks" and "what the runtime verifies".
 
 ## 1. Installer v1 — path + Git, editable source
 
-**Status: partially shipped.** Local-path and Git installation, composition
+**Status: shipped.** Local-path and Git installation, composition
 installation, capability gates, kind-aware activation, profile commands,
 validation, `mesh.lock` v2 (version, source, resolved revision, content digest,
 requesters), `update`/`rollback`/`uninstall`/`lock verify`, the interface
 compatibility gate, and capability re-approval are available through
-`mesh-shell`. The replaceable package-service contract remains target behavior.
-A CLI or package component is a client of that service, not a privileged
-management layer.
+`mesh-shell` and the typed `mesh.packages` service. A CLI or package component
+is a client of that service, not a privileged management layer.
 
 v1 deliberately ships without a registry, package archives, or signing. The
 design must not block them (§6), but the first installer is:

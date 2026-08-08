@@ -34,10 +34,6 @@ The 2026-06-18 redesign largely shipped: canonical `module.json` with
 `mesh.uses` / `mesh.provides` / `mesh.implements`, the graph as single source of
 truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
-- [ ] Expose install and uninstall through `mesh.packages`. Provider selection,
-      module enable/disable, and profile switching are typed service methods;
-      adding and removing modules is still CLI-only, so a settings frontend
-      cannot offer it. See [`spec/01-module-system.md`](spec/01-module-system.md).
 - [ ] Move the remaining built-in debug and theme/locale service behavior
       behind generic providers. Startup sounds and backend profiling use the
       generic contract/runtime path; core-owned service state still branches.
@@ -80,9 +76,6 @@ gate where the win is structural.
       still flattened per ancestor. Replay must consume segments directly
       instead of eagerly re-flattening them — an eager reconstruction was tried
       and reverted (see log).
-- [ ] Replace all-runtime descendant-generation scans in memo stores with a
-      parent/child runtime index carrying an aggregated subtree generation.
-
 ### Style
 
 - [ ] Typed style declarations end-to-end: resolve theme tokens to typed values
@@ -133,13 +126,6 @@ gate where the win is structural.
 - [ ] Slider drags with `change` / `release` handlers still take script
       invalidation; closing this needs narrow invalidation (J). Handlerless
       drags already use interaction restyle.
-
-### Layout
-
-- [ ] Make the retained Taffy mapping authoritative — incremental layout still
-      rebuilds whole-tree `node_id_to_taffy` and `text_nodes` maps before
-      compute. Complete fragment/unkeyed handling and maintain it during
-      reconciliation.
 
 ### Presentation
 - [ ] Direct Skia paint into the mapped SHM canvas for full-present frames,

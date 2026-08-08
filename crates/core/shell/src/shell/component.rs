@@ -918,6 +918,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// locale, and container size are unchanged — skipping template
     /// re-evaluation, style resolution, and prop sync for that subtree.
     component_memo: RefCell<HashMap<Arc<str>, memo::ComponentMemoEntry>>,
+    /// Parent/child aggregate generations used to validate component memo
+    /// entries without scanning every embedded runtime.
+    runtime_generations: RefCell<memo::RuntimeGenerationIndex>,
     /// Host-module → local-component alias → immutable merged rules and
     /// selector index. Local source and host styles are stable for this
     /// compiled surface, so cache misses can reuse the prepared style input.
@@ -1179,6 +1182,7 @@ impl FrontendSurfaceComponent {
             has_promoted_popover_wrappers: Cell::new(false),
             has_error_placeholders: Cell::new(false),
             component_memo: RefCell::new(HashMap::new()),
+            runtime_generations: RefCell::new(memo::RuntimeGenerationIndex::default()),
             prepared_component_styles: RefCell::new(HashMap::new()),
             popover_wrapper_marks: Cell::new(0),
             error_placeholder_marks: Cell::new(0),

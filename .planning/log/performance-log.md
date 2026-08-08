@@ -1,5 +1,28 @@
 # MESH Performance Log
 
+## 2026-08-08 — sparse retained-layout dirty-node handoff
+
+area: retained Taffy layout synchronization
+
+Layout-dirty frames now receive owned copy-on-write snapshots for the nodes
+whose layout, style, or text inputs changed. The retained layout engine applies
+their Taffy styles and text contexts directly, avoiding a second clean-tree
+walk to resolve IDs; structural and unkeyed reconciliation still use the full
+safe path. The parity suite covers keyed updates and structural add/remove/
+reorder fallbacks.
+
+**Measured.** Release with the local linker fallback, three runs of 2,000
+one-leaf width updates on a 1,365-node `4^0..5` retained tree: the ID-based
+tree-walk path took 318.384–320.724ms, while owned dirty snapshots took
+234.558–242.892ms (1.31–1.37x). The
+`retained_layout_dirty_snapshots_beat_tree_walk` gate passed all three runs.
+An earlier broad-subtree shape was slower because cloning a 341-node dirty
+subtree outweighed the walk; the shipped path is intended for sparse dirty
+sets, which is the retained-tree contract.
+
+**Verified.** `cargo test -p mesh-core-elements retained_layout --lib` passed
+(7 active tests), and the release gate passed.
+
 ## 2026-08-04 — bounded Appearance resource materialization
 
 area: settings frontend, component tree size

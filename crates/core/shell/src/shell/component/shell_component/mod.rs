@@ -229,7 +229,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             let mut runtimes = self.runtimes.lock().unwrap();
             std::mem::take(&mut *runtimes)
         };
-        for runtime in runtimes.values_mut() {
+        for (instance_key, runtime) in runtimes.iter_mut() {
             let observes_event = Self::runtime_observes_service_event(runtime, event);
             let capabilities = &runtime.script_ctx.capabilities;
             let has_read = capabilities.is_granted(&caps.read)
@@ -242,6 +242,10 @@ impl ShellComponent for FrontendSurfaceComponent {
                     .as_ref()
                     .is_some_and(|capability| capabilities.is_granted(capability));
             if !has_read && !observes_event {
+                self.sync_runtime_generation(
+                    instance_key,
+                    runtime.script_ctx.state().mutation_generation(),
+                );
                 continue;
             }
             // Always apply the Lua-level service payload so interface
@@ -253,6 +257,10 @@ impl ShellComponent for FrontendSurfaceComponent {
                 payload_fingerprint,
             );
             if !has_read {
+                self.sync_runtime_generation(
+                    instance_key,
+                    runtime.script_ctx.state().mutation_generation(),
+                );
                 continue;
             }
             if apply_service_update_with_name_and_fingerprint(
@@ -282,6 +290,10 @@ impl ShellComponent for FrontendSurfaceComponent {
             } {
                 needs_rebuild = true;
             }
+            self.sync_runtime_generation(
+                instance_key,
+                runtime.script_ctx.state().mutation_generation(),
+            );
         }
         *self.runtimes.lock().unwrap() = runtimes;
         if needs_rebuild {
@@ -1081,7 +1093,8 @@ impl ShellComponent for FrontendSurfaceComponent {
             "locale": locale.current(),
             "current": locale.current(),
         });
-        for runtime in self.runtimes.lock().unwrap().values_mut() {
+        let mut generations = Vec::new();
+        for (instance_key, runtime) in self.runtimes.lock().unwrap().iter_mut() {
             runtime.script_ctx.set_i18n_translations(
                 self.locale
                     .effective_translations_for_module(&runtime.script_ctx.module_id),
@@ -1096,6 +1109,13 @@ impl ShellComponent for FrontendSurfaceComponent {
                     &payload,
                 );
             }
+            generations.push((
+                instance_key.clone(),
+                runtime.script_ctx.state().mutation_generation(),
+            ));
+        }
+        for (instance_key, generation) in generations {
+            self.sync_runtime_generation(&instance_key, generation);
         }
         self.reset_render_caches();
         self.render_hooks_pending = true;
@@ -1164,6 +1184,15 @@ impl ShellComponent for FrontendSurfaceComponent {
                 }
                 runtime.host_props = next_host_props;
             }
+            if let Some(generation) = self
+                .runtimes
+                .lock()
+                .unwrap()
+                .get(self.root_instance_key())
+                .map(|runtime| runtime.script_ctx.state().mutation_generation())
+            {
+                self.sync_runtime_generation(self.root_instance_key(), generation);
+            }
         }
 
         let Some(locale) = self
@@ -1210,6 +1239,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             .update_compiled_module(&component_id, self.compiled.clone());
         self.frontend_catalog_changed();
         self.runtimes.lock().unwrap().clear();
+        self.clear_runtime_generation_index();
         self.init_root_runtime()?;
         self.render_hooks_pending = true;
         self.invalidate_script_state();
@@ -1242,6 +1272,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .changed_modules
                 .contains(&runtime.script_ctx.module_id)
         });
+        self.rebuild_runtime_generation_index();
         self.prepared_component_styles
             .get_mut()
             .retain(|module_id, _| !state.changed_modules.contains(module_id));

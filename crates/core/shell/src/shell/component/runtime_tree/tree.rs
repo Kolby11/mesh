@@ -333,18 +333,38 @@ impl RetainedWidgetTree {
             .is_some_and(|key| self.dirty.contains_key(*key))
     }
 
-    pub(in crate::shell::component) fn layout_dirty_node_ids(
+    pub(in crate::shell::component) fn layout_dirty_node_snapshots(
         &self,
         root: &WidgetNode,
-    ) -> Option<HashSet<NodeId>> {
-        // The result is normally sparse, but reserving against the retained
-        // node count avoids repeated rehashes on layout-heavy frames.
-        let mut dirty_ids = HashSet::with_capacity(self.node_keys.len().min(256));
-        let total = self.visit_fresh_snapshots(root, &mut |node_id, previous, fresh| {
-            let (flags, _) = previous.diff_flags(fresh);
-            if flags.is_empty() {
-                return true;
+    ) -> Option<Vec<WidgetNode>> {
+        // The result is normally sparse, so only the changed nodes are cloned
+        // into owned COW snapshots. The live tree must be mutably borrowed by
+        // the layout engine while these snapshots are consumed.
+        fn collect(
+            retained: &RetainedWidgetTree,
+            node: &WidgetNode,
+            dirty_nodes: &mut Vec<WidgetNode>,
+            total: &mut usize,
+        ) -> bool {
+            let Some(key) = retained.node_keys.get(&node.id).copied() else {
+                return false;
+            };
+            let Some(previous) = retained.nodes.get(key) else {
+                return false;
+            };
+            if previous.child_ids.len() != node.children.len()
+                || previous
+                    .child_ids
+                    .iter()
+                    .zip(&node.children)
+                    .any(|(previous_id, child)| *previous_id != child.id)
+            {
+                return false;
             }
+
+            let fresh = retained_snapshot_with_render(node, previous.render.clone());
+            let (flags, _) = previous.diff_flags(&fresh);
+            *total += 1;
             if flags.intersects(RetainedNodeDirtyFlags::INSERTED | RetainedNodeDirtyFlags::CHILDREN)
             {
                 return false;
@@ -354,12 +374,20 @@ impl RetainedWidgetTree {
                     | RetainedNodeDirtyFlags::STYLE
                     | RetainedNodeDirtyFlags::ATTRIBUTES,
             ) {
-                dirty_ids.insert(node_id);
+                dirty_nodes.push(node.clone());
             }
-            true
-        })?;
 
-        (total == self.node_keys.len()).then_some(dirty_ids)
+            node.children
+                .iter()
+                .all(|child| collect(retained, child, dirty_nodes, total))
+        }
+
+        let mut dirty_nodes = Vec::with_capacity(self.node_keys.len().min(256));
+        let mut total = 0;
+        if !collect(self, root, &mut dirty_nodes, &mut total) || total != self.node_keys.len() {
+            return None;
+        }
+        Some(dirty_nodes)
     }
 
     #[cfg(test)]

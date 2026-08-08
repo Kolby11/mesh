@@ -6,10 +6,9 @@
 //! when the cached inputs still hold:
 //!
 //! - the resolved props (fingerprint over props + typed handler calls),
-//! - the instance's own `ScriptState::mutation_generation` **and** every
-//!   descendant instance's generation (descendants are identified by the
-//!   hierarchical instance-key prefix, so a nested child whose state changed
-//!   invalidates every enclosing cached subtree),
+//! - the aggregate runtime-generation stamp for the instance and every
+//!   descendant (a nested child whose state changed bumps each enclosing
+//!   cached subtree),
 //! - the active theme (`Arc` pointer identity — `refresh_active_theme` swaps
 //!   the `Arc` whenever the theme actually changes),
 //! - the active locale,
@@ -36,7 +35,7 @@
 //! distinct runtime/cache identities. A `{#for}` can supply `key={expression}`
 //! to retain that identity across reorders; unkeyed loops remain positional.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -49,9 +48,10 @@ pub(super) struct ComponentMemoEntry {
     container_bits: (u32, u32),
     theme_ptr: usize,
     locale: String,
-    /// `(instance_key, mutation_generation)` for the instance itself plus
-    /// every descendant runtime that existed when the entry was stored.
-    generations: Vec<(Arc<str>, u64)>,
+    /// Aggregate generation for the instance and all currently registered
+    /// descendant runtimes. The runtime-generation index bumps this stamp on
+    /// the affected ancestor path when a runtime changes or is added.
+    subtree_generation: u64,
     /// The cached subtree contains promoted `<popover>` wrappers; reuse must
     /// re-set `has_promoted_popover_wrappers` so `finalize_tree` collapses them.
     marks_popover: bool,
@@ -59,6 +59,139 @@ pub(super) struct ComponentMemoEntry {
     /// `has_error_placeholders` so `finalize_tree` constrains them.
     marks_error: bool,
     node: WidgetNode,
+}
+
+struct RuntimeGenerationEntry {
+    parent: Option<Arc<str>>,
+    children: HashSet<Arc<str>>,
+    generation: u64,
+    subtree_generation: u64,
+    runtime: bool,
+}
+
+/// Parent/child index for runtime mutation generations.
+///
+/// Memo validity only needs to know whether anything in an instance's
+/// subtree changed. Keeping that aggregate in the index avoids scanning every
+/// runtime when a memo entry is stored or probed. Parent placeholders are
+/// retained while a child is registered so registration order does not matter;
+/// only entries marked as real runtimes are returned to memo lookups.
+#[derive(Default)]
+pub(super) struct RuntimeGenerationIndex {
+    entries: HashMap<Arc<str>, RuntimeGenerationEntry>,
+    next_subtree_generation: u64,
+}
+
+impl RuntimeGenerationIndex {
+    fn ensure_entry(&mut self, key: Arc<str>) {
+        if self.entries.contains_key(&key) {
+            return;
+        }
+        let parent = parent_instance_key(&key);
+        if let Some(parent_key) = parent.as_ref() {
+            self.ensure_entry(Arc::clone(parent_key));
+            self.entries
+                .get_mut(parent_key)
+                .expect("parent runtime-generation entry")
+                .children
+                .insert(Arc::clone(&key));
+        }
+        self.entries.insert(
+            key,
+            RuntimeGenerationEntry {
+                parent,
+                children: HashSet::new(),
+                generation: 0,
+                subtree_generation: 0,
+                runtime: false,
+            },
+        );
+    }
+
+    fn bump_path(&mut self, key: &Arc<str>) {
+        self.next_subtree_generation = self.next_subtree_generation.wrapping_add(1);
+        if self.next_subtree_generation == 0 {
+            self.next_subtree_generation = 1;
+        }
+        let stamp = self.next_subtree_generation;
+        let mut current = Some(Arc::clone(key));
+        while let Some(current_key) = current {
+            let Some(entry) = self.entries.get_mut(&current_key) else {
+                break;
+            };
+            entry.subtree_generation = stamp;
+            current = entry.parent.clone();
+        }
+    }
+
+    pub(super) fn register(&mut self, key: &str, generation: u64) {
+        let key: Arc<str> = Arc::from(key);
+        self.ensure_entry(Arc::clone(&key));
+        let changed = {
+            let entry = self
+                .entries
+                .get_mut(&key)
+                .expect("registered runtime-generation entry");
+            let changed = !entry.runtime || entry.generation != generation;
+            entry.runtime = true;
+            entry.generation = generation;
+            changed
+        };
+        if changed {
+            self.bump_path(&key);
+        }
+    }
+
+    pub(super) fn sync(&mut self, key: &str, generation: u64) {
+        let key: Arc<str> = Arc::from(key);
+        self.ensure_entry(Arc::clone(&key));
+        let changed = {
+            let entry = self
+                .entries
+                .get_mut(&key)
+                .expect("synced runtime-generation entry");
+            let changed = !entry.runtime || entry.generation != generation;
+            entry.runtime = true;
+            entry.generation = generation;
+            changed
+        };
+        if changed {
+            self.bump_path(&key);
+        }
+    }
+
+    pub(super) fn subtree_generation(&self, key: &str) -> Option<u64> {
+        self.entries
+            .get(key)
+            .filter(|entry| entry.runtime)
+            .map(|entry| entry.subtree_generation)
+    }
+
+    fn runtime_count(&self) -> usize {
+        self.entries.values().filter(|entry| entry.runtime).count()
+    }
+
+    pub(super) fn rebuild(&mut self, runtimes: &[(Arc<str>, u64)]) {
+        self.entries.clear();
+        self.next_subtree_generation = 0;
+        for (key, generation) in runtimes {
+            self.register(key, *generation);
+        }
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.entries.clear();
+        self.next_subtree_generation = 0;
+    }
+
+    #[cfg(test)]
+    fn aggregate_for(&self, key: &str) -> Option<u64> {
+        self.entries.get(key).map(|entry| entry.subtree_generation)
+    }
+}
+
+fn parent_instance_key(key: &str) -> Option<Arc<str>> {
+    key.rsplit_once('/').map(|(parent, _)| Arc::from(parent))
 }
 
 /// Snapshot of the side-effect mark counters taken before a child build.
@@ -114,6 +247,7 @@ pub(super) fn slot_props_fingerprint(props: &serde_json::Map<String, serde_json:
     hasher.finish()
 }
 
+#[cfg(test)]
 fn descendant_instance_prefix(instance_key: &str) -> String {
     let mut prefix = String::with_capacity(instance_key.len() + 1);
     prefix.push_str(instance_key);
@@ -161,6 +295,47 @@ fn hash_json_value(value: &serde_json::Value, hasher: &mut impl Hasher) {
 }
 
 impl FrontendSurfaceComponent {
+    pub(super) fn register_runtime_generation(&self, instance_key: &str, generation: u64) {
+        self.runtime_generations
+            .borrow_mut()
+            .register(instance_key, generation);
+    }
+
+    pub(super) fn sync_runtime_generation(&self, instance_key: &str, generation: u64) {
+        self.runtime_generations
+            .borrow_mut()
+            .sync(instance_key, generation);
+    }
+
+    pub(super) fn rebuild_runtime_generation_index(&self) {
+        let runtimes = self.runtimes.lock().unwrap();
+        let snapshot = runtimes
+            .iter()
+            .map(|(key, runtime)| {
+                (
+                    Arc::clone(key),
+                    runtime.script_ctx.state().mutation_generation(),
+                )
+            })
+            .collect::<Vec<_>>();
+        drop(runtimes);
+        self.runtime_generations.borrow_mut().rebuild(&snapshot);
+    }
+
+    fn ensure_runtime_generation_index(&self) {
+        let runtime_count = self.runtimes.lock().unwrap().len();
+        if self.runtime_generations.borrow().runtime_count() != runtime_count {
+            self.rebuild_runtime_generation_index();
+        }
+    }
+
+    fn runtime_subtree_generation(&self, instance_key: &str) -> Option<u64> {
+        self.ensure_runtime_generation_index();
+        self.runtime_generations
+            .borrow()
+            .subtree_generation(instance_key)
+    }
+
     /// Returns a copy-on-write clone of the memoized subtree for `instance_key`
     /// when every cached input still holds, replaying the presence-flag side
     /// effects the cached subtree carries. Authored payload and descendant
@@ -182,14 +357,8 @@ impl FrontendSurfaceComponent {
         {
             return None;
         }
-        {
-            let runtimes = self.runtimes.lock().unwrap();
-            for (key, generation) in &entry.generations {
-                let runtime = runtimes.get(key)?;
-                if runtime.script_ctx.state().mutation_generation() != *generation {
-                    return None;
-                }
-            }
+        if entry.subtree_generation != self.runtime_subtree_generation(instance_key)? {
+            return None;
         }
         if entry.marks_popover {
             self.has_promoted_popover_wrappers.set(true);
@@ -234,19 +403,8 @@ impl FrontendSurfaceComponent {
             self.component_memo.borrow_mut().remove(instance_key);
             return;
         }
-        let descendant_prefix = descendant_instance_prefix(instance_key);
-        let generations = {
-            let runtimes = self.runtimes.lock().unwrap();
-            let mut generations = Vec::new();
-            for (key, runtime) in runtimes.iter() {
-                if key.as_ref() == instance_key || key.starts_with(&descendant_prefix) {
-                    generations.push((
-                        key.clone(),
-                        runtime.script_ctx.state().mutation_generation(),
-                    ));
-                }
-            }
-            generations
+        let Some(subtree_generation) = self.runtime_subtree_generation(instance_key) else {
+            return;
         };
         self.component_memo.borrow_mut().insert(
             self.instance_keys.borrow_mut().intern(instance_key),
@@ -255,7 +413,7 @@ impl FrontendSurfaceComponent {
                 container_bits: (container_width.to_bits(), container_height.to_bits()),
                 theme_ptr: std::sync::Arc::as_ptr(&self.active_theme.borrow()) as usize,
                 locale: self.locale.current().to_string(),
-                generations,
+                subtree_generation,
                 marks_popover: self.popover_wrapper_marks.get() != marks_before.popover,
                 marks_error: self.error_placeholder_marks.get() != marks_before.error,
                 node: node.clone(),
@@ -265,6 +423,10 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn clear_component_memo(&self) {
         self.component_memo.borrow_mut().clear();
+    }
+
+    pub(super) fn clear_runtime_generation_index(&self) {
+        self.runtime_generations.borrow_mut().clear();
     }
 
     #[cfg(test)]
@@ -295,6 +457,66 @@ mod tests {
             descendant_instance_prefix("@mesh/panel/local:Toolbar"),
             "@mesh/panel/local:Toolbar/"
         );
+    }
+
+    #[test]
+    fn runtime_generation_index_aggregates_descendants_without_scanning() {
+        let mut index = RuntimeGenerationIndex::default();
+        index.register("root", 1);
+        let root_generation = index.aggregate_for("root").unwrap();
+        index.register("root/local:Child", 1);
+        let child_generation = index.aggregate_for("root/local:Child").unwrap();
+        let root_after_child = index.aggregate_for("root").unwrap();
+
+        assert_ne!(root_after_child, root_generation);
+        assert_ne!(child_generation, 0);
+
+        index.sync("root/local:Child", 2);
+        assert_ne!(index.aggregate_for("root").unwrap(), root_after_child);
+        assert_eq!(
+            index.subtree_generation("root/local:Child"),
+            index.aggregate_for("root/local:Child")
+        );
+    }
+
+    // cargo test -p mesh-core-shell --release -- runtime_generation_index_beats_descendant_scan --ignored --nocapture
+    #[test]
+    #[ignore = "release-only runtime-generation index benchmark"]
+    fn runtime_generation_index_beats_descendant_scan() {
+        let mut index = RuntimeGenerationIndex::default();
+        let keys = (0..4096)
+            .map(|index| Arc::<str>::from(format!("root/local:Child{index}")))
+            .collect::<Vec<_>>();
+        index.register("root", 1);
+        for key in &keys {
+            index.register(key, 1);
+        }
+
+        let iterations = 100_000;
+        let scan_started = std::time::Instant::now();
+        let mut scan_total = 0u64;
+        for _ in 0..iterations {
+            for key in &keys {
+                scan_total = scan_total.wrapping_add(key.len() as u64);
+            }
+        }
+        let scan_time = scan_started.elapsed();
+
+        let index_started = std::time::Instant::now();
+        let mut index_total = 0u64;
+        for _ in 0..iterations {
+            index_total = index_total
+                .wrapping_add(index.subtree_generation("root").expect("root generation"));
+        }
+        let index_time = index_started.elapsed();
+
+        eprintln!(
+            "runtime-generation index: descendant scan {scan_time:?}; aggregate lookup {index_time:?}; ratio {:.2}x",
+            scan_time.as_secs_f64() / index_time.as_secs_f64()
+        );
+        assert_ne!(scan_total, 0);
+        assert_ne!(index_total, 0);
+        assert!(index_time < scan_time);
     }
 
     // cargo test -p mesh-core-shell --release -- descendant_instance_prefix_presizing_beats_format_benchmark --ignored --nocapture

@@ -255,6 +255,49 @@ pub(super) fn update_retained_node_styles(
     }
 }
 
+/// Synchronize only the nodes selected by the retained-tree layout diff.
+///
+/// The ordinary ID-based entry point remains available for callers that only
+/// have a dirty set. The shell's retained tree can provide sparse owned node
+/// snapshots, however, which lets this path avoid walking clean descendants
+/// just to resolve their Taffy IDs.
+pub(super) fn update_retained_node_snapshots(
+    state: &mut PerSurfaceLayoutState,
+    mark_dirty: bool,
+    dirty_nodes: &[WidgetNode],
+    report: &mut TaffyLayoutReport,
+) {
+    for node in dirty_nodes {
+        let Some(taffy_id) = retained_taffy_id(node, state) else {
+            continue;
+        };
+        let style = taffy_style_for_node(node, report);
+        if let Err(error) = state.tree.set_style(taffy_id, style) {
+            tracing::warn!(
+                target: "mesh::layout",
+                error = %error,
+                "failed to update retained taffy style from dirty snapshot"
+            );
+        }
+        if mark_dirty && let Err(error) = state.tree.mark_dirty(taffy_id) {
+            tracing::warn!(
+                target: "mesh::layout",
+                error = %error,
+                "failed to mark retained taffy node dirty from dirty snapshot"
+            );
+        }
+        if let Err(error) =
+            update_text_context(node, &mut state.tree, taffy_id, &mut state.text_nodes)
+        {
+            tracing::warn!(
+                target: "mesh::layout",
+                error = %error,
+                "failed to update retained taffy text context from dirty snapshot"
+            );
+        }
+    }
+}
+
 pub(super) fn update_text_context(
     node: &WidgetNode,
     tree: &mut TaffyTree<NodeId>,

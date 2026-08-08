@@ -1078,6 +1078,138 @@ fn retained_layout_syncs_only_known_dirty_styles() {
 }
 
 #[test]
+fn retained_layout_syncs_owned_dirty_node_snapshots() {
+    let mut retained = retained_fixture();
+    let mut state = PerSurfaceLayoutState::default();
+    let mut cache = IntrinsicLayoutCache::default();
+    LayoutEngine::compute_incremental(
+        &mut retained,
+        &mut state,
+        200.0,
+        100.0,
+        false,
+        false,
+        &mut cache,
+        None,
+    );
+
+    retained.children[0].computed_style.width = Dimension::Px(80.0);
+    let dirty_snapshots = vec![retained.children[0].clone()];
+    let mut fresh = retained.clone();
+    LayoutEngine::compute_incremental_with_dirty_node_snapshots(
+        &mut retained,
+        &mut state,
+        200.0,
+        100.0,
+        true,
+        false,
+        Some(&dirty_snapshots),
+        &mut cache,
+        None,
+    );
+    LayoutEngine::compute_with_intrinsic_cache_and_measurer(
+        &mut fresh,
+        200.0,
+        100.0,
+        &mut IntrinsicLayoutCache::default(),
+        None,
+    );
+
+    assert_layout_maps_eq(&keyed_layouts(&retained), &keyed_layouts(&fresh));
+}
+
+// cargo test -p mesh-core-elements --release -- retained_layout_dirty_snapshots_beat_tree_walk --ignored --nocapture
+#[test]
+#[ignore = "release-only sparse retained layout synchronization benchmark"]
+fn retained_layout_dirty_snapshots_beat_tree_walk() {
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    fn first_leaf_mut(node: &mut WidgetNode) -> &mut WidgetNode {
+        if node.children.is_empty() {
+            node
+        } else {
+            first_leaf_mut(&mut node.children[0])
+        }
+    }
+
+    const ITERATIONS: usize = 2_000;
+    let mut id_root = broad_retained_fixture(4, 5);
+    let mut id_state = PerSurfaceLayoutState::default();
+    let mut id_cache = IntrinsicLayoutCache::default();
+    LayoutEngine::compute_incremental(
+        &mut id_root,
+        &mut id_state,
+        1200.0,
+        800.0,
+        false,
+        false,
+        &mut id_cache,
+        None,
+    );
+    let dirty_id = first_leaf_mut(&mut id_root).id;
+    let dirty_ids = HashSet::from([dirty_id]);
+
+    let id_started = Instant::now();
+    for iteration in 0..ITERATIONS {
+        first_leaf_mut(&mut id_root).computed_style.width =
+            Dimension::Px(if iteration % 2 == 0 { 240.0 } else { 241.0 });
+        LayoutEngine::compute_incremental_with_dirty_nodes(
+            black_box(&mut id_root),
+            &mut id_state,
+            1200.0,
+            800.0,
+            true,
+            false,
+            Some(&dirty_ids),
+            &mut id_cache,
+            None,
+        );
+    }
+    let id_time = id_started.elapsed();
+
+    let mut snapshot_root = broad_retained_fixture(4, 5);
+    let mut snapshot_state = PerSurfaceLayoutState::default();
+    let mut snapshot_cache = IntrinsicLayoutCache::default();
+    LayoutEngine::compute_incremental(
+        &mut snapshot_root,
+        &mut snapshot_state,
+        1200.0,
+        800.0,
+        false,
+        false,
+        &mut snapshot_cache,
+        None,
+    );
+
+    let snapshot_started = Instant::now();
+    for iteration in 0..ITERATIONS {
+        let dirty_node = first_leaf_mut(&mut snapshot_root);
+        dirty_node.computed_style.width =
+            Dimension::Px(if iteration % 2 == 0 { 240.0 } else { 241.0 });
+        let dirty_snapshots = [dirty_node.clone()];
+        LayoutEngine::compute_incremental_with_dirty_node_snapshots(
+            black_box(&mut snapshot_root),
+            &mut snapshot_state,
+            1200.0,
+            800.0,
+            true,
+            false,
+            Some(&dirty_snapshots),
+            &mut snapshot_cache,
+            None,
+        );
+    }
+    let snapshot_time = snapshot_started.elapsed();
+
+    eprintln!(
+        "retained layout dirty synchronization over {ITERATIONS} one-node updates: ID tree walk {id_time:?}; owned snapshots {snapshot_time:?}; ratio {:.2}x",
+        id_time.as_secs_f64() / snapshot_time.as_secs_f64()
+    );
+    assert!(snapshot_time < id_time);
+}
+
+#[test]
 fn paint_only_fast_path_defers_style_sync_until_layout_is_dirty() {
     let mut retained = retained_fixture();
     let mut state = PerSurfaceLayoutState::default();

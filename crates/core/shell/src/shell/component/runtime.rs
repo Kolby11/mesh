@@ -135,7 +135,19 @@ impl FrontendSurfaceComponent {
                 state_dirty = true;
             }
         }
+        let generations = runtimes
+            .iter()
+            .map(|(instance_key, runtime)| {
+                (
+                    instance_key.clone(),
+                    runtime.script_ctx.state().mutation_generation(),
+                )
+            })
+            .collect::<Vec<_>>();
         drop(runtimes);
+        for (instance_key, generation) in generations {
+            self.sync_runtime_generation(&instance_key, generation);
+        }
         if state_dirty {
             self.invalidate_script_state();
         }
@@ -419,12 +431,14 @@ impl FrontendSurfaceComponent {
     pub(super) fn init_root_runtime(&self) -> Result<(), ComponentError> {
         let runtime =
             self.create_runtime(self.root_instance_key(), &self.compiled, &HashMap::new())?;
+        let generation = runtime.script_ctx.state().mutation_generation();
         self.runtimes.lock().unwrap().insert(
             self.instance_keys
                 .borrow_mut()
                 .intern(self.root_instance_key()),
             runtime,
         );
+        self.register_runtime_generation(self.root_instance_key(), generation);
         Ok(())
     }
 
@@ -434,21 +448,29 @@ impl FrontendSurfaceComponent {
         compiled: &mesh_core_frontend::CompiledFrontendModule,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<(), ComponentError> {
-        {
+        let existing_generation = {
             let mut runtimes = self.runtimes.lock().unwrap();
             if let Some(runtime) = runtimes.get_mut(instance_key) {
                 apply_runtime_props(runtime, props, true);
-                return Ok(());
+                Some(runtime.script_ctx.state().mutation_generation())
+            } else {
+                None
             }
+        };
+        if let Some(generation) = existing_generation {
+            self.sync_runtime_generation(instance_key, generation);
+            return Ok(());
         }
 
         let mut runtime = self.create_runtime(instance_key, compiled, props)?;
         Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
         apply_runtime_props(&mut runtime, props, false);
+        let generation = runtime.script_ctx.state().mutation_generation();
         self.runtimes.lock().unwrap().insert(
             self.instance_keys.borrow_mut().intern(instance_key),
             runtime,
         );
+        self.register_runtime_generation(instance_key, generation);
 
         Ok(())
     }
@@ -469,12 +491,18 @@ impl FrontendSurfaceComponent {
         component: &mesh_core_component::ComponentFile,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<(), ComponentError> {
-        {
+        let existing_generation = {
             let mut runtimes = self.runtimes.lock().unwrap();
             if let Some(runtime) = runtimes.get_mut(instance_key) {
                 apply_runtime_props(runtime, props, true);
-                return Ok(());
+                Some(runtime.script_ctx.state().mutation_generation())
+            } else {
+                None
             }
+        };
+        if let Some(generation) = existing_generation {
+            self.sync_runtime_generation(instance_key, generation);
+            return Ok(());
         }
 
         let mut runtime = self.create_runtime_for_component(
@@ -486,10 +514,12 @@ impl FrontendSurfaceComponent {
         )?;
         Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
         apply_runtime_props(&mut runtime, props, false);
+        let generation = runtime.script_ctx.state().mutation_generation();
         self.runtimes.lock().unwrap().insert(
             self.instance_keys.borrow_mut().intern(instance_key),
             runtime,
         );
+        self.register_runtime_generation(instance_key, generation);
 
         Ok(())
     }
@@ -668,6 +698,10 @@ impl FrontendSurfaceComponent {
                 );
             }
             Self::drain_script_diagnostics(&self.diagnostics, runtime);
+            let generation = runtime.script_ctx.state().mutation_generation();
+            let runtime_key = instance_key.to_string();
+            drop(runtimes);
+            self.sync_runtime_generation(&runtime_key, generation);
             return Ok(Vec::new());
         }
         Self::drain_script_diagnostics(&self.diagnostics, runtime);
@@ -677,7 +711,10 @@ impl FrontendSurfaceComponent {
             runtime.script_ctx.state_mut().clear_dirty();
         }
         let published = runtime.script_ctx.drain_published_events();
+        let generation = runtime.script_ctx.state().mutation_generation();
+        let runtime_key = instance_key.to_string();
         drop(runtimes);
+        self.sync_runtime_generation(&runtime_key, generation);
 
         let (mut events, neighbors_dirty) = match target.instance_key() {
             Some(instance_key) => {
@@ -792,7 +829,9 @@ impl FrontendSurfaceComponent {
                 state_dirty = true;
             }
             let published = neighbor.script_ctx.drain_published_events();
+            let generation = neighbor.script_ctx.state().mutation_generation();
             drop(runtimes);
+            self.sync_runtime_generation(&neighbor_key, generation);
             events.extend(self.drain_local_script_events(&neighbor_key, published));
         }
         (state_dirty, events)

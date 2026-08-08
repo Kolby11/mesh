@@ -36,6 +36,7 @@ mod discovery;
 mod file_watch;
 mod ipc;
 mod module_config;
+mod package;
 mod profile;
 mod runtime;
 mod service;
@@ -531,6 +532,9 @@ pub enum ShellRunError {
         path: PathBuf,
         source: std::io::Error,
     },
+
+    #[error("package operation failed: {0}")]
+    Package(String),
 
     #[error(transparent)]
     Theme(#[from] mesh_core_theme::ThemeError),

@@ -254,16 +254,26 @@ fn direct_snapshot_analysis_preserves_layout_dirty_detection() {
 
     let mut retained = RetainedWidgetTree::default();
     retained.update(&tree);
-    assert_eq!(retained.layout_dirty_node_ids(&tree), Some(HashSet::new()));
+    let dirty_snapshot_ids = |snapshots: Option<Vec<WidgetNode>>| {
+        snapshots
+            .unwrap_or_default()
+            .into_iter()
+            .map(|node| node.id)
+            .collect::<HashSet<_>>()
+    };
+    assert_eq!(
+        dirty_snapshot_ids(retained.layout_dirty_node_snapshots(&tree)),
+        HashSet::new()
+    );
 
     tree.children[0].layout.width = 42.0;
     assert_eq!(
-        retained.layout_dirty_node_ids(&tree),
-        Some(HashSet::from([tree.children[0].id]))
+        dirty_snapshot_ids(retained.layout_dirty_node_snapshots(&tree)),
+        HashSet::from([tree.children[0].id])
     );
 
     tree.children.push(WidgetNode::new("text"));
-    assert_eq!(retained.layout_dirty_node_ids(&tree), None);
+    assert!(retained.layout_dirty_node_snapshots(&tree).is_none());
 }
 
 #[test]

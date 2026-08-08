@@ -716,19 +716,19 @@ impl FrontendSurfaceComponent {
         let dirty_structural =
             dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
         let dirty_layout = dirty_types.contains(ComponentDirtyFlags::LAYOUT);
-        let layout_dirty_node_ids = if dirty_layout && !dirty_structural {
-            self.retained_tree.layout_dirty_node_ids(tree)
+        let layout_dirty_node_snapshots = if dirty_layout && !dirty_structural {
+            self.retained_tree.layout_dirty_node_snapshots(tree)
         } else {
             None
         };
-        LayoutEngine::compute_incremental_with_dirty_nodes(
+        LayoutEngine::compute_incremental_with_dirty_node_snapshots(
             tree,
             &mut self.layout_state,
             width as f32,
             height as f32,
             dirty_layout,
             dirty_structural,
-            layout_dirty_node_ids.as_ref(),
+            layout_dirty_node_snapshots.as_deref(),
             &mut self.intrinsic_layout_cache,
             Some(&measurer),
         );

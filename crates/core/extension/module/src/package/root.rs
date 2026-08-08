@@ -4,6 +4,7 @@ use super::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize)]
@@ -76,6 +77,47 @@ impl RootModuleGraphManifest {
             theme.validate()?;
         }
         Ok(())
+    }
+
+    /// Persist the inventory portion of the root graph while preserving the
+    /// document's top-level metadata. The loader accepts a canonical
+    /// `module.json` envelope, so writing the derived struct directly would
+    /// accidentally drop the `mesh` wrapper and any author-owned fields.
+    pub fn save(&self, path: &Path) -> Result<(), ModuleManifestError> {
+        self.validate()?;
+        let mut document = if path.exists() {
+            let content = fs::read_to_string(path).map_err(|source| ModuleManifestError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            serde_json::from_str::<serde_json::Value>(&content).map_err(|source| {
+                ModuleManifestError::Json {
+                    path: path.to_path_buf(),
+                    source,
+                }
+            })?
+        } else {
+            serde_json::json!({})
+        };
+        let mesh = serde_json::to_value(self).map_err(|source| ModuleManifestError::Json {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let Some(object) = document.as_object_mut() else {
+            return Err(ModuleManifestError::Validation(format!(
+                "root module graph {} must contain a JSON object",
+                path.display()
+            )));
+        };
+        object.insert("mesh".into(), mesh);
+        let mut content = serde_json::to_string_pretty(&document).map_err(|source| {
+            ModuleManifestError::Json {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?;
+        content.push('\n');
+        super::profile::atomic_write(path, content.as_bytes())
     }
 }
 

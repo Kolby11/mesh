@@ -324,6 +324,20 @@ impl Shell {
                     &[("interface", "string"), ("provider_id", "string")],
                 ),
                 ("switch_profile", &[("profile_id", "string")]),
+                (
+                    "install",
+                    &[
+                        ("source", "string"),
+                        ("profile_id", "string?"),
+                        ("available_only", "boolean?"),
+                        ("allow_elevated", "boolean?"),
+                        ("allow_high", "boolean?"),
+                    ],
+                ),
+                (
+                    "uninstall",
+                    &[("module_id", "string"), ("force", "boolean?")],
+                ),
             ],
         ));
         interfaces.register(InterfaceProvider {

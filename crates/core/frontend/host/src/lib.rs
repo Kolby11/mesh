@@ -337,6 +337,22 @@ pub enum CoreRequest {
         module_id: String,
         enabled: bool,
     },
+    /// Install a module from a local directory or Git source, then make it
+    /// available to the installed graph. Frontends are added to the selected
+    /// profile unless `available_only` is set.
+    InstallModule {
+        source: String,
+        profile_id: Option<String>,
+        available_only: bool,
+        allow_elevated: bool,
+        allow_high: bool,
+    },
+    /// Remove an installed module and its lock entry. Without `force`, active
+    /// profile references and dependent lock entries refuse the operation.
+    UninstallModule {
+        module_id: String,
+        force: bool,
+    },
     /// `instance_id = None` targets `props.global`; otherwise
     /// `props.instances.<instance-id>`.
     SetModuleProp {

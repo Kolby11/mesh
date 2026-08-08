@@ -814,6 +814,22 @@ impl Shell {
             CoreRequest::SetModuleEnabled { module_id, enabled } => {
                 Ok(self.apply_set_module_enabled(&module_id, enabled))
             }
+            CoreRequest::InstallModule {
+                source,
+                profile_id,
+                available_only,
+                allow_elevated,
+                allow_high,
+            } => self.apply_install_module(
+                &source,
+                profile_id.as_deref(),
+                available_only,
+                allow_elevated,
+                allow_high,
+            ),
+            CoreRequest::UninstallModule { module_id, force } => {
+                self.apply_uninstall_module(&module_id, force)
+            }
             CoreRequest::SetModuleProp {
                 module_id,
                 instance_id,
@@ -1857,6 +1873,29 @@ fn core_service_request(
             module_id: text("module_id")?,
             enabled: payload.get("enabled")?.as_bool()?,
         }),
+        ("mesh.packages", "install") => Some(CoreRequest::InstallModule {
+            source: text("source")?,
+            profile_id: optional_text("profile_id").filter(|value| !value.trim().is_empty()),
+            available_only: payload
+                .get("available_only")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false),
+            allow_elevated: payload
+                .get("allow_elevated")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false),
+            allow_high: payload
+                .get("allow_high")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false),
+        }),
+        ("mesh.packages", "uninstall") => Some(CoreRequest::UninstallModule {
+            module_id: text("module_id")?,
+            force: payload
+                .get("force")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false),
+        }),
         ("mesh.packages", "set_provider") => Some(CoreRequest::SetProvider {
             interface: text("interface")?,
             provider_id: text("provider_id")?,
@@ -1886,6 +1925,8 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::SetLocale { .. } => "set_locale",
         CoreRequest::SetProvider { .. } => "set_provider",
         CoreRequest::SetModuleEnabled { .. } => "set_module_enabled",
+        CoreRequest::InstallModule { .. } => "install_module",
+        CoreRequest::UninstallModule { .. } => "uninstall_module",
         CoreRequest::SetModuleProp { .. } => "set_module_prop",
         CoreRequest::UnsetModuleProp { .. } => "unset_module_prop",
         CoreRequest::SwitchProfile { .. } => "switch_profile",
@@ -1924,5 +1965,51 @@ fn benchmark_scenario_id(scenario_id: &str) -> Option<BenchmarkScenarioId> {
         "keyboard_traversal" => Some(BenchmarkScenarioId::KeyboardTraversal),
         "backend_update" => Some(BenchmarkScenarioId::BackendUpdate),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn package_install_and_uninstall_commands_become_typed_requests() {
+        let install = core_service_request(
+            "mesh.packages",
+            "install",
+            &serde_json::json!({
+                "source": "/tmp/example-module",
+                "profile_id": "desktop",
+                "available_only": true,
+                "allow_elevated": true,
+                "allow_high": false,
+            }),
+        )
+        .expect("install should be a core-provided package method");
+        assert!(matches!(
+            install,
+            CoreRequest::InstallModule {
+                source,
+                profile_id: Some(profile_id),
+                available_only: true,
+                allow_elevated: true,
+                allow_high: false,
+            } if source == "/tmp/example-module" && profile_id == "desktop"
+        ));
+
+        let uninstall = core_service_request(
+            "mesh.packages",
+            "uninstall",
+            &serde_json::json!({
+                "module_id": "@example/module",
+                "force": true,
+            }),
+        )
+        .expect("uninstall should be a core-provided package method");
+        assert!(matches!(
+            uninstall,
+            CoreRequest::UninstallModule { module_id, force }
+                if module_id == "@example/module" && force
+        ));
     }
 }
