@@ -1571,6 +1571,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.measured_size.is_none()
     }
 
+    fn invalidate_surface_config(&mut self) {
+        FrontendSurfaceComponent::invalidate_surface_config(self);
+    }
+
     fn node_bounds_by_key(&self, key: &str) -> Option<(f32, f32, f32, f32)> {
         let tree = self.last_tree.as_ref()?;
         find_node_bounds_by_key(tree, key, 0.0, 0.0)

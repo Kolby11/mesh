@@ -202,3 +202,31 @@ fn cached_region_state_beats_command_scan() {
     );
     assert!(cache < scan);
 }
+
+#[test]
+fn spanning_and_docked_surfaces_keep_their_deliberate_zero_dimension() {
+    use mesh_core_wayland::Edge;
+
+    // A top/bottom bar is anchored to both horizontal edges unconditionally, so
+    // a zero width is the protocol spelling for its span.
+    assert!(layer_configure_size_is_resolved(Some(Edge::Top), 0, 0, 56));
+    // A docked rail asked for its exclusive zone, so resolving a zero axis to
+    // that zone gives it the size it named.
+    assert!(layer_configure_size_is_resolved(Some(Edge::Left), 48, 0, 0));
+    // Nothing backs these: the cross axis of a bar, and either axis of a
+    // floating surface. Sending one makes the protocol layer substitute a size,
+    // which is a visible collapse into the anchor corner.
+    assert!(!layer_configure_size_is_resolved(
+        Some(Edge::Top),
+        0,
+        1920,
+        0
+    ));
+    assert!(!layer_configure_size_is_resolved(
+        Some(Edge::Right),
+        0,
+        920,
+        0
+    ));
+    assert!(!layer_configure_size_is_resolved(None, 0, 0, 700));
+}

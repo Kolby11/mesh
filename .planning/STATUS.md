@@ -7,7 +7,17 @@ lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
 
-Settings opening and closing now has one idempotent visibility lifecycle. A
+Showing and hiding a surface is one clean map/unmap on the wire. A layer-surface
+configure is never sent carrying a zero dimension no anchor backs — the
+protocol has to clamp those (1x1 at the anchor corner for a floating surface),
+which is what made Settings collapse to a sliver and pop back on every show and
+hide. Reopening also works at all again: hiding unmaps the surface and returns
+it to the unconfigured state, and the render loop no longer waits for a
+configure event before sending the configure that provokes it. Measured live
+against Hyprland: five open/close cycles, one `openlayer`/`closelayer` pair and
+one 920x900 configure each, zero protocol clamps.
+
+Settings opening and closing has one idempotent visibility lifecycle. A
 duplicate show cannot replay the entrance, a duplicate hide cannot shortcut an
 active exit, and the navigation launcher suppresses Quick Settings while the
 full Settings surface is being opened. Focused navigation and shell lifecycle

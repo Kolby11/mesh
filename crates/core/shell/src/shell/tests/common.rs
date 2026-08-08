@@ -1229,6 +1229,129 @@ impl super::types::ShellComponent for PopupGeometryRecordingComponent {
     }
 }
 
+/// A floating (right-anchored, no exclusive zone) layer component that models
+/// the real surface-config lifecycle rather than a simplified one:
+///
+/// - `render` writes the surface record only while the config is dirty, which is
+///   what keeps a quiet component from re-deriving its placement every frame;
+/// - a size change drops the cached measurement, so the next `render` has
+///   nothing to report and writes `(0, 0)`;
+/// - a paint restores the measurement but does *not* re-dirty the config when
+///   the content measures exactly what it was laid out against.
+///
+/// Together those three make the shell's second render pass recompute a
+/// configure from the first pass's unmeasured dimensions unless it re-dirties
+/// the config itself — and on a floating layer surface `(0, 0)` is not "unknown"
+/// but "span the output", which the protocol layer has to clamp.
+pub(super) struct SurfaceConfigLifecycleComponent {
+    pub(super) surface_id: String,
+    pub(super) content_size: (u32, u32),
+    pub(super) measured: Option<(u32, u32)>,
+    pub(super) surface_config_dirty: bool,
+}
+
+impl SurfaceConfigLifecycleComponent {
+    pub(super) fn new(surface_id: &str, content_size: (u32, u32)) -> Self {
+        Self {
+            surface_id: surface_id.to_string(),
+            content_size,
+            measured: None,
+            surface_config_dirty: true,
+        }
+    }
+}
+
+impl super::types::ShellComponent for SurfaceConfigLifecycleComponent {
+    fn id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn surface_id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn initial_visibility(&self) -> Option<bool> {
+        Some(false)
+    }
+
+    fn mount(
+        &mut self,
+        _ctx: super::types::ComponentContext,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_core_event(
+        &mut self,
+        _event: &super::types::CoreEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_service_event(
+        &mut self,
+        _event: &ServiceEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn tick(&mut self) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn wants_render(&self) -> bool {
+        true
+    }
+
+    fn render(
+        &mut self,
+        surface: &mut dyn mesh_core_wayland::ShellSurface,
+    ) -> Result<(), super::types::ComponentError> {
+        if !self.surface_config_dirty {
+            return Ok(());
+        }
+        self.surface_config_dirty = false;
+        surface.anchor(mesh_core_wayland::Edge::Right);
+        surface.set_exclusive_zone(0);
+        let (width, height) = self.measured.unwrap_or((0, 0));
+        surface.set_size(width, height);
+        Ok(())
+    }
+
+    fn paint(
+        &mut self,
+        _theme: &mesh_core_theme::Theme,
+        _extent: crate::shell::types::SurfaceExtent,
+        _buffer: &mut mesh_core_render::PixelBuffer,
+        _scale: f32,
+    ) -> Result<(), super::types::ComponentError> {
+        self.measured = Some(self.content_size);
+        Ok(())
+    }
+
+    fn theme_changed(&mut self) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn surface_size_changed(&mut self, _width: u32, _height: u32) -> bool {
+        self.measured = None;
+        self.surface_config_dirty = true;
+        true
+    }
+
+    fn invalidate_surface_config(&mut self) {
+        self.surface_config_dirty = true;
+    }
+
+    fn declared_or_measured_size(&self) -> (u32, u32) {
+        self.measured.unwrap_or((0, 0))
+    }
+
+    fn needs_content_measure(&self) -> bool {
+        self.measured.is_none()
+    }
+}
+
 pub(super) struct MeasuredLayerGeometryComponent {
     pub(super) surface_id: String,
     pub(super) declared_size: (u32, u32),

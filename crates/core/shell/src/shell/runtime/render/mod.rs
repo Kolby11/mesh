@@ -97,7 +97,21 @@ impl Shell {
                 components_want_render_after_frame = true;
                 continue;
             }
+            // A surface that still owes the compositor a configure must not be
+            // gated on the compositor having answered one. Hiding a layer
+            // surface unmaps it by attaching a null buffer, which returns it to
+            // the unconfigured state on both sides: the backend clears
+            // `configured` and the hidden frame below drops
+            // `last_surface_config`. Waiting for readiness in that state waits
+            // for a configure event that only the configure request further
+            // down can provoke, so the surface would never map again — the
+            // second and every later `ShowSurface` would silently do nothing.
+            // The present itself stays safe: it reports `NotReady` while the
+            // compositor has not answered, which retains the damage and asks
+            // for another frame.
+            let owes_configure = self.components[index].parent.last_surface_config.is_none();
             if visible
+                && !owes_configure
                 && !self
                     .presentation_engine
                     .surface_ready_to_present(&surface_id)
@@ -272,8 +286,45 @@ impl Shell {
                             || last.role != surface.role
                             || last.window != surface.window
                     });
+                // `render_layout` writes `(0, 0)` for a component with no content
+                // measurement, and `observe_surface_size` drops that measurement
+                // whenever the available size changes — so a zero can reach this
+                // point on any frame between a configure and the paint that
+                // re-measures, and it survives into later passes of the same
+                // frame because `render()` only re-runs `render_layout` while the
+                // surface config is dirty. Zero is not "unknown" on the wire: it
+                // is layer-shell for "span the output", so `layer_protocol_size`
+                // has to invent a size for a zero the anchor does not back — the
+                // exclusive zone for a docked rail, a 1x1 clamp for a floating
+                // surface rather than map a screen-sized input sink. Either way
+                // it is a real, visible resize that collapses the surface into a
+                // sliver at its anchor corner until the next measured configure
+                // pops it back, which is the flicker seen when a surface is shown
+                // or hidden. Hold the last good geometry instead: `config_changed`
+                // stays true, so the configure goes out as soon as a size the
+                // compositor can honour exists.
+                //
+                // A window is exempt: its size is a hint the compositor answers
+                // rather than a placement it applies, and `apply_window_config`
+                // reads a zero as "no hint" instead of as a span.
+                let configure_size_resolved = surface.role == SurfaceRole::Window
+                    || layer_configure_size_is_resolved(
+                        surface.edge,
+                        surface.exclusive_zone,
+                        configured_width,
+                        configured_height,
+                    );
+                // A pass that cannot produce a usable configure earns one more,
+                // taken after the paint below has measured the content.
+                let unmeasured_configure = !is_popup
+                    && (!configure_size_resolved
+                        || self.components[index].component.needs_content_measure());
                 let defer_first_layer_configure = first_layer_configure && rerender_attempts == 0;
-                if config_changed && !is_popup && !defer_first_layer_configure {
+                if config_changed
+                    && !is_popup
+                    && !defer_first_layer_configure
+                    && configure_size_resolved
+                {
                     let cfg = SurfaceConfig {
                         role: surface.role,
                         window: surface.window.clone(),
@@ -558,14 +609,27 @@ impl Shell {
                 // just built the retained tree for the first time, so
                 // re-running render() now lets it re-measure and send a
                 // corrected `configure()` instead of leaving the surface
-                // stuck at the unmeasured first-pass size.
+                // stuck at the unmeasured first-pass size. A pass that skipped
+                // its configure for want of a measurement takes the same second
+                // pass, so the configure it owes goes out in this frame instead
+                // of a later one.
                 if (!self.components[index].component.wants_immediate_rerender()
                     && !defer_popup_create
-                    && !first_layer_configure)
+                    && !first_layer_configure
+                    && !unmeasured_configure)
                     || rerender_attempts >= 1
                 {
                     break;
                 }
+
+                // The corrective pass exists to re-derive the surface config
+                // from the measurement the paint above just produced, but
+                // `render` only re-runs `render_layout` while that config is
+                // dirty — and a component whose content measures exactly what it
+                // was laid out against leaves it clean. Without this the second
+                // pass would recompute the configure from the first pass's
+                // unmeasured dimensions and send those instead.
+                self.components[index].component.invalidate_surface_config();
 
                 rerender_attempts += 1;
             }
@@ -1018,5 +1082,42 @@ impl Shell {
             (None, Some(size)) => Some((size.0.max(1), size.1.max(1))),
             (None, None) | (Some(_), None) => None,
         }
+    }
+}
+
+/// Whether a layer-surface config carries a size the compositor can apply as
+/// written.
+///
+/// A zero dimension is not "not measured yet" on the wire — in layer-shell it
+/// means "span the output", and it is only valid when the surface is anchored
+/// to both opposing edges of that axis. `layer_protocol_size` therefore has to
+/// substitute a size for a zero the anchor does not back: the exclusive zone
+/// for a docked surface, and a 1x1 clamp for a floating one (the alternative
+/// being an invisible output-spanning input sink). Both substitutions are
+/// visible geometry, so a config that would trigger one is held back rather
+/// than sent — see the call site.
+///
+/// This mirrors `layer_surface_request_size`, which is where the deliberate
+/// zeros come from: a top/bottom bar spans horizontally, and a docked side rail
+/// spans vertically.
+pub(in crate::shell) fn layer_configure_size_is_resolved(
+    edge: Option<mesh_core_wayland::Edge>,
+    exclusive_zone: i32,
+    width: u32,
+    height: u32,
+) -> bool {
+    use mesh_core_wayland::Edge;
+    // A docked surface asked for its exclusive zone, so resolving a zero axis
+    // to that zone gives it the size it named; nothing is invented.
+    if exclusive_zone > 0 {
+        return true;
+    }
+    match edge {
+        // Anchored to both horizontal edges unconditionally: a zero width is
+        // the intended spanning spelling, but the cross axis is content.
+        Some(Edge::Top | Edge::Bottom) => height != 0,
+        // A floating surface anchors neither axis to both edges, so every zero
+        // here stands for an absent measurement.
+        Some(Edge::Left | Edge::Right) | None => width != 0 && height != 0,
     }
 }

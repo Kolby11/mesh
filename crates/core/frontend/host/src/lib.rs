@@ -757,6 +757,17 @@ pub trait ShellComponent: Send {
     fn needs_content_measure(&self) -> bool {
         false
     }
+    /// Mark the surface config (size, anchor, margins, keyboard mode) as needing
+    /// to be re-emitted on the next `render`.
+    ///
+    /// `render` refreshes the shell's surface record only while that config is
+    /// dirty, which is what keeps a quiet component from re-deriving its
+    /// placement every frame. The shell calls this when it takes a second render
+    /// pass specifically to correct a configure — the paint in between has just
+    /// produced the measurement the first pass lacked, and without this the
+    /// corrective pass would recompute the configure from the same unmeasured
+    /// dimensions and send them.
+    fn invalidate_surface_config(&mut self) {}
     /// Bounds `(left, top, right, bottom)` of a node in this surface's last
     /// painted tree, in surface-local logical coordinates. Used to anchor a
     /// promoted popover to its real trigger rect so the compositor can center

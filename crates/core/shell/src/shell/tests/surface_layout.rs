@@ -161,6 +161,148 @@ fn repeated_visibility_requests_do_not_restart_or_short_circuit_surface_lifecycl
     );
 }
 
+/// Reopening a surface has to survive the unmap that hiding it performs.
+///
+/// Hiding a layer surface attaches a null buffer, which returns it to the
+/// unconfigured state: the backend clears `configured` and the hidden frame
+/// drops `last_surface_config`. If the render loop then waits for the
+/// compositor to be ready before it will send a configure, it waits for a
+/// configure event that only that request can provoke — and the surface never
+/// maps again, which is a `ShowSurface` that silently does nothing.
+#[test]
+fn hidden_surface_reconfigures_and_presents_when_shown_again() {
+    const CONTENT: (u32, u32) = (920, 700);
+    const SURFACE: &str = "@test/reopened";
+
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(SurfaceConfigLifecycleComponent::new(
+        SURFACE, CONTENT,
+    )));
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: SURFACE.into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+    assert_eq!(
+        shell.presentation_engine.testing_presented_surfaces(),
+        [SURFACE],
+        "the first show must present"
+    );
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::HideSurface {
+            surface_id: SURFACE.into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+    // What the Wayland backend does on the hiding present: the null-buffer
+    // attach unmaps the surface and it must be configured again before it can
+    // take another buffer.
+    shell
+        .presentation_engine
+        .testing_set_surface_configured(SURFACE, false);
+
+    let configures_before = shell
+        .presentation_engine
+        .testing_surface_config_history()
+        .len();
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: SURFACE.into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+
+    let configures = shell
+        .presentation_engine
+        .testing_surface_config_history()
+        .iter()
+        .skip(configures_before)
+        .filter(|(id, _)| id == SURFACE)
+        .map(|(_, cfg)| (cfg.width, cfg.height))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        configures,
+        [(CONTENT.0, CONTENT.1 + 200)],
+        "re-showing an unmapped surface must send exactly one configure, at its \
+         measured size"
+    );
+
+    // The configure above is what makes the compositor answer; the surface can
+    // take a buffer from the frame after it does.
+    shell
+        .presentation_engine
+        .testing_set_surface_configured(SURFACE, true);
+    shell.render_components().unwrap();
+    assert_eq!(
+        shell.presentation_engine.testing_presented_surfaces(),
+        [SURFACE, SURFACE],
+        "a re-shown surface must map again"
+    );
+}
+
+/// The invariant: a layer-surface configure never carries a size the protocol
+/// layer would have to invent.
+///
+/// Zero is layer-shell for "span the output", not for "not measured yet", so a
+/// zero the anchor does not back forces `layer_protocol_size` to substitute one
+/// — the exclusive zone, or a 1x1 clamp for a floating surface rather than an
+/// invisible output-spanning input sink. Either substitution is visible
+/// geometry: the surface collapses into a sliver at its anchor corner and the
+/// next measured configure pops it back, which is the flicker this guards.
+#[test]
+fn layer_configures_never_carry_an_unbacked_zero_dimension() {
+    const SURFACE: &str = "@test/no-zero-configure";
+
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(SurfaceConfigLifecycleComponent::new(
+        SURFACE,
+        (920, 700),
+    )));
+
+    // Show, hide, and show again: every one of those transitions passes through
+    // a frame whose measurement has been dropped and not yet retaken.
+    for request in [
+        CoreRequest::ShowSurface {
+            surface_id: SURFACE.into(),
+        },
+        CoreRequest::HideSurface {
+            surface_id: SURFACE.into(),
+        },
+        CoreRequest::ShowSurface {
+            surface_id: SURFACE.into(),
+        },
+    ] {
+        let mut emitted = shell.apply_request(request).unwrap();
+        shell.drain_requests(&mut emitted).unwrap();
+        shell.render_components().unwrap();
+        shell.render_components().unwrap();
+    }
+
+    let zero_configures = shell
+        .presentation_engine
+        .testing_surface_config_history()
+        .iter()
+        .filter(|(id, cfg)| id == SURFACE && (cfg.width == 0 || cfg.height == 0))
+        .map(|(_, cfg)| (cfg.width, cfg.height))
+        .collect::<Vec<_>>();
+    assert!(
+        zero_configures.is_empty(),
+        "a floating layer surface anchors neither axis to both edges, so every \
+         zero here is an absent measurement the compositor would clamp: \
+         {zero_configures:?}"
+    );
+}
+
 #[test]
 fn wayland_parent_input_uses_content_size_not_tooltip_inflated_surface_size() {
     let state = Arc::new(Mutex::new(InputSizeRecordingState::default()));
@@ -269,6 +411,11 @@ fn unconfigured_surface_keeps_pending_frame_until_configure_retry() {
         })
         .unwrap();
     shell.drain_requests(&mut emitted).unwrap();
+    // Wait for the answer to a configure the shell has actually sent. A surface
+    // whose configure is still owed is the *other* state, and it must not wait:
+    // nothing but that request can make the compositor answer, so waiting there
+    // is what left a re-shown surface unmapped forever.
+    shell.render_components().unwrap();
 
     let pending = mesh_core_render::DamageRect {
         x: 3,
@@ -280,6 +427,7 @@ fn unconfigured_surface_keeps_pending_frame_until_configure_retry() {
     shell
         .presentation_engine
         .testing_set_surface_configured("@test/configure-retry", false);
+    let presents_before = shell.presentation_engine.testing_presented_surfaces().len();
 
     shell.render_components().unwrap();
 
@@ -288,11 +436,10 @@ fn unconfigured_surface_keeps_pending_frame_until_configure_retry() {
         [pending],
         "an unconfigured surface must retain its already-painted frame"
     );
-    assert!(
-        shell
-            .presentation_engine
-            .testing_presented_surfaces()
-            .is_empty()
+    assert_eq!(
+        shell.presentation_engine.testing_presented_surfaces().len(),
+        presents_before,
+        "a surface awaiting its configure must not present"
     );
     assert!(
         !shell.components_have_ready_render_work(),
@@ -307,8 +454,9 @@ fn unconfigured_surface_keeps_pending_frame_until_configure_retry() {
 
     assert!(shell.components[0].parent.pending_present_damage.is_empty());
     assert_eq!(
-        shell.presentation_engine.testing_presented_surfaces(),
-        ["@test/configure-retry"]
+        shell.presentation_engine.testing_presented_surfaces().len(),
+        presents_before + 1,
+        "the answered configure releases the retained frame"
     );
 }
 
