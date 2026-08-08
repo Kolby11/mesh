@@ -263,9 +263,26 @@ impl ShellComponent for FrontendSurfaceComponent {
                 );
                 continue;
             }
+            // Capability is module-wide, so every component instance of a
+            // module that declares `service.x.read` is handed the payload —
+            // including the five settings pages that never mention it. Once a
+            // runtime has evaluated its template, its recorded read sets say
+            // whether it can see this update at all: through the service proxy
+            // (`observes_event`), through the `<service>` state member, or
+            // through the generic `last_service_update` trace. If none of them
+            // reach it, install the value without dirtying the instance or
+            // advancing the generation its render memoization keys on —
+            // otherwise an unrelated 1 Hz poll re-instantiates every page's
+            // subtree on every tick.
+            let observed = observes_event
+                || runtime.script_ctx.observes_state_member(service_name)
+                || runtime
+                    .script_ctx
+                    .observes_state_member("last_service_update");
             if apply_service_update_with_name_and_fingerprint(
                 runtime.script_ctx.state_mut(),
                 true,
+                observed,
                 service_name,
                 source_module,
                 payload,
@@ -659,6 +676,11 @@ impl ShellComponent for FrontendSurfaceComponent {
         // one that rebuilds at the new size — snapshotting first would leave
         // those flags pending and burn one extra full frame per resize.
         self.observe_surface_size(content_width, content_height);
+        // Run render hooks BEFORE the dirty flags are snapshotted, so a hook
+        // that does invalidate lands in this frame rather than costing an
+        // extra one, and so the path decision below can see whether the hooks
+        // changed anything a template reads.
+        self.run_pending_render_hooks();
         let animation_only_frame = std::mem::take(&mut self.animation_only_dirty);
         let (requires_tree_rebuild, can_use_retained_path, dirty_types, _) =
             self.take_dirty_for_paint();

@@ -260,7 +260,7 @@ impl RetainedWidgetTree {
         let update_epoch = self.update_epoch;
 
         let mut dirty_nodes = SmallVec::new();
-        for node in update_nodes {
+        for (node, geometry_only) in update_nodes {
             if update_retained_node(
                 node,
                 &mut self.nodes,
@@ -272,6 +272,7 @@ impl RetainedWidgetTree {
                 &mut render_dirty,
                 &mut next_render_dirty_node_ids,
                 true,
+                geometry_only,
             ) {
                 dirty_nodes.push(node);
             }
@@ -362,7 +363,7 @@ impl RetainedWidgetTree {
                 return false;
             }
 
-            let fresh = retained_snapshot_with_render(node, previous.render.clone());
+            let fresh = retained_snapshot_with_render(node, previous.render.clone(), None);
             let (flags, _) = previous.diff_flags(&fresh);
             *total += 1;
             if flags.intersects(RetainedNodeDirtyFlags::INSERTED | RetainedNodeDirtyFlags::CHILDREN)
@@ -454,7 +455,7 @@ impl RetainedWidgetTree {
             let Some(previous) = retained.nodes.get(key) else {
                 return false;
             };
-            let fresh = retained_snapshot_with_render(node, previous.render.clone());
+            let fresh = retained_snapshot_with_render(node, previous.render.clone(), None);
             *total += 1;
             if !visit(node.id, previous, &fresh) {
                 return false;
@@ -582,6 +583,7 @@ pub(super) fn update_retained_snapshots(
         render_dirty,
         render_dirty_node_ids,
         synchronize_render_fingerprints,
+        false,
     );
 
     let mut visited = 1;
@@ -614,6 +616,7 @@ pub(super) fn update_retained_node(
     render_dirty: &mut RenderObjectDirtySummary,
     render_dirty_node_ids: &mut HashSet<NodeId>,
     synchronize_render_fingerprints: bool,
+    geometry_only: bool,
 ) -> bool {
     match node_keys.get(&node.id).copied() {
         Some(previous_key) => match nodes.get_mut(previous_key) {
@@ -625,7 +628,11 @@ pub(super) fn update_retained_node(
                     node.id,
                     node.mesh_key()
                 );
-                let mut next = retained_snapshot_with_render(node, previous.render.clone());
+                let mut next = retained_snapshot_with_render(
+                    node,
+                    previous.render.clone(),
+                    geometry_only.then_some(&*previous),
+                );
                 next.last_seen_epoch = update_epoch;
                 let (flags, node_state_bits) = previous.diff_flags(&next);
                 let render_changed = if flags.is_empty() || !synchronize_render_fingerprints {
@@ -692,7 +699,7 @@ pub(super) fn collect_scoped_update_nodes<'a>(
     dirty_roots: &HashSet<NodeId>,
     nodes: &SlotMap<RetainedNodeKey, RetainedNodeSnapshot>,
     node_keys: &HashMap<NodeId, RetainedNodeKey>,
-    update_nodes: &mut Vec<&'a WidgetNode>,
+    update_nodes: &mut Vec<(&'a WidgetNode, bool)>,
 ) -> bool {
     let Some(previous) = node_keys.get(&node.id).and_then(|key| nodes.get(*key)) else {
         return false;
@@ -709,7 +716,7 @@ pub(super) fn collect_scoped_update_nodes<'a>(
 
     let node_is_dirty = ancestor_is_dirty || dirty_roots.contains(&node.id);
     if node_is_dirty || previous.layout != layout_fingerprint(node) {
-        update_nodes.push(node);
+        update_nodes.push((node, !node_is_dirty));
     }
     node.children.iter().all(|child| {
         collect_scoped_update_nodes(

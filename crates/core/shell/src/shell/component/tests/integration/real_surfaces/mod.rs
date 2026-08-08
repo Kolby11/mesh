@@ -1,3 +1,4 @@
+mod appearance_profile;
 mod audio;
 mod brightness;
 mod bubbles;
@@ -5,6 +6,7 @@ mod commands;
 mod hover;
 mod inspector;
 mod layout;
+mod navigation_profile;
 mod raster;
 mod settings;
 mod transitions;

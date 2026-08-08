@@ -141,6 +141,62 @@ fn raw_service_state_update_schedules_repaint_without_proxy_tracking() {
 }
 
 #[test]
+fn service_update_does_not_dirty_a_component_that_reads_neither_it_nor_the_trace() {
+    // Read capability is declared per module, so a component gets payloads for
+    // every service its module may read. One that references none of them must
+    // not be repainted by an unrelated 1 Hz poll.
+    let mut component = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <box title="{label}" />
+</template>
+<script lang="luau">
+label = "static"
+</script>
+"#,
+        InterfaceCatalog::default(),
+        &["service.audio.read"],
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 40);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
+
+    // The first payload arrives before any read set is known to be complete,
+    // so it is still treated as observable.
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({ "percent": 64, "muted": false }),
+        })
+        .unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
+    component.dirty = false;
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({ "percent": 65, "muted": false }),
+        })
+        .unwrap();
+    assert!(
+        !component.wants_render(),
+        "a service this component never reads must not schedule a repaint"
+    );
+
+    // The value is still installed, so a later first read sees current data.
+    assert_eq!(
+        runtime_value(&component, "audio"),
+        Some(serde_json::json!({ "percent": 65, "muted": false }))
+    );
+}
+
+#[test]
 fn frontend_proxy_state_update_reaches_render_state() {
     let mut component = test_frontend_component_with_catalog(
         r#"

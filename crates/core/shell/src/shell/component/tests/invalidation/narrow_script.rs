@@ -232,6 +232,20 @@ fn direct_audio_service_component(
     dynamic_structure: bool,
     render_hook: bool,
 ) -> FrontendSurfaceComponent {
+    direct_audio_service_component_with_hook_body(
+        static_nodes,
+        dynamic_structure,
+        render_hook.then_some(""),
+    )
+}
+
+/// `render_hook_body` is the body of a `render()` hook, or `None` for a
+/// component without one.
+fn direct_audio_service_component_with_hook_body(
+    static_nodes: usize,
+    dynamic_structure: bool,
+    render_hook_body: Option<&str>,
+) -> FrontendSurfaceComponent {
     let static_nodes = (0..static_nodes)
         .map(|index| format!("<text>static row {index}</text>"))
         .collect::<String>();
@@ -240,16 +254,14 @@ fn direct_audio_service_component(
     } else {
         ""
     };
-    let render_hook = if render_hook {
-        "function render() end"
-    } else {
-        ""
-    };
+    let render_hook = render_hook_body
+        .map(|body| format!("function render() {body} end"))
+        .unwrap_or_default();
     test_frontend_component_with_catalog(
         &format!(
             r#"
-<template><column><text>{{require('mesh.audio@>=1.0').percent}}</text>{conditional}{static_nodes}</column></template>
-<script lang="luau">function init() end {render_hook}</script>
+<template><column><text>{{require('mesh.audio@>=1.0').percent}}</text><text>{{hook_label}}</text>{conditional}{static_nodes}</column></template>
+<script lang="luau">hook_label = "" function init() end {render_hook}</script>
 "#
         ),
         audio_network_catalog(),
@@ -339,7 +351,38 @@ fn dynamic_service_template_keeps_full_evaluation_fallback() {
 }
 
 #[test]
-fn service_template_with_render_hook_keeps_full_evaluation_fallback() {
+fn service_template_with_writing_render_hook_keeps_full_evaluation_fallback() {
+    // The hook writes a member the template renders, so nodes outside the
+    // service-derived set can change and the selective build is unsafe.
+    let mut component = direct_audio_service_component_with_hook_body(
+        16,
+        false,
+        Some("hook_label = tostring(require('mesh.audio@>=1.0').percent) .. '!'"),
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(640, 160);
+    prime_audio_component(&mut component, &theme, &mut buffer);
+
+    apply_audio_update(&mut component, 20, false);
+    assert!(component.has_render_hooks());
+    component
+        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .unwrap();
+
+    let text = rendered_text(&component);
+    assert!(text.iter().any(|text| text == "20"));
+    assert!(
+        text.iter().any(|text| text == "20!"),
+        "the render hook's write must reach the template: {text:?}"
+    );
+    assert_eq!(component.last_template_build_reused_nodes, 0);
+}
+
+#[test]
+fn service_template_with_inert_render_hook_still_reuses_clean_subtrees() {
+    // Merely declaring `render()` is not a reason to rebuild the whole
+    // template. The hook runs before the frame picks its path; when it writes
+    // nothing a template reads, the service-derived selective build stands.
     let mut component = direct_audio_service_component(16, false, true);
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(640, 160);
@@ -352,7 +395,11 @@ fn service_template_with_render_hook_keeps_full_evaluation_fallback() {
         .unwrap();
 
     assert!(rendered_text(&component).iter().any(|text| text == "20"));
-    assert_eq!(component.last_template_build_reused_nodes, 0);
+    assert!(
+        component.last_template_build_reused_nodes >= 16,
+        "clean static rows should be retained; reused {}",
+        component.last_template_build_reused_nodes
+    );
 }
 
 // cargo test -p mesh-core-shell --release -- affected_template_eval_beats_full_rebuild --ignored --nocapture

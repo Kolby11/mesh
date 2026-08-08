@@ -105,3 +105,29 @@ fn retained_snapshot_keeps_common_child_lists_inline() {
     node.children.push(WidgetNode::new("box"));
     assert!(retained_snapshot(&node).child_ids.spilled());
 }
+
+#[test]
+fn geometry_only_snapshot_reuses_non_layout_fingerprints() {
+    let mut node = WidgetNode::new("box");
+    node.attributes.insert("class".into(), "before".into());
+    let previous = retained_snapshot(&node);
+
+    node.layout.x = 24.0;
+    node.computed_style.opacity = 0.5;
+    node.attributes.insert("class".into(), "after".into());
+    node.state.hovered = true;
+
+    let geometry_only =
+        retained_snapshot_with_render(&node, previous.render.clone(), Some(&previous));
+    let (geometry_flags, changed_state_bits) = previous.diff_flags(&geometry_only);
+    assert_eq!(geometry_flags, RetainedNodeDirtyFlags::LAYOUT);
+    assert_eq!(changed_state_bits, 0);
+
+    let full = retained_snapshot_with_render(&node, previous.render.clone(), None);
+    let (full_flags, changed_state_bits) = previous.diff_flags(&full);
+    assert!(full_flags.contains(RetainedNodeDirtyFlags::LAYOUT));
+    assert!(full_flags.contains(RetainedNodeDirtyFlags::STYLE));
+    assert!(full_flags.contains(RetainedNodeDirtyFlags::ATTRIBUTES));
+    assert!(full_flags.contains(RetainedNodeDirtyFlags::STATE));
+    assert_ne!(changed_state_bits, 0);
+}

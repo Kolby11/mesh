@@ -386,10 +386,14 @@ impl FrontendSurfaceComponent {
             let affected = selective_rebuild_nodes.clone();
             narrow_expand_ancestors(previous, &affected, &mut selective_rebuild_nodes);
         }
+        // The render hooks for this frame have already run (`paint` drives
+        // them before taking the dirty flags). Only a hook that actually wrote
+        // a template input can invalidate nodes outside the service-derived
+        // set, so gate on what the hooks did rather than on their existence.
         let can_selectively_build = scope_is_safe
             && !selective_rebuild_nodes.is_empty()
             && self.selective_service_build_supported
-            && !self.has_render_hooks();
+            && !self.render_hooks_changed_templates;
         #[cfg(test)]
         let can_selectively_build = can_selectively_build && !self.force_full_template_build;
         let tree = if can_selectively_build {

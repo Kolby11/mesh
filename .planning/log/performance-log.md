@@ -1,5 +1,496 @@
 # MESH Performance Log
 
+## 2026-08-08 — Hyprland stream events stop spawning full-state queries
+
+area: backend host API, Hyprland provider, service events
+
+The Hyprland backend now consumes authoritative `activewindow`, `workspace`,
+and `workspacev2` socket payloads directly. Address-only or named-workspace
+events query only their missing field, and structural workspace events query
+only the workspace catalog. The 2-second full-state poll remains as a safety
+net. State commits compare fields independently, so title-only changes emit
+`WindowChanged` without the former redundant `WorkspaceChanged` event.
+
+**Measured.** `profiling` build (optimized plus debuginfo, rustc/cargo 1.94.0),
+live Hyprland session, active terminal title changing at approximately 10 Hz.
+`perf record -F 997 -g` attached to the shell with child inheritance. Before,
+a 30-second capture recorded 19,970 samples, or **66.8% of one core**; roughly
+76% of samples were `hyprctl`, mostly dynamic-linker startup. The first fixed
+20-second control recorded 3,708 samples, or 18.6% of one core, with `hyprctl`
+down to roughly 16% of samples and primarily the intended safety poll. After
+demoting title-only state logs from info to debug, a final 20-second Settings
+scroll recorded 3,163 samples, or **15.9% of one core** including children: a
+**4.20x** reduction from the original scroll capture. The event path itself
+moved from three `hyprctl` launches per title change (about 30
+launches/second in this workload) to zero.
+
+The paired shell-only controls also showed why the symptom looked like scroll
+cost: ordinary scrolling used 9.2% of one core while the no-scroll title-storm
+control used 10.1%. Scrolling added no measurable shell CPU in that capture.
+
+**Checked structural gate.** The
+`hyprland_stream_events_query_only_missing_fields_and_emit_selectively`
+regression requires zero subprocesses plus only `WindowChanged` for an
+`activewindow` payload, zero subprocesses plus only `WorkspaceChanged` for a
+`workspacev2` payload, and exactly one workspace-catalog query for an
+`openwindow` event. The full `mesh-core-scripting` suite passed: 178 active,
+27 ignored.
+
+---
+
+## 2026-08-08 — geometry-only retained snapshots skip style and attribute hashing
+
+area: retained tree diff, scroll frames
+
+Scoped retained updates now distinguish authoritative dirty roots from clean
+nodes whose geometry changed through layout propagation. Dirty roots still
+compute the complete layout, style, attribute, child, state, and render diff.
+For geometry-only nodes, `retained_snapshot_with_render` refreshes the layout
+fingerprint and reuses the retained style and attribute hashes, child ids, and
+state. This removes the ~70-field `ComputedStyle` hash and full attribute-map
+hash from each moved row without weakening full-diff detection at dirty roots.
+
+**Measured.** `release` profile under `nix develop` (rustc/cargo 1.94.0), local
+development host, three runs of 2,000 geometry-only frames with 256 moved rows.
+Each row carries four children and representative class, resource-id, and
+accessibility attributes. The control recomputes the former full retained
+snapshot; the split path recomputes layout only. Full fingerprinting took
+192.294–193.961ms; split fingerprinting took 62.866–62.967ms, a **3.06–3.08x**
+speedup. The checked `geometry_only_fingerprint_speedup` gate requires 2.5x.
+
+**Verified.** The retained-tree suite passed 25 active tests. Focused parity
+tests passed for propagated layout plus simultaneous dirty-root style,
+attribute, and state changes, and for the end-to-end paint-only scroll against
+the forced-full control. `cargo check -p mesh-core-shell` passed in the Nix dev
+shell; the direct host check remains blocked by the already-recorded stale Nix
+`ld-wrapper.sh` path.
+
+---
+
+## 2026-08-08 — live scroll profile: retained fingerprinting is the hot path
+
+area: retained tree diff, scroll frames
+
+Corrects the entry below that attributed a live scroll's cost to subprocess
+spawning. A verified 120-second capture of a real scroll on the **release**
+build puts the cost in the shell's own render path.
+
+**Measured.** `release` build, live Hyprland session, `perf record -F 997 -g`
+on the shell and its children for 120s while a person scrolled, plus
+`/proc/<pid>/stat` accounting:
+
+| | |
+| --- | --- |
+| shell process | 38.50% of one core |
+| its children | 12.90% of one core |
+| samples: `mesh-shell` | **89.49%** |
+| samples: `wpctl` | 7.35% |
+| samples: `hyprctl` | 2.78% |
+
+**The shell's own top self-time:**
+
+```
+13.68%  runtime_tree::fingerprint::retained_snapshot_with_render
+ 5.73%  __memmove_avx512_unaligned_erms
+ 5.13%  __memcmp_evex_movbe
+ 4.35%  mesh_core_elements::attributes::AttributeMap::get
+ 6.21%  malloc / free / cfree / malloc_consolidate (combined)
+ 1.52%  display_list::paint_node::build_paint_node_with_previous
+ 2.51%  core::hash::sip::Hasher::write (two entries)
+ 1.43%  animation::apply_style_animations_to_node
+ 2.65%  skia srcover_rgba_8888 + rect_memset32
+ 1.03%  taffy::compute::flexbox::compute_preliminary
+```
+
+`retained_snapshot_with_render` is the single hottest function in the process by
+a factor of two. It rebuilds, per visited node per frame, a `LayoutFingerprint`,
+a `style_fingerprint` over ~70 `ComputedStyle` fields, an `attributes_fingerprint`
+over the whole attribute map, and a `child_ids` Vec. Scrolling a list moves
+every visible row, so every row's layout fingerprint legitimately changes — but
+its style and attributes did not, and both are re-hashed anyway. The
+`memmove`/`memcmp`/`AttributeMap::get`/SipHash mass behind it is the same walk.
+
+Actual rasterization is ~2.7% (`srcover_rgba_8888`, `rect_memset32`).
+
+**Correction.** The 2026-08-08 entry titled "scroll-to-100%-CPU is subprocess
+spawning" measured a scroll that put children at 93.4% and the shell at 3.55%.
+That capture is not wrong, but it was not representative: it evidently caught a
+scroll over the volume button, where `onVolumeScroll` → `audio.set_volume()`
+drives two `wpctl` launches per command. This capture, over an ordinary scroll,
+spawned 695 `wpctl` and 174 `hyprctl` processes in 120s (5.8/s and 1.5/s) for
+only 7.35% and 2.78% of samples. Both costs are real; which dominates depends
+on what the pointer is over. The spawn storm is the narrower case, and the
+retained-diff cost is the general one.
+
+**Magnitude, confirmed by the operator.** The shell averaged 38.5% of a core
+across the whole 120s window because the scrolling was intermittent; `btop` on
+the same pid showed `mesh-shell` peaking near **80% of one core** during active
+scrolling, and nothing reaching 100%. The peak sits on the shell process, not
+on its children, which is what the 89.49%-of-samples split already indicated.
+
+---
+
+## 2026-08-08 — the reported slowness was a debug build
+
+area: developer workflow, dev-shell guidance
+
+Every measurement in this log's 2026-08-08 entries was taken against the
+`profiling` build (`inherits = "release"`). The shell actually running on the
+development host was `target/debug/mesh-shell` — unoptimized.
+
+**Measured.** Same host, same shipped graph, idle with no interaction,
+20-second windows, `/proc/<pid>/stat`:
+
+| build | shell process | its children |
+| --- | --- | --- |
+| `profiling` (optimized) | 0.20–0.27% of one core | 6.6% |
+| `debug` | **5.55%** of one core | 14.7% |
+
+**~21–28x** on the render loop at idle. Applied to the 3.55% the optimized
+shell used during a live scroll, the debug build lands at roughly a full core —
+which is what the reported `btop` reading showed, on the `mesh-shell` process
+itself rather than on its children.
+
+**Why it happened.** The `nix develop` banner prints
+`Run: cargo run -p mesh-tools-cli --bin mesh-shell -- start`, which builds and
+runs the debug profile. That line is the first thing shown on entering the dev
+shell, so it is the default path into running the shell, and nothing downstream
+distinguishes the resulting binary from a release one at runtime.
+
+**This does not retract the other findings.** The subprocess-spawn storm
+recorded below was measured on the *optimized* build and is build-independent:
+`wpctl` costs 15.5ms of CPU per launch regardless of how MESH was compiled, and
+a scroll over the volume button still drove children to 93.4% of a core there.
+A debug build and a spawn storm are two separate problems that happened to
+produce the same symptom. Fixing the build does not fix the spawn rate.
+
+---
+
+## 2026-08-08 — scroll-to-100%-CPU is subprocess spawning, not rendering
+
+area: backend host API, command throttle, service method dispatch
+
+A reported "scrolling pegs a core" reproduced against the live shell. The
+renderer is not involved.
+
+**Measured.** `profiling` build, live Hyprland session, 60-second
+`perf record -F 997 -g --no-inherit` on the shell plus `/proc/<pid>/stat`
+accounting, while a person scrolled continuously:
+
+| | % of one core |
+| --- | --- |
+| shell process (all its threads, render loop included) | **3.55** |
+| its reaped children | **93.40** |
+
+The shell's own samples are dominated by Luau on the tokio workers —
+`luau_execute` 10.2%, `luaS_newlstr` 3.5%, `luaM_newgco_` 2.0%,
+`mlua::state::LuaGuard::new` 1.5%, `mesh_core_scripting::backend::exec_stream::spawn_stream`
+1.1% — i.e. backend command dispatch, not painting. No render stage appears
+above 1%.
+
+**Mechanism.** `volume-button.mesh` binds `onscroll` / `ontwofingerscroll` to
+`onVolumeScroll`, which calls `audio.set_volume()`. Commands are throttled to
+`COMMAND_THROTTLE_INTERVAL` = 16ms, so a continuous scroll dispatches up to
+62.5 commands per second. Each one costs **two** subprocess spawns:
+`on_command_set_volume` runs `wpctl set-volume`, then `refresh_state()` →
+`read_state()` → `wpctl get-volume`.
+
+A `wpctl` invocation costs **15.5ms of CPU** on this host (0.31s for 20 runs,
+0.16 user + 0.15 sys), almost all of it dynamic-linker work — the earlier
+system profile put `do_lookup_x`, `strcmp`, `_dl_lookup_symbol_x` and
+`_dl_relocate_object_no_relro` at the top for exactly these children. The
+source comment at `read_state` estimates ~20ms per invocation, so the cost was
+known; what was missing is that the throttle permits it 125 times a second.
+
+```
+ 10 commands/s ->  20 spawns/s ->  31% of one core
+ 20 commands/s ->  40 spawns/s ->  62% of one core
+ 30 commands/s ->  60 spawns/s ->  93% of one core   <- matches the capture
+ 62 commands/s -> 125 spawns/s -> 194% of one core   <- what the throttle allows
+```
+
+The 16ms throttle is tuned for a *render* budget; it is roughly 30x too
+permissive for an operation whose implementation is a process launch.
+
+**Scope.** The same shape applies wherever a scroll or drag maps to a service
+method backed by `mesh.exec`: brightness scroll (`brightnessctl`), and audio
+slider drags in the popover. The `refresh_state()` round-trip after every write
+doubles it, and is redundant while `pw-mon` is already streaming state.
+
+**Context: this is not the idle cost.** At rest, and with Settings merely open
+and untouched, children stay at 6.6% and the shell process at 0.2–0.3%.
+Scrolling is what moves it, and only when the pointer is over a control whose
+handler writes to a service.
+
+---
+
+## 2026-08-08 — live shell capture: the render loop is idle-cheap, backend polling is not
+
+area: measurement only — running shell on a real Hyprland session
+
+The frame profiles below measure `component.paint()` in isolation. This entry
+measures the actual shipped shell running against the user's live compositor,
+to test whether per-frame cost explains a perceived frame-rate problem. It does
+not.
+
+**Setup.** `profiling` build of `mesh-shell start`, shipped root graph
+(`@mesh/navigation-bar` as layout entrypoint, pipewire-audio and
+backlight-brightness providers), Hyprland session, 1920px output. CPU measured
+from `/proc/<pid>/stat` — fields 14/15 for the process, 16/17 for reaped
+children — over 20-second windows with no interaction.
+
+| | % of one core |
+| --- | --- |
+| shell process itself (render loop, at rest) | **0.20** |
+| its reaped children (`hyprctl`, `wpctl`, `brightnessctl`) | **6.40** |
+| Hyprland, with the MESH bar running | 2.10 |
+| Hyprland, with MESH stopped | 3.05 |
+
+**The render loop is not the cost.** At rest the shell burns a fifth of a
+percent of a core. A service poll only rebuilds when the payload actually
+changed, so an unchanging volume/network/brightness reading costs nothing —
+the full-surface rebuild recorded in the entry below fires on real changes, not
+on every poll.
+
+**Backend polling costs 32x the rest of the shell.** `perf record -F 997 -g` on
+the shell and its children put ~45% of all samples in `hyprctl`, and most of
+that in the dynamic linker (`do_lookup_x`, `strcmp`, `_dl_lookup_symbol_x`,
+`_dl_relocate_object_no_relro`) — process startup, not work. A 15-second window
+contained 24 distinct `hyprctl` processes, 15 `wpctl`, and 7 `brightnessctl`,
+matching the shipped poll intervals (hyprland-wm 500ms, audio 1000ms,
+brightness 2000ms) at roughly three `fork`+`exec` per second, forever. The
+already-open backlog item for push-based backend primitives now has its
+measurement: 6.4% of a core, continuously, for no state change.
+
+Not every backend does this: `pw-mon` and `socat` appear as *persistent*
+children across every sample, so the event-stream adoption path already works
+where it is used.
+
+**MESH costs the compositor nothing at rest.** Hyprland's own CPU was
+unchanged — marginally lower — with the bar running. The concern that
+full-surface damage on a `layerrule = blur` surface forces continuous
+compositor re-blur is not observable at rest, because at rest the bar does not
+damage. It remains untested under animation.
+
+**A transient, not a leak.** An early window showed the shell process at
+98–99% of a core for roughly a minute after startup, which did not reproduce in
+any later window on the same or a fresh process; steady state is consistently
+0.1–0.4%. Startup work (module compilation, icon rasterization, backend spawn)
+is the likely explanation. Recorded because it was observed, not as a finding —
+it was not isolated.
+
+**Still unmeasured.** Interactive frame timing. Driving the shell over IPC
+(`shell:debug_benchmark:<scenario>`) exercises the scenarios but their results
+surface only in the debug inspector, and pointer interaction cannot be
+synthesized from here. Whether a specific surface drops frames under a specific
+interaction needs a capture taken while a person interacts with it.
+
+---
+
+## 2026-08-08 — every service poll repaints the whole navigation bar
+
+area: measurement only — service invalidation, damage selection
+
+Follow-up to the frame profile below, chasing a perceived frame-rate problem
+that the per-frame CPU numbers do not explain: 0.4–2.6ms of work per surface is
+several hundred frames per second of headroom, so something forces work rather
+than costing it.
+
+**Measured.** `profiling` profile under `nix develop` (rustc/cargo 1.94.0), the
+settled 1920x56 navigation bar, 240 sampled frames per run. A `mesh.audio`
+volume change — the most ordinary update the bar receives — produces:
+
+```
+dirty = SCRIPT|STATE|STYLE|LAYOUT|PAINT|TEXT|ACCESSIBILITY|METRICS  (TREE_REBUILD)
+damage = 1 rect, 1920x56 = 100.0% of the surface, 240/240 frames full-surface
+```
+
+Every poll is a full Luau tree rebuild, a full style walk, a full-surface
+repaint, a full SHM copy, and full compositor damage. The narrow path exists
+(`SCRIPT_NARROW`, `invalidate_service_template_nodes`) and never engages.
+
+**Why.** `handle_service_event` takes the narrow path only when
+`node_service_field_deps.nodes_reading_field(service, field)` is non-empty, and
+that index is populated from `WidgetNode::service_field_reads` — i.e. only when
+a **template** interpolates the service field directly. Every shipped navigation
+component instead does the idiomatic thing: `local audio = require("mesh.audio")`
+in Luau, deriving `icon_name` / `audio_tooltip_value` for the template to bind.
+Those nodes record no service field read, `narrow_nodes` is empty, and the code
+falls back to `invalidate_script_state()` → `TREE_REBUILD` →
+`requires_tree_rebuild` → full-surface damage. The narrow service path is
+effectively dead for the module-authoring pattern the project recommends.
+
+**Poll rates** in the shipped graph: audio 1000ms (250ms while a stream is
+active), network 1000ms, hyprland-wm 500ms, brightness 2000ms, power 10s, media
+5s, theme 5s — roughly 4 full-surface bar repaints per second at rest, ~7 during
+audio activity.
+
+**Ruled out by measurement.**
+
+- *Slots.* The customizable `<slot>` elements added in 56016c9e were the first
+  suspect via `template_has_dynamic_structure`. Restoring the pre-slot HEAD~1
+  template gave the identical result (`narrow_supported=false`, 100% damage,
+  2.451–2.468ms audio frames vs 2.575–2.586ms), so slots are not the cause.
+- *Backdrop blur.* `.nav-shell` carries `backdrop-filter: blur()` at the bar
+  root, and `expand_damage_for_blur_regions` unions any intersecting damage with
+  the whole blurred region — so it *would* collapse partial damage to the full
+  surface. But damage is already 100% without it: flipping the `blur_enabled`
+  prop default to false changed neither the damage (100.0%, 240/240) nor the
+  frame cost (2.383–2.419ms vs 2.575–2.586ms). It is a latent amplifier, not the
+  current cause.
+
+**Not measured here.** These numbers are `component.paint()` into a
+`PixelBuffer` only. The SHM copy, the Wayland commit, serial paint of every
+surface in one loop iteration, and the compositor's own cost for a damaged
+blurred layer surface are all outside them. On Hyprland the bar opts into
+`layerrule = blur` via its `:blur` namespace, so each full-surface damage also
+forces a compositor re-blur of the whole bar. Quantifying that needs a live
+`./tools/profile-shell` capture against a running shell.
+
+---
+
+## 2026-08-08 — navigation-bar frame profile and paint-path hotspot survey
+
+area: measurement only — frame cost attribution across the shipped surfaces
+
+No behavior changed. This entry records a baseline for the always-on surface,
+which had none, plus a sampling profile of where a steady-state frame actually
+goes.
+
+**New gate.** `navigation_frame_cost_profile` (release-only, ignored) drives the
+real `@mesh/navigation-bar` module the way the session does: a poll of a service
+it reads (`mesh.audio`), a poll of one it does not (`mesh.media`), a pointer
+crossing the bar, and a plain repaint. `MESH_BENCH_FRAMES` scales the loops for
+sampling. The existing `appearance_frame_cost_profile` gained per-rule and
+per-command attribution output.
+
+**Settle first.** A surface painted at an extent its content does not measure to
+re-raises `STYLE|LAYOUT|PAINT|METRICS` and never reaches a fast path. The bar
+measures 1920x56; the harness adopts that before measuring, and prints the
+measured size and the resulting dirty flags so an unsettled run is visible
+rather than silently reported as steady state.
+
+**Measured.** `profiling` profile (release + debuginfo, rustc/cargo 1.94.0)
+under `nix develop`, local development host, three runs of 4,000 frames per
+loop against the 107-node settled bar at 1920x56:
+
+| frame kind | ms/frame |
+| --- | --- |
+| `mesh.audio` poll (the bar reads it) | 2.575–2.586 |
+| `mesh.media` poll (nothing reads it) | 1.601–1.606 |
+| pointer move | 1.357–1.373 |
+| paint only | 0.413–0.421 |
+| render hooks alone | 0.309–0.314 |
+
+Instrumented stage split of the audio-poll frame (60 frames; attribution
+inflates absolute values, so read the shares): style_restyle 1.93ms, tree_build
+1.22ms, paint 0.46ms (paint_traversal 0.43ms), render_object_sync 0.12ms,
+layout 0.07ms, retained_display_list_update 0.010ms, text_shaping 0.000ms.
+
+**Where the cycles go.** `perf record -F 997`, 26K samples, instrumented passes
+excluded so per-rule attribution does not appear as a production cost. Self
+time: the glibc allocator totals ~27% (`_int_malloc` 8.9, `_int_free_chunk`
+4.9, `cfree` 3.4, `malloc_consolidate` 3.0, `__libc_malloc2` 3.0, `malloc` 2.1,
+`unlink_chunk` 1.3), plus `memmove` 4.3% and `memcmp` 3.7% from string traffic.
+Named work: `HashMap::clone` 4.6% inclusive, `format!` 4.0% inclusive,
+`collect_focused_nodes` 2.1% inclusive, `style_fingerprint` 2.0%,
+`attributes_fingerprint` 2.0%, taffy flexbox 3.1%, Luau GC 2.5%, SipHash 2.1%,
+`AttributeMap::get` 1.6%, `ComputedStyle::clone` 1.3%. Skia's
+`blit_row_color32` — the actual pixel fill — is 0.75%. **Rasterization is not
+the bottleneck; per-frame allocation and string hashing in shell bookkeeping
+is.**
+
+**A/B: the per-paint focused proof snapshot.** `build_focused_proof_snapshot`
+runs on every paint and is read only by tests. It allocates several `String`s
+per node per frame (`node.id.to_string()` twice, `accesskit_node_id_for`'s
+`format!`, cloned `role`/`aria-label`, and a
+`"parley_text::{content}::…"` format per text node). Skipping it behind a
+temporary env gate, three runs each on the 556-node Appearance surface:
+paint-only 1.977–2.204ms → 1.603–1.698ms (**~19%**), resource-list scroll
+2.613–2.715ms → 2.279–2.365ms (**~13%**), unrelated service frame
+8.182–8.673ms → 7.898–8.258ms (~4%). On the 107-node bar the same gate is worth
+~4–8%. The gate was reverted; nothing in the tree carries it.
+
+**A live animation defeats targeted restyle.** While any transition or keyframe
+animation is unfinished anywhere in a surface,
+`invalidate_animation_style_path` raises `VISUAL_REPAINT`, which carries no
+`STATE` bit — and `STATE` is exactly what selects the targeted
+interaction-restyle branch. Every frame for the animation's duration therefore
+restyles the whole tree rather than the animating nodes. Measured on the bar:
+frames taken while a hover transition is live cost 0.87ms paint-only versus
+0.413–0.421ms once nothing is animating, a **2.1x** difference on identical
+content. `.bubble-option-core`'s `animation-iteration-count: infinite` was
+tested as a cause and ruled out — making it finite changed nothing.
+
+**Not reproduced as a problem.** Text shaping and icon rasterization are
+0.000–0.006ms per frame; the glyph and raster caches are doing their job.
+`retained_display_list_update` is 0.010ms. Neither needs work.
+
+---
+
+## 2026-08-08 — service fan-out stops invalidating components that cannot see it
+
+area: service updates, component render memoization, render hooks
+
+The Settings Appearance page stuttered under ordinary background service
+traffic. Profiling a real `@mesh/settings` surface showed a frame triggered by
+an unrelated `mesh.audio` poll costing 12.4ms against 2.1ms for a paint-only
+frame, with component memoization hitting **zero** times: every one of the six
+page instances was re-instantiated on every tick. Two independent causes:
+
+1. **Read capability is declared per module**, so all seven runtimes of
+   `@mesh/settings` received every payload the module may read. The
+   `ScriptState` write marked each instance dirty and advanced the
+   `mutation_generation` that the memo's subtree stamp is keyed on, so an audio
+   poll invalidated Appearance, Wi-Fi, Bluetooth, Device and Advanced alike.
+   A runtime that has completed a template evaluation now has authoritative
+   read sets: if the update reaches it through neither the service proxy, the
+   `<service>` state member, nor the `last_service_update` trace, the value is
+   installed non-reactively (`set_unobserved_value_with_fingerprint`) — correct
+   for a later first read, but not a mutation.
+2. **Declaring `render()` disabled the selective service build outright.** The
+   hooks now run in `paint` before the dirty flags are snapshotted, and the
+   gate is what a hook actually wrote: a hook whose writes no template reads
+   leaves the retained and selective paths available, using the same
+   `dirty_state_affects_template` rule that event-handler dispatch already
+   applies. Running hooks before the snapshot also folds their invalidation
+   into the current frame instead of costing an extra one.
+
+`changed_public_members` is now deduplicated on push: a frame that never
+rebuilds no longer clears it, so blind pushes could grow it without bound.
+
+**Measured.** Release under `nix develop` (rustc/cargo 1.94.0), three repeated
+runs of the `appearance_frame_cost_profile` workload — a real `@mesh/settings`
+surface at 920x900 showing Appearance over a 240-icon-theme plus
+240-font-family catalog (556-node tree), 60 frames each of an unrelated
+`mesh.audio` payload change plus paint. Before: 12.186–12.376ms per frame.
+After: 8.181–8.593ms per frame, a **1.42–1.51x** improvement from the observed
+ranges. Stage breakdown per frame moved from tree_build 6.9ms / restyle 2.9ms
+to tree_build 3.4ms / restyle 2.8ms, and the render hooks themselves from
+0.793–0.800ms to 0.584–0.633ms. Paint-only frames (2.06→1.94ms) and
+resource-list scroll frames (2.65→2.65ms) were unchanged within noise. The
+checked gate is behavioural, not timed:
+`audio_polls_reuse_every_settings_page_appearance_does_not_read` pins five
+memo reuses per audio poll and asserts Appearance content still paints.
+
+**Not fixed.** The rebuild frame still restyles the memo-reused subtrees,
+because memo entries are stored pre-restyle to stay position-independent.
+That is 2.8ms of the remaining 8.6ms and is now a backlog item.
+
+**Verified.** `mesh-core-shell --lib`: 659 passed, 6 failed, 126 ignored — the
+six are the pre-existing shipped-navigation, inspector, backend-lifecycle and
+debug-fixture failures present on `main` before this change (baseline: 656
+passed, same 6 failed). `mesh-core-scripting` 177 passed, `mesh-core-elements`
+213 passed, `mesh-core-frontend` 64 passed. `cargo fmt --all -- --check` and
+`git diff --check` passed.
+
+Two tests encoded the superseded rules and were replaced rather than deleted:
+`service_template_with_render_hook_keeps_full_evaluation_fallback` split into
+an inert-hook case (reuse expected) and a writing-hook case (fallback
+expected), and `immediate_rerender_preserves_present_damage_from_first_pass`
+now tolerates the second pass being unnecessary while still requiring present
+damage and the hook-derived label in the same frame.
+
 ## 2026-08-08 — skip full style restyle on paint-only scroll frames
 
 area: retained component rendering, Appearance scrolling

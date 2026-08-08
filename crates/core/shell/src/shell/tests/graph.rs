@@ -50,6 +50,18 @@ fn installed_module_graph_exposes_shell_package_choices() {
             .len(),
         1
     );
+    assert_eq!(
+        graph.declared_interface("mesh.device").unwrap().module_id,
+        "@mesh/device-interface"
+    );
+    assert_eq!(
+        graph.active_provider("mesh.device").unwrap().module_id,
+        "@mesh/device-info"
+    );
+    assert_eq!(
+        graph.backend_providers_for_interface("mesh.device").len(),
+        1
+    );
     assert!(
         graph
             .frontend_modules()

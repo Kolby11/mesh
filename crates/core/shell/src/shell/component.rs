@@ -764,6 +764,12 @@ pub(super) struct FrontendSurfaceComponent {
     slider_script_values: HashMap<NodeId, f32>,
     checked_values: HashMap<NodeId, bool>,
     render_hooks_pending: bool,
+    /// Whether the render hooks run for the frame currently being painted
+    /// wrote script state that a template expression actually reads. A render
+    /// hook is only observable through that state, so a hook that ran without
+    /// touching any template input leaves the retained and selective build
+    /// paths valid for this frame.
+    render_hooks_changed_templates: bool,
     pub(super) scroll_offsets: HashMap<NodeId, ScrollOffsetState>,
     scheduled_handlers: HashMap<String, ScheduledHandler>,
     /// In-flight smooth-scroll animations keyed by scroll-container node ID.
@@ -1109,6 +1115,7 @@ impl FrontendSurfaceComponent {
             slider_script_values: HashMap::new(),
             checked_values: HashMap::new(),
             render_hooks_pending: true,
+            render_hooks_changed_templates: false,
             scroll_offsets: HashMap::new(),
             scheduled_handlers: HashMap::new(),
             scroll_animations: HashMap::new(),

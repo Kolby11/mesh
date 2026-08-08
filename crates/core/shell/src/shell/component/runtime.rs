@@ -127,6 +127,21 @@ impl FrontendSurfaceComponent {
         self.call_handler_target(handler, &merged_args)
     }
 
+    /// Run the pending render hooks before the paint path decides how to
+    /// produce this frame's tree, and report whether they changed anything a
+    /// template reads. Running them first is what makes the answer usable: a
+    /// hook that only refreshes state no template consumes then leaves the
+    /// retained and selective build paths available for the frame, instead of
+    /// forcing a full template rebuild merely because a `render()` exists.
+    pub(super) fn run_pending_render_hooks(&mut self) {
+        self.render_hooks_changed_templates = false;
+        if !self.render_hooks_pending {
+            return;
+        }
+        self.call_render_hooks();
+        self.render_hooks_pending = false;
+    }
+
     pub(super) fn call_render_hooks(&mut self) {
         let mut state_dirty = false;
         let mut runtimes = self.runtimes.lock().unwrap();
@@ -149,10 +164,12 @@ impl FrontendSurfaceComponent {
             self.sync_runtime_generation(&instance_key, generation);
         }
         if state_dirty {
+            self.render_hooks_changed_templates = true;
             self.invalidate_script_state();
         }
     }
 
+    #[cfg(test)]
     pub(super) fn has_render_hooks(&self) -> bool {
         let mut runtimes = self.runtimes.lock().unwrap();
         runtimes
@@ -184,6 +201,15 @@ impl FrontendSurfaceComponent {
             return false;
         }
         Self::drain_script_diagnostics(diagnostics, runtime);
+        // A render hook that refreshed state no template expression reads has
+        // no effect on the tree, exactly as for an event handler. Clear the
+        // dirty flag so the frame is not rebuilt for an invisible write.
+        if runtime.script_ctx.state().is_dirty()
+            && !runtime.script_ctx.dirty_state_affects_template()
+        {
+            runtime.script_ctx.state_mut().clear_dirty();
+            return false;
+        }
         runtime.script_ctx.state().is_dirty()
     }
 
@@ -356,6 +382,9 @@ impl FrontendSurfaceComponent {
             if script_has_service_read(&script_ctx, &interface, service_name) {
                 apply_service_update_with_name_and_fingerprint(
                     script_ctx.state_mut(),
+                    true,
+                    // A runtime being seeded has evaluated nothing yet, so
+                    // nothing is known about what it reads.
                     true,
                     service_name,
                     "<cached>",

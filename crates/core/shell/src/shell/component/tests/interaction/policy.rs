@@ -91,17 +91,22 @@ text {
     component
         .paint(&light, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
         .unwrap();
-    assert!(
-        component.wants_immediate_rerender(),
-        "render state sync should request the same-frame rerender that used to erase damage"
-    );
-    component
-        .paint(&light, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
-        .unwrap();
+    // The render hook now runs before the frame snapshots its dirty flags, so
+    // the theme swap and the label it derives land in this one pass. If a
+    // second pass is still requested it must not erase the first pass's damage.
+    if component.wants_immediate_rerender() {
+        component
+            .paint(&light, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+            .unwrap();
+    }
 
     assert!(
         !component.take_present_damage().is_empty(),
-        "same-frame rerender must preserve first-pass damage so the shell still presents"
+        "the theme swap must leave present damage so the shell still presents"
+    );
+    assert!(
+        rendered_text(&component).iter().any(|text| text == "light"),
+        "the render hook's theme-derived label must be painted in the same frame"
     );
 }
 

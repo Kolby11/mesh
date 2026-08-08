@@ -1061,6 +1061,83 @@ fn scroll_layout_scope_beats_full_fingerprinting() {
     );
 }
 
+// cargo test -p mesh-core-shell --release -- geometry_only_snapshot_beats_full_fingerprinting --ignored --nocapture
+#[test]
+#[ignore = "release-only geometry-only retained fingerprint benchmark"]
+fn geometry_only_snapshot_beats_full_fingerprinting() {
+    let mut nodes = (0..256_u64)
+        .map(|index| {
+            let mut node = WidgetNode::new("row");
+            node.id = index + 1;
+            node.attributes
+                .insert("class".into(), "resource-row".into());
+            node.attributes
+                .insert("data-resource-id".into(), format!("resource-{index}"));
+            node.attributes
+                .insert("aria-label".into(), format!("Resource {index}"));
+            node.children = (0..4)
+                .map(|child| {
+                    let mut child_node = WidgetNode::new("text");
+                    child_node.id = 10_000 + index * 4 + child;
+                    child_node
+                })
+                .collect();
+            node
+        })
+        .collect::<Vec<_>>();
+    let previous = nodes.iter().map(retained_snapshot).collect::<Vec<_>>();
+    for (index, node) in nodes.iter_mut().enumerate() {
+        node.layout.y = index as f32 + 1.0;
+    }
+
+    let iterations = 2_000;
+    let full_started = Instant::now();
+    let mut full_layout_changes = 0usize;
+    for _ in 0..iterations {
+        for (node, previous) in nodes.iter().zip(&previous) {
+            let next = retained_snapshot_with_render(node, previous.render.clone(), None);
+            full_layout_changes += usize::from(
+                previous
+                    .diff_flags(std::hint::black_box(&next))
+                    .0
+                    .contains(RetainedNodeDirtyFlags::LAYOUT),
+            );
+        }
+    }
+    let full_time = full_started.elapsed();
+
+    let geometry_started = Instant::now();
+    let mut geometry_layout_changes = 0usize;
+    for _ in 0..iterations {
+        for (node, previous) in nodes.iter().zip(&previous) {
+            let next = retained_snapshot_with_render(
+                node,
+                previous.render.clone(),
+                Some(std::hint::black_box(previous)),
+            );
+            geometry_layout_changes += usize::from(
+                previous
+                    .diff_flags(std::hint::black_box(&next))
+                    .0
+                    .contains(RetainedNodeDirtyFlags::LAYOUT),
+            );
+        }
+    }
+    let geometry_time = geometry_started.elapsed();
+    let speedup = full_time.as_secs_f64() / geometry_time.as_secs_f64();
+
+    assert_eq!(geometry_layout_changes, full_layout_changes);
+    assert_eq!(geometry_layout_changes, iterations * nodes.len());
+    eprintln!(
+        "retained snapshots over {iterations} geometry-only frames with 256 moved rows: full {full_time:?}; split {geometry_time:?}; ratio {speedup:.2}x"
+    );
+    eprintln!("MESH_PERF metric=geometry_only_fingerprint_speedup value={speedup:.3}");
+    assert!(
+        geometry_time * 5 < full_time * 2,
+        "split geometry fingerprints should be at least 2.5x faster"
+    );
+}
+
 // cargo test -p mesh-core-shell --release -- animation_retained_scope_beats_full_fingerprinting --ignored --nocapture
 #[test]
 #[ignore = "release-only animation retained fingerprint benchmark"]

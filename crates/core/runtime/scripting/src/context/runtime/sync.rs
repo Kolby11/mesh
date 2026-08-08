@@ -5,6 +5,19 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 
+/// Record a changed public member for the template-dependency gate.
+///
+/// The list is only cleared by a complete template evaluation. A frame whose
+/// writes touch no template input never rebuilds, so pushing blindly would let
+/// a member that changes every frame grow the list without bound and make the
+/// gate's scan progressively slower.
+fn record_changed_public_member(changed: &mut Vec<String>, name: &str) {
+    if changed.iter().any(|recorded| recorded == name) {
+        return;
+    }
+    changed.push(name.to_owned());
+}
+
 impl ScriptContext {
     /// Sync Lua globals back into ScriptState.
     ///
@@ -63,7 +76,7 @@ impl ScriptContext {
                         }
                         if let Ok(value) = self.lua().from_value::<Value>(lua_value) {
                             self.state.set(key.clone(), value);
-                            self.changed_public_members.push(key.clone());
+                            record_changed_public_member(&mut self.changed_public_members, key);
                         }
                     }
                 }
@@ -95,7 +108,10 @@ impl ScriptContext {
                                 }) && let Ok(value) = self.lua().from_value::<Value>(lua_value)
                                 {
                                     self.state.set(name.clone(), value);
-                                    self.changed_public_members.push(name.clone());
+                                    record_changed_public_member(
+                                        &mut self.changed_public_members,
+                                        &name,
+                                    );
                                 }
                             } else {
                                 let value_for_env = lua_value.clone();
@@ -104,7 +120,10 @@ impl ScriptContext {
                                     && let Ok(value) = self.lua().from_value::<Value>(lua_value)
                                 {
                                     self.state.set(name.clone(), value);
-                                    self.changed_public_members.push(name.clone());
+                                    record_changed_public_member(
+                                        &mut self.changed_public_members,
+                                        &name,
+                                    );
                                 }
                             }
                         }
@@ -117,7 +136,7 @@ impl ScriptContext {
                         && let Ok(value) = self.lua().from_value::<Value>(lua_value.clone())
                     {
                         self.state.set(name.clone(), value);
-                        self.changed_public_members.push(name.clone());
+                        record_changed_public_member(&mut self.changed_public_members, &name);
                         if is_proxyable_lua_scalar(&lua_value) {
                             let _ = self.proxy_scalar_global(&name, lua_value);
                         }

@@ -117,6 +117,47 @@ impl ScriptState {
             .take();
     }
 
+    /// Install a host-produced value the owning runtime has been observed not
+    /// to read, keeping it correct for a later first read without claiming the
+    /// runtime changed.
+    ///
+    /// Service capabilities are declared per module, so every component
+    /// instance of that module is handed every payload the module may read —
+    /// including instances whose template and script never mention the
+    /// service. Treating those writes as mutations marks the instance dirty
+    /// and advances the generation its render memoization keys on, so an
+    /// unrelated 1 Hz service poll re-instantiates subtrees that cannot have
+    /// changed. The value is still installed; only the reactivity is withheld.
+    pub fn set_unobserved_value_with_fingerprint(
+        &mut self,
+        name: &str,
+        value: &Value,
+        fingerprint: u64,
+    ) {
+        if let Some(proxy) = self.proxies.get(name)
+            && let Some(setter) = &proxy.setter
+        {
+            (setter)(value.clone());
+            return;
+        }
+        if self
+            .host_value_fingerprints
+            .get(name)
+            .is_some_and(|previous| *previous == fingerprint)
+        {
+            return;
+        }
+
+        self.variables
+            .insert(name.to_owned(), Arc::new(value.clone()));
+        self.host_value_fingerprints
+            .insert(name.to_owned(), fingerprint);
+        self.cached_snapshot
+            .get_mut()
+            .expect("snapshot cache poisoned")
+            .take();
+    }
+
     /// Lazily construct a host-produced reactive value only when its
     /// fingerprint differs from the installed value. Returns whether the value
     /// was installed, so hosts can mirror a changed value elsewhere (into a

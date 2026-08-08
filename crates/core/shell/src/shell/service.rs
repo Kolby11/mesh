@@ -123,15 +123,25 @@ pub(super) fn apply_service_update_with_name(
 /// Returns `true` when the `last_service_update` trace changed, so the caller
 /// can mirror it into the context's `_ENV` without paying a JSON-to-Lua
 /// conversion on every unchanged fan-out probe.
+/// `observed` says whether this runtime has been seen reading the service. A
+/// runtime that has evaluated its template without ever touching the service
+/// still receives the value — module-wide capability makes the fan-out
+/// unavoidable — but the write is installed non-reactively, so it neither
+/// dirties the instance nor invalidates its memoized subtree.
 pub(super) fn apply_service_update_with_name_and_fingerprint(
     state: &mut ScriptState,
     has_read: bool,
+    observed: bool,
     service_name: &str,
     source_module: &str,
     payload: &serde_json::Value,
     fingerprint: u64,
 ) -> bool {
     if !has_read {
+        return false;
+    }
+    if !observed {
+        state.set_unobserved_value_with_fingerprint(service_name, payload, fingerprint);
         return false;
     }
     let metadata_fingerprint = service_update_metadata_fingerprint(service_name, source_module);
@@ -843,6 +853,7 @@ mod tests {
         apply_service_update_with_name_and_fingerprint(
             &mut state,
             true,
+            true,
             "audio",
             "@mesh/pipewire",
             &payload,
@@ -886,6 +897,7 @@ mod tests {
         apply_service_update_with_name_and_fingerprint(
             &mut lazy,
             true,
+            true,
             "audio",
             "@mesh/pipewire",
             &payload,
@@ -896,6 +908,7 @@ mod tests {
         for _ in 0..iterations {
             apply_service_update_with_name_and_fingerprint(
                 &mut lazy,
+                true,
                 true,
                 "audio",
                 "@mesh/pipewire",

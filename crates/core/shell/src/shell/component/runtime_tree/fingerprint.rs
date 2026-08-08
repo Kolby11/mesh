@@ -80,13 +80,34 @@ impl RuntimeTreeHasher {
 }
 
 pub(super) fn retained_snapshot(node: &WidgetNode) -> RetainedNodeSnapshot {
-    retained_snapshot_with_render(node, RenderObjectFingerprint::for_node(node, None))
+    retained_snapshot_with_render(node, RenderObjectFingerprint::for_node(node, None), None)
 }
 
+/// Builds a retained snapshot, optionally reusing fingerprints that the scoped
+/// update contract proves cannot have changed.
+///
+/// Clean nodes can still move when layout propagates from a dirty subtree (the
+/// common scroll-frame case). Passing their previous snapshot avoids hashing
+/// computed style and attributes, rebuilding child ids, or re-reading state;
+/// only the layout fingerprint is refreshed. Authoritative dirty roots always
+/// pass `None` and receive the complete fingerprint diff.
 pub(super) fn retained_snapshot_with_render(
     node: &WidgetNode,
     render: RenderObjectFingerprint,
+    geometry_only_previous: Option<&RetainedNodeSnapshot>,
 ) -> RetainedNodeSnapshot {
+    if let Some(previous) = geometry_only_previous {
+        return RetainedNodeSnapshot {
+            layout: layout_fingerprint(node),
+            style_hash: previous.style_hash,
+            attributes_hash: previous.attributes_hash,
+            child_ids: previous.child_ids.clone(),
+            state: previous.state,
+            render,
+            last_seen_epoch: 0,
+        };
+    }
+
     RetainedNodeSnapshot {
         layout: layout_fingerprint(node),
         style_hash: style_fingerprint(&node.computed_style),

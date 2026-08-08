@@ -1,0 +1,52 @@
+{
+  "name": "@mesh/device-info",
+  "version": "0.1.0",
+  "description": "Linux device-information backend for system settings.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "modules": {
+        "@mesh/device-interface": ">=1.0.0, <2.0.0"
+      },
+      "capabilities": [
+        "exec.cat",
+        "exec.hostname",
+        "exec.uname"
+      ],
+      "optionalCapabilities": [
+        "exec.lspci",
+        "exec.printenv"
+      ],
+      "binaries": [
+        {
+          "name": "lspci",
+          "optional": true,
+          "reason": "Report the primary graphics adapter when pciutils is installed.",
+          "packages": {
+            "debian": "pciutils",
+            "arch": "pciutils",
+            "fedora": "pciutils",
+            "nixos": "pciutils"
+          }
+        }
+      ]
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": ["en"]
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.device",
+        "version": "1.0",
+        "baseModule": "@mesh/device-interface",
+        "provider": "linux",
+        "label": "Linux device information",
+        "priority": 100
+      }
+    ]
+  }
+}

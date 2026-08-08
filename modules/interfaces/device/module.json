@@ -1,0 +1,82 @@
+{
+  "name": "@mesh/device-interface",
+  "version": "1.0.0",
+  "description": "Base device-information interface for settings and system surfaces.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.device",
+      "version": "1.0",
+      "domain": "device",
+      "relationship": "base",
+      "contract": {
+        "state": [
+          {
+            "name": "available",
+            "type": "boolean",
+            "description": "Whether a device-information provider can report system details"
+          },
+          {
+            "name": "hostname",
+            "type": "string",
+            "description": "Local system hostname"
+          },
+          {
+            "name": "os_name",
+            "type": "string",
+            "description": "Operating-system or distribution name"
+          },
+          {
+            "name": "os_version",
+            "type": "string",
+            "description": "Operating-system or distribution version"
+          },
+          {
+            "name": "kernel",
+            "type": "string",
+            "description": "Running kernel release"
+          },
+          {
+            "name": "architecture",
+            "type": "string",
+            "description": "Kernel-reported machine architecture"
+          },
+          {
+            "name": "desktop",
+            "type": "string",
+            "description": "Desktop environment or session name"
+          },
+          {
+            "name": "processor",
+            "type": "string",
+            "description": "Human-readable processor model"
+          },
+          {
+            "name": "memory_total_bytes",
+            "type": "int",
+            "description": "Total physical memory in bytes"
+          },
+          {
+            "name": "graphics",
+            "type": "string",
+            "description": "Human-readable primary graphics adapter when available"
+          },
+          {
+            "name": "uptime_seconds",
+            "type": "int",
+            "description": "System uptime in seconds"
+          },
+          {
+            "name": "source_module",
+            "type": "string",
+            "description": "Backend module ID that emitted this state (runtime-additive)"
+          }
+        ],
+        "capabilities": {
+          "required": ["service.device.read"]
+        }
+      }
+    }
+  }
+}

@@ -582,6 +582,94 @@ fn bundled_network_provider_exports_state() {
 }
 
 #[test]
+fn bundled_device_provider_normalizes_linux_system_information() {
+    let script = bundled_backend_script(
+        "../../../../packages/modules/backend/core/device-info/src/main.luau",
+    );
+    let mut ctx = BackendScriptContext::new("@mesh/device-info");
+    ctx.load_script(&script).unwrap();
+    ctx.ensure_lua()
+        .load(
+            r#"
+mesh.exec = function(program, args)
+    if program == "uname" and args[1] == "-r" then
+        return { success = true, stdout = "6.8.0-mesh\n" }
+    elseif program == "uname" and args[1] == "-m" then
+        return { success = true, stdout = "x86_64\n" }
+    elseif program == "uname" and args[1] == "-s" then
+        return { success = true, stdout = "Linux\n" }
+    elseif program == "hostname" then
+        return { success = true, stdout = "mesh-host\n" }
+    elseif program == "printenv" then
+        return { success = true, stdout = args[1] == "XDG_CURRENT_DESKTOP" and "GNOME\n" or "" }
+    elseif program == "cat" and args[1] == "/etc/os-release" then
+        return { success = true, stdout = "NAME=Ubuntu\nVERSION_ID=\"24.04\"\n" }
+    elseif program == "cat" and args[1] == "/proc/cpuinfo" then
+        return { success = true, stdout = "model name : MESH CPU 9000\n" }
+    elseif program == "cat" and args[1] == "/proc/meminfo" then
+        return { success = true, stdout = "MemTotal:       8388608 kB\n" }
+    elseif program == "cat" and args[1] == "/proc/uptime" then
+        return { success = true, stdout = "12345.67 67890.12\n" }
+    elseif program == "lspci" then
+        return { success = true, stdout = "00:02.0 VGA compatible controller: Advanced GPU\n" }
+    end
+    return { success = false, stdout = "" }
+end
+"#,
+        )
+        .exec()
+        .unwrap();
+
+    let payload = ctx.call_init().unwrap().unwrap();
+
+    assert_eq!(
+        payload.get("available").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        payload.get("hostname").and_then(|v| v.as_str()),
+        Some("mesh-host")
+    );
+    assert_eq!(
+        payload.get("os_name").and_then(|v| v.as_str()),
+        Some("Ubuntu")
+    );
+    assert_eq!(
+        payload.get("os_version").and_then(|v| v.as_str()),
+        Some("24.04")
+    );
+    assert_eq!(
+        payload.get("kernel").and_then(|v| v.as_str()),
+        Some("6.8.0-mesh")
+    );
+    assert_eq!(
+        payload.get("architecture").and_then(|v| v.as_str()),
+        Some("x86_64")
+    );
+    assert_eq!(
+        payload.get("desktop").and_then(|v| v.as_str()),
+        Some("GNOME")
+    );
+    assert_eq!(
+        payload.get("processor").and_then(|v| v.as_str()),
+        Some("MESH CPU 9000")
+    );
+    assert_eq!(
+        payload.get("memory_total_bytes").and_then(|v| v.as_u64()),
+        Some(8 * 1024 * 1024 * 1024)
+    );
+    assert_eq!(
+        payload.get("graphics").and_then(|v| v.as_str()),
+        Some("Advanced GPU")
+    );
+    assert_eq!(
+        payload.get("uptime_seconds").and_then(|v| v.as_u64()),
+        Some(12345)
+    );
+    assert_eq!(ctx.poll_interval_ms(), 30000);
+}
+
+#[test]
 fn bundled_brightness_provider_reads_and_controls_the_backlight() {
     let script = bundled_backend_script(
         "../../../../packages/modules/backend/core/backlight-brightness/src/main.luau",
@@ -696,6 +784,103 @@ end
 }
 
 #[test]
+fn hyprland_stream_events_query_only_missing_fields_and_emit_selectively() {
+    let script = bundled_backend_script(
+        "../../../../packages/modules/backend/core/hyprland-wm/src/main.luau",
+    );
+    let mut ctx = BackendScriptContext::new("@mesh/hyprland-wm");
+    ctx.load_script(&script).unwrap();
+    ctx.ensure_lua()
+        .load(
+            r#"
+exec_calls = {}
+mesh.service.has_capability = function(capability)
+    return capability == "exec.nc"
+end
+mesh.exec_stream = function(_program, _args)
+    return true
+end
+mesh.exec = function(program, args)
+    exec_calls[#exec_calls + 1] = { program = program, args = args }
+    if program == "sh" then
+        local command = args[2] or ""
+        if string.find(command, "HYPRLAND_INSTANCE_SIGNATURE", 1, true) then
+            return { success = true, stdout = "test-instance", stderr = "", code = 0 }
+        end
+        if string.find(command, "XDG_RUNTIME_DIR", 1, true) then
+            return { success = true, stdout = "/run/user/1000", stderr = "", code = 0 }
+        end
+        return { success = true, stdout = "ok", stderr = "", code = 0 }
+    end
+    if args[1] == "activeworkspace" then
+        return { success = true, stdout = '{"id":3}', stderr = "", code = 0 }
+    end
+    if args[1] == "activewindow" then
+        return { success = true, stdout = '{"class":"kitty","title":"before"}', stderr = "", code = 0 }
+    end
+    if args[1] == "workspaces" then
+        return { success = true, stdout = '[{"id":3,"name":"3","windows":1}]', stderr = "", code = 0 }
+    end
+    return { success = false, stdout = "", stderr = "unexpected call", code = 1 }
+end
+"#,
+        )
+        .exec()
+        .unwrap();
+
+    ctx.call_init().unwrap();
+    ctx.drain_events();
+    ctx.ensure_lua().load("exec_calls = {}").exec().unwrap();
+
+    let title_state = ctx
+        .run_stream_batch("nc", &["activewindow>>kitty,⠸ mesh, build".to_string()])
+        .unwrap()
+        .unwrap();
+    let calls = ctx
+        .ensure_lua()
+        .globals()
+        .get::<Table>("exec_calls")
+        .unwrap();
+    assert_eq!(
+        calls.raw_len(),
+        0,
+        "activewindow payload must not spawn state queries"
+    );
+    assert_eq!(
+        title_state["active_window"]["title"],
+        serde_json::json!("⠸ mesh, build")
+    );
+    let events = ctx.drain_events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].name, "WindowChanged");
+
+    let workspace_state = ctx
+        .run_stream_batch("nc", &["workspacev2>>4,code".to_string()])
+        .unwrap()
+        .unwrap();
+    assert_eq!(workspace_state["active_workspace"], serde_json::json!(4));
+    assert_eq!(calls.raw_len(), 0);
+    let events = ctx.drain_events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].name, "WorkspaceChanged");
+
+    let catalog_state = ctx
+        .run_stream_batch(
+            "nc",
+            &["openwindow>>abc,4,kitty,another window".to_string()],
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(calls.raw_len(), 1);
+    let call = calls.get::<Table>(1).unwrap();
+    assert_eq!(call.get::<String>("program").unwrap(), "hyprctl");
+    let args = call.get::<Table>("args").unwrap();
+    assert_eq!(args.get::<String>(1).unwrap(), "workspaces");
+    assert_eq!(catalog_state["active_workspace"], serde_json::json!(4));
+    assert!(ctx.drain_events().is_empty());
+}
+
+#[test]
 fn bundled_backend_scripts_expose_required_host_api_surface() {
     for (module_id, path) in [
         (
@@ -725,6 +910,10 @@ fn bundled_backend_scripts_expose_required_host_api_surface() {
         (
             "@mesh/shell-theme",
             "../../../../packages/modules/backend/core/shell-theme/src/main.luau",
+        ),
+        (
+            "@mesh/device-info",
+            "../../../../packages/modules/backend/core/device-info/src/main.luau",
         ),
     ] {
         let script = bundled_backend_script(path);

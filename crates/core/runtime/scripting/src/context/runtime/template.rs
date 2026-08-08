@@ -121,6 +121,28 @@ impl ScriptContext {
             .any(|name| cache.template_member_reads.contains(name))
     }
 
+    /// Whether this runtime has completed a template evaluation, so its
+    /// recorded read sets describe what the component actually consumes. Before
+    /// that, an empty read set means "not yet known", not "reads nothing".
+    pub fn template_dependencies_ready(&self) -> bool {
+        self.template_dependencies_ready
+    }
+
+    /// Whether a write to the public member `name` can reach this component.
+    ///
+    /// Answers `true` until the first template evaluation completes, because
+    /// an empty read set is not yet evidence of anything.
+    pub fn observes_state_member(&self, name: &str) -> bool {
+        if !self.template_dependencies_ready {
+            return true;
+        }
+        self.template_expression_cache
+            .lock()
+            .unwrap()
+            .template_member_reads
+            .contains(name)
+    }
+
     /// Mark the dependency set as authoritative after a complete component
     /// template evaluation, including the valid empty-set case.
     pub fn mark_template_dependencies_ready(&mut self) {

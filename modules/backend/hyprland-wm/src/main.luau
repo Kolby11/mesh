@@ -12,13 +12,16 @@ state = {
     workspaces = {},
 }
 
-local last_snapshot = nil
 local stream_active = false
 -- Program name actually used for the stream (socat or nc).
 local stream_program = nil
 
 local function log_info(msg)
     mesh.log.info("[hyprland-wm] " .. msg)
+end
+
+local function log_debug(msg)
+    mesh.log.debug("[hyprland-wm] " .. msg)
 end
 
 local function log_warn(msg)
@@ -91,39 +94,77 @@ local function read_state()
     }
 end
 
-local function refresh_state(self)
-    local next_state = read_state()
-    if next_state then
-        state = next_state
-    else
-        state = { available = false, active_workspace = 1, active_window = nil, workspaces = {} }
+local function windows_equal(a, b)
+    if a == nil or b == nil then
+        return a == b
+    end
+    return a.title == b.title and a.class == b.class
+end
+
+local function workspaces_equal(a, b)
+    if #a ~= #b then
+        return false
+    end
+    for index = 1, #a do
+        local left = a[index]
+        local right = b[index]
+        if left.id ~= right.id or left.name ~= right.name or left.windows ~= right.windows then
+            return false
+        end
+    end
+    return true
+end
+
+local function commit_state(self, next_state)
+    local previous = state
+    local availability_changed = previous.available ~= next_state.available
+    local workspace_changed = previous.active_workspace ~= next_state.active_workspace
+    local window_changed = not windows_equal(previous.active_window, next_state.active_window)
+    local workspace_list_changed = not workspaces_equal(previous.workspaces, next_state.workspaces)
+
+    state = next_state
+    if not (availability_changed or workspace_changed or window_changed or workspace_list_changed) then
+        return
     end
 
     local win_title = state.active_window and state.active_window.title or "(desktop)"
-    local snapshot = string.format(
-        "available=%s ws=%d window=%s",
+    local message = string.format(
+        "state available=%s ws=%d window=%s",
         tostring(state.available),
         state.active_workspace,
         win_title
     )
+    if window_changed and not (availability_changed or workspace_changed or workspace_list_changed) then
+        -- Some applications animate their title at 10 Hz or faster. Keep the
+        -- state reactive without turning cosmetic churn into an info-log storm.
+        log_debug(message)
+    else
+        log_info(message)
+    end
 
-    if snapshot ~= last_snapshot then
-        last_snapshot = snapshot
-        log_info("state " .. snapshot)
-
-        if self and state.available then
+    if self and state.available then
+        if availability_changed or workspace_changed then
             self.WorkspaceChanged:fire({
                 id = state.active_workspace,
                 name = tostring(state.active_workspace),
             })
-            if state.active_window then
-                self.WindowChanged:fire({
-                    title = state.active_window.title,
-                    class = state.active_window.class,
-                })
-            end
+        end
+        if (availability_changed or window_changed) and state.active_window then
+            self.WindowChanged:fire({
+                title = state.active_window.title,
+                class = state.active_window.class,
+            })
         end
     end
+end
+
+local function refresh_state(self)
+    commit_state(self, read_state() or {
+        available = false,
+        active_workspace = 1,
+        active_window = nil,
+        workspaces = {},
+    })
 end
 
 -- Discover the Hyprland IPC event socket path.
@@ -222,51 +263,121 @@ function on_poll(self)
 end
 
 -- Hyprland socket2 event lines: `eventname>>params`
--- Full list of workspace-affecting events we react to:
---   workspace / workspacev2          — active workspace switched
---   focusedmon                       — monitor (and thus workspace) focus changed
---   createworkspace / v2             — new workspace created
---   destroyworkspace / v2            — workspace removed
---   openwindow                       — window opened (window count changes)
---   closewindow                      — window closed (window count changes)
---   activewindow / activewindowv2    — focused window title/class changed
---   movewindow / movewindowv2        — window moved between workspaces
---   moveworkspace / moveworkspacev2  — workspace moved to another monitor
-local WORKSPACE_EVENTS = {
-    workspace = true,
-    workspacev2 = true,
-    focusedmon = true,
+local WORKSPACE_LIST_EVENTS = {
     createworkspace = true,
     createworkspacev2 = true,
     destroyworkspace = true,
     destroyworkspacev2 = true,
     openwindow = true,
     closewindow = true,
-    activewindow = true,
-    activewindowv2 = true,
     movewindow = true,
     movewindowv2 = true,
     moveworkspace = true,
     moveworkspacev2 = true,
 }
 
+local function parse_active_window_event(payload)
+    local class, title = payload:match("^(.-),(.*)$")
+    if not class then
+        return nil, false
+    end
+    if class == "" and title == "" then
+        return nil, true
+    end
+    return { class = class, title = title }, true
+end
+
+local function parse_workspace_v2_event(payload)
+    local id = tonumber(payload:match("^(%-?%d+),"))
+    return id
+end
+
 function on_stream_batch(self, program, lines)
     if program ~= stream_program then
         return
     end
 
-    local needs_refresh = false
+    local active_window = nil
+    local has_active_window_payload = false
+    local active_workspace = nil
+    local needs_active_window_query = false
+    local needs_active_workspace_query = false
+    local needs_workspace_list_query = false
+
     for _, line in ipairs(lines) do
-        local event = line:match("^([%a%d]+)>>")
-        if event and WORKSPACE_EVENTS[event] then
-            needs_refresh = true
-            break
+        local event, payload = line:match("^([%a%d]+)>>(.*)$")
+        if event == "activewindow" then
+            active_window, has_active_window_payload = parse_active_window_event(payload)
+            needs_active_window_query = false
+        elseif event == "activewindowv2" and not has_active_window_payload then
+            -- The v2 event carries only the address. Most batches also carry
+            -- `activewindow`; query just this field when they do not.
+            needs_active_window_query = true
+        elseif event == "workspacev2" then
+            active_workspace = parse_workspace_v2_event(payload)
+            needs_active_workspace_query = active_workspace == nil
+        elseif event == "workspace" then
+            -- Legacy payloads carry a workspace name, commonly the numeric id.
+            active_workspace = tonumber(payload)
+            needs_active_workspace_query = active_workspace == nil
+        elseif event == "focusedmon" and active_workspace == nil then
+            local workspace_name = payload:match("^[^,]*,(.*)$") or ""
+            active_workspace = tonumber(workspace_name)
+            needs_active_workspace_query = active_workspace == nil
+        elseif event and WORKSPACE_LIST_EVENTS[event] then
+            needs_workspace_list_query = true
         end
     end
 
-    if needs_refresh then
-        refresh_state(self)
+    if not (has_active_window_payload
+        or active_workspace ~= nil
+        or needs_active_window_query
+        or needs_active_workspace_query
+        or needs_workspace_list_query) then
+        return
     end
+
+    local next_state = {
+        available = state.available,
+        active_workspace = state.active_workspace,
+        active_window = state.active_window,
+        workspaces = state.workspaces,
+    }
+
+    if has_active_window_payload then
+        next_state.active_window = active_window
+        next_state.available = true
+    elseif needs_active_window_query then
+        local result = mesh.exec("hyprctl", { "activewindow", "-j" })
+        if result.success then
+            next_state.active_window = parse_active_window(result.stdout or "")
+            next_state.available = true
+        end
+    end
+
+    if active_workspace ~= nil then
+        next_state.active_workspace = active_workspace
+        next_state.available = true
+    elseif needs_active_workspace_query then
+        local result = mesh.exec("hyprctl", { "activeworkspace", "-j" })
+        if result.success then
+            local parsed = parse_active_workspace(result.stdout or "")
+            if parsed then
+                next_state.active_workspace = parsed
+                next_state.available = true
+            end
+        end
+    end
+
+    if needs_workspace_list_query then
+        local result = mesh.exec("hyprctl", { "workspaces", "-j" })
+        if result.success then
+            next_state.workspaces = parse_workspaces(result.stdout or "")
+            next_state.available = true
+        end
+    end
+
+    commit_state(self, next_state)
 end
 
 function on_command_focus_workspace(self)

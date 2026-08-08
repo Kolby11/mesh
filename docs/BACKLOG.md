@@ -69,9 +69,28 @@ gate where the win is structural.
 
 ### Render pipeline
 
-- [ ] Widen generation shortcuts to per-node dirty scoping — scope the retained
-      tree's own fingerprint traversal and unify changed-node fingerprints
-      across the retained, render, and display layers.
+- [ ] **The narrow service path never engages for real modules.** It requires a
+      template to interpolate the service field directly, but every shipped
+      component reads services in Luau and binds derived variables — so
+      `narrow_nodes` is empty, invalidation falls back to `TREE_REBUILD`, and
+      every poll is a full rebuild plus 100%-of-surface damage. Measured on the
+      navigation bar 2026-08-08: 240/240 frames full-surface, ~4 such frames per
+      second at rest. Needs script-level service reads to feed
+      `service_field_reads`, or a different narrowing signal.
+- [ ] A root-level `backdrop-filter` collapses all partial damage to the whole
+      surface (`expand_damage_for_blur_regions` unions with the full blurred
+      region), and `.nav-shell` carries one. Latent today because damage is
+      already full-surface for the reason above; it becomes the next ceiling as
+      soon as that is fixed.
+- [ ] Stop building the focused proof snapshot on production paints. It runs on
+      every paint, allocates several `String`s per node (two `node.id`
+      stringifications, an AccessKit id `format!`, cloned `role`/`aria-label`,
+      and a `parley_text::…` format per text node), and is read only by tests.
+      Worth ~19% of an Appearance paint-only frame and ~13% of a scroll frame;
+      measured 2026-08-08.
+- [ ] Continue widening generation shortcuts to per-node dirty scoping and
+      unify changed-node fingerprints across the retained, render, and display
+      layers; geometry-only retained snapshots are split out now.
 - [ ] Display-list segment/rope command storage → v1.21. Command arrays are
       still flattened per ancestor. Replay must consume segments directly
       instead of eagerly re-flattening them — an eager reconstruction was tried
@@ -86,9 +105,24 @@ gate where the win is structural.
 - [ ] Interaction frames still re-apply string style declarations per node —
       folds into typed declarations and narrower invalidation.
       *(detail: "P2 — architecture")*
+- [ ] A live animation defeats targeted restyle. Animation invalidation raises
+      `VISUAL_REPAINT`, which carries no `STATE` bit — the exact bit that
+      selects the targeted interaction-restyle branch — so every frame for a
+      transition's duration restyles the whole tree instead of the animating
+      nodes. Costs 2.1x on an otherwise identical navigation-bar paint frame.
+- [ ] A tree-rebuild frame restyles memo-reused subtrees too. Component memo
+      entries are stored pre-restyle (position-independent by design), so a
+      reused page pays a full style walk and copy-on-write anyway — 2.8ms of an
+      8.6ms Appearance service frame. Needs styled memo entries, or a
+      "styles still valid" mark the restyle walk can skip.
 
 ### Typing and interning
 
+- [ ] Per-frame `String` keys and SipHash on the animation path. The transition
+      pass allocates a `String` per node per frame (`mesh_key().to_owned()`,
+      then cloned again into `live_keys`) and keys `HashMap`/`HashSet` on it,
+      while every other layer already keys on `NodeId`. Part of the ~27% of
+      frame cycles the sampling profile puts in the allocator.
 - [ ] Interned `Symbol` / `TagId` types and a typed `WidgetNode`. Attributes,
       module ids, and element tags are done; widget-tree **tags**, attribute
       **values**, and the broader symbol types remain. Profiling now puts the
@@ -110,9 +144,28 @@ gate where the win is structural.
 
 ### Runtime boundary
 
+- [ ] The `nix develop` banner tells developers to run the **debug** build
+      (`cargo run -p mesh-tools-cli --bin mesh-shell -- start`), which is
+      21–28x slower at idle than the optimized profile (5.55% vs 0.20% of a
+      core) and reads as a shell performance problem. Point the banner at a
+      release/profiling run, and consider a startup log line naming the build
+      profile so a debug shell is self-identifying.
+- [ ] **A scroll over a service-backed control spawns ~60 processes/second.**
+      `onVolumeScroll` → `audio.set_volume()` costs two `wpctl` launches (the
+      write, then an unconditional `refresh_state()` read-back) at up to 62.5
+      commands/s under the 16ms `COMMAND_THROTTLE_INTERVAL`. A `wpctl` launch is
+      15.5ms of CPU, nearly all dynamic linking, so continuous scrolling pegs a
+      core (measured 93.4% in children vs 3.55% for the whole shell). Three
+      separable fixes: throttle service *commands* by cost rather than by frame
+      budget, drop the read-back while a monitor stream is already live, and
+      coalesce repeated writes to the same field. Same shape for brightness
+      scroll and popover slider drags.
 - [ ] Push-based backend host API primitives (D-Bus signal subscribe, fd/socket
       watch, stream adoption) so providers are event-driven and polling is the
-      fallback (C). Includes evaluating `pw-dump --monitor` as a real volume
+      fallback (C). **Measured 2026-08-08:** the shipped polls fork ~3 processes
+      per second (`hyprctl` 500ms, `wpctl` 1000ms, `brightnessctl` 2000ms) and
+      cost 6.4% of a core continuously — 32x the whole shell render loop at rest
+      (0.2%) — mostly in dynamic-linker startup, for no state change. Includes evaluating `pw-dump --monitor` as a real volume
       event source; `pw-mon` emits no `changed:` block for volume.
 - [ ] Handler sync still reads compound table globals, because nested in-place
       mutations never assign through `_ENV`. Eliminating those reads needs
