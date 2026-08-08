@@ -7,10 +7,10 @@
   "schemaVersion": 1,
   "shell": {
     "fonts": {
-      "ui_family": "FantasqueSansM Nerd Font"
+      "ui_family": "FiraCode Nerd Font Mono"
     },
     "icons": {
-      "default_pack": "Bibata-Original-Classic"
+      "default_pack": "Papirus-Light"
     },
     "render": {
       "blur": {
@@ -19,7 +19,7 @@
       }
     },
     "theme": {
-      "active": "gruvbox-dark"
+      "active": "tokyo-night"
     }
   }
 }

@@ -7,6 +7,12 @@ lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
 
+Settings opening and closing now has one idempotent visibility lifecycle. A
+duplicate show cannot replay the entrance, a duplicate hide cannot shortcut an
+active exit, and the navigation launcher suppresses Quick Settings while the
+full Settings surface is being opened. Focused navigation and shell lifecycle
+regressions pass.
+
 Hyprland socket events now update provider state field-by-field instead of
 running three `hyprctl` queries for every title change. Under a 10 Hz live
 terminal-title workload with Settings scrolling, combined shell-plus-child CPU

@@ -368,7 +368,7 @@ fn default_surface() -> String {
 }
 
 fn default_theme_id() -> String {
-    "mesh-default-dark".to_string()
+    "tokyo-night".to_string()
 }
 
 fn default_locale() -> String {

@@ -364,7 +364,7 @@ mod tests {
     #[test]
     fn missing_shell_namespace_yields_declared_defaults() {
         let store = store(json!({}));
-        assert_eq!(store.shell().theme.active, "mesh-default-dark");
+        assert_eq!(store.shell().theme.active, "tokyo-night");
         assert_eq!(store.shell().tooltip.delay_ms, 300);
         assert_eq!(
             store.shell().keyboard.button_activation_keys,
@@ -381,7 +381,7 @@ mod tests {
         assert_eq!(store.shell().tooltip.delay_ms, 25);
         assert_eq!(store.shell().tooltip.position, "bottom");
         assert_eq!(store.shell().tooltip.gap, 6.0);
-        assert_eq!(store.shell().theme.active, "mesh-default-dark");
+        assert_eq!(store.shell().theme.active, "tokyo-night");
     }
 
     #[test]
@@ -495,7 +495,7 @@ mod tests {
         ));
         let store = SettingsStore::load_from(&path).expect("absent file is not an error");
 
-        assert_eq!(store.shell().theme.active, "mesh-default-dark");
+        assert_eq!(store.shell().theme.active, "tokyo-night");
         assert_eq!(store.namespace_names().count(), 0);
     }
 
@@ -670,7 +670,7 @@ mod tests {
 
         let diagnostic = only(store.diagnostics());
         assert!(diagnostic.is_error());
-        assert_eq!(store.shell().theme.active, "mesh-default-dark");
+        assert_eq!(store.shell().theme.active, "tokyo-night");
     }
 
     #[test]
@@ -688,7 +688,7 @@ mod tests {
         store.set_namespace("shell", json!({ "theme": { "active": 7 } }));
 
         assert_eq!(only(store.diagnostics()).key_path, "theme.active");
-        assert_eq!(store.shell().theme.active, "mesh-default-dark");
+        assert_eq!(store.shell().theme.active, "tokyo-night");
     }
 
     #[test]

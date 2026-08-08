@@ -465,7 +465,7 @@ pub fn default_theme() -> Theme {
 }
 
 pub fn default_theme_path() -> PathBuf {
-    theme_path_for_id("mesh-default-dark")
+    theme_path_for_id("tokyo-night")
 }
 
 pub fn theme_dir_path() -> PathBuf {
@@ -537,9 +537,9 @@ pub fn load_theme_from_path(path: &Path) -> Result<Theme, ThemeError> {
 
 fn embedded_default_theme() -> Theme {
     parse_theme_css(
-        "mesh-default-dark",
-        "MESH Default Dark",
-        include_str!("../../../../../config/themes/mesh-default-dark/theme.css"),
+        "tokyo-night",
+        "Tokyo Night",
+        include_str!("../../../../../config/themes/tokyo-night/theme.css"),
     )
     .expect("embedded default theme css must be valid")
 }
@@ -1239,16 +1239,16 @@ mod tests {
     fn shipped_default_css_theme_exposes_expected_tokens() {
         let theme = default_theme();
 
-        assert_eq!(theme.id, "mesh-default-dark");
+        assert_eq!(theme.id, "tokyo-night");
         assert_eq!(
             theme
                 .token("color.surface-container")
                 .map(ToString::to_string),
-            Some("#211f26".into())
+            Some("#24283b".into())
         );
         assert_eq!(
             theme.token("color.on-surface").map(ToString::to_string),
-            Some("#e6e1e5".into())
+            Some("#c0caf5".into())
         );
         let transition = theme
             .component_defaults("base")
@@ -1290,7 +1290,7 @@ mod tests {
         assert_eq!(button.get("padding").map(String::as_str), Some("10"));
         assert_eq!(
             button.get("background").map(String::as_str),
-            Some("#2b2633")
+            Some("#24283b")
         );
     }
 

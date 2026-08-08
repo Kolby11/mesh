@@ -108,13 +108,25 @@ fn theme_service_state_lists_every_registered_theme() {
     assert_eq!(
         state["themes"][0]["palette"],
         serde_json::json!({
-            "surface": "#1c1b1f",
-            "surface_container_low": "#1d1b20",
-            "surface_container_high": "#2b2930",
-            "primary": "#6750a4",
-            "outline_variant": "#49454f",
-            "on_surface": "#e6e1e5",
+            "surface": "#1a1b26",
+            "surface_container_low": "#1a1b26",
+            "surface_container_high": "#2f334d",
+            "primary": "#e0af68",
+            "outline_variant": "#414868",
+            "on_surface": "#c0caf5",
         })
+    );
+}
+
+#[test]
+fn tokyo_night_is_reported_as_a_dark_theme() {
+    let mut shell = Shell::new();
+
+    shell.sync_theme_service_state("tokyo-night").unwrap();
+
+    assert_eq!(
+        shell.latest_service_state["mesh.theme"].state["is_dark"],
+        serde_json::json!(true)
     );
 }
 
@@ -137,14 +149,14 @@ fn shell_theme_backend_candidate_receives_resolved_active_theme_setting() {
 
     shell.apply_shell_runtime_settings(&mut candidate);
 
-    assert_eq!(shell.theme.active().id, "mesh-default-dark");
+    assert_eq!(shell.theme.active().id, "tokyo-night");
     assert_eq!(
         candidate
             .settings
             .get("__shell")
             .and_then(|shell| shell.get("theme"))
             .and_then(|value| value.as_str()),
-        Some("mesh-default-dark")
+        Some("tokyo-night")
     );
 }
 
@@ -205,7 +217,7 @@ fn shell_theme_fallback_backend_restart_keeps_latest_state_on_resolved_theme() {
         .unwrap();
 
     let latest = shell.latest_service_state.get("mesh.theme").unwrap();
-    assert_eq!(shell.theme.active().id, "mesh-default-dark");
+    assert_eq!(shell.theme.active().id, "tokyo-night");
     assert_eq!(
         latest.state["current"],
         serde_json::json!("mesh-default-dark")
@@ -340,14 +352,14 @@ fn settings_theme_reload_publishes_resolved_fallback_theme_state() {
     shell.reload_locale_if_settings_changed().unwrap();
 
     assert_eq!(shell.settings.theme.active, "missing-theme");
-    assert_eq!(shell.theme.active().id, "mesh-default-dark");
+    assert_eq!(shell.theme.active().id, "tokyo-night");
     assert_eq!(recorded_updates_for(&seen_events, "mesh.theme"), 1);
     assert_eq!(
         shell
             .latest_service_state
             .get("mesh.theme")
             .and_then(|state| state.state.get("current")),
-        Some(&serde_json::json!("mesh-default-dark"))
+        Some(&serde_json::json!("tokyo-night"))
     );
 }
 
@@ -377,7 +389,7 @@ fn theme_file_recovery_syncs_mesh_theme_latest_state_and_components() {
     shell.replace_backend_runtime("mesh.theme".to_string(), slot);
 
     assert_eq!(shell.settings.theme.active, "mesh-recovered-light");
-    assert_eq!(shell.theme.active().id, "mesh-default-dark");
+    assert_eq!(shell.theme.active().id, "tokyo-night");
     let fallback_theme_id = shell.theme.active().id.clone();
     shell.sync_theme_service_state(&fallback_theme_id).unwrap();
     assert_eq!(
@@ -385,7 +397,7 @@ fn theme_file_recovery_syncs_mesh_theme_latest_state_and_components() {
             .latest_service_state
             .get("mesh.theme")
             .and_then(|state| state.state.get("current")),
-        Some(&serde_json::json!("mesh-default-dark"))
+        Some(&serde_json::json!("tokyo-night"))
     );
     assert_eq!(
         shell

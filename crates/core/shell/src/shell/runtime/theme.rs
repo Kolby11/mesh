@@ -5,6 +5,10 @@ const THEME_RELOAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::fro
 const SHELL_SETTINGS_RELOAD_POLL_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(500);
 
+fn is_dark_theme_id(theme_id: &str) -> bool {
+    theme_id.contains("dark") || theme_id.eq_ignore_ascii_case("tokyo-night")
+}
+
 fn theme_preview_palette(theme: &mesh_core_theme::Theme) -> serde_json::Value {
     let color = |name: &str, fallback: &str| {
         theme
@@ -138,7 +142,7 @@ impl Shell {
 
     pub(in crate::shell) fn mark_components_theme_changed(&mut self) -> Result<(), ShellRunError> {
         let theme_id = self.theme.active().id.clone();
-        let is_dark = theme_id.contains("dark");
+        let is_dark = is_dark_theme_id(&theme_id);
         for runtime in &mut self.components {
             runtime
                 .component
@@ -243,7 +247,7 @@ impl Shell {
         &mut self,
         theme_id: &str,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        let is_dark = theme_id.contains("dark");
+        let is_dark = is_dark_theme_id(theme_id);
         let mut themes = self
             .theme
             .available_themes()

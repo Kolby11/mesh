@@ -1478,6 +1478,41 @@ impl Shell {
         visible: bool,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         tracing::info!("set_surface_visibility surface_id={surface_id} visible={visible}");
+        let current_visible = self
+            .core
+            .surfaces
+            .get(&surface_id)
+            .map(|state| state.visible)
+            .or_else(|| {
+                self.surfaces
+                    .get(&surface_id)
+                    .map(|surface| surface.visible)
+            })
+            .unwrap_or(false);
+        let already_closing = self
+            .core
+            .surfaces
+            .get(&surface_id)
+            .and_then(|state| state.closing_until)
+            .is_some();
+        let pending_popover_hide = self.pending_popover_hides.contains_key(&surface_id);
+
+        // Visibility commands are often produced by two independent paths in
+        // one interaction: a direct shell event and a retained portal update.
+        // Re-applying ShowSurface to an already visible surface restarts its
+        // entrance state, which makes the surface visibly pop twice. Likewise,
+        // a second HideSurface must not skip the exit transition and tear down
+        // a surface that is already closing. Treat both cases as idempotent.
+        if visible && current_visible && !already_closing && !pending_popover_hide {
+            return Ok(VecDeque::new());
+        }
+        if !visible && already_closing {
+            return Ok(VecDeque::new());
+        }
+        if !visible && !current_visible {
+            return Ok(VecDeque::new());
+        }
+
         if visible {
             self.pending_popover_hides.remove(&surface_id);
             if let Some(state) = self.core.surfaces.get_mut(&surface_id) {
@@ -1510,12 +1545,6 @@ impl Shell {
                     .map(|surface| surface.visible)
                     .unwrap_or(true)
             });
-        let already_closing = self
-            .core
-            .surfaces
-            .get(&surface_id)
-            .and_then(|state| state.closing_until)
-            .is_some();
         if hide_transition > 0 && is_visible && !already_closing {
             let until =
                 std::time::Instant::now() + std::time::Duration::from_millis(hide_transition);

@@ -1098,6 +1098,104 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
 }
 
 #[test]
+fn navigation_settings_trigger_does_not_reopen_quick_settings_after_opening_settings() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    let theme = default_theme();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    let enter_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsEnter";
+    let open_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onOpenSettings";
+    let leave_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsLeave";
+
+    component
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    component
+        .call_namespaced_handler(enter_handler, &[])
+        .unwrap();
+    component
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    assert_eq!(
+        component.child_surface_requests().len(),
+        1,
+        "hover should open one Quick Settings child"
+    );
+
+    let requests = component
+        .call_namespaced_handler(open_handler, &[])
+        .unwrap();
+    assert!(matches!(
+        requests.as_slice(),
+        [CoreRequest::ShowSurface { surface_id }] if surface_id == "@mesh/settings"
+    ));
+    component
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    assert!(
+        component.child_surface_requests().is_empty(),
+        "opening full Settings must remove the Quick Settings child"
+    );
+
+    // The pointer can still be over the launcher after the full surface is
+    // shown. A second enter in that state must not create another popup.
+    component
+        .call_namespaced_handler(enter_handler, &[])
+        .unwrap();
+    component
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    assert!(
+        component.child_surface_requests().is_empty(),
+        "full Settings must suppress a second Quick Settings popup"
+    );
+
+    // Leaving the launcher releases the guard; the next hover can use Quick
+    // Settings again after Settings has been closed.
+    component
+        .call_namespaced_handler(leave_handler, &[])
+        .unwrap();
+    component
+        .call_namespaced_handler(enter_handler, &[])
+        .unwrap();
+    component
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    assert_eq!(
+        component.child_surface_requests().len(),
+        1,
+        "a later hover should still open Quick Settings"
+    );
+}
+
+#[test]
 fn navigation_bar_real_surface_keeps_status_copy_non_selectable() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());

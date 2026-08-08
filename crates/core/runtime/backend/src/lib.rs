@@ -904,7 +904,7 @@ mod tests {
         .await;
         assert_eq!(
             initial.payload.get("current").and_then(|v| v.as_str()),
-            Some("mesh-default-dark")
+            Some("tokyo-night")
         );
 
         cmd_tx

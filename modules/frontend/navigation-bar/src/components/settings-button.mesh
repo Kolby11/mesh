@@ -23,6 +23,7 @@ local t = import("mesh.i18n", "t")
 local QuickSettings = require("@mesh/quick-settings")
 
 settings_surface_hidden = true
+settings_launcher_blocked = false
 settings_aria_expanded = "false"
 settings_tooltip = t('nav.open_settings')
 settings_tooltip_disabled = "false"
@@ -61,7 +62,7 @@ local function sync_trigger_state()
 end
 
 local function show_settings_selector(event)
-    if quick_settings and settings_surface_hidden then
+    if quick_settings and settings_surface_hidden and not settings_launcher_blocked then
         connect_quick_settings()
         cancel_bridge_close()
         quick_settings.open = true
@@ -104,6 +105,11 @@ end
 function onOpenSettings()
     -- A click is the explicit path into the full settings application. The
     -- quick-settings popup remains the lightweight hover surface.
+    -- Keep the launcher from reopening Quick Settings while the pointer is
+    -- still over this button after the full surface appears. The lock is
+    -- released by the next pointer leave, so a later hover works normally.
+    settings_launcher_blocked = true
+    cancel_bridge_close()
     mesh.events.publish("shell.show-surface", { surface_id = "@mesh/settings" })
     hide_settings_selector(false)
     -- Settings owns focus once its window opens. Leaving focus on the launcher
@@ -120,6 +126,7 @@ function onSettingsEnter(event)
 end
 
 function onSettingsLeave()
+    settings_launcher_blocked = false
     hide_settings_selector(true)
 end
 

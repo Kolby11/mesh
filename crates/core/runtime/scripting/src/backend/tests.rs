@@ -504,6 +504,26 @@ fn shell_theme_backend_initializes_from_configured_current_theme() {
 }
 
 #[test]
+fn shell_theme_backend_treats_tokyo_night_as_dark() {
+    let script = bundled_backend_script(
+        "../../../../packages/modules/backend/core/shell-theme/src/main.luau",
+    );
+    let mut ctx = BackendScriptContext::new_with_settings(
+        "@mesh/shell-theme",
+        serde_json::json!({ "__shell": { "theme": "tokyo-night" } }),
+    );
+    ctx.load_script(&script).unwrap();
+
+    let payload = ctx.call_init().unwrap().unwrap();
+
+    assert_eq!(
+        payload.get("current").and_then(|v| v.as_str()),
+        Some("tokyo-night")
+    );
+    assert_eq!(payload.get("is_dark").and_then(|v| v.as_bool()), Some(true));
+}
+
+#[test]
 fn shell_theme_backend_preserves_shell_authored_dark_state() {
     let script = bundled_backend_script(
         "../../../../packages/modules/backend/core/shell-theme/src/main.luau",

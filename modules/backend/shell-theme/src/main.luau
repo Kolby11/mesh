@@ -1,6 +1,6 @@
 state = {
-    current = "mesh-default-dark",
-    theme_id = "mesh-default-dark",
+    current = "tokyo-night",
+    theme_id = "tokyo-night",
     is_dark = true,
     themes = {},
     available = {},
@@ -11,11 +11,12 @@ local function derive_is_dark(theme_id, payload)
         return payload.is_dark == true
     end
 
-    return type(theme_id) == "string" and theme_id:find("dark", 1, true) ~= nil
+    return type(theme_id) == "string"
+        and (theme_id:find("dark", 1, true) ~= nil or theme_id == "tokyo-night")
 end
 
 local function sync_theme(theme_id, payload)
-    local current = theme_id or "mesh-default-dark"
+    local current = theme_id or "tokyo-night"
     local themes = payload.themes or state.themes or {}
     local available = payload.available or state.available or {}
     state = {

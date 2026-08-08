@@ -117,6 +117,51 @@ fn hide_surface_without_transition_unmaps_immediately() {
 }
 
 #[test]
+fn repeated_visibility_requests_do_not_restart_or_short_circuit_surface_lifecycle() {
+    let state = Arc::new(Mutex::new(TransitionRecordingState::default()));
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(TransitionRecordingComponent::new(
+        "@test/idempotent-visibility",
+        120,
+        Arc::clone(&state),
+    )));
+
+    shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@test/idempotent-visibility".into(),
+        })
+        .unwrap();
+    assert!(
+        state.lock().unwrap().exiting.is_empty(),
+        "a redundant show must not restart the entrance lifecycle"
+    );
+
+    shell
+        .apply_request(CoreRequest::HideSurface {
+            surface_id: "@test/idempotent-visibility".into(),
+        })
+        .unwrap();
+    shell
+        .apply_request(CoreRequest::HideSurface {
+            surface_id: "@test/idempotent-visibility".into(),
+        })
+        .unwrap();
+    assert_eq!(
+        state.lock().unwrap().exiting.as_slice(),
+        [true],
+        "a redundant hide must leave the existing exit transition running"
+    );
+    assert!(
+        shell
+            .core
+            .surfaces
+            .get("@test/idempotent-visibility")
+            .is_some_and(|surface| surface.visible && surface.closing_until.is_some()),
+        "the surface must remain visible until its close transition expires"
+    );
+}
+
+#[test]
 fn wayland_parent_input_uses_content_size_not_tooltip_inflated_surface_size() {
     let state = Arc::new(Mutex::new(InputSizeRecordingState::default()));
     let mut shell = Shell::new();
