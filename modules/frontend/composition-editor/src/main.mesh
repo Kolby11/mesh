@@ -1,0 +1,504 @@
+<template>
+  <column class="editor" aria-label="Layout editor">
+    <row class="header">
+      <column class="header-copy">
+        <text class="eyebrow">MESH composition</text>
+        <text class="title">Layout editor</text>
+        <text class="subtitle">Arrange components in regions exposed by their authors.</text>
+      </column>
+      <button class="close" onclick={closeEditor} aria-label="Close layout editor">
+        <text>Close</text>
+      </button>
+    </row>
+
+    <scroll class="workspace">
+      <column class="slot-list">
+        {#for slot in slot_rows key={slot.key}}
+          <column class="slot-card">
+            <row class="slot-heading">
+              <column>
+                <text class="slot-title">{slot.root_instance} · {slot.name}</text>
+                <text class="slot-contract">{slot.contract}</text>
+              </column>
+              <spacer />
+              <button class="quiet" onclick={undoSlot(slot.key)} aria-label="Undo last slot change">
+                <text>Undo</text>
+              </button>
+              <button class="quiet" onclick={redoSlot(slot.key)} aria-label="Redo last slot change">
+                <text>Redo</text>
+              </button>
+              <button class="quiet" onclick={resetSlot(slot.key)}>
+                <text>Reset</text>
+              </button>
+            </row>
+
+            <column class="nodes" aria-label={slot.name .. " placements"}>
+              {#for node in slot.nodes key={node.id}}
+                <row class="node">
+                  <column class="node-copy">
+                    <text class="node-title">{node.use}</text>
+                    <text class="node-id">Placement: {node.id}</text>
+                  </column>
+                  <spacer />
+                  <button class="quiet" onclick={selectNode(slot.key, node.id)} aria-label="Edit public properties">
+                    <text>Configure</text>
+                  </button>
+                  <button class="icon-button" onclick={moveNode(slot.key, node.id, -1)} aria-label="Move earlier">
+                    <text>←</text>
+                  </button>
+                  <button class="icon-button" onclick={moveNode(slot.key, node.id, 1)} aria-label="Move later">
+                    <text>→</text>
+                  </button>
+                  <button class="remove" onclick={removeNode(slot.key, node.id)} aria-label="Remove component">
+                    <text>Remove</text>
+                  </button>
+                </row>
+                <row class="move-targets" hidden={selected_key ~= slot.key .. "/" .. node.id}>
+                  <text class="palette-label">Move to</text>
+                  {#for target in slot_rows key={target.key}}
+                    <button
+                      class="quiet"
+                      hidden={target.contract ~= slot.contract or target.key == slot.key}
+                      onclick={moveNodeToSlot(slot.key, target.key, node.id)}
+                    >
+                      <text>{target.name}</text>
+                    </button>
+                  {/for}
+                </row>
+              {/for}
+            </column>
+
+            <column class="inspector" hidden={selected_slot_key ~= slot.key or #prop_rows == 0}>
+              <text class="palette-label">Public properties</text>
+              {#for prop in prop_rows key={prop.name}}
+                <row class="prop-row">
+                  <column class="node-copy">
+                    <text class="node-title">{prop.label}</text>
+                    <text class="node-id">{prop.name}</text>
+                  </column>
+                  <spacer />
+                  <button
+                    class="quiet"
+                    hidden={prop.type ~= "bool"}
+                    onclick={toggleProp(prop.name, prop.value)}
+                  >
+                    <text>{prop.value and "Enabled" or "Disabled"}</text>
+                  </button>
+                  <button
+                    class="quiet"
+                    hidden={#prop.options == 0}
+                    onclick={nextPropOption(prop.name, prop.value, prop.options)}
+                  >
+                    <text>{prop.display_value}</text>
+                  </button>
+                  <slider
+                    class="prop-slider"
+                    hidden={not prop.number}
+                    min={prop.minimum}
+                    max={prop.maximum}
+                    step={prop.step}
+                    value={prop.value}
+                    label={prop.label}
+                    onchange={setNumberProp(prop.name)}
+                  />
+                  <input
+                    class="prop-input"
+                    hidden={prop.type == "bool" or prop.number or #prop.options > 0}
+                    value={prop.display_value}
+                    label={prop.label}
+                    onchange={setTextProp(prop.name)}
+                  />
+                </row>
+              {/for}
+            </column>
+
+            <column class="palette">
+              <text class="palette-label">Add compatible component</text>
+              <row class="palette-items">
+                {#for entry in palette_rows key={entry.key}}
+                  <button
+                    class="palette-button"
+                    hidden={entry.contract ~= slot.contract}
+                    onclick={addNode(slot.key, entry.use)}
+                  >
+                    <text>{entry.use}</text>
+                  </button>
+                {/for}
+              </row>
+            </column>
+          </column>
+        {/for}
+      </column>
+    </scroll>
+
+    <text class="status" role="status">{status_text}</text>
+  </column>
+</template>
+
+<script lang="luau">
+local composition = require("mesh.composition")
+
+slot_rows = {}
+palette_rows = {}
+prop_rows = {}
+selected_key = ""
+selected_slot_key = ""
+selected_node_id = ""
+status_text = "Loading composition…"
+local pending_cross_slot = nil
+local history_by_slot = {}
+local redo_by_slot = {}
+
+local function copy_nodes(nodes)
+    local copy = {}
+    for index, node in ipairs(nodes or {}) do
+        local props = {}
+        for name, value in pairs(node.props or {}) do props[name] = value end
+        copy[index] = {
+            id = node.id,
+            use = node.use,
+            props = props,
+        }
+    end
+    return copy
+end
+
+local function slot_by_key(key)
+    for _, slot in ipairs(slot_rows) do
+        if slot.key == key then
+            return slot
+        end
+    end
+    return nil
+end
+
+local function palette_by_use(reference)
+    for _, entry in ipairs(palette_rows) do
+        if entry.use == reference then return entry end
+    end
+    return nil
+end
+
+local function selected_node()
+    local slot = slot_by_key(selected_slot_key)
+    if not slot then return nil, nil end
+    for _, node in ipairs(slot.nodes or {}) do
+        if node.id == selected_node_id then return slot, node end
+    end
+    return slot, nil
+end
+
+local function rebuild_props()
+    local _, node = selected_node()
+    local entry = node and palette_by_use(node.use) or nil
+    local properties = entry and entry.props_schema and entry.props_schema.properties or {}
+    local rows = {}
+    for name, schema in pairs(properties or {}) do
+        local value = node.props and node.props[name]
+        if value == nil then value = schema.default end
+        local options = schema.enum or {}
+        rows[#rows + 1] = {
+            name = name,
+            label = type(schema.label) == "string" and schema.label or name,
+            type = schema.type or "string",
+            value = value,
+            display_value = tostring(value or ""),
+            options = options,
+            number = schema.type == "number" or schema.type == "int",
+            minimum = schema.minimum or 0,
+            maximum = schema.maximum or 100,
+            step = schema.step or 1,
+        }
+    end
+    table.sort(rows, function(left, right) return left.name < right.name end)
+    prop_rows = rows
+end
+
+local function publish_slot(slot, nodes, record_history)
+    if not composition or not composition.profile_id or composition.profile_id == "" then
+        status_text = "No active profile can receive this edit."
+        return
+    end
+    if record_history ~= false then
+        history_by_slot[slot.key] = history_by_slot[slot.key] or {}
+        history_by_slot[slot.key][#history_by_slot[slot.key] + 1] = copy_nodes(slot.nodes)
+        redo_by_slot[slot.key] = {}
+    end
+    mesh.events.publish("mesh.composition.apply_node_slot", {
+        profile_id = composition.profile_id,
+        root_instance = slot.root_instance,
+        slot = slot.name,
+        nodes = nodes,
+        expected_generation = composition.generation,
+    })
+    status_text = "Applying " .. slot.name .. "…"
+end
+
+function undoSlot(slot_key)
+    local slot = slot_by_key(slot_key)
+    local history = history_by_slot[slot_key] or {}
+    if not slot or #history == 0 then
+        status_text = "Nothing to undo for this region."
+        return
+    end
+    redo_by_slot[slot_key] = redo_by_slot[slot_key] or {}
+    redo_by_slot[slot_key][#redo_by_slot[slot_key] + 1] = copy_nodes(slot.nodes)
+    local nodes = history[#history]
+    history[#history] = nil
+    publish_slot(slot, nodes, false)
+end
+
+function redoSlot(slot_key)
+    local slot = slot_by_key(slot_key)
+    local redo = redo_by_slot[slot_key] or {}
+    if not slot or #redo == 0 then
+        status_text = "Nothing to redo for this region."
+        return
+    end
+    history_by_slot[slot_key] = history_by_slot[slot_key] or {}
+    history_by_slot[slot_key][#history_by_slot[slot_key] + 1] = copy_nodes(slot.nodes)
+    local nodes = redo[#redo]
+    redo[#redo] = nil
+    publish_slot(slot, nodes, false)
+end
+
+function render(self)
+    if not composition then
+        status_text = "The mesh.composition service is unavailable."
+        slot_rows = {}
+        palette_rows = {}
+        return
+    end
+    local next_slots = {}
+    for index, slot in ipairs(composition.slots or {}) do
+        next_slots[index] = {
+            key = tostring(slot.root_instance) .. "/" .. tostring(slot.name),
+            root_instance = slot.root_instance,
+            name = slot.name,
+            contract = slot.contract,
+            nodes = copy_nodes(slot.nodes),
+        }
+    end
+    local next_palette = {}
+    for index, entry in ipairs(composition.palette or {}) do
+        next_palette[index] = {
+            key = tostring(entry.contract) .. "/" .. tostring(entry.use),
+            contract = entry.contract,
+            use = entry.use,
+            props_schema = entry.props_schema,
+        }
+    end
+    slot_rows = next_slots
+    palette_rows = next_palette
+    rebuild_props()
+    status_text = #next_slots == 0
+        and "No active component exposes customizable regions."
+        or "Changes are validated and applied atomically."
+    if pending_cross_slot then
+        local pending = pending_cross_slot
+        pending_cross_slot = nil
+        local target = slot_by_key(pending.target_key)
+        if target then publish_slot(target, pending.nodes) end
+    end
+end
+
+function selectNode(slot_key, node_id)
+    selected_slot_key = slot_key
+    selected_node_id = node_id
+    selected_key = slot_key .. "/" .. node_id
+    rebuild_props()
+end
+
+function moveNode(slot_key, node_id, delta)
+    local slot = slot_by_key(slot_key)
+    if not slot then return end
+    local nodes = copy_nodes(slot.nodes)
+    for index, node in ipairs(nodes) do
+        if node.id == node_id then
+            local target = math.max(1, math.min(#nodes, index + delta))
+            if target ~= index then
+                nodes[index], nodes[target] = nodes[target], nodes[index]
+                publish_slot(slot, nodes)
+            end
+            return
+        end
+    end
+end
+
+function moveNodeToSlot(source_key, target_key, node_id)
+    local source = slot_by_key(source_key)
+    local target = slot_by_key(target_key)
+    if not source or not target or source.contract ~= target.contract then return end
+    local moved = nil
+    local source_nodes = {}
+    for _, node in ipairs(source.nodes or {}) do
+        if node.id == node_id then moved = node else source_nodes[#source_nodes + 1] = node end
+    end
+    if not moved then return end
+    local target_nodes = copy_nodes(target.nodes)
+    local used = {}
+    for _, node in ipairs(target_nodes) do used[node.id] = true end
+    if used[moved.id] then
+        local base, suffix = moved.id, 2
+        while used[base .. "-" .. tostring(suffix)] do suffix = suffix + 1 end
+        moved.id = base .. "-" .. tostring(suffix)
+    end
+    target_nodes[#target_nodes + 1] = moved
+    -- The API replaces one whole slot per generation. Apply the source first,
+    -- then finish the target against the newly published generation.
+    pending_cross_slot = { target_key = target_key, nodes = target_nodes }
+    publish_slot(source, source_nodes)
+    selected_key = ""
+    selected_slot_key = ""
+    selected_node_id = ""
+end
+
+local function updateSelectedProp(name, value)
+    local slot, selected = selected_node()
+    if not slot or not selected then return end
+    local nodes = copy_nodes(slot.nodes)
+    for _, node in ipairs(nodes) do
+        if node.id == selected.id then
+            node.props[name] = value
+            publish_slot(slot, nodes)
+            return
+        end
+    end
+end
+
+function toggleProp(name, value)
+    updateSelectedProp(name, not value)
+end
+
+function nextPropOption(name, value, options)
+    if #options == 0 then return end
+    local next_index = 1
+    for index, option in ipairs(options) do
+        if option == value then next_index = (index % #options) + 1 end
+    end
+    updateSelectedProp(name, options[next_index])
+end
+
+function setNumberProp(name)
+    return function(value)
+        local number = tonumber(value)
+        if number ~= nil then updateSelectedProp(name, number) end
+    end
+end
+
+function setTextProp(name)
+    return function(value) updateSelectedProp(name, tostring(value or "")) end
+end
+
+function removeNode(slot_key, node_id)
+    local slot = slot_by_key(slot_key)
+    if not slot then return end
+    local nodes = {}
+    for _, node in ipairs(slot.nodes or {}) do
+        if node.id ~= node_id then
+            nodes[#nodes + 1] = {
+                id = node.id,
+                use = node.use,
+                props = node.props or {},
+            }
+        end
+    end
+    publish_slot(slot, nodes)
+end
+
+function addNode(slot_key, contribution)
+    local slot = slot_by_key(slot_key)
+    if not slot then return end
+    local nodes = copy_nodes(slot.nodes)
+    local base = string.gsub(contribution, "[^%w_-]", "-")
+    local id = base
+    local suffix = 2
+    local used = {}
+    for _, node in ipairs(nodes) do used[node.id] = true end
+    while used[id] do
+        id = base .. "-" .. tostring(suffix)
+        suffix = suffix + 1
+    end
+    nodes[#nodes + 1] = { id = id, use = contribution, props = {} }
+    publish_slot(slot, nodes)
+end
+
+function resetSlot(slot_key)
+    local slot = slot_by_key(slot_key)
+    if not slot or not composition then return end
+    history_by_slot[slot.key] = history_by_slot[slot.key] or {}
+    history_by_slot[slot.key][#history_by_slot[slot.key] + 1] = copy_nodes(slot.nodes)
+    redo_by_slot[slot.key] = {}
+    mesh.events.publish("mesh.composition.reset_node_slot", {
+        profile_id = composition.profile_id,
+        root_instance = slot.root_instance,
+        slot = slot.name,
+        expected_generation = composition.generation,
+    })
+    status_text = "Resetting " .. slot.name .. "…"
+end
+
+function closeEditor()
+    mesh.events.publish("shell.hide-surface", {
+        surface_id = "@mesh/composition-editor",
+    })
+end
+</script>
+
+<style>
+.editor {
+    width: 920px;
+    height: 680px;
+    padding: var(--spacing-lg);
+    gap: var(--spacing-md);
+    background: var(--color-surface);
+    color: var(--color-on-surface);
+}
+
+.header, .slot-heading, .node, .palette-items {
+    align-items: center;
+}
+
+.header-copy, .slot-list, .nodes, .palette, .inspector {
+    gap: var(--spacing-sm);
+}
+
+.title { font-size: 26px; font-weight: 700; }
+.eyebrow, .slot-contract, .node-id, .palette-label, .status {
+    color: var(--color-on-surface-variant);
+    font-size: 12px;
+}
+.subtitle { color: var(--color-on-surface-variant); }
+.workspace { flex-grow: 1; }
+.slot-card {
+    padding: var(--spacing-md);
+    gap: var(--spacing-md);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface-container);
+}
+.slot-title, .node-title { font-weight: 600; }
+.node {
+    min-height: 52px;
+    padding: var(--spacing-sm);
+    gap: var(--spacing-sm);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-container-high);
+}
+.palette-items { gap: var(--spacing-sm); flex-wrap: wrap; }
+.move-targets, .prop-row { align-items: center; gap: var(--spacing-sm); }
+.inspector {
+    padding: var(--spacing-sm);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-container-high);
+}
+.prop-slider, .prop-input { min-width: 220px; }
+.close, .quiet, .icon-button, .remove, .palette-button {
+    min-height: 36px;
+    padding-inline: var(--spacing-sm);
+    border-radius: var(--radius-md);
+    background: var(--color-secondary-container);
+    color: var(--color-on-secondary-container);
+}
+.icon-button { min-width: 36px; }
+.remove { background: var(--color-error-container); color: var(--color-on-error-container); }
+</style>

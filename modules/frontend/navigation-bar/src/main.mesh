@@ -7,46 +7,20 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-surface-b
 <template>
     <row class={props.blur_enabled and "nav-shell nav-shell-blur" or "nav-shell"}>
         <row class="status-cluster">
-            <WorkspaceList />
-            <WindowTitle />
+            <slot name="start" extension-point="mesh.navigation.item" mode="customizable" />
         </row>
 
-        <ClockButton />
+        <slot name="center" extension-point="mesh.navigation.item" mode="customizable" />
 
         <row ref="control-cluster" class="right-cluster">
-            <BrightnessButton />
-            <VolumeButton onMuteKeybind={onMuteShortcut} />
-            <ThemeButton />
-            <LanguageButton />
-            <BatteryButton />
-            <SettingsButton />
+            <slot name="end" extension-point="mesh.navigation.item" mode="customizable" />
         </row>
     </row>
 </template>
 
 <script lang="luau">
-local BatteryButton = require("./components/battery-button.mesh")
-local BrightnessButton = require("./components/brightness-button.mesh")
-local ClockButton = require("./components/clock-button.mesh")
-local LanguageButton = require("./components/language-button.mesh")
-local NowPlaying = require("./components/now-playing.mesh")
-local SettingsButton = require("./components/settings-button.mesh")
-local ThemeButton = require("./components/theme-button.mesh")
-local VolumeButton = require("./components/volume-button.mesh")
-local WindowTitle = require("./components/window-title.mesh")
-local WorkspaceList = require("./components/workspace-list.mesh")
-
-local audio = require("mesh.audio")
-
-function onMuteShortcut()
-    if audio and audio.available ~= false then
-        if type(audio.set_muted) == "function" then
-            audio.set_muted("default", not (audio.muted or false))
-        else
-            audio.toggle_mute()
-        end
-    end
-end
+-- Navigation items are public alternate-root contributions selected by the
+-- active composition. This root owns only the three author-declared regions.
 </script>
 
 <style>

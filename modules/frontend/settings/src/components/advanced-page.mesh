@@ -1,6 +1,14 @@
 <template>
     <column class="settings-page" hidden={hidden}>
         <column class="settings-section">
+            <text class="settings-section-title">Layout customization</text>
+            <text class="settings-section-copy">Arrange components inside regions exposed by shell modules.</text>
+            <button class="settings-secondary-button" onclick={openCompositionEditor}>
+                Open layout editor
+            </button>
+        </column>
+
+        <column class="settings-section">
             <text class="settings-section-title">{t('advanced.active_providers')}</text>
             <text class="settings-section-copy">{providers_count .. t(providers_summary) .. providers_notice_separator .. t(provider_notice)}</text>
             <list class="settings-list" label={t('advanced.active_backend_providers')} hidden={providers_hidden}>
@@ -160,6 +168,12 @@ hidden = false
 
 local debug_service = require("mesh.debug")
 local t = import("mesh.i18n", "t")
+
+function openCompositionEditor()
+    mesh.events.publish("shell.show-surface", {
+        surface_id = "@mesh/composition-editor",
+    })
+end
 
 providers_count = ""
 providers_summary = "advanced.waiting_graph"

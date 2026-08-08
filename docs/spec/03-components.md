@@ -62,6 +62,24 @@ CSS re-consumes it next frame — one shared named value, no geometry fight.
 Imperative `refs` geometry writes are the documented last-writer-wins escape
 hatch, not the default path.
 
+### 2.1 Author-declared customizable slots
+
+**Status: shipped.** A component may expose selected regions to profile-level
+visual composition with a named slot whose mode is customizable and whose
+extension-point names a versioned UI contract. Slot identity and mode are
+static, and the matching host manifest record declares compatible defaults.
+
+The persisted node is a component placement, not a serialized WidgetNode and
+not another UI language. Version 1 stores a stable placement id, a public
+extension-point contribution reference, literal exposed prop values, and list
+order. Elements, arbitrary nesting, Luau expressions and handlers, bindings,
+styles, and surface policy remain source-level authoring.
+
+Coders change fixed structure and precise behavior in component source. Visual
+editors arrange only compatible public components inside the regions the author
+chose to expose. An editor is a replaceable frontend module consuming the
+generic mesh.composition interface.
+
 ## 3. The `<props>` block
 
 **Status: shipped** for `.mesh` components. Backend and interface declarations

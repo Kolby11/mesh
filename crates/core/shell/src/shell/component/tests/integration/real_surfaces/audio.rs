@@ -242,6 +242,7 @@ end
         ]),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
+        node_slot_placements: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new(
         root_compiled,
@@ -355,7 +356,7 @@ fn shipped_navigation_volume_button_click_toggles_mute() {
             "navigation diagnostics should not contain {unexpected}: {health}"
         );
     }
-    let handler = "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle";
+    let handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-1::onAudioToggle";
     let tree = component
         .last_tree
         .as_ref()
@@ -424,7 +425,7 @@ fn shipped_navigation_volume_hover_opens_embedded_audio_popover() {
         .expect("rendered navigation bar");
     let volume_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-1::onAudioToggle",
     )
     .expect("volume button");
     let bounds = find_node_bounds_by_key(
@@ -536,7 +537,7 @@ fn shipped_navigation_volume_scroll_reaches_audio_service_on_first_input() {
         .expect("rendered navigation bar");
     let button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-1::onAudioToggle",
     )
     .expect("volume button");
     let button_x = button.layout.x + button.layout.width / 2.0;
@@ -602,7 +603,7 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
         .expect("rendered navigation bar");
     let button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-1::onAudioToggle",
     )
     .expect("volume button");
     let button_key = button.mesh_key().expect("button mesh key").to_owned();
@@ -653,7 +654,7 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     assert_eq!(inherited_handler.handler(), "onAudioToggle");
     assert_eq!(
         inherited_handler.instance_key(),
-        Some("@mesh/navigation-bar/local:VolumeButton"),
+        Some("@mesh/navigation-bar/slot:end/default-1"),
         "icon click should bubble to the VolumeButton toggle handler"
     );
 

@@ -73,7 +73,7 @@ fn shipped_navigation_icon_rasterizes_pixels_on_real_surface() {
 
     let button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-1::onAudioToggle",
     )
     .expect("volume button");
     let icon = first_node_by_tag(button, "icon").expect("volume icon node");

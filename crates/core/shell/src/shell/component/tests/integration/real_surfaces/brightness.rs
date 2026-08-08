@@ -119,7 +119,7 @@ fn shipped_navigation_brightness_uses_configured_scroll_sensitivity() {
     component.settings_json = serde_json::json!({
         "props": {
             "instances": {
-                "@mesh/navigation-bar/local:BrightnessButton": {
+                "@mesh/navigation-bar/slot:end/default-0": {
                     "scroll_sensitivity": 12
                 }
             }
@@ -204,7 +204,7 @@ fn shipped_navigation_brightness_falls_back_for_invalid_scroll_sensitivity() {
     component.settings_json = serde_json::json!({
         "props": {
             "instances": {
-                "@mesh/navigation-bar/local:BrightnessButton": {
+                "@mesh/navigation-bar/slot:end/default-0": {
                     "scroll_sensitivity": 0
                 }
             }

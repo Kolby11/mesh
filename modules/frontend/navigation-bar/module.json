@@ -136,6 +136,17 @@
         }
       },
       "extensionPoints": {
+        "mesh.navigation.item": [
+          { "id": "workspaces", "entry": "src/components/workspace-list.mesh" },
+          { "id": "window-title", "entry": "src/components/window-title.mesh" },
+          { "id": "clock", "entry": "src/components/clock-button.mesh" },
+          { "id": "brightness", "entry": "src/components/brightness-button.mesh" },
+          { "id": "volume", "entry": "src/components/volume-button.mesh" },
+          { "id": "theme", "entry": "src/components/theme-button.mesh" },
+          { "id": "language", "entry": "src/components/language-button.mesh" },
+          { "id": "battery", "entry": "src/components/battery-button.mesh" },
+          { "id": "settings", "entry": "src/components/settings-button.mesh" }
+        ],
         "mesh.settings.page": [
           {
             "id": "navigation-bar",
@@ -147,6 +158,34 @@
             }
           }
         ]
+      }
+    },
+    "hosts": {
+      "mesh.navigation.item": {
+        "version": ">=1.0",
+        "layout": "row",
+        "max": 6,
+        "slots": {
+          "start": {
+            "defaults": [
+              "@mesh/navigation-bar:workspaces",
+              "@mesh/navigation-bar:window-title"
+            ]
+          },
+          "center": {
+            "defaults": ["@mesh/navigation-bar:clock"]
+          },
+          "end": {
+            "defaults": [
+              "@mesh/navigation-bar:brightness",
+              "@mesh/navigation-bar:volume",
+              "@mesh/navigation-bar:theme",
+              "@mesh/navigation-bar:language",
+              "@mesh/navigation-bar:battery",
+              "@mesh/navigation-bar:settings"
+            ]
+          }
+        }
       }
     },
     "accessibility": {

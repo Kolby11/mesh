@@ -315,6 +315,8 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         host: &mesh_core_module::Manifest,
         host_instance_key: &str,
         extension_point: Option<&str>,
+        slot_name: Option<&str>,
+        customizable: bool,
         container_width: f32,
         container_height: f32,
     ) -> Vec<WidgetNode> {
@@ -330,8 +332,85 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         let contributions = self
             .frontend_catalog
             .extension_point_contributions_for(&host.package.id, extension_point);
-        let mut nodes = Vec::with_capacity(contributions.len());
-        for contribution in contributions {
+        let selected = if customizable {
+            let Some(slot_name) = slot_name else {
+                return vec![self.build_error_widget("customizable slot has no stable name")];
+            };
+            let requested = self
+                .frontend_catalog
+                .node_slot_placement(host_instance_key, slot_name)
+                .map(|slot| {
+                    slot.nodes
+                        .iter()
+                        .map(|node| {
+                            (
+                                node.id.clone(),
+                                node.contribution.clone(),
+                                node.props.clone(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_else(|| {
+                    host.hosted_extension_points
+                        .get(extension_point)
+                        .and_then(|hosted| hosted.slots.get(slot_name))
+                        .map(|slot| {
+                            slot.defaults
+                                .iter()
+                                .enumerate()
+                                .map(|(index, reference)| {
+                                    (
+                                        format!("default-{index}"),
+                                        reference.clone(),
+                                        serde_json::Map::new(),
+                                    )
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                });
+            let mut selected = Vec::with_capacity(requested.len());
+            for (placement_id, reference, prop_overrides) in requested {
+                let Some((source_module_id, contribution_id)) = reference.rsplit_once(':') else {
+                    selected.push(Err(format!(
+                        "slot '{slot_name}' has invalid contribution reference '{reference}'"
+                    )));
+                    continue;
+                };
+                let Some(contribution) = contributions.iter().find(|entry| {
+                    entry.source_module_id == source_module_id
+                        && entry.contribution_id == contribution_id
+                }) else {
+                    selected.push(Err(format!(
+                        "slot '{slot_name}' cannot resolve contribution '{reference}'"
+                    )));
+                    continue;
+                };
+                let mut contribution = contribution.clone();
+                contribution.props.extend(prop_overrides);
+                contribution.props_fingerprint =
+                    super::memo::slot_props_fingerprint(&contribution.props);
+                selected.push(Ok((placement_id, contribution)));
+            }
+            selected
+        } else {
+            contributions
+                .iter()
+                .cloned()
+                .map(|contribution| Ok((contribution.contribution_id.clone(), contribution)))
+                .collect()
+        };
+
+        let mut nodes = Vec::with_capacity(selected.len());
+        for selected in selected {
+            let (placement_id, contribution) = match selected {
+                Ok(selected) => selected,
+                Err(message) => {
+                    nodes.push(self.build_error_widget(message));
+                    continue;
+                }
+            };
             let Some(compiled) = self.frontend_catalog.contribution_entry(
                 &contribution.source_module_id,
                 &contribution.contribution_id,
@@ -345,8 +424,8 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
 
             let instance_key = self.instance_keys.borrow_mut().intern_slot(
                 host_instance_key,
-                extension_point,
-                &contribution.contribution_id,
+                slot_name.unwrap_or(extension_point),
+                &placement_id,
             );
             let mut node = if let Some(node) = self.lookup_component_memo(
                 &instance_key,

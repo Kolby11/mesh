@@ -51,6 +51,7 @@ fn host(module_id: &str, version_req: Option<&str>) -> LoadedModuleManifest {
             version: version_req.map(str::to_string),
             layout: Some("column".into()),
             max: None,
+            slots: Default::default(),
         },
     )]);
     module

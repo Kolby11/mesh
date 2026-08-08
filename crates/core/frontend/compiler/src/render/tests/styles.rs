@@ -58,7 +58,9 @@ fn component_handler_calls_preserve_authored_prop_identity() {
             &self,
             _host: &Manifest,
             _host_instance_key: &str,
+            _extension_point: Option<&str>,
             _slot_name: Option<&str>,
+            _customizable: bool,
             _container_width: f32,
             _container_height: f32,
         ) -> Vec<WidgetNode> {

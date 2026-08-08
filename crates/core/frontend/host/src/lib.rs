@@ -367,6 +367,21 @@ pub enum CoreRequest {
         instance_id: Option<String>,
         prop: String,
     },
+    /// Atomically replace one author-declared customizable slot list.
+    ApplyNodeSlot {
+        profile_id: String,
+        root_instance: String,
+        slot: String,
+        nodes: serde_json::Value,
+        expected_generation: String,
+    },
+    /// Remove the sparse override so composition/author defaults apply.
+    ResetNodeSlot {
+        profile_id: String,
+        root_instance: String,
+        slot: String,
+        expected_generation: String,
+    },
     /// Transactional: candidates are prepared before the active pointer and
     /// visible roots change.
     SwitchProfile {

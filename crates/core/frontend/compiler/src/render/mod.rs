@@ -318,6 +318,29 @@ pub(crate) fn build_widget_nodes(
                 }
             })
             .unwrap_or_default(),
+        TemplateNode::Slot(slot) if slot.customizable => {
+            let Some(composition) = composition else {
+                return Vec::new();
+            };
+            let mut children = composition.render_slot(
+                manifest,
+                instance_key,
+                slot.extension_point.as_deref(),
+                slot.name.as_deref(),
+                true,
+                container_context.container_width,
+                container_context.container_height,
+            );
+            if let Some(max) = slot
+                .extension_point
+                .as_ref()
+                .and_then(|point| manifest.hosted_extension_points.get(point))
+                .and_then(|hosted| hosted.max)
+            {
+                children.truncate(max as usize);
+            }
+            children
+        }
         _ => vec![build_widget_node(
             node,
             manifest,
@@ -611,6 +634,8 @@ fn build_widget_node_inner(
                     manifest,
                     instance_key,
                     slot.extension_point.as_deref(),
+                    slot.name.as_deref(),
+                    slot.customizable,
                     child_context.container_width,
                     child_context.container_height,
                 );
@@ -829,7 +854,15 @@ fn build_element_node(
         .iter()
         .enumerate()
         .flat_map(|(index, child)| {
-            if matches!(child, TemplateNode::If(_) | TemplateNode::For(_)) {
+            if matches!(
+                child,
+                TemplateNode::If(_)
+                    | TemplateNode::For(_)
+                    | TemplateNode::Slot(mesh_core_component::template::SlotNode {
+                        customizable: true,
+                        ..
+                    })
+            ) {
                 return build_widget_nodes(
                     child,
                     manifest,

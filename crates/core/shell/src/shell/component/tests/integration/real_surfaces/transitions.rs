@@ -316,7 +316,7 @@ fn shipped_language_popover_cycles_three_bubble_options_on_scroll() {
 
     component
         .call_namespaced_handler(
-            "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageEnter",
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageEnter",
             &[],
         )
         .unwrap();
@@ -484,7 +484,7 @@ fn shipped_language_popover_rotates_on_two_finger_trackpad_scroll() {
         .unwrap();
     component
         .call_namespaced_handler(
-            "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageEnter",
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageEnter",
             &[],
         )
         .unwrap();

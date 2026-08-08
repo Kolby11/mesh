@@ -1,4 +1,5 @@
 use super::common::*;
+use super::types::TargetRef;
 use super::*;
 
 #[test]
@@ -145,6 +146,65 @@ fn wayland_parent_input_uses_content_size_not_tooltip_inflated_surface_size() {
         state.lock().unwrap().sizes,
         vec![(100, 50)],
         "parent input must rebuild/hit-test against the real content size, not the tooltip-padded buffer"
+    );
+}
+
+#[test]
+fn wayland_parent_click_does_not_cache_padded_size_for_spanning_surface() {
+    let state = Arc::new(Mutex::new(InputSizeRecordingState::default()));
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(InputSizeRecordingComponent::new(
+        Arc::clone(&state),
+        (1920, 56),
+    )));
+    let surface = shell
+        .surfaces
+        .get_mut("@test/input-size")
+        .expect("registered test surface");
+    // A top/bottom spanning layer surface keeps width 0 in the shell record;
+    // the paint buffer is wider/taller because it includes tooltip reserve.
+    surface.width = 0;
+    surface.height = 56;
+    shell.components[0].parent.paint_buffer = Some(mesh_core_render::PixelBuffer::new(1920, 256));
+
+    shell.presentation_engine.testing_push_event(
+        mesh_core_presentation::WindowEvent::PointerButton {
+            surface_id: "@test/input-size".into(),
+            x: 1840.0,
+            y: 28.0,
+            pressed: true,
+        },
+    );
+    shell.dispatch_wayland().unwrap();
+
+    assert_eq!(state.lock().unwrap().sizes, vec![(1920, 56)]);
+    assert_eq!(
+        shell.components[0].parent.known_surface_size,
+        Some((1920, 56)),
+        "parent input must preserve content geometry instead of caching the padded spanning buffer"
+    );
+}
+
+#[test]
+fn padded_parent_surface_size_is_converted_to_content_geometry() {
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(InputSizeRecordingComponent::new(
+        Arc::new(Mutex::new(InputSizeRecordingState::default())),
+        (1920, 56),
+    )));
+    shell.components[0].parent.last_surface_config = Some(mesh_core_presentation::SurfaceConfig {
+        width: 0,
+        height: 256,
+        padding: mesh_core_presentation::SurfacePadding::trailing(0, 200),
+        ..Default::default()
+    });
+
+    assert_eq!(
+        shell.content_size_for_target(0, TargetRef::Parent, (1920, 256)),
+        (1920, 56),
+        "component geometry must exclude the tooltip reserve"
     );
 }
 

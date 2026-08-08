@@ -759,6 +759,15 @@ impl FrontendSurfaceComponent {
         // `refs.<name>` references (focus/blur), routed through the real focus path.
         let mut element_requests = self.apply_element_actions()?;
         events.append(&mut element_requests);
+        if events
+            .iter()
+            .any(|request| matches!(request, CoreRequest::ShowSurface { .. }))
+        {
+            // A newly shown top-level surface receives compositor focus. Keep
+            // the source surface's retained focus model in sync even when the
+            // request originated in an isolated slot contribution runtime.
+            self.clear_focus_for_transfer();
+        }
 
         Ok(events)
     }

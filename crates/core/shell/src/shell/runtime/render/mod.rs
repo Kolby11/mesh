@@ -116,13 +116,14 @@ impl Shell {
                     Some((surface.width.max(1), surface.height.max(1)))
                 }
             };
-            if let Some((width, height)) = surface_size {
-                let resolved_size = (width, height);
+            if let Some(surface_size) = surface_size {
+                let resolved_size =
+                    self.content_size_for_target(index, TargetRef::Parent, surface_size);
                 if self.components[index].parent.known_surface_size != Some(resolved_size) {
                     self.components[index].parent.known_surface_size = Some(resolved_size);
                     self.components[index]
                         .component
-                        .surface_size_changed(width, height);
+                        .surface_size_changed(resolved_size.0, resolved_size.1);
                 }
             }
             let profiling_enabled = self.profiling_enabled();
@@ -960,8 +961,9 @@ impl Shell {
         surface_id: &str,
     ) -> Result<Option<(u32, u32)>, ShellRunError> {
         if let Some(size) = self.presentation_engine.surface_size_if_known(surface_id) {
-            self.components[index].parent.known_surface_size = Some(size);
-            return Ok(Some(size));
+            let content_size = self.content_size_for_target(index, TargetRef::Parent, size);
+            self.components[index].parent.known_surface_size = Some(content_size);
+            return Ok(Some(content_size));
         }
         if let Some(size) = self.components[index].parent.known_surface_size {
             return Ok(Some(size));

@@ -1,5 +1,29 @@
 # MESH Performance Log
 
+## 2026-08-08 — skip full style restyle on paint-only scroll frames
+
+area: retained component rendering, Appearance scrolling
+
+Paint-only invalidations now reuse the existing computed styles and retained
+layout. Scroll ticks still update runtime scroll metrics and run the retained
+display-list damage/paint path, while script, state, style, layout, and text
+invalidations keep their existing restyle behavior. This removes a full style
+resolver walk from every scroll frame in large settings trees.
+
+**Measured.** Release under `nix develop` (rustc/cargo 1.94.0), three repeated
+samples of the existing `paint_only_frame_speedup` workload: a 2,050-node
+retained tree with 150 paint-only frames per sample, with optimized and legacy
+versions measured in separate controlled batches. The legacy scoped path took
+353.298–364.946ms; the paint-only style-reuse path took 236.227–245.235ms
+(1.44–1.55x faster from the observed ranges). The gate passed all three
+optimized samples. The Appearance regression also uses a 240-icon-theme plus
+240-font-family catalog and verifies the bounded 48-row tree remains scrollable
+and paints after a retained scroll update.
+
+**Verified.** Focused Appearance integration test, bounded Appearance resource
+list regression, release retained paint benchmark, `cargo fmt --all -- --check`,
+and `git diff --check` passed.
+
 ## 2026-08-08 — sparse retained-layout dirty-node handoff
 
 area: retained Taffy layout synchronization

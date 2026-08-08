@@ -58,7 +58,7 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
     );
     let volume_button = first_node_with_click_handler(
         navigation_tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-1::onAudioToggle",
     )
     .expect("volume button");
     assert!(

@@ -35,6 +35,7 @@ fn memo_surface(parent_src: &str, locals: &[(&str, &str)]) -> FrontendSurfaceCom
         )]),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
+        node_slot_placements: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,
@@ -520,6 +521,7 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
                 )
             })
             .collect(),
+        node_slot_placements: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new(
         parent_compiled,
@@ -882,6 +884,7 @@ import MenuPopover from "@mesh/menu-popover"
         ]),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
+        node_slot_placements: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new(
         parent_compiled,

@@ -2,9 +2,11 @@ use super::backend::{BackendRuntimeStatus, backend_launch_candidates_from_graph}
 use super::component::{FrontendCatalog, FrontendCatalogHandle, FrontendSurfaceComponent};
 use super::*;
 use mesh_core_module::package::{
-    InstalledModuleGraph, ProfilePaths, load_installed_module_graph_for_profile,
+    ComponentPlacement, InstalledModuleGraph, NodeSlotOverride, ProfilePaths,
+    load_installed_module_graph_for_profile,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
 
 pub(super) struct PreparedProfileFrontend {
     component: FrontendSurfaceComponent,
@@ -30,7 +32,7 @@ mod tests {
         .unwrap();
         let profile = ShellProfile::from_json_str(
             r#"{
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "roots": {},
                 "settings": {
                     "shell": { "theme": { "active": "mesh-default-dark" } },
@@ -103,7 +105,7 @@ mod tests {
         .unwrap();
         let profile = ShellProfile::from_json_str(
             r#"{
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "roots": {
                     "@test/panel#bottom": {
                         "module": "@test/panel",
@@ -139,6 +141,183 @@ pub(super) struct PendingProfileSwitch {
 }
 
 impl Shell {
+    pub(in crate::shell) fn apply_node_slot_edit(
+        &mut self,
+        profile_id: &str,
+        root_instance: &str,
+        slot: &str,
+        nodes: Option<serde_json::Value>,
+        expected_generation: &str,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        if self.pending_profile_switch.is_some() {
+            return Err(ShellRunError::Package(
+                "node edit rejected while a profile switch is pending".into(),
+            ));
+        }
+        let graph_path = self.installed_module_graph_path();
+        let paths = ProfilePaths::from_root_graph(&graph_path)?;
+        let mut profile = paths.load(profile_id)?;
+        let generation = profile_generation(&profile)?;
+        if generation != expected_generation {
+            return Err(ShellRunError::Package(format!(
+                "node_edit_generation_conflict: expected {expected_generation}, current {generation}"
+            )));
+        }
+
+        match nodes {
+            Some(nodes) => {
+                let nodes: Vec<ComponentPlacement> =
+                    serde_json::from_value(nodes).map_err(|error| {
+                        ShellRunError::Package(format!("invalid_node_props: {error}"))
+                    })?;
+                profile
+                    .node_slots
+                    .entry(root_instance.to_string())
+                    .or_default()
+                    .insert(slot.to_string(), NodeSlotOverride { nodes });
+            }
+            None => {
+                if let Some(slots) = profile.node_slots.get_mut(root_instance) {
+                    slots.remove(slot);
+                    if slots.is_empty() {
+                        profile.node_slots.remove(root_instance);
+                    }
+                }
+            }
+        }
+        profile.validate()?;
+        let candidate = load_installed_module_graph_for_profile(&graph_path, &profile)?;
+        let previous_catalog = self.frontend_catalog.snapshot().catalog;
+        FrontendCatalog::from_modules_reusing(
+            &self.modules,
+            Some(&candidate),
+            Some(&previous_catalog),
+        )?;
+
+        paths.save(profile_id, &profile)?;
+        if self.active_profile_id.as_deref() == Some(profile_id) {
+            self.installed_module_graph = None;
+            return Ok(self.apply_switch_profile(profile_id));
+        }
+        Ok(VecDeque::new())
+    }
+
+    pub(in crate::shell) fn sync_composition_service_state(
+        &mut self,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let Some(profile_id) = self.active_profile_id.clone() else {
+            return self.broadcast_service_event(ServiceEvent::Updated {
+                service: "mesh.composition".into(),
+                source_module: "@mesh/shell".into(),
+                payload: serde_json::json!({
+                    "profile_id": "",
+                    "generation": "",
+                    "roots": [],
+                    "slots": [],
+                    "palette": [],
+                }),
+            });
+        };
+        let paths = ProfilePaths::from_root_graph(&self.installed_module_graph_path())?;
+        let profile_delta = paths.load(&profile_id)?;
+        let generation = profile_generation(&profile_delta)?;
+        let graph = self.load_installed_module_graph_cached()?.clone();
+        let manifests = graph
+            .modules()
+            .into_iter()
+            .map(|module| &module.manifest)
+            .collect::<Vec<_>>();
+        let profile =
+            mesh_core_module::package::resolve_composition(&profile_delta, manifests)?.to_profile();
+        let catalog = self.frontend_catalog.snapshot().catalog;
+        let mut roots = Vec::new();
+        let mut slots = Vec::new();
+        let mut palette = Vec::new();
+
+        for (root_instance, root) in &profile.roots {
+            roots.push(serde_json::json!({
+                "instance": root_instance,
+                "module": root.module,
+                "active": root.active,
+            }));
+            let Some(host) = catalog.modules.get(&root.module) else {
+                continue;
+            };
+            for descriptor in customizable_slots(&host.compiled.component) {
+                let Some(point) = descriptor.extension_point.as_deref() else {
+                    continue;
+                };
+                let slot_name = descriptor.name.as_deref().unwrap_or_default();
+                let hosted = host.compiled.manifest.hosted_extension_points.get(point);
+                let defaults = hosted
+                    .and_then(|hosted| hosted.slots.get(slot_name))
+                    .map(|slot| slot.defaults.clone())
+                    .unwrap_or_default();
+                let effective = catalog
+                    .node_slot_placement(root_instance, slot_name)
+                    .map(|slot| serde_json::to_value(&slot.nodes))
+                    .transpose()
+                    .map_err(|error| ShellRunError::Package(error.to_string()))?
+                    .unwrap_or_else(|| {
+                        serde_json::Value::Array(
+                            defaults
+                                .iter()
+                                .enumerate()
+                                .map(|(index, reference)| {
+                                    serde_json::json!({
+                                        "id": format!("default-{index}"),
+                                        "use": reference,
+                                        "props": {},
+                                    })
+                                })
+                                .collect(),
+                        )
+                    });
+                slots.push(serde_json::json!({
+                    "root_instance": root_instance,
+                    "name": slot_name,
+                    "contract": point,
+                    "layout": hosted.and_then(|hosted| hosted.layout.clone()).unwrap_or_else(|| "row".into()),
+                    "max": hosted.and_then(|hosted| hosted.max),
+                    "defaults": defaults,
+                    "nodes": effective,
+                    "overridden": catalog.node_slot_placement(root_instance, slot_name).is_some(),
+                }));
+                for contribution in catalog.extension_point_contributions_for(&root.module, point) {
+                    let compiled = catalog
+                        .contribution_entry(
+                            &contribution.source_module_id,
+                            &contribution.contribution_id,
+                        )
+                        .expect("resolved contribution is compiled");
+                    palette.push(serde_json::json!({
+                        "contract": point,
+                        "use": format!("{}:{}", contribution.source_module_id, contribution.contribution_id),
+                        "module": contribution.source_module_id,
+                        "id": contribution.contribution_id,
+                        "props_schema": mesh_core_component::props_settings_schema(
+                            compiled.component.props.as_ref()
+                        ),
+                    }));
+                }
+            }
+        }
+        palette.sort_by(|left, right| left["use"].as_str().cmp(&right["use"].as_str()));
+        palette.dedup_by(|left, right| left["use"] == right["use"]);
+
+        self.broadcast_service_event(ServiceEvent::Updated {
+            service: "mesh.composition".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({
+                "profile_id": profile_id,
+                "generation": generation,
+                "roots": roots,
+                "slots": slots,
+                "palette": palette,
+            }),
+        })
+    }
+
     pub(in crate::shell) fn apply_set_module_prop(
         &mut self,
         module_id: &str,
@@ -645,6 +824,9 @@ impl Shell {
             .expect("candidate graph was installed")
             .clone();
         self.register_interfaces_from_graph(&active_graph);
+        if let Ok(next) = self.sync_composition_service_state() {
+            requests.extend(next);
+        }
         self.sync_frontend_catalog_components();
         self.components_want_render = true;
         tracing::info!(
@@ -709,6 +891,46 @@ impl Shell {
             format!("profile {profile_id}: {message}"),
         );
     }
+}
+
+pub(super) fn profile_generation(
+    profile: &mesh_core_module::package::ShellProfile,
+) -> Result<String, ShellRunError> {
+    let bytes = serde_json::to_vec(profile).map_err(|error| {
+        ShellRunError::Package(format!("profile serialization failed: {error}"))
+    })?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    Ok(format!("{:016x}", hasher.finish()))
+}
+
+fn customizable_slots(
+    component: &mesh_core_component::ComponentFile,
+) -> Vec<&mesh_core_component::template::SlotNode> {
+    fn visit<'a>(
+        nodes: &'a [mesh_core_component::template::TemplateNode],
+        out: &mut Vec<&'a mesh_core_component::template::SlotNode>,
+    ) {
+        use mesh_core_component::template::TemplateNode;
+        for node in nodes {
+            match node {
+                TemplateNode::Slot(slot) if slot.customizable => out.push(slot),
+                TemplateNode::Element(node) => visit(&node.children, out),
+                TemplateNode::Component(node) => visit(&node.children, out),
+                TemplateNode::If(node) => {
+                    visit(&node.then_children, out);
+                    visit(&node.else_children, out);
+                }
+                TemplateNode::For(node) => visit(&node.children, out),
+                _ => {}
+            }
+        }
+    }
+    let mut slots = Vec::new();
+    if let Some(template) = &component.template {
+        visit(&template.root, &mut slots);
+    }
+    slots
 }
 
 fn update_module_prop_override(

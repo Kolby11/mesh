@@ -477,6 +477,17 @@ surface — a trust decision, never an inference:
 <slot extension-point="mesh.settings.page" />
 ```
 
+Hosts may also expose a contract as named customizable slots. These slots use
+explicit composition/profile placement instead of automatically rendering every
+contribution. The host record contains a slots map whose keys are stable local
+names and whose defaults are stable source-module-id:contribution-id
+references. Markup addresses the same record with a static name,
+extension-point, and customizable mode.
+
+A customizable slot name is unique in its component entry and must have a
+matching host record. Existing slots remain automatic unless explicitly marked
+customizable.
+
 A **contributor** names the point, never the host:
 
 ```json
@@ -680,7 +691,7 @@ A profile is an **instance of a composition plus the user's deltas**:
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "from": { "module": "@alice/desk", "version": "2.1.0" },
   "roots":    { "@mesh/navigation-bar#top": { "active": false } },
   "settings": { "shell": { "i18n": { "locale": "sk-SK" } } }
@@ -736,6 +747,18 @@ frontend directly creates or re-enables its `#default` instance. Component,
 interface, and library modules are availability/dependency nodes rather than
 independently enabled units.
 
+Schema 3 adds sparse nodeSlots, keyed by root instance and then by the
+component-local slot name. Each record holds an ordered nodes list; every node
+has a stable id, a use reference in source-module-id:contribution-id form, and
+literal public prop overrides.
+
+Each list replaces the less-specific list wholesale. An explicit empty list
+empties the slot, while an absent key inherits composition or author defaults.
+Placement ids preserve component VM and storage identity across reorder. The
+contribution must satisfy the slot contract, and props validate against its
+exposed props. Selected modules join the activation closure and gain no
+capabilities from their placement.
+
 A profile is a declarative starting point for one shell composition. It lists
 root component instances and their surface placement, explicit provider choices
 where several compatible providers exist, resource selections, root background
@@ -761,16 +784,25 @@ the next start. `profile set` and `profile unset` edit sparse profile settings.
 
 **Status: shipped.**
 
-The shell is the provider for four interfaces. They are declared, resolved, and
+The shell is the provider for five interfaces. They are declared, resolved, and
 capability-checked exactly like a backend module's, and they are how a module
 changes composition or configuration:
 
 | Interface | Methods | Capability |
 | --- | --- | --- |
+| mesh.composition | apply_node_slot, reset_node_slot | service.composition.control |
 | `mesh.packages` | `install`, `uninstall`, `set_module_enabled`, `set_provider`, `switch_profile` | `service.packages.control` |
 | `mesh.settings` | `set_prop`, `unset_prop` | `service.settings.control` |
 | `mesh.theme` | `set_theme`, `set_icon_theme`, `set_font_family` | `service.theme.control` |
 | `mesh.locale` | — (state only) | — |
+
+The fifth core interface, mesh.composition, publishes the active profile
+generation, roots, named slots, effective/default placements, and compatible
+contribution palette. Its apply_node_slot and reset_node_slot methods require
+service.composition.control. Writes replace or reset one complete ordered list
+and include the observed generation; stale writes fail with
+node_edit_generation_conflict. It exposes no profile paths or editor-specific
+canvas model, so a visual editor remains an ordinary frontend module.
 
 The capability is the whole gate. **No module id is consulted**, so a
 third-party settings frontend that declares `service.packages.control` has the

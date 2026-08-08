@@ -874,7 +874,7 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         .expect("rendered navigation tree");
     let theme_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeToggle",
     )
     .expect("rendered theme button");
     let button_sample_x = (theme_button.layout.x + 6.0).round() as u32;

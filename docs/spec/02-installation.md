@@ -153,7 +153,7 @@ without staging anything. It is the primary review surface.
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "generation": 7,
   "composition": { "module": "@alice/desk", "version": "2.1.0" },
   "modules": {

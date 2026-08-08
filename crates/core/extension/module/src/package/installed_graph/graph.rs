@@ -1,7 +1,7 @@
 use super::super::{
     InterfaceRelationship, ModuleKind, ModuleManifest, ModuleManifestDiagnostic,
-    ModuleManifestError, ResolutionOutcome, RootModuleGraphManifest, SlotOverride,
-    apply_slot_override, parse_module_entrypoint, resolve_closure,
+    ModuleManifestError, NodeSlotOverride, ResolutionOutcome, RootModuleGraphManifest,
+    SlotOverride, apply_slot_override, parse_module_entrypoint, resolve_closure,
 };
 use super::*;
 use crate::manifest;
@@ -39,6 +39,9 @@ pub struct InstalledModuleGraph {
     /// Host↔contribution matching for every declared extension point, keyed by
     /// `(host module id, point contract name)`.
     extension_points: HashMap<(String, String), Vec<ResolvedExtensionPointContribution>>,
+    /// Effective explicit placements for named customizable slots.
+    node_slots:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, NodeSlotOverride>>,
     layout_entrypoint: Option<ResolvedLayoutEntrypoint>,
 }
 
@@ -48,6 +51,8 @@ pub struct InstalledModuleGraph {
 #[derive(Debug, Clone, Default)]
 pub struct CompositionContext {
     pub slots: std::collections::BTreeMap<String, SlotOverride>,
+    pub node_slots:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, NodeSlotOverride>>,
     pub orphaned_overrides: Vec<String>,
 }
 
@@ -448,6 +453,7 @@ impl InstalledModuleGraph {
             contributions,
             resolution,
             extension_points,
+            node_slots: composition.node_slots,
             layout_entrypoint,
         })
     }
@@ -668,6 +674,13 @@ impl InstalledModuleGraph {
         &self,
     ) -> &HashMap<(String, String), Vec<ResolvedExtensionPointContribution>> {
         &self.extension_points
+    }
+
+    pub fn node_slot_overrides(
+        &self,
+    ) -> &std::collections::BTreeMap<String, std::collections::BTreeMap<String, NodeSlotOverride>>
+    {
+        &self.node_slots
     }
 
     /// Typed contracts parsed from declared interface contract JSON, keyed by

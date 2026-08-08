@@ -30,6 +30,7 @@ fn bind_live_surface(parent_src: &str, child_src: &str) -> FrontendSurfaceCompon
         )]),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
+        node_slot_placements: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,

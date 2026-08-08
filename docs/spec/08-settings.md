@@ -8,6 +8,13 @@ stored overrides**
 props, manifest surface placement, and shell prop declarations. The store
 holds *only values the user changed*.
 
+Ordered customizable-slot placements are sparse profile composition, not
+settings-store preferences. They live in profile nodeSlots records because
+they affect the activation closure and runtime component tree. Source defaults
+apply when no record exists; a reset deletes the record; an explicit empty
+nodes list intentionally empties the slot. Public placement props still reuse
+the component's derived props schema and generated control metadata.
+
 "One logical service" describes the user/developer API, not one undifferentiated
 ownership bucket. Its effective snapshot joins the installed catalog, active
 profile composition, declared defaults, sparse overrides, and runtime status;

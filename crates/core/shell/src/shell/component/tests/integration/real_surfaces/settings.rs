@@ -237,6 +237,69 @@ fn settings_appearance_resource_lists_are_bounded() {
     );
 }
 
+#[test]
+fn settings_appearance_resource_scroll_keeps_the_existing_tree() {
+    let theme = default_theme();
+    let mut settings =
+        real_frontend_module_component("@mesh/settings", super::super::debug::settings_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
+    seed_large_settings_resource_catalog(&mut settings);
+    settings
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
+        .unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = settings
+        .last_tree
+        .as_ref()
+        .expect("rendered Appearance tree");
+    let resource_list = first_node_with_class_token(tree, "resource-list")
+        .expect("Appearance should contain a scrollable resource list");
+    assert!(
+        resource_list.resolved_scroll_metrics().max_y > 0.0,
+        "the bounded resource list should still have scrollable overflow"
+    );
+    let scroll_id = resource_list.id;
+    settings.scroll_offsets.insert(
+        scroll_id,
+        mesh_core_interaction::ScrollOffsetState { x: 0.0, y: 120.0 },
+    );
+    settings.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
+
+    let scrolled = settings
+        .last_tree
+        .as_ref()
+        .expect("scrolled Appearance tree");
+    assert_eq!(
+        first_node_with_class_token(scrolled, "resource-list")
+            .expect("resource list after scroll")
+            .resolved_scroll_metrics()
+            .y,
+        120.0
+    );
+    assert!(
+        settings
+            .display_list_paint_commands()
+            .iter()
+            .any(|command| {
+                matches!(
+                    &command.node.content,
+                    mesh_core_render::display_list::DisplayPaintContent::Text(text)
+                        if text.text.starts_with("Icon Theme")
+                )
+            }),
+        "scrolling Appearance should keep resource content in the retained display list"
+    );
+}
+
 // cargo test -p mesh-core-shell --release -- settings_active_page_switch_cost --ignored --nocapture
 #[test]
 #[ignore = "release-only real Settings page-switch benchmark"]

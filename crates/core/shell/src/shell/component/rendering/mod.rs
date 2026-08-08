@@ -76,6 +76,40 @@ impl FrontendSurfaceComponent {
                 .filter(|module_id| module_id.as_str() != self.id())
                 .cloned()
                 .collect();
+            // Extension-point contributions are alternate compiled roots of
+            // this surface's module. They are not local components and do not
+            // appear in the primary entrypoint's import map, but their CSS is
+            // still part of the rendered tree. Keep it in the retained
+            // restyle rule set or the first click/hover repaint will resolve
+            // those nodes from theme defaults and drop their authored
+            // dimensions and interaction styles.
+            let contribution_entries: Vec<_> = self
+                .frontend_catalog
+                .contribution_entries_for_host(self.id())
+                .into_iter()
+                .cloned()
+                .collect();
+            for compiled in &contribution_entries {
+                if let Some(style) = compiled.component.style.as_ref() {
+                    rules.extend(style.rules.iter().cloned());
+                }
+                let mut aliases: Vec<_> = compiled.local_components.keys().cloned().collect();
+                aliases.sort();
+                for alias in aliases {
+                    if let Some(component) = compiled.local_components.get(&alias)
+                        && let Some(style) = component.style.as_ref()
+                    {
+                        rules.extend(style.rules.iter().cloned());
+                    }
+                }
+                imported_module_ids.extend(
+                    compiled
+                        .module_component_imports
+                        .values()
+                        .filter(|module_id| module_id.as_str() != self.id())
+                        .cloned(),
+                );
+            }
             imported_module_ids.sort();
             imported_module_ids.dedup();
             for module_id in imported_module_ids {
@@ -525,7 +559,14 @@ impl FrontendSurfaceComponent {
         let mut reused_retained_layout = false;
         let mut empty_restyle_avoided = false;
         let preserve_surface_root = tree.tag == "surface";
-        if targeted_interaction_restyle {
+        if paint_only_restyle {
+            // Scroll, tooltip, and other paint-only invalidations do not alter
+            // authored attributes or computed styles. Re-resolving the whole
+            // tree here used to make every scroll tick pay the Appearance
+            // page's full style walk before the retained painter could move
+            // its already-laid-out content.
+            reused_retained_layout = true;
+        } else if targeted_interaction_restyle {
             if affected_keys.affected.is_empty() {
                 if !interaction_snapshot_valid {
                     // First frame or no previous interaction state — fall back

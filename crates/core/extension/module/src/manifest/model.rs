@@ -712,6 +712,17 @@ pub struct HostedExtensionPoint {
     /// Cap on rendered contributions.
     #[serde(default)]
     pub max: Option<u32>,
+    /// Defaults for named customizable slots in the host component.
+    #[serde(default)]
+    pub slots: std::collections::BTreeMap<String, CustomizableHostSlot>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CustomizableHostSlot {
+    /// Stable contribution references in module-id:contribution-id form.
+    #[serde(default)]
+    pub defaults: Vec<String>,
 }
 
 /// One module's contribution to an extension point.

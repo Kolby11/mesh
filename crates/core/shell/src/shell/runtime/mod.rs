@@ -17,6 +17,33 @@ const DEV_WINDOW_POLL_SLEEP: Duration = Duration::from_millis(16);
 pub(in crate::shell) const FILE_WATCHER_RELOAD_PARK: Duration = Duration::from_secs(24 * 60 * 60);
 
 impl Shell {
+    /// Presentation reports the compositor-facing buffer size. Parent layer
+    /// surfaces may include transparent tooltip reserve in that size, while
+    /// component layout and input always use the content rectangle.
+    pub(in crate::shell) fn content_size_for_target(
+        &self,
+        index: usize,
+        target: TargetRef,
+        padded: (u32, u32),
+    ) -> (u32, u32) {
+        let padding = self.components[index]
+            .target(target)
+            .last_surface_config
+            .as_ref()
+            .map(|config| config.padding)
+            .unwrap_or_default();
+        (
+            padded
+                .0
+                .saturating_sub(padding.left.saturating_add(padding.right))
+                .max(1),
+            padded
+                .1
+                .saturating_sub(padding.top.saturating_add(padding.bottom))
+                .max(1),
+        )
+    }
+
     fn surface_is_effectively_visible(&self, surface_id: &str) -> bool {
         self.core
             .surfaces

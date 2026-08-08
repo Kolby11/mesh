@@ -42,8 +42,29 @@ pub struct CompositionSpec {
     /// its members contribute, without editing any member.
     #[serde(default)]
     pub slots: BTreeMap<String, SlotOverride>,
+    /// Sparse ordered component placements for named customizable slots,
+    /// keyed by root instance and then component-local slot name.
+    #[serde(default)]
+    pub node_slots: BTreeMap<String, BTreeMap<String, NodeSlotOverride>>,
     #[serde(default)]
     pub settings: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NodeSlotOverride {
+    #[serde(default)]
+    pub nodes: Vec<ComponentPlacement>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ComponentPlacement {
+    pub id: String,
+    #[serde(rename = "use")]
+    pub contribution: String,
+    #[serde(default)]
+    pub props: serde_json::Map<String, serde_json::Value>,
 }
 
 /// A composition's authority over one extension point.
@@ -107,6 +128,7 @@ impl EffectiveComposition {
             background_services: self.spec.background_services.clone(),
             providers: self.spec.providers.clone(),
             resources: self.spec.resources.clone(),
+            node_slots: self.spec.node_slots.clone(),
             settings: self.spec.settings.clone(),
         }
     }
@@ -153,6 +175,11 @@ pub fn resolve_composition<'a>(
     for instance_id in profile_spec.roots.keys() {
         if profile.from.is_some() && !spec.roots.contains_key(instance_id) {
             orphaned_overrides.push(instance_id.clone());
+        }
+    }
+    for instance_id in profile_spec.node_slots.keys() {
+        if profile.from.is_some() && !spec.roots.contains_key(instance_id) {
+            orphaned_overrides.push(format!("nodeSlots.{instance_id}"));
         }
     }
     merge_spec(&mut spec, &profile_spec);
@@ -230,6 +257,12 @@ fn merge_spec(base: &mut CompositionSpec, overlay: &CompositionSpec) {
             .entry(point.clone())
             .or_default()
             .merge_from(over);
+    }
+    for (instance, slots) in &overlay.node_slots {
+        let target = base.node_slots.entry(instance.clone()).or_default();
+        for (slot, over) in slots {
+            target.insert(slot.clone(), over.clone());
+        }
     }
 
     for (namespace, value) in &overlay.settings {
@@ -362,7 +395,7 @@ mod tests {
     #[test]
     fn a_profile_without_provenance_stays_a_hand_built_composition() {
         let resolved = resolve_composition(
-            &profile(r#"{"schemaVersion":2,"roots":{"@me/panel#default":{"module":"@me/panel"}}}"#),
+            &profile(r#"{"schemaVersion":3,"roots":{"@me/panel#default":{"module":"@me/panel"}}}"#),
             [],
         )
         .unwrap();
@@ -386,7 +419,7 @@ mod tests {
         );
 
         let resolved = resolve_composition(
-            &profile(r#"{"schemaVersion":2,"from":{"module":"@alice/desk"}}"#),
+            &profile(r#"{"schemaVersion":3,"from":{"module":"@alice/desk"}}"#),
             [&base, &derived],
         )
         .unwrap();
@@ -408,7 +441,7 @@ mod tests {
         );
         let resolved = resolve_composition(
             &profile(
-                r#"{"schemaVersion":2,"from":{"module":"@alice/desk"},
+                r#"{"schemaVersion":3,"from":{"module":"@alice/desk"},
                     "roots":{"@mesh/panel#top":{"module":"@mesh/panel","active":false,
                       "surface":{"anchor":"bottom"}}},
                     "settings":{"shell":{"i18n":{"locale":"sk-SK"}}}}"#,
@@ -433,7 +466,7 @@ mod tests {
         let desk = composition("@alice/desk", None, r#"{"roots":{}}"#);
         let resolved = resolve_composition(
             &profile(
-                r#"{"schemaVersion":2,"from":{"module":"@alice/desk"},
+                r#"{"schemaVersion":3,"from":{"module":"@alice/desk"},
                     "roots":{"@mesh/gone#default":{"module":"@mesh/gone"}}}"#,
             ),
             [&desk],
@@ -449,7 +482,7 @@ mod tests {
         let a = composition("@me/a", Some("@me/b"), "{}");
         let b = composition("@me/b", Some("@me/a"), "{}");
         let error = resolve_composition(
-            &profile(r#"{"schemaVersion":2,"from":{"module":"@me/a"}}"#),
+            &profile(r#"{"schemaVersion":3,"from":{"module":"@me/a"}}"#),
             [&a, &b],
         )
         .unwrap_err();
@@ -471,7 +504,7 @@ mod tests {
                  "suppress":["@mesh/other"]}}}"#,
         );
         let resolved = resolve_composition(
-            &profile(r#"{"schemaVersion":2,"from":{"module":"@alice/desk"}}"#),
+            &profile(r#"{"schemaVersion":3,"from":{"module":"@alice/desk"}}"#),
             [&base, &derived],
         )
         .unwrap();
@@ -481,6 +514,31 @@ mod tests {
         assert!(over.suppress.contains("@mesh/noisy"));
         assert!(over.suppress.contains("@mesh/other"));
         assert_eq!(over.order, vec!["@mesh/a", "@mesh/b"]);
+    }
+
+    #[test]
+    fn node_slot_lists_replace_wholesale_and_an_empty_list_is_explicit() {
+        let base = composition(
+            "@mesh/base",
+            None,
+            r#"{"roots":{"@mesh/panel#top":{"module":"@mesh/panel"}},
+                "nodeSlots":{"@mesh/panel#top":{"start":{"nodes":[
+                  {"id":"clock","use":"@mesh/items:clock","props":{}}
+                ]}}}}"#,
+        );
+        let resolved = resolve_composition(
+            &profile(
+                r#"{"schemaVersion":3,"from":{"module":"@mesh/base"},
+                    "nodeSlots":{"@mesh/panel#top":{"start":{"nodes":[]}}}}"#,
+            ),
+            [&base],
+        )
+        .unwrap();
+        assert!(
+            resolved.spec.node_slots["@mesh/panel#top"]["start"]
+                .nodes
+                .is_empty()
+        );
     }
 
     #[test]
@@ -516,13 +574,13 @@ mod tests {
         let desk = composition("@mesh/desk", None, compose);
 
         let from_composition = resolve_composition(
-            &profile(r#"{"schemaVersion":2,"from":{"module":"@mesh/desk"}}"#),
+            &profile(r#"{"schemaVersion":3,"from":{"module":"@mesh/desk"}}"#),
             [&desk],
         )
         .unwrap();
         let hand_written = resolve_composition(
             &profile(&format!(
-                r#"{{"schemaVersion":2,{}}}"#,
+                r#"{{"schemaVersion":3,{}}}"#,
                 &compose[1..compose.len() - 1]
             )),
             [&desk],

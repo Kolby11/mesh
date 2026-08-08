@@ -841,6 +841,31 @@ impl Shell {
                 instance_id,
                 prop,
             } => self.apply_set_module_prop(&module_id, instance_id.as_deref(), &prop, None),
+            CoreRequest::ApplyNodeSlot {
+                profile_id,
+                root_instance,
+                slot,
+                nodes,
+                expected_generation,
+            } => self.apply_node_slot_edit(
+                &profile_id,
+                &root_instance,
+                &slot,
+                Some(nodes),
+                &expected_generation,
+            ),
+            CoreRequest::ResetNodeSlot {
+                profile_id,
+                root_instance,
+                slot,
+                expected_generation,
+            } => self.apply_node_slot_edit(
+                &profile_id,
+                &root_instance,
+                &slot,
+                None,
+                &expected_generation,
+            ),
             CoreRequest::SwitchProfile { profile_id } => Ok(self.apply_switch_profile(&profile_id)),
             CoreRequest::ToggleDebugOverlay => {
                 self.debug.toggle();
@@ -1903,6 +1928,19 @@ fn core_service_request(
         ("mesh.packages", "switch_profile") => Some(CoreRequest::SwitchProfile {
             profile_id: text("profile_id")?,
         }),
+        ("mesh.composition", "apply_node_slot") => Some(CoreRequest::ApplyNodeSlot {
+            profile_id: text("profile_id")?,
+            root_instance: text("root_instance")?,
+            slot: text("slot")?,
+            nodes: payload.get("nodes")?.clone(),
+            expected_generation: text("expected_generation")?,
+        }),
+        ("mesh.composition", "reset_node_slot") => Some(CoreRequest::ResetNodeSlot {
+            profile_id: text("profile_id")?,
+            root_instance: text("root_instance")?,
+            slot: text("slot")?,
+            expected_generation: text("expected_generation")?,
+        }),
         _ => None,
     }
 }
@@ -1928,6 +1966,8 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::InstallModule { .. } => "install_module",
         CoreRequest::UninstallModule { .. } => "uninstall_module",
         CoreRequest::SetModuleProp { .. } => "set_module_prop",
+        CoreRequest::ApplyNodeSlot { .. } => "apply_node_slot",
+        CoreRequest::ResetNodeSlot { .. } => "reset_node_slot",
         CoreRequest::UnsetModuleProp { .. } => "unset_module_prop",
         CoreRequest::SwitchProfile { .. } => "switch_profile",
         CoreRequest::ActivatePopover { .. } => "activate_popover",
@@ -1971,6 +2011,35 @@ fn benchmark_scenario_id(scenario_id: &str) -> Option<BenchmarkScenarioId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn composition_slot_commands_become_typed_requests() {
+        let apply = core_service_request(
+            "mesh.composition",
+            "apply_node_slot",
+            &serde_json::json!({
+                "profile_id": "desk",
+                "root_instance": "@mesh/navigation-bar#default",
+                "slot": "end",
+                "nodes": [{"id":"clock","use":"@mesh/navigation-bar:clock","props":{}}],
+                "expected_generation": "abc",
+            }),
+        )
+        .unwrap();
+        assert!(matches!(
+            apply,
+            CoreRequest::ApplyNodeSlot {
+                profile_id,
+                root_instance,
+                slot,
+                expected_generation,
+                ..
+            } if profile_id == "desk"
+                && root_instance == "@mesh/navigation-bar#default"
+                && slot == "end"
+                && expected_generation == "abc"
+        ));
+    }
 
     #[test]
     fn package_install_and_uninstall_commands_become_typed_requests() {

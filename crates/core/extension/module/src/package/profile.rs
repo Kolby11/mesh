@@ -9,7 +9,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 2;
+pub const PROFILE_SCHEMA_VERSION: u32 = 3;
 pub const DEFAULT_PROFILE_ID: &str = "default";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +30,9 @@ pub struct ShellProfile {
     pub providers: BTreeMap<String, String>,
     #[serde(default)]
     pub resources: ProfileResources,
+    /// Sparse ordered placements for author-declared customizable slots.
+    #[serde(default)]
+    pub node_slots: BTreeMap<String, BTreeMap<String, super::NodeSlotOverride>>,
     /// Sparse preference overrides layered over the shared settings store.
     /// Keys use the same namespaces as `settings.json`; durable module data is
     /// deliberately not stored here.
@@ -126,6 +129,7 @@ impl ShellProfile {
             providers: self.providers.clone(),
             resources: self.resources.clone(),
             slots: BTreeMap::new(),
+            node_slots: self.node_slots.clone(),
             settings: self.settings.clone(),
         }
     }
@@ -134,7 +138,7 @@ impl ShellProfile {
         if self.schema_version != PROFILE_SCHEMA_VERSION {
             return Err(ModuleManifestError::Validation(format!(
                 "unsupported profile schemaVersion {}; supported version is {PROFILE_SCHEMA_VERSION}. \
-                 Schema 2 adds the optional `from` composition reference; set \"schemaVersion\": {PROFILE_SCHEMA_VERSION} to migrate an otherwise valid profile",
+                 Schema 3 adds sparse nodeSlots; set \"schemaVersion\": {PROFILE_SCHEMA_VERSION} to migrate an otherwise valid profile",
                 self.schema_version
             )));
         }
@@ -160,6 +164,43 @@ impl ShellProfile {
                 .chain(self.resources.languages.iter()),
             "resources",
         )?;
+        for (instance_id, slots) in &self.node_slots {
+            if instance_id.trim().is_empty() {
+                return Err(ModuleManifestError::Validation(
+                    "nodeSlots cannot contain an empty root instance id".into(),
+                ));
+            }
+            for (slot_name, slot) in slots {
+                if slot_name.trim().is_empty() {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "nodeSlots.{instance_id} cannot contain an empty slot name"
+                    )));
+                }
+                let mut ids = HashSet::new();
+                for node in &slot.nodes {
+                    if node.id.trim().is_empty() || !ids.insert(node.id.as_str()) {
+                        return Err(ModuleManifestError::Validation(format!(
+                            "nodeSlots.{instance_id}.{slot_name} has an empty or duplicate placement id '{}'",
+                            node.id
+                        )));
+                    }
+                    let Some((module, contribution)) = node.contribution.rsplit_once(':') else {
+                        return Err(ModuleManifestError::Validation(format!(
+                            "node placement '{}' must use module-id:contribution-id",
+                            node.contribution
+                        )));
+                    };
+                    let module = module.to_string();
+                    validate_module_ids([&module].into_iter(), "nodeSlots")?;
+                    if contribution.trim().is_empty() {
+                        return Err(ModuleManifestError::Validation(format!(
+                            "node placement '{}' has an empty contribution id",
+                            node.contribution
+                        )));
+                    }
+                }
+            }
+        }
         for (namespace, value) in &self.settings {
             if namespace != "shell" && !namespace.starts_with('@') && !namespace.contains('.') {
                 return Err(ModuleManifestError::Validation(format!(
@@ -238,6 +279,15 @@ impl ShellProfile {
         queue.extend(self.resources.icons.iter().cloned());
         queue.extend(self.resources.fonts.iter().cloned());
         queue.extend(self.resources.languages.iter().cloned());
+        for slots in self.node_slots.values() {
+            for slot in slots.values() {
+                for node in &slot.nodes {
+                    if let Some((module_id, _)) = node.contribution.rsplit_once(':') {
+                        queue.push_back(module_id.to_string());
+                    }
+                }
+            }
+        }
 
         while let Some(module_id) = queue.pop_front() {
             if !active.insert(module_id.clone()) {
@@ -337,6 +387,7 @@ impl Default for ShellProfile {
             background_services: BTreeSet::new(),
             providers: BTreeMap::new(),
             resources: ProfileResources::default(),
+            node_slots: BTreeMap::new(),
             settings: BTreeMap::new(),
         }
     }
@@ -629,7 +680,7 @@ mod tests {
     fn profile_settings_are_sparse_namespaced_objects() {
         let profile = ShellProfile::from_json_str(
             r#"{
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "settings": {
                     "shell": { "i18n": { "locale": "sk-SK" } },
                     "@me/panel#work": { "props": { "global": { "dense": true } } }
@@ -640,9 +691,46 @@ mod tests {
         assert_eq!(profile.settings["shell"]["i18n"]["locale"], "sk-SK");
         assert!(
             ShellProfile::from_json_str(
-                r#"{"schemaVersion":2,"settings":{"shell":"not-an-object"}}"#
+                r#"{"schemaVersion":3,"settings":{"shell":"not-an-object"}}"#
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn schema_two_profiles_receive_a_focused_node_slots_migration_diagnostic() {
+        let error = ShellProfile::from_json_str(r#"{"schemaVersion":2,"roots":{}}"#)
+            .expect_err("schema 2 must not be accepted as a compatibility input")
+            .to_string();
+        assert!(error.contains("Schema 3 adds sparse nodeSlots"), "{error}");
+        assert!(error.contains("\"schemaVersion\": 3"), "{error}");
+    }
+
+    #[test]
+    fn node_slot_placements_reject_duplicate_ids_and_invalid_references() {
+        let duplicate = ShellProfile::from_json_str(
+            r#"{
+                "schemaVersion": 3,
+                "nodeSlots": {"@me/panel#top":{"start":{"nodes":[
+                    {"id":"clock","use":"@me/clock:small"},
+                    {"id":"clock","use":"@me/clock:large"}
+                ]}}}
+            }"#,
+        )
+        .expect_err("placement ids are slot-local stable identities")
+        .to_string();
+        assert!(duplicate.contains("duplicate placement id"), "{duplicate}");
+
+        let invalid = ShellProfile::from_json_str(
+            r#"{
+                "schemaVersion": 3,
+                "nodeSlots": {"@me/panel#top":{"start":{"nodes":[
+                    {"id":"clock","use":"not-a-contribution"}
+                ]}}}
+            }"#,
+        )
+        .expect_err("placements must reference public contributions")
+        .to_string();
+        assert!(invalid.contains("module-id:contribution-id"), "{invalid}");
     }
 }

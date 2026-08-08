@@ -428,8 +428,31 @@ impl MeshModuleSection {
             validate_extension_point_name("mesh.extensionPoints", point_name)?;
             declaration.validate(point_name)?;
         }
-        for point_name in self.hosts.keys() {
+        for (point_name, host) in &self.hosts {
             validate_extension_point_name("mesh.hosts", point_name)?;
+            for (slot_name, slot) in &host.slots {
+                if slot_name.trim().is_empty() {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "mesh.hosts.{point_name}.slots cannot contain an empty name"
+                    )));
+                }
+                for reference in &slot.defaults {
+                    let Some((module_id, contribution_id)) = reference.rsplit_once(':') else {
+                        return Err(ModuleManifestError::Validation(format!(
+                            "mesh.hosts.{point_name}.slots.{slot_name} default '{reference}' must use module-id:contribution-id"
+                        )));
+                    };
+                    validate_module_dependency_id(
+                        "mesh.hosts customizable slot defaults",
+                        module_id,
+                    )?;
+                    if contribution_id.trim().is_empty() {
+                        return Err(ModuleManifestError::Validation(format!(
+                            "mesh.hosts.{point_name}.slots.{slot_name} has an empty contribution id"
+                        )));
+                    }
+                }
+            }
         }
         if self.kind == ModuleKind::Library && !self.capabilities.required.is_empty() {
             return Err(ModuleManifestError::Validation(

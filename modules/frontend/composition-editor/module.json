@@ -1,0 +1,32 @@
+{
+  "name": "@mesh/composition-editor",
+  "version": "0.1.0",
+  "description": "Replaceable visual editor for author-declared component slots.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "entry": "src/main.mesh",
+    "uses": {
+      "interfaces": {
+        "mesh.composition": ">=1.0"
+      },
+      "capabilities": [
+        "shell.surface",
+        "service.composition.read",
+        "service.composition.control"
+      ]
+    },
+    "surface": {
+      "role": "window",
+      "title": "MESH Layout Editor",
+      "appId": "mesh.composition-editor",
+      "resizable": true,
+      "visible_on_start": false
+    },
+    "accessibility": {
+      "role": "dialog",
+      "label": "Layout editor",
+      "description": "Arrange components inside customizable shell regions"
+    }
+  }
+}

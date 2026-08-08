@@ -36,6 +36,7 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
     let cluster_before =
         first_node_by_class(tree, "right-cluster").expect("control cluster before");
     let cluster_width_before = cluster_before.layout.width;
+    let cluster_layout_before = cluster_before.layout;
 
     let enter_handler = theme_button
         .event_handlers
@@ -119,7 +120,8 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
     );
     assert!(
         cluster_after.layout.x + cluster_after.layout.width <= width as f32,
-        "open promoted popover must not push controls off the nav surface"
+        "open promoted popover must not push controls off the nav surface: before {cluster_layout_before:?}, after {:?}",
+        cluster_after.layout
     );
 }
 
@@ -131,13 +133,13 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
 
     for (handler, expected_size, expected_core_class, expected_text) in [
         (
-            "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeToggle",
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeToggle",
             (132, 60),
             "bubble-option-core-dark",
             None,
         ),
         (
-            "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageToggle",
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageToggle",
             (132, 60),
             "bubble-option-core-language",
             Some("\u{1f1ec}\u{1f1e7}"),

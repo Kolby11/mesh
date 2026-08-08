@@ -139,6 +139,32 @@ boolean checked value. `radio` values are exclusive inside `radio-group`.
 Menus use `menu-item` or `command-item` children and activate through `onclick`
 or `onactivate`; put icons and shortcut labels inside the item markup.
 
+### Customizable slots
+
+A component author can expose a bounded region to visual composition without
+making the component's complete element tree editable:
+
+```xml
+<row class="start">
+  <slot
+    name="start"
+    extension-point="mesh.navigation.item"
+    mode="customizable"
+  />
+</row>
+```
+
+`name`, `extension-point`, and `mode` are static. A customizable slot requires
+a locally unique `name`, and the module must declare the extension point in
+`mesh.hosts`. Its host record can supply ordered `slots.<name>.defaults` using
+public contribution references such as `@mesh/navigation-bar:launcher`.
+
+An ordinary `<slot extension-point="…" />` remains automatic and renders the
+resolved contributions in their normal order. Visual editors can only arrange
+public component contributions and literal public prop values within a
+customizable slot. Fixed elements, Luau, handlers, styles, and surface policy
+remain source-level `.mesh` customization.
+
 Container and collection elements preserve shell-native source semantics. Use
 `tabs` with activatable `tab` children, and `list` with activatable
 `list-item` children:

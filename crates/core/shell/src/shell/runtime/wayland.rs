@@ -114,10 +114,9 @@ impl Shell {
                 .or_else(|| {
                     self.presentation_engine
                         .surface_size_if_known(target_surface_id)
+                        .map(|size| self.content_size_for_target(index, target, size))
                 })
                 .unwrap_or((1, 1));
-            self.components[index].target_mut(target).known_surface_size =
-                Some(target_surface_size);
             let component_surface_size = match target {
                 TargetRef::Parent => self.components[index]
                     .component
@@ -133,6 +132,19 @@ impl Shell {
                     })
                     .unwrap_or(target_surface_size),
             };
+            // A spanning layer surface reports width 0 in the shell-side
+            // surface record, while its compositor buffer can be larger than
+            // the component content because it includes tooltip padding. Do
+            // not let pointer input cache that padded buffer as the parent's
+            // layout size: the following interaction repaint would lay the
+            // navigation tree out against the wrong geometry. Child popup
+            // sizes remain local to their own target.
+            self.components[index].target_mut(target).known_surface_size =
+                Some(if matches!(target, TargetRef::Parent) {
+                    component_surface_size
+                } else {
+                    target_surface_size
+                });
 
             if let RoutedWindowEvent::KeyPressed { key, mods } = &event {
                 if let Some(request) =

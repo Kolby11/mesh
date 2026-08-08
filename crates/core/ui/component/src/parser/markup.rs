@@ -713,18 +713,42 @@ fn build_template_node(
     }
 
     if tag == "slot" {
-        let extension_point = attributes.iter().find_map(|attribute| {
-            if attribute.name != "extension-point" {
-                return None;
-            }
-
+        let static_slot_attr = |name: &str| -> Result<Option<String>, ParseError> {
+            let Some(attribute) = attributes.iter().find(|attribute| attribute.name == name) else {
+                return Ok(None);
+            };
             match &attribute.value {
-                AttributeValue::Static(value) => Some(value.clone()),
-                _ => None,
+                AttributeValue::Static(value) => Ok(Some(value.clone())),
+                _ => Err(ParseError::InvalidTemplate {
+                    message: format!("<slot> attribute '{name}' must be static"),
+                }),
             }
-        });
+        };
+        let extension_point = static_slot_attr("extension-point")?;
+        let name = static_slot_attr("name")?;
+        let mode = static_slot_attr("mode")?;
+        let customizable = match mode.as_deref().unwrap_or("automatic") {
+            "automatic" => false,
+            "customizable" => true,
+            other => {
+                return Err(ParseError::InvalidTemplate {
+                    message: format!(
+                        "<slot> mode must be 'automatic' or 'customizable', got '{other}'"
+                    ),
+                });
+            }
+        };
+        if customizable && name.as_ref().is_none_or(|name| name.trim().is_empty()) {
+            return Err(ParseError::InvalidTemplate {
+                message: "a customizable <slot> requires a non-empty static name".into(),
+            });
+        }
 
-        return Ok(TemplateNode::Slot(SlotNode { extension_point }));
+        return Ok(TemplateNode::Slot(SlotNode {
+            extension_point,
+            name,
+            customizable,
+        }));
     }
 
     let tag_kind = crate::template::SourceTag::from_tag_name(&tag);

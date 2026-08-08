@@ -340,6 +340,37 @@ impl Shell {
                 ),
             ],
         ));
+        interfaces.register_contract(builtin_contract(
+            "mesh.composition",
+            &[
+                ("profile_id", "string"),
+                ("generation", "string"),
+                ("roots", "object[]"),
+                ("slots", "object[]"),
+                ("palette", "object[]"),
+            ],
+            &[
+                (
+                    "apply_node_slot",
+                    &[
+                        ("profile_id", "string"),
+                        ("root_instance", "string"),
+                        ("slot", "string"),
+                        ("nodes", "object[]"),
+                        ("expected_generation", "string"),
+                    ],
+                ),
+                (
+                    "reset_node_slot",
+                    &[
+                        ("profile_id", "string"),
+                        ("root_instance", "string"),
+                        ("slot", "string"),
+                        ("expected_generation", "string"),
+                    ],
+                ),
+            ],
+        ));
         interfaces.register(InterfaceProvider {
             interface: mesh_core_debug::DEBUG_INTERFACE.to_string(),
             version: Some("1.0".to_string()),
@@ -378,6 +409,14 @@ impl Shell {
             base_module: Some("@mesh/packages-interface".to_string()),
             provider_module: "@mesh/shell".to_string(),
             backend_name: "Shell Package Graph".to_string(),
+            priority: 200,
+        });
+        interfaces.register(InterfaceProvider {
+            interface: "mesh.composition".to_string(),
+            version: Some("1.0".to_string()),
+            base_module: Some("@mesh/composition-interface".to_string()),
+            provider_module: "@mesh/shell".to_string(),
+            backend_name: "Shell Composition".to_string(),
             priority: 200,
         });
 
@@ -898,6 +937,7 @@ impl Shell {
         // Mount first so module scripts can establish their service proxy;
         // then deliver the revisioned effective settings snapshot normally.
         requests.extend(self.sync_settings_service_state()?);
+        requests.extend(self.sync_composition_service_state()?);
         self.service_delivery_index.mark_dirty();
         Ok(requests)
     }

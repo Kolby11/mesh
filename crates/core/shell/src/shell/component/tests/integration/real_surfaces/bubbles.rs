@@ -6,7 +6,7 @@ use super::*;
 #[test]
 fn shipped_theme_selector_marks_the_picked_bubble_active_immediately() {
     let (before, after) = pick_bubble_option(
-        "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeEnter",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeEnter",
         2,
     );
     assert_eq!(
@@ -24,7 +24,7 @@ fn shipped_theme_selector_marks_the_picked_bubble_active_immediately() {
 #[test]
 fn shipped_language_popover_marks_the_picked_bubble_active_immediately() {
     let (before, after) = pick_bubble_option(
-        "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageEnter",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageEnter",
         2,
     );
     assert_eq!(
@@ -75,7 +75,7 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
 
     component
         .call_namespaced_handler(
-            "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageEnter",
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageEnter",
             &[],
         )
         .unwrap();
@@ -197,7 +197,7 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
         .unwrap();
     component
         .call_namespaced_handler(
-            "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeEnter",
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeEnter",
             &[],
         )
         .unwrap();

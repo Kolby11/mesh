@@ -27,7 +27,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
             subscribers
                 .iter()
                 .any(|subscriber| subscriber.keybind_id == "mute"
-                    && subscriber.handler.contains("onMuteShortcut")),
+                    && subscriber.handler.contains("onMuteKeybind")),
             "navigation mute keybind should expose its subscribed handler"
         );
     }
@@ -57,7 +57,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         .expect("rendered navigation tree");
     let theme_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeToggle",
     )
     .expect("rendered theme button");
     let theme_key = theme_button
@@ -208,7 +208,7 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         .expect("rendered navigation tree");
     let language_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageToggle",
     )
     .expect("language menu button");
     let language_key = language_button
@@ -347,12 +347,12 @@ fn navigation_theme_and_language_popovers_close_when_trigger_hover_leaves() {
 
     for (enter_handler, leave_handler) in [
         (
-            "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeEnter",
-            "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeLeave",
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeEnter",
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeLeave",
         ),
         (
-            "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageEnter",
-            "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageLeave",
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageEnter",
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageLeave",
         ),
     ] {
         let mut component =
@@ -471,7 +471,7 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
         .expect("rendered navigation tree");
     let language_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageToggle",
     )
     .expect("language menu button");
     let language_key = language_button
@@ -607,10 +607,8 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
         )
         .unwrap();
 
-    let enter_handler =
-        "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageEnter";
-    let leave_handler =
-        "__mesh_embed__::@mesh/navigation-bar/local:LanguageButton::onLanguageLeave";
+    let enter_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageEnter";
+    let leave_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageLeave";
     component
         .call_namespaced_handler(enter_handler, &[])
         .unwrap();
@@ -855,7 +853,7 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
         .expect("rendered navigation tree");
     let settings_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onOpenSettings",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onOpenSettings",
     )
     .expect("rendered settings button");
     let settings_key = settings_button
@@ -870,8 +868,7 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
         "the resting settings trigger should carry a tooltip"
     );
 
-    let enter_handler =
-        "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onSettingsEnter";
+    let enter_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsEnter";
     component
         .call_namespaced_handler(
             enter_handler,
@@ -921,8 +918,7 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
         1,
         "hovering the trigger should author one Quick Settings child"
     );
-    let leave_handler =
-        "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onSettingsLeave";
+    let leave_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsLeave";
     component
         .call_namespaced_handler(leave_handler, &[])
         .unwrap();
@@ -940,7 +936,7 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
         "trigger leave must preserve the Quick Settings child during the bridge"
     );
     let popup_enter_handler =
-        "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onQuickSettingsEnter";
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onQuickSettingsEnter";
     component
         .call_namespaced_handler(popup_enter_handler, &[])
         .unwrap();
@@ -984,7 +980,7 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
         .expect("rendered navigation tree");
     let settings_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onOpenSettings",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onOpenSettings",
     )
     .expect("rendered settings button");
     let settings_key = settings_button
@@ -1008,6 +1004,33 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
         )
         .unwrap();
 
+    component
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    let pressed_tree = component
+        .last_tree
+        .as_ref()
+        .expect("navigation tree after pointer press");
+    let pressed_shell = first_node_with_class_token(pressed_tree, "nav-shell")
+        .expect("navigation shell after pointer press");
+    assert_eq!(pressed_shell.layout.width, width as f32);
+    assert_eq!(pressed_shell.layout.height, 56.0);
+    let pressed_controls = first_node_with_class_token(pressed_tree, "right-cluster")
+        .expect("navigation controls after pointer press");
+    assert!(pressed_controls.layout.width > 0.0);
+    let pressed_settings = first_node_with_click_handler(
+        pressed_tree,
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onOpenSettings",
+    )
+    .expect("settings button after pointer press");
+    assert_eq!(pressed_settings.layout.width, 40.0);
+    assert_eq!(pressed_settings.layout.height, 40.0);
+
     let requests = component
         .handle_input(
             &theme,
@@ -1020,6 +1043,33 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
             },
         )
         .unwrap();
+
+    component
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    let released_tree = component
+        .last_tree
+        .as_ref()
+        .expect("navigation tree after pointer release");
+    let released_shell = first_node_with_class_token(released_tree, "nav-shell")
+        .expect("navigation shell after pointer release");
+    assert_eq!(released_shell.layout.width, width as f32);
+    assert_eq!(released_shell.layout.height, 56.0);
+    let released_controls = first_node_with_class_token(released_tree, "right-cluster")
+        .expect("navigation controls after pointer release");
+    assert!(released_controls.layout.width > 0.0);
+    let released_settings = first_node_with_click_handler(
+        released_tree,
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onOpenSettings",
+    )
+    .expect("settings button after pointer release");
+    assert_eq!(released_settings.layout.width, 40.0);
+    assert_eq!(released_settings.layout.height, 40.0);
 
     assert!(matches!(
         requests.as_slice(),
@@ -1040,7 +1090,7 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
             .as_ref()
             .and_then(|tree| first_node_with_click_handler(
                 tree,
-                "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onOpenSettings",
+                "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onOpenSettings",
             ))
             .is_some_and(|button| button.state.active || button.state.focused),
         "opening Settings must clear the launcher's active and focused state"
@@ -1114,7 +1164,7 @@ fn navigation_bar_keyboard_activation_toggles_volume_mute_on_real_surface() {
         .expect("rendered navigation tree");
     let volume_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-1::onAudioToggle",
     )
     .expect("rendered volume button");
     let volume_key = volume_button
@@ -1186,7 +1236,7 @@ fn navigation_bar_pointer_activation_toggles_volume_mute() {
         .expect("rendered navigation tree");
     let volume_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-1::onAudioToggle",
     )
     .expect("rendered volume button");
     let volume_key = volume_button
@@ -1272,7 +1322,7 @@ fn navigation_bar_volume_scroll_changes_level_immediately() {
         .expect("rendered navigation tree");
     let volume_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-1::onAudioToggle",
     )
     .expect("rendered volume button");
     let volume_key = volume_button
@@ -1342,7 +1392,7 @@ fn navigation_bar_volume_scroll_respects_instance_sensitivity() {
     component.settings_json = serde_json::json!({
         "props": {
             "instances": {
-                "@mesh/navigation-bar/local:VolumeButton": {
+                "@mesh/navigation-bar/slot:end/default-1": {
                     "scroll_sensitivity": 12
                 }
             }
@@ -1378,7 +1428,7 @@ fn navigation_bar_volume_scroll_respects_instance_sensitivity() {
         .expect("rendered navigation tree");
     let volume_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-1::onAudioToggle",
     )
     .expect("rendered volume button");
     let volume_key = volume_button
@@ -1450,7 +1500,7 @@ fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
         .expect("rendered navigation tree");
     let volume_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/local:VolumeButton::onAudioToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-1::onAudioToggle",
     )
     .expect("rendered volume button");
     let volume_key = volume_button

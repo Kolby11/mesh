@@ -114,6 +114,8 @@ pub trait FrontendCompositionResolver {
         host: &Manifest,
         host_instance_key: &str,
         extension_point: Option<&str>,
+        slot_name: Option<&str>,
+        customizable: bool,
         container_width: f32,
         container_height: f32,
     ) -> Vec<WidgetNode>;

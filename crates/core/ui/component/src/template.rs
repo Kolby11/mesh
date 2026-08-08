@@ -261,6 +261,11 @@ pub struct SlotNode {
     /// contract, never by module id, so a host can be replaced without
     /// breaking its contributors.
     pub extension_point: Option<String>,
+    /// Stable component-local address for a user-configurable slot.
+    pub name: Option<String>,
+    /// True selects placements from the active composition/profile instead of
+    /// automatically rendering every compatible contribution.
+    pub customizable: bool,
 }
 
 /// A reference to a child component.

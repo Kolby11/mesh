@@ -343,6 +343,25 @@ fn mesh_section() -> Node {
                                 false,
                                 scalar("Cap on rendered contributions.", "integer"),
                             ),
+                            field(
+                                "slots",
+                                false,
+                                node(
+                                    "Author-declared customizable slots, keyed by the stable local slot name used in markup.",
+                                    "object",
+                                    Kind::Map(Box::new(obj(
+                                        "Defaults for one customizable slot.",
+                                        vec![field(
+                                            "defaults",
+                                            false,
+                                            string_array(
+                                                "Ordered default contribution references (`module-id:contribution-id`).",
+                                                "Contribution reference.",
+                                            ),
+                                        )],
+                                    ))),
+                                ),
+                            ),
                         ],
                     ))),
                 ),
@@ -747,6 +766,59 @@ fn compose_node() -> Node {
                                 ),
                             ),
                         ],
+                    ))),
+                ),
+            ),
+            field(
+                "nodeSlots",
+                false,
+                node(
+                    "Sparse visual-placement overrides, keyed by root instance and then by author-declared slot name. Each list replaces the inherited list wholesale.",
+                    "object",
+                    Kind::Map(Box::new(node(
+                        "Customizable slots on one root instance.",
+                        "object",
+                        Kind::Map(Box::new(obj(
+                            "One ordered customizable-slot override.",
+                            vec![field(
+                                "nodes",
+                                true,
+                                node(
+                                    "Ordered placement nodes. An empty list intentionally empties the slot.",
+                                    "array",
+                                    Kind::Array(Box::new(obj(
+                                        "A stable public component placement.",
+                                        vec![
+                                            field(
+                                                "id",
+                                                true,
+                                                scalar("Stable placement id.", "string"),
+                                            ),
+                                            field(
+                                                "use",
+                                                true,
+                                                scalar(
+                                                    "Public contribution reference (`module-id:contribution-id`).",
+                                                    "string",
+                                                ),
+                                            ),
+                                            field(
+                                                "props",
+                                                false,
+                                                node(
+                                                    "Literal overrides for public component props.",
+                                                    "object",
+                                                    Kind::Map(Box::new(scalar(
+                                                        "Literal prop value.",
+                                                        "any",
+                                                    ))),
+                                                ),
+                                            ),
+                                        ],
+                                    ))),
+                                ),
+                            )],
+                        ))),
                     ))),
                 ),
             ),

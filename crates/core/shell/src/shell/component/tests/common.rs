@@ -1,12 +1,17 @@
 use super::*;
 use crate::shell::ComponentContext;
 use crate::shell::component::FrontendSurfaceComponent;
-use crate::shell::component::catalog::FrontendCatalogEntry;
+use crate::shell::component::catalog::{
+    FrontendCatalogEntry, ResolvedExtensionPointContribution, contribution_entry_key,
+    extension_point_key,
+};
 use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_component::parse_component;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::style::Display;
-use mesh_core_frontend::{CompiledFrontendModule, compile_frontend_module};
+use mesh_core_frontend::{
+    CompiledFrontendModule, compile_frontend_entrypoint, compile_frontend_module,
+};
 use mesh_core_module::manifest::{
     CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
 };
@@ -494,6 +499,7 @@ pub(super) fn test_frontend_component_with_local_components(
         )]),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
+        node_slot_placements: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,
@@ -530,6 +536,7 @@ pub(super) fn test_frontend_component_with_manifest(
         modules: HashMap::new(),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
+        node_slot_placements: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,
@@ -596,6 +603,7 @@ pub(super) fn test_frontend_component_with_required_icons(
         modules: HashMap::new(),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
+        node_slot_placements: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,
@@ -638,6 +646,7 @@ pub(super) fn test_frontend_component_with_catalog(
         modules: HashMap::new(),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
+        node_slot_placements: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,
@@ -937,7 +946,7 @@ pub(super) fn real_frontend_module_component(
     let settings_compiled = compile_frontend_module(&settings_manifest, &settings_dir)
         .expect("settings module and its local pages should compile");
 
-    let catalog = FrontendCatalog {
+    let mut catalog = FrontendCatalog {
         modules: HashMap::from([
             (
                 "@mesh/navigation-bar".into(),
@@ -991,7 +1000,38 @@ pub(super) fn real_frontend_module_component(
         ]),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
+        node_slot_placements: Default::default(),
     };
+    let mut navigation_items = Vec::new();
+    for contribution in navigation_compiled
+        .manifest
+        .extension_point_contributions
+        .get("mesh.navigation.item")
+        .into_iter()
+        .flatten()
+    {
+        let compiled = compile_frontend_entrypoint(
+            &navigation_compiled.manifest,
+            &navigation_dir,
+            &contribution.entry,
+        )
+        .expect("navigation item contribution should compile");
+        catalog.extension_point_entries.insert(
+            contribution_entry_key("@mesh/navigation-bar", &contribution.id),
+            compiled.into(),
+        );
+        navigation_items.push(ResolvedExtensionPointContribution {
+            source_module_id: "@mesh/navigation-bar".into(),
+            contribution_id: contribution.id.clone(),
+            order: contribution.order.unwrap_or(0),
+            props_fingerprint: 0,
+            props: contribution.props.clone(),
+        });
+    }
+    catalog.extension_point_contributions.insert(
+        extension_point_key("@mesh/navigation-bar", "mesh.navigation.item"),
+        navigation_items,
+    );
 
     // Mirror the shell's graph i18n wiring so component `t(...)` calls resolve
     // against each module's `config/i18n/<locale>.json`, including child

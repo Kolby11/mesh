@@ -10,7 +10,7 @@ use mesh_core_frontend::{
 };
 use mesh_core_module::ModuleType;
 use mesh_core_module::lifecycle::ModuleInstance;
-use mesh_core_module::package::InstalledModuleGraph;
+use mesh_core_module::package::{InstalledModuleGraph, NodeSlotOverride};
 use rayon::prelude::*;
 
 use super::memo;
@@ -44,7 +44,7 @@ fn compile_module_entrypoints(
 
 #[derive(Debug, Clone, Default)]
 pub(in crate::shell) struct FrontendCatalog {
-    pub(super) modules: HashMap<String, FrontendCatalogEntry>,
+    pub(in crate::shell) modules: HashMap<String, FrontendCatalogEntry>,
     /// Contributions each host renders, keyed by
     /// [`extension_point_key`]`(host module id, point contract name)`.
     ///
@@ -56,6 +56,9 @@ pub(in crate::shell) struct FrontendCatalog {
     /// Each is an alternate root of its *contributing* module, so it runs with
     /// that module's VM, capabilities, and settings namespace.
     pub(super) extension_point_entries: HashMap<String, SharedCompiledFrontendModule>,
+    /// Sparse effective placement overrides, keyed by root instance then slot.
+    pub(super) node_slot_placements:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, NodeSlotOverride>>,
 }
 
 /// Index key for the contributions one host renders at one extension point.
@@ -66,6 +69,57 @@ pub(super) fn extension_point_key(host_module_id: &str, point: &str) -> String {
 /// Index key for one contribution's compiled component.
 pub(super) fn contribution_entry_key(source_module_id: &str, contribution_id: &str) -> String {
     format!("{source_module_id}\u{1}{contribution_id}")
+}
+
+fn validate_placement_props(
+    reference: &str,
+    props: &serde_json::Map<String, serde_json::Value>,
+    compiled: &CompiledFrontendModule,
+) -> Result<(), ShellRunError> {
+    let declared = compiled.component.props.as_ref();
+    for (name, value) in props {
+        let Some(definition) = declared.and_then(|block| {
+            block
+                .props
+                .iter()
+                .find(|definition| definition.name == *name)
+        }) else {
+            return Err(ShellRunError::FrontendComposition {
+                message: format!(
+                    "invalid_node_props: contribution '{reference}' has no public prop '{name}'"
+                ),
+            });
+        };
+        if !definition.expose {
+            return Err(ShellRunError::FrontendComposition {
+                message: format!(
+                    "invalid_node_props: contribution '{reference}' prop '{name}' is private"
+                ),
+            });
+        }
+        let value = match value {
+            serde_json::Value::String(value) => {
+                mesh_core_component::PropValue::String(value.clone())
+            }
+            serde_json::Value::Number(value) => {
+                mesh_core_component::PropValue::Number(value.as_f64().unwrap_or(f64::NAN))
+            }
+            serde_json::Value::Bool(value) => mesh_core_component::PropValue::Bool(*value),
+            _ => {
+                return Err(ShellRunError::FrontendComposition {
+                    message: format!(
+                        "invalid_node_props: contribution '{reference}' prop '{name}' must be scalar"
+                    ),
+                });
+            }
+        };
+        mesh_core_component::validate_prop_value(definition, &value).map_err(|error| {
+            ShellRunError::FrontendComposition {
+                message: format!("invalid_node_props: {error}"),
+            }
+        })?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -172,12 +226,12 @@ impl DerefMut for SharedCompiledFrontendModule {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct ResolvedExtensionPointContribution {
-    pub(super) source_module_id: String,
-    pub(super) contribution_id: String,
-    pub(super) order: i64,
-    pub(super) props_fingerprint: u64,
-    pub(super) props: serde_json::Map<String, serde_json::Value>,
+pub(in crate::shell) struct ResolvedExtensionPointContribution {
+    pub(in crate::shell) source_module_id: String,
+    pub(in crate::shell) contribution_id: String,
+    pub(in crate::shell) order: i64,
+    pub(in crate::shell) props_fingerprint: u64,
+    pub(in crate::shell) props: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -396,6 +450,9 @@ impl FrontendCatalog {
             modules: compiled_entries.into_iter().collect(),
             extension_point_contributions: HashMap::new(),
             extension_point_entries: HashMap::new(),
+            node_slot_placements: graph
+                .map(|graph| graph.node_slot_overrides().clone())
+                .unwrap_or_default(),
         };
 
         // Host↔contribution matching is the graph's job: it owns the contract
@@ -498,10 +555,118 @@ impl FrontendCatalog {
             }
         }
 
+        catalog.validate_node_slot_placements()?;
+
         Ok(catalog)
     }
 
-    pub(super) fn extension_point_contributions_for(
+    fn validate_node_slot_placements(&self) -> Result<(), ShellRunError> {
+        fn find_slot<'a>(
+            nodes: &'a [mesh_core_component::template::TemplateNode],
+            name: &str,
+        ) -> Option<&'a mesh_core_component::template::SlotNode> {
+            use mesh_core_component::template::TemplateNode;
+            for node in nodes {
+                let found = match node {
+                    TemplateNode::Slot(slot)
+                        if slot.customizable && slot.name.as_deref() == Some(name) =>
+                    {
+                        Some(slot)
+                    }
+                    TemplateNode::Element(node) => find_slot(&node.children, name),
+                    TemplateNode::Component(node) => find_slot(&node.children, name),
+                    TemplateNode::If(node) => find_slot(&node.then_children, name)
+                        .or_else(|| find_slot(&node.else_children, name)),
+                    TemplateNode::For(node) => find_slot(&node.children, name),
+                    _ => None,
+                };
+                if found.is_some() {
+                    return found;
+                }
+            }
+            None
+        }
+
+        for (root_instance, slots) in &self.node_slot_placements {
+            let module_id = root_instance.split('#').next().unwrap_or(root_instance);
+            let host = self.modules.get(module_id).ok_or_else(|| {
+                ShellRunError::FrontendComposition {
+                    message: format!(
+                        "unknown_node_slot: root instance '{root_instance}' has no compiled module"
+                    ),
+                }
+            })?;
+            let roots = host
+                .compiled
+                .component
+                .template
+                .as_ref()
+                .map(|template| template.root.as_slice())
+                .unwrap_or_default();
+            for (slot_name, over) in slots {
+                let slot = find_slot(roots, slot_name).ok_or_else(|| {
+                    ShellRunError::FrontendComposition {
+                        message: format!(
+                            "unknown_node_slot: '{root_instance}' has no customizable slot '{slot_name}'"
+                        ),
+                    }
+                })?;
+                let point = slot.extension_point.as_deref().ok_or_else(|| {
+                    ShellRunError::FrontendComposition {
+                        message: format!(
+                            "node_slot_not_customizable: slot '{slot_name}' has no contract"
+                        ),
+                    }
+                })?;
+                let compatible = self.extension_point_contributions_for(module_id, point);
+                if let Some(max) = host
+                    .compiled
+                    .manifest
+                    .hosted_extension_points
+                    .get(point)
+                    .and_then(|hosted| hosted.max)
+                    && over.nodes.len() > max as usize
+                {
+                    return Err(ShellRunError::FrontendComposition {
+                        message: format!(
+                            "node_slot_cardinality: slot '{slot_name}' accepts at most {max} nodes"
+                        ),
+                    });
+                }
+                for node in &over.nodes {
+                    let Some((source, contribution_id)) = node.contribution.rsplit_once(':') else {
+                        return Err(ShellRunError::FrontendComposition {
+                            message: format!(
+                                "node_contribution_incompatible: invalid reference '{}'",
+                                node.contribution
+                            ),
+                        });
+                    };
+                    let contribution = compatible.iter().find(|entry| {
+                        entry.source_module_id == source && entry.contribution_id == contribution_id
+                    });
+                    let Some(contribution) = contribution else {
+                        return Err(ShellRunError::FrontendComposition {
+                            message: format!(
+                                "node_contribution_incompatible: '{}' does not satisfy '{point}'",
+                                node.contribution
+                            ),
+                        });
+                    };
+                    let compiled = self
+                        .contribution_entry(
+                            &contribution.source_module_id,
+                            &contribution.contribution_id,
+                        )
+                        .expect("resolved contributions are compiled");
+                    validate_placement_props(&node.contribution, &node.props, compiled)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(in crate::shell) fn extension_point_contributions_for(
         &self,
         host_module_id: &str,
         point: &str,
@@ -528,13 +693,57 @@ impl FrontendCatalog {
             .map(|(_, compiled)| compiled)
     }
 
-    pub(super) fn contribution_entry(
+    /// Compiled contribution roots rendered by one host module. Contributions
+    /// may come from a different module than the host, so this is distinct
+    /// from [`Self::contribution_entries_for`], which indexes roots by their
+    /// source module for alias resolution.
+    pub(super) fn contribution_entries_for_host(
+        &self,
+        host_module_id: &str,
+    ) -> Vec<&SharedCompiledFrontendModule> {
+        let prefix = format!("{host_module_id}\u{1}");
+        let mut seen = std::collections::HashSet::new();
+        let mut entries = Vec::new();
+        let mut point_keys: Vec<_> = self
+            .extension_point_contributions
+            .keys()
+            .filter(|point_key| point_key.starts_with(&prefix))
+            .collect();
+        point_keys.sort_unstable();
+        for point_key in point_keys {
+            let contributions = &self.extension_point_contributions[point_key];
+            for contribution in contributions {
+                let key = contribution_entry_key(
+                    &contribution.source_module_id,
+                    &contribution.contribution_id,
+                );
+                if seen.insert(key.clone())
+                    && let Some(compiled) = self.extension_point_entries.get(&key)
+                {
+                    entries.push(compiled);
+                }
+            }
+        }
+        entries
+    }
+
+    pub(in crate::shell) fn contribution_entry(
         &self,
         source_module_id: &str,
         contribution_id: &str,
     ) -> Option<&SharedCompiledFrontendModule> {
         self.extension_point_entries
             .get(&contribution_entry_key(source_module_id, contribution_id))
+    }
+
+    pub(in crate::shell) fn node_slot_placement(
+        &self,
+        root_instance: &str,
+        slot_name: &str,
+    ) -> Option<&NodeSlotOverride> {
+        self.node_slot_placements
+            .get(root_instance)
+            .and_then(|slots| slots.get(slot_name))
     }
 
     pub(in crate::shell) fn top_level_surfaces(&self) -> Vec<FrontendCatalogEntry> {

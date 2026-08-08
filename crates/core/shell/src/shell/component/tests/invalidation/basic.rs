@@ -1150,6 +1150,67 @@ surface { width: 200px; height: 80px; }
     );
 }
 
+#[test]
+fn hover_gate_sees_state_rules_from_extension_point_contributions() {
+    use crate::shell::component::catalog::{
+        ResolvedExtensionPointContribution, extension_point_key,
+    };
+    use mesh_core_component::parse_component;
+    use mesh_core_frontend::CompiledFrontendModule;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    let mut component = test_frontend_component(
+        r#"
+<template><row><box class="plain" /></row></template>
+<style>
+surface { width: 200px; height: 80px; }
+.plain { width: 80px; height: 40px; background: #222222; }
+</style>
+"#,
+    );
+    let contribution = CompiledFrontendModule {
+        manifest: minimal_test_manifest("@test/navigation-item"),
+        source_path: PathBuf::from("src/contribution.mesh"),
+        component: parse_component(
+            r#"
+<template><button class="contribution">Pick</button></template>
+<style>
+.contribution { width: 40px; height: 40px; }
+.contribution:hover { transform: scale(1.04); }
+</style>
+"#,
+        )
+        .unwrap(),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
+    };
+    let host_id = component.id().to_owned();
+    Arc::make_mut(&mut component.frontend_catalog)
+        .extension_point_entries
+        .insert(
+            format!("{host_id}\u{1}navigation-item"),
+            contribution.into(),
+        );
+    Arc::make_mut(&mut component.frontend_catalog)
+        .extension_point_contributions
+        .insert(
+            extension_point_key(&host_id, "mesh.navigation.item"),
+            vec![ResolvedExtensionPointContribution {
+                source_module_id: host_id,
+                contribution_id: "navigation-item".into(),
+                order: 0,
+                props_fingerprint: 0,
+                props: serde_json::Map::new(),
+            }],
+        );
+    component.cached_restyle_rules = None;
+
+    assert!(component.module_styles_have_state_rules());
+    assert!(component.module_styles_have_hover_rules());
+}
+
 // cargo test -p mesh-core-shell --release -- hover_without_state_rules_skips_repaint_benchmark --ignored --nocapture
 #[test]
 #[ignore = "release-only hover invalidation microbenchmark"]
@@ -1457,6 +1518,7 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
         modules: Default::default(),
         extension_point_contributions: Default::default(),
         extension_point_entries: Default::default(),
+        node_slot_placements: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,
@@ -1559,6 +1621,7 @@ local Child = require("./components/child.mesh")
         )]),
         extension_point_contributions: Default::default(),
         extension_point_entries: Default::default(),
+        node_slot_placements: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new(
         compiled,

@@ -6,6 +6,12 @@
     "apiVersion": "0.1",
     "kind": "interface",
     "extensionPoints": {
+      "mesh.navigation.item": {
+        "version": "1.0",
+        "description": "A public component that may be placed in an author-declared navigation region.",
+        "multiple": true,
+        "props": []
+      },
       "mesh.settings.page": {
         "version": "1.0",
         "description": "A settings page mounted into a settings frontend. Any module may contribute one; any settings frontend may host the point.",

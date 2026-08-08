@@ -211,6 +211,10 @@ function onAudioToggle()
     end
 end
 
+function onMuteKeybind()
+    onAudioToggle()
+end
+
 function onVolumeScroll(event)
     if not audio or audio.available == false or type(audio.set_volume) ~= "function" then
         return

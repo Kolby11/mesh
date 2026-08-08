@@ -100,6 +100,7 @@ pub fn compile_frontend_entrypoint(
         &mut seen_local_paths,
     )?;
     validate_standalone_imports(&component, &source_path, module_dir, &local_components)?;
+    validate_customizable_slots(manifest, &component, &source_path)?;
 
     tracing::info!(
         "compiled frontend module '{}' from {}",
@@ -126,6 +127,69 @@ pub fn compile_frontend_entrypoint(
         module_component_imports,
         watched_paths,
     })
+}
+
+fn validate_customizable_slots(
+    manifest: &Manifest,
+    component: &ComponentFile,
+    source_path: &Path,
+) -> Result<(), CompileFrontendError> {
+    fn visit<'a>(
+        nodes: &'a [TemplateNode],
+        out: &mut Vec<&'a mesh_core_component::template::SlotNode>,
+    ) {
+        for node in nodes {
+            match node {
+                TemplateNode::Slot(slot) => out.push(slot),
+                TemplateNode::Element(node) => visit(&node.children, out),
+                TemplateNode::Component(node) => visit(&node.children, out),
+                TemplateNode::If(node) => {
+                    visit(&node.then_children, out);
+                    visit(&node.else_children, out);
+                }
+                TemplateNode::For(node) => visit(&node.children, out),
+                TemplateNode::Text(_) | TemplateNode::Expr(_) => {}
+            }
+        }
+    }
+
+    let mut slots = Vec::new();
+    if let Some(template) = &component.template {
+        visit(&template.root, &mut slots);
+    }
+    let mut names = HashSet::new();
+    for slot in slots.into_iter().filter(|slot| slot.customizable) {
+        let name = slot.name.as_deref().unwrap_or_default();
+        if !names.insert(name) {
+            return Err(CompileFrontendError::StandaloneComponentViolation {
+                path: source_path.to_path_buf(),
+                message: format!("duplicate customizable slot name '{name}'"),
+            });
+        }
+        let Some(point) = slot.extension_point.as_deref() else {
+            return Err(CompileFrontendError::StandaloneComponentViolation {
+                path: source_path.to_path_buf(),
+                message: format!("customizable slot '{name}' requires an extension-point"),
+            });
+        };
+        let Some(hosted) = manifest.hosted_extension_points.get(point) else {
+            return Err(CompileFrontendError::StandaloneComponentViolation {
+                path: source_path.to_path_buf(),
+                message: format!(
+                    "customizable slot '{name}' hosts undeclared extension point '{point}'"
+                ),
+            });
+        };
+        if !hosted.slots.contains_key(name) {
+            return Err(CompileFrontendError::StandaloneComponentViolation {
+                path: source_path.to_path_buf(),
+                message: format!(
+                    "customizable slot '{name}' has no mesh.hosts.{point}.slots.{name} declaration"
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn parse_component_file(path: &Path) -> Result<ComponentFile, CompileFrontendError> {

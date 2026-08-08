@@ -909,12 +909,33 @@ local Thing = require("./components/two.mesh")
         match &tmpl.root[0] {
             TemplateNode::Element(el) => match &el.children[0] {
                 TemplateNode::Slot(slot) => {
-                    assert_eq!(slot.extension_point.as_deref(), Some("mesh.settings.page"))
+                    assert_eq!(slot.extension_point.as_deref(), Some("mesh.settings.page"));
+                    assert_eq!(slot.name, None);
+                    assert!(!slot.customizable);
                 }
                 other => panic!("expected slot node, got {other:?}"),
             },
             other => panic!("expected element node, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_customizable_slot_and_rejects_dynamic_identity() {
+        let file = parse_component(
+            r#"<template><slot name="start" extension-point="mesh.navigation.item" mode="customizable"/></template>"#,
+        )
+        .unwrap();
+        let TemplateNode::Slot(slot) = &file.template.unwrap().root[0] else {
+            panic!("expected slot")
+        };
+        assert_eq!(slot.name.as_deref(), Some("start"));
+        assert!(slot.customizable);
+
+        let error = parse_component(
+            r#"<template><slot name={slot_name} extension-point="mesh.navigation.item" mode="customizable"/></template>"#,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("must be static"));
     }
 
     #[test]

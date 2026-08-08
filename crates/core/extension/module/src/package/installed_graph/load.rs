@@ -97,6 +97,7 @@ fn load_installed_module_graph_with(
             .collect::<Vec<_>>();
         let resolved = resolve_composition(profile, manifests.iter())?;
         composition.slots = resolved.spec.slots.clone();
+        composition.node_slots = resolved.spec.node_slots.clone();
         composition.orphaned_overrides = resolved.orphaned_overrides.clone();
         resolved.to_profile().apply_to_root(&mut root, &manifests)?;
     }
