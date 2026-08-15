@@ -71,10 +71,10 @@ function onBrightnessScroll(event)
     -- positive is up and negative is down.
     if dy > 0 then
         update_brightness_copy(brightness_level + amount)
-        brightness.increase(amount)
+        brightness.set(brightness_level)
     else
         update_brightness_copy(brightness_level - amount)
-        brightness.decrease(amount)
+        brightness.set(brightness_level)
     end
 end
 </script>

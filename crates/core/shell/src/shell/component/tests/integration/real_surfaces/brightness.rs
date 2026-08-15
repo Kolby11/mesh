@@ -63,10 +63,10 @@ fn shipped_navigation_brightness_uses_one_level_icon_and_scrolls_both_input_kind
         .unwrap();
     assert!(wheel_requests.iter().any(|request| matches!(
         request,
-        CoreRequest::ServiceCommand { interface, command, payload, .. }
-            if interface == "mesh.brightness"
-                && command == "decrease"
-                && payload == &serde_json::json!({ "amount": 5 })
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.brightness"
+                && command == "set"
+                && payload == &serde_json::json!({ "level": 45 })
     )));
 
     let touchpad_down_requests = component
@@ -84,10 +84,10 @@ fn shipped_navigation_brightness_uses_one_level_icon_and_scrolls_both_input_kind
         .unwrap();
     assert!(touchpad_down_requests.iter().any(|request| matches!(
         request,
-        CoreRequest::ServiceCommand { interface, command, payload, .. }
-            if interface == "mesh.brightness"
-                && command == "decrease"
-                && payload == &serde_json::json!({ "amount": 5 })
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.brightness"
+                && command == "set"
+                && payload == &serde_json::json!({ "level": 40 })
     )));
 
     let touchpad_up_requests = component
@@ -105,10 +105,10 @@ fn shipped_navigation_brightness_uses_one_level_icon_and_scrolls_both_input_kind
         .unwrap();
     assert!(touchpad_up_requests.iter().any(|request| matches!(
         request,
-        CoreRequest::ServiceCommand { interface, command, payload, .. }
-            if interface == "mesh.brightness"
-                && command == "increase"
-                && payload == &serde_json::json!({ "amount": 5 })
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.brightness"
+                && command == "set"
+                && payload == &serde_json::json!({ "level": 45 })
     )));
 }
 
@@ -169,10 +169,10 @@ fn shipped_navigation_brightness_uses_configured_scroll_sensitivity() {
         .unwrap();
     assert!(wheel_requests.iter().any(|request| matches!(
         request,
-        CoreRequest::ServiceCommand { interface, command, payload, .. }
-            if interface == "mesh.brightness"
-                && command == "decrease"
-                && payload == &serde_json::json!({ "amount": 12 })
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.brightness"
+                && command == "set"
+                && payload == &serde_json::json!({ "level": 38 })
     )));
 
     let touchpad_requests = component
@@ -190,10 +190,10 @@ fn shipped_navigation_brightness_uses_configured_scroll_sensitivity() {
         .unwrap();
     assert!(touchpad_requests.iter().any(|request| matches!(
         request,
-        CoreRequest::ServiceCommand { interface, command, payload, .. }
-            if interface == "mesh.brightness"
-                && command == "increase"
-                && payload == &serde_json::json!({ "amount": 12 })
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.brightness"
+                && command == "set"
+                && payload == &serde_json::json!({ "level": 50 })
     )));
 }
 
@@ -254,9 +254,9 @@ fn shipped_navigation_brightness_falls_back_for_invalid_scroll_sensitivity() {
         .unwrap();
     assert!(requests.iter().any(|request| matches!(
         request,
-        CoreRequest::ServiceCommand { interface, command, payload, .. }
-            if interface == "mesh.brightness"
-                && command == "increase"
-                && payload == &serde_json::json!({ "amount": 5 })
+            CoreRequest::ServiceCommand { interface, command, payload, .. }
+                if interface == "mesh.brightness"
+                && command == "set"
+                && payload == &serde_json::json!({ "level": 55 })
     )));
 }

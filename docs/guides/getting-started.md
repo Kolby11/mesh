@@ -25,7 +25,7 @@ workflow runs the development shell from source.
 Inside a compatible Wayland session:
 
 ```bash
-nix develop -c cargo run -p mesh-tools-cli --bin mesh-shell -- start
+nix develop -c cargo run --release -p mesh-tools-cli --bin mesh-shell -- start
 ```
 
 The current shell reads the repository module graph from `config/module.json`

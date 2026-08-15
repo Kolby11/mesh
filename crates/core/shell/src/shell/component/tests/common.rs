@@ -263,10 +263,23 @@ pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
                     field_type: "number".into(),
                     description: None,
                 }],
-                vec!["increase", "decrease"]
-                    .into_iter()
-                    .map(|name| InterfaceMethod {
-                        name: name.into(),
+                vec![
+                    InterfaceMethod {
+                        name: "set".into(),
+                        args: vec![InterfaceArgument {
+                            name: "level".into(),
+                            arg_type: "number".into(),
+                        }],
+                        returns: None,
+                        coalesce: true,
+                        state_binding: Some(mesh_core_service::StateBinding {
+                            field: "level".into(),
+                            from_arg: Some("level".into()),
+                            toggle: false,
+                        }),
+                    },
+                    InterfaceMethod {
+                        name: "increase".into(),
                         args: vec![InterfaceArgument {
                             name: "amount".into(),
                             arg_type: "number".into(),
@@ -274,8 +287,18 @@ pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
                         returns: None,
                         coalesce: false,
                         state_binding: None,
-                    })
-                    .collect(),
+                    },
+                    InterfaceMethod {
+                        name: "decrease".into(),
+                        args: vec![InterfaceArgument {
+                            name: "amount".into(),
+                            arg_type: "number".into(),
+                        }],
+                        returns: None,
+                        coalesce: false,
+                        state_binding: None,
+                    },
+                ],
             )
         } else {
             (Vec::new(), Vec::new())

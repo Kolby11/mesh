@@ -41,7 +41,8 @@
 
           shellHook = ''
             echo "MESH dev shell ready"
-            echo "Run: cargo run -p mesh-tools-cli --bin mesh-shell -- start"
+            echo "Run: cargo run --release -p mesh-tools-cli --bin mesh-shell -- start"
+            echo "Debug: cargo run -p mesh-tools-cli --bin mesh-shell -- start"
             echo "Profile: ./tools/profile-shell live|cpu|memory"
           '';
         };

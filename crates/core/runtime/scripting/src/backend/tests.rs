@@ -737,12 +737,21 @@ end
         .globals()
         .get::<Table>("exec_calls")
         .unwrap();
-    assert_eq!(calls.raw_len(), 3);
+    assert_eq!(calls.raw_len(), 2);
     let set_call = calls.get::<Table>(2).unwrap();
     assert_eq!(set_call.get::<String>("program").unwrap(), "brightnessctl");
     let args = set_call.get::<Table>("args").unwrap();
     assert_eq!(args.get::<String>(1).unwrap(), "set");
     assert_eq!(args.get::<String>(2).unwrap(), "5.0%+");
+    assert_eq!(
+        outcome
+            .state
+            .as_ref()
+            .and_then(|state| state.get("level"))
+            .and_then(|level| level.as_f64()),
+        Some(55.0),
+        "a successful brightness write should publish optimistic state"
+    );
 }
 
 #[test]
@@ -1010,6 +1019,100 @@ fn bundled_pulseaudio_backend_does_not_restore_high_frequency_exec_polling() {
     assert!(
         ctx.poll_interval_ms() >= 250,
         "PulseAudio fallback polling must stay at or above 250ms to avoid spawning two pactl processes every 100ms"
+    );
+}
+
+#[test]
+fn bundled_pipewire_backend_skips_successful_write_readback_when_streaming() {
+    let script = bundled_backend_script(
+        "../../../../packages/modules/backend/core/pipewire-audio/src/main.luau",
+    );
+    let mut ctx = BackendScriptContext::new("@mesh/pipewire-audio");
+    ctx.load_script(&script).unwrap();
+    ctx.ensure_lua()
+        .load(
+            r#"
+exec_calls = {}
+mesh.exec_stream = function(program, _args)
+    return program == "pw-mon"
+end
+mesh.exec = function(program, args)
+    exec_calls[#exec_calls + 1] = { program = program, args = args }
+    return { success = true, stdout = "", stderr = "", code = 0 }
+end
+"#,
+        )
+        .exec()
+        .unwrap();
+
+    ctx.call_init().unwrap();
+    let outcome = ctx
+        .run_command_with_result("set-volume", &serde_json::json!({ "percent": 72 }))
+        .unwrap();
+    assert_eq!(outcome.result["ok"], serde_json::json!(true));
+
+    let calls = ctx
+        .ensure_lua()
+        .globals()
+        .get::<Table>("exec_calls")
+        .unwrap();
+    assert_eq!(
+        calls.raw_len(),
+        1,
+        "streaming writes must not reread volume"
+    );
+    let call = calls.get::<Table>(1).unwrap();
+    assert_eq!(call.get::<String>("program").unwrap(), "wpctl");
+    assert_eq!(
+        call.get::<Table>("args").unwrap().get::<String>(1).unwrap(),
+        "set-volume"
+    );
+}
+
+#[test]
+fn bundled_pulseaudio_backend_skips_successful_write_readback_when_streaming() {
+    let script = bundled_backend_script(
+        "../../../../packages/modules/backend/core/pulseaudio-audio/src/main.luau",
+    );
+    let mut ctx = BackendScriptContext::new("@mesh/pulseaudio-audio");
+    ctx.load_script(&script).unwrap();
+    ctx.ensure_lua()
+        .load(
+            r#"
+exec_calls = {}
+mesh.exec_stream = function(program, _args)
+    return program == "pactl"
+end
+mesh.exec = function(program, args)
+    exec_calls[#exec_calls + 1] = { program = program, args = args }
+    return { success = true, stdout = "", stderr = "", code = 0 }
+end
+"#,
+        )
+        .exec()
+        .unwrap();
+
+    ctx.call_init().unwrap();
+    let outcome = ctx
+        .run_command_with_result("set-volume", &serde_json::json!({ "percent": 72 }))
+        .unwrap();
+    assert_eq!(outcome.result["ok"], serde_json::json!(true));
+
+    let calls = ctx
+        .ensure_lua()
+        .globals()
+        .get::<Table>("exec_calls")
+        .unwrap();
+    assert_eq!(
+        calls.raw_len(),
+        1,
+        "streaming writes must not reread volume"
+    );
+    let call = calls.get::<Table>(1).unwrap();
+    assert_eq!(call.get::<String>("program").unwrap(), "pactl");
+    assert_eq!(
+        call.get::<Table>("args").unwrap().get::<String>(1).unwrap(),
+        "set-sink-volume"
     );
 }
 

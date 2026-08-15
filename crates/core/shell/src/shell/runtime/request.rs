@@ -8,13 +8,14 @@ use mesh_core_presentation::{
     PopupPlacement, SurfacePadding,
 };
 
-/// One main-loop tick (~60 Hz). Coalescable commands fire on the leading
-/// edge; further calls within the interval park as `pending` and are
-/// flushed on the next tick after the interval elapses. The slider's
-/// visual position is rendered from cursor state independently of this
-/// throttle, so dragging stays smooth.
+/// Coalescable commands fire on the leading edge; further calls within the
+/// interval park as `pending` and are flushed on the trailing edge. This is
+/// intentionally longer than one render tick because shipped providers use
+/// these setters for external commands such as `wpctl` and `brightnessctl`.
+/// Their optimistic state bindings keep slider visuals smooth while the
+/// backend command rate stays below the process-launch cost.
 pub(in crate::shell) const COMMAND_THROTTLE_INTERVAL: std::time::Duration =
-    std::time::Duration::from_millis(16);
+    std::time::Duration::from_millis(100);
 const POPOVER_HOVER_BRIDGE_DELAY: std::time::Duration = std::time::Duration::from_millis(180);
 const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 

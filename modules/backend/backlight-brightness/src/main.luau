@@ -68,10 +68,14 @@ local function command_amount(default_amount)
     return clamp_percent(payload.amount, default_amount)
 end
 
-local function apply(self, argument)
+local function apply(self, argument, next_level)
     local result = mesh.exec("brightnessctl", { "set", argument })
-    refresh_state(self)
-    if not result.success then
+    if result.success then
+        -- brightnessctl has no event stream. Publish the requested value
+        -- optimistically and let the safety poll correct rounding or clamping.
+        publish_level(self, next_level)
+    else
+        refresh_state(self)
         log_warn("brightnessctl set failed: " .. (result.stderr or "unknown error"))
     end
     return { ok = result.success, error = result.stderr }
@@ -89,15 +93,17 @@ end
 function on_command_set(self)
     local payload = mesh.service.payload()
     local level = clamp_percent(payload.level, state.level)
-    return apply(self, string.format("%.1f%%", level))
+    return apply(self, string.format("%.1f%%", level), level)
 end
 
 function on_command_increase(self)
     local amount = command_amount(5)
-    return apply(self, string.format("%.1f%%+", amount))
+    local next_level = clamp_percent(state.level + amount, state.level)
+    return apply(self, string.format("%.1f%%+", amount), next_level)
 end
 
 function on_command_decrease(self)
     local amount = command_amount(5)
-    return apply(self, string.format("%.1f%%-", amount))
+    local next_level = clamp_percent(state.level - amount, state.level)
+    return apply(self, string.format("%.1f%%-", amount), next_level)
 end

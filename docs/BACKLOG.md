@@ -82,12 +82,6 @@ gate where the win is structural.
       region), and `.nav-shell` carries one. Latent today because damage is
       already full-surface for the reason above; it becomes the next ceiling as
       soon as that is fixed.
-- [ ] Stop building the focused proof snapshot on production paints. It runs on
-      every paint, allocates several `String`s per node (two `node.id`
-      stringifications, an AccessKit id `format!`, cloned `role`/`aria-label`,
-      and a `parley_text::…` format per text node), and is read only by tests.
-      Worth ~19% of an Appearance paint-only frame and ~13% of a scroll frame;
-      measured 2026-08-08.
 - [ ] Continue widening generation shortcuts to per-node dirty scoping and
       unify changed-node fingerprints across the retained, render, and display
       layers; geometry-only retained snapshots are split out now.
@@ -144,22 +138,6 @@ gate where the win is structural.
 
 ### Runtime boundary
 
-- [ ] The `nix develop` banner tells developers to run the **debug** build
-      (`cargo run -p mesh-tools-cli --bin mesh-shell -- start`), which is
-      21–28x slower at idle than the optimized profile (5.55% vs 0.20% of a
-      core) and reads as a shell performance problem. Point the banner at a
-      release/profiling run, and consider a startup log line naming the build
-      profile so a debug shell is self-identifying.
-- [ ] **A scroll over a service-backed control spawns ~60 processes/second.**
-      `onVolumeScroll` → `audio.set_volume()` costs two `wpctl` launches (the
-      write, then an unconditional `refresh_state()` read-back) at up to 62.5
-      commands/s under the 16ms `COMMAND_THROTTLE_INTERVAL`. A `wpctl` launch is
-      15.5ms of CPU, nearly all dynamic linking, so continuous scrolling pegs a
-      core (measured 93.4% in children vs 3.55% for the whole shell). Three
-      separable fixes: throttle service *commands* by cost rather than by frame
-      budget, drop the read-back while a monitor stream is already live, and
-      coalesce repeated writes to the same field. Same shape for brightness
-      scroll and popover slider drags.
 - [ ] Push-based backend host API primitives (D-Bus signal subscribe, fd/socket
       watch, stream adoption) so providers are event-driven and polling is the
       fallback (C). **Measured 2026-08-08:** the shipped polls fork ~3 processes

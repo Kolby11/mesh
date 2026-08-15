@@ -948,6 +948,7 @@ pub(super) struct FrontendSurfaceComponent {
     profiling_enabled: bool,
     profiling_records: RefCell<Vec<ComponentProfilingRecord>>,
     invalidation_snapshot: Option<mesh_core_debug::ProfilingInvalidationSnapshot>,
+    #[cfg(test)]
     focused_proof_snapshot: Option<mesh_core_render::FocusedProofSnapshot>,
     last_present_damage_rects: Vec<DamageRect>,
     last_visual_damage: HashMap<NodeId, DamageRect>,
@@ -1200,6 +1201,7 @@ impl FrontendSurfaceComponent {
             profiling_enabled: false,
             profiling_records: RefCell::new(Vec::new()),
             invalidation_snapshot: None,
+            #[cfg(test)]
             focused_proof_snapshot: None,
             last_present_damage_rects: Vec::new(),
             last_visual_damage: HashMap::new(),

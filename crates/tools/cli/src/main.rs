@@ -69,7 +69,10 @@ fn init_tracing() {
 }
 
 fn cmd_start() {
-    tracing::info!("starting MESH shell");
+    tracing::info!(
+        build_profile = env!("MESH_BUILD_PROFILE"),
+        "starting MESH shell"
+    );
     let mut shell = Shell::new();
     if let Err(err) = shell.run() {
         tracing::error!("MESH shell exited with error: {err}");

@@ -1,5 +1,42 @@
 # MESH Performance Log
 
+## 2026-08-15 — pace service control writes and remove successful read-backs
+
+area: runtime command dispatch, audio/brightness backends, service-backed input
+
+Coalescable service setters now use a 100ms backend-command budget instead of
+the former 16ms render-tick interval. The shell keeps leading-edge delivery
+and last-wins trailing flushes, so optimistic state bindings keep controls
+responsive without permitting external-process-backed setters to run at the
+frame rate. Navigation brightness scroll now sends the absolute `set` value,
+which makes it coalescable instead of issuing relative commands that cannot be
+safely collapsed.
+
+PipeWire and PulseAudio successful writes no longer synchronously reread state
+when their monitor stream is active. The shell's optimistic binding is
+confirmed by the stream or safety poll; failed writes and fallback polling
+still reread state. The brightness provider likewise publishes a successful
+requested level optimistically and leaves rounding/clamping correction to its
+2-second safety poll.
+
+**Baseline.** The live `profiling` capture from 2026-08-08 used a 16ms
+interval, observed up to 62.5 volume commands/second, two `wpctl` launches per
+command, 15.5ms CPU per launch, and 93.4% of one core in children versus 3.55%
+for the shell process. That workload was on a live Hyprland session; the
+current verification environment did not provide a compositor session, so no
+live before/after CPU range is claimed here.
+
+**Checked structural gate.** `coalescable_service_commands_use_a_backend_cost_budget`
+proves leading-edge delivery, last-wins pending payloads, and trailing flush
+after the 100ms budget. The bundled PipeWire and PulseAudio backend tests each
+prove one successful setter produces only the write process when streaming;
+the bundled brightness test proves a successful write publishes the requested
+level without a read-back. The shipped navigation brightness tests cover wheel,
+trackpad, configured sensitivity, and invalid-sensitivity fallback through the
+coalescable absolute setter.
+
+---
+
 ## 2026-08-08 — Hyprland stream events stop spawning full-state queries
 
 area: backend host API, Hyprland provider, service events

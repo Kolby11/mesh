@@ -1,11 +1,16 @@
 # Status
 
-**Updated:** 2026-08-08
+**Updated:** 2026-08-15
 
 This page describes the present. History lives in [`log/`](log/); open work
 lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
+
+The Nix development shell now recommends the optimized release shell command,
+keeps the debug command explicit for debugging, and the shell logs its Cargo
+build profile at startup. Production paints no longer build the focused proof
+snapshot; the proof remains available to the shell regression tests.
 
 Showing and hiding a surface is one clean map/unmap on the wire. A layer-surface
 configure is never sent carrying a zero dimension no anchor backs — the
@@ -36,13 +41,13 @@ that moved through layout propagation, while authoritative dirty roots retain
 the full diff. The isolated 256-row release gate improves from
 192.294–193.961ms to 62.866–62.967ms across three runs (3.06–3.08x).
 
-The reported "scrolling pegs a core" is subprocess spawning, not rendering. A
-scroll over the volume button dispatches `audio.set_volume()` up to 62.5 times
-a second under the 16ms command throttle, and each command costs two `wpctl`
-launches (the write plus an unconditional state read-back) at 15.5ms of CPU
-each — almost all dynamic linking. Measured during a live scroll: 93.4% of a
-core in children, 3.55% for the entire shell process. No render stage appears
-above 1% in that profile.
+Service-backed scroll and drag commands now use a 100ms backend-command budget
+for coalescable setters. Navigation brightness scroll emits the absolute
+coalescable setter; successful audio writes rely on live streams and optimistic
+state instead of synchronous read-backs, while brightness publishes the
+requested level and lets its safety poll confirm rounding or clamping. The
+original live capture remains the baseline; mocked command-path regressions
+cover the pacing, stream read-back suppression, and optimistic state paths.
 
 A live capture against the running shell reframes the frame-cost work below:
 the render loop is not what costs. At rest the shell process uses 0.20% of one
@@ -59,12 +64,10 @@ for a pointer move, 1.60ms for a service poll nothing on the bar reads, and
 2.58ms for one it does. Sampling puts ~27% of a steady-state frame in the
 allocator and under 1% in Skia's pixel fill, so the software rasterizer is not
 the limit — per-frame `String` allocation and hashing in shell bookkeeping is.
-Three specific costs are now backlog items: the test-only focused proof
-snapshot built on every production paint (~19% of an Appearance paint frame),
-animation invalidation dropping the `STATE` bit that selects targeted restyle
-(2.1x on an otherwise identical frame), and `String`-keyed per-frame maps on
-the animation path. No behavior changed; measurements are in the performance
-log.
+The remaining measured frame costs are animation invalidation dropping the
+`STATE` bit that selects targeted restyle (2.1x on an otherwise identical
+frame), and `String`-keyed per-frame maps on the animation path. No behavior
+changed; measurements are in the performance log.
 
 Background service polls no longer re-instantiate frontend components that
 cannot observe them. Read capability is per module, so every component instance

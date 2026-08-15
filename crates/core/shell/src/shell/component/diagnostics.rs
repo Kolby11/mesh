@@ -28,6 +28,7 @@ impl FrontendSurfaceComponent {
         diagnostics.record_missing_icon(semantic_name.to_string(), tried)
     }
 
+    #[cfg(test)]
     pub(super) fn record_focused_proof_diagnostic(
         &self,
         diagnostic: &mesh_core_render::FocusedProofDiagnostic,

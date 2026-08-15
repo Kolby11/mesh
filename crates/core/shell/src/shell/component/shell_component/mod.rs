@@ -32,7 +32,10 @@ impl FrontendSurfaceComponent {
         self.retained_display_list = RetainedDisplayList::default();
         self.pending_service_template_nodes = None;
         self.child_display_lists.get_mut().clear();
-        self.focused_proof_snapshot = None;
+        #[cfg(test)]
+        {
+            self.focused_proof_snapshot = None;
+        }
         self.last_visual_damage.clear();
     }
 
@@ -930,16 +933,19 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.retained_display_list
                 .select_paint_commands_for_rects(&effective_damage.rects, effective_damage.policy)
         };
-        let focused_proof_snapshot = mesh_core_render::build_focused_proof_snapshot(
-            &tree,
-            render_object_dirty,
-            display_list_metrics,
-            &selected_paint,
-        );
-        for diagnostic in &focused_proof_snapshot.diagnostics {
-            self.record_focused_proof_diagnostic(diagnostic);
+        #[cfg(test)]
+        {
+            let focused_proof_snapshot = mesh_core_render::build_focused_proof_snapshot(
+                &tree,
+                render_object_dirty,
+                display_list_metrics,
+                &selected_paint,
+            );
+            for diagnostic in &focused_proof_snapshot.diagnostics {
+                self.record_focused_proof_diagnostic(diagnostic);
+            }
+            self.focused_proof_snapshot = Some(focused_proof_snapshot);
         }
-        self.focused_proof_snapshot = Some(focused_proof_snapshot);
         let narrow_path = self.narrow_path_active;
         let affected_count = self.affected_node_count;
         self.narrow_path_active = false;

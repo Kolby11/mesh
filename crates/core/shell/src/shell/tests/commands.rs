@@ -335,6 +335,52 @@ fn a_core_provided_command_is_applied_by_the_shell_itself() {
     );
 }
 
+#[test]
+fn coalescable_service_commands_use_a_backend_cost_budget() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let mut contract = test_contract("mesh.audio");
+    contract.methods[0].coalesce = true;
+    shell.interfaces.register_contract(contract);
+    register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
+    let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.audio.control",
+    ));
+
+    let first = shell.dispatch_service_command(
+        "mesh.audio",
+        "set_volume",
+        &serde_json::json!({ "percent": 40 }),
+        "@mesh/navigation-bar",
+        &capabilities,
+    );
+    assert_eq!(first["ok"], serde_json::json!(true));
+    assert_eq!(
+        rx.try_recv().unwrap().payload["percent"],
+        serde_json::json!(40)
+    );
+
+    let second = shell.dispatch_service_command(
+        "mesh.audio",
+        "set_volume",
+        &serde_json::json!({ "percent": 75 }),
+        "@mesh/navigation-bar",
+        &capabilities,
+    );
+    assert_eq!(second["throttled"], serde_json::json!(true));
+    assert!(rx.try_recv().is_err());
+
+    std::thread::sleep(std::time::Duration::from_millis(110));
+    shell.flush_throttled_commands();
+    assert_eq!(
+        rx.try_recv().unwrap().payload["percent"],
+        serde_json::json!(75)
+    );
+}
+
 /// The capability is the whole gate. No module id is consulted, so a
 /// third-party settings frontend has exactly the same reach as `@mesh/settings`.
 #[test]

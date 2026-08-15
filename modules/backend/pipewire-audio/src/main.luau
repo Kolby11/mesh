@@ -192,6 +192,18 @@ local function maybe_emit_volume_changed(self)
     emit_volume_changed(self)
 end
 
+-- A successful write is reflected by the shell's optimistic state binding and
+-- confirmed by the live stream or the safety poll. Avoid a synchronous
+-- get-volume process on the command path; retain the read-back for failures
+-- so the provider can recover its actual state.
+local function refresh_after_command(self, succeeded)
+    if stream_active and succeeded then
+        return
+    end
+    refresh_state()
+    maybe_emit_volume_changed(self)
+end
+
 -- Scan one pw-mon batch. Returns whether it carries a real signal (any
 -- `changed:` block, or an `added:` block whose object is not a Client) and
 -- how many Client `added:` blocks it contains. Client connects are how
@@ -271,16 +283,15 @@ function on_command_volume_up(self)
     debug_info("received volume_up()")
     local volume = wpctl_with_sink_fallback({ "set-volume", "@DEFAULT_AUDIO_SINK@", "5%+" })
     local mute = wpctl_with_sink_fallback({ "set-mute", "@DEFAULT_AUDIO_SINK@", "0" })
-    refresh_state()
-    maybe_emit_volume_changed(self)
-    return { ok = volume.success and mute.success, error = volume.stderr ~= "" and volume.stderr or mute.stderr }
+    local ok = volume.success and mute.success
+    refresh_after_command(self, ok)
+    return { ok = ok, error = volume.stderr ~= "" and volume.stderr or mute.stderr }
 end
 
 function on_command_volume_down(self)
     debug_info("received volume_down()")
     local result = wpctl_with_sink_fallback({ "set-volume", "@DEFAULT_AUDIO_SINK@", "5%-" })
-    refresh_state()
-    maybe_emit_volume_changed(self)
+    refresh_after_command(self, result.success)
     return { ok = result.success, error = result.stderr }
 end
 
@@ -290,20 +301,18 @@ function on_command_set_volume(self)
     debug_info("received set_volume payload percent=" .. tostring(percent))
     local result = wpctl_with_sink_fallback({ "set-volume", "@DEFAULT_AUDIO_SINK@", tostring(percent) .. "%" })
     if not result.success then
-        refresh_state()
+        refresh_after_command(self, false)
         debug_warn("set_volume failed: " .. (result.stderr or "unknown error"))
         return { ok = false, error = result.stderr }
     end
-    refresh_state()
-    maybe_emit_volume_changed(self)
+    refresh_after_command(self, true)
     return { ok = true }
 end
 
 function on_command_toggle_mute(self)
     debug_info("received toggle_mute()")
     local result = wpctl_with_sink_fallback({ "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle" })
-    refresh_state()
-    maybe_emit_volume_changed(self)
+    refresh_after_command(self, result.success)
     return { ok = result.success, error = result.stderr }
 end
 
@@ -312,8 +321,7 @@ function on_command_set_muted(self)
     local muted = payload.muted == true
     debug_info("received set_muted(" .. tostring(muted) .. ")")
     local result = wpctl_with_sink_fallback({ "set-mute", "@DEFAULT_AUDIO_SINK@", muted and "1" or "0" })
-    refresh_state()
-    maybe_emit_volume_changed(self)
+    refresh_after_command(self, result.success)
     return { ok = result.success, error = result.stderr }
 end
 

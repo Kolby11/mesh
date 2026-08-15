@@ -18,7 +18,8 @@ and Linux profiling tools.
 | --- | --- |
 | `cargo check --workspace` | Type-check the complete Cargo workspace |
 | `cargo build --workspace` | Build all workspace crates |
-| `cargo run -p mesh-tools-cli --bin mesh-shell -- start` | Run the development shell |
+| `cargo run --release -p mesh-tools-cli --bin mesh-shell -- start` | Run the optimized development shell |
+| `cargo run -p mesh-tools-cli --bin mesh-shell -- start` | Run the debug shell for debugging |
 | `cargo run -p mesh-tools-cli --bin mesh-shell -- help` | Show current CLI commands |
 | `cargo run -p mesh-tools-lsp --bin mesh-tools-lsp` | Run the language server over stdio |
 | `cargo fmt --all --check` | Check Rust formatting |

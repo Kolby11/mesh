@@ -9,6 +9,7 @@ local last_availability = nil
 local last_state_snapshot = nil
 local last_emitted_percent = nil
 local last_emitted_muted = nil
+local stream_active = false
 
 local STREAM_SAFETY_POLL_MS = 1000
 local FALLBACK_POLL_MS = 250
@@ -27,6 +28,7 @@ function start(self)
     mesh.service.set_poll_interval(STREAM_SAFETY_POLL_MS)
     local subscribed = mesh.exec_stream("pactl", { "subscribe" })
     if subscribed then
+        stream_active = true
         debug_info("subscribed to pactl for live volume events")
     else
         mesh.service.set_poll_interval(FALLBACK_POLL_MS)
@@ -126,6 +128,17 @@ local function maybe_emit_volume_changed(self)
     emit_volume_changed(self)
 end
 
+-- Successful writes are confirmed by pactl's event stream. Keep the read-back
+-- only for fallback mode or failed writes, where it is needed to recover the
+-- provider's actual state.
+local function refresh_after_command(self, succeeded)
+    if stream_active and succeeded then
+        return
+    end
+    refresh_state()
+    maybe_emit_volume_changed(self)
+end
+
 function on_stream_batch(self, program, lines)
     if program ~= "pactl" then
         return
@@ -148,16 +161,15 @@ function on_command_volume_up(self)
     debug_info("received volume_up()")
     local volume = mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", "+5%" })
     local mute = mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", "0" })
-    refresh_state()
-    emit_volume_changed(self)
-    return { ok = volume.success and mute.success, error = volume.stderr ~= "" and volume.stderr or mute.stderr }
+    local ok = volume.success and mute.success
+    refresh_after_command(self, ok)
+    return { ok = ok, error = volume.stderr ~= "" and volume.stderr or mute.stderr }
 end
 
 function on_command_volume_down(self)
     debug_info("received volume_down()")
     local result = mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", "-5%" })
-    refresh_state()
-    emit_volume_changed(self)
+    refresh_after_command(self, result.success)
     return { ok = result.success, error = result.stderr }
 end
 
@@ -166,16 +178,14 @@ function on_command_set_volume(self)
     local percent = command_percent_from_payload(payload)
     debug_info("received set_volume payload percent=" .. tostring(percent))
     local result = mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", tostring(percent) .. "%" })
-    refresh_state()
-    emit_volume_changed(self)
+    refresh_after_command(self, result.success)
     return { ok = result.success, error = result.stderr }
 end
 
 function on_command_toggle_mute(self)
     debug_info("received toggle_mute()")
     local result = mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", "toggle" })
-    refresh_state()
-    emit_volume_changed(self)
+    refresh_after_command(self, result.success)
     return { ok = result.success, error = result.stderr }
 end
 
@@ -184,8 +194,7 @@ function on_command_set_muted(self)
     local muted = payload.muted == true
     debug_info("received set_muted(" .. tostring(muted) .. ")")
     local result = mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", muted and "1" or "0" })
-    refresh_state()
-    emit_volume_changed(self)
+    refresh_after_command(self, result.success)
     return { ok = result.success, error = result.stderr }
 end
 
