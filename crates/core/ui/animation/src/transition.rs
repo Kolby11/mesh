@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use mesh_core_elements::{
-    BoxShadow, Corners, Dimension, Edges, TransitionProperties, TransitionStyle, VisualFilter,
-    WidgetNode,
+    BoxShadow, Corners, Dimension, Edges, NodeId, TransitionProperties, TransitionStyle,
+    VisualFilter, WidgetNode,
     style::{Color, Visibility},
 };
 
@@ -356,13 +356,13 @@ impl ActiveTransition {
 /// Per-component transition controller.
 ///
 /// Owns the in-flight transitions keyed by retained widget identity
-/// (`_mesh_key`). Callers that drive transitions alongside other concerns
+/// (`NodeId`). Callers that drive transitions alongside other concerns
 /// (keyframes, theme restyle, dirty tracking) step nodes individually with
 /// [`TransitionAnimator::step_node`]; callers that only need transitions can
 /// walk a whole tree with [`TransitionAnimator::apply`].
 #[derive(Debug, Default)]
 pub struct TransitionAnimator {
-    active: HashMap<String, ActiveTransition>,
+    active: HashMap<NodeId, ActiveTransition>,
 }
 
 impl TransitionAnimator {
@@ -374,35 +374,35 @@ impl TransitionAnimator {
         self.active.is_empty()
     }
 
-    pub fn contains_key(&self, key: &str) -> bool {
-        self.active.contains_key(key)
+    pub fn contains_key(&self, key: NodeId) -> bool {
+        self.active.contains_key(&key)
     }
 
     pub fn clear(&mut self) {
         self.active.clear();
     }
 
-    pub fn remove(&mut self, key: &str) {
-        self.active.remove(key);
+    pub fn remove(&mut self, key: NodeId) {
+        self.active.remove(&key);
     }
 
     /// Style currently displayed by an in-flight transition for `key`.
-    pub fn displayed_style(&self, key: &str, now: Instant) -> Option<AnimatableStyle> {
+    pub fn displayed_style(&self, key: NodeId, now: Instant) -> Option<AnimatableStyle> {
         self.active
-            .get(key)
+            .get(&key)
             .map(|transition| transition.current(now))
     }
 
     /// The transition for `key` if it has not finished — used to classify the
     /// active animation property bucket.
-    pub fn active_unfinished(&self, key: &str, now: Instant) -> Option<&ActiveTransition> {
+    pub fn active_unfinished(&self, key: NodeId, now: Instant) -> Option<&ActiveTransition> {
         self.active
-            .get(key)
+            .get(&key)
             .filter(|transition| !transition.finished(now))
     }
 
     /// Drop transitions whose key left the live set or that have finished.
-    pub fn retain_live(&mut self, live: &HashSet<String>, now: Instant) {
+    pub fn retain_live(&mut self, live: &HashSet<NodeId>, now: Instant) {
         self.active
             .retain(|key, transition| live.contains(key) && !transition.finished(now));
     }
@@ -419,7 +419,7 @@ impl TransitionAnimator {
     /// interpolated value and returns `true` if a transition is still active.
     pub fn step_node(
         &mut self,
-        key: &str,
+        key: NodeId,
         node: &mut WidgetNode,
         previous_displayed: AnimatableStyle,
         now: Instant,
@@ -443,7 +443,7 @@ impl TransitionAnimator {
             transition.duration_ms > 0 && previous_displayed.differs(&desired, props);
 
         if should_animate {
-            let restart = self.active.get(key).is_none_or(|transition_in_flight| {
+            let restart = self.active.get(&key).is_none_or(|transition_in_flight| {
                 transition_in_flight.to != desired
                     || transition_in_flight.source != transition
                     || transition_in_flight.finished(now)
@@ -452,7 +452,7 @@ impl TransitionAnimator {
             if restart {
                 let from = AnimatableStyle::selective_from(previous_displayed, desired, props);
                 self.active.insert(
-                    key.to_string(),
+                    key,
                     ActiveTransition {
                         from,
                         to: desired,
@@ -465,10 +465,10 @@ impl TransitionAnimator {
                 );
             }
         } else {
-            self.active.remove(key);
+            self.active.remove(&key);
         }
 
-        if let Some(transition_in_flight) = self.active.get(key) {
+        if let Some(transition_in_flight) = self.active.get(&key) {
             transition_in_flight.current(now).apply_to_node(node);
             if !transition_in_flight.finished(now) {
                 return true;
@@ -477,7 +477,7 @@ impl TransitionAnimator {
         false
     }
 
-    /// Walk a widget tree and step the transition for every `_mesh_key` node
+    /// Walk a widget tree and step the transition for every runtime-keyed node
     /// using that node's own `computed_style.transition`. Suitable for
     /// consumers that only need transitions (no keyframes or theme
     /// orchestration). Returns `true` if any transition is active.
@@ -492,15 +492,16 @@ impl TransitionAnimator {
         &mut self,
         node: &mut WidgetNode,
         now: Instant,
-        live: &mut HashSet<String>,
+        live: &mut HashSet<NodeId>,
     ) -> bool {
         let mut active = false;
-        if let Some(key) = node.mesh_key().map(str::to_owned) {
-            live.insert(key.clone());
+        if node.mesh_key().is_some() {
+            let key = node.id;
+            live.insert(key);
             let previous = self
-                .displayed_style(&key, now)
+                .displayed_style(key, now)
                 .unwrap_or_else(|| AnimatableStyle::from_node(node));
-            active |= self.step_node(&key, node, previous, now);
+            active |= self.step_node(key, node, previous, now);
         }
         for child in &mut node.children {
             active |= self.apply_node(child, now, live);
@@ -593,16 +594,17 @@ mod tests {
             opacity: 0.0,
             ..AnimatableStyle::from_node(&node)
         };
-        let active = animator.step_node("k", &mut node, previous, start);
+        let key = node.id;
+        let active = animator.step_node(key, &mut node, previous, start);
         assert!(active);
         assert!(node.computed_style.opacity < 1.0);
-        assert!(animator.contains_key("k"));
+        assert!(animator.contains_key(key));
 
         // A fresh tree rebuild re-asserts the desired target (1.0) each frame.
         node.computed_style.opacity = 1.0;
         let done = start + Duration::from_millis(150);
-        let displayed = animator.displayed_style("k", done).expect("in flight");
-        let still_active = animator.step_node("k", &mut node, displayed, done);
+        let displayed = animator.displayed_style(key, done).expect("in flight");
+        let still_active = animator.step_node(key, &mut node, displayed, done);
         assert!(!still_active);
         assert!((node.computed_style.opacity - 1.0).abs() < 1e-4);
     }

@@ -908,10 +908,10 @@ pub(super) struct FrontendSurfaceComponent {
     keyframe_animations: HashMap<String, mesh_core_animation::keyframes::ActiveKeyframeAnimation>,
     keyframe_rules: HashMap<String, mesh_core_animation::keyframes::KeyframeRule>,
     previous_visual_styles_scratch:
-        HashMap<String, mesh_core_animation::transition::AnimatableStyle>,
+        HashMap<NodeId, mesh_core_animation::transition::AnimatableStyle>,
     /// Per-animation-pass key sets. Retain their hash-table allocations across
     /// ticks because the same surface is usually traversed every frame.
-    animation_live_keys_scratch: HashSet<String>,
+    animation_live_keys_scratch: HashSet<NodeId>,
     animation_live_keyframe_keys_scratch: HashSet<String>,
     animation_dirty_node_ids_scratch: HashSet<NodeId>,
     has_animatable_style_rules: bool,

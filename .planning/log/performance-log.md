@@ -1,5 +1,60 @@
 # MESH Performance Log
 
+## 2026-08-16 — key animation transition state by NodeId
+
+`working tree` · area: animation identity and per-frame allocation
+
+Transition state, previous visual snapshots, and the live transition set now
+use the stable runtime `NodeId` assigned during tree annotation. The animation
+walk no longer owns a mesh-key `String` and clones it into a live set for every
+node on every frame. Keyframe registry entries remain string-based because
+their names are authored CSS identities.
+
+**Measured.** Release profile under `nix develop`, three runs of
+`animation_node_id_keys_beats_string_keys`: 1,024 nodes and 5,000 passes over
+the previous-style lookup plus live-set update. The former owned-string shape
+took 296.090–805.982ms; the `NodeId` shape took 88.414–252.904ms, with paired
+speedups of 3.19–3.47x. The checked ignored gate is
+`animation_node_id_keys_beats_string_keys`.
+
+**Verified.** `mesh-core-animation` passed 19 tests; the focused shell
+animation slice passed 30 active tests with 4 ignored; formatting and diff
+checks passed.
+
+---
+
+## 2026-08-15 — scope animation restyles and slider handler invalidation
+
+area: retained style invalidation, slider input
+
+Animation-only frames now enter the targeted restyle decision using the
+existing `animation_only_frame` marker. When no interaction state changed, the
+restyle walk is skipped while animated values are still applied and the
+retained tree receives the animated dirty roots. Slider `change` and `release`
+handlers likewise no longer force `TREE_REBUILD`; handler dispatch selects
+`SCRIPT_NARROW` when reactive state changed, and the slider retains an
+interaction repaint for handler-side effects that do not change script state.
+
+**Measured.** Release profile under `nix develop`, three runs of the existing
+`animation_scoped_retained_end_to_end_benchmark`: a 1,026-node tree with one
+animated node over 250 frames. Forced full retained fingerprinting took
+659.275–697.273ms; the scoped path took 351.863–398.864ms (1.748–1.874x).
+The checked ignored gate is `animation_scoped_retained_end_to_end_benchmark`.
+
+The new `slider_drag_handler_narrow_script_beats_full_rebuild` gate uses a
+96-row surface and 200 drag frames per run. The former forced full rebuild took
+373.980–939.031ms across three release runs; narrow script invalidation took
+143.390–306.308ms (2.4–3.1x). The gate requires the narrow path to finish
+before the forced rebuild control.
+
+**Verified.** The focused animation and slider slices passed (30 and 18 active
+tests respectively), including the new `waste:empty_restyle_avoided` proof and
+the renamed narrow-invalidation regression. The full `mesh-core-shell --lib`
+suite passed 667 tests with 6 already-recorded fixture/manifest/debug failures
+and 128 ignored. `cargo fmt --all -- --check` passed.
+
+---
+
 ## 2026-08-15 — pace service control writes and remove successful read-backs
 
 area: runtime command dispatch, audio/brightness backends, service-backed input

@@ -94,14 +94,14 @@ impl FrontendSurfaceComponent {
     }
 
     #[cfg(test)]
-    pub(super) fn previous_visual_styles(&self) -> HashMap<String, AnimatableStyle> {
+    pub(super) fn previous_visual_styles(&self) -> HashMap<NodeId, AnimatableStyle> {
         self.last_tree
             .as_ref()
             .map(collect_visual_styles)
             .unwrap_or_default()
     }
 
-    pub(super) fn take_previous_visual_styles(&mut self) -> HashMap<String, AnimatableStyle> {
+    pub(super) fn take_previous_visual_styles(&mut self) -> HashMap<NodeId, AnimatableStyle> {
         let mut styles = std::mem::take(&mut self.previous_visual_styles_scratch);
         styles.clear();
         if let Some(last_tree) = self.last_tree.as_ref() {
@@ -112,7 +112,7 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn restore_previous_visual_styles(
         &mut self,
-        styles: HashMap<String, AnimatableStyle>,
+        styles: HashMap<NodeId, AnimatableStyle>,
     ) {
         self.previous_visual_styles_scratch = styles;
     }
@@ -120,7 +120,7 @@ impl FrontendSurfaceComponent {
     pub(super) fn apply_style_animations_with_previous(
         &mut self,
         tree: &mut WidgetNode,
-        previous_styles: &HashMap<String, AnimatableStyle>,
+        previous_styles: &HashMap<NodeId, AnimatableStyle>,
         surface_css_props: &SurfaceCssProps,
     ) -> HashSet<NodeId> {
         let now = Instant::now();
@@ -185,11 +185,11 @@ impl FrontendSurfaceComponent {
     fn apply_style_animations_to_node(
         &mut self,
         node: &mut WidgetNode,
-        previous_styles: &HashMap<String, AnimatableStyle>,
+        previous_styles: &HashMap<NodeId, AnimatableStyle>,
         resolver: &StyleResolver,
         now: Instant,
         ancestor_entering: bool,
-        live_keys: &mut HashSet<String>,
+        live_keys: &mut HashSet<NodeId>,
         live_keyframe_keys: &mut HashSet<String>,
         has_active_animation: &mut bool,
         active_animation_bucket: &mut AnimationPropertyBucket,
@@ -202,32 +202,32 @@ impl FrontendSurfaceComponent {
                 .attributes
                 .get("_mesh_surface_entering")
                 .is_some_and(|value| value == "true");
-        if let Some(key) = node.mesh_key().map(str::to_owned) {
-            live_keys.insert(key.clone());
+        if node.mesh_key().is_some() {
+            let node_id = node.id;
+            live_keys.insert(node_id);
             let previous_style = if entering {
                 // A promoted child is mapped from this exact paint. Snap its
                 // first buffer to the authored entrance state; on the next
                 // paint the marker disappears and the normal transition pass
                 // animates from this snapshot to the resting style.
-                self.transitions.remove(&key);
-                previous_styles.get(&key).copied()
+                self.transitions.remove(node_id);
+                previous_styles.get(&node_id).copied()
             } else {
                 self.apply_node_style_animation(
-                    &key,
+                    node_id,
                     node,
                     previous_styles,
                     now,
                     has_active_animation,
                 )
             };
-            if let Some(transition) = self.transitions.active_unfinished(&key, now) {
+            if let Some(transition) = self.transitions.active_unfinished(node_id, now) {
                 *active_animation_bucket = merge_animation_bucket(
                     *active_animation_bucket,
                     active_transition_bucket(transition.source),
                 );
             }
             self.apply_node_keyframe_animation(
-                &key,
                 node,
                 resolver,
                 now,
@@ -260,9 +260,9 @@ impl FrontendSurfaceComponent {
 
     fn apply_node_style_animation(
         &mut self,
-        key: &str,
+        key: NodeId,
         node: &mut WidgetNode,
-        previous_styles: &HashMap<String, AnimatableStyle>,
+        previous_styles: &HashMap<NodeId, AnimatableStyle>,
         now: Instant,
         has_active_animation: &mut bool,
     ) -> Option<AnimatableStyle> {
@@ -275,7 +275,7 @@ impl FrontendSurfaceComponent {
             // CSS animations own their animated properties; do not layer
             // transition playback on top of the same node.
             self.transitions.remove(key);
-            return previous_styles.get(key).copied();
+            return previous_styles.get(&key).copied();
         }
 
         // The value shown for this node last frame: the in-flight transition's
@@ -285,7 +285,7 @@ impl FrontendSurfaceComponent {
         let previous_displayed = self
             .transitions
             .displayed_style(key, now)
-            .or_else(|| previous_styles.get(key).copied())
+            .or_else(|| previous_styles.get(&key).copied())
             .unwrap_or(desired);
 
         if self
@@ -299,7 +299,6 @@ impl FrontendSurfaceComponent {
 
     fn apply_node_keyframe_animation(
         &mut self,
-        key: &str,
         node: &mut WidgetNode,
         resolver: &StyleResolver,
         now: Instant,
@@ -319,6 +318,10 @@ impl FrontendSurfaceComponent {
         if animations.is_empty() {
             return;
         }
+
+        let Some(key) = node.mesh_key().map(str::to_owned) else {
+            return;
+        };
 
         for animation_style in animations {
             let animation_name = animation_style.name.clone().unwrap();
@@ -440,15 +443,15 @@ impl FrontendSurfaceComponent {
 }
 
 #[cfg(test)]
-pub(super) fn collect_visual_styles(root: &WidgetNode) -> HashMap<String, AnimatableStyle> {
+pub(super) fn collect_visual_styles(root: &WidgetNode) -> HashMap<NodeId, AnimatableStyle> {
     let mut styles = HashMap::new();
     collect_visual_styles_into(root, &mut styles);
     styles
 }
 
-fn collect_visual_styles_into(node: &WidgetNode, styles: &mut HashMap<String, AnimatableStyle>) {
-    if let Some(key) = node.mesh_key() {
-        styles.insert(key.to_owned(), AnimatableStyle::from_node(node));
+fn collect_visual_styles_into(node: &WidgetNode, styles: &mut HashMap<NodeId, AnimatableStyle>) {
+    if node.mesh_key().is_some() {
+        styles.insert(node.id, AnimatableStyle::from_node(node));
     }
 
     for child in &node.children {
@@ -531,6 +534,68 @@ mod tests {
         assert_eq!(old_total, new_total);
         eprintln!(
             "animation live-key sets: fresh {old_time:?}; scratch reuse {new_time:?}; ratio {:.2}x",
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
+        assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release --lib animation_node_id_keys_beats_string_keys -- --ignored --nocapture
+    #[test]
+    #[ignore = "release-only animation NodeId key microbenchmark"]
+    fn animation_node_id_keys_beats_string_keys() {
+        let keys: Vec<String> = (0..1_024).map(|index| format!("root/{index}")).collect();
+        let node_ids: Vec<NodeId> = (1..=keys.len() as NodeId).collect();
+        let previous_strings: HashMap<String, u64> = keys
+            .iter()
+            .enumerate()
+            .map(|(index, key)| (key.clone(), index as u64))
+            .collect();
+        let previous_node_ids: HashMap<NodeId, u64> = node_ids
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, node_id)| (node_id, index as u64))
+            .collect();
+        let iterations = 5_000usize;
+
+        let old_started = Instant::now();
+        let mut old_live = HashSet::new();
+        let mut old_total = 0u64;
+        for _ in 0..iterations {
+            old_live.clear();
+            for key in &keys {
+                // This is the former hot-path shape: own the mesh key for the
+                // transition lookup, then clone it into the live set.
+                let owned_key = key.clone();
+                old_live.insert(owned_key.clone());
+                old_total = old_total.wrapping_add(
+                    previous_strings
+                        .get(&owned_key)
+                        .copied()
+                        .unwrap_or_default(),
+                );
+            }
+            old_total = old_total.wrapping_add(old_live.len() as u64);
+        }
+        let old_time = old_started.elapsed();
+
+        let new_started = Instant::now();
+        let mut new_live = HashSet::new();
+        let mut new_total = 0u64;
+        for _ in 0..iterations {
+            new_live.clear();
+            for node_id in &node_ids {
+                new_live.insert(*node_id);
+                new_total = new_total
+                    .wrapping_add(previous_node_ids.get(node_id).copied().unwrap_or_default());
+            }
+            new_total = new_total.wrapping_add(new_live.len() as u64);
+        }
+        let new_time = new_started.elapsed();
+
+        assert_eq!(old_total, new_total);
+        eprintln!(
+            "animation identity keys: owned strings {old_time:?}; NodeId {new_time:?}; ratio {:.2}x",
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert!(new_time < old_time);

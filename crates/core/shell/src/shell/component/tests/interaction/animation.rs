@@ -503,11 +503,17 @@ fn animation_only_tick_uses_scoped_retained_fingerprinting() {
         .unwrap();
 
     assert!(component.animation_only_dirty);
+    component.set_profiling_enabled(true);
+    component.take_profiling_records();
     component
         .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     assert!(component.retained_tree.last_update_was_scoped());
+    assert!(component.take_profiling_records().iter().any(|record| {
+        record.stage == mesh_core_debug::ProfilingStage::StyleRestyle
+            && record.trigger_kind.as_deref() == Some("waste:empty_restyle_avoided")
+    }));
 }
 
 #[test]

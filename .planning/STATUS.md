@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-08-15
+**Updated:** 2026-08-16
 
 This page describes the present. History lives in [`log/`](log/); open work
 lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
@@ -11,6 +11,16 @@ The Nix development shell now recommends the optimized release shell command,
 keeps the debug command explicit for debugging, and the shell logs its Cargo
 build profile at startup. Production paints no longer build the focused proof
 snapshot; the proof remains available to the shell regression tests.
+
+Animation-only frames now reuse the targeted restyle decision and skip an
+unrelated full style walk when no interaction state changed. Slider `change`
+and `release` handlers now use narrow script invalidation plus retained slider
+repainting instead of forcing a full tree rebuild.
+
+Animation transition state and previous visual snapshots now key on stable
+`NodeId`s. The transition pass no longer allocates a mesh-key string and then
+clones it into a live set for every node; authored keyframe names remain
+string-based where they are part of the CSS-facing identity.
 
 Showing and hiding a surface is one clean map/unmap on the wire. A layer-surface
 configure is never sent carrying a zero dimension no anchor backs — the
@@ -64,10 +74,8 @@ for a pointer move, 1.60ms for a service poll nothing on the bar reads, and
 2.58ms for one it does. Sampling puts ~27% of a steady-state frame in the
 allocator and under 1% in Skia's pixel fill, so the software rasterizer is not
 the limit — per-frame `String` allocation and hashing in shell bookkeeping is.
-The remaining measured frame costs are animation invalidation dropping the
-`STATE` bit that selects targeted restyle (2.1x on an otherwise identical
-frame), and `String`-keyed per-frame maps on the animation path. No behavior
-changed; measurements are in the performance log.
+Transition identity is now `NodeId`-keyed; remaining animation string work is
+limited to authored keyframe names. Measurements are in the performance log.
 
 Background service polls no longer re-instantiate frontend components that
 cannot observe them. Read capability is per module, so every component instance
@@ -172,9 +180,14 @@ core path used by the CLI.
 - Shipped frontend compilation, navigation layout/raster/hover/keyboard/pointer
   behavior, and LSP manifest schema check: passed.
 - `mesh-core-module`: 198 passed, 3 ignored.
-- Full `mesh-core-shell --lib`: 656 passed, 125 ignored; five known fixture
-  failures remain in shipped-navigation layout expectations and debug/theme
-  manifest fixtures.
+- Full `mesh-core-shell --lib`: 667 passed, 128 ignored; six known fixture,
+  shipped-navigation, and debug/theme manifest baseline failures remain.
+- Animation and slider focused slices: 30 and 18 active tests passed; release
+  retained-scope and narrow-slider gates passed across three runs.
+- Release `animation_node_id_keys_beats_string_keys`: 3/3 runs passed on a
+  1,024-node, 5,000-pass workload; owned-string bookkeeping took
+  296.090–805.982ms versus 88.414–252.904ms for `NodeId` (3.19–3.47x per
+  run).
 - `cargo fmt --all -- --check` and `git diff --check`: passed.
 
 - Runtime-generation index correctness: passed.

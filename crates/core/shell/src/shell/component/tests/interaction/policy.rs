@@ -944,7 +944,7 @@ fn handlerless_slider_drag_uses_interaction_restyle_not_script_rebuild() {
 }
 
 #[test]
-fn slider_drag_with_change_handler_keeps_script_rebuild() {
+fn slider_drag_with_change_handler_uses_narrow_script_invalidation() {
     let mut component = test_frontend_component(
         r#"
 <template><slider onchange={onChange} /></template>
@@ -978,7 +978,12 @@ end
         )
         .unwrap();
 
-    assert!(component.dirty_types.contains(ComponentDirtyFlags::SCRIPT));
+    assert!(
+        component
+            .dirty_types
+            .contains(ComponentDirtyFlags::SCRIPT_NARROW)
+    );
+    assert!(!component.dirty_types.contains(ComponentDirtyFlags::SCRIPT));
     assert_eq!(runtime_number(&component, "value"), 75.0);
 }
 
@@ -1066,6 +1071,102 @@ fn handlerless_slider_drag_retained_paint_beats_script_rebuild() {
 
     eprintln!(
         "handlerless slider drag repaint: script rebuild {old_time:?}; retained interaction {new_time:?}; ratio {:.1}x",
+        old_time.as_secs_f64() / new_time.as_secs_f64()
+    );
+    assert!(new_time < old_time);
+}
+
+// cargo test -p mesh-core-shell --release -- slider_drag_handler_narrow_script_beats_full_rebuild --ignored --nocapture
+#[test]
+#[ignore = "release-only slider handler invalidation microbenchmark"]
+fn slider_drag_handler_narrow_script_beats_full_rebuild() {
+    fn slider_surface_source(rows: usize) -> String {
+        let mut source = String::from(r#"<template><box><slider onchange={on_change} />"#);
+        for index in 0..rows {
+            source.push_str("<row><text>row ");
+            source.push_str(&index.to_string());
+            source.push_str("</text><box /></row>");
+        }
+        source.push_str(
+            r#"</box></template>
+<script lang="luau">
+function on_change(value)
+    last_value = value
+end
+</script>"#,
+        );
+        source
+    }
+
+    fn run_drag_frame(
+        component: &mut FrontendSurfaceComponent,
+        theme: &Theme,
+        buffer: &mut PixelBuffer,
+        x: f32,
+        force_old_script_rebuild: bool,
+    ) {
+        component.active_slider_id = Some(runtime_node_id_for_key("root/0/0"));
+        component
+            .handle_input(theme, 640, 480, ComponentInput::PointerMove { x, y: 10.0 })
+            .unwrap();
+        if force_old_script_rebuild {
+            component.dirty = false;
+            component.dirty_types = ComponentDirtyFlags::empty();
+            component.invalidate_script_state();
+        }
+        component
+            .paint(theme, SurfaceExtent::unpadded(640, 480), buffer, 1.0)
+            .unwrap();
+    }
+
+    let source = slider_surface_source(96);
+    let theme = default_theme();
+    let mut old = test_frontend_component(&source);
+    let mut new = test_frontend_component(&source);
+    let mut old_buffer = PixelBuffer::new(640, 480);
+    let mut new_buffer = PixelBuffer::new(640, 480);
+    old.paint(
+        &theme,
+        SurfaceExtent::unpadded(640, 480),
+        &mut old_buffer,
+        1.0,
+    )
+    .unwrap();
+    new.paint(
+        &theme,
+        SurfaceExtent::unpadded(640, 480),
+        &mut new_buffer,
+        1.0,
+    )
+    .unwrap();
+
+    let iterations = 200;
+    let old_started = std::time::Instant::now();
+    for index in 0..iterations {
+        run_drag_frame(
+            std::hint::black_box(&mut old),
+            &theme,
+            &mut old_buffer,
+            20.0 + (index % 100) as f32,
+            true,
+        );
+    }
+    let old_time = old_started.elapsed();
+
+    let new_started = std::time::Instant::now();
+    for index in 0..iterations {
+        run_drag_frame(
+            std::hint::black_box(&mut new),
+            &theme,
+            &mut new_buffer,
+            20.0 + (index % 100) as f32,
+            false,
+        );
+    }
+    let new_time = new_started.elapsed();
+
+    eprintln!(
+        "slider handler drag repaint: script rebuild {old_time:?}; narrow script {new_time:?}; ratio {:.1}x",
         old_time.as_secs_f64() / new_time.as_secs_f64()
     );
     assert!(new_time < old_time);

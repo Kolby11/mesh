@@ -99,11 +99,6 @@ gate where the win is structural.
 - [ ] Interaction frames still re-apply string style declarations per node —
       folds into typed declarations and narrower invalidation.
       *(detail: "P2 — architecture")*
-- [ ] A live animation defeats targeted restyle. Animation invalidation raises
-      `VISUAL_REPAINT`, which carries no `STATE` bit — the exact bit that
-      selects the targeted interaction-restyle branch — so every frame for a
-      transition's duration restyles the whole tree instead of the animating
-      nodes. Costs 2.1x on an otherwise identical navigation-bar paint frame.
 - [ ] A tree-rebuild frame restyles memo-reused subtrees too. Component memo
       entries are stored pre-restyle (position-independent by design), so a
       reused page pays a full style walk and copy-on-write anyway — 2.8ms of an
@@ -112,11 +107,6 @@ gate where the win is structural.
 
 ### Typing and interning
 
-- [ ] Per-frame `String` keys and SipHash on the animation path. The transition
-      pass allocates a `String` per node per frame (`mesh_key().to_owned()`,
-      then cloned again into `live_keys`) and keys `HashMap`/`HashSet` on it,
-      while every other layer already keys on `NodeId`. Part of the ~27% of
-      frame cycles the sampling profile puts in the allocator.
 - [ ] Interned `Symbol` / `TagId` types and a typed `WidgetNode`. Attributes,
       module ids, and element tags are done; widget-tree **tags**, attribute
       **values**, and the broader symbol types remain. Profiling now puts the
@@ -152,12 +142,6 @@ gate where the win is structural.
 - [ ] Storage reads still clone per Lua access. Needs shared immutable JSON
       values or lock avoidance — two cache designs were measured and reverted
       (I; see log).
-### Input
-
-- [ ] Slider drags with `change` / `release` handlers still take script
-      invalidation; closing this needs narrow invalidation (J). Handlerless
-      drags already use interaction restyle.
-
 ### Presentation
 - [ ] Direct Skia paint into the mapped SHM canvas for full-present frames,
       keeping `PixelBuffer` as the retained compare copy (H). Design:

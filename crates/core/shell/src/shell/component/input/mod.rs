@@ -173,7 +173,6 @@ impl FrontendSurfaceComponent {
                                     "change",
                                     &[serde_json::json!(value)],
                                 )?);
-                                self.invalidate_script_state();
                             } else {
                                 self.invalidate_interaction_restyle();
                             }
@@ -235,7 +234,6 @@ impl FrontendSurfaceComponent {
                             "release",
                             &[serde_json::json!(value)],
                         )?);
-                        self.invalidate_script_state();
                     }
 
                     self.end_text_selection_drag();
@@ -356,12 +354,11 @@ impl FrontendSurfaceComponent {
                                 "change",
                                 &[serde_json::json!(value)],
                             )?);
-                            // Slider drag with script handlers can mutate reactive globals
-                            // such as labels bound to the value, so preserve the rebuild path.
-                            self.invalidate_script_state();
-                        } else {
-                            self.invalidate_interaction_restyle();
                         }
+                        // Handler dispatch already selects narrow script invalidation when
+                        // reactive state changed. The slider's retained value still needs the
+                        // interaction restyle path when the handler only emits an effect.
+                        self.invalidate_interaction_restyle();
                     }
                     if !requests.is_empty() {
                         return Ok(requests);

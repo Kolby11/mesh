@@ -543,8 +543,11 @@ impl FrontendSurfaceComponent {
             .expect("cache populated above");
         let mut style_attribution = collect_style_attribution
             .then(|| mesh_core_elements::style::StyleRuleAttribution::new(restyle_rules));
+        // Animation-only frames have already resolved their authored styles and
+        // only need the animated values applied below. Reuse the targeted path
+        // so an otherwise empty interaction diff avoids a full style walk.
         let targeted_interaction_restyle = trigger_kind == "restyle"
-            && dirty_types.contains(ComponentDirtyFlags::STATE)
+            && (dirty_types.contains(ComponentDirtyFlags::STATE) || animation_only_frame)
             && !dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
         let paint_only_restyle = trigger_kind == "restyle"
             && !dirty_types.is_empty()
@@ -553,11 +556,12 @@ impl FrontendSurfaceComponent {
                 .is_empty();
         // Collect affected ids before borrowing index_cache, to satisfy the
         // borrow checker.
-        let affected_keys = if targeted_interaction_restyle {
-            self.collect_interaction_changed_node_ids()
-        } else {
-            InteractionChangedNodeIds::default()
-        };
+        let affected_keys =
+            if targeted_interaction_restyle && dirty_types.contains(ComponentDirtyFlags::STATE) {
+                self.collect_interaction_changed_node_ids()
+            } else {
+                InteractionChangedNodeIds::default()
+            };
         let interaction_snapshot_valid = self.interaction_snapshot_valid;
         let index_cache = &mut self.cached_style_rule_index;
         let mut reused_retained_layout = false;
