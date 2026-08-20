@@ -1,3 +1,4 @@
+use mesh_core_capability::{CapabilityPolicy, EffectiveCapabilities};
 use mesh_core_config::{
     ModuleSettingsOverrides, SettingsStore, ShellConfig, ShellSettings, load_config,
     resolve_discovery_paths,
@@ -10,7 +11,9 @@ use mesh_core_diagnostics::DiagnosticsCollector;
 use mesh_core_events::EventBus;
 use mesh_core_locale::LocaleEngine;
 use mesh_core_module::lifecycle::{ModuleInstance, ModuleState};
-use mesh_core_module::package::{InstalledModuleGraph, ModuleKind, load_installed_module_graph};
+use mesh_core_module::package::{
+    InstalledModuleGraph, ModuleKind, RootModuleGraphManifest, load_installed_module_graph,
+};
 use mesh_core_module::{DependencyGraphError, ModuleType, validate_module_dependency_graph};
 use mesh_core_service::{
     InterfaceContract, InterfaceProvider, InterfaceRegistry, ServiceRegistry,
@@ -405,6 +408,11 @@ pub struct Shell {
     pub diagnostics: DiagnosticsCollector,
     pub services: ServiceRegistry,
     pub interfaces: InterfaceRegistry,
+    /// Catalog-backed policy loaded from the root graph's persisted approvals.
+    capability_policy: CapabilityPolicy,
+    /// Effective grants for the current activation candidate. Runtime
+    /// construction must consume this map rather than manifest declarations.
+    effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
     installed_module_graph: Option<InstalledModuleGraph>,
     active_profile_id: Option<String>,
     modules: HashMap<String, ModuleInstance>,
@@ -514,6 +522,9 @@ pub enum ShellRunError {
 
     #[error(transparent)]
     DependencyGraph(#[from] DependencyGraphError),
+
+    #[error(transparent)]
+    CapabilityPolicy(#[from] mesh_core_capability::CapabilityPolicyError),
 
     #[error(transparent)]
     ModuleGraph(#[from] mesh_core_module::package::ModuleManifestError),

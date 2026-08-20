@@ -3,7 +3,7 @@ use super::{
     parse_module_entrypoint, validate_modules_dir, validate_relative_path,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -21,6 +21,11 @@ pub struct RootModuleGraphManifest {
     pub disabled: Vec<String>,
     #[serde(default)]
     pub providers: HashMap<String, String>,
+    /// Explicit capability approvals keyed by module id. Required grants must
+    /// be present here before activation; optional grants are denied unless
+    /// they are also listed.
+    #[serde(default)]
+    pub capability_approvals: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub layout: Option<RootLayoutSelection>,
     #[serde(default)]
@@ -142,6 +147,7 @@ impl RootModuleGraphJson {
             modules: mesh.modules,
             disabled: mesh.disabled,
             providers: mesh.providers,
+            capability_approvals: mesh.capability_approvals,
             layout: mesh.layout,
             theme: mesh.theme,
         })
@@ -161,6 +167,12 @@ struct RootMeshSection {
     disabled: Vec<String>,
     #[serde(default)]
     providers: HashMap<String, String>,
+    #[serde(
+        default,
+        rename = "capabilityApprovals",
+        alias = "capability_approvals"
+    )]
+    capability_approvals: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     layout: Option<RootLayoutSelection>,
     #[serde(default)]

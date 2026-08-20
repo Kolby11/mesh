@@ -1,5 +1,6 @@
 use super::super::*;
 use super::{BackendLaunchCandidate, BackendLifecycleStatusRecord};
+use mesh_core_capability::EffectiveCapabilities;
 use mesh_core_module::package::{BackendProviderNode, binary_available};
 
 pub(in crate::shell) fn backend_launch_candidates_from_graph(
@@ -7,6 +8,21 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph(
     modules: &HashMap<String, ModuleInstance>,
     settings: &SettingsStore,
     interfaces: &InterfaceRegistry,
+) -> (
+    Vec<BackendLaunchCandidate>,
+    Vec<BackendLifecycleStatusRecord>,
+) {
+    backend_launch_candidates_from_graph_with_capabilities(
+        graph, modules, settings, interfaces, None,
+    )
+}
+
+pub(in crate::shell) fn backend_launch_candidates_from_graph_with_capabilities(
+    graph: &InstalledModuleGraph,
+    modules: &HashMap<String, ModuleInstance>,
+    settings: &SettingsStore,
+    interfaces: &InterfaceRegistry,
+    effective_capabilities: Option<&HashMap<String, EffectiveCapabilities>>,
 ) -> (
     Vec<BackendLaunchCandidate>,
     Vec<BackendLifecycleStatusRecord>,
@@ -32,7 +48,14 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph(
             continue;
         };
 
-        match launch_candidate_for_provider(graph, modules, settings, interfaces, active_provider) {
+        match launch_candidate_for_provider_with_capabilities(
+            graph,
+            modules,
+            settings,
+            interfaces,
+            active_provider,
+            effective_capabilities,
+        ) {
             Ok(candidate) => candidates.push(candidate),
             Err(status) => statuses.push(status),
         }
@@ -50,6 +73,19 @@ pub(in crate::shell) fn launch_candidate_for_provider(
     settings: &SettingsStore,
     interfaces: &InterfaceRegistry,
     provider: &BackendProviderNode,
+) -> Result<BackendLaunchCandidate, BackendLifecycleStatusRecord> {
+    launch_candidate_for_provider_with_capabilities(
+        graph, modules, settings, interfaces, provider, None,
+    )
+}
+
+pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities(
+    graph: &InstalledModuleGraph,
+    modules: &HashMap<String, ModuleInstance>,
+    settings: &SettingsStore,
+    interfaces: &InterfaceRegistry,
+    provider: &BackendProviderNode,
+    effective_capabilities: Option<&HashMap<String, EffectiveCapabilities>>,
 ) -> Result<BackendLaunchCandidate, BackendLifecycleStatusRecord> {
     let interface = provider.interface.clone();
     let Some(module) = graph.module(&provider.module_id) else {
@@ -136,14 +172,30 @@ pub(in crate::shell) fn launch_candidate_for_provider(
         });
     };
 
-    let capabilities = module
-        .manifest
-        .capabilities
-        .required
-        .iter()
-        .chain(module.manifest.capabilities.optional.iter())
-        .cloned()
-        .collect::<Vec<_>>();
+    let capabilities = match effective_capabilities {
+        Some(effective_capabilities) => {
+            let Some(effective) = effective_capabilities.get(&provider.module_id) else {
+                return Err(BackendLifecycleStatusRecord {
+                    interface,
+                    provider_id: Some(provider.module_id.clone()),
+                    status: "missing_capability",
+                    message: format!(
+                        "backend provider {} has no activation-resolved capability grant",
+                        provider.module_id
+                    ),
+                });
+            };
+            effective.granted_ids().map(str::to_string).collect()
+        }
+        None => module
+            .manifest
+            .capabilities
+            .required
+            .iter()
+            .chain(module.manifest.capabilities.optional.iter())
+            .cloned()
+            .collect::<Vec<_>>(),
+    };
     let settings = settings.namespace(&provider.module_id);
     Ok(BackendLaunchCandidate {
         module_id: provider.module_id.clone(),

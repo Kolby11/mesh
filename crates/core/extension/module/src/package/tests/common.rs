@@ -173,6 +173,7 @@ pub(super) fn root_with_modules(
     RootModuleGraphManifest {
         schema_version: 1,
         modules_dir: "modules".into(),
+        capability_approvals: Default::default(),
         modules: modules
             .iter()
             .map(|(id, kind)| {

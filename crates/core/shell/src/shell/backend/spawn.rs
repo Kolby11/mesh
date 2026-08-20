@@ -1,5 +1,5 @@
 use super::super::*;
-use super::candidates::backend_launch_candidates_from_graph;
+use super::candidates::backend_launch_candidates_from_graph_with_capabilities;
 use super::{BackendLaunchCandidate, BackendRuntimeStatus};
 use rustix::fd::BorrowedFd;
 
@@ -14,11 +14,12 @@ impl Shell {
         match self.load_installed_module_graph_cached() {
             Ok(graph) => {
                 let graph = graph.clone();
-                let (candidates, statuses) = backend_launch_candidates_from_graph(
+                let (candidates, statuses) = backend_launch_candidates_from_graph_with_capabilities(
                     &graph,
                     &self.modules,
                     &self.settings_store,
                     &self.interfaces,
+                    Some(&self.effective_capabilities),
                 );
                 for status in statuses {
                     self.record_backend_runtime_status(

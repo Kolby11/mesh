@@ -14,6 +14,81 @@
       "mesh.audio": "@mesh/pipewire-audio",
       "mesh.brightness": "@mesh/backlight-brightness"
     },
+    "capabilityApprovals": {
+      "@mesh/audio-popover": ["service.audio.control", "service.audio.read"],
+      "@mesh/backlight-brightness": ["exec.brightnessctl"],
+      "@mesh/blur-test": ["shell.surface", "theme.read"],
+      "@mesh/composition-editor": [
+        "service.composition.control",
+        "service.composition.read",
+        "shell.surface"
+      ],
+      "@mesh/debug-inspector": [
+        "locale.read",
+        "service.debug.read",
+        "shell.surface"
+      ],
+      "@mesh/device-info": [
+        "exec.cat",
+        "exec.hostname",
+        "exec.uname"
+      ],
+      "@mesh/hyprland-wm": ["exec.hyprctl", "exec.sh"],
+      "@mesh/language-popover": ["locale.read", "locale.write"],
+      "@mesh/navigation-bar": [
+        "locale.read",
+        "locale.write",
+        "service.audio.control",
+        "service.audio.read",
+        "service.brightness.control",
+        "service.brightness.read",
+        "service.media.read",
+        "service.power.read",
+        "service.settings.read",
+        "service.wm.control",
+        "service.wm.read",
+        "shell.surface",
+        "theme.read"
+      ],
+      "@mesh/opacity-test": ["shell.surface", "theme.read"],
+      "@mesh/pipewire-audio": ["exec.wpctl"],
+      "@mesh/pulseaudio-audio": ["exec.pactl"],
+      "@mesh/quick-settings": [
+        "locale.read",
+        "locale.write",
+        "service.audio.control",
+        "service.audio.read",
+        "service.brightness.control",
+        "service.brightness.read",
+        "service.power.read",
+        "service.theme.control",
+        "shell.surface",
+        "theme.read"
+      ],
+      "@mesh/settings": [
+        "locale.read",
+        "locale.write",
+        "service.audio.control",
+        "service.audio.read",
+        "service.bluetooth.control",
+        "service.bluetooth.read",
+        "service.debug.read",
+        "service.device.read",
+        "service.network.control",
+        "service.network.read",
+        "service.packages.control",
+        "service.packages.read",
+        "service.settings.control",
+        "service.settings.read",
+        "service.theme.control",
+        "shell.surface",
+        "theme.read"
+      ],
+      "@mesh/text-selection-proof": ["shell.surface", "theme.read"],
+      "@mesh/theme-selector": ["service.theme.control", "theme.read"],
+      "@mesh/touch-gesture-proof": ["shell.surface", "theme.read"],
+      "@mesh/upower-power": ["exec.upower"]
+    },
     "schemaVersion": 1
   },
   "name": "@mesh/local-config",

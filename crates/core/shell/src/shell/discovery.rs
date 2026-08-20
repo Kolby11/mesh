@@ -206,6 +206,15 @@ impl Shell {
             SettingsStore::default()
         });
         let graph_path = installed_module_graph_path();
+        let capability_policy = RootModuleGraphManifest::from_path(&graph_path)
+            .map(|root| CapabilityPolicy::from_approvals(root.capability_approvals))
+            .unwrap_or_else(|error| {
+                tracing::warn!(
+                    "failed to load capability approvals from {}: {error}",
+                    graph_path.display()
+                );
+                CapabilityPolicy::default()
+            });
         let active_profile = mesh_core_module::package::ProfilePaths::from_root_graph(&graph_path)
             .and_then(|paths| paths.load_active())
             .unwrap_or_else(|error| {
@@ -432,6 +441,8 @@ impl Shell {
             diagnostics: DiagnosticsCollector::new(),
             services: ServiceRegistry::new(),
             interfaces,
+            capability_policy,
+            effective_capabilities: Arc::new(HashMap::new()),
             installed_module_graph: None,
             active_profile_id,
             modules: HashMap::new(),
@@ -605,6 +616,23 @@ impl Shell {
 
     pub fn resolve_modules(&mut self) -> Result<(), ShellRunError> {
         validate_module_dependency_graph(self.modules.values().map(|module| &module.manifest))?;
+        let active_graph = self.load_installed_module_graph_cached()?.clone();
+        let mut effective_capabilities = HashMap::with_capacity(self.modules.len());
+        for (module_id, module) in &self.modules {
+            if !active_graph
+                .module(module_id)
+                .is_some_and(|node| node.enabled)
+            {
+                continue;
+            }
+            let effective = self.capability_policy.resolve(
+                module_id,
+                &module.manifest.capabilities.required,
+                &module.manifest.capabilities.optional,
+            )?;
+            effective_capabilities.insert(module_id.clone(), effective);
+        }
+        self.effective_capabilities = Arc::new(effective_capabilities);
         let ids: Vec<String> = self.modules.keys().cloned().collect();
         for id in ids {
             if let Some(module) = self.modules.get_mut(&id) {
@@ -662,6 +690,7 @@ impl Shell {
                         interface_catalog.clone(),
                         self.settings_store.clone(),
                     )
+                    .with_effective_capabilities(self.effective_capabilities.clone())
                     .with_instance_id(instance_id)
                     .with_graph_i18n_catalogs(graph_i18n_catalogs.clone()),
                 ));
@@ -677,6 +706,7 @@ impl Shell {
                     interface_catalog.clone(),
                     self.settings_store.clone(),
                 )
+                .with_effective_capabilities(self.effective_capabilities.clone())
                 .with_graph_i18n_catalogs(graph_i18n_catalogs.clone()),
             ));
         }
@@ -739,6 +769,7 @@ impl Shell {
                     interface_catalog.clone(),
                     self.settings_store.clone(),
                 )
+                .with_effective_capabilities(self.effective_capabilities.clone())
                 .with_instance_id(&instance_id)
                 .with_graph_i18n_catalogs(self.graph_i18n_catalog_paths());
                 let diagnostics = self.diagnostics.register(module_id.to_string());

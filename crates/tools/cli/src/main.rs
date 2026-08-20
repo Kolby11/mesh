@@ -504,7 +504,7 @@ fn cmd_install(args: &[String]) {
         "mesh-shell install <path-or-git-url>[#ref] [--available-only] [--profile <profile>] [--allow-elevated] [--allow-high]",
     );
     let root_path = root_module_graph_path();
-    let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
+    let mut root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
         .unwrap_or_else(|error| exit_error(error));
     let config_dir = root_path
         .parent()
@@ -518,17 +518,21 @@ fn cmd_install(args: &[String]) {
 
     let allow_elevated = args.iter().any(|arg| arg == "--allow-elevated");
     let allow_high = args.iter().any(|arg| arg == "--allow-high");
+    let catalog = mesh_core_capability::CapabilityCatalog::builtin();
     let requested = manifest
         .mesh
         .capabilities
         .required
         .iter()
-        .chain(manifest.mesh.uses.capabilities.iter())
+        .chain(manifest.mesh.capabilities.optional.iter())
         .map(|id| mesh_core_capability::Capability::new(id.clone()))
         .collect::<Vec<_>>();
     for capability in &requested {
+        let level = catalog
+            .validate(capability.id())
+            .unwrap_or_else(|error| exit_error(error.to_string()));
         use mesh_core_capability::PrivilegeLevel;
-        match capability.privilege_level() {
+        match level {
             PrivilegeLevel::High if !allow_high => exit_error(format!(
                 "{} requests high capability {}; review it and repeat with --allow-high",
                 manifest.name, capability
@@ -540,7 +544,6 @@ fn cmd_install(args: &[String]) {
             _ => {}
         }
     }
-
     let destination = modules_dir.join(manifest.name.trim_start_matches('@'));
     if destination.exists() {
         exit_error(format!(
@@ -553,6 +556,23 @@ fn cmd_install(args: &[String]) {
     source.place_at(&destination).unwrap_or_else(|error| {
         let _ = std::fs::remove_dir_all(&destination);
         exit_error(format!("failed to install {}: {error}", manifest.name));
+    });
+
+    let previous_root = root.clone();
+    let approvals = root
+        .capability_approvals
+        .entry(manifest.name.clone())
+        .or_default();
+    for capability in &manifest.mesh.capabilities.required {
+        if !approvals.contains(capability) {
+            approvals.push(capability.clone());
+        }
+    }
+    approvals.sort();
+    approvals.dedup();
+    root.save(&root_path).unwrap_or_else(|error| {
+        let _ = std::fs::remove_dir_all(&destination);
+        exit_error(error);
     });
 
     let install_result = (|| -> Result<Option<String>, String> {
@@ -706,6 +726,7 @@ fn cmd_install(args: &[String]) {
         }
         Err(error) => {
             let _ = std::fs::remove_dir_all(&destination);
+            let _ = previous_root.save(&root_path);
             exit_error(format!(
                 "installation validation failed; removed staged module: {error}"
             ));
@@ -985,7 +1006,10 @@ fn cmd_update(args: &[String]) {
         .map(String::as_str);
 
     let installed = installed_manifests(&root_path);
-    let plan = update::plan_update(&modules_dir, &lock, only, policy, &installed)
+    let approvals = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
+        .unwrap_or_else(|error| exit_error(error))
+        .capability_approvals;
+    let plan = update::plan_update(&modules_dir, &lock, only, policy, &installed, &approvals)
         .unwrap_or_else(|error| exit_error(error));
 
     let changed = plan.changed().collect::<Vec<_>>();

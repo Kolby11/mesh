@@ -1,6 +1,6 @@
 use super::component::FrontendCatalog;
 use super::*;
-use mesh_core_capability::PrivilegeLevel;
+use mesh_core_capability::{CapabilityCatalog, PrivilegeLevel};
 use mesh_core_module::package::{
     InstalledModuleEntry, MeshLock, ModuleKind, ModuleManifest, ModuleSource, ProfilePaths,
     RootModuleGraphManifest, ShellProfile, load_installed_module_graph, module_tree_digest,
@@ -51,6 +51,8 @@ impl Shell {
 
         let previous_root = root.clone();
         let mut updated_root = root;
+        approve_required_capabilities(&mut updated_root, &manifest);
+        let explicit_inventory = !updated_root.modules.is_empty();
         if !updated_root.modules.is_empty() {
             let relative = destination
                 .strip_prefix(&modules_dir)
@@ -65,6 +67,10 @@ impl Shell {
                     enabled: true,
                 },
             );
+        }
+        let root_changed = explicit_inventory
+            || updated_root.capability_approvals != previous_root.capability_approvals;
+        if root_changed {
             if let Err(error) = updated_root.save(&graph_path) {
                 let _ = fs::remove_dir_all(&destination);
                 return Err(package_error(error.to_string()));
@@ -75,7 +81,7 @@ impl Shell {
             Ok(graph) => graph,
             Err(error) => {
                 let _ = fs::remove_dir_all(&destination);
-                if !updated_root.modules.is_empty() {
+                if root_changed {
                     let _ = previous_root.save(&graph_path);
                 }
                 return Err(package_error(error.to_string()));
@@ -89,7 +95,7 @@ impl Shell {
         })?;
         if installed.kind != manifest.mesh.kind {
             let _ = fs::remove_dir_all(&destination);
-            if !updated_root.modules.is_empty() {
+            if root_changed {
                 let _ = previous_root.save(&graph_path);
             }
             return Err(package_error(format!(
@@ -238,6 +244,7 @@ impl Shell {
                 root.layout = None;
             }
             root.disabled.retain(|disabled| disabled != module_id);
+            root.capability_approvals.remove(module_id);
             root.providers.retain(|_, provider| provider != module_id);
             if root
                 .theme
@@ -393,15 +400,19 @@ fn check_install_capabilities(
     allow_elevated: bool,
     allow_high: bool,
 ) -> Result<(), ShellRunError> {
+    let catalog = CapabilityCatalog::builtin();
     let requested = manifest
         .mesh
         .capabilities
         .required
         .iter()
-        .chain(manifest.mesh.uses.capabilities.iter())
+        .chain(manifest.mesh.capabilities.optional.iter())
         .map(|id| mesh_core_capability::Capability::new(id.clone()));
     for capability in requested {
-        match capability.privilege_level() {
+        let level = catalog
+            .validate(capability.id())
+            .map_err(|error| package_error(error.to_string()))?;
+        match level {
             PrivilegeLevel::High if !allow_high => {
                 return Err(package_error(format!(
                     "{} requests high capability {}; repeat with allow_high",
@@ -418,6 +429,20 @@ fn check_install_capabilities(
         }
     }
     Ok(())
+}
+
+fn approve_required_capabilities(root: &mut RootModuleGraphManifest, manifest: &ModuleManifest) {
+    let approvals = root
+        .capability_approvals
+        .entry(manifest.name.clone())
+        .or_default();
+    for capability in &manifest.mesh.capabilities.required {
+        if !approvals.contains(capability) {
+            approvals.push(capability.clone());
+        }
+    }
+    approvals.sort();
+    approvals.dedup();
 }
 
 fn record_lock_entry(

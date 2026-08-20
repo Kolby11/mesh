@@ -5,8 +5,10 @@ mod lifecycle;
 mod spawn;
 mod supervision;
 
+#[cfg(test)]
 pub(in crate::shell) use candidates::backend_launch_candidates_from_graph;
-pub(in crate::shell) use candidates::launch_candidate_for_provider;
+pub(in crate::shell) use candidates::backend_launch_candidates_from_graph_with_capabilities;
+pub(in crate::shell) use candidates::launch_candidate_for_provider_with_capabilities;
 pub(in crate::shell) use supervision::{BackendRespawnContext, BackendSupervisionState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

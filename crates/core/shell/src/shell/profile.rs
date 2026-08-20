@@ -1,4 +1,6 @@
-use super::backend::{BackendRuntimeStatus, backend_launch_candidates_from_graph};
+use super::backend::{
+    BackendRuntimeStatus, backend_launch_candidates_from_graph_with_capabilities,
+};
 use super::component::{FrontendCatalog, FrontendCatalogHandle, FrontendSurfaceComponent};
 use super::*;
 use mesh_core_module::package::{
@@ -524,6 +526,7 @@ impl Shell {
                 Arc::new(self.interfaces.catalog()),
                 settings.clone(),
             )
+            .with_effective_capabilities(self.effective_capabilities.clone())
             .with_instance_id(instance_id)
             .with_graph_i18n_catalogs(self.profile_i18n_catalog_paths(&graph));
             let diagnostics = self.diagnostics.register(root.module.clone());
@@ -564,11 +567,12 @@ impl Shell {
             });
         }
 
-        let (mut candidates, statuses) = backend_launch_candidates_from_graph(
+        let (mut candidates, statuses) = backend_launch_candidates_from_graph_with_capabilities(
             &graph,
             &self.modules,
             &settings,
             &self.interfaces,
+            Some(&self.effective_capabilities),
         );
         if let Some(status) = statuses.iter().find(|status| {
             !matches!(
@@ -595,11 +599,12 @@ impl Shell {
             .installed_module_graph
             .as_ref()
             .map(|current_graph| {
-                let (mut current, _) = backend_launch_candidates_from_graph(
+                let (mut current, _) = backend_launch_candidates_from_graph_with_capabilities(
                     current_graph,
                     &self.modules,
                     &self.settings_store,
                     &self.interfaces,
+                    Some(&self.effective_capabilities),
                 );
                 for candidate in &mut current {
                     self.apply_shell_runtime_settings(candidate);

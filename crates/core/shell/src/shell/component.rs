@@ -47,7 +47,7 @@ use runtime_tree::{
     runtime_node_id_for_key,
 };
 
-use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_capability::{Capability, CapabilitySet, EffectiveCapabilities};
 use mesh_core_component::template::{AttributeValue, TemplateNode};
 use mesh_core_config::TooltipSettings;
 use mesh_core_diagnostics::Diagnostics;
@@ -683,6 +683,10 @@ pub(super) struct FrontendSurfaceComponent {
     pub(super) frontend_catalog: Arc<FrontendCatalog>,
     frontend_catalog_handle: FrontendCatalogHandle,
     frontend_catalog_version: u64,
+    /// Activation-resolved grants keyed by owning module id. Embedded
+    /// components use their own entry rather than inheriting the host's
+    /// capabilities.
+    effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
     graph_i18n_catalogs: Vec<(String, String, PathBuf)>,
     pub(super) visible: bool,
     surface_exiting: bool,
@@ -1074,6 +1078,7 @@ impl FrontendSurfaceComponent {
             frontend_catalog,
             frontend_catalog_handle,
             frontend_catalog_version: frontend_catalog_state.version,
+            effective_capabilities: Arc::new(HashMap::new()),
             graph_i18n_catalogs: Vec::new(),
             visible: settings_state.layout.visible_on_start,
             surface_exiting: false,
@@ -1238,6 +1243,14 @@ impl FrontendSurfaceComponent {
         self.settings_diagnostics = settings_state.diagnostics;
         self.surface_layout = settings_state.layout;
         self.visible = self.surface_layout.visible_on_start;
+        self
+    }
+
+    pub(super) fn with_effective_capabilities(
+        mut self,
+        effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
+    ) -> Self {
+        self.effective_capabilities = effective_capabilities;
         self
     }
 

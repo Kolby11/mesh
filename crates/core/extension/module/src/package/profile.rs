@@ -631,6 +631,7 @@ mod tests {
         let mut root = RootModuleGraphManifest {
             schema_version: 1,
             modules_dir: "../modules".into(),
+            capability_approvals: Default::default(),
             modules: [
                 ("@me/panel", ModuleKind::Frontend),
                 ("@me/component", ModuleKind::Component),

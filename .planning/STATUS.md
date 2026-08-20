@@ -7,6 +7,11 @@ lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
 
+Section 01 improvement 1 is complete: module capability declarations now resolve
+against a closed catalog and persisted root-graph approvals before activation;
+required grants fail without approval, optional grants default to denied, and
+frontend/backend runtimes receive only the resolved grant set.
+
 The Section 11 Luau runtime and sandbox audit is complete. Its logical process
 tree, confirmed findings, broader feature direction, and regression matrix are
 in [`sections/11-luau-runtime-and-sandbox/improvements.md`](log/sections/11-luau-runtime-and-sandbox/improvements.md);

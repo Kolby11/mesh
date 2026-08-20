@@ -30,9 +30,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ## Foundation contracts
 
-- [ ] Resolve and persist effective capabilities before activation: required
-      grants must be approved, optional grants default denied, and unknown
-      capability classifications fail closed. [Audit](../.planning/log/sections/01-core-foundation-contracts/improvements.md).
 - [ ] Authorize every `shell.*` and popover operation through one typed operation
       registry; remove the raw-event bypass around host APIs such as
       `mesh.locale.set`. [Audit](../.planning/log/sections/01-core-foundation-contracts/improvements.md).

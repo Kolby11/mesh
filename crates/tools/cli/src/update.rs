@@ -11,13 +11,15 @@
 //!
 //! Everything before step 6 can refuse without touching the running shell.
 
-use mesh_core_capability::{Capability, PrivilegeLevel};
+use mesh_core_capability::{Capability, CapabilityCatalog, PrivilegeLevel};
 use mesh_core_module::package::{
     LockedModule, MeshLock, ModuleManifest, ModuleSource, has_local_edits, module_tree_digest,
 };
 use mesh_core_service::{CompatibilityClass, diff_contracts, parse_interface_contract};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 /// How a module whose working tree differs from its locked digest is handled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,7 +54,7 @@ pub struct UpdatePlan {
     pub candidates: Vec<CandidateModule>,
     /// Contract changes that break an installed consumer.
     pub breaking: Vec<String>,
-    /// New elevated/high capabilities needing explicit re-approval.
+    /// New required capabilities needing explicit approval.
     pub capability_additions: Vec<(String, Capability, PrivilegeLevel)>,
     /// Modules with local edits, under `EditPolicy::Refuse`.
     pub edited: Vec<String>,
@@ -161,6 +163,7 @@ pub fn plan_update(
     only: Option<&str>,
     policy: EditPolicy,
     installed: &BTreeMap<String, ModuleManifest>,
+    approvals: &BTreeMap<String, Vec<String>>,
 ) -> Result<UpdatePlan, String> {
     let mut plan = UpdatePlan::default();
 
@@ -197,7 +200,7 @@ pub fn plan_update(
     }
 
     classify_contract_changes(&mut plan, installed);
-    classify_capability_changes(&mut plan, installed);
+    classify_capability_changes(&mut plan, approvals)?;
     Ok(plan)
 }
 
@@ -253,45 +256,52 @@ fn declared_contracts(
     contracts
 }
 
-/// A candidate that asks for more privilege than the user approved must not
-/// land silently — the install-time capability review applies to updates too.
+/// A candidate that asks for a required capability not present in the persisted
+/// approval set must not land silently. Optional capabilities remain denied
+/// unless explicitly approved, but do not block an update by themselves.
 fn classify_capability_changes(
     plan: &mut UpdatePlan,
-    installed: &BTreeMap<String, ModuleManifest>,
-) {
+    approvals: &BTreeMap<String, Vec<String>>,
+) -> Result<(), String> {
+    let catalog = CapabilityCatalog::builtin();
     for candidate in plan.candidates.iter().filter(|c| !c.is_unchanged()) {
-        let approved: Vec<String> = installed
+        let approved = approvals
             .get(&candidate.module_id)
-            .map(|manifest| declared_capabilities(manifest))
+            .map(|ids| ids.iter().collect::<std::collections::BTreeSet<_>>())
             .unwrap_or_default();
-        for capability_id in declared_capabilities(&candidate.candidate_manifest) {
-            if approved.contains(&capability_id) {
-                continue;
-            }
-            let capability = Capability::new(capability_id);
-            let level = capability.privilege_level();
-            if matches!(level, PrivilegeLevel::Elevated | PrivilegeLevel::High) {
+        let required = candidate
+            .candidate_manifest
+            .mesh
+            .capabilities
+            .required
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        for capability_id in candidate
+            .candidate_manifest
+            .mesh
+            .capabilities
+            .required
+            .iter()
+            .chain(
+                candidate
+                    .candidate_manifest
+                    .mesh
+                    .capabilities
+                    .optional
+                    .iter(),
+            )
+        {
+            let level = catalog
+                .validate(capability_id)
+                .map_err(|error| error.to_string())?;
+            if required.contains(capability_id) && !approved.contains(capability_id) {
+                let capability = Capability::new(capability_id.clone());
                 plan.capability_additions
                     .push((candidate.module_id.clone(), capability, level));
             }
         }
     }
-}
-
-/// Normalization merges `mesh.uses.capabilities` into `mesh.capabilities`, so
-/// the two lists overlap; deduplicate or one added capability reports twice.
-fn declared_capabilities(manifest: &ModuleManifest) -> Vec<String> {
-    let mut capabilities: Vec<String> = manifest
-        .mesh
-        .capabilities
-        .required
-        .iter()
-        .chain(manifest.mesh.uses.capabilities.iter())
-        .cloned()
-        .collect();
-    capabilities.sort();
-    capabilities.dedup();
-    capabilities
+    Ok(())
 }
 
 /// Check the installed tree out at the candidate revision and refresh the lock.
@@ -495,7 +505,11 @@ mod tests {
             ..UpdatePlan::default()
         };
         classify_contract_changes(&mut plan, &installed);
-        classify_capability_changes(&mut plan, &installed);
+        let approvals = BTreeMap::from([(
+            "@me/audio".to_string(),
+            vec!["service.audio.read".to_string()],
+        )]);
+        classify_capability_changes(&mut plan, &approvals).unwrap();
         assert!(!plan.is_refused(), "{:?}", plan.breaking);
     }
 
@@ -528,10 +542,6 @@ mod tests {
 
     #[test]
     fn a_new_high_capability_requires_re_approval() {
-        let installed = BTreeMap::from([(
-            "@me/audio".to_string(),
-            manifest("@me/audio", "1.0.0", &["exec.wpctl"], BASE_CONTRACT),
-        )]);
         let mut plan = UpdatePlan {
             candidates: vec![candidate(
                 "@me/audio",
@@ -545,7 +555,8 @@ mod tests {
             )],
             ..UpdatePlan::default()
         };
-        classify_capability_changes(&mut plan, &installed);
+        let approvals = BTreeMap::from([("@me/audio".to_string(), vec!["exec.wpctl".to_string()])]);
+        classify_capability_changes(&mut plan, &approvals).unwrap();
         assert!(plan.is_refused());
         assert_eq!(plan.capability_additions.len(), 1);
         assert_eq!(
@@ -692,6 +703,7 @@ mod tests {
             None,
             EditPolicy::Refuse,
             &BTreeMap::new(),
+            &BTreeMap::new(),
         )
         .unwrap();
         assert!(plan.is_refused());
@@ -702,6 +714,7 @@ mod tests {
             &lock,
             None,
             EditPolicy::Keep,
+            &BTreeMap::new(),
             &BTreeMap::new(),
         )
         .unwrap();

@@ -1,5 +1,5 @@
 use super::super::*;
-use super::candidates::launch_candidate_for_provider;
+use super::candidates::launch_candidate_for_provider_with_capabilities;
 use rustix::fd::BorrowedFd;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -174,12 +174,13 @@ impl Shell {
             return;
         };
 
-        match launch_candidate_for_provider(
+        match launch_candidate_for_provider_with_capabilities(
             &graph,
             &self.modules,
             &self.settings_store,
             &self.interfaces,
             &provider,
+            Some(&self.effective_capabilities),
         ) {
             Ok(mut candidate) => {
                 tracing::info!(

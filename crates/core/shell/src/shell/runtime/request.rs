@@ -318,33 +318,35 @@ impl Shell {
             );
             return;
         };
-        let mut candidate = match crate::shell::backend::launch_candidate_for_provider(
-            &graph,
-            &self.modules,
-            &self.settings_store,
-            &self.interfaces,
-            &provider,
-        ) {
-            Ok(candidate) => candidate,
-            Err(status) => {
-                self.record_backend_runtime_status(
-                    status.interface.clone(),
-                    status
-                        .provider_id
-                        .clone()
-                        .unwrap_or_else(|| provider_id.to_string()),
-                    BackendRuntimeStatus::from_str(status.status),
-                    status.message.clone(),
-                );
-                tracing::warn!(
-                    interface,
-                    provider_id,
-                    "provider switch rejected: {}",
-                    status.message
-                );
-                return;
-            }
-        };
+        let mut candidate =
+            match crate::shell::backend::launch_candidate_for_provider_with_capabilities(
+                &graph,
+                &self.modules,
+                &self.settings_store,
+                &self.interfaces,
+                &provider,
+                Some(&self.effective_capabilities),
+            ) {
+                Ok(candidate) => candidate,
+                Err(status) => {
+                    self.record_backend_runtime_status(
+                        status.interface.clone(),
+                        status
+                            .provider_id
+                            .clone()
+                            .unwrap_or_else(|| provider_id.to_string()),
+                        BackendRuntimeStatus::from_str(status.status),
+                        status.message.clone(),
+                    );
+                    tracing::warn!(
+                        interface,
+                        provider_id,
+                        "provider switch rejected: {}",
+                        status.message
+                    );
+                    return;
+                }
+            };
         self.apply_shell_runtime_settings(&mut candidate);
         let slot = self.start_backend_candidate(&ctx.handle, ctx.tx, candidate, ctx.eventfd_fd);
         self.stage_backend_runtime_switch(interface.to_string(), slot, graph_path);
