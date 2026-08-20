@@ -8,9 +8,11 @@ lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 ## Now
 
 The guarded `scripts/codex-backlog-runner.sh` can process one unchecked backlog
-item at a time directly on `main`, requiring one feature commit and rolling to
-a fresh Codex session at the configured context threshold. It is intentionally
-blocked by any pre-existing dirty working tree.
+item at a time directly on `main`, using Codex's explicit unrestricted mode for
+unattended turns by default (`CODEX_ALLOW_ALL=0` opts back into workspace-write),
+requiring one feature commit and rolling to a fresh Codex session at the
+configured context threshold. It is intentionally blocked by any pre-existing
+dirty working tree.
 
 The 16 section improvement audits now have a feature-level checkbox checklist
 in `docs/BACKLOG.md`; implementation detail, evidence, and regression matrices

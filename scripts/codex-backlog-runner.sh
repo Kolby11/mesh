@@ -28,6 +28,8 @@ Environment:
   CODEX_CONTEXT_LEFT_PERCENT
                             Start a fresh session at or below this percentage
                             of context remaining (default: 30)
+  CODEX_ALLOW_ALL          Set to 0 to use workspace-write instead
+                            (default: 1; unattended mode bypasses approvals)
   CODEX_AUTO_APPROVE        Set to 0 to omit --approve-for-me (default: 1)
   CODEX_BIN                 Codex executable (default: codex)
 EOF
@@ -70,11 +72,13 @@ done
 CODEX_BIN=${CODEX_BIN:-codex}
 CODEX_CONTEXT_WINDOW_TOKENS=${CODEX_CONTEXT_WINDOW_TOKENS:-1050000}
 CODEX_CONTEXT_LEFT_PERCENT=${CODEX_CONTEXT_LEFT_PERCENT:-30}
+CODEX_ALLOW_ALL=${CODEX_ALLOW_ALL:-1}
 CODEX_AUTO_APPROVE=${CODEX_AUTO_APPROVE:-1}
 CODEX_MODEL=${CODEX_MODEL:-}
 
 [[ "$CODEX_CONTEXT_WINDOW_TOKENS" =~ ^[1-9][0-9]*$ ]] || die "CODEX_CONTEXT_WINDOW_TOKENS must be a positive integer"
 [[ "$CODEX_CONTEXT_LEFT_PERCENT" =~ ^([1-9][0-9]?|100)$ ]] || die "CODEX_CONTEXT_LEFT_PERCENT must be between 1 and 100"
+[[ "$CODEX_ALLOW_ALL" == 0 || "$CODEX_ALLOW_ALL" == 1 ]] || die "CODEX_ALLOW_ALL must be 0 or 1"
 [[ "$CODEX_AUTO_APPROVE" == 0 || "$CODEX_AUTO_APPROVE" == 1 ]] || die "CODEX_AUTO_APPROVE must be 0 or 1"
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -113,6 +117,7 @@ print_configuration() {
     printf 'branch: %s\n' "$(git -C "$ROOT" branch --show-current)"
     printf 'context window: %s tokens\n' "$CODEX_CONTEXT_WINDOW_TOKENS"
     printf 'fresh-session threshold: %s tokens used (%s%% remaining)\n' "$rollover_used" "$CODEX_CONTEXT_LEFT_PERCENT"
+    printf 'allow all permissions: %s\n' "$CODEX_ALLOW_ALL"
     printf 'auto approval: %s\n' "$CODEX_AUTO_APPROVE"
 }
 
@@ -193,13 +198,20 @@ run_turn() {
 
     if [[ -n "$session_id" ]]; then
         command=("$CODEX_BIN" exec resume "$session_id" --json --output-schema "$SCHEMA")
+        if ((CODEX_ALLOW_ALL)); then
+            command+=(--dangerously-bypass-approvals-and-sandbox)
+        fi
     else
-        command=("$CODEX_BIN" exec --json --sandbox workspace-write --output-schema "$SCHEMA")
+        command=("$CODEX_BIN" exec --json --output-schema "$SCHEMA")
         if [[ -n "$CODEX_MODEL" ]]; then
             command+=(--model "$CODEX_MODEL")
         fi
-        if ((CODEX_AUTO_APPROVE)); then
+        if ((CODEX_ALLOW_ALL)); then
+            command+=(--dangerously-bypass-approvals-and-sandbox)
+        elif ((CODEX_AUTO_APPROVE)); then
             command+=(--approve-for-me)
+        else
+            command+=(--sandbox workspace-write)
         fi
     fi
 
