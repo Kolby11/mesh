@@ -24,7 +24,10 @@ use crate::validate::{
 use crate::{ConfigError, SHELL_SETTINGS_FIELDS, ShellSettings, mesh_home_path};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::collections::BTreeMap;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const SETTINGS_SCHEMA_VERSION: u64 = 1;
 
@@ -34,6 +37,7 @@ pub const SETTINGS_SCHEMA_VERSION: u64 = 1;
 pub const SHELL_NAMESPACE: &str = "shell";
 
 const SCHEMA_VERSION_KEY: &str = "schemaVersion";
+static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// A schema registered by the owner of one settings namespace.
 #[derive(Debug, Clone, PartialEq)]
@@ -377,16 +381,30 @@ impl SettingsStore {
         JsonValue::Object(root)
     }
 
-    /// Written atomically: a crash mid-write cannot truncate the file.
+    /// Write the store through a unique owner-only temporary file, syncing the
+    /// file before the atomic rename and the parent directory afterwards.
+    ///
+    /// A failure before the rename leaves the previous settings file intact.
     pub fn save(&self) -> Result<(), ConfigError> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+        let parent = settings_parent(&self.path);
+        ensure_settings_directory(parent)?;
         let mut content = serde_json::to_string_pretty(&self.to_value())?;
         content.push('\n');
-        let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, content)?;
-        std::fs::rename(&tmp, &self.path)?;
+        let (temporary, mut file) = create_settings_temporary(&self.path, parent)?;
+        let result = (|| {
+            let file_result = (|| {
+                file.write_all(content.as_bytes())?;
+                file.sync_all()
+            })();
+            drop(file);
+            file_result?;
+            fs::rename(&temporary, &self.path)?;
+            sync_settings_directory(parent)
+        })();
+        if let Err(error) = result {
+            let _ = fs::remove_file(&temporary);
+            return Err(error.into());
+        }
         Ok(())
     }
 
@@ -426,6 +444,77 @@ impl SettingsStore {
         self.shell = shell;
         self.diagnostics = diagnostics;
         self.validated_root = validated_root;
+    }
+}
+
+fn settings_parent(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+fn ensure_settings_directory(parent: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(parent)?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(parent)?;
+    }
+    Ok(())
+}
+
+fn create_settings_temporary(path: &Path, parent: &Path) -> io::Result<(PathBuf, File)> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("settings.json");
+
+    for _ in 0..128 {
+        let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let temporary = parent.join(format!(
+            ".{file_name}.tmp-{}-{sequence}",
+            std::process::id()
+        ));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+
+            options.mode(0o600);
+        }
+        match options.open(&temporary) {
+            Ok(file) => return Ok((temporary, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!(
+            "could not allocate a unique temporary settings file in {}",
+            parent.display()
+        ),
+    ))
+}
+
+fn sync_settings_directory(parent: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        File::open(parent)?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = parent;
+        Ok(())
     }
 }
 
@@ -920,6 +1009,89 @@ mod tests {
             loaded.namespace("@mesh/navigation-bar")["surface"]["exclusive_zone"],
             json!(48)
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_uses_owner_only_file_and_directory_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "mesh-settings-permissions-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let parent = root.join("config");
+        let path = parent.join("settings.json");
+        let store = SettingsStore::from_value(&path, json!({})).unwrap();
+
+        store.save().expect("write settings");
+
+        assert_eq!(
+            std::fs::metadata(&parent).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::read_dir(&parent)
+                .unwrap()
+                .filter_map(Result::ok)
+                .count(),
+            1,
+            "the unique temporary file must be removed by the rename"
+        );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn concurrent_saves_keep_complete_documents_and_clean_temporary_files() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-settings-concurrent-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let path = root.join("settings.json");
+        let shared_path = std::sync::Arc::new(path.clone());
+
+        let workers = (0..4)
+            .map(|worker| {
+                let path = shared_path.clone();
+                std::thread::spawn(move || {
+                    let mut store = SettingsStore::from_value(&*path, json!({})).unwrap();
+                    store.set_namespace(
+                        "shell",
+                        json!({
+                            "i18n": { "locale": format!("worker-{worker}") }
+                        }),
+                    );
+                    for _ in 0..8 {
+                        store.save().unwrap();
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for worker in workers {
+            worker
+                .join()
+                .expect("concurrent settings writer must not panic");
+        }
+
+        let loaded = SettingsStore::load_from(&path).expect("last atomic document is valid JSON");
+        assert!(loaded.shell().i18n.locale.starts_with("worker-"));
+        assert_eq!(
+            std::fs::read_dir(&root)
+                .unwrap()
+                .filter_map(Result::ok)
+                .count(),
+            1,
+            "unique temporary files must not remain after concurrent saves"
+        );
+
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]

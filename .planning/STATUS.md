@@ -67,6 +67,11 @@ from the installed graph. Registration and graph replacement stage validation
 before commit; invalid values are omitted from the runtime projection while raw
 unknown or uninstalled namespaces remain available for lifecycle repair.
 
+Settings persistence now writes owner-only settings files through unique
+same-directory temporary files, syncing file data before rename and the parent
+directory after rename. Concurrent writers no longer share a fixed temporary
+path, and newly created settings directories are owner-only.
+
 The Section 11 Luau runtime and sandbox audit is complete. Its logical process
 tree, confirmed findings, broader feature direction, and regression matrix are
 in [`sections/11-luau-runtime-and-sandbox/improvements.md`](log/sections/11-luau-runtime-and-sandbox/improvements.md);

@@ -35,7 +35,6 @@ The six primary findings in this audit shipped on 2026-08-20 and are recorded in
 the monthly log, so they are intentionally absent from the open backlog.
 [Audit](../.planning/log/sections/01-core-foundation-contracts/improvements.md)
 
-- [ ] Replace the fixed settings temporary file with unique, permission-aware, crash-durable atomic writes.
 - [ ] Avoid leading-dot root diagnostic locations when the namespace is empty.
 - [ ] Treat empty XDG directory variables as absent instead of relative paths.
 - [ ] Report allocation profiling as active only when the counting allocator is installed.
