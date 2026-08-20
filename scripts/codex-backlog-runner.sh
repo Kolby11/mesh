@@ -195,6 +195,8 @@ run_turn() {
     local event_file=$2
     local stderr_file=$3
     local -a command
+    local -a pipeline_status
+    local result
 
     if [[ -n "$session_id" ]]; then
         command=("$CODEX_BIN" exec resume "$session_id" --json --output-schema "$SCHEMA")
@@ -216,11 +218,42 @@ run_turn() {
     fi
 
     set +e
-    "${command[@]}" "$prompt" >"$event_file" 2>"$stderr_file"
-    local result=$?
+    "${command[@]}" "$prompt" 2>"$stderr_file" \
+        | tee "$event_file" \
+        | jq --unbuffered -r '
+            def shorten:
+                tostring
+                | gsub("[\\r\\n\\t]"; " ")
+                | if length > 180 then .[0:177] + "..." else . end;
+
+            if .type == "thread.started" then
+                "[codex] session started: \(.thread_id)"
+            elif .type == "turn.started" then
+                "[codex] turn started"
+            elif .type == "item.started" and .item.type == "command_execution" then
+                "[codex] running: \(.item.command | shorten)"
+            elif .type == "item.completed" and .item.type == "command_execution" then
+                if .item.exit_code == 0 then
+                    "[codex] finished (exit 0): \(.item.command | shorten)"
+                elif .item.exit_code != null then
+                    "[codex] finished (exit \(.item.exit_code)): \(.item.command | shorten)"
+                else
+                    "[codex] command \(.item.status // "completed"): \(.item.command | shorten)"
+                end
+            elif .type == "item.completed" and .item.type == "agent_message" then
+                "[codex] response ready"
+            elif .type == "turn.completed" then
+                "[codex] turn completed"
+            elif .type == "error" then
+                "[codex] error: \(.message // .error // "unknown error" | shorten)"
+            else
+                empty
+            end
+        '
+    pipeline_status=("${PIPESTATUS[@]}")
+    result=${pipeline_status[0]}
     set -e
     cat "$stderr_file" >&2
-    cat "$event_file"
     return "$result"
 }
 
