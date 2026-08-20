@@ -485,14 +485,18 @@ pub fn default_ipc_socket_path() -> PathBuf {
         }
     }
 
-    if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
-        return PathBuf::from(runtime_dir).join("mesh.sock");
+    if let Some(runtime_dir) = non_empty_env_path(std::env::var_os("XDG_RUNTIME_DIR")) {
+        return runtime_dir.join("mesh.sock");
     }
 
     let uid = std::env::var("UID").unwrap_or_else(|_| "unknown".to_string());
     PathBuf::from("/tmp")
         .join(format!("mesh-{uid}"))
         .join("mesh.sock")
+}
+
+fn non_empty_env_path(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    value.filter(|value| !value.is_empty()).map(PathBuf::from)
 }
 
 impl Default for Shell {

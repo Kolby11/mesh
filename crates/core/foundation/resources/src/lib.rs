@@ -73,7 +73,9 @@ fn discover_font_families() -> Vec<SystemFontFamily> {
 pub fn xdg_icon_base_dirs() -> Vec<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let mut dirs = Vec::new();
-    if let Some(data_home) = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from) {
+    if let Some(data_home) =
+        non_empty_env_value(std::env::var_os("XDG_DATA_HOME")).map(PathBuf::from)
+    {
         dirs.push(data_home.join("icons"));
     } else if let Some(home) = &home {
         dirs.push(home.join(".local/share/icons"));
@@ -81,7 +83,7 @@ pub fn xdg_icon_base_dirs() -> Vec<PathBuf> {
     if let Some(home) = home {
         dirs.push(home.join(".icons"));
     }
-    let data_dirs = std::env::var_os("XDG_DATA_DIRS")
+    let data_dirs = non_empty_env_value(std::env::var_os("XDG_DATA_DIRS"))
         .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
         .filter(|dirs| !dirs.is_empty())
         .unwrap_or_else(|| {
@@ -96,6 +98,10 @@ pub fn xdg_icon_base_dirs() -> Vec<PathBuf> {
     dirs.into_iter()
         .filter(|path| path.is_dir() && seen.insert(path.clone()))
         .collect()
+}
+
+fn non_empty_env_value(value: Option<std::ffi::OsString>) -> Option<std::ffi::OsString> {
+    value.filter(|value| !value.is_empty())
 }
 
 fn discover_icon_themes_in(base_dirs: &[PathBuf]) -> Vec<SystemIconTheme> {
@@ -162,6 +168,15 @@ fn read_icon_theme(path: &Path) -> Option<SystemIconTheme> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_xdg_directory_values_are_absent() {
+        assert_eq!(non_empty_env_value(Some(std::ffi::OsString::new())), None);
+        assert_eq!(
+            non_empty_env_value(Some(std::ffi::OsString::from("/tmp/mesh-data"))),
+            Some(std::ffi::OsString::from("/tmp/mesh-data"))
+        );
+    }
 
     #[test]
     fn icon_catalog_honors_precedence_and_metadata() {

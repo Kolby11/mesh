@@ -76,6 +76,11 @@ Root-level settings diagnostics now render their key paths without a leading
 separator when the namespace is empty, so unknown root keys are reported as
 `shel` rather than `.shel`.
 
+Empty XDG config, data, data-search, and runtime directory variables now fall
+back to their platform defaults instead of producing relative paths. This
+covers default configuration lookup, host icon discovery, and the shell IPC
+socket location.
+
 The Section 11 Luau runtime and sandbox audit is complete. Its logical process
 tree, confirmed findings, broader feature direction, and regression matrix are
 in [`sections/11-luau-runtime-and-sandbox/improvements.md`](log/sections/11-luau-runtime-and-sandbox/improvements.md);

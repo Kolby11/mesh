@@ -65,3 +65,15 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
+
+#[test]
+fn empty_xdg_runtime_directory_is_absent() {
+    assert_eq!(
+        super::non_empty_env_path(Some(std::ffi::OsString::new())),
+        None
+    );
+    assert_eq!(
+        super::non_empty_env_path(Some(std::ffi::OsString::from("/run/user/1000"))),
+        Some(PathBuf::from("/run/user/1000"))
+    );
+}

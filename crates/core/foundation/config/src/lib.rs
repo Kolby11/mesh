@@ -487,20 +487,20 @@ pub fn load_config(path: &Path) -> Result<ShellConfig, ConfigError> {
 
 fn dirs_path(kind: &str) -> PathBuf {
     match kind {
-        "config" => std::env::var("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-                PathBuf::from(home).join(".config")
-            }),
-        "data" => std::env::var("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-                PathBuf::from(home).join(".local/share")
-            }),
+        "config" => non_empty_env_path(std::env::var_os("XDG_CONFIG_HOME")).unwrap_or_else(|| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            PathBuf::from(home).join(".config")
+        }),
+        "data" => non_empty_env_path(std::env::var_os("XDG_DATA_HOME")).unwrap_or_else(|| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            PathBuf::from(home).join(".local/share")
+        }),
         _ => PathBuf::from("/tmp"),
     }
+}
+
+fn non_empty_env_path(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    value.filter(|value| !value.is_empty()).map(PathBuf::from)
 }
 
 fn mesh_home_path() -> PathBuf {
@@ -518,6 +518,15 @@ fn mesh_home_path() -> PathBuf {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn empty_xdg_directory_values_are_absent() {
+        assert_eq!(non_empty_env_path(Some(std::ffi::OsString::new())), None);
+        assert_eq!(
+            non_empty_env_path(Some(std::ffi::OsString::from("/tmp/mesh-config"))),
+            Some(PathBuf::from("/tmp/mesh-config"))
+        );
+    }
 
     #[test]
     fn keyboard_settings_default_shortcuts_remain_available_without_user_overrides() {
