@@ -250,6 +250,7 @@ pub(super) fn interface_module(
         Vec::new(),
         MeshContributes::default(),
     );
+    module.manifest.version = "1.0.0".into();
     module.manifest.mesh.interface = Some(MeshInterfaceDeclaration {
         name: name.into(),
         version: Some("1.0".into()),

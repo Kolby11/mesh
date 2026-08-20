@@ -328,6 +328,7 @@ end
         MeshContributes::default(),
     );
     interface.path = interface_dir.join("module.json");
+    interface.manifest.version = "1.0.0".into();
     interface.manifest.mesh.interface = Some(MeshInterfaceDeclaration {
         name: "mesh.example".into(),
         version: Some("1.0".into()),

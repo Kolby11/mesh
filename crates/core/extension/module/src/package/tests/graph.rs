@@ -97,6 +97,113 @@ fn installed_module_graph_rejects_root_module_without_loaded_package() {
 }
 
 #[test]
+fn installed_module_graph_blocks_a_frontend_with_a_missing_required_module() {
+    let mut dependencies = MeshDependencies::default();
+    dependencies.modules.insert(
+        "@mesh/missing".into(),
+        crate::manifest::DependencySpec::Simple(">=1.0.0".into()),
+    );
+    let frontend = loaded_module(
+        "@mesh/frontend",
+        ModuleKind::Frontend,
+        dependencies,
+        vec![],
+        MeshContributes::default(),
+    );
+    let root = root_with_modules(&[("@mesh/frontend", ModuleKind::Frontend)], &[], None);
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
+
+    assert!(!graph.module("@mesh/frontend").unwrap().enabled);
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/frontend"
+            && diagnostic.status == "missing_required_module_dependency"
+    }));
+}
+
+#[test]
+fn installed_module_graph_keeps_an_optional_module_dependency_degraded() {
+    let mut dependencies = MeshDependencies::default();
+    dependencies.modules.insert(
+        "@mesh/optional".into(),
+        crate::manifest::DependencySpec::Detailed {
+            version: ">=1.0.0".into(),
+            optional: Some(true),
+        },
+    );
+    let frontend = loaded_module(
+        "@mesh/frontend",
+        ModuleKind::Frontend,
+        dependencies,
+        vec![],
+        MeshContributes::default(),
+    );
+    let root = root_with_modules(&[("@mesh/frontend", ModuleKind::Frontend)], &[], None);
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
+
+    assert!(graph.module("@mesh/frontend").unwrap().enabled);
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/frontend"
+            && diagnostic.status == "optional_module_dependency_missing"
+    }));
+}
+
+#[test]
+fn installed_module_graph_blocks_required_consumers_from_incompatible_provider_versions() {
+    let mut frontend_dependencies = MeshDependencies::default();
+    frontend_dependencies
+        .backend
+        .insert("mesh.example".into(), ">=2.0.0".into());
+    let frontend = loaded_module(
+        "@mesh/frontend",
+        ModuleKind::Frontend,
+        frontend_dependencies,
+        vec![],
+        MeshContributes::default(),
+    );
+    let interface = interface_module(
+        "@mesh/example-interface",
+        "mesh.example",
+        "example",
+        InterfaceRelationship::Base,
+        None,
+    );
+    let backend = loaded_module(
+        "@mesh/backend",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: Some("1.0".into()),
+            base_module: Some("@mesh/example-interface".into()),
+            provider: Some("example".into()),
+            label: None,
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+    let root = root_with_modules(
+        &[
+            ("@mesh/frontend", ModuleKind::Frontend),
+            ("@mesh/example-interface", ModuleKind::Interface),
+            ("@mesh/backend", ModuleKind::Backend),
+        ],
+        &[("mesh.example", "@mesh/backend")],
+        None,
+    );
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![frontend, interface, backend]).unwrap();
+
+    assert!(!graph.module("@mesh/frontend").unwrap().enabled);
+    assert!(graph.active_provider("mesh.example").is_none());
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/frontend"
+            && diagnostic.status == "interface_dependency_blocked"
+    }));
+}
+
+#[test]
 fn installed_module_graph_exposes_frontend_backend_requirements() {
     let mut deps = MeshDependencies::default();
     deps.backend.insert("mesh.audio".into(), ">=1.0.0".into());
@@ -275,13 +382,7 @@ fn installed_module_graph_routes_generic_interface_provider_without_service_bran
     let backend = loaded_module(
         "@mesh/example-backend",
         ModuleKind::Backend,
-        MeshDependencies {
-            modules: HashMap::from([(
-                "@mesh/example-interface".into(),
-                crate::manifest::DependencySpec::Simple(">=1.0.0".into()),
-            )]),
-            ..MeshDependencies::default()
-        },
+        MeshDependencies::default(),
         vec![MeshProvidesDeclaration {
             interface: "mesh.example.alt".into(),
             version: Some("1.0.0".into()),

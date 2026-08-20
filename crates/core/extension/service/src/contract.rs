@@ -452,9 +452,15 @@ pub fn parse_contract_version(value: &str) -> Option<Version> {
         return None;
     }
 
-    Version::parse(trimmed)
-        .ok()
-        .or_else(|| Version::parse(&format!("{trimmed}.0")).ok())
+    Version::parse(trimmed).ok().or_else(|| {
+        let component_count = trimmed.split('.').count();
+        let normalized = match component_count {
+            1 => format!("{trimmed}.0.0"),
+            2 => format!("{trimmed}.0"),
+            _ => return None,
+        };
+        Version::parse(&normalized).ok()
+    })
 }
 
 pub fn parse_version_req(value: &str) -> Option<VersionReq> {

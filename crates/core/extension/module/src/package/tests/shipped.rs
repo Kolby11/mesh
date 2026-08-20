@@ -96,11 +96,11 @@ fn shipped_module_graph_loads_repo_module_fixture() {
         .into_iter()
         .map(|module| module.id.as_str())
         .collect();
-    assert_eq!(component_ids.len(), 3);
+    assert_eq!(component_ids.len(), 4);
     assert!(component_ids.contains("@mesh/audio-popover"));
     assert!(component_ids.contains("@mesh/quick-settings"));
     assert!(component_ids.contains("@mesh/theme-selector"));
-    assert!(!graph.module("@mesh/language-popover").unwrap().enabled);
+    assert!(graph.module("@mesh/language-popover").unwrap().enabled);
     assert_eq!(
         graph
             .module("@mesh/navigation-bar")
@@ -231,6 +231,10 @@ fn shipped_module_diagnostics_report_missing_navigation_icon() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let mut navigation =
         load_module_manifest(&workspace_root.join("modules/frontend/navigation-bar")).unwrap();
+    // This test isolates icon diagnostics from the graph's required-module
+    // activation gate.
+    navigation.manifest.mesh.uses.modules.clear();
+    navigation.manifest.mesh.dependencies.modules.clear();
     navigation
         .manifest
         .mesh

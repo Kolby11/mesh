@@ -5,8 +5,10 @@ use super::super::{
 };
 use super::*;
 use crate::manifest;
-use mesh_core_service::{InterfaceContract, parse_interface_contract};
-use std::collections::HashMap;
+use mesh_core_service::{
+    InterfaceContract, parse_contract_version, parse_interface_contract, parse_version_req,
+};
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -15,6 +17,208 @@ pub struct LoadedModuleManifest {
     pub path: PathBuf,
     pub source: ModuleManifestSource,
     pub diagnostics: Vec<ModuleManifestDiagnostic>,
+}
+
+/// Select providers only after the graph has parsed interface contracts. A
+/// provider is eligible for an interface when its offered version and the
+/// interface contract version both satisfy the consumer's requested range.
+/// Required consumers participate in one shared selection decision; optional
+/// consumers receive a degradation diagnostic when the selected provider does
+/// not match their range.
+fn resolve_active_providers(
+    requested: &HashMap<String, String>,
+    providers: &HashMap<String, Vec<BackendProviderNode>>,
+    disabled_provider_interfaces: &BTreeSet<String>,
+    requirements: &HashMap<String, FrontendRequirementSet>,
+    declarations: &HashMap<String, InterfaceDeclarationNode>,
+    contracts: &HashMap<String, InterfaceContract>,
+) -> (
+    HashMap<String, String>,
+    Vec<ModuleGraphDiagnostic>,
+    BTreeSet<String>,
+) {
+    let mut interfaces = BTreeSet::new();
+    interfaces.extend(providers.keys().cloned());
+    interfaces.extend(declarations.keys().cloned());
+    interfaces.extend(requirements.values().flat_map(|requirements| {
+        requirements
+            .backend
+            .keys()
+            .chain(requirements.optional_backend.keys())
+            .cloned()
+    }));
+    interfaces.extend(requested.keys().cloned());
+
+    let mut active = HashMap::new();
+    let mut diagnostics = Vec::new();
+    let mut blocked_frontends = BTreeSet::new();
+
+    for interface in interfaces {
+        // Core-provided interfaces are registered by the shell after graph
+        // construction. Without a graph declaration or graph provider there is
+        // no module-owned version to validate here, so leave that decision to
+        // the core registry rather than disabling every shipped frontend.
+        if !providers.contains_key(&interface) && !declarations.contains_key(&interface) {
+            continue;
+        }
+
+        let required_consumers = requirements
+            .values()
+            .filter(|requirements| requirements.backend.contains_key(&interface))
+            .collect::<Vec<_>>();
+        let optional_consumers = requirements
+            .values()
+            .filter(|requirements| requirements.optional_backend.contains_key(&interface))
+            .collect::<Vec<_>>();
+        let provider_candidates = providers
+            .get(&interface)
+            .map(|providers| {
+                providers
+                    .iter()
+                    .filter(|provider| {
+                        required_consumers.iter().all(|consumer| {
+                            consumer.backend.get(&interface).is_some_and(|requirement| {
+                                provider_satisfies_requirement(
+                                    provider,
+                                    requirement,
+                                    declarations.get(&interface),
+                                    contracts.get(&interface),
+                                )
+                            })
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let has_graph_provider = providers
+            .get(&interface)
+            .is_some_and(|list| !list.is_empty())
+            || disabled_provider_interfaces.contains(&interface);
+
+        let selected = if let Some(requested_module) = requested.get(&interface) {
+            provider_candidates
+                .iter()
+                .copied()
+                .find(|provider| provider.module_id == *requested_module)
+        } else if provider_candidates.len() == 1 {
+            provider_candidates.first().copied()
+        } else {
+            None
+        };
+
+        if let Some(provider) = selected {
+            active.insert(interface.clone(), provider.module_id.clone());
+        }
+
+        for consumer in required_consumers {
+            let Some(requirement) = consumer.backend.get(&interface) else {
+                continue;
+            };
+            match selected {
+                Some(provider)
+                    if provider_satisfies_requirement(
+                        provider,
+                        requirement,
+                        declarations.get(&interface),
+                        contracts.get(&interface),
+                    ) => {}
+                _ => {
+                    let status = if provider_candidates.is_empty() {
+                        "required_interface_version_mismatch"
+                    } else {
+                        "required_interface_unavailable"
+                    };
+                    diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: consumer.module_id.clone(),
+                        contribution_id: Some(format!(
+                            "{}:interface:{}",
+                            consumer.module_id, interface
+                        )),
+                        status: status.into(),
+                        message: format!(
+                            "module {} requires {interface} {requirement}, but no selected provider satisfies the contract and provider versions",
+                            consumer.module_id
+                        ),
+                    });
+                    if has_graph_provider {
+                        blocked_frontends.insert(consumer.module_id.clone());
+                    }
+                }
+            }
+        }
+
+        for consumer in optional_consumers {
+            let Some(requirement) = consumer.optional_backend.get(&interface) else {
+                continue;
+            };
+            let (status, message) = match selected {
+                None => (
+                    "optional_interface_unavailable",
+                    format!(
+                        "module {} optionally uses {interface} {requirement}, but no compatible provider is active",
+                        consumer.module_id
+                    ),
+                ),
+                Some(provider)
+                    if provider_satisfies_requirement(
+                        provider,
+                        requirement,
+                        declarations.get(&interface),
+                        contracts.get(&interface),
+                    ) =>
+                {
+                    continue;
+                }
+                Some(provider) => (
+                    "optional_interface_version_mismatch",
+                    format!(
+                        "module {} optionally uses {interface} {requirement}, but provider {} is incompatible",
+                        consumer.module_id, provider.module_id
+                    ),
+                ),
+            };
+            diagnostics.push(ModuleGraphDiagnostic {
+                module_id: consumer.module_id.clone(),
+                contribution_id: Some(format!(
+                    "{}:optional-interface:{}",
+                    consumer.module_id, interface
+                )),
+                status: status.into(),
+                message,
+            });
+        }
+    }
+
+    (active, diagnostics, blocked_frontends)
+}
+
+fn provider_satisfies_requirement(
+    provider: &BackendProviderNode,
+    requirement: &str,
+    declaration: Option<&InterfaceDeclarationNode>,
+    contract: Option<&InterfaceContract>,
+) -> bool {
+    let Some(request) = parse_version_req(requirement) else {
+        return false;
+    };
+    if let Some(contract) = contract {
+        if !request.matches(&contract.version) {
+            return false;
+        }
+    } else if let Some(version) = declaration
+        .and_then(|declaration| declaration.version.as_deref())
+        .and_then(parse_contract_version)
+        && !request.matches(&version)
+    {
+        return false;
+    }
+
+    let Some(provider_version) = provider.version.as_deref() else {
+        // Older providers without a version inherit the declared contract
+        // version, which was checked above when one exists.
+        return true;
+    };
+    parse_contract_version(provider_version).is_some_and(|version| request.matches(&version))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,7 +269,7 @@ impl InstalledModuleGraph {
     }
 
     pub fn from_parts_with_composition(
-        mut root: RootModuleGraphManifest,
+        root: RootModuleGraphManifest,
         modules: Vec<LoadedModuleManifest>,
         composition: CompositionContext,
     ) -> Result<Self, ModuleManifestError> {
@@ -88,6 +292,7 @@ impl InstalledModuleGraph {
         let mut frontend_requirements = HashMap::new();
         let mut interface_declarations = HashMap::new();
         let mut contributions = ModuleContributionIndex::default();
+        let mut manual_diagnostics: Vec<ModuleGraphDiagnostic> = Vec::new();
 
         for (module_id, entry) in &root.modules {
             let loaded = loaded_by_id.get(module_id).ok_or_else(|| {
@@ -112,59 +317,142 @@ impl InstalledModuleGraph {
                 manifest: loaded.manifest.clone(),
             };
 
-            if entry.enabled {
-                if entry.kind == ModuleKind::Frontend {
-                    frontend_requirements.insert(
-                        module_id.clone(),
-                        FrontendRequirementSet::from_manifest(module_id, &node.manifest),
-                    );
-                }
-
-                if entry.kind == ModuleKind::Interface
-                    && let Some(interface) = &node.manifest.mesh.interface
-                {
-                    let declaration = InterfaceDeclarationNode {
-                        source: ContributionSource::new(&node, &interface.name),
-                        module_id: module_id.clone(),
-                        name: interface.name.clone(),
-                        version: interface.version.clone(),
-                        contract: interface.contract.clone(),
-                        domain: interface.domain.clone(),
-                        extends: interface.extends.clone(),
-                        relationship: interface.effective_relationship(),
-                        reason: interface.reason.clone(),
-                    };
-                    interface_declarations.insert(declaration.name.clone(), declaration);
-                }
-
-                if entry.kind == ModuleKind::Backend {
-                    for provided in node.manifest.mesh.implementations() {
-                        let provider = BackendProviderNode {
-                            source: ContributionSource::new(
-                                &node,
-                                provided.provider.as_deref().unwrap_or(&provided.interface),
-                            ),
-                            module_id: module_id.clone(),
-                            interface: provided.interface.clone(),
-                            version: provided.version.clone(),
-                            base_module: provided.base_module.clone(),
-                            provider: provided.provider.clone(),
-                            label: provided.label.clone(),
-                            priority: provided.priority,
-                            required_capabilities: node.manifest.mesh.capabilities.required.clone(),
-                            optional_capabilities: node.manifest.mesh.capabilities.optional.clone(),
-                        };
-                        backend_providers
-                            .entry(provided.interface.clone())
-                            .or_default()
-                            .push(provider);
-                    }
-                }
-
-                contributions.index_module(&node)?;
-            }
-
             graph_modules.insert(module_id.clone(), node);
+        }
+
+        // Resolve module edges before indexing any contributions. A required
+        // dependency failure disables only the affected module closure; an
+        // optional edge is retained as a degraded record and never blocks its
+        // requester.
+        let enabled_ids = graph_modules
+            .values()
+            .filter(|module| module.enabled)
+            .map(|module| module.id.as_str())
+            .collect::<Vec<_>>();
+        let enabled_manifests = graph_modules
+            .values()
+            .map(|module| &module.manifest)
+            .collect::<Vec<_>>();
+        let resolution = resolve_closure(enabled_ids.iter().copied(), enabled_manifests);
+        let active_module_ids = resolution.active_modules(enabled_ids.iter().copied());
+        for node in graph_modules.values_mut() {
+            node.enabled = active_module_ids.contains(&node.id);
+        }
+        for (module_id, reasons) in &resolution.blocked {
+            manual_diagnostics.push(ModuleGraphDiagnostic {
+                module_id: module_id.clone(),
+                contribution_id: Some(format!("{module_id}:dependencies")),
+                status: "module_dependency_blocked".into(),
+                message: format!(
+                    "module {module_id} is not activated because {}",
+                    reasons.iter().cloned().collect::<Vec<_>>().join("; ")
+                ),
+            });
+        }
+        for conflict in &resolution.conflicts {
+            manual_diagnostics.push(ModuleGraphDiagnostic {
+                module_id: conflict.module_id.clone(),
+                contribution_id: Some(format!("{}:version", conflict.module_id)),
+                status: "module_version_conflict".into(),
+                message: conflict.message(),
+            });
+        }
+        for (dependency_id, requirers) in &resolution.missing {
+            for requester in requirers {
+                manual_diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: requester.clone(),
+                    contribution_id: Some(format!("{requester}:dependency:{dependency_id}")),
+                    status: "missing_required_module_dependency".into(),
+                    message: format!(
+                        "module {requester} requires module {dependency_id}, but it is not installed"
+                    ),
+                });
+            }
+        }
+        for optional in &resolution.optional {
+            manual_diagnostics.push(ModuleGraphDiagnostic {
+                module_id: optional.module_id.clone(),
+                contribution_id: Some(format!(
+                    "{}:dependency:{}",
+                    optional.module_id, optional.dependency_id
+                )),
+                status: optional.status.clone(),
+                message: format!("{} (requested {})", optional.message, optional.requirement),
+            });
+        }
+        for node in graph_modules.values().filter(|node| node.enabled) {
+            for (dependency_id, spec) in &node.manifest.mesh.dependencies.modules {
+                if !spec.is_optional() {
+                    continue;
+                }
+                if let Some(dependency) = graph_modules.get(dependency_id)
+                    && !dependency.enabled
+                {
+                    manual_diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: node.id.clone(),
+                        contribution_id: Some(format!(
+                            "{}:dependency:{}",
+                            node.id, dependency_id
+                        )),
+                        status: "optional_module_dependency_disabled".into(),
+                        message: format!(
+                            "optional module {dependency_id} is installed but disabled; module {} continues without it",
+                            node.id
+                        ),
+                    });
+                }
+            }
+        }
+
+        for node in graph_modules.values() {
+            if !node.enabled {
+                continue;
+            }
+            if node.kind == ModuleKind::Frontend {
+                frontend_requirements.insert(
+                    node.id.clone(),
+                    FrontendRequirementSet::from_manifest(&node.id, &node.manifest),
+                );
+            }
+            if node.kind == ModuleKind::Interface
+                && let Some(interface) = &node.manifest.mesh.interface
+            {
+                let declaration = InterfaceDeclarationNode {
+                    source: ContributionSource::new(node, &interface.name),
+                    module_id: node.id.clone(),
+                    name: interface.name.clone(),
+                    version: interface.version.clone(),
+                    contract: interface.contract.clone(),
+                    domain: interface.domain.clone(),
+                    extends: interface.extends.clone(),
+                    relationship: interface.effective_relationship(),
+                    reason: interface.reason.clone(),
+                };
+                interface_declarations.insert(declaration.name.clone(), declaration);
+            }
+            if node.kind == ModuleKind::Backend {
+                for provided in node.manifest.mesh.implementations() {
+                    let provider = BackendProviderNode {
+                        source: ContributionSource::new(
+                            node,
+                            provided.provider.as_deref().unwrap_or(&provided.interface),
+                        ),
+                        module_id: node.id.clone(),
+                        interface: provided.interface.clone(),
+                        version: provided.version.clone(),
+                        base_module: provided.base_module.clone(),
+                        provider: provided.provider.clone(),
+                        label: provided.label.clone(),
+                        priority: provided.priority,
+                        required_capabilities: node.manifest.mesh.capabilities.required.clone(),
+                        optional_capabilities: node.manifest.mesh.capabilities.optional.clone(),
+                    };
+                    backend_providers
+                        .entry(provided.interface.clone())
+                        .or_default()
+                        .push(provider);
+                }
+            }
         }
 
         for providers in backend_providers.values_mut() {
@@ -180,7 +468,6 @@ impl InstalledModuleGraph {
         // the same interface name; among duplicate inline declarations the
         // highest-priority provider's copy wins. Losers become diagnostics,
         // not errors — the graph stays loadable.
-        let mut manual_diagnostics: Vec<ModuleGraphDiagnostic> = Vec::new();
         let mut backend_ids: Vec<String> = graph_modules
             .values()
             .filter(|node| node.enabled && node.kind == ModuleKind::Backend)
@@ -250,22 +537,6 @@ impl InstalledModuleGraph {
             }
         }
 
-        // Auto-select a provider when exactly one enabled backend implements an
-        // interface and the root graph names none. This removes the need to
-        // hand-write a `providers` entry for the common single-provider case.
-        // `backend_providers` only holds enabled providers, so a length of one
-        // means a sole implementer. Explicit root selections always win, and
-        // interfaces with multiple providers still require an explicit choice.
-        for (interface, providers) in &backend_providers {
-            if root.providers.contains_key(interface) {
-                continue;
-            }
-            if let [sole] = providers.as_slice() {
-                root.providers
-                    .insert(interface.clone(), sole.module_id.clone());
-            }
-        }
-
         for (interface, module_id) in &root.providers {
             let Some(node) = graph_modules.get(module_id) else {
                 return Err(ModuleManifestError::Validation(format!(
@@ -273,9 +544,15 @@ impl InstalledModuleGraph {
                 )));
             };
             if !node.enabled {
-                return Err(ModuleManifestError::Validation(format!(
-                    "active provider {module_id} for {interface} is disabled"
-                )));
+                manual_diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: module_id.clone(),
+                    contribution_id: Some(format!("{module_id}:provider:{interface}")),
+                    status: "active_provider_disabled".into(),
+                    message: format!(
+                        "active provider {module_id} for {interface} is disabled and cannot be activated"
+                    ),
+                });
+                continue;
             }
             if node.kind != ModuleKind::Backend {
                 return Err(ModuleManifestError::Validation(format!(
@@ -297,43 +574,6 @@ impl InstalledModuleGraph {
             }
         }
 
-        let layout_entrypoint = match root.layout {
-            Some(layout) => {
-                let (module_id, entrypoint_id) = parse_module_entrypoint(&layout.entrypoint)
-                    .ok_or_else(|| {
-                        ModuleManifestError::Validation(format!(
-                            "invalid layout entrypoint {}",
-                            layout.entrypoint
-                        ))
-                    })?;
-                let node = graph_modules.get(module_id).ok_or_else(|| {
-                    ModuleManifestError::Validation(format!(
-                        "layout entrypoint module {module_id} is not installed"
-                    ))
-                })?;
-                if !node.enabled || node.kind != ModuleKind::Frontend {
-                    return Err(ModuleManifestError::Validation(format!(
-                        "layout entrypoint module {module_id} must be an enabled frontend module"
-                    )));
-                }
-                let contribution = contributions
-                    .layout
-                    .iter()
-                    .find(|item| item.module_id == module_id && item.id == entrypoint_id)
-                    .ok_or_else(|| {
-                        ModuleManifestError::Validation(format!(
-                            "layout contribution {} not found",
-                            layout.entrypoint
-                        ))
-                    })?;
-                Some(ResolvedLayoutEntrypoint {
-                    module_id: module_id.into(),
-                    entrypoint_id: entrypoint_id.into(),
-                    path: contribution.path.clone(),
-                })
-            }
-            None => None,
-        };
         // Parse every declared contract once. Invalid contracts become
         // diagnostics and the interface simply has no typed contract.
         let mut interface_contracts: HashMap<String, InterfaceContract> = HashMap::new();
@@ -360,6 +600,100 @@ impl InstalledModuleGraph {
                 }),
             }
         }
+
+        let disabled_provider_interfaces = graph_modules
+            .values()
+            .filter(|node| !node.enabled && node.kind == ModuleKind::Backend)
+            .flat_map(|node| {
+                node.manifest
+                    .mesh
+                    .implementations()
+                    .map(|implementation| implementation.interface.clone())
+            })
+            .collect::<BTreeSet<_>>();
+        let (active_providers, compatibility_diagnostics, blocked_frontends) =
+            resolve_active_providers(
+                &root.providers,
+                &backend_providers,
+                &disabled_provider_interfaces,
+                &frontend_requirements,
+                &interface_declarations,
+                &interface_contracts,
+            );
+        manual_diagnostics.extend(compatibility_diagnostics);
+        for module_id in blocked_frontends {
+            if let Some(module) = graph_modules.get_mut(&module_id) {
+                module.enabled = false;
+            }
+            frontend_requirements.remove(&module_id);
+            manual_diagnostics.push(ModuleGraphDiagnostic {
+                module_id: module_id.clone(),
+                contribution_id: Some(format!("{module_id}:interfaces")),
+                status: "interface_dependency_blocked".into(),
+                message: format!(
+                    "module {module_id} is not activated because a required interface has no compatible provider"
+                ),
+            });
+        }
+
+        // Contributions are indexed only after module and interface/provider
+        // compatibility has made its activation decisions.
+        for node in graph_modules.values() {
+            if node.enabled {
+                contributions.index_module(node)?;
+            }
+        }
+
+        let layout_entrypoint = match root.layout {
+            Some(layout) => {
+                let (module_id, entrypoint_id) = parse_module_entrypoint(&layout.entrypoint)
+                    .ok_or_else(|| {
+                        ModuleManifestError::Validation(format!(
+                            "invalid layout entrypoint {}",
+                            layout.entrypoint
+                        ))
+                    })?;
+                let node = graph_modules.get(module_id).ok_or_else(|| {
+                    ModuleManifestError::Validation(format!(
+                        "layout entrypoint module {module_id} is not installed"
+                    ))
+                })?;
+                if node.kind != ModuleKind::Frontend {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "layout entrypoint module {module_id} must be a frontend module"
+                    )));
+                }
+                if !node.enabled {
+                    manual_diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: module_id.into(),
+                        contribution_id: Some(layout.entrypoint.clone()),
+                        status: "layout_entrypoint_blocked".into(),
+                        message: format!(
+                            "layout entrypoint {} is unavailable because its module was not activated",
+                            layout.entrypoint
+                        ),
+                    });
+                    None
+                } else {
+                    let contribution = contributions
+                        .layout
+                        .iter()
+                        .find(|item| item.module_id == module_id && item.id == entrypoint_id)
+                        .ok_or_else(|| {
+                            ModuleManifestError::Validation(format!(
+                                "layout contribution {} not found",
+                                layout.entrypoint
+                            ))
+                        })?;
+                    Some(ResolvedLayoutEntrypoint {
+                        module_id: module_id.into(),
+                        entrypoint_id: entrypoint_id.into(),
+                        path: contribution.path.clone(),
+                    })
+                }
+            }
+            None => None,
+        };
 
         let (mut extension_points, extension_point_diagnostics) =
             resolve_extension_points(&contributions);
@@ -396,29 +730,6 @@ impl InstalledModuleGraph {
             });
         }
 
-        // Version resolution over the enabled closure. One version per module
-        // id is not a limitation MESH could lift: the id is also the settings
-        // namespace and the surface instance key.
-        let enabled_manifests = graph_modules
-            .values()
-            .filter(|module| module.enabled)
-            .map(|module| &module.manifest)
-            .collect::<Vec<_>>();
-        let enabled_ids = graph_modules
-            .values()
-            .filter(|module| module.enabled)
-            .map(|module| module.id.as_str())
-            .collect::<Vec<_>>();
-        let resolution = resolve_closure(enabled_ids, enabled_manifests);
-        for conflict in &resolution.conflicts {
-            manual_diagnostics.push(ModuleGraphDiagnostic {
-                module_id: conflict.module_id.clone(),
-                contribution_id: Some(format!("{}:version", conflict.module_id)),
-                status: "module_version_conflict".into(),
-                message: conflict.message(),
-            });
-        }
-
         let interface_guidance = build_interface_guidance(&interface_declarations);
         let diagnostics = build_graph_diagnostics(
             &graph_modules,
@@ -435,7 +746,7 @@ impl InstalledModuleGraph {
         }
         let health = build_graph_health(
             &backend_providers,
-            &root.providers,
+            &active_providers,
             &frontend_requirements,
             &diagnostics,
         );
@@ -443,7 +754,7 @@ impl InstalledModuleGraph {
         Ok(Self {
             modules: graph_modules,
             backend_providers,
-            active_providers: root.providers,
+            active_providers,
             frontend_requirements,
             interface_declarations,
             interface_contracts,

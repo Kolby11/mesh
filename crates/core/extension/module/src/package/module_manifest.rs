@@ -1,5 +1,6 @@
 use super::{ModuleId, ModuleManifestDiagnostic, ModuleManifestError, validate_relative_path};
 use crate::manifest::{self, CapabilitiesSection, DependencySpec, Manifest, ModuleType};
+use mesh_core_service::{parse_contract_version, parse_version_req};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -55,6 +56,12 @@ impl ModuleManifest {
             return Err(ModuleManifestError::Validation(format!(
                 "module {} version cannot be empty",
                 self.name
+            )));
+        }
+        if parse_contract_version(&self.version).is_none() {
+            return Err(ModuleManifestError::Validation(format!(
+                "module {} version '{}' is not a valid semantic version",
+                self.name, self.version
             )));
         }
         if let Some(repository) = &self.repository {
@@ -346,6 +353,7 @@ impl MeshModuleSection {
             ));
         }
         self.uses.validate()?;
+        self.dependencies.validate()?;
         if let Some(interface) = &self.interface {
             interface.validate()?;
             if self.kind == ModuleKind::Interface && interface.version.is_none() {
@@ -778,8 +786,9 @@ pub struct MeshResourceUses {
 
 impl MeshUses {
     fn validate(&self) -> Result<(), ModuleManifestError> {
-        for module_id in self.modules.keys() {
+        for (module_id, spec) in &self.modules {
             validate_module_dependency_id("mesh.uses.modules", module_id)?;
+            validate_dependency_version("mesh.uses.modules", module_id, spec)?;
         }
         for module_id in self.sources.keys() {
             validate_module_dependency_id("mesh.uses.sources", module_id)?;
@@ -794,12 +803,13 @@ impl MeshUses {
         {
             validate_module_dependency_id("mesh.uses.resources", module_id)?;
         }
-        for interface in self
-            .interfaces
-            .keys()
-            .chain(self.optional_interfaces.keys())
-        {
+        for (interface, version) in &self.interfaces {
             validate_interface_dependency_id(interface)?;
+            validate_version_requirement("mesh.uses.interfaces", interface, version)?;
+        }
+        for (interface, version) in &self.optional_interfaces {
+            validate_interface_dependency_id(interface)?;
+            validate_version_requirement("mesh.uses.optionalInterfaces", interface, version)?;
         }
         for capability in self
             .capabilities
@@ -810,6 +820,44 @@ impl MeshUses {
         }
         Ok(())
     }
+}
+
+fn validate_dependency_version(
+    field: &str,
+    dependency_id: &str,
+    spec: &DependencySpec,
+) -> Result<(), ModuleManifestError> {
+    let version = match spec {
+        DependencySpec::Simple(version) => version,
+        DependencySpec::Detailed { version, .. } => version,
+    };
+    validate_version_requirement(field, dependency_id, version)
+}
+
+fn validate_version_requirement(
+    field: &str,
+    name: &str,
+    version: &str,
+) -> Result<(), ModuleManifestError> {
+    if parse_version_req(version).is_none() {
+        return Err(ModuleManifestError::Validation(format!(
+            "{field} dependency '{name}' has invalid version range '{version}'"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_declared_version(
+    field: &str,
+    name: &str,
+    version: &str,
+) -> Result<(), ModuleManifestError> {
+    if parse_contract_version(version).is_none() {
+        return Err(ModuleManifestError::Validation(format!(
+            "{field} '{name}' has invalid semantic version '{version}'"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_module_dependency_id(field: &str, value: &str) -> Result<(), ModuleManifestError> {
@@ -885,6 +933,18 @@ pub struct MeshDependencies {
 }
 
 impl MeshDependencies {
+    fn validate(&self) -> Result<(), ModuleManifestError> {
+        for (module_id, spec) in &self.modules {
+            validate_module_dependency_id("mesh.dependencies.modules", module_id)?;
+            validate_dependency_version("mesh.dependencies.modules", module_id, spec)?;
+        }
+        for (interface, version) in self.backend.iter().chain(self.optional_backend.iter()) {
+            validate_interface_dependency_id(interface)?;
+            validate_version_requirement("mesh.dependencies.interfaces", interface, version)?;
+        }
+        Ok(())
+    }
+
     fn into_manifest_dependencies(self) -> manifest::DependenciesSection {
         let interfaces = self
             .backend
@@ -993,6 +1053,10 @@ impl MeshProvidesDeclaration {
                 "mesh.provides interface cannot be empty".into(),
             ));
         }
+        validate_interface_dependency_id(&self.interface)?;
+        if let Some(version) = &self.version {
+            validate_declared_version("mesh.provides version", &self.interface, version)?;
+        }
         Ok(())
     }
 }
@@ -1028,6 +1092,9 @@ impl MeshInterfaceDeclaration {
             return Err(ModuleManifestError::Validation(
                 "mesh.interface.version cannot be empty".into(),
             ));
+        }
+        if let Some(version) = &self.version {
+            validate_declared_version("mesh.interface version", &self.name, version)?;
         }
         if let Some(contract) = &self.contract {
             match contract {
