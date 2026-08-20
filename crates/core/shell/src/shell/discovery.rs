@@ -437,7 +437,6 @@ impl Shell {
             settings_store,
             theme,
             locale,
-            events: EventBus::new(),
             diagnostics: DiagnosticsCollector::new(),
             services: ServiceRegistry::new(),
             interfaces,

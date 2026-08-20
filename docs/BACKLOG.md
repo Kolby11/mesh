@@ -30,9 +30,8 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ## Foundation contracts
 
-- [ ] Choose one event contract and version the debug telemetry boundary: remove
-      or integrate the unused foundation `EventBus`, and serialize complete debug
-      DTOs without a second hand-maintained JSON contract.
+- [ ] Version the debug telemetry boundary and serialize complete debug DTOs
+      without a second hand-maintained JSON contract.
 
 ## Module system
 

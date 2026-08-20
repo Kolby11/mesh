@@ -11,7 +11,6 @@ mesh-core-elements = { workspace = true }
 mesh-core-theme = { workspace = true }
 mesh-core-locale = { workspace = true }
 mesh-core-config = { workspace = true }
-mesh-core-events = { workspace = true }
 mesh-core-capability = { workspace = true }
 mesh-core-service = { workspace = true }
 

@@ -8,7 +8,6 @@ use mesh_core_debug::{
     ModuleEntry, ProviderEntry,
 };
 use mesh_core_diagnostics::DiagnosticsCollector;
-use mesh_core_events::EventBus;
 use mesh_core_locale::LocaleEngine;
 use mesh_core_module::lifecycle::{ModuleInstance, ModuleState};
 use mesh_core_module::package::{
@@ -404,7 +403,6 @@ pub struct Shell {
     pub settings_store: Arc<SettingsStore>,
     pub theme: ThemeEngine,
     pub locale: LocaleEngine,
-    pub events: EventBus,
     pub diagnostics: DiagnosticsCollector,
     pub services: ServiceRegistry,
     pub interfaces: InterfaceRegistry,

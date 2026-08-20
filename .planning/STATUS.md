@@ -30,6 +30,11 @@ collector registration replaces identities, unregister removes stale instance
 state, snapshots are deterministic, and backend recovery resolves lifecycle
 issues explicitly.
 
+Section 01 improvement 5 is complete: the unused foundation `EventBus` and its
+misleading publish/subscribe contract were removed from the workspace. Live
+extension events continue through the typed scripting queue and shell service
+router, leaving one operational event path.
+
 The Section 11 Luau runtime and sandbox audit is complete. Its logical process
 tree, confirmed findings, broader feature direction, and regression matrix are
 in [`sections/11-luau-runtime-and-sandbox/improvements.md`](log/sections/11-luau-runtime-and-sandbox/improvements.md);

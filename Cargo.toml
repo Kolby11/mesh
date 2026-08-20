@@ -4,7 +4,6 @@ members = [
     "crates/core/shell",
     "crates/core/extension/module",
     "crates/core/foundation/capability",
-    "crates/core/foundation/events",
     "crates/core/foundation/config",
     "crates/core/foundation/theme",
     "crates/core/foundation/locale",
@@ -53,7 +52,6 @@ rust-version = "1.85"
 mesh-core-shell = { path = "crates/core/shell" }
 mesh-core-module = { path = "crates/core/extension/module" }
 mesh-core-capability = { path = "crates/core/foundation/capability" }
-mesh-core-events = { path = "crates/core/foundation/events" }
 mesh-core-config = { path = "crates/core/foundation/config" }
 mesh-core-theme = { path = "crates/core/foundation/theme" }
 mesh-core-locale = { path = "crates/core/foundation/locale" }
