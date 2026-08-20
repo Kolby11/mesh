@@ -153,7 +153,24 @@ fi
 assert_main_and_clean
 cd -- "$ROOT"
 
-TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/mesh-codex-runner.XXXXXX")
+create_temp_dir() {
+    local parent
+
+    for parent in "${TMPDIR:-}" /tmp; do
+        [[ -n "$parent" && -d "$parent" && -w "$parent" ]] || continue
+        if TMP_DIR=$(mktemp -d "$parent/mesh-codex-runner.XXXXXX"); then
+            if [[ -n "${TMPDIR:-}" && "$parent" != "$TMPDIR" ]]; then
+                printf 'codex-backlog-runner: TMPDIR is unavailable; using %s\n' "$parent" >&2
+            fi
+            return 0
+        fi
+    done
+
+    die "could not create a temporary directory; checked TMPDIR and /tmp"
+}
+
+TMP_DIR=''
+create_temp_dir
 trap 'rm -rf -- "$TMP_DIR"' EXIT
 
 session_id=''
