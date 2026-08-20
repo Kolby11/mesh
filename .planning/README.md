@@ -65,7 +65,8 @@ entry format. Current files:
   table, back to 2026-07-02.
 - `backlog-archive-2026-07-28.md` — verbatim snapshot of the pre-split backlog,
   holding the detailed progress narratives for items still open.
-- `sections.md` — the ten-subsystem map that section letters (A–V) refer to.
+- `sections.md` — the current package-oriented concern map; section letters
+  (A–V) in older records are historical references.
 
 ### `archive/`
 

@@ -1,515 +1,421 @@
-# MESH Performance Plan — by Codebase Section
+# MESH Package and Concern Map
 
-Companion to `todo.md` (the canonical backlog). This file splits the codebase
-into subsystems and, for each, lists what already shipped, what is still open
-(with the `todo.md` section it lives in), and the recommended next step for
-that subsystem. Work one section at a time, top to bottom inside each section.
+# prompt
 
-Sections ordered by expected remaining win.
+i want you to take a look at the sections.md file, then i want you to go throgh the 3. section spawning luna xhigh agent to which you will add instruction to scan the whole logical process of that section so it
+creates a picture of the instruction tree or something like that then you will spawn next two agents, one
+will check for any logical errors or improvements in the code order, the second agent will look directly at
+possible code errors. If you find any place where some other agents could be use to create a concrete list
+of improvement for that section spawn them. After the work is finished make sure you output summary of the
+findings into new improvements.md file under that section. Also dont constraint the logic agent on the
+current code flow, if they see a possible better feature make sure that they suggest it
 
----
+**Audited:** 2026-08-16
 
-## 1. Component composition & template evaluation
-`crates/core/shell/src/shell/component/composition.rs`, `crates/core/frontend/compiler`
+This is the current package-oriented split of the MESH codebase. Each section
+names the workspace packages that can be reasoned about or tested together,
+what they own, and the seam that keeps the concern replaceable.
 
-Shipped: per-tree `StyleRuleIndex` on the build path (E), typed handler-call
-args instead of JSON-in-attribute (G), `surface_css_props()` computed once per
-paint (E), profiling-gated narrow diff (J).
+This is not a second backlog. Open work lives in
+[`docs/BACKLOG.md`](../../docs/BACKLOG.md); the present lives in
+[`STATUS.md`](../STATUS.md); measurements and historical decisions live in the
+dated log and [`performance-log.md`](performance-log.md).
 
-Open — in priority order:
-1. **Component-level render memoization** (I) — cache each embedded instance's
-   built subtree keyed by (props fingerprint, `ScriptState::mutation_generation`,
-   locale/theme generation) and reuse it wholesale. The single largest
-   structural win; one reactive variable currently re-costs the whole surface.
-2. **Affected-subtree template re-eval** (P1 → v1.27) — use
-   `NodeServiceFieldDependencies` so only nodes whose tracked fields changed
-   are re-evaluated instead of full template eval + diff.
-3. **Typed expression values** (A) — `eval_expr` returns `String` for
-   everything; numeric ops re-`parse::<f64>` both sides per evaluation
-   (`compiler/src/expr.rs:208`) and float re-formatting causes false attribute
-   dirtiness. Introduce a small bool/number/string value enum, stringify only
-   at the attribute boundary.
-4. **Handler write → binding dependency gating** (B) — record which public
-   members templates actually bind and skip rebuilds for writes nothing binds
-   to (extends v1.18 typed state dependencies).
+## Package split at a glance
 
-### Section 1 deep dive — 2026-07-04 (new findings, not yet in todo.md)
+| Concern | Workspace package(s) | Primary isolation seam |
+| --- | --- | --- |
+| Core foundation contracts | `mesh-core-capability`, `mesh-core-config`, `mesh-core-diagnostics`, `mesh-core-events`, `mesh-core-debug` | serializable contracts, diagnostics, events, and policy types |
+| Module system and installation | `mesh-core-module` | canonical manifests, graph, lifecycle, package state |
+| Service contracts | `mesh-core-service` | interfaces, providers, typed state/method/event records |
+| Themes | `mesh-core-theme` | token/default/keyframe/theme-engine API |
+| Localization / i18n | `mesh-core-locale` | locale catalogs and translation lookup |
+| Host resources and icon packs | `mesh-core-resources`, `mesh-core-icon` | system catalogs, semantic icon resolution, pack bindings |
+| Component language | `mesh-core-component` | `.mesh` parsing, props, scripts, styles, templates |
+| UI element core | `mesh-core-elements` | retained widget model, style, layout, events, accessibility primitives |
+| Interaction and motion | `mesh-core-interaction`, `mesh-core-animation` | hit testing, focus, scroll, transitions, keyframes |
+| Frontend compiler and host | `mesh-core-frontend`, `mesh-core-frontend-host` | compiled frontend modules and shell-facing host contracts |
+| Luau runtime and sandbox | `mesh-core-runtime`, `mesh-core-scripting`, `mesh-core-backend` | sandbox policy, Luau contexts, backend loops and commands |
+| Rendering and paint | `mesh-core-render` | retained display list, render objects, painter and adapters |
+| Surface policy | `mesh-core-surface-config` | placement, sizing, surface settings, prop validation |
+| Wayland and presentation | `mesh-core-wayland`, `mesh-core-presentation` | compositor protocol, SHM, damage, input, popup/surface commits |
+| Shell core/orchestration | `mesh-core-shell` | discovery, profiles, lifecycle, scheduling, runtime composition |
+| Developer and authoring tools | `mesh-tools-cli`, `mesh-tools-lsp` | CLI operations and `.mesh`/manifest language tooling |
 
-Perf:
-- **Full layout per embedded instance per rebuild.** `build_tree_with_state`
-  always ends with `LayoutEngine::compute_with_measurer` (`compiler/src/lib.rs:203`),
-  and `render_embedded_instance` calls it per embedded module instance
-  mid-build; `finalize_tree` then re-lays-out the whole tree
-  (`rendering.rs:460`). Embedded subtrees get ≥3 layout passes per rebuild
-  (+1 per nesting level). Verify nothing reads `node.layout` between build and
-  finalize, then skip layout in `FrontendRenderMode::Embedded` (and likely for
-  the surface build too).
-- **`{#for}` deep-clones the whole items array every rebuild.** Completed
-  2026-07-06: borrowed iterable arrays through `VariableStore::get_ref` when
-  available, with an owned fallback for older stores. Release-only benchmark on
-  a clone-heavy 1k-item array measured ~1.2x faster locally (5.12s → 4.25s for
-  80 rebuilds); small-payload full-render was layout/tree-build dominated.
-  `store.get(&for_node.iterable)` (`render.rs:429`) uses the owned `get` even
-  though borrowed `get_ref` exists; switch to `get_ref`.
-- **Three post-hoc full-subtree walks per embedded instance:**
-  `namespace_event_handlers` re-`format!`s every handler string every rebuild
-  (`interaction/src/hit_test.rs:359`) even though `build_widget_node` already
-  receives `instance_key` — namespace at `parse_attributes` time instead;
-  `apply_prop_handler_calls` clones each node's whole handler map and does an
-  O(handlers × props) value-equality scan (`composition.rs:213-239`);
-  plus the popover-root check.
-- **Per-rebuild prop churn:** `ensure_runtime` re-`set`s every prop into script
-  state per instance per frame (`runtime.rs:408-415`, 2–3 runtimes-mutex
-  acquisitions each); `render_import` rebuilds `props_json` maps and
-  `format!`s instance keys per frame; host+component rule slices are re-cloned
-  into a merged Vec per instance (`render.rs:266-278`) — cacheable per
-  (host, alias).
-- **Per-node build allocations:** `_mesh_module_id` String inserted on every
-  node (`attach_module_id`); `TrackingVariableStore` pushes two fresh Strings
-  per dotted read; `resolve_event_handler_value` does an owned `store.get`
-  per handler attribute. All fold into the v1.23 interning work but are worth
-  keeping on this list since composition authors keep adding attributes.
+The split follows package ownership rather than product features. A panel,
+launcher, or settings page crosses several sections; it does not create a new
+core package. Module-specific policy stays in modules and Luau scripts while
+these packages provide reusable mechanisms and contracts.
 
-Structure / correctness:
-- **`and`/`or` diverge from Lua semantics.** `eval_compiled` returns literal
-  `"true"`/`"false"` for `And`/`Or` (`expr.rs:193-204`) instead of the operand
-  values — `{name or "Anonymous"}` renders `true`/`false`. Only the exact
-  `cond and a or b` ternary shape works. Also `is_truthy` treats `"0"`/`""`
-  as falsy (Lua doesn't), and `a or b and c` parses with wrong precedence
-  (`and` is split before `or`). Fixing these naturally lands with the typed
-  expression-value enum (§1.3).
-- **Build is no longer a pure function.** `render_import` mutates shell state
-  during build via RefCells (`pending_surface_states`,
-  `portal_hidden_bindings`, `has_promoted_popover_wrappers`, live-binding
-  installation). Component-level memoization (§1.1) will silently skip these
-  side effects when serving a cached subtree — they must become explicit build
-  outputs (a `BuildEffects` struct) before memoization can land.
-- **Handler-call linkage matches by value equality.** `apply_prop_handler_calls`
-  maps typed args onto child handlers by comparing resolved handler *values*
-  to prop values; two props bound to the same handler mismatch args. Link by
-  prop name through the child build instead.
-- **Legacy JSON handler descriptors still parsed** in `unpack_handler_args`
-  (`runtime.rs:644-664`) after typed `EventHandlerCall` landed — per the
-  no-backward-compat rule, remove once nothing produces them.
-- **`{#if}`/`{#for}` always wrap children in a synthetic `column` node**
-  (`render.rs:394,423`) — an extra node per conditional/loop for layout,
-  style, hash, and paint, and it forces column flow inside row parents.
-  Needs a fragment/transparent-container concept.
-- **No keyed list diffing.** `{#for}` identity is positional (`_mesh_key`
-  paths), so any reorder/insert re-styles and re-hashes every following row.
-  A `key=` attribute pairs naturally with component memoization.
-- **Magic-string protocol at the composition boundary** (`__mesh_embed__::`,
-  `__mesh_binding_*`, `__mesh_bind_this`, `_mesh_module_id`,
-  promoted-popover marker) — the composition-boundary instance of the v1.23
-  typed-fields work.
-- Minor: `render_import`'s local branch does its catalog lookups twice
-  (once for the `contains_key` gate, again inside `render_local_component`).
+## 1. Core foundation contracts
 
-## 2. Retained tree, diff & display list
-`shell/component/runtime_tree.rs`, `frontend/render/src/display_list.rs`
+**Packages:** `mesh-core-capability`, `mesh-core-config`,
+`mesh-core-diagnostics`, `mesh-core-events`, and `mesh-core-debug`.
 
-Shipped: shallow `Arc<Value>` state clones (A), snapshot inline `child_ids`,
-primitive-aware hashing, `_mesh_key` hash removal (D), scratch-map reuse in
-the display list (I), hash-chained runtime node IDs (J), metrics publication
-gated on retained diff (A).
+**Owns:** capability values and privilege checks; settings/config models and
+validation; health/lifecycle diagnostics; the typed event bus; debug, profiling,
+allocation, invalidation, and inspection snapshots.
 
-Open:
-1. **Generation-aware diff / skip clean subtrees** (P1 → v1.27, D) — stop
-   re-hashing every node's ~50 style fields + attributes per paint; dirty bits
-   from the invalidation source should scope the fingerprint walk.
-2. **String key-path allocation removal** (J) — IDs are chained now, but the
-   slash-joined string path is still built per node per frame because
-   interaction state and `refs` use it as the public key. Migrate those to
-   `NodeId` and keep string paths for debug only.
-3. **`WidgetNode` representation** (D, P2 → v1.23) — interned `Symbol`/`TagId`,
-   small-vec attribute storage instead of two `BTreeMap<String,String>` per
-   node, shell annotations (scroll offsets, focus flags, selection coords) as
-   typed fields instead of formatted-float string attributes.
-4. **Segment/rope display-list storage** (P1 → v1.21) — stop flattening
-   retained subtrees into a new flat command buffer per update.
-5. **`Arc<str>` display payload text** (I) — pointer-first comparison for
-   `content`/`value`/`src`/`name` instead of per-entry string clones.
+**Isolation seam:** These packages should expose data and policy contracts, not
+shell composition or service-specific behavior. They are the lowest-level
+cross-cutting core and should remain usable without rendering or Wayland.
 
-### Section 2 deep dive — 2026-07-04 (new findings; full list in todo.md §N)
+**Source roots:**
+`crates/core/foundation/{capability,config,diagnostics,events,debug}/`.
 
-The pipeline is annotate → `RetainedWidgetTree::update` → `RenderObjectTree`
-→ `RetainedDisplayList` → damage. Key discoveries:
+**Review:** [`improvements.md`](sections/01-core-foundation-contracts/improvements.md)
+records the 2026-08-16 logical-flow, correctness, and security audit for this
+section. Actionable follow-ups remain tracked only in `docs/BACKLOG.md`.
 
-- **Three parallel diff systems fingerprint the same tree every dirty frame** —
-  retained-tree snapshots, render-object paint-data slots, and display-list
-  entry signatures (`collect_display_entries` re-hashes every node regardless
-  of the dirty set). Unifying them around the retained tree's per-node dirty
-  flags is the structural win for this section and folds into v1.27.
-- **`ordered_entries` is release-build waste**: built per rebuild, consumed
-  only by a `#[cfg(debug_assertions)]` metric (`display_list.rs:891-894`).
-- **`render_object.rs` never received the D-item optimizations**: per-node
-  String/Vec allocations, six string-parsed floats per node, fresh HashSets
-  per update, byte-at-a-time hasher (the primitive-aware hasher was only added
-  to `runtime_tree.rs`).
-- **Scroll state round-trips float→string→float 3× per node per frame**
-  (`"{:.2}"` annotation attrs re-parsed in three places) — the concrete typed-
-  fields motivation.
-- Reused paint subtrees clone twice per clean node; `build_command_spans` +
-  effect-overflow count add two more full passes per rebuild.
-- Structure: no NodeId collision detection (hash-derived ids, silent aliasing
-  risk — add a debug assertion); `_mesh_key` identity-as-string-attribute
-  forces special cases; three hand-rolled FNV hashers drifted apart.
+## 2. Module system and installation
 
-## 3. Style system & theming
-`ui/elements/src/style*`, `frontend/compiler/src/style.rs`, `foundation/theme`
+**Package:** `mesh-core-module`.
 
-Shipped: unified `css_property_table!`, cached class-token splits, indexed
-build-path resolution (E), empty-diff no-op restyle, state-selector presence
-gate for hover invalidation (K).
+**Owns:** canonical `module.json` manifests, module kinds and capabilities,
+installed graphs, dependency/provider resolution, module lifecycle, source
+loading, package provenance, locks, health, graph diagnostics, and contribution
+records.
 
-### Section 3 deep dive — 2026-07-04 (new findings; full list in todo.md §O)
+**Isolation seam:** The graph and manifest model are the source of truth for
+what is installed and enabled. The module package must not own shell widgets,
+service policy, or compositor behavior; it hands resolved records to their
+consumers.
 
-- **Hidden second full restyle on every rebuild frame**: first stage completed
-  2026-07-06. Runtime style diagnostics now reuse the cached `StyleRuleIndex`
-  instead of rebuilding one per node; indexed-vs-uncached parity is covered and
-  a release-only microbenchmark measured ~2.4x faster diagnostics locally
-  (652.3ms → 270.3ms for 20k resolutions over 80 rules). Remaining follow-up:
-  gate diagnostics by rules/tree generation or move static validation to compile
-  time. The runtime style
-  diagnostics pass (always on in production) re-resolves every node through
-  the diagnostics path, which still builds a `StyleRuleIndex` **per node** —
-  the O(nodes × rules) pattern the build path already fixed. Likely the
-  largest single win in this section.
-- **Per-declaration static validation re-runs per node per pass**
-  (profile status, supported-property, deprecated-token string scan) — all
-  precomputable once per rule; the cheap first step toward typed declarations.
-- Per-node allocation leaks in the resolver inner loop: module theme-token
-  variable seeding (`format!` + `replace` per token per node), prop map
-  cloning per node, `var()` token-name canonicalization per reference.
-- **Correctness**: theme component defaults live in a `HashMap` and apply in
-  nondeterministic order — overlapping shorthand+longhand defaults resolve
-  randomly per run; theme-CSS source order is lost at parse.
-- Structure: the diagnostics/no-diagnostics function-pair duplication is what
-  let the per-node index rebuild survive on one path; fold into one path with
-  a diagnostics sink parameter. No CSS specificity by design (source-order
-  wins) — document in `docs/spec/04-styling.md`.
+**Source roots:**
+`crates/core/extension/module/{manifest,package,lifecycle}.rs` and
+`crates/core/extension/module/src/package/installed_graph/`.
 
-Second pass on §2 (same date, todo.md §N addendum): every rebuilt ancestor
-copies its whole descendant command list into its own retained flat buffer
-(O(n × depth) storage — the retained-memory face of v1.21); a dirty node
-force-rebuilds its entire subtree's paint segments even for style-only
-changes; `DisplayPaintCommand` embeds a cloned `DisplayPaintNode` per command
-(share via `Arc`).
+**Review:** [`improvements.md`](sections/02-module-system-and-installation/improvements.md)
+records the 2026-08-17 process, correctness, transaction, resolver, and
+filesystem-security audit for this section. Actionable follow-ups remain tracked
+only in `docs/BACKLOG.md`.
 
-Open:
-1. **Typed declarations end-to-end** (E, v1.23) — theme tokens resolve through
-   `format!("{n}")` → re-`parse_px`/`Color::from_hex` string round-trips in the
-   inner loop of build and restyle. Resolve tokens to typed values once per
-   theme load; `apply_declaration` consumes typed values.
-2. **Per-tag `ComputedStyle` prototypes** (E) — pre-bake theme component
-   defaults once per theme change; start node resolution from a memcpy instead
-   of re-applying string declaration maps per node.
-3. **Selector-dependency analysis** (P0 → v1.18) — full-tree restyle avoidance
-   for interaction changes beyond the shipped presence gate.
+## 3. Service contracts
 
-## 4. Rendering & paint
-`crates/core/frontend/render` (painter, text, icons, debug overlay)
+**Package:** `mesh-core-service`.
 
-Shipped: multi-rect damage through the retained renderer (P1 → v1.20), shaped
-single-pass ellipsis, opaque-region/blur wiring, checkbox/radio vector paint,
-shared layout/paint text measurer.
+**Owns:** versioned interfaces, typed state, method and event contracts,
+provider compatibility, resolution records, and the transitional typed service
+registry.
 
-Open:
-1. **Fractional-scale partial damage** (D) — still the biggest visible lever on
-   1.25×/1.5× outputs; the 2026-07-03 physical-damage experiment was
-   byte-correct but showed no CPU win, so land compositor/SHM-upload damage
-   instrumentation first (Tier 2/3 in L), then re-measure. Related memory:
-   logical-vs-physical damage clip mismatch is the root cause.
-2. **Text/glyph cache pressure visibility** (`TEXT_RENDERING_TODO.md`) — expose
-   layout-cache entries/hits/misses/invalidations + shaping time in profiling
-   output before further shaping changes; add locale/script/direction cases to
-   canonical workloads. (Note: the ellipsis item in that file is stale — it
-   shipped 2026-06-20 per todo.md.)
-3. **Tile-parallel raster for large damage** (K) — band-split full-surface
-   repaints; gate on a damage-area threshold, measure with v1.21 profiles.
-4. **GPU backend** (P2 → v1.25) — wgpu/Skia-GPU with the retained display list
-   as command source; only after damage/invalidation work stabilizes.
+**Isolation seam:** Frontends consume interface records and backends implement
+them. This package must not know how a provider polls Linux, paints a widget,
+or presents a surface.
 
-### Section 4 deep dive — 2026-07-04 (new findings; full list in todo.md §P)
+**Source root:** `crates/core/extension/service/`.
 
-- **Icon paints stat() files every frame** — `file_freshness` runs
-  `fs::metadata` per file-backed icon per paint even on raster-cache hits
-  (freshness is in the cache key), SVG twice, plus opaque-region derivation.
-  Blocking syscalls in the paint hot path; TTL or inotify-driven invalidation.
-- **Child popup surfaces bypass the retained pipeline** — full clear + 
-  immediate-mode subtree repaint + two tree walks per child per present. An
-  open popover repaints fully at frame rate. Route through the display-list +
-  damage path.
-- **Generation shortcuts only cover fully-clean frames**
-  (`use_generation_shortcuts` needs `dirty_types.is_empty()`), so every
-  interaction/animation frame runs the full render-object + entry-collection
-  passes — the shell-side face of the §2 triple-fingerprint item.
-- **Structure: every widget has two painter implementations** (immediate-mode
-  + display-list twins for input/slider/icon/scrollbars/text) — silent drift
-  hazard; converge on display-list and delete the twins once child surfaces
-  migrate.
-- Rotation transforms allocate a temp buffer + full subtree repaint per frame;
-  gradient shader cache keys include absolute position (animated gradients
-  thrash it). Text stack (layout LRU, glyph atlas, ellipsis cache) is healthy
-  — no new text findings.
+**Review:** [`improvements.md`](sections/03-service-contracts/improvements.md)
+records the 2026-08-17 service-flow, contract-semantics, correctness, capability,
+and provider-lifecycle audit for this section. Actionable follow-ups remain
+tracked only in `docs/BACKLOG.md`.
 
-## 5. Interaction & input
-`shell/component/input`, `ui/interaction`
+## 4. Themes
 
-Shipped: pointer/scroll coalescing, fused hit-test walk, take/restore instead
-of tree deep-clone, single-walk hover dispatch, `NodeId` hover diff, O(1)
-stale-target pruning, handler JSON-parse syntax gate, flag-gated neighbor
-resync (B, J).
+**Package:** `mesh-core-theme`.
 
-Open:
-1. **Slider-drag reclassification** (J) — route drags through the
-   STATE/interaction-restyle path (knob position is shell-owned
-   `slider_values`) instead of SCRIPT invalidation → full rebuild per motion.
-   Highest-leverage remaining input item.
-2. **Per-paint hit-test/key index** (B follow-on) — a persistent flat index was
-   rejected on rebuild cost; revisit only if the retained tree exposes a free
-   key→node map (section 2 item 2 makes this nearly free).
-3. **Instance-key interning in handler dispatch** (B) — remaining allocation
-   in `call_namespaced_handler`.
+**Owns:** theme manifests and layers, token values, component defaults, modes,
+keyframes, inheritance/cascade, revisions, and theme diagnostics.
 
-### Section 5 deep dive — 2026-07-04 (new findings; full list in todo.md §Q)
+**Isolation seam:** Theme consumers ask for resolved semantic tokens and
+component defaults. Theme loading must not depend on widget painting, Wayland,
+or a particular settings frontend.
 
-- **Keyboard input reads settings files from disk per keystroke** —
-  `current_keyboard_settings()` → `load_shell_settings()` does up to two
-  file reads + JSON parses per KeyPressed/KeyReleased/Char event. Cache +
-  invalidate via the existing settings watcher. The one serious find here.
-- Click press/release still runs ~5–8 separate full-tree walks (the motion
-  path was fused; clicks weren't) — extend `pointer_hit_test` to return
-  focusable/kind/handler info. Scroll events similarly do two extra walks.
-- Slider-drag `invalidate_script_state()` per motion confirmed at
-  `input/mod.rs:193-200` (already tracked as §5.1/J).
-- Interaction identity is string-keyed end to end (hover path, focus, scroll,
-  input, slider maps) — the consumer side of the §2 NodeId migration.
-- Otherwise this section is healthy: fused motion hit-test, single-walk hover
-  dispatch, early-out scroll animations, probe-based pruning.
+**Source root:** `crates/core/foundation/theme/`.
 
-## 6. Script runtime & Rust↔Lua boundary
-`crates/core/runtime/scripting`, `crates/core/runtime/backend`
+**Review:** [`improvements.md`](sections/04-themes/improvements.md) records the
+2026-08-19 theme-flow, correctness, cascade, parser, transaction, and
+filesystem-security audit for this section. Actionable follow-ups remain
+tracked only in `docs/BACKLOG.md`.
 
-Shipped: write-log `sync_state_from_lua`, pending-flag side channels, cached
-lifecycle `self` table, proxy seen-field cache, shared-VM payload conversion
-marker, borrowed `get_ref` template reads, host-value fingerprints (A, G, I).
+## 5. Localization / i18n
 
-Open:
-1. **Per-thread VM with `_ENV` isolation** (P0 → v1.17) — one `mlua::Lua` per
-   `ScriptContext` today; the shared-surface VM (Option B) landed for frontend
-   surfaces, this tracks the remaining per-context VMs.
-2. **Lazy `refs` field resolution** (A) — unchanged paints are now fully
-   gated, but frames where metrics really changed still eagerly build JSON and
-   convert to Lua; resolve fields on `__index` from a Rust-side store with a
-   generation bump per paint.
-3. **Storage read cost** (I) — the Lua-table cache prototype lost (0.8×);
-   next attempt should share immutable JSON values or avoid the lock without
-   adding a Lua lookup. Low priority until modules use storage per frame.
+**Package:** `mesh-core-locale`.
 
-### Section 6 deep dive — 2026-07-04 (new findings; full list in todo.md §R)
+**Owns:** translation catalogs, locale selection, fallback lookup, formatting,
+plural/variant handling, and locale-aware module data.
 
-- **`refresh_module_object` re-serializes full component state per handler**
-  for every service-connected component (proxies defeat the generation skip
-  AND the snapshot cache — deep JSON clone of every variable + proxy getters
-  + full JSON→Lua conversion per handler/render). Feeds `module.state`, which
-  docs mark as a legacy v1.12 lane no shipped module reads → verify + delete.
-  Likely the largest remaining boundary cost.
-- **The sync fast path still converts every known global Lua→JSON per
-  handler** (write-log fixed discovery only). True fix needs a forwarding
-  `_ENV` proxy (Luau `__newindex` doesn't fire on existing keys) or Rust-owned
-  values — pairs with the v1.17 VM work.
-- `snapshot()` with proxies bypasses caching entirely; exports sync runs even
-  for components with no exports.
-- Confirmed healthy: VM pool sandboxing, cached self table, flag-gated side
-  channels, proxy seen-field cache, backend emit-only snapshots.
+**Isolation seam:** Components and scripts use translation keys and locale
+records; catalog storage and fallback policy remain independent of rendering
+and compositor code.
 
-## 7. Events, services & backends
-`foundation/events`, `extension/service`, `runtime/backend`, `shell/runtime/service_state.rs`
+**Source root:** `crates/core/foundation/locale/`.
 
-Shipped: `Arc<Event>` broadcast, wake-level coalescing with barrier semantics,
-shell-boundary payload dedup, observation gating (C, K, P0).
+**Review:** [`improvements.md`](sections/05-localization-i18n/improvements.md)
+records the 2026-08-19 locale-flow, correctness, catalog, fallback, capability,
+and tooling audit for this section. Actionable follow-ups remain tracked only
+in `docs/BACKLOG.md`.
 
-Open:
-1. **Shell-side subscription index** (C) — service → component-indices map
-   invalidated on tracked-field changes, replacing the per-event
-   O(components) mutex scan. The component-local summary experiment was
-   rejected; the index design remains the viable one.
-2. **Push-based backend host APIs** (C) — D-Bus signal subscribe, fd/socket
-   watch, stream adoption (`pw-dump --monitor` for pipewire, P1) so exec
-   polling becomes the fallback, not the mechanism.
-3. **Channel-name interning** (C follow-on) — noted when `Arc<Event>` landed.
+## 6. Host resources and icon packs
 
-### Section 7 deep dive — 2026-07-04 (new findings; full list in todo.md §S)
+**Packages:** `mesh-core-resources` and `mesh-core-icon`.
 
-- **`InterfaceRegistry::resolve` deep-clones the entire catalog per call** —
-  every contract + provider map, cloned on every accepted state update, every
-  named interface event, and every service command dispatch. Resolve under
-  the read lock and return `Arc<InterfaceContract>`.
-- **Contract validation re-derives typed info per event**: lowercased-String
-  alloc per field per update; named-event schemas re-parsed from strings per
-  event (also hand-rolled-parser debt). Precompile at contract registration.
-- Interface-name canonicalization allocates 2–3 Strings per event.
-- Structure: the hardcoded `mesh.audio` optimistic-mute branch located
-  (`service_state.rs:66-75,137-165`) for the tracked service-specific-branch
-  removal; replacement is contract-declared optimistic state.
-- Confirmed healthy: boundary dedup, wake coalescing, backend-side dedup and
-  stream batching, `Arc<Event>` bus.
+**Owns:** host XDG icon-theme/font-family discovery, semantic icon names,
+icon-pack module bindings, pack chains, fallback targets, font assets, and
+variable icon axes.
 
-## 8. Layout
-`ui/elements/src/layout.rs`
+**Isolation seam:** Authors use semantic icon/font roles. Resource discovery
+and asset resolution produce targets consumed by the renderer; they do not
+own paint commands or shell layout.
 
-Shipped: paint-only fast path skipping full style re-sync (F).
+**Source roots:**
+`crates/core/foundation/resources/` and `crates/core/ui/icon/`.
 
-Open:
-1. **Retain Taffy node state across passes** (P1 → v1.21) — `build_taffy_tree`
-   still rebuilds a fresh TaffyTree on structural layout.
-2. **Dirty-node-only style sync inside real layout passes** (F) — feed the
-   retained-tree dirty set into `update_retained_node_styles` so one changed
-   node doesn't re-convert every node's style. Depends on section 2 item 1
-   exposing dirty IDs. (Scratch-map reuse prototype lost — don't retry that.)
+**Review:** [`improvements.md`](sections/06-host-resources-and-icon-packs/improvements.md)
+records the 2026-08-19 resource-discovery, resolution, lifecycle, safety,
+caching, font-pack, and tooling audit for this section. Actionable follow-ups
+remain tracked only in `docs/BACKLOG.md`.
 
-### Section 8 deep dive — 2026-07-04 (new findings; full list in todo.md §T)
+## 7. Component language
 
-- **Unconditional `set_style` per node on layout-dirty frames defeats Taffy's
-  internal caches** — one changed node makes Taffy recompute everything. The
-  retained tree's per-node dirty flags are the ready-made fix (makes the F
-  item pay off twice).
-- **Text content String cloned twice per text node per pass** — into
-  `TextMeasureData`, then again into the owned `TextMeasureKey` just to probe
-  the cache (even on hits). `Arc<str>` + borrowed-key probe.
-- **The LAYOUT-03 "key by String, not ephemeral NodeId" rationale is
-  obsolete** — NodeIds are stable hash-chained now; re-keying `node_map` by
-  NodeId removes all the structural-pass string clones and pairs with the §5
-  interaction-map migration.
-- Confirmed healthy: paint-only fast path, LRU-bounded intrinsic cache,
-  measured-and-rejected scratch reuse.
+**Package:** `mesh-core-component`.
 
-## 9. Presentation & memory
-`crates/core/presentation`
+**Owns:** `.mesh` single-file parsing, `<props>`, template/script/style blocks,
+component imports, prop types and values, localized labels, and component-level
+syntax diagnostics.
 
-Shipped: surface-config change detection, region-cache by display-list
-generation, popup reconcile early-outs and config equality (D, P1 → v1.20).
+**Isolation seam:** This package produces source/AST/component contracts. It
+does not evaluate Luau, resolve installed modules, compute layout, or paint.
 
-Open:
-1. **Skia paints directly into mapped SHM** (H) — remove the extra full-buffer
-   memcpy on full-present frames (`copy_bgra_to_canvas`), keeping `PixelBuffer`
-   as the retained/compare copy only.
-2. **SHM size-class pools** (H) — round buffer allocation up (next-64px) +
-   viewport crop so animating content-measured surfaces stop reallocating all
-   pool buffers per frame.
+**Source roots:**
+`crates/core/ui/component/{parser,template,style}.rs`.
 
-### Section 9 deep dive — 2026-07-04 (new findings; full list in todo.md §U)
+**Review:** [`improvements.md`](sections/07-component-language/improvements.md)
+records the 2026-08-19 component-flow, parser, import-boundary, props, and
+compiler-contract audit for this section. Actionable follow-ups remain tracked
+only in `docs/BACKLOG.md`.
 
-- **Per-buffer pending damage is a single bounding rect, so the SHM copy is
-  always a union** — two small disjoint changes on a bar (clock left, icon
-  right) memcpy the whole span between them every frame, even though the
-  `damage_buffer` calls are correctly per-rect. Make `pending_damage` a
-  bounded rect list; pairs with the H direct-paint item.
-- **kde_blur is re-created + re-committed per present while active** — the
-  shell-side generation gate covers region *updates* only; the backend
-  replays `set_region`+`commit` from stored state every frame. Needs the
-  same last-committed/dirty pattern the input region already has.
-- **Input normalization allocates a String per raw event via a linear
-  surface scan** (`surface_id_for_wl_surface` find + clone per pointer/key
-  event, re-allocated again in shell dispatch) — store surface ids as
-  `Arc<str>`/numeric ids on `SurfaceEntry`.
-- **Child popups force `force_full_present` every frame** — the
-  presentation-side half of the §4 child-popup item; fixing the display-list
-  side alone shows no SHM win.
-- `wait_for_surface_configure` can block the whole frame loop for 10
-  roundtrips on an unconfigured surface — bound by deadline or return
-  not-ready.
-- Confirmed healthy: pool reuse + busy-slot overflow, config fingerprint
-  gating with the keyboard-only carve-out, popup-config equality gating,
-  lazy input-region application, frame-callback 50 ms escape hatch,
-  fd-based `wait_for_events`, boundary input coalescing.
+## 8. UI element core
 
-## 10. Shell orchestrator, threading & startup
-`crates/core/shell/src/shell/runtime`, `shell/discovery.rs`
+**Package:** `mesh-core-elements`.
 
-Shipped: deadline-driven scheduler (no fixed 16 ms sleep), clean-surface render
-bookkeeping gate, finalize-walk presence gates (P0, D, K).
+**Owns:** `WidgetNode`, `NodeId`, element contracts, attributes, event records,
+component composition values, popover metadata, style resolution, layout/Taffy
+state, retained geometry, text measurement contracts, and accessibility
+metadata.
 
-Open:
-1. **Parallel paint across surfaces** (K) — split `render_components` into a
-   serial VM-bound phase (script/build/restyle/layout/display-list) and a
-   parallel paint+SHM phase via rayon; painter caches are already
-   `thread_local`. First threading step; do before pipelining.
-2. **Paint/script pipelining** (K) — overlap frame N paint with frame N+1
-   script work; classic guarded render loop. After item 1 proves the phase
-   boundary.
-3. **Parallel module discovery/compile at startup** (H) — `.mesh` parse +
-   compile are pure per-module; rayon/spawn_blocking cuts perceived session
-   start latency.
-4. **Blocking IO off the shell thread** (K) — i18n catalog reads on mount,
-   inline settings/theme reload reads, icon/SVG rasterize-on-miss stalling the
-   frame; route through `spawn_blocking` + placeholder-then-fill.
-5. **Fuse remaining unconditional finalize walks** (D) — note the 2026-07-04
-   fusion prototype lost by scanning unrelated branches; any fusion must stay
-   targeted.
+**Isolation seam:** This is the shared UI model package. It should remain
+renderer- and compositor-neutral: it can describe a tree, computed style,
+layout, and semantics without importing Skia or Wayland.
 
-### Section 10 deep dive — 2026-07-04 (new findings; full list in todo.md §V)
+**Internal areas:**
 
-- **Every top-level surface holds a deep clone of the entire compiled
-  frontend catalog.** `FrontendCatalog` (all `CompiledFrontendModule`s) is
-  cloned per registered surface at startup, plus a per-entry clone in
-  `top_level_surfaces()` — N surfaces means N+1 copies of every compiled
-  module resident for the process lifetime. Wrap in `Arc`; same call site
-  also deep-clones `interfaces.catalog()` per component (startup face of §7's
-  resolve-clone item).
-- **The §7 catalog deep-clone also fires per ServiceCommand dispatch**:
-  `service_command_is_supported` + `service_command_is_coalescable` are two
-  full-catalog clones per command (every throttled slider tick), plus one
-  per throttled flush — retire these call sites with the §7 fix.
-- Startup serial compile confirmed (H): manifest scan → per-module compile →
-  backend spawn, all on the main thread; rayon over `from_modules` is the
-  smallest first cut.
-- Per-event allocation hygiene in `dispatch_wayland` (surface-id Strings ×2,
-  per-request single-element VecDeques) and idle-loop clones in
-  `render_components` — fold into v1.23 interning.
-- Structure: `legacy_backend_candidates_from_discovery` is a duplicated
-  compat lane behind graph-load failure — per the no-backward-compat rule,
-  make a broken `config/module.json` a hard error and delete it, or document
-  the degraded-boot requirement.
-- Confirmed healthy: deadline-driven loop (reloads park 24 h on inotify,
-  exact deadlines from throttles/ticks/hides), capped + barrier-correct
-  message coalescing, lazy surface-index rebuild, TRACE-gated flush,
-  eventfd-waking backend bridges.
+- `crates/core/ui/elements/src/tree.rs`, `element/`, `attributes.rs`,
+  `composition.rs`, and `events.rs` — element/tree contracts;
+- `crates/core/ui/elements/src/style/` — CSS-like values, matching, state, and
+  computed style;
+- `crates/core/ui/elements/src/layout/` — Taffy lowering, retained layout,
+  and text measurement;
+- `crates/core/ui/elements/src/accessibility.rs` and `popover.rs` — semantic
+  and surface-promotion metadata.
 
-## 11. Instrumentation & regression guard
-`runtime/profiling.rs`, `render/src/surface/debug_overlay.rs`, tools
+This package is intentionally broad today. Style, layout, and accessibility
+are logical sub-concerns, but extracting them into more crates would only be
+useful once their shared `WidgetNode` contracts stop changing.
 
-Shipped: Tier 0 Tracy live flamegraph (`perf-tracy`, `./tools/profile-shell live`).
+**Review:** [`improvements.md`](sections/08-ui-element-core/improvements.md)
+records the 2026-08-19 end-to-end process, contract, state, layout, event,
+style, popover, and accessibility audit for this section. Actionable
+follow-ups remain tracked only in `docs/BACKLOG.md`.
 
-Open (these de-risk everything above — run in parallel with sections 1–10):
-1. **Tier 1 perf HUD in `DebugOverlay`** (L) — frame waterfall strip, live
-   counters, damage paint-flashing. Paint flashing directly serves the
-   fractional-damage decision (section 4 item 1).
-2. **Tier 2 cause attribution** (L) — per-rule restyle time, per-instance build
-   time (measures the memoization win before building it), per-command-kind
-   paint time, wasted-work counters.
-3. **Canonical workload profiles + CI baseline** (P1 → v1.21, L Tier 3) — the
-   harness that keeps shipped wins from rotting.
+## 9. Interaction and motion
 
----
+**Packages:** `mesh-core-interaction` and `mesh-core-animation`.
 
-## Cross-section attack order (updated 2026-07-04)
+**Owns:** hit testing, focus traversal, keyboard/pointer/scroll behavior,
+tooltip ownership, interaction state queries, easing, interpolation,
+transitions, transforms, shadows, and keyframes.
 
-Of `todo.md`'s original 14-step order, steps 1, 3, 4, 5, 8, 9, 10 have shipped.
-Remaining, re-ranked:
+**Isolation seam:** Interaction consumes the element tree and emits target or
+state decisions. Animation consumes style/tree identities and emits visual
+values. Neither package should own Luau execution or Wayland event polling.
 
-1. Slider-drag reclassification (§5.1) — small, bounded, kills the worst
-   interaction case.
-2. Perf HUD + damage instrumentation (§11.1–2) — cheap, unblocks the
-   fractional-scale decision and measures §1.1 before building it.
-3. Fractional-scale partial damage, re-measured (§4.1).
-4. Shell-side event subscription index (§7.1).
-5. Per-surface parallel paint (§10.1).
-6. Component-level render memoization (§1.1) — plan with v1.18/v1.27
-   dependency bookkeeping.
-7. Typed declarations + typed expression values (§3.1, §1.3) — shared
-   string-round-trip elimination.
-8. `WidgetNode` interning/typed fields (§2.3) — feeds diff, input, and layout.
-9. SHM direct paint + size classes (§9).
-10. Pipelining, tile raster, GPU (§10.2, §4.3, §4.4) — after the phase split.
+**Source roots:**
+`crates/core/ui/interaction/` and `crates/core/ui/animation/`.
+
+**Review:** [`improvements.md`](sections/09-interaction-and-motion/improvements.md)
+records the 2026-08-19 end-to-end process, geometry, target eligibility,
+focus, animation, motion-policy, and interaction/render-boundary audit for this
+section. Actionable follow-ups remain tracked only in `docs/BACKLOG.md`.
+
+## 10. Frontend compiler and host
+
+**Packages:** `mesh-core-frontend` and `mesh-core-frontend-host`.
+
+**Owns:** compiled frontend module records, expression/template evaluation,
+component composition, style-context assembly, widget-tree construction,
+frontend catalog-facing contracts, surface component host types, service
+observation summaries, child-surface requests, input/core requests, and the
+shell component trait.
+
+**Isolation seam:** The compiler converts component source into element data;
+the host package defines the contract needed to run that data in a shell. The
+compiler must not know the live shell event loop, and the host contract must
+not implement module-specific UI.
+
+**Source roots:**
+`crates/core/frontend/compiler/{compile,expr,style,tags}.rs` plus
+`crates/core/frontend/compiler/render/` and
+`crates/core/frontend/host/src/lib.rs`.
+
+**Review:** [`improvements.md`](sections/10-frontend-compiler-and-host/improvements.md)
+records the 2026-08-20 end-to-end compiler, composition, catalog, runtime,
+host-boundary, lifecycle, capability, diagnostics, and revision audit for this
+section. Actionable follow-ups remain tracked only in `docs/BACKLOG.md`.
+
+## 11. Luau runtime and sandbox
+
+**Packages:** `mesh-core-runtime`, `mesh-core-scripting`, and
+`mesh-core-backend`.
+
+**Owns:** sandbox tiers and capability policy; per-thread Luau realms and
+per-context `_ENV` isolation; frontend/backend script state; host APIs,
+storage, streams, backend polling, command coalescing, provider lifecycle,
+and backend event publication.
+
+**Isolation seam:** Generic host APIs cross into Luau. Service-specific logic
+stays in module scripts. The runtime must not import the painter, glyph caches,
+surface buffers, or compositor protocol.
+
+**Source roots:**
+`crates/core/runtime/{sandbox,scripting,backend}/`.
+
+**Review:** [`improvements.md`](sections/11-luau-runtime-and-sandbox/improvements.md)
+records the 2026-08-20 end-to-end runtime, isolation, capability, lifecycle,
+stream, command, storage, and security audit for this section. Actionable
+follow-ups remain tracked only in `docs/BACKLOG.md`.
+
+## 12. Rendering and paint
+
+**Package:** `mesh-core-render`.
+
+**Owns:** retained render objects, display-list commands and subtree spans,
+damage selection, software/Skia paint backends, text and glyph rasterization,
+icon painting, effects, render proofs, debug paint, and optional renderer
+adapters.
+
+**Isolation seam:** The renderer consumes element/style/layout data and emits
+paint commands/pixels. Skia and other paint backends stay below the display-list
+boundary; Wayland buffer ownership stays in presentation.
+
+**Source roots:**
+`crates/core/frontend/render/{display_list,render_object.rs,surface,proof.rs}`.
+
+**Review:** [`improvements.md`](sections/12-rendering-and-paint/improvements.md)
+records the 2026-08-20 process-tree, logic/order, direct code-error, and
+render-boundary audit for this section. Actionable follow-ups remain tracked
+only in `docs/BACKLOG.md`.
+
+## 13. Surface policy and configuration
+
+**Package:** `mesh-core-surface-config`.
+
+**Owns:** surface placement and sizing policy, manifest/settings surface
+validation, component prop override validation, content/padding extent rules,
+and compositor-facing surface configuration decisions.
+
+**Isolation seam:** This package resolves policy into surface configuration
+records. It does not create Wayland objects, run the shell loop, or paint
+content.
+
+**Source root:** `crates/core/surface-config/`.
+
+**Review:** [`improvements.md`](sections/13-surface-policy-and-configuration/improvements.md)
+records the 2026-08-20 process-tree, logic/order, direct code-error, and
+schema/lifecycle audit for this section. Actionable follow-ups remain tracked
+only in `docs/BACKLOG.md`.
+
+## 14. Wayland platform and presentation
+
+**Packages:** `mesh-core-wayland` and `mesh-core-presentation`.
+
+**Owns:** compositor-neutral surface roles and capability traits; Wayland
+client protocol plumbing; layer-shell and popup surfaces; SHM allocation and
+reuse; damage conversion; input regions; configure/frame callbacks; and
+presentation commits.
+
+**Isolation seam:** `mesh-core-wayland` contains small platform contracts and
+stubs. `mesh-core-presentation` owns the concrete Wayland backend and consumes
+render output; neither package owns module graphs, Luau policy, or component
+authoring.
+
+**Source roots:**
+`crates/core/platform/wayland/` and
+`crates/core/presentation/src/wayland_surface/`.
+
+**Review:** [`improvements.md`](sections/14-wayland-platform-and-presentation/improvements.md)
+records the 2026-08-20 process-tree, logic/order, direct code-error, protocol,
+lifecycle, SHM, input, and test-fidelity audit for this section. Actionable
+follow-ups remain tracked only in `docs/BACKLOG.md`.
+
+## 15. Shell core and orchestration
+
+**Package:** `mesh-core-shell`.
+
+**Owns:** module discovery, profile activation, frontend catalog lifetime,
+service/provider runtime coordination, component runtime instances, reloads,
+scheduling, request/event routing, settings/theme/locale integration, render
+orchestration, and the running shell lifecycle.
+
+**Isolation seam:** The shell is the integration package, not the home for
+service-specific policy or reusable low-level mechanisms. It wires the other
+packages together and owns decisions that require the complete live runtime.
+
+**Source roots:** `crates/core/shell/src/shell/`, including
+`component/`, `runtime/`, `discovery.rs`, `profile.rs`, `package.rs`, and
+`types.rs`.
+
+**Review:** [`improvements.md`](sections/15-shell-core-and-orchestration/improvements.md)
+records the 2026-08-20 process-tree, logic/order, direct code-error,
+transaction, lifecycle, scheduler, watcher, and recovery audit for this
+section. Actionable follow-ups remain tracked only in `docs/BACKLOG.md`.
+
+## 16. Developer and authoring tools
+
+**Packages:** `mesh-tools-cli` and `mesh-tools-lsp`.
+
+**Owns:** `mesh-shell` commands, installation/doctor/profile/package
+operations, manifest/schema validation, `.mesh` diagnostics, formatting,
+completion/hover/definition support, semantic tokens, and author-facing
+knowledge/indexes.
+
+**Isolation seam:** Tools call the public module/config/compiler contracts.
+They must not duplicate graph resolution, theme lookup, service routing, or
+shell lifecycle policy.
+
+**Source roots:** `crates/tools/cli/` and `crates/tools/lsp/`.
+
+## Dependency direction
+
+The intended package flow is:
+
+```text
+foundation/core contracts
+        │
+        ├── module system ──► frontend compiler/host ──► shell
+        ├── service contracts ──► scripting/backend ──► shell
+        ├── theme + locale + resources ──► compiler/elements/render
+        └── component language ──► elements ──► interaction/layout/render
+                                                   │
+                           surface policy ◄────────┘
+                                                   │
+                         Wayland platform ◄─ presentation
+```
+
+Concrete rules:
+
+- `mesh-core-elements`, `mesh-core-component`, and the foundation packages
+  remain neutral about Skia, Wayland, and shell orchestration.
+- `mesh-core-render` may consume UI data and icon/resource targets, but does
+  not resolve modules or run scripts.
+- `mesh-core-scripting` and `mesh-core-backend` may consume generic service,
+  capability, locale, config, and event contracts, but do not paint or present.
+- `mesh-core-presentation` may consume render output and Wayland contracts, but
+  does not own surface policy, module activation, or component state.
+- `mesh-core-shell` is allowed to depend on the boundary packages as the
+  orchestration glue; lower-level packages must not depend back on it.
+- CLI and LSP depend on public contracts and do not become alternate owners of
+  module graph, settings, or runtime behavior.
+
+Open work and performance priorities should be attached to one of these
+sections in [`docs/BACKLOG.md`](../../docs/BACKLOG.md), while measurements and
+rejected approaches stay in [`performance-log.md`](performance-log.md).

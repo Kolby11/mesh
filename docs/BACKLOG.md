@@ -28,12 +28,51 @@ are from the retired milestone scheme and are kept only as rough sequencing.
       modules. Whole-surface promotion shipped 2026-07-30. Design:
       [`.planning/todos/pending/2026-07-28-toplevel-window-surfaces.md`](../.planning/todos/pending/2026-07-28-toplevel-window-surfaces.md).
 
+## Foundation contracts
+
+- [ ] Resolve and persist effective capabilities before activation: required
+      grants must be approved, optional grants default denied, and unknown
+      capability classifications fail closed. [Audit](../.planning/log/sections/01-core-foundation-contracts/improvements.md).
+- [ ] Authorize every `shell.*` and popover operation through one typed operation
+      registry; remove the raw-event bypass around host APIs such as
+      `mesh.locale.set`. [Audit](../.planning/log/sections/01-core-foundation-contracts/improvements.md).
+- [ ] Make settings validation bounded and normalizing with field-level fallback;
+      one out-of-range value must not discard valid sibling settings. Fix the
+      stale `fonts.packs` diagnostic-path regression test with it.
+- [ ] Replace last-write-wins diagnostics with keyed active/resolved issues and
+      explicit module-instance registration/removal so severity cannot downgrade
+      and profile switches cannot retain duplicate stale health entries.
+- [ ] Choose one event contract and version the debug telemetry boundary: remove
+      or integrate the unused foundation `EventBus`, and serialize complete debug
+      DTOs without a second hand-maintained JSON contract.
+
 ## Module system
 
 The 2026-06-18 redesign largely shipped: canonical `module.json` with
 `mesh.uses` / `mesh.provides` / `mesh.implements`, the graph as single source of
 truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
+- [ ] Close module filesystem escapes before any package mutation or source
+      read: validate canonical module IDs, contain all entry/import/asset paths,
+      reject Git symlinks, and remove CLI uninstall traversal. [Audit](../.planning/log/sections/02-module-system-and-installation/improvements.md).
+- [ ] Make installed-graph activation fail closed and build catalogs/provider
+      registries only from its enabled, compatible candidate set; preserve the
+      last known-good runtime when graph validation fails. [Audit](../.planning/log/sections/02-module-system-and-installation/improvements.md).
+- [ ] Replace the duplicate CLI/shell package implementations with one locked,
+      journaled transaction engine covering source, root, lock, profiles, and
+      runtime preparation/commit/rollback. [Audit](../.planning/log/sections/02-module-system-and-installation/improvements.md).
+- [ ] Enforce required/optional module dependencies, module/interface version
+      ranges, composition pins/closure, and duplicate contract/contribution IDs
+      before activation rather than leaving conflicts diagnostic-only.
+- [ ] Make the canonical `module.json` loader the only production path; legacy
+      manifests remain migration diagnostics, never runnable compatibility
+      inputs.
+- [ ] Make module lifecycle and health authoritative across graph, frontend, and
+      backend states, including explicit unload/recovery/quarantine and service
+      unavailability delivery.
+- [ ] Align the lock schema with the specification and populate dependency and
+      composition provenance so uninstall/update/rollback decisions operate on
+      complete state.
 - [ ] Move the remaining built-in debug and theme/locale service behavior
       behind generic providers. Startup sounds and backend profiling use the
       generic contract/runtime path; core-owned service state still branches.
@@ -44,6 +83,168 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
       parallel inline-interface path were both rejected: they trade conceptual
       simplicity for typing simplicity, which is the failure mode that redesign
       set out to avoid.
+
+## Service contracts
+
+- [ ] Remove shared `__mesh_svc_*` Luau state: keep service payloads in a
+      capability-filtered per-context/Rust-owned store so one module cannot read
+      or mutate another module's service state. [Audit](../.planning/log/sections/03-service-contracts/improvements.md).
+- [ ] Replace the additive interface registry with one immutable, atomic
+      graph-derived service catalog binding each consumer to the active compatible
+      contract/provider/version/policy generation. [Audit](../.planning/log/sections/03-service-contracts/improvements.md).
+- [ ] Compile and enforce complete contracts end to end: canonical unique names,
+      recursive named/array types, consistent optional semantics, typed method
+      inputs/results, last-known-good state, and event payloads.
+- [ ] Make service methods correlated request/response transactions with typed
+      invocation failures, deadlines/cancellation, explicit coalescing outcomes,
+      and rollback/settlement for optimistic `stateBinding` writes.
+- [ ] Gate provider/profile commits on validated readiness and buffered initial
+      state; immediately deliver unavailability and reject all state/events/results
+      from stopped or obsolete provider generations.
+- [ ] Diff the complete compiled contract in consumer and provider directions,
+      load external candidate contracts, align LSP/static analysis/codegen with
+      the runtime ABI, and remove the unused transitional `ServiceRegistry`.
+
+## Themes
+
+- [ ] Make graph-authorized theme descriptors the only catalog/loader, with
+      contained mode sources and one composed base/pack/module/user cascade;
+      remove the private `config/themes` manifest and legacy JSON paths. [Audit](../.planning/log/sections/04-themes/improvements.md).
+- [ ] Make theme selection, profile switching, graph changes, and hot reload one
+      durable prepare/commit transaction that preserves the last-known-good
+      snapshot, refreshes watches/catalog state, and never exits on bad CSS.
+- [ ] Share the restricted CSS/token/keyframe lowering path between themes and
+      components so pseudo-states, inherited custom properties, token recipes,
+      and general theme keyframes work or produce source-located diagnostics.
+- [ ] Complete `mesh.theme` and settings with modes, sparse token overrides,
+      provenance, explicit color-scheme/contrast, and revisioned authoritative
+      events instead of ID heuristics and provider-overwritable render facts.
+
+## Localization / i18n
+
+- [ ] Replace per-surface locale engines and the cross-module global key pool
+      with one graph-authorized immutable catalog snapshot, strict module/interface
+      scopes, provenance, and atomic last-known-good refresh. [Audit](../.planning/log/sections/05-localization-i18n/improvements.md).
+- [ ] Make locale selection a durable revisioned settings/profile transaction:
+      normalize BCP 47, derive the full fallback chain and direction, apply each
+      module's default terminally, and remove stale/per-component locale mutation.
+- [ ] Compile bounded typed catalogs with per-entry diagnostics, interpolation,
+      CLDR plural/select and formatting; add targeted language-pack identities,
+      ordered key-level precedence, and deterministic duplicate validation.
+- [ ] Route templates, Luau, manifests, props, generated settings, and debug data
+      through one owner-aware resolver with visible misses; align `mesh.i18n`,
+      `mesh.locale`, service events, and read/write capability enforcement.
+- [ ] Drive locale CLI/LSP/doctor, extraction, missing-key and provenance tooling
+      from the canonical graph/snapshot, and either implement `<i18n>` component
+      blocks with explicit precedence or reject them instead of discarding them.
+
+## Host resources and icon packs
+
+- [ ] Replace discovery-time global resource registration with one immutable,
+      graph/profile-authorized icon-and-font snapshot and atomic last-known-good
+      lifecycle reconciliation. [Audit](../.planning/log/sections/06-host-resources-and-icon-packs/improvements.md).
+- [ ] Make icon resolution deterministic and complete: canonical owner-scoped
+      pack IDs/aliases, typed multicolor mappings, semantic/dash fallbacks,
+      ordered chains, and required/optional results with provenance.
+- [ ] Complete font-pack runtime support with logical and pack-qualified roles,
+      ordered profile/module chains, bundled face validation, fallback coverage,
+      and typography-token integration.
+- [ ] Unify XDG and font discovery into a refreshable host catalog; propagate
+      resource revisions/fingerprints through negative lookup, glyph, font,
+      text-layout, and renderer caches.
+- [ ] Remove legacy icon config and discovery authorities, and drive bounded
+      pack validation, effective-state diagnostics, CLI/LSP/doctor inspection,
+      and resource coverage previews from the canonical snapshot.
+
+## Component language
+
+- [ ] Replace lossy `.mesh` block extraction and ad-hoc template preprocessing
+      with a span-preserving parser that rejects unknown/duplicate blocks,
+      malformed expressions, unsupported script languages, and discarded `<i18n>` data. [Audit](../.planning/log/sections/07-component-language/improvements.md).
+- [ ] Make component compilation resolve imports per owner, enforce module-root
+      path containment, detect alias collisions/cycles, and validate child prop
+      names, visibility, values, and `prop()` references before runtime.
+- [ ] Make the `<props>` contract one normalized typed value pipeline: reject
+      invalid constraints/coercions and retain the highest valid precedence value
+      when a later settings or instance override is invalid.
+
+## UI element core
+
+- [ ] Establish unique `NodeId` tree identity and reject duplicate/unknown
+      element definitions before layout, events, and accessibility projection.
+- [ ] Generate element contracts, runtime types, attributes, events, and
+      pseudo-state matching from one canonical schema with complete coverage.
+- [ ] Consolidate interaction, style invalidation, retained layout, and
+      accessibility into a coherent frame transaction with pointer capture,
+      failure-safe layout, and explicit dirty-node output.
+- [ ] Normalize ARIA/visibility/name semantics after child construction and
+      invalidate text measurement caches on font/measurer generation changes.
+
+## Interaction and motion
+
+- [ ] Unify visibility, transformed geometry, disabled/inert eligibility, and
+      target filtering across interaction, rendering, focus, scrolling,
+      tooltips, and accessibility. [Audit](../.planning/log/sections/09-interaction-and-motion/improvements.md).
+- [ ] Define a canonical interaction transaction for focus, pointer capture,
+      press origin, gesture/scroll ownership, and typed invalidation instead of
+      splitting policy between `mesh-core-interaction` and the shell.
+- [ ] Complete motion semantics: pause/resume, stable animation identity,
+      cancellation/reversal, reduced-motion policy, discrete visibility timing,
+      and per-keyframe easing propagation.
+- [ ] Implement or safely gate the public `box-shadow` parser and add the
+      Section 9 interaction/render/animation regression matrix.
+
+## Frontend compiler and host
+
+- [ ] Compile, validate, watch, invalidate, and reload primary and
+      extension-point roots as one atomic frontend catalog revision, including
+      contribution interface checks and contribution-only dependencies. [Audit](../.planning/log/sections/10-frontend-compiler-and-host/improvements.md).
+- [ ] Gate service payload publication on capabilities and replace the
+      revision-light host effects with a coherent, typed frontend frame/effect
+      boundary that rejects stale catalog/runtime requests.
+- [ ] Complete frontend runtime lifecycle and recovery: dispatch mount/unmount,
+      make prop publication transactional, and preserve truthful typed,
+      source-located diagnostics on failures.
+- [ ] Unify template expression semantics and root-scope validation around the
+      real Luau parser/runtime, then enforce imported public-prop and
+      child-surface contracts.
+- [ ] Split the renderer/Wayland/package/debug policy out of the
+      compiler-facing frontend host ABI.
+
+## Shell core and orchestration
+
+- [ ] Replace split profile/runtime mutation with one revisioned activation
+      coordinator: immutable candidate graph/interfaces/resources, full root and
+      provider identities, ready hidden replacements, atomic commit, and
+      post-commit retirement. [Audit](../.planning/log/sections/15-shell-core-and-orchestration/improvements.md).
+- [ ] Reconcile every live graph delta, including backend module enable/disable;
+      buffer provider readiness state and generation-tag all runtime messages,
+      events, results, and restart deadlines.
+- [ ] Add explicit frontend unmount and graceful backend stop/join, then route
+      normal shutdown and every shell-loop error through one bounded lifecycle
+      supervisor that owns workers, IPC, eventfd, storage, and surfaces.
+- [ ] Replace the static startup watcher with a healthy, generation-aware watch
+      set covering graph/profile/catalog/contribution/resource/import changes,
+      with immediate bounded-poll fallback and last-known-good reloads.
+- [ ] Centralize CoreRequest effects in one fair bounded scheduler and isolate
+      component callback/tick/build failures into errored placeholders instead
+      of allowing cycles or one module to terminate the shell.
+- [ ] Make shell control-plane propagation coherent: publish provider
+      unavailable/recovery transitions, settings revisions, theme/locale effects,
+      and invalid graph/profile diagnostics through the committed generation.
+
+## Developer and authoring tools
+
+- [ ] Move CLI install/update/rollback/uninstall/profile mutations behind one
+      journaled, path-contained package transaction with typed live-activation
+      acknowledgements and exact-generation recovery. [Section 16 audit](../.planning/log/sections/16-developer-and-authoring-tools/improvements.md).
+- [ ] Derive and refresh one canonical graph-authoring snapshot for CLI, doctor,
+      and LSP; eliminate duplicated manifest/schema validation and stale or
+      silently lossy module/service indexes. [Section 16 audit](../.planning/log/sections/16-developer-and-authoring-tools/improvements.md).
+- [ ] Make LSP parsing and protocol boundaries correct and syntax-aware:
+      UTF-16 positions, workspace folders, Unicode JSON, versioned updates,
+      secure definitions, and recoverable Luau/component AST diagnostics.
+      [Section 16 audit](../.planning/log/sections/16-developer-and-authoring-tools/improvements.md).
 
 ## Settings
 
@@ -89,6 +290,10 @@ gate where the win is structural.
       still flattened per ancestor. Replay must consume segments directly
       instead of eagerly re-flattening them — an eager reconstruction was tried
       and reverted (see log).
+- [ ] Close the Section 12 correctness gaps before further paint optimization:
+      unify paint fingerprints and topology generations, implement complete
+      transforms/effect compositing/border lowering, and revision text/icon
+      caches. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md)
 ### Style
 
 - [ ] Typed style declarations end-to-end: resolve theme tokens to typed values
@@ -128,6 +333,25 @@ gate where the win is structural.
 
 ### Runtime boundary
 
+- [ ] Apply one authoritative sandbox/resource policy to every Luau realm:
+      enforce instruction, memory, output, queue, storage, and child-process
+      budgets, with timeout cleanup and quarantine. [Section 11 audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md).
+- [ ] Replace backend task aborts and early-return cleanup with an idempotent
+      lifecycle supervisor that stages provider generations, flushes storage,
+      reaps streams, and publishes one truthful terminal result. [Section 11 audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md).
+- [ ] Move `mesh.exec` and stream handling behind bounded cancellable workers
+      with stable stream IDs, exit/reap events, output limits, and executable
+      path/argument policy. [Section 11 audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md).
+- [ ] Make backend commands and events typed, correlated, generation-aware,
+      transactional, and bounded; define explicit coalescing keys and terminal
+      overflow/timeout results. [Section 11 audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md).
+- [ ] Move default runtime storage to secure durable XDG state with user-only
+      permissions, quotas, recovery, and single-writer/revision semantics.
+      [Section 11 audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md).
+- [ ] Make reload transactional and backend callback handles generation-stable:
+      replace stale Lua environments, preserve one backend `self`, and prevent
+      pre-ready or old-generation updates from reaching consumers. [Section 11 audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md).
+
 - [ ] Push-based backend host API primitives (D-Bus signal subscribe, fd/socket
       watch, stream adoption) so providers are event-driven and polling is the
       fallback (C). **Measured 2026-08-08:** the shipped polls fork ~3 processes
@@ -142,7 +366,59 @@ gate where the win is structural.
 - [ ] Storage reads still clone per Lua access. Needs shared immutable JSON
       values or lock avoidance — two cache designs were measured and reverted
       (I; see log).
+
+### Surface policy and configuration
+
+- [ ] Validate manifest surface enums and role-specific fields before
+      resolution; invalid declarations must produce diagnostics instead of
+      silently falling back. [Section 13 audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md).
+- [ ] Protect the author-only `promotable` contract and route settings-driven
+      role changes through the same transactional transition path as explicit
+      promotion requests. [Section 13 audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md).
+- [ ] Unify role-field metadata, settings/ejection semantics, and manifest
+      diagnostics so inert window/layer fields are handled consistently.
+      [Section 13 audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md).
+- [ ] Replace split surface-config field lists with a revisioned semantic
+      policy diff that includes blur, decorations, padding, geometry, keyboard
+      mode, and role transitions. [Section 13 audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md).
+- [ ] Make unmeasured/content/padded/physical surface extents typed at the
+      shell/presentation seam, with checked geometry and transactional reload
+      regressions. [Section 13 audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md).
+
+### Rendering and paint
+
+- [ ] Establish one canonical render-frame snapshot and transform/clip model;
+      unify invalidation, display-list reuse, damage, blur regions, and hit
+      testing around cumulative affine transforms. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).
+- [ ] Make `PixelBuffer` allocation fallible and bounded, and make
+      `PixelCanvasSession` storage-safe so a live Skia surface cannot outlive
+      its backing allocation. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).
+- [ ] Complete paint semantics for opacity layers, four-edge borders,
+      four-corner radii, text physical scaling, and stable equal-z ordering;
+      add retained and pixel regressions. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).
+- [ ] Replace path-only font/glyph/text caches and synchronous icon/font decode
+      with generation-aware bounded resources and an asynchronous paint-safe
+      resource broker. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).
+- [ ] Make partial-present capability, layer balance, diagnostics, and
+      backend fidelity explicit contracts; derive compositor blur and uploaded
+      damage from the validated frame spans. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).
+
 ### Presentation
+- [ ] Make presentation lifecycle transactional and observable: typed
+      create/configure/present/lost results, last-known-good role replacement,
+      and one idempotent close/dismiss/destroy teardown path. [Section 14 audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md).
+- [ ] Replace presentation fingerprints and warm region caches with typed diffs
+      and object/configure/frame generations so state-only changes and recreated
+      objects commit compositor state. [Section 14 audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md).
+- [ ] Make popup promotion capability- and identity-safe: carry click seat/serial,
+      gate reposition by xdg-shell version, validate role/parent/reparenting, and
+      correlate reactive configures. [Section 14 audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md).
+- [ ] Unify resolved logical/physical surface extents and make SHM buffer-release
+      backpressure, callback generations, output membership, and input ownership
+      explicit without hot retries or stale routing. [Section 14 audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md).
+- [ ] Replace the recording-only presentation test backend with a deterministic
+      lifecycle simulator and a small live compositor conformance matrix covering
+      close, popup, scaling, occlusion, and multi-output behavior. [Section 14 audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md).
 - [ ] Direct Skia paint into the mapped SHM canvas for full-present frames,
       keeping `PixelBuffer` as the retained compare copy (H). Design:
       [`.planning/todos/pending/2026-08-02-direct-shm-paint.md`](../.planning/todos/pending/2026-08-02-direct-shm-paint.md).

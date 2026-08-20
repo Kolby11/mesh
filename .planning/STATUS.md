@@ -1,11 +1,48 @@
 # Status
 
-**Updated:** 2026-08-16
+**Updated:** 2026-08-20
 
 This page describes the present. History lives in [`log/`](log/); open work
 lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
+
+The Section 11 Luau runtime and sandbox audit is complete. Its logical process
+tree, confirmed findings, broader feature direction, and regression matrix are
+in [`sections/11-luau-runtime-and-sandbox/improvements.md`](log/sections/11-luau-runtime-and-sandbox/improvements.md);
+the resulting open work is in `docs/BACKLOG.md`.
+
+The Section 12 rendering and paint audit is complete. Its end-to-end process
+tree, confirmed correctness and safety findings, unconstrained render-frame
+direction, and regression matrix are in
+[`sections/12-rendering-and-paint/improvements.md`](log/sections/12-rendering-and-paint/improvements.md);
+the resulting open work is in `docs/BACKLOG.md`.
+
+The Section 13 surface policy and configuration audit is complete. Its process
+tree, role/settings/manifest findings, policy-compiler direction, and
+regression matrix are in
+[`sections/13-surface-policy-and-configuration/improvements.md`](log/sections/13-surface-policy-and-configuration/improvements.md);
+the resulting open work is in `docs/BACKLOG.md`.
+
+The Section 14 Wayland platform and presentation audit is complete. Its
+end-to-end lifecycle tree, confirmed protocol, popup, SHM, region, input, and
+test-fidelity findings, transactional presentation direction, and regression
+matrix are in
+[`sections/14-wayland-platform-and-presentation/improvements.md`](log/sections/14-wayland-platform-and-presentation/improvements.md);
+the resulting open work is in `docs/BACKLOG.md`.
+
+The Section 16 developer and authoring tools audit is complete. Its end-to-end
+CLI/LSP process tree, package-transaction and path-safety findings, canonical
+authoring-snapshot direction, LSP protocol findings, and regression matrix are
+in [`sections/16-developer-and-authoring-tools/improvements.md`](log/sections/16-developer-and-authoring-tools/improvements.md);
+the resulting open work is in `docs/BACKLOG.md`.
+
+The Section 15 shell core and orchestration audit is complete. Its end-to-end
+instruction tree, confirmed activation, backend lifecycle, generation,
+scheduler, watcher, failure-isolation, and shutdown findings, revisioned shell
+activation direction, and regression matrix are in
+[`sections/15-shell-core-and-orchestration/improvements.md`](log/sections/15-shell-core-and-orchestration/improvements.md);
+the resulting open work is in `docs/BACKLOG.md`.
 
 The Nix development shell now recommends the optimized release shell command,
 keeps the debug command explicit for debugging, and the shell logs its Cargo
