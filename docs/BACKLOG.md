@@ -30,9 +30,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ## Foundation contracts
 
-- [ ] Make settings validation bounded and normalizing with field-level fallback;
-      one out-of-range value must not discard valid sibling settings. Fix the
-      stale `fonts.packs` diagnostic-path regression test with it.
 - [ ] Replace last-write-wins diagnostics with keyed active/resolved issues and
       explicit module-instance registration/removal so severity cannot downgrade
       and profile switches cannot retain duplicate stale health entries.

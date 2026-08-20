@@ -155,12 +155,23 @@ pub enum FieldKind {
     UInt,
     /// Signed integer that must survive the trip into `i32`.
     Int32,
+    /// Unsigned integer constrained by an inclusive range.
+    UIntRange {
+        min: u64,
+        max: u64,
+    },
+    /// Floating-point number constrained by inclusive bounds. `max = None`
+    /// means that only the lower bound is finite.
+    FloatRange {
+        min: f64,
+        max: Option<f64>,
+    },
     Float,
     StrArray,
     /// `accepts` *is* the defining parser, so aliases it takes are accepted
     /// here too; `values` is only the canonical list quoted in the suggestion.
     Enum {
-        accepts: fn(&str) -> bool,
+        canonicalize: fn(&str) -> Option<&'static str>,
         values: &'static [&'static str],
     },
     /// Object with a known key set; unknown keys inside it are reported.
@@ -180,6 +191,11 @@ impl FieldKind {
             Self::Bool => "a boolean".to_string(),
             Self::UInt => "a non-negative integer".to_string(),
             Self::Int32 => "an integer".to_string(),
+            Self::UIntRange { min, max } => format!("an integer from {min} through {max}"),
+            Self::FloatRange { min, max } => match max {
+                Some(max) => format!("a number from {min} through {max}"),
+                None => format!("a number greater than or equal to {min}"),
+            },
             Self::Float => "a number".to_string(),
             Self::StrArray => "an array of strings".to_string(),
             Self::Enum { values, .. } => format!("one of [{}]", values.join(", ")),
@@ -240,26 +256,43 @@ pub fn validate_value(
     value: &JsonValue,
     diagnostics: &mut Vec<SettingsDiagnostic>,
 ) -> Option<JsonValue> {
-    let ok = match kind {
-        FieldKind::Str => value.is_string(),
-        FieldKind::Bool => value.is_boolean(),
-        FieldKind::UInt => value.as_u64().is_some(),
-        FieldKind::Int32 => value.as_i64().is_some_and(|n| i32::try_from(n).is_ok()),
-        FieldKind::Float => value.is_number(),
+    let accepted = match kind {
+        FieldKind::Str => value.is_string().then(|| value.clone()),
+        FieldKind::Bool => value.is_boolean().then(|| value.clone()),
+        FieldKind::UInt => value.as_u64().map(|_| value.clone()),
+        FieldKind::Int32 => value
+            .as_i64()
+            .filter(|n| i32::try_from(*n).is_ok())
+            .map(|_| value.clone()),
+        FieldKind::UIntRange { min, max } => value
+            .as_u64()
+            .filter(|n| (*min..=*max).contains(n))
+            .map(|_| value.clone()),
+        FieldKind::FloatRange { min, max } => value
+            .as_f64()
+            .filter(|number| number.is_finite() && *number >= *min)
+            .filter(|number| max.is_none_or(|max| *number <= max))
+            .map(|_| value.clone()),
+        FieldKind::Float => value
+            .as_f64()
+            .filter(|number| number.is_finite())
+            .map(|_| value.clone()),
         FieldKind::StrArray => value
             .as_array()
-            .is_some_and(|items| items.iter().all(JsonValue::is_string)),
-        FieldKind::Enum { accepts, .. } => value.as_str().is_some_and(accepts),
-        FieldKind::Opaque => value.is_object(),
-        FieldKind::Section(fields) => {
-            return Some(validate_object(
-                namespace,
-                key_path,
-                fields,
-                value,
-                diagnostics,
-            ));
-        }
+            .filter(|items| items.iter().all(JsonValue::is_string))
+            .map(|_| value.clone()),
+        FieldKind::Enum { canonicalize, .. } => value
+            .as_str()
+            .and_then(canonicalize)
+            .map(|canonical| JsonValue::String(canonical.to_string())),
+        FieldKind::Opaque => value.is_object().then(|| value.clone()),
+        FieldKind::Section(fields) => Some(validate_object(
+            namespace,
+            key_path,
+            fields,
+            value,
+            diagnostics,
+        )),
         FieldKind::Map(inner) => {
             let Some(entries) = value.as_object() else {
                 diagnostics.push(SettingsDiagnostic::error(
@@ -277,12 +310,12 @@ pub fn validate_value(
                     accepted.insert(key.clone(), kept);
                 }
             }
-            return Some(JsonValue::Object(accepted));
+            Some(JsonValue::Object(accepted))
         }
     };
 
-    if ok {
-        return Some(value.clone());
+    if let Some(accepted) = accepted {
+        return Some(accepted);
     }
 
     diagnostics.push(SettingsDiagnostic::error(

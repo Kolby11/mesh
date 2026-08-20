@@ -584,20 +584,20 @@ const _: () = assert!(
         && keyboard_mode_is_listed(KeyboardMode::None),
 );
 
-fn accepts_surface_role(value: &str) -> bool {
-    parse_surface_role(value).is_some()
+fn canonical_surface_role(value: &str) -> Option<&'static str> {
+    parse_surface_role(value).map(surface_role_name)
 }
-fn accepts_window_decorations(value: &str) -> bool {
-    parse_window_decorations(value).is_some()
+fn canonical_window_decorations(value: &str) -> Option<&'static str> {
+    parse_window_decorations(value).map(window_decorations_name)
 }
-fn accepts_surface_edge(value: &str) -> bool {
-    parse_surface_edge(value).is_some()
+fn canonical_surface_edge(value: &str) -> Option<&'static str> {
+    parse_surface_edge(value).map(surface_edge_name)
 }
-fn accepts_surface_layer(value: &str) -> bool {
-    parse_surface_layer(value).is_some()
+fn canonical_surface_layer(value: &str) -> Option<&'static str> {
+    parse_surface_layer(value).map(surface_layer_name)
 }
-fn accepts_keyboard_mode(value: &str) -> bool {
-    parse_keyboard_mode(value).is_some()
+fn canonical_keyboard_mode(value: &str) -> Option<&'static str> {
+    parse_keyboard_mode(value).map(keyboard_mode_name)
 }
 
 /// One entry per field [`resolve_frontend_module_settings`] reads.
@@ -605,7 +605,7 @@ pub const SURFACE_FIELDS: &[FieldSpec] = &[
     FieldSpec::new(
         "role",
         FieldKind::Enum {
-            accepts: accepts_surface_role,
+            canonicalize: canonical_surface_role,
             values: SURFACE_ROLE_VALUES,
         },
     ),
@@ -616,21 +616,21 @@ pub const SURFACE_FIELDS: &[FieldSpec] = &[
     FieldSpec::new(
         "decorations",
         FieldKind::Enum {
-            accepts: accepts_window_decorations,
+            canonicalize: canonical_window_decorations,
             values: WINDOW_DECORATIONS_VALUES,
         },
     ),
     FieldSpec::new(
         "anchor",
         FieldKind::Enum {
-            accepts: accepts_surface_edge,
+            canonicalize: canonical_surface_edge,
             values: SURFACE_EDGE_VALUES,
         },
     ),
     FieldSpec::new(
         "layer",
         FieldKind::Enum {
-            accepts: accepts_surface_layer,
+            canonicalize: canonical_surface_layer,
             values: SURFACE_LAYER_VALUES,
         },
     ),
@@ -638,7 +638,7 @@ pub const SURFACE_FIELDS: &[FieldSpec] = &[
     FieldSpec::new(
         "keyboard_mode",
         FieldKind::Enum {
-            accepts: accepts_keyboard_mode,
+            canonicalize: canonical_keyboard_mode,
             values: KEYBOARD_MODE_VALUES,
         },
     ),

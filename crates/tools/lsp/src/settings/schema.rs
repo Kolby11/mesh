@@ -144,6 +144,14 @@ fn node_from_kind(kind: &'static FieldKind, path: &str, found: &Discovered) -> N
         FieldKind::Bool => scalar(doc, "boolean"),
         FieldKind::UInt => scalar(doc, "integer ≥ 0"),
         FieldKind::Int32 => scalar(doc, "integer"),
+        FieldKind::UIntRange { min, max } => scalar(doc, format!("integer {min}–{max}")),
+        FieldKind::FloatRange { min, max } => scalar(
+            doc,
+            max.map_or_else(
+                || format!("number ≥ {min}"),
+                |max| format!("number {min}–{max}"),
+            ),
+        ),
         FieldKind::Float => scalar(doc, "number"),
         FieldKind::StrArray => array(doc, "array<string>", scalar(doc, "string")),
         FieldKind::Enum { values, .. } => enumeration(doc, values),

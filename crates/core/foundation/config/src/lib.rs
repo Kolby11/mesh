@@ -101,8 +101,14 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
         FieldKind::Section(&[FieldSpec::new(
             "blur",
             FieldKind::Section(&[
-                FieldSpec::new("passes", FieldKind::UInt),
-                FieldSpec::new("max_radius", FieldKind::Float),
+                FieldSpec::new("passes", FieldKind::UIntRange { min: 1, max: 3 }),
+                FieldSpec::new(
+                    "max_radius",
+                    FieldKind::FloatRange {
+                        min: 0.0,
+                        max: None,
+                    },
+                ),
             ]),
         )]),
     ),
@@ -112,7 +118,7 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
             FieldSpec::new(
                 "position",
                 FieldKind::Enum {
-                    accepts: tooltip_position_is_valid,
+                    canonicalize: canonical_tooltip_position,
                     values: TOOLTIP_POSITIONS,
                 },
             ),
@@ -128,8 +134,12 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
 /// walks this list to keep anchor resolution from drifting apart from it.
 pub const TOOLTIP_POSITIONS: &[&str] = &["auto", "bottom", "top", "left", "right", "cursor"];
 
-fn tooltip_position_is_valid(value: &str) -> bool {
-    TOOLTIP_POSITIONS.contains(&value.trim())
+fn canonical_tooltip_position(value: &str) -> Option<&'static str> {
+    let value = value.trim();
+    TOOLTIP_POSITIONS
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == value)
 }
 
 /// `default_pack` is prepended to every frontend's effective icon-pack chain

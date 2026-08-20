@@ -18,6 +18,11 @@ constraints. Raw shell events, locale writes, and popover helpers share that
 authorization path; malformed, unauthorized, unknown, and dropped requests
 produce structured diagnostics.
 
+Section 01 improvement 3 is complete: shared settings field declarations now
+enforce numeric bounds and canonicalize enum values before deserialization.
+Rejected values fall back per field, preserving valid siblings; the runtime
+and LSP settings schema consume the same declarations.
+
 The Section 11 Luau runtime and sandbox audit is complete. Its logical process
 tree, confirmed findings, broader feature direction, and regression matrix are
 in [`sections/11-luau-runtime-and-sandbox/improvements.md`](log/sections/11-luau-runtime-and-sandbox/improvements.md);

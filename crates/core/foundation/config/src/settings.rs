@@ -590,6 +590,45 @@ mod tests {
     }
 
     #[test]
+    fn a_tooltip_position_is_trimmed_to_its_canonical_value() {
+        let store = store(json!({
+            "shell": { "tooltip": { "position": " bottom " } }
+        }));
+
+        assert!(store.diagnostics().is_empty(), "{:#?}", store.diagnostics());
+        assert_eq!(store.shell().tooltip.position, "bottom");
+    }
+
+    #[test]
+    fn an_out_of_range_value_falls_back_without_discarding_valid_siblings() {
+        let store = store(json!({
+            "shell": {
+                "render": { "blur": { "passes": 256 } },
+                "tooltip": { "delay_ms": 25 },
+                "theme": { "active": "gruvbox-dark" }
+            }
+        }));
+
+        let diagnostic = only(store.diagnostics());
+        assert_eq!(diagnostic.key_path, "render.blur.passes");
+        assert!(diagnostic.message.contains("1 through 3"));
+        assert_eq!(store.shell().render.blur.passes, 1);
+        assert_eq!(store.shell().tooltip.delay_ms, 25);
+        assert_eq!(store.shell().theme.active, "gruvbox-dark");
+    }
+
+    #[test]
+    fn a_negative_blur_radius_falls_back_to_the_declared_default() {
+        let store = store(json!({
+            "shell": { "render": { "blur": { "max_radius": -1 } } }
+        }));
+
+        let diagnostic = only(store.diagnostics());
+        assert_eq!(diagnostic.key_path, "render.blur.max_radius");
+        assert_eq!(store.shell().render.blur.max_radius, 96.0);
+    }
+
+    #[test]
     fn an_unknown_key_near_a_known_one_suggests_it() {
         let store = store(json!({ "shell": { "tooltip": { "delay_msec": 25 } } }));
 
@@ -622,7 +661,7 @@ mod tests {
         }));
 
         let diagnostic = only(store.diagnostics());
-        assert_eq!(diagnostic.key_path, "fonts");
+        assert_eq!(diagnostic.key_path, "fonts.packs");
         assert_eq!(store.shell().theme.active, "gruvbox-dark");
     }
 
