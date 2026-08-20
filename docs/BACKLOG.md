@@ -39,7 +39,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/02-module-system-and-installation/improvements.md)
 
-- [ ] Preserve composition versions, dependency closure, sparse root overrides, active-host node slots, and lock provenance.
 - [ ] Plan updates from fully staged candidate graphs, including external contracts and capability decisions, before checkout or mutation.
 - [ ] Make the canonical manifest loader the only production path and route legacy inputs through explicit migration diagnostics.
 - [ ] Make lifecycle and health authoritative across graph/runtime state, recovery, unload, restart, quarantine, and availability delivery.

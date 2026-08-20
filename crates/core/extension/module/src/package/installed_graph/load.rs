@@ -97,10 +97,15 @@ fn load_installed_module_graph_with(
             .map(|loaded| loaded.manifest.clone())
             .collect::<Vec<_>>();
         let resolved = resolve_composition(profile, manifests.iter())?;
+        let effective_profile = resolved.to_profile();
         composition.slots = resolved.spec.slots.clone();
-        composition.node_slots = resolved.spec.node_slots.clone();
+        // A node-slot placement is meaningful only while its host root is
+        // active. Orphaned overrides remain in the profile for diagnostics,
+        // but must not pull their contributed modules into the activation
+        // closure or make catalog validation fail.
+        composition.node_slots = effective_profile.node_slots.clone();
         composition.orphaned_overrides = resolved.orphaned_overrides.clone();
-        resolved.to_profile().apply_to_root(&mut root, &manifests)?;
+        effective_profile.apply_to_root(&mut root, &manifests)?;
     }
 
     InstalledModuleGraph::from_parts_with_composition(root, modules, composition)

@@ -16,7 +16,8 @@
 //! - `requested_by` makes uninstall safe and explains version conflicts.
 
 use super::{
-    ModuleId, ModuleManifestError, atomic_write, validate_module_tree, validate_regular_file,
+    ModuleId, ModuleManifest, ModuleManifestError, atomic_write, resolve_closure,
+    validate_module_tree, validate_regular_file,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -110,6 +111,32 @@ impl Default for MeshLock {
 impl MeshLock {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Recompute lock provenance from the installed module set.
+    ///
+    /// Installers historically inserted every entry with an empty
+    /// `requestedBy`, which made a dependency look directly removable. The
+    /// installed manifests are the authoritative dependency closure, so keep
+    /// the lock's uninstall guard synchronized with that graph after each
+    /// package transaction.
+    pub fn refresh_requested_by<'a>(
+        &mut self,
+        manifests: impl IntoIterator<Item = &'a ModuleManifest>,
+    ) {
+        let manifests = manifests.into_iter().collect::<Vec<_>>();
+        let roots = manifests
+            .iter()
+            .map(|manifest| manifest.name.as_str())
+            .collect::<Vec<_>>();
+        let resolution = resolve_closure(roots, manifests.iter().copied());
+        for (module_id, entry) in &mut self.modules {
+            entry.requested_by = resolution
+                .modules
+                .get(module_id)
+                .map(|module| module.requirements.keys().cloned().collect())
+                .unwrap_or_default();
+        }
     }
 
     pub fn from_path(path: &Path) -> Result<Self, ModuleManifestError> {
@@ -510,6 +537,31 @@ mod tests {
             .map(|(generation, _)| generation)
             .collect();
         assert_eq!(generations, vec![2, 1]);
+    }
+
+    #[test]
+    fn requested_by_is_rebuilt_from_the_installed_dependency_closure() {
+        let requester = ModuleManifest::from_json_str(
+            r#"{"name":"@me/desk","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh","dependencies":{"modules":{"@me/shared":"^1.0.0"}}}}"#,
+        )
+        .unwrap();
+        let shared = ModuleManifest::from_json_str(
+            r#"{"name":"@me/shared","version":"1.2.0","mesh":{"apiVersion":"0.1","kind":"library"}}"#,
+        )
+        .unwrap();
+        let mut lock = MeshLock::new();
+        lock.modules
+            .insert("@me/desk".into(), locked("sha256:desk"));
+        lock.modules
+            .insert("@me/shared".into(), locked("sha256:shared"));
+
+        lock.refresh_requested_by([&requester, &shared]);
+
+        assert_eq!(
+            lock.modules["@me/shared"].requested_by,
+            BTreeSet::from(["@me/desk".to_string()])
+        );
+        assert!(lock.modules["@me/desk"].requested_by.is_empty());
     }
 
     #[test]

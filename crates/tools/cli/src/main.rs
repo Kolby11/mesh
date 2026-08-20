@@ -598,6 +598,11 @@ fn cmd_install(args: &[String]) {
         if installed.kind != manifest.mesh.kind {
             return Err("installed module kind changed while copying".into());
         }
+        let installed_manifests = graph
+            .modules()
+            .into_iter()
+            .map(|module| module.manifest.clone())
+            .collect::<Vec<_>>();
 
         use mesh_core_module::package::ModuleKind;
 
@@ -640,6 +645,11 @@ fn cmd_install(args: &[String]) {
                 &manifest.version,
                 &destination,
                 &source,
+                &installed_manifests,
+                Some(mesh_core_module::package::LockedComposition {
+                    module: manifest.name.clone(),
+                    version: manifest.version.clone(),
+                }),
             )?;
             return Ok(Some(format!(
                 "composition {} in profile {profile_id}",
@@ -656,6 +666,8 @@ fn cmd_install(args: &[String]) {
                 &manifest.version,
                 &destination,
                 &source,
+                &installed_manifests,
+                None,
             )?;
             return Ok(None);
         }
@@ -675,6 +687,8 @@ fn cmd_install(args: &[String]) {
                 &manifest.version,
                 &destination,
                 &source,
+                &installed_manifests,
+                None,
             )?;
             return Ok(Some("legacy root graph (auto-enabled)".into()));
         };
@@ -722,6 +736,8 @@ fn cmd_install(args: &[String]) {
             &manifest.version,
             &destination,
             &source,
+            &installed_manifests,
+            None,
         )?;
         Ok(Some(format!("{instance_id} in profile {profile_id}")))
     })();
@@ -949,6 +965,8 @@ fn record_lock_entry(
     version: &str,
     installed_at: &std::path::Path,
     source: &InstallSource,
+    installed_manifests: &[mesh_core_module::package::ModuleManifest],
+    composition: Option<mesh_core_module::package::LockedComposition>,
 ) -> Result<(), String> {
     use mesh_core_module::package::{LockedModule, MeshLock, ModuleSource, module_tree_digest};
 
@@ -981,6 +999,10 @@ fn record_lock_entry(
             requested_by: Default::default(),
         },
     );
+    if composition.is_some() {
+        lock.composition = composition;
+    }
+    lock.refresh_requested_by(installed_manifests.iter());
     MeshLock::archive(&path, &history).map_err(|error| error.to_string())?;
     lock.save(&path).map_err(|error| error.to_string())
 }
@@ -1201,6 +1223,15 @@ fn cmd_uninstall(args: &[String]) {
         });
     }
     lock.modules.remove(module_id);
+    if lock
+        .composition
+        .as_ref()
+        .is_some_and(|composition| composition.module == module_id)
+    {
+        lock.composition = None;
+    }
+    let remaining_manifests = installed_manifests(&root_path);
+    lock.refresh_requested_by(remaining_manifests.values());
     let history = config_dir.join("lock-history");
     mesh_core_module::package::MeshLock::archive(&lock_path, &history)
         .unwrap_or_else(|error| exit_error(error));
@@ -1600,7 +1631,16 @@ mod tests {
                 revision: "abc123".to_string(),
             },
         };
-        record_lock_entry(&config_dir, "@example/widget", "1.2.3", &installed, &source).unwrap();
+        record_lock_entry(
+            &config_dir,
+            "@example/widget",
+            "1.2.3",
+            &installed,
+            &source,
+            &[],
+            None,
+        )
+        .unwrap();
 
         let lock = MeshLock::from_path(&config_dir.join("mesh.lock")).unwrap();
         let entry = &lock.modules["@example/widget"];

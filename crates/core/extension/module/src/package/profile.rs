@@ -43,6 +43,10 @@ pub struct ShellProfile {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProfileRootInstance {
+    /// Omitted in a sparse override; the profile key supplies the module id
+    /// during load.  Keeping the field optional on input lets `{ "active":
+    /// false }` deactivate an inherited root without repeating its identity.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub module: String,
     #[serde(default = "default_entrypoint")]
     pub entrypoint: String,
@@ -98,11 +102,12 @@ impl ShellProfile {
     }
 
     pub fn from_json_str(input: &str) -> Result<Self, ModuleManifestError> {
-        let profile: Self =
+        let mut profile: Self =
             serde_json::from_str(input).map_err(|source| ModuleManifestError::Json {
                 path: PathBuf::from("<profile>"),
                 source,
             })?;
+        profile.normalize_sparse_roots();
         profile.validate()?;
         Ok(profile)
     }
@@ -113,13 +118,24 @@ impl ShellProfile {
             path: path.to_path_buf(),
             source,
         })?;
-        let profile: Self =
+        let mut profile: Self =
             serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
                 path: path.to_path_buf(),
                 source,
             })?;
+        profile.normalize_sparse_roots();
         profile.validate()?;
         Ok(profile)
+    }
+
+    fn normalize_sparse_roots(&mut self) {
+        for (instance_id, instance) in &mut self.roots {
+            if instance.module.is_empty()
+                && let Some((module, _)) = instance_id.rsplit_once('#')
+            {
+                instance.module = module.to_string();
+            }
+        }
     }
 
     /// This profile's own decisions, as a composition layer.
@@ -262,31 +278,82 @@ impl ShellProfile {
         &self,
         manifests: impl IntoIterator<Item = &'a ModuleManifest>,
     ) -> Result<HashSet<String>, ModuleManifestError> {
-        let manifests = manifests
-            .into_iter()
+        let manifest_list = manifests.into_iter().collect::<Vec<_>>();
+        let manifests = manifest_list
+            .iter()
+            .copied()
             .map(|manifest| (manifest.name.as_str(), manifest))
             .collect::<HashMap<_, _>>();
         let mut active = HashSet::new();
         let mut queue = VecDeque::new();
 
-        for instance in self.roots.values().filter(|instance| instance.active) {
+        // A composition module contributes a dependency node as well as the
+        // roots and resources that its profile declares. Resolve the same
+        // effective spec used by graph loading so the activation set contains
+        // the complete composition closure, including `extends` ancestors.
+        let profile_spec = self.as_composition_spec();
+        let effective = if self.from.is_some() {
+            Some(super::resolve_composition(
+                self,
+                manifest_list.iter().copied(),
+            )?)
+        } else {
+            None
+        };
+        let activation_spec = effective
+            .as_ref()
+            .map(|resolved| &resolved.spec)
+            .unwrap_or(&profile_spec);
+        let orphaned = effective
+            .as_ref()
+            .map(|resolved| resolved.orphaned_overrides.as_slice())
+            .unwrap_or(&[]);
+        let is_active_host = |instance_id: &str| {
+            activation_spec
+                .roots
+                .get(instance_id)
+                .is_some_and(|instance| instance.active)
+                && !orphaned.iter().any(|orphan| {
+                    orphan == instance_id || orphan == &format!("nodeSlots.{instance_id}")
+                })
+        };
+
+        for (instance_id, instance) in &activation_spec.roots {
+            if !instance.active || !is_active_host(instance_id) {
+                continue;
+            }
             queue.push_back(instance.module.clone());
         }
-        queue.extend(self.background_services.iter().cloned());
-        queue.extend(self.providers.values().cloned());
-        if let Some(theme) = &self.resources.theme {
+        queue.extend(activation_spec.background_services.iter().cloned());
+        queue.extend(activation_spec.providers.values().cloned());
+        if let Some(theme) = &activation_spec.resources.theme {
             queue.push_back(theme.clone());
         }
-        queue.extend(self.resources.icons.iter().cloned());
-        queue.extend(self.resources.fonts.iter().cloned());
-        queue.extend(self.resources.languages.iter().cloned());
-        for slots in self.node_slots.values() {
+        queue.extend(activation_spec.resources.icons.iter().cloned());
+        queue.extend(activation_spec.resources.fonts.iter().cloned());
+        queue.extend(activation_spec.resources.languages.iter().cloned());
+        for (instance_id, slots) in &activation_spec.node_slots {
+            if !is_active_host(instance_id) {
+                continue;
+            }
             for slot in slots.values() {
                 for node in &slot.nodes {
                     if let Some((module_id, _)) = node.contribution.rsplit_once(':') {
                         queue.push_back(module_id.to_string());
                     }
                 }
+            }
+        }
+
+        if let Some(from) = &self.from {
+            let compositions = manifest_list
+                .iter()
+                .copied()
+                .filter(|manifest| manifest.mesh.kind == ModuleKind::Composition)
+                .map(|manifest| (manifest.name.as_str(), manifest))
+                .collect::<HashMap<_, _>>();
+            for composition_id in super::composition_chain(&from.module, &compositions)? {
+                queue.push_back(composition_id);
             }
         }
 
@@ -300,7 +367,15 @@ impl ShellProfile {
                 ))
             })?;
 
-            queue.extend(manifest.mesh.uses.modules.keys().cloned());
+            queue.extend(
+                manifest
+                    .mesh
+                    .dependencies
+                    .modules
+                    .iter()
+                    .filter(|(_, dependency)| !dependency.is_optional())
+                    .map(|(module_id, _)| module_id.clone()),
+            );
             queue.extend(manifest.mesh.uses.resources.icons.iter().cloned());
             queue.extend(manifest.mesh.uses.resources.fonts.iter().cloned());
             queue.extend(manifest.mesh.uses.resources.i18n.iter().cloned());
@@ -691,6 +766,64 @@ mod tests {
             root.layout.unwrap().entrypoint,
             "@me/panel:main".to_string()
         );
+    }
+
+    #[test]
+    fn sparse_root_overrides_inherit_the_module_from_the_instance_key() {
+        let profile = ShellProfile::from_json_str(
+            r#"{"schemaVersion":3,"roots":{"@me/panel#top":{"active":false}}}"#,
+        )
+        .unwrap();
+        let root = &profile.roots["@me/panel#top"];
+        assert_eq!(root.module, "@me/panel");
+        assert!(!root.active);
+    }
+
+    #[test]
+    fn composition_activation_includes_the_composition_and_its_dependency_closure() {
+        let composition = manifest(
+            r#"{"name":"@me/desk","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"composition","uses":{"modules":{"@me/helpers":"^1.0.0"}},"compose":{"roots":{"@me/panel#top":{"module":"@me/panel"}}}}}"#,
+        );
+        let panel = manifest(
+            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh"}}"#,
+        );
+        let helpers = manifest(
+            r#"{"name":"@me/helpers","version":"1.2.0","mesh":{"apiVersion":"0.1","kind":"library"}}"#,
+        );
+        let profile = ShellProfile::from_json_str(
+            r#"{"schemaVersion":3,"from":{"module":"@me/desk","version":"1.0.0"}}"#,
+        )
+        .unwrap();
+        let active = profile
+            .active_module_ids([&composition, &panel, &helpers])
+            .unwrap();
+        assert!(active.contains("@me/desk"));
+        assert!(active.contains("@me/panel"));
+        assert!(active.contains("@me/helpers"));
+    }
+
+    #[test]
+    fn inactive_root_node_slots_do_not_activate_their_contributions() {
+        let composition = manifest(
+            r#"{"name":"@me/desk","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"composition","compose":{"roots":{"@me/panel#top":{"module":"@me/panel"}},"nodeSlots":{"@me/panel#top":{"start":{"nodes":[{"id":"clock","use":"@me/items:clock"}]}}}}}}"#,
+        );
+        let panel = manifest(
+            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh"}}"#,
+        );
+        let items = manifest(
+            r#"{"name":"@me/items","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"component","entry":"main.mesh"}}"#,
+        );
+        let profile = ShellProfile::from_json_str(
+            r#"{"schemaVersion":3,"from":{"module":"@me/desk","version":"1.0.0"},"roots":{"@me/panel#top":{"active":false},"@me/gone#default":{"active":true}}}"#,
+        )
+        .unwrap();
+        let active = profile
+            .active_module_ids([&composition, &panel, &items])
+            .unwrap();
+        assert!(active.contains("@me/desk"));
+        assert!(!active.contains("@me/panel"));
+        assert!(!active.contains("@me/items"));
+        assert!(!active.contains("@me/gone"));
     }
 
     #[test]

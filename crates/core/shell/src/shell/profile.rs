@@ -241,6 +241,9 @@ impl Shell {
                 "module": root.module,
                 "active": root.active,
             }));
+            if !root.active {
+                continue;
+            }
             let Some(host) = catalog.modules.get(&root.module) else {
                 continue;
             };

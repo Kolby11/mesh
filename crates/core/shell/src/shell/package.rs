@@ -120,7 +120,19 @@ impl Shell {
             )));
         }
 
-        record_lock_entry(config_dir, &manifest, &destination, &staged)?;
+        let installed_manifests = graph
+            .modules()
+            .into_iter()
+            .map(|module| module.manifest.clone())
+            .collect::<Vec<_>>();
+        record_lock_entry(
+            config_dir,
+            &manifest,
+            &destination,
+            &staged,
+            &installed_manifests,
+            !available_only,
+        )?;
 
         if !self
             .module_dirs
@@ -330,7 +342,25 @@ impl Shell {
             self.sync_frontend_catalog_components();
         }
 
-        if lock.modules.remove(module_id).is_some() || lock_path.exists() {
+        let lock_changed = lock.modules.remove(module_id).is_some()
+            || lock
+                .composition
+                .as_ref()
+                .is_some_and(|composition| composition.module == module_id);
+        if lock
+            .composition
+            .as_ref()
+            .is_some_and(|composition| composition.module == module_id)
+        {
+            lock.composition = None;
+        }
+        let remaining_manifests = new_graph
+            .modules()
+            .into_iter()
+            .map(|module| module.manifest.clone())
+            .collect::<Vec<_>>();
+        lock.refresh_requested_by(remaining_manifests.iter());
+        if lock_changed || lock_path.exists() {
             MeshLock::archive(&lock_path, &config_dir.join("lock-history"))
                 .map_err(|error| package_error(error.to_string()))?;
             lock.save(&lock_path)
@@ -481,6 +511,8 @@ fn record_lock_entry(
     manifest: &ModuleManifest,
     installed_at: &Path,
     source: &StagedModuleSource,
+    installed_manifests: &[ModuleManifest],
+    activate_composition: bool,
 ) -> Result<(), ShellRunError> {
     let lock_path = config_dir.join("mesh.lock");
     let mut lock =
@@ -517,6 +549,13 @@ fn record_lock_entry(
             requested_by: Default::default(),
         },
     );
+    if activate_composition && manifest.mesh.kind == ModuleKind::Composition {
+        lock.composition = Some(mesh_core_module::package::LockedComposition {
+            module: manifest.name.clone(),
+            version: manifest.version.clone(),
+        });
+    }
+    lock.refresh_requested_by(installed_manifests.iter());
     MeshLock::archive(&lock_path, &config_dir.join("lock-history"))
         .map_err(|error| package_error(error.to_string()))?;
     lock.save(&lock_path)

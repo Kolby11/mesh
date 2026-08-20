@@ -107,6 +107,10 @@ pub struct EffectiveComposition {
     /// `from` is a hand-built composition — the pre-composition behavior, still
     /// fully supported.
     pub source_module: Option<String>,
+    /// The selected source version is part of profile provenance. A module id
+    /// alone is not enough to reproduce which installed composition supplied
+    /// the effective roots and bindings.
+    pub source_version: Option<String>,
     /// User overrides that no longer match anything the composition declares.
     ///
     /// Retained rather than dropped: discarding them would lose the user's work
@@ -118,17 +122,43 @@ impl EffectiveComposition {
     /// Project back into a [`ShellProfile`] so the existing activation closure,
     /// root-graph application, and transactional switch work unchanged.
     pub fn to_profile(&self) -> ShellProfile {
+        let is_orphaned = |instance_id: &str| {
+            self.orphaned_overrides.iter().any(|orphan| {
+                orphan == instance_id || orphan == &format!("nodeSlots.{instance_id}")
+            })
+        };
+        let roots = self
+            .spec
+            .roots
+            .iter()
+            .filter(|(instance_id, _)| !is_orphaned(instance_id))
+            .map(|(instance_id, instance)| (instance_id.clone(), instance.clone()))
+            .collect();
+        let node_slots = self
+            .spec
+            .node_slots
+            .iter()
+            .filter(|(instance_id, _)| {
+                !is_orphaned(instance_id)
+                    && self
+                        .spec
+                        .roots
+                        .get(*instance_id)
+                        .is_some_and(|root| root.active)
+            })
+            .map(|(instance_id, slots)| (instance_id.clone(), slots.clone()))
+            .collect();
         ShellProfile {
             schema_version: super::PROFILE_SCHEMA_VERSION,
             from: self.source_module.as_ref().map(|module| CompositionRef {
                 module: module.clone(),
-                version: None,
+                version: self.source_version.clone(),
             }),
-            roots: self.spec.roots.clone(),
+            roots,
             background_services: self.spec.background_services.clone(),
             providers: self.spec.providers.clone(),
             resources: self.spec.resources.clone(),
-            node_slots: self.spec.node_slots.clone(),
+            node_slots,
             settings: self.spec.settings.clone(),
         }
     }
@@ -158,9 +188,21 @@ pub fn resolve_composition<'a>(
 
     let mut spec = CompositionSpec::default();
     let source_module = profile.from.as_ref().map(|from| from.module.clone());
+    let source_version = profile.from.as_ref().and_then(|from| from.version.clone());
 
     if let Some(from) = &profile.from {
         let chain = composition_chain(&from.module, &compositions)?;
+        let selected = compositions
+            .get(from.module.as_str())
+            .expect("composition chain already validated the selected module");
+        if let Some(requested) = &from.version
+            && selected.version != *requested
+        {
+            return Err(ModuleManifestError::Validation(format!(
+                "profile selects composition {} version {}, but installed version is {}",
+                from.module, requested, selected.version
+            )));
+        }
         // Base first, so a derived composition wins where they disagree.
         for module_id in chain.iter().rev() {
             let manifest = compositions[module_id.as_str()];
@@ -187,12 +229,13 @@ pub fn resolve_composition<'a>(
     Ok(EffectiveComposition {
         spec,
         source_module,
+        source_version,
         orphaned_overrides,
     })
 }
 
 /// The `extends` chain from `module_id` upward, most derived first.
-fn composition_chain(
+pub(crate) fn composition_chain(
     module_id: &str,
     compositions: &HashMap<&str, &ModuleManifest>,
 ) -> Result<Vec<String>, ModuleManifestError> {
@@ -431,6 +474,30 @@ mod tests {
     }
 
     #[test]
+    fn selected_composition_version_is_preserved_and_mismatches_are_rejected() {
+        let desk = manifest(
+            r#"{"name":"@alice/desk","version":"2.1.0","mesh":{"apiVersion":"0.1","kind":"composition","compose":{}}}"#,
+        );
+        let selected = resolve_composition(
+            &profile(r#"{"schemaVersion":3,"from":{"module":"@alice/desk","version":"2.1.0"}}"#),
+            [&desk],
+        )
+        .unwrap();
+        assert_eq!(selected.source_version.as_deref(), Some("2.1.0"));
+        assert_eq!(
+            selected.to_profile().from.unwrap().version.as_deref(),
+            Some("2.1.0")
+        );
+
+        let error = resolve_composition(
+            &profile(r#"{"schemaVersion":3,"from":{"module":"@alice/desk","version":"2.0.0"}}"#),
+            [&desk],
+        )
+        .unwrap_err();
+        assert!(format!("{error}").contains("installed version is 2.1.0"));
+    }
+
+    #[test]
     fn user_deltas_beat_the_composition() {
         let desk = composition(
             "@alice/desk",
@@ -594,6 +661,30 @@ mod tests {
             Some("@mesh/desk")
         );
         assert!(hand_written.source_module.is_none());
+    }
+
+    #[test]
+    fn inactive_and_orphaned_node_slots_are_not_projected_into_runtime_profile() {
+        let desk = composition(
+            "@mesh/desk",
+            None,
+            r#"{"roots":{"@mesh/panel#top":{"module":"@mesh/panel"}},
+                "nodeSlots":{"@mesh/panel#top":{"start":{"nodes":[
+                  {"id":"clock","use":"@mesh/items:clock"}
+                ]}}}}"#,
+        );
+        let resolved = resolve_composition(
+            &profile(
+                r#"{"schemaVersion":3,"from":{"module":"@mesh/desk"},
+                    "roots":{"@mesh/panel#top":{"active":false},"@mesh/gone#default":{"active":true}},
+                    "nodeSlots":{"@mesh/gone#default":{"start":{"nodes":[{"id":"gone","use":"@mesh/items:clock"}]}}}}"#,
+            ),
+            [&desk],
+        )
+        .unwrap();
+        let runtime = resolved.to_profile();
+        assert!(runtime.node_slots.is_empty());
+        assert!(!runtime.roots.contains_key("@mesh/gone#default"));
     }
 
     #[test]
