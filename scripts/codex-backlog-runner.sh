@@ -11,13 +11,14 @@ usage() {
     cat <<'EOF'
 Usage: scripts/codex-backlog-runner.sh [options]
 
-Run Codex against the next unchecked item in docs/BACKLOG.md. The runner only
-operates on a clean main branch and requires exactly one new commit per item.
+Run Codex against the next unchecked item in docs/BACKLOG.md. The runner
+requires a clean main branch by default and exactly one new commit per item.
 
 Options:
   --dry-run                 Show the next item and configuration without running Codex
   --max-features N          Stop after N successful items (default: unlimited)
   --once                    Alias for --max-features 1
+  --allow-dirty             Resume an interrupted turn with existing changes
   -h, --help                Show this help
 
 Environment:
@@ -42,6 +43,7 @@ die() {
 
 MAX_FEATURES=0
 DRY_RUN=0
+ALLOW_DIRTY=0
 
 while (($# > 0)); do
     case "$1" in
@@ -57,6 +59,10 @@ while (($# > 0)); do
             ;;
         --once)
             MAX_FEATURES=1
+            shift
+            ;;
+        --allow-dirty)
+            ALLOW_DIRTY=1
             shift
             ;;
         -h|--help)
@@ -107,7 +113,11 @@ assert_main_and_clean() {
 
     if [[ -n "$(git -C "$ROOT" status --porcelain)" ]]; then
         git -C "$ROOT" status --short >&2
-        die "working tree is not clean; commit or set aside existing changes first"
+        if ((ALLOW_DIRTY)); then
+            printf 'codex-backlog-runner: continuing with existing changes because --allow-dirty was supplied\n' >&2
+        else
+            die "working tree is not clean; commit or set aside existing changes first (or pass --allow-dirty to resume an interrupted turn)"
+        fi
     fi
 }
 
@@ -119,6 +129,7 @@ print_configuration() {
     printf 'fresh-session threshold: %s tokens used (%s%% remaining)\n' "$rollover_used" "$CODEX_CONTEXT_LEFT_PERCENT"
     printf 'allow all permissions: %s\n' "$CODEX_ALLOW_ALL"
     printf 'auto approval: %s\n' "$CODEX_AUTO_APPROVE"
+    printf 'allow dirty recovery: %s\n' "$ALLOW_DIRTY"
 }
 
 if [[ -z "$(next_backlog_line)" ]]; then
