@@ -3,7 +3,7 @@ use super::*;
 use mesh_core_capability::{CapabilityCatalog, PrivilegeLevel};
 use mesh_core_module::package::{
     InstalledModuleEntry, MeshLock, ModuleId, ModuleKind, ModuleManifest, ModuleSource,
-    ProfilePaths, RootModuleGraphManifest, ShellProfile, contained_path,
+    PackageTransaction, ProfilePaths, RootModuleGraphManifest, ShellProfile, contained_path,
     load_installed_module_graph, module_install_path, module_tree_digest, validate_module_tree,
 };
 use std::collections::VecDeque;
@@ -29,13 +29,18 @@ impl Shell {
         }
 
         let graph_path = self.installed_module_graph_path();
-        let root = RootModuleGraphManifest::from_path(&graph_path)
-            .map_err(|error| package_error(error.to_string()))?;
         let config_dir = graph_path
             .parent()
             .ok_or_else(|| package_error("root module graph has no parent directory"))?;
+        let mut transaction = PackageTransaction::begin(config_dir, "install")
+            .map_err(|error| package_error(error.to_string()))?;
+        let root = RootModuleGraphManifest::from_path(&graph_path)
+            .map_err(|error| package_error(error.to_string()))?;
         let modules_dir = config_dir.join(&root.modules_dir);
-        let mut staged = stage_module_source(source, &modules_dir)?;
+        transaction
+            .protect_package_state(&graph_path, &modules_dir)
+            .map_err(|error| package_error(error.to_string()))?;
+        let mut staged = stage_module_source(source, &transaction.staging_dir())?;
         let manifest = ModuleManifest::from_path(&staged.path().join("module.json"))
             .map_err(|error| package_error(error.to_string()))?;
         check_install_capabilities(&manifest, allow_elevated, allow_high)?;
@@ -55,6 +60,9 @@ impl Shell {
                 destination.display()
             )));
         }
+        transaction
+            .protect(&destination)
+            .map_err(|error| package_error(error.to_string()))?;
         staged.place_at(&destination)?;
 
         let previous_root = root.clone();
@@ -127,6 +135,9 @@ impl Shell {
 
         let requests = self.configure_install_activation(&manifest, profile_id, available_only)?;
         tracing::info!(module_id = %manifest.name, "installed module through mesh.packages");
+        transaction
+            .commit()
+            .map_err(|error| package_error(error.to_string()))?;
         Ok(requests)
     }
 
@@ -138,6 +149,11 @@ impl Shell {
         ModuleId::parse(module_id).map_err(|error| package_error(error.to_string()))?;
 
         let graph_path = self.installed_module_graph_path();
+        let config_dir = graph_path
+            .parent()
+            .ok_or_else(|| package_error("root module graph has no parent directory"))?;
+        let mut transaction = PackageTransaction::begin(config_dir, "uninstall")
+            .map_err(|error| package_error(error.to_string()))?;
         let mut root = RootModuleGraphManifest::from_path(&graph_path)
             .map_err(|error| package_error(error.to_string()))?;
         let graph = load_installed_module_graph(&graph_path)
@@ -146,9 +162,9 @@ impl Shell {
             .module(module_id)
             .ok_or_else(|| package_error(format!("module {module_id} is not installed")))?;
         let module_kind = node.kind;
-        let config_dir = graph_path
-            .parent()
-            .ok_or_else(|| package_error("root module graph has no parent directory"))?;
+        transaction
+            .protect_package_state(&graph_path, &config_dir.join(&root.modules_dir))
+            .map_err(|error| package_error(error.to_string()))?;
         let installed_at = contained_path(
             &config_dir.join(&root.modules_dir),
             &node.path,
@@ -322,6 +338,9 @@ impl Shell {
         }
 
         tracing::info!(module_id, "uninstalled module through mesh.packages");
+        transaction
+            .commit()
+            .map_err(|error| package_error(error.to_string()))?;
         Ok(requests)
     }
 

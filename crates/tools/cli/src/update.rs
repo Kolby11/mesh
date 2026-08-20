@@ -13,14 +13,13 @@
 
 use mesh_core_capability::{Capability, CapabilityCatalog, PrivilegeLevel};
 use mesh_core_module::package::{
-    LockedModule, MeshLock, ModuleManifest, ModuleSource, has_local_edits, module_install_path,
-    module_tree_digest, validate_module_tree,
+    LockedModule, MeshLock, ModuleManifest, ModuleSource, PackageTransaction, has_local_edits,
+    module_install_path, module_tree_digest, validate_module_tree,
 };
 use mesh_core_service::{CompatibilityClass, diff_contracts, parse_interface_contract};
 use std::collections::BTreeMap;
-use std::path::Path;
-#[cfg(test)]
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 /// How a module whose working tree differs from its locked digest is handled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,29 +315,23 @@ pub fn commit_update(
     config_dir: &Path,
     lock: &mut MeshLock,
     plan: &UpdatePlan,
+    transaction: &mut PackageTransaction,
 ) -> Result<Vec<String>, String> {
     let mut updated = Vec::new();
-    for candidate in plan.changed() {
+    for (index, candidate) in plan.changed().enumerate() {
         let installed_at = module_install_path(modules_dir, &candidate.module_id)
             .map_err(|error| error.to_string())?;
         let Some(revision) = &candidate.candidate_revision else {
             continue;
         };
-        let checkout = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&installed_at)
-            .arg("checkout")
-            .arg("--quiet")
-            .arg(revision)
-            .output()
-            .map_err(|error| format!("failed to run git checkout: {error}"))?;
-        if !checkout.status.success() {
-            return Err(format!(
-                "checking out {revision} for {} failed: {}",
-                candidate.module_id,
-                String::from_utf8_lossy(&checkout.stderr).trim()
-            ));
-        }
+        let staged = stage_git_revision(
+            &installed_at,
+            revision,
+            &transaction.staging_dir().join(format!("update-{index}")),
+        )?;
+        transaction
+            .replace_with(&installed_at, &staged)
+            .map_err(|error| error.to_string())?;
         let digest = module_tree_digest(&installed_at).map_err(|error| error.to_string())?;
         if let Some(entry) = lock.modules.get_mut(&candidate.module_id) {
             entry.version = candidate.candidate_version.clone();
@@ -366,10 +359,11 @@ pub fn rollback(
     modules_dir: &Path,
     config_dir: &Path,
     generation: Option<u64>,
+    transaction: &mut PackageTransaction,
 ) -> Result<Vec<String>, String> {
     let lock_path = config_dir.join("mesh.lock");
     let history = config_dir.join("lock-history");
-    MeshLock::load_or_default(&lock_path).map_err(|error| error.to_string())?;
+    let current = MeshLock::load_or_default(&lock_path).map_err(|error| error.to_string())?;
     let generations = MeshLock::history(&history);
     if generations.is_empty() {
         return Err("no previous lock generation to roll back to".into());
@@ -384,37 +378,180 @@ pub fn rollback(
 
     let target = MeshLock::from_path(&path).map_err(|error| error.to_string())?;
     let mut restored = Vec::new();
-    for (module_id, entry) in &target.modules {
-        let Some(revision) = &entry.revision else {
-            continue;
-        };
+    fs::create_dir_all(modules_dir)
+        .map_err(|error| format!("failed to create modules directory: {error}"))?;
+    for (index, (module_id, entry)) in target.modules.iter().enumerate() {
         let installed_at =
             module_install_path(modules_dir, module_id).map_err(|error| error.to_string())?;
-        if !installed_at.exists() {
+        let staged = stage_lock_entry(
+            entry,
+            &installed_at,
+            config_dir,
+            &transaction.staging_dir().join(format!("rollback-{index}")),
+        )?;
+        transaction
+            .replace_with(&installed_at, &staged)
+            .map_err(|error| error.to_string())?;
+        restored.push(format!("{module_id} → {}", entry.version));
+    }
+    for module_id in current.modules.keys() {
+        if target.modules.contains_key(module_id) {
             continue;
         }
-        let checkout = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&installed_at)
-            .arg("checkout")
-            .arg("--quiet")
-            .arg(revision)
-            .output()
-            .map_err(|error| format!("failed to run git checkout: {error}"))?;
-        if !checkout.status.success() {
-            return Err(format!(
-                "restoring {module_id} to {revision} failed: {}",
-                String::from_utf8_lossy(&checkout.stderr).trim()
-            ));
+        let installed_at =
+            module_install_path(modules_dir, module_id).map_err(|error| error.to_string())?;
+        if installed_at.exists() {
+            transaction
+                .remove(&installed_at)
+                .map_err(|error| error.to_string())?;
+            restored.push(format!("removed {module_id}"));
         }
-        validate_module_tree(&installed_at).map_err(|error| error.to_string())?;
-        restored.push(format!("{module_id} → {} ({revision})", entry.version));
     }
 
-    let content = std::fs::read(&path).map_err(|error| error.to_string())?;
-    std::fs::write(&lock_path, content).map_err(|error| error.to_string())?;
+    MeshLock::archive(&lock_path, &history).map_err(|error| error.to_string())?;
+    target
+        .save_exact(&lock_path)
+        .map_err(|error| error.to_string())?;
     restored.push(format!("lock restored to generation {target_generation}"));
     Ok(restored)
+}
+
+fn stage_git_revision(
+    repository: &Path,
+    revision: &str,
+    destination: &Path,
+) -> Result<PathBuf, String> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create update staging directory: {error}"))?;
+    }
+    let clone = std::process::Command::new("git")
+        .args(["clone", "--quiet", "--no-hardlinks"])
+        .arg(repository)
+        .arg(destination)
+        .output()
+        .map_err(|error| format!("failed to stage Git revision: {error}"))?;
+    if !clone.status.success() {
+        return Err(format!(
+            "staging {} failed: {}",
+            repository.display(),
+            String::from_utf8_lossy(&clone.stderr).trim()
+        ));
+    }
+    let checkout = std::process::Command::new("git")
+        .args(["-C"])
+        .arg(destination)
+        .args(["checkout", "--quiet", revision])
+        .output()
+        .map_err(|error| format!("failed to stage Git checkout: {error}"))?;
+    if !checkout.status.success() {
+        return Err(format!(
+            "checking out {revision} failed: {}",
+            String::from_utf8_lossy(&checkout.stderr).trim()
+        ));
+    }
+    validate_module_tree(destination).map_err(|error| error.to_string())?;
+    Ok(destination.to_path_buf())
+}
+
+fn stage_lock_entry(
+    entry: &LockedModule,
+    installed_at: &Path,
+    config_dir: &Path,
+    destination: &Path,
+) -> Result<PathBuf, String> {
+    if let Some(revision) = &entry.revision {
+        if installed_at.exists() {
+            return stage_git_revision(installed_at, revision, destination);
+        }
+        if let ModuleSource::Git { url, .. } = &entry.source {
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent).map_err(|error| {
+                    format!("failed to create rollback staging directory: {error}")
+                })?;
+            }
+            let clone = std::process::Command::new("git")
+                .args(["clone", "--quiet", url])
+                .arg(destination)
+                .output()
+                .map_err(|error| format!("failed to fetch rollback source: {error}"))?;
+            if !clone.status.success() {
+                return Err(format!(
+                    "fetching rollback source failed: {}",
+                    String::from_utf8_lossy(&clone.stderr).trim()
+                ));
+            }
+            let checkout = std::process::Command::new("git")
+                .args(["-C"])
+                .arg(destination)
+                .args(["checkout", "--quiet", revision])
+                .output()
+                .map_err(|error| format!("failed to restore rollback revision: {error}"))?;
+            if !checkout.status.success() {
+                return Err(format!(
+                    "restoring {revision} failed: {}",
+                    String::from_utf8_lossy(&checkout.stderr).trim()
+                ));
+            }
+            validate_module_tree(destination).map_err(|error| error.to_string())?;
+            return Ok(destination.to_path_buf());
+        }
+    }
+    let ModuleSource::Path { path } = &entry.source else {
+        return Err(format!(
+            "cannot materialize rollback entry without a revision: {}",
+            installed_at.display()
+        ));
+    };
+    let source = Path::new(path);
+    let source = if source.is_absolute() {
+        source.to_path_buf()
+    } else {
+        config_dir.join(source)
+    };
+    let metadata = fs::symlink_metadata(&source).map_err(|error| {
+        format!(
+            "failed to read rollback source {}: {error}",
+            source.display()
+        )
+    })?;
+    copy_module_tree(&source, destination, &metadata)?;
+    validate_module_tree(destination).map_err(|error| error.to_string())?;
+    Ok(destination.to_path_buf())
+}
+
+fn copy_module_tree(
+    source: &Path,
+    destination: &Path,
+    metadata: &fs::Metadata,
+) -> Result<(), String> {
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "rollback source {} contains a symlink",
+            source.display()
+        ));
+    }
+    if metadata.is_dir() {
+        fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+        for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+            copy_module_tree(&path, &destination.join(entry.file_name()), &metadata)?;
+        }
+    } else if metadata.is_file() {
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        fs::copy(source, destination).map_err(|error| error.to_string())?;
+    } else {
+        return Err(format!(
+            "rollback source {} is not a file or directory",
+            source.display()
+        ));
+    }
+    fs::set_permissions(destination, metadata.permissions()).map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 /// Recompute every digest and report which modules the user has edited.

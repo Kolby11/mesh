@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-08-20
+**Updated:** 2026-08-21
 
 This page describes the present. History lives in [`log/`](log/); open work
 lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
@@ -18,6 +18,11 @@ to recover an interrupted turn.
 The 16 section improvement audits now have a feature-level checkbox checklist
 in `docs/BACKLOG.md`; implementation detail, evidence, and regression matrices
 remain in each section's `improvements.md`.
+
+Package install, update, uninstall, and rollback now share the core
+`PackageTransaction` engine: one OS lock, a durable journal, staged candidates,
+filesystem snapshots, and crash recovery. The completed backlog item and its
+validation record are in the 2026-08 log.
 
 Per-widget promotion is complete: an embedded retained widget can move between
 its parent surface and an independent `xdg_toplevel` while retaining the shared

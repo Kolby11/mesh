@@ -192,6 +192,25 @@ impl MeshLock {
         atomic_write(path, content.as_bytes())
     }
 
+    /// Persist an already-resolved generation without advancing it.
+    ///
+    /// Rollback restores the selected lock generation exactly.  Calling
+    /// [`Self::save`] here would turn the restored snapshot into a new, subtly
+    /// different generation and would make a second rollback ambiguous.
+    pub fn save_exact(&self, path: &Path) -> Result<(), ModuleManifestError> {
+        self.validate()?;
+        if path.exists() {
+            validate_regular_file(path, "mesh.lock")?;
+        }
+        let mut content =
+            serde_json::to_string_pretty(self).map_err(|source| ModuleManifestError::Json {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        content.push('\n');
+        atomic_write(path, content.as_bytes())
+    }
+
     /// Archive the current on-disk lock before overwriting it, so
     /// `mesh rollback` has a previous generation to restore.
     pub fn archive(path: &Path, history_dir: &Path) -> Result<(), ModuleManifestError> {

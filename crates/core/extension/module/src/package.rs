@@ -8,6 +8,7 @@ mod paths;
 mod profile;
 mod resolution;
 mod root;
+mod transaction;
 mod util;
 
 #[cfg(test)]
@@ -28,3 +29,4 @@ pub use paths::*;
 pub use profile::*;
 pub use resolution::*;
 pub use root::*;
+pub use transaction::*;

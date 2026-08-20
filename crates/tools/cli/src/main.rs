@@ -504,15 +504,23 @@ fn cmd_install(args: &[String]) {
         "mesh-shell install <path-or-git-url>[#ref] [--available-only] [--profile <profile>] [--allow-elevated] [--allow-high]",
     );
     let root_path = root_module_graph_path();
-    let mut root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
-        .unwrap_or_else(|error| exit_error(error));
     let config_dir = root_path
         .parent()
-        .expect("root graph path has a parent directory");
+        .expect("root graph path has a parent directory")
+        .to_path_buf();
+    let mut transaction =
+        mesh_core_module::package::PackageTransaction::begin(&config_dir, "install")
+            .unwrap_or_else(|error| exit_error(error));
+    let mut root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
+        .unwrap_or_else(|error| exit_error(error));
     let modules_dir = config_dir.join(&root.modules_dir);
+    transaction
+        .protect_package_state(&root_path, &modules_dir)
+        .unwrap_or_else(|error| exit_error(error));
     std::fs::create_dir_all(&modules_dir)
         .unwrap_or_else(|error| exit_error(format!("failed to create modules directory: {error}")));
-    let source = install_source(source_arg, &modules_dir).unwrap_or_else(|error| exit_error(error));
+    let source = install_source(source_arg, &transaction.staging_dir())
+        .unwrap_or_else(|error| exit_error(error));
     let source_path = source.path();
     let manifest_path = source_path.join("module.json");
     let manifest = mesh_core_module::package::ModuleManifest::from_path(&manifest_path)
@@ -555,6 +563,9 @@ fn cmd_install(args: &[String]) {
             destination.display()
         ));
     }
+    transaction
+        .protect(&destination)
+        .unwrap_or_else(|error| exit_error(error));
 
     source.place_at(&destination).unwrap_or_else(|error| {
         let _ = std::fs::remove_dir_all(&destination);
@@ -624,7 +635,7 @@ fn cmd_install(args: &[String]) {
                     .map_err(|error| error.to_string())?;
             }
             record_lock_entry(
-                config_dir,
+                &config_dir,
                 &manifest.name,
                 &manifest.version,
                 &destination,
@@ -640,7 +651,7 @@ fn cmd_install(args: &[String]) {
             || manifest.mesh.kind != ModuleKind::Frontend
         {
             record_lock_entry(
-                config_dir,
+                &config_dir,
                 &manifest.name,
                 &manifest.version,
                 &destination,
@@ -659,7 +670,7 @@ fn cmd_install(args: &[String]) {
         let Some(profile_id) = profile_id else {
             // Legacy auto-discovery already activates new modules by default.
             record_lock_entry(
-                config_dir,
+                &config_dir,
                 &manifest.name,
                 &manifest.version,
                 &destination,
@@ -706,7 +717,7 @@ fn cmd_install(args: &[String]) {
             }
         }
         record_lock_entry(
-            config_dir,
+            &config_dir,
             &manifest.name,
             &manifest.version,
             &destination,
@@ -730,11 +741,16 @@ fn cmd_install(args: &[String]) {
         Err(error) => {
             let _ = std::fs::remove_dir_all(&destination);
             let _ = previous_root.save(&root_path);
+            let _ = transaction.abort();
             exit_error(format!(
                 "installation validation failed; removed staged module: {error}"
             ));
         }
     }
+
+    transaction
+        .commit()
+        .unwrap_or_else(|error| exit_error(format!("failed to commit installation: {error}")));
 }
 
 fn copy_module_tree(
@@ -1003,7 +1019,20 @@ fn installed_manifests(
 fn cmd_update(args: &[String]) {
     use update::EditPolicy;
 
-    let (root_path, config_dir, modules_dir) = lock_paths();
+    let root_path = root_module_graph_path();
+    let config_dir = root_path
+        .parent()
+        .expect("root graph path has a parent directory")
+        .to_path_buf();
+    let mut transaction =
+        mesh_core_module::package::PackageTransaction::begin(&config_dir, "update")
+            .unwrap_or_else(|error| exit_error(error));
+    let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
+        .unwrap_or_else(|error| exit_error(error));
+    let modules_dir = config_dir.join(&root.modules_dir);
+    transaction
+        .protect_package_state(&root_path, &modules_dir)
+        .unwrap_or_else(|error| exit_error(error));
     let lock_path = config_dir.join("mesh.lock");
     let mut lock = mesh_core_module::package::MeshLock::load_or_default(&lock_path)
         .unwrap_or_else(|error| exit_error(error));
@@ -1022,15 +1051,16 @@ fn cmd_update(args: &[String]) {
         .map(String::as_str);
 
     let installed = installed_manifests(&root_path);
-    let approvals = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
-        .unwrap_or_else(|error| exit_error(error))
-        .capability_approvals;
+    let approvals = root.capability_approvals;
     let plan = update::plan_update(&modules_dir, &lock, only, policy, &installed, &approvals)
         .unwrap_or_else(|error| exit_error(error));
 
     let changed = plan.changed().collect::<Vec<_>>();
     if changed.is_empty() && !plan.is_refused() {
         println!("everything is already at its locked revision");
+        transaction.abort().unwrap_or_else(|error| {
+            exit_error(format!("failed to close update transaction: {error}"))
+        });
         return;
     }
     for candidate in &changed {
@@ -1057,15 +1087,33 @@ fn cmd_update(args: &[String]) {
         eprintln!("{module_id} now requests {level:?} capability {capability}");
     }
     if plan.is_refused() {
+        let _ = transaction.abort();
         exit_error("update refused; nothing was changed");
     }
     if dry_run {
         println!("dry run: no source, lock, or profile was changed");
+        transaction.abort().unwrap_or_else(|error| {
+            exit_error(format!("failed to close update transaction: {error}"))
+        });
         return;
     }
 
-    let updated = update::commit_update(&modules_dir, &config_dir, &mut lock, &plan)
-        .unwrap_or_else(|error| exit_error(error));
+    let updated = match update::commit_update(
+        &modules_dir,
+        &config_dir,
+        &mut lock,
+        &plan,
+        &mut transaction,
+    ) {
+        Ok(updated) => updated,
+        Err(error) => {
+            let _ = transaction.abort();
+            exit_error(error);
+        }
+    };
+    transaction
+        .commit()
+        .unwrap_or_else(|error| exit_error(format!("failed to commit update: {error}")));
     for entry in updated {
         println!("updated {entry}");
     }
@@ -1073,10 +1121,31 @@ fn cmd_update(args: &[String]) {
 }
 
 fn cmd_rollback(args: &[String]) {
-    let (_, config_dir, modules_dir) = lock_paths();
-    let generation = args.first().and_then(|arg| arg.parse::<u64>().ok());
-    let restored = update::rollback(&modules_dir, &config_dir, generation)
+    let root_path = root_module_graph_path();
+    let config_dir = root_path
+        .parent()
+        .expect("root graph path has a parent directory")
+        .to_path_buf();
+    let mut transaction =
+        mesh_core_module::package::PackageTransaction::begin(&config_dir, "rollback")
+            .unwrap_or_else(|error| exit_error(error));
+    let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
         .unwrap_or_else(|error| exit_error(error));
+    let modules_dir = config_dir.join(&root.modules_dir);
+    transaction
+        .protect_package_state(&root_path, &modules_dir)
+        .unwrap_or_else(|error| exit_error(error));
+    let generation = args.first().and_then(|arg| arg.parse::<u64>().ok());
+    let restored = match update::rollback(&modules_dir, &config_dir, generation, &mut transaction) {
+        Ok(restored) => restored,
+        Err(error) => {
+            let _ = transaction.abort();
+            exit_error(error);
+        }
+    };
+    transaction
+        .commit()
+        .unwrap_or_else(|error| exit_error(format!("failed to commit rollback: {error}")));
     for entry in restored {
         println!("{entry}");
     }
@@ -1084,7 +1153,20 @@ fn cmd_rollback(args: &[String]) {
 
 fn cmd_uninstall(args: &[String]) {
     let module_id = required_arg(args, 0, "mesh-shell uninstall <module-id>");
-    let (root_path, config_dir, modules_dir) = lock_paths();
+    let root_path = root_module_graph_path();
+    let config_dir = root_path
+        .parent()
+        .expect("root graph path has a parent directory")
+        .to_path_buf();
+    let mut transaction =
+        mesh_core_module::package::PackageTransaction::begin(&config_dir, "uninstall")
+            .unwrap_or_else(|error| exit_error(error));
+    let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
+        .unwrap_or_else(|error| exit_error(error));
+    let modules_dir = config_dir.join(&root.modules_dir);
+    transaction
+        .protect_package_state(&root_path, &modules_dir)
+        .unwrap_or_else(|error| exit_error(error));
     mesh_core_module::package::ModuleId::parse(module_id).unwrap_or_else(|error| exit_error(error));
     let lock_path = config_dir.join("mesh.lock");
     let mut lock = mesh_core_module::package::MeshLock::load_or_default(&lock_path)
@@ -1098,8 +1180,6 @@ fn cmd_uninstall(args: &[String]) {
         ));
     }
 
-    let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
-        .unwrap_or_else(|error| exit_error(error));
     let installed_at = match root.modules.get(module_id) {
         Some(entry) => mesh_core_module::package::contained_path(
             &modules_dir,
@@ -1126,6 +1206,9 @@ fn cmd_uninstall(args: &[String]) {
         .unwrap_or_else(|error| exit_error(error));
     lock.save(&lock_path)
         .unwrap_or_else(|error| exit_error(error));
+    transaction
+        .commit()
+        .unwrap_or_else(|error| exit_error(format!("failed to commit uninstall: {error}")));
     println!("uninstalled {module_id}");
 }
 
