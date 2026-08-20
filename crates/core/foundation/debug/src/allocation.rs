@@ -33,6 +33,9 @@ impl AllocationCounters {
 mod enabled {
     use super::AllocationCounters;
     use std::cell::Cell;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static ALLOCATOR_ACTIVE: AtomicBool = AtomicBool::new(false);
 
     std::thread_local! {
         static COUNTERS: Cell<AllocationCounters> = const {
@@ -49,6 +52,14 @@ mod enabled {
 
     pub(super) fn snapshot() -> AllocationCounters {
         COUNTERS.get()
+    }
+
+    pub(super) fn allocator_active() -> bool {
+        ALLOCATOR_ACTIVE.load(Ordering::Relaxed)
+    }
+
+    pub(super) fn note_allocator_use() {
+        ALLOCATOR_ACTIVE.store(true, Ordering::Relaxed);
     }
 
     pub(super) fn record_allocation(bytes: usize) {
@@ -100,8 +111,15 @@ mod enabled {
     }
 }
 
-pub const fn profiling_available() -> bool {
-    cfg!(feature = "allocation-profiling")
+pub fn profiling_available() -> bool {
+    #[cfg(feature = "allocation-profiling")]
+    {
+        enabled::allocator_active()
+    }
+    #[cfg(not(feature = "allocation-profiling"))]
+    {
+        false
+    }
 }
 
 pub fn snapshot() -> AllocationCounters {
@@ -143,6 +161,8 @@ impl<A> CountingAllocator<A> {
 // `Cell` storage and do not affect allocator ownership.
 unsafe impl<A: GlobalAlloc> GlobalAlloc for CountingAllocator<A> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        #[cfg(feature = "allocation-profiling")]
+        enabled::note_allocator_use();
         let pointer = unsafe { self.inner.alloc(layout) };
         #[cfg(feature = "allocation-profiling")]
         if !pointer.is_null() && enabled::tracking_enabled() {
@@ -152,6 +172,8 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for CountingAllocator<A> {
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        #[cfg(feature = "allocation-profiling")]
+        enabled::note_allocator_use();
         let pointer = unsafe { self.inner.alloc_zeroed(layout) };
         #[cfg(feature = "allocation-profiling")]
         if !pointer.is_null() && enabled::tracking_enabled() {
@@ -161,6 +183,8 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for CountingAllocator<A> {
     }
 
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+        #[cfg(feature = "allocation-profiling")]
+        enabled::note_allocator_use();
         unsafe { self.inner.dealloc(pointer, layout) };
         #[cfg(feature = "allocation-profiling")]
         if enabled::tracking_enabled() {
@@ -169,6 +193,8 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for CountingAllocator<A> {
     }
 
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        #[cfg(feature = "allocation-profiling")]
+        enabled::note_allocator_use();
         let new_pointer = unsafe { self.inner.realloc(pointer, layout, new_size) };
         #[cfg(feature = "allocation-profiling")]
         if !new_pointer.is_null() && enabled::tracking_enabled() {
@@ -219,6 +245,7 @@ mod tests {
     #[cfg(feature = "allocation-profiling")]
     #[test]
     fn counting_allocator_observes_current_thread_allocations_and_deallocations() {
+        assert!(profiling_available());
         let before = snapshot();
         let allocation = std::hint::black_box(vec![0_u8; 4_096]);
         let after_allocation = snapshot();
@@ -231,6 +258,12 @@ mod tests {
         let deallocated = after_drop.saturating_delta(after_allocation);
         assert!(deallocated.deallocation_count >= 1);
         assert!(deallocated.deallocated_bytes >= 4_096);
+    }
+
+    #[cfg(not(feature = "allocation-profiling"))]
+    #[test]
+    fn allocation_profiling_is_unavailable_without_the_feature() {
+        assert!(!profiling_available());
     }
 
     #[cfg(feature = "allocation-profiling")]
