@@ -58,23 +58,24 @@ impl SettingsStore {
     }
 
     pub fn load_from(path: &Path) -> Result<Self, ConfigError> {
-        let root = if path.exists() {
+        let (root, mut diagnostics) = if path.exists() {
             let content = std::fs::read_to_string(path)?;
             match serde_json::from_str::<JsonValue>(&content)? {
-                JsonValue::Object(map) => map,
-                other => {
-                    return Err(ConfigError::Validation(format!(
-                        "{} must contain a JSON object, found {}",
-                        path.display(),
-                        json_type_name(&other)
-                    )));
-                }
+                JsonValue::Object(map) => (map, Vec::new()),
+                other => (
+                    JsonMap::new(),
+                    vec![non_object_document_diagnostic(
+                        &format!("{} must contain", path.display()),
+                        &other,
+                    )],
+                ),
             }
         } else {
-            JsonMap::new()
+            (JsonMap::new(), Vec::new())
         };
 
-        let (shell, diagnostics) = resolve_shell_settings(&root);
+        let (shell, shell_diagnostics) = resolve_shell_settings(&root);
+        diagnostics.extend(shell_diagnostics);
         Ok(Self {
             path: path.to_path_buf(),
             root,
@@ -85,18 +86,18 @@ impl SettingsStore {
 
     /// Build a store from an already-parsed document.
     pub fn from_value(path: impl Into<PathBuf>, value: JsonValue) -> Result<Self, ConfigError> {
-        let root = match value {
-            JsonValue::Object(map) => map,
-            other => {
-                return Err(ConfigError::Validation(format!(
-                    "settings must be a JSON object, found {}",
-                    json_type_name(&other)
-                )));
-            }
+        let path = path.into();
+        let (root, mut diagnostics) = match value {
+            JsonValue::Object(map) => (map, Vec::new()),
+            other => (
+                JsonMap::new(),
+                vec![non_object_document_diagnostic("settings must be", &other)],
+            ),
         };
-        let (shell, diagnostics) = resolve_shell_settings(&root);
+        let (shell, shell_diagnostics) = resolve_shell_settings(&root);
+        diagnostics.extend(shell_diagnostics);
         Ok(Self {
-            path: path.into(),
+            path,
             root,
             shell,
             diagnostics,
@@ -352,6 +353,15 @@ fn json_type_name(value: &JsonValue) -> &'static str {
     }
 }
 
+fn non_object_document_diagnostic(source: &str, value: &JsonValue) -> SettingsDiagnostic {
+    SettingsDiagnostic::error(
+        "",
+        "",
+        format!("{source} a JSON object, found {}", json_type_name(value)),
+        "replace the document with a JSON object",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,17 +536,39 @@ mod tests {
     }
 
     #[test]
-    fn a_non_object_document_is_a_diagnostic_not_a_panic() {
+    fn a_non_object_document_loads_defaults_and_retains_a_root_diagnostic() {
         let path = std::env::temp_dir().join(format!(
             "mesh-settings-invalid-{}-{}.json",
             std::process::id(),
             line!()
         ));
         std::fs::write(&path, "[]").unwrap();
-        let result = SettingsStore::load_from(&path);
+        let store = SettingsStore::load_from(&path).expect("non-object documents are recoverable");
         std::fs::remove_file(&path).ok();
 
-        assert!(matches!(result, Err(ConfigError::Validation(_))));
+        assert_eq!(store.shell().theme.active, "tokyo-night");
+        assert_eq!(store.namespace_names().count(), 0);
+        let diagnostic = only(store.diagnostics());
+        assert!(diagnostic.is_error());
+        assert_eq!(diagnostic.namespace, "");
+        assert_eq!(diagnostic.key_path, "");
+        assert!(diagnostic.message.contains("must contain a JSON object"));
+        assert_eq!(
+            diagnostic.suggested_action,
+            "replace the document with a JSON object"
+        );
+    }
+
+    #[test]
+    fn a_non_object_value_builds_a_default_store_with_a_root_diagnostic() {
+        let store = SettingsStore::from_value("/tmp/mesh-test-settings.json", json!(null))
+            .expect("non-object values are recoverable");
+
+        assert_eq!(store.shell().theme.active, "tokyo-night");
+        let diagnostic = only(store.diagnostics());
+        assert_eq!(diagnostic.namespace, "");
+        assert_eq!(diagnostic.key_path, "");
+        assert!(diagnostic.message.contains("found null"));
     }
 
     fn only(diagnostics: &[SettingsDiagnostic]) -> &SettingsDiagnostic {

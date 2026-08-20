@@ -58,6 +58,10 @@ that had drifted out of the shell payload. The shell adds the schema version and
 keeps only overlay/controller state plus the established module-graph compatibility
 adapter outside the DTO boundary.
 
+The settings store now recovers from a successfully parsed non-object document by
+using an empty default store and retaining an error diagnostic at the document
+root. I/O and irrecoverable JSON parse failures remain fatal.
+
 The Section 11 Luau runtime and sandbox audit is complete. Its logical process
 tree, confirmed findings, broader feature direction, and regression matrix are
 in [`sections/11-luau-runtime-and-sandbox/improvements.md`](log/sections/11-luau-runtime-and-sandbox/improvements.md);

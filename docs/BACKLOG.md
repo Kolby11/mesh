@@ -35,7 +35,6 @@ The six primary findings in this audit shipped on 2026-08-20 and are recorded in
 the monthly log, so they are intentionally absent from the open backlog.
 [Audit](../.planning/log/sections/01-core-foundation-contracts/improvements.md)
 
-- [ ] Return a usable default settings store for non-object documents while retaining a root diagnostic.
 - [ ] Validate module namespaces transactionally through owner-registered schemas.
 - [ ] Replace the fixed settings temporary file with unique, permission-aware, crash-durable atomic writes.
 - [ ] Avoid leading-dot root diagnostic locations when the namespace is empty.
