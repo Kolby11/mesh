@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["complete", "blocked", "failed"]
+    },
+    "backlog_item": {
+      "type": "string"
+    },
+    "commit": {
+      "type": ["string", "null"]
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": ["status", "backlog_item", "commit", "tests", "summary"]
+}

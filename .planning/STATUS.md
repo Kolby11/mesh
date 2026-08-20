@@ -7,6 +7,15 @@ lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
 
+The guarded `scripts/codex-backlog-runner.sh` can process one unchecked backlog
+item at a time directly on `main`, requiring one feature commit and rolling to
+a fresh Codex session at the configured context threshold. It is intentionally
+blocked by any pre-existing dirty working tree.
+
+The 16 section improvement audits now have a feature-level checkbox checklist
+in `docs/BACKLOG.md`; implementation detail, evidence, and regression matrices
+remain in each section's `improvements.md`.
+
 Section 01 improvement 1 is complete: module capability declarations now resolve
 against a closed catalog and persisted root-graph approvals before activation;
 required grants fail without approval, optional grants default to denied, and
