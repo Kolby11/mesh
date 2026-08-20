@@ -24,8 +24,9 @@ Options:
 Environment:
   CODEX_MODEL               Optional model override; otherwise Codex config applies
   CODEX_CONTEXT_WINDOW_TOKENS
-                            Context size used for rollover calculations
-                            (default: 1050000 for GPT-5.6)
+                            Fallback context size for rollover calculations;
+                            the runtime-reported size is used when available
+                            (default: 1050000)
   CODEX_CONTEXT_LEFT_PERCENT
                             Start a fresh session at or below this percentage
                             of context remaining (default: 30)
@@ -76,6 +77,11 @@ while (($# > 0)); do
 done
 
 CODEX_BIN=${CODEX_BIN:-codex}
+if [[ -n "${CODEX_CONTEXT_WINDOW_TOKENS:-}" ]]; then
+    CODEX_CONTEXT_WINDOW_TOKENS_EXPLICIT=1
+else
+    CODEX_CONTEXT_WINDOW_TOKENS_EXPLICIT=0
+fi
 CODEX_CONTEXT_WINDOW_TOKENS=${CODEX_CONTEXT_WINDOW_TOKENS:-1050000}
 CODEX_CONTEXT_LEFT_PERCENT=${CODEX_CONTEXT_LEFT_PERCENT:-30}
 CODEX_ALLOW_ALL=${CODEX_ALLOW_ALL:-1}
@@ -287,6 +293,40 @@ read_usage() {
     ' "$1" | tail -n 1
 }
 
+codex_sessions_dir() {
+    if [[ -n "${CODEX_HOME:-}" ]]; then
+        printf '%s/sessions\n' "$CODEX_HOME"
+        return 0
+    fi
+
+    command -v getent >/dev/null 2>&1 || return 1
+    local user_home
+    user_home=$(getent passwd "$(id -u)" | cut -d: -f6)
+    [[ -n "$user_home" ]] || return 1
+    printf '%s/.codex/sessions\n' "$user_home"
+}
+
+read_context_usage() {
+    local thread_id=$1
+    local sessions_dir rollout_file
+
+    [[ -n "$thread_id" ]] || return 1
+    sessions_dir=$(codex_sessions_dir) || return 1
+    [[ -d "$sessions_dir" ]] || return 1
+    rollout_file=$(find "$sessions_dir" -type f -name "*-$thread_id.jsonl" -print -quit 2>/dev/null)
+    [[ -n "$rollout_file" ]] || return 1
+
+    jq -r -s '
+        map(select(.type == "event_msg" and .payload.type == "token_count" and .payload.info != null)
+            | .payload.info)
+        | if length == 0 then empty
+          else .[-1]
+          | [(.last_token_usage.total_tokens // 0), (.model_context_window // 0)]
+          | @tsv
+          end
+    ' "$rollout_file"
+}
+
 read_final_response() {
     jq -r -s '
         map(select(.type == "item.completed" and .item.type == "agent_message") | .item.text)
@@ -363,16 +403,41 @@ while :; do
     successful_features=$((successful_features + 1))
     printf 'Committed feature %s as %s\n' "$successful_features" "$commit"
 
-    usage=$(read_usage "$event_file")
-    if [[ -z "$usage" ]]; then
-        printf 'No usage event was reported; starting a fresh session conservatively.\n' >&2
+    context_usage=$(read_context_usage "$session_id" || true)
+    if [[ -z "$context_usage" ]]; then
+        usage=$(read_usage "$event_file")
+        if [[ -n "$usage" ]]; then
+            read -r input_tokens output_tokens reasoning_tokens <<<"$usage"
+            accounted_tokens=$((input_tokens + output_tokens + reasoning_tokens))
+            printf 'Session token accounting: %s cumulative tokens; current context usage is unavailable.\n' "$accounted_tokens" >&2
+        else
+            printf 'No usage event was reported; current context usage is unavailable.\n' >&2
+        fi
+        printf 'Starting the next feature in a fresh Codex session conservatively.\n' >&2
         session_id=''
         continue
     fi
-    read -r input_tokens output_tokens reasoning_tokens <<<"$usage"
-    used_tokens=$((input_tokens + output_tokens + reasoning_tokens))
-    remaining_percent=$(( (CODEX_CONTEXT_WINDOW_TOKENS - used_tokens) * 100 / CODEX_CONTEXT_WINDOW_TOKENS ))
-    printf 'Context estimate: %s tokens used, %s%% remaining.\n' "$used_tokens" "$remaining_percent"
+
+    read -r context_tokens reported_context_window <<<"$context_usage"
+    effective_context_window=$CODEX_CONTEXT_WINDOW_TOKENS
+    if (( !CODEX_CONTEXT_WINDOW_TOKENS_EXPLICIT && reported_context_window > 0 )); then
+        effective_context_window=$reported_context_window
+    fi
+    if (( effective_context_window <= 0 )); then
+        printf 'Invalid context window; starting a fresh Codex session conservatively.\n' >&2
+        session_id=''
+        continue
+    fi
+
+    if (( context_tokens >= effective_context_window )); then
+        remaining_percent=0
+    else
+        remaining_percent=$(( (effective_context_window - context_tokens) * 100 / effective_context_window ))
+        (( remaining_percent < 0 )) && remaining_percent=0
+        (( remaining_percent > 100 )) && remaining_percent=100
+    fi
+    printf 'Context estimate: %s/%s tokens, %s%% remaining.\n' \
+        "$context_tokens" "$effective_context_window" "$remaining_percent"
     if ((remaining_percent <= CODEX_CONTEXT_LEFT_PERCENT)); then
         printf 'Starting the next feature in a fresh Codex session.\n'
         session_id=''
