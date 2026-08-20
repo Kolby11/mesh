@@ -23,6 +23,13 @@ enforce numeric bounds and canonicalize enum values before deserialization.
 Rejected values fall back per field, preserving valid siblings; the runtime
 and LSP settings schema consume the same declarations.
 
+Section 01 improvement 4 is complete: diagnostics are keyed by module,
+instance, and stable issue code with severity, timestamps, counts, and active/
+resolved state. Health aggregates active issues without severity downgrades;
+collector registration replaces identities, unregister removes stale instance
+state, snapshots are deterministic, and backend recovery resolves lifecycle
+issues explicitly.
+
 The Section 11 Luau runtime and sandbox audit is complete. Its logical process
 tree, confirmed findings, broader feature direction, and regression matrix are
 in [`sections/11-luau-runtime-and-sandbox/improvements.md`](log/sections/11-luau-runtime-and-sandbox/improvements.md);

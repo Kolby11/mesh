@@ -160,9 +160,12 @@ fn state_shape_mismatch_records_service_contract_warning() {
         .unwrap();
 
     let snapshot = shell.diagnostics.snapshot();
-    assert!(snapshot.iter().any(|(module_id, health)| {
-        module_id == "@mesh/pipewire-audio"
-            && health.to_string().contains("service_contract_warning")
+    assert!(snapshot.iter().any(|entry| {
+        entry.module_id == "@mesh/pipewire-audio"
+            && entry
+                .health
+                .to_string()
+                .contains("service_contract_warning")
     }));
     let latest = shell.latest_service_state.get("mesh.audio").unwrap();
     assert!(latest.state.get("source_module").is_none());
@@ -197,16 +200,13 @@ fn service_contract_unknown_service_command_returns_failure_result() {
         serde_json::json!("unsupported_service_command")
     );
     assert!(rx.try_recv().is_err());
-    assert!(
-        shell
-            .diagnostics
-            .snapshot()
-            .iter()
-            .any(|(module_id, health)| {
-                module_id == "@mesh/panel"
-                    && health.to_string().contains("unsupported_service_command")
-            })
-    );
+    assert!(shell.diagnostics.snapshot().iter().any(|entry| {
+        entry.module_id == "@mesh/panel"
+            && entry
+                .health
+                .to_string()
+                .contains("unsupported_service_command")
+    }));
 }
 
 #[test]
@@ -339,18 +339,13 @@ fn backend_interface_event_drops_invalid_payload_with_diagnostic() {
         .unwrap();
 
     assert!(events.lock().unwrap().is_empty());
-    assert!(
-        shell
-            .diagnostics
-            .snapshot()
-            .iter()
-            .any(|(module_id, health)| {
-                module_id == "@mesh/pipewire-audio"
-                    && health
-                        .to_string()
-                        .contains("payload field 'level' expected float")
-            })
-    );
+    assert!(shell.diagnostics.snapshot().iter().any(|entry| {
+        entry.module_id == "@mesh/pipewire-audio"
+            && entry
+                .health
+                .to_string()
+                .contains("payload field 'level' expected float")
+    }));
 }
 
 #[test]

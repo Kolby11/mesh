@@ -772,7 +772,9 @@ impl Shell {
                 .with_effective_capabilities(self.effective_capabilities.clone())
                 .with_instance_id(&instance_id)
                 .with_graph_i18n_catalogs(self.graph_i18n_catalog_paths());
-                let diagnostics = self.diagnostics.register(module_id.to_string());
+                let diagnostics = self
+                    .diagnostics
+                    .register_instance(module_id.to_string(), instance_id.clone());
                 let mut requests = VecDeque::from(
                     component
                         .mount(ComponentContext {
@@ -844,9 +846,11 @@ impl Shell {
         let mut removed_surfaces = Vec::new();
         for index in indices.into_iter().rev() {
             let surface_id = self.components[index].surface_id.clone();
+            let module_id = self.components[index].component.id().to_string();
             self.destroy_all_child_surfaces(index);
             self.presentation_engine.destroy_surface(&surface_id);
             self.components.remove(index);
+            self.diagnostics.unregister(&module_id, &surface_id);
             self.core.surfaces.remove(&surface_id);
             self.surfaces.remove(&surface_id);
             self.pending_popover_hides.remove(&surface_id);
@@ -950,9 +954,10 @@ impl Shell {
     pub(super) fn mount_components(&mut self) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
         for runtime in &mut self.components {
-            let diagnostics = self
-                .diagnostics
-                .register(runtime.component.id().to_string());
+            let diagnostics = self.diagnostics.register_instance(
+                runtime.component.id().to_string(),
+                runtime.surface_id.clone(),
+            );
             let ctx = ComponentContext {
                 component_id: runtime.component.id().to_string(),
                 surface_id: runtime.surface_id.clone(),

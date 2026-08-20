@@ -529,7 +529,9 @@ impl Shell {
             .with_effective_capabilities(self.effective_capabilities.clone())
             .with_instance_id(instance_id)
             .with_graph_i18n_catalogs(self.profile_i18n_catalog_paths(&graph));
-            let diagnostics = self.diagnostics.register(root.module.clone());
+            let diagnostics = self
+                .diagnostics
+                .register_instance(root.module.clone(), instance_id.clone());
             let mut requests = match component.mount(ComponentContext {
                 component_id: root.module.clone(),
                 surface_id: instance_id.clone(),
@@ -843,9 +845,11 @@ impl Shell {
 
     fn remove_profile_component(&mut self, index: usize) {
         let surface_id = self.components[index].surface_id.clone();
+        let module_id = self.components[index].component.id().to_string();
         self.destroy_all_child_surfaces(index);
         self.presentation_engine.destroy_surface(&surface_id);
         self.components.remove(index);
+        self.diagnostics.unregister(&module_id, &surface_id);
         self.core.surfaces.remove(&surface_id);
         self.surfaces.remove(&surface_id);
         self.pending_popover_hides.remove(&surface_id);

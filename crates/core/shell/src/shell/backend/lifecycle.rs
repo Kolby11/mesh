@@ -35,6 +35,8 @@ impl Shell {
                 status.as_str(),
                 message.clone(),
             );
+        } else if status == BackendRuntimeStatus::Running {
+            self.diagnostics.resolve_lifecycle_errors(&provider_id);
         }
         let prev_failure_count = self
             .backend_runtime_status(&interface, &provider_id)

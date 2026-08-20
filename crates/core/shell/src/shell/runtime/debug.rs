@@ -53,9 +53,9 @@ impl Shell {
             .diagnostics
             .snapshot()
             .into_iter()
-            .map(|(id, status)| HealthEntry {
-                module_id: id,
-                status: status.to_string(),
+            .map(|entry| HealthEntry {
+                module_id: entry.module_id,
+                status: entry.health.to_string(),
             })
             .collect();
 

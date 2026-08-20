@@ -30,9 +30,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ## Foundation contracts
 
-- [ ] Replace last-write-wins diagnostics with keyed active/resolved issues and
-      explicit module-instance registration/removal so severity cannot downgrade
-      and profile switches cannot retain duplicate stale health entries.
 - [ ] Choose one event contract and version the debug telemetry boundary: remove
       or integrate the unused foundation `EventBus`, and serialize complete debug
       DTOs without a second hand-maintained JSON contract.
