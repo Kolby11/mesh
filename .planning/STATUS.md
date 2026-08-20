@@ -24,6 +24,11 @@ Package install, update, uninstall, and rollback now share the core
 filesystem snapshots, and crash recovery. The completed backlog item and its
 validation record are in the 2026-08 log.
 
+Update planning now materializes every candidate and unchanged graph member in
+the transaction workspace, resolves external interface contracts and profile
+closure from that staged graph, and records approval-filtered capability
+decisions before any live checkout or replacement.
+
 Per-widget promotion is complete: an embedded retained widget can move between
 its parent surface and an independent `xdg_toplevel` while retaining the shared
 component VM, state, paint, and input path. The backlog item and design record

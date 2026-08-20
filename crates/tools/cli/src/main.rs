@@ -1074,8 +1074,17 @@ fn cmd_update(args: &[String]) {
 
     let installed = installed_manifests(&root_path);
     let approvals = root.capability_approvals;
-    let plan = update::plan_update(&modules_dir, &lock, only, policy, &installed, &approvals)
-        .unwrap_or_else(|error| exit_error(error));
+    let plan = update::plan_update_from_staged_graph(
+        &root_path,
+        &modules_dir,
+        &lock,
+        only,
+        policy,
+        &installed,
+        &approvals,
+        &mut transaction,
+    )
+    .unwrap_or_else(|error| exit_error(error));
 
     let changed = plan.changed().collect::<Vec<_>>();
     if changed.is_empty() && !plan.is_refused() {
@@ -1107,6 +1116,9 @@ fn cmd_update(args: &[String]) {
     }
     for (module_id, capability, level) in &plan.capability_additions {
         eprintln!("{module_id} now requests {level:?} capability {capability}");
+    }
+    for graph_breaking in &plan.graph_breaking {
+        eprintln!("breaking: {graph_breaking}");
     }
     if plan.is_refused() {
         let _ = transaction.abort();
