@@ -72,6 +72,10 @@ same-directory temporary files, syncing file data before rename and the parent
 directory after rename. Concurrent writers no longer share a fixed temporary
 path, and newly created settings directories are owner-only.
 
+Root-level settings diagnostics now render their key paths without a leading
+separator when the namespace is empty, so unknown root keys are reported as
+`shel` rather than `.shel`.
+
 The Section 11 Luau runtime and sandbox audit is complete. Its logical process
 tree, confirmed findings, broader feature direction, and regression matrix are
 in [`sections/11-luau-runtime-and-sandbox/improvements.md`](log/sections/11-luau-runtime-and-sandbox/improvements.md);

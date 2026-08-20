@@ -76,10 +76,10 @@ impl SettingsDiagnostic {
 
     /// Where the value lives, as a user would point at it in the file.
     pub fn location(&self) -> String {
-        if self.key_path.is_empty() {
-            self.namespace.clone()
-        } else {
-            format!("{}.{}", self.namespace, self.key_path)
+        match (self.namespace.is_empty(), self.key_path.is_empty()) {
+            (true, _) => self.key_path.clone(),
+            (false, true) => self.namespace.clone(),
+            (false, false) => format!("{}.{}", self.namespace, self.key_path),
         }
     }
 }
@@ -610,5 +610,17 @@ mod tests {
         assert_eq!(edit_distance("", "anchor"), 6);
         assert_eq!(edit_distance("anchor", ""), 6);
         assert_eq!(edit_distance("anchor", "anchor"), 0);
+    }
+
+    #[test]
+    fn root_level_diagnostic_location_omits_the_namespace_separator() {
+        let diagnostic =
+            SettingsDiagnostic::warning("", "unknown_root_key", "unknown key", "remove it");
+
+        assert_eq!(diagnostic.location(), "unknown_root_key");
+        assert_eq!(
+            diagnostic.to_string(),
+            "warning: unknown_root_key: unknown key — remove it"
+        );
     }
 }

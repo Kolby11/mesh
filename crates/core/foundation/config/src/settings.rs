@@ -1266,6 +1266,7 @@ mod tests {
 
         let diagnostic = only(store.diagnostics());
         assert_eq!(diagnostic.key_path, "shel");
+        assert_eq!(diagnostic.location(), "shel");
         assert_eq!(diagnostic.suggested_action, "did you mean \"shell\"?");
     }
 
