@@ -557,7 +557,8 @@ end
 
 #[test]
 fn popover_activate_publishes_focus_option_and_trigger_target() {
-    let caps = CapabilitySet::new();
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("shell.surface"));
     let mut ctx = ScriptContext::new("@test/nav", caps).unwrap();
     ctx.load_script(
         r#"
@@ -588,8 +589,31 @@ end
 }
 
 #[test]
+fn raw_shell_event_requires_the_registry_capability() {
+    let mut ctx = ScriptContext::new("@test/unprivileged", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+function init()
+    mesh.events.publish("shell.show-surface", { surface_id = "@mesh/settings" })
+end
+"#,
+    )
+    .unwrap();
+
+    let error = ctx
+        .call_init()
+        .expect_err("unprivileged shell event must fail");
+    assert!(matches!(
+        error,
+        ScriptError::OperationRejected(message) if message.contains("shell.surface")
+    ));
+    assert!(ctx.drain_published_events().is_empty());
+}
+
+#[test]
 fn mesh_popover_hide_can_request_hover_bridge_deferral() {
-    let caps = CapabilitySet::new();
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("shell.surface"));
     let mut ctx = ScriptContext::new("@test/popover", caps).unwrap();
     ctx.load_script(
         r#"

@@ -380,11 +380,13 @@ fn benchmark_backend_update_waits_when_backend_stage_is_missing() {
 
 #[test]
 fn benchmark_service_event_maps_to_run_request() {
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new("service.debug.read"));
     let requests = script_events_to_requests(vec![PublishedEvent {
         channel: "shell.run-debug-benchmark".into(),
         payload: serde_json::json!({ "scenario_id": "hover" }),
         source_module_id: "@mesh/debug-inspector".into(),
-        source_capabilities: mesh_core_capability::CapabilitySet::new(),
+        source_capabilities: capabilities,
     }]);
 
     match requests.as_slice() {

@@ -7,6 +7,7 @@ use super::super::proxy::{create_event_channel, create_interface_proxy};
 use super::super::{PublishedEvent, ScriptError, ScriptInterfaceImport};
 use super::*;
 use crate::host_api::{HostApiManifest, InterfaceProxy};
+use crate::operation::OperationRegistry;
 use mlua::{Error as LuaError, LuaSerdeExt, Table, Value as LuaValue, Variadic};
 use serde_json::Value;
 use std::sync::{Arc, atomic::Ordering};
@@ -30,7 +31,7 @@ impl ScriptContext {
 
         self.install_events_api(&mesh_core_events)?;
         self.install_ui_api(globals, &mesh_ui_api)?;
-        self.install_locale_api(globals, &mesh_locale, &manifest)?;
+        self.install_locale_api(globals, &mesh_locale)?;
         self.install_log_api(&mesh_log)?;
         self.install_popover_api(&mesh_popover)?;
 
@@ -89,14 +90,14 @@ impl ScriptContext {
                         let payload = payload.unwrap_or(LuaValue::Nil);
                         let payload = lua.from_value::<Value>(payload)?;
                         tracing::info!("{} published event {}", module_id, channel);
-                        pending_side_channels.store(true, Ordering::Release);
-                        published_events.lock().unwrap().push(PublishedEvent {
+                        Self::queue_authorized_event(
+                            &published_events,
+                            &pending_side_channels,
                             channel,
                             payload,
-                            source_module_id: module_id.clone(),
-                            source_capabilities: capabilities.clone(),
-                        });
-                        Ok(())
+                            &module_id,
+                            &capabilities,
+                        )
                     })
                     .map_err(lua_err)?,
             )
@@ -126,7 +127,6 @@ impl ScriptContext {
         &mut self,
         globals: &mlua::Table,
         mesh_locale: &Table,
-        manifest: &HostApiManifest,
     ) -> Result<(), ScriptError> {
         let env_for_locale = globals.clone();
         mesh_locale
@@ -142,7 +142,6 @@ impl ScriptContext {
             )
             .map_err(lua_err)?;
 
-        let has_locale_write = manifest.has_locale_write;
         let published_events_for_locale = Arc::clone(&self.shared_published_events);
         let pending_side_channels_for_locale = Arc::clone(&self.pending_side_channels);
         let module_id_for_locale = self.module_id.clone();
@@ -152,22 +151,14 @@ impl ScriptContext {
                 "set",
                 self.lua()
                     .create_function(move |_lua, locale: String| {
-                        if !has_locale_write {
-                            return Err(LuaError::external(ScriptError::CapabilityDenied(
-                                "locale.write".to_string(),
-                            )));
-                        }
-                        pending_side_channels_for_locale.store(true, Ordering::Release);
-                        published_events_for_locale
-                            .lock()
-                            .unwrap()
-                            .push(PublishedEvent {
-                                channel: "shell.set-locale".to_string(),
-                                payload: serde_json::json!({ "locale": locale }),
-                                source_module_id: module_id_for_locale.clone(),
-                                source_capabilities: capabilities_for_locale.clone(),
-                            });
-                        Ok(())
+                        Self::queue_authorized_event(
+                            &published_events_for_locale,
+                            &pending_side_channels_for_locale,
+                            "shell.set-locale".to_string(),
+                            serde_json::json!({ "locale": locale }),
+                            &module_id_for_locale,
+                            &capabilities_for_locale,
+                        )
                     })
                     .map_err(lua_err)?,
             )
@@ -276,17 +267,14 @@ impl ScriptContext {
                             "{} called mesh.popover.activate target={} trigger_surface={} trigger_key={} focus={}",
                             module_id_for_popover, surface_id, trigger_surface, trigger_key, focus
                         );
-                        pending_side_channels_for_popover.store(true, Ordering::Release);
-                        published_events_for_popover
-                            .lock()
-                            .unwrap()
-                            .push(PublishedEvent {
-                                channel: "shell.activate-popover".to_string(),
-                                payload,
-                                source_module_id: module_id_for_popover.clone(),
-                                source_capabilities: capabilities_for_popover.clone(),
-                            });
-                        Ok(())
+                        Self::queue_authorized_event(
+                            &published_events_for_popover,
+                            &pending_side_channels_for_popover,
+                            "shell.activate-popover".to_string(),
+                            payload,
+                            &module_id_for_popover,
+                            &capabilities_for_popover,
+                        )
                     })
                     .map_err(lua_err)?,
             )
@@ -321,24 +309,44 @@ impl ScriptContext {
                                 .unwrap_or(false),
                             _ => false,
                         };
-                        pending_side_channels_for_popover.store(true, Ordering::Release);
-                        published_events_for_popover
-                            .lock()
-                            .unwrap()
-                            .push(PublishedEvent {
-                                channel: "shell.hide-popover".to_string(),
-                                payload: serde_json::json!({
-                                    "surface_id": surface_id,
-                                    "defer_for_hover_bridge": defer_for_hover_bridge,
-                                }),
-                                source_module_id: module_id_for_popover.clone(),
-                                source_capabilities: capabilities_for_popover.clone(),
-                            });
-                        Ok(())
+                        Self::queue_authorized_event(
+                            &published_events_for_popover,
+                            &pending_side_channels_for_popover,
+                            "shell.hide-popover".to_string(),
+                            serde_json::json!({
+                                "surface_id": surface_id,
+                                "defer_for_hover_bridge": defer_for_hover_bridge,
+                            }),
+                            &module_id_for_popover,
+                            &capabilities_for_popover,
+                        )
                     })
                     .map_err(lua_err)?,
             )
             .map_err(lua_err)
+    }
+
+    fn queue_authorized_event(
+        published_events: &Arc<std::sync::Mutex<Vec<PublishedEvent>>>,
+        pending_side_channels: &Arc<std::sync::atomic::AtomicBool>,
+        channel: String,
+        payload: Value,
+        module_id: &str,
+        capabilities: &mesh_core_capability::CapabilitySet,
+    ) -> Result<(), LuaError> {
+        OperationRegistry::builtin()
+            .authorize_event(&channel, &payload, module_id, capabilities)
+            .map_err(|rejection| {
+                LuaError::external(ScriptError::OperationRejected(rejection.to_string()))
+            })?;
+        pending_side_channels.store(true, Ordering::Release);
+        published_events.lock().unwrap().push(PublishedEvent {
+            channel,
+            payload,
+            source_module_id: module_id.to_string(),
+            source_capabilities: capabilities.clone(),
+        });
+        Ok(())
     }
 
     fn install_loader_api(

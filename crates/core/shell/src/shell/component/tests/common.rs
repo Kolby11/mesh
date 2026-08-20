@@ -418,6 +418,7 @@ pub(super) fn make_audio_ctx() -> ScriptContext {
 
 pub(super) fn make_network_ctx() -> ScriptContext {
     let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("shell.surface"));
     caps.grant(Capability::new("service.network.read"));
     caps.grant(Capability::new("service.network.control"));
     let mut ctx = ScriptContext::new("@mesh/quick-settings", caps).unwrap();

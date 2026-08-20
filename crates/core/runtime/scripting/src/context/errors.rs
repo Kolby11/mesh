@@ -39,6 +39,9 @@ pub enum ScriptError {
     #[error("capability denied: {0}")]
     CapabilityDenied(String),
 
+    #[error("operation rejected: {0}")]
+    OperationRejected(String),
+
     #[error("script execution timed out")]
     Timeout,
 

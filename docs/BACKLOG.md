@@ -30,9 +30,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ## Foundation contracts
 
-- [ ] Authorize every `shell.*` and popover operation through one typed operation
-      registry; remove the raw-event bypass around host APIs such as
-      `mesh.locale.set`. [Audit](../.planning/log/sections/01-core-foundation-contracts/improvements.md).
 - [ ] Make settings validation bounded and normalizing with field-level fallback;
       one out-of-range value must not discard valid sibling settings. Fix the
       stale `fonts.packs` diagnostic-path regression test with it.

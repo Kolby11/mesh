@@ -233,6 +233,10 @@ end
     let popover_component = parse_component("<template><box /></template>").unwrap();
 
     let mut root_manifest = minimal_test_manifest("@mesh/navigation-bar");
+    root_manifest
+        .capabilities
+        .required
+        .push("shell.surface".into());
     root_manifest.dependencies.modules.insert(
         "@mesh/audio-popover".into(),
         mesh_core_module::manifest::DependencySpec::Simple(">=0.1.0".into()),

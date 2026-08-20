@@ -61,7 +61,8 @@ use mesh_core_frontend::{
 };
 use mesh_core_locale::LocaleEngine;
 use mesh_core_scripting::{
-    LocaleBoundState, PublishedEvent, ScriptContext, ScriptInterfaceImport, ScriptState, SurfaceVm,
+    LocaleBoundState, OperationRegistry, PublishedEvent, ScriptContext, ScriptInterfaceImport,
+    ScriptState, SurfaceVm,
 };
 use mesh_core_theme::{Theme, default_theme};
 use mesh_core_wayland::{Edge, KeyboardMode, ShellSurface, WindowStates};

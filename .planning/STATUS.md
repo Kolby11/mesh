@@ -12,6 +12,12 @@ against a closed catalog and persisted root-graph approvals before activation;
 required grants fail without approval, optional grants default to denied, and
 frontend/backend runtimes receive only the resolved grant set.
 
+Section 01 improvement 2 is complete: shell operations now pass through one
+typed registry that validates payloads, required capabilities, and caller
+constraints. Raw shell events, locale writes, and popover helpers share that
+authorization path; malformed, unauthorized, unknown, and dropped requests
+produce structured diagnostics.
+
 The Section 11 Luau runtime and sandbox audit is complete. Its logical process
 tree, confirmed findings, broader feature direction, and regression matrix are
 in [`sections/11-luau-runtime-and-sandbox/improvements.md`](log/sections/11-luau-runtime-and-sandbox/improvements.md);

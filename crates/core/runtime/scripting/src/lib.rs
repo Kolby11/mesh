@@ -17,6 +17,7 @@ pub mod backend;
 /// `mesh.service.bind` and `mesh.service.on`.
 pub mod context;
 pub mod host_api;
+pub mod operation;
 pub mod pool;
 pub mod storage;
 mod util;
@@ -28,3 +29,4 @@ pub use context::{
     ElementAction, LocaleBoundState, PublishedEvent, ScriptContext, ScriptError,
     ScriptInterfaceImport, ScriptState, SurfaceVm,
 };
+pub use operation::{OperationRegistry, OperationRejection, ShellOperation};

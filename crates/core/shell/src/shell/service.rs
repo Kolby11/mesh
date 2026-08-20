@@ -1,6 +1,6 @@
 use super::types::CoreRequest;
 use mesh_core_capability::Capability;
-use mesh_core_scripting::{PublishedEvent, ScriptState};
+use mesh_core_scripting::{OperationRegistry, OperationRejection, PublishedEvent, ScriptState};
 pub(super) use mesh_core_service::service_name_from_interface;
 pub(super) use mesh_core_service::service_name_from_interface_cow;
 use std::borrow::Borrow;
@@ -173,6 +173,25 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
 }
 
 fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
+    if event.channel.starts_with("shell.")
+        && let Err(rejection) = OperationRegistry::builtin().authorize_event(
+            &event.channel,
+            &event.payload,
+            &event.source_module_id,
+            &event.source_capabilities,
+        )
+    {
+        tracing::warn!(
+            source_module_id = %event.source_module_id,
+            channel = %event.channel,
+            rejection = %rejection,
+            "shell operation rejected"
+        );
+        return Some(CoreRequest::PublishDiagnostics {
+            message: rejection.to_string(),
+        });
+    }
+
     match event.channel.as_str() {
         "shell.show-surface" => event
             .payload
@@ -228,8 +247,8 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
             }),
         "shell.position-surface" => {
             let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
-            let margin_top = payload_i32(&event.payload, "margin_top").unwrap_or(0);
-            let margin_left = payload_i32(&event.payload, "margin_left").unwrap_or(0);
+            let margin_top = payload_i32(&event.payload, "margin_top")?;
+            let margin_left = payload_i32(&event.payload, "margin_left")?;
             Some(CoreRequest::PositionSurface {
                 surface_id: surface_id.to_string(),
                 margin_top,
@@ -296,44 +315,49 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
             }
         }
         other if other.starts_with("shell.") => {
-            tracing::warn!(
-                source_module_id = %event.source_module_id,
-                channel = %event.channel,
-                "unknown shell channel published by frontend module"
-            );
+            let rejection = OperationRejection::Dropped {
+                channel: event.channel.clone(),
+                reason: "the operation must be handled by its owning component".into(),
+            };
             Some(CoreRequest::PublishDiagnostics {
-                message: format!(
-                    "Unknown shell channel '{}' published by '{}'; shell.* is reserved for core requests and service commands use mesh.<interface>.<command> channels",
-                    event.channel, event.source_module_id
-                ),
+                message: rejection.to_string(),
             })
         }
-        other => other.rfind('.').map(|pos| {
-            let interface_name = &other[..pos];
-            let capabilities = service_capabilities(interface_name);
-            let required = &capabilities.control;
-            if event.source_capabilities.is_granted(required) {
-                CoreRequest::ServiceCommand {
-                    interface: interface_name.to_string(),
-                    command: other[pos + 1..].to_string(),
-                    payload: event.payload,
-                    source_module_id: event.source_module_id,
-                    source_capabilities: event.source_capabilities,
-                }
-            } else {
-                tracing::warn!(
-                    source_module_id = %event.source_module_id,
-                    required_capability = %required,
-                    channel = %event.channel,
-                    "denied frontend service command publication"
-                );
-                CoreRequest::PublishDiagnostics {
-                    message: format!(
-                        "Denied service command '{}' from '{}' without {}",
-                        event.channel, event.source_module_id, required
-                    ),
+        other => Some(match other.rfind('.') {
+            Some(pos) => {
+                let interface_name = &other[..pos];
+                let capabilities = service_capabilities(interface_name);
+                let required = &capabilities.control;
+                if event.source_capabilities.is_granted(required) {
+                    CoreRequest::ServiceCommand {
+                        interface: interface_name.to_string(),
+                        command: other[pos + 1..].to_string(),
+                        payload: event.payload,
+                        source_module_id: event.source_module_id,
+                        source_capabilities: event.source_capabilities,
+                    }
+                } else {
+                    tracing::warn!(
+                        source_module_id = %event.source_module_id,
+                        required_capability = %required,
+                        channel = %event.channel,
+                        "denied frontend service command publication"
+                    );
+                    CoreRequest::PublishDiagnostics {
+                        message: format!(
+                            "Denied service command '{}' from '{}' without {}",
+                            event.channel, event.source_module_id, required
+                        ),
+                    }
                 }
             }
+            None => CoreRequest::PublishDiagnostics {
+                message: OperationRejection::Dropped {
+                    channel: event.channel,
+                    reason: "channel is not routable".into(),
+                }
+                .to_string(),
+            },
         }),
     }
 }
@@ -631,6 +655,8 @@ mod tests {
 
     #[test]
     fn script_events_to_requests_maps_popover_focus_option() {
+        let mut capabilities = mesh_core_capability::CapabilitySet::new();
+        capabilities.grant(Capability::new("shell.surface"));
         let requests = script_events_to_requests(vec![PublishedEvent {
             channel: "shell.activate-popover".into(),
             payload: serde_json::json!({
@@ -640,7 +666,7 @@ mod tests {
                 "focus": false,
             }),
             source_module_id: "@mesh/navigation-bar".into(),
-            source_capabilities: mesh_core_capability::CapabilitySet::new(),
+            source_capabilities: capabilities,
         }]);
 
         match requests.as_slice() {
@@ -663,6 +689,8 @@ mod tests {
 
     #[test]
     fn script_events_to_requests_maps_popover_hover_bridge_hide() {
+        let mut capabilities = mesh_core_capability::CapabilitySet::new();
+        capabilities.grant(Capability::new("shell.surface"));
         let requests = script_events_to_requests(vec![PublishedEvent {
             channel: "shell.hide-popover".into(),
             payload: serde_json::json!({
@@ -670,7 +698,7 @@ mod tests {
                 "defer_for_hover_bridge": true,
             }),
             source_module_id: "@mesh/quick-settings".into(),
-            source_capabilities: mesh_core_capability::CapabilitySet::new(),
+            source_capabilities: capabilities,
         }]);
 
         match requests.as_slice() {
@@ -730,36 +758,38 @@ mod tests {
 
     #[test]
     fn script_events_to_requests_maps_debug_control_events() {
+        let mut debug_capabilities = mesh_core_capability::CapabilitySet::new();
+        debug_capabilities.grant(Capability::new("service.debug.read"));
         let requests = script_events_to_requests(vec![
             PublishedEvent {
                 channel: "shell.toggle-debug-overlay".into(),
                 payload: serde_json::json!({}),
                 source_module_id: "@mesh/debug-inspector".into(),
-                source_capabilities: mesh_core_capability::CapabilitySet::new(),
+                source_capabilities: debug_capabilities.clone(),
             },
             PublishedEvent {
                 channel: "shell.toggle-debug-layout-bounds".into(),
                 payload: serde_json::json!({}),
                 source_module_id: "@mesh/debug-inspector".into(),
-                source_capabilities: mesh_core_capability::CapabilitySet::new(),
+                source_capabilities: debug_capabilities.clone(),
             },
             PublishedEvent {
                 channel: "shell.toggle-debug-element-picker".into(),
                 payload: serde_json::json!({}),
                 source_module_id: "@mesh/debug-inspector".into(),
-                source_capabilities: mesh_core_capability::CapabilitySet::new(),
+                source_capabilities: debug_capabilities.clone(),
             },
             PublishedEvent {
                 channel: "shell.open-debug-source".into(),
                 payload: serde_json::json!({ "path": "/tmp/example.mesh", "line": 42 }),
                 source_module_id: "@mesh/debug-inspector".into(),
-                source_capabilities: mesh_core_capability::CapabilitySet::new(),
+                source_capabilities: debug_capabilities.clone(),
             },
             PublishedEvent {
                 channel: "shell.toggle-debug-profiling".into(),
                 payload: serde_json::json!({}),
                 source_module_id: "@mesh/debug-inspector".into(),
-                source_capabilities: mesh_core_capability::CapabilitySet::new(),
+                source_capabilities: debug_capabilities,
             },
         ]);
 
@@ -787,7 +817,9 @@ mod tests {
     }
 
     #[test]
-    fn script_events_to_requests_keeps_position_margins_in_i32_range() {
+    fn script_events_to_requests_rejects_malformed_position_margins() {
+        let mut capabilities = mesh_core_capability::CapabilitySet::new();
+        capabilities.grant(Capability::new("shell.surface"));
         let requests = script_events_to_requests(vec![
             PublishedEvent {
                 channel: "shell.position-surface".into(),
@@ -797,7 +829,7 @@ mod tests {
                     "margin_left": i64::MIN,
                 }),
                 source_module_id: "@mesh/navigation-bar".into(),
-                source_capabilities: mesh_core_capability::CapabilitySet::new(),
+                source_capabilities: capabilities.clone(),
             },
             PublishedEvent {
                 channel: "shell.position-surface".into(),
@@ -807,32 +839,16 @@ mod tests {
                     "margin_left": 24,
                 }),
                 source_module_id: "@mesh/navigation-bar".into(),
-                source_capabilities: mesh_core_capability::CapabilitySet::new(),
+                source_capabilities: capabilities,
             },
         ]);
 
-        match &requests[0] {
-            CoreRequest::PositionSurface {
-                margin_top,
-                margin_left,
-                ..
-            } => {
-                assert_eq!(*margin_top, 0);
-                assert_eq!(*margin_left, 0);
-            }
-            other => panic!("expected PositionSurface, got {other:?}"),
-        }
-        match &requests[1] {
-            CoreRequest::PositionSurface {
-                margin_top,
-                margin_left,
-                ..
-            } => {
-                assert_eq!(*margin_top, 0);
-                assert_eq!(*margin_left, 24);
-            }
-            other => panic!("expected PositionSurface, got {other:?}"),
-        }
+        assert_eq!(requests.len(), 2);
+        assert!(requests.iter().all(|request| matches!(
+            request,
+            CoreRequest::PublishDiagnostics { message }
+                if message.contains("Malformed payload")
+        )));
     }
 
     #[test]

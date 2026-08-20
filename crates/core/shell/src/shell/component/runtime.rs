@@ -57,6 +57,22 @@ impl FrontendSurfaceComponent {
     ) -> Vec<CoreRequest> {
         let mut shell_events = Vec::new();
         for event in events {
+            if event.channel.starts_with("shell.")
+                && let Err(rejection) = OperationRegistry::builtin().authorize_event(
+                    &event.channel,
+                    &event.payload,
+                    &event.source_module_id,
+                    &event.source_capabilities,
+                )
+            {
+                tracing::warn!(
+                    source_module_id = %event.source_module_id,
+                    channel = %event.channel,
+                    rejection = %rejection,
+                    "shell operation rejected"
+                );
+                continue;
+            }
             match event.channel.as_str() {
                 "shell.schedule-handler" => {
                     let Some(key) = event.payload.get("key").and_then(|value| value.as_str())
