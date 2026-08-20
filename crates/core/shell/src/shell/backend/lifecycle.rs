@@ -150,14 +150,23 @@ impl Shell {
             return;
         }
 
-        self.installed_module_graph = None;
-        if let Err(error) = self.load_installed_module_graph_cached() {
-            tracing::warn!(
-                interface,
-                provider_id,
-                "provider selection was saved but the installed graph cache could not be refreshed: {error}"
-            );
-        }
+        let candidate_graph = match self.load_installed_module_graph_candidate() {
+            Ok(graph) => graph,
+            Err(error) => {
+                pending.slot.task.abort();
+                let message = format!(
+                    "provider selection was saved but the candidate graph could not be refreshed: {error}"
+                );
+                tracing::warn!(interface, provider_id, "{message}");
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/shell".to_string(),
+                    "provider_selection_graph_reload_failed",
+                    message,
+                );
+                return;
+            }
+        };
+        self.commit_installed_module_graph(candidate_graph);
         self.backend_supervision.remove(interface);
         self.replace_backend_runtime(interface.to_string(), pending.slot);
         self.note_backend_running(interface);

@@ -198,7 +198,6 @@ impl Shell {
 
         paths.save(profile_id, &profile)?;
         if self.active_profile_id.as_deref() == Some(profile_id) {
-            self.installed_module_graph = None;
             return Ok(self.apply_switch_profile(profile_id));
         }
         Ok(VecDeque::new())

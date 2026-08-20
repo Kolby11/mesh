@@ -16,6 +16,12 @@ pub(in crate::shell) fn installed_module_graph_path() -> PathBuf {
         .join("config/module.json")
 }
 
+fn load_installed_module_graph_candidate(
+    root_module_graph_path: &Path,
+) -> Result<InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
+    load_installed_module_graph(root_module_graph_path)
+}
+
 /// Layer a profile's sparse preferences and per-instance surface overrides on
 /// top of shared user defaults. The shared document remains untouched.
 pub(in crate::shell) fn effective_profile_settings(
@@ -668,12 +674,36 @@ impl Shell {
     ) -> Result<&InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
         if self.installed_module_graph.is_none() {
             let graph_path = self.installed_module_graph_path();
-            self.installed_module_graph = Some(load_installed_module_graph(&graph_path)?);
+            self.installed_module_graph = Some(load_installed_module_graph_candidate(&graph_path)?);
         }
         Ok(self
             .installed_module_graph
             .as_ref()
             .expect("installed module graph was just loaded"))
+    }
+
+    /// Read a replacement graph without changing the active graph. Callers
+    /// that prepare a live activation use this boundary so a malformed or
+    /// incomplete on-disk candidate cannot discard the last-known-good graph.
+    pub(in crate::shell) fn load_installed_module_graph_candidate(
+        &self,
+    ) -> Result<InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
+        load_installed_module_graph_candidate(&self.installed_module_graph_path())
+    }
+
+    #[cfg(test)]
+    pub(in crate::shell) fn reload_installed_module_graph_at(
+        &mut self,
+        root_module_graph_path: &Path,
+    ) -> Result<InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
+        let candidate = load_installed_module_graph_candidate(root_module_graph_path)?;
+        self.commit_installed_module_graph(candidate.clone());
+        Ok(candidate)
+    }
+
+    /// Commit a graph only after its runtime candidate has been prepared.
+    pub(in crate::shell) fn commit_installed_module_graph(&mut self, graph: InstalledModuleGraph) {
+        self.installed_module_graph = Some(graph);
     }
 
     fn register_installed_graph_interfaces(&mut self) {
@@ -730,37 +760,6 @@ impl Shell {
 
     fn register_loaded_module(&mut self, dir: &Path, loaded: mesh_core_module::LoadedManifest) {
         let id = loaded.manifest.package.id.clone();
-        // Register declared contracts: `mesh.interface` on interface modules
-        // and inline `mesh.interfaces` on backend modules.
-        let declared_contract_sections = loaded
-            .manifest
-            .interface
-            .iter()
-            .filter(|_| loaded.manifest.package.module_type == ModuleType::Interface)
-            .chain(loaded.manifest.interfaces.iter());
-        for section in declared_contract_sections {
-            let Some(contract_value) = &section.contract else {
-                continue;
-            };
-            match parse_interface_contract(&section.name, &section.version, contract_value) {
-                Ok(contract) => self.interfaces.register_contract(contract),
-                Err(err) => tracing::warn!(
-                    "invalid interface contract {} in module {}: {err}",
-                    section.name,
-                    id
-                ),
-            }
-        }
-        for provided in loaded.manifest.declared_provides() {
-            self.interfaces.register(InterfaceProvider {
-                interface: canonical_interface_name(&provided.interface),
-                version: provided.version.clone(),
-                base_module: provided.base_module.clone(),
-                provider_module: id.clone(),
-                backend_name: provided.backend_name.clone().unwrap_or_else(|| id.clone()),
-                priority: provided.priority,
-            });
-        }
         tracing::info!(
             "discovered module: {} v{} ({}) from {}",
             id,
@@ -833,8 +832,8 @@ impl Shell {
             return Ok(());
         }
 
-        let graph = self.load_installed_module_graph_cached().ok().cloned();
-        let frontend_catalog = FrontendCatalog::from_modules(&self.modules, graph.as_ref())?;
+        let graph = self.load_installed_module_graph_cached()?.clone();
+        let frontend_catalog = FrontendCatalog::from_modules(&self.modules, Some(&graph))?;
         self.frontend_catalog.replace(frontend_catalog, None);
         let frontend_catalog = self.frontend_catalog.snapshot().catalog;
         let enabled_frontends = self.installed_enabled_frontend_ids();
@@ -851,9 +850,13 @@ impl Shell {
                 .map(|entry| (entry.compiled.manifest.package.id.clone(), entry))
                 .collect::<HashMap<_, _>>();
             for (instance_id, root) in profile.roots.iter().filter(|(_, root)| root.active) {
-                let Some(entry) = entries.get(&root.module) else {
-                    continue;
-                };
+                let entry = entries.get(&root.module).ok_or_else(|| {
+                    ShellRunError::FrontendComposition {
+                        message: format!(
+                            "profile root {instance_id} has no mountable frontend entrypoint"
+                        ),
+                    }
+                })?;
                 self.register_component(Box::new(
                     FrontendSurfaceComponent::new(
                         entry.compiled.clone(),
@@ -869,7 +872,7 @@ impl Shell {
             }
             return Ok(());
         }
-        for entry in frontend_catalog.top_level_surfaces_filtered(enabled_frontends.as_ref()) {
+        for entry in frontend_catalog.top_level_surfaces_filtered(Some(&enabled_frontends)) {
             self.register_component(Box::new(
                 FrontendSurfaceComponent::new(
                     entry.compiled,
@@ -1081,26 +1084,18 @@ impl Shell {
             .collect()
     }
 
-    fn installed_enabled_frontend_ids(&mut self) -> Option<HashSet<String>> {
-        let graph_path = self.installed_module_graph_path();
-        match self.load_installed_module_graph_cached() {
-            Ok(graph) => {
-                let mut enabled = graph
-                    .frontend_modules()
-                    .into_iter()
-                    .map(|module| module.id.clone())
-                    .collect::<HashSet<_>>();
-                enabled.insert(BUILTIN_DEBUG_INSPECTOR_ID.to_string());
-                Some(enabled)
-            }
-            Err(err) => {
-                tracing::warn!(
-                    "failed to load installed module graph from {}; using all discovered frontend modules: {err}",
-                    graph_path.display()
-                );
-                None
-            }
-        }
+    fn installed_enabled_frontend_ids(&self) -> HashSet<String> {
+        let graph = self
+            .installed_module_graph
+            .as_ref()
+            .expect("frontend loading requires a validated installed module graph");
+        let mut enabled = graph
+            .frontend_modules()
+            .into_iter()
+            .map(|module| module.id.clone())
+            .collect::<HashSet<_>>();
+        enabled.insert(BUILTIN_DEBUG_INSPECTOR_ID.to_string());
+        enabled
     }
 
     pub(super) fn register_component(&mut self, component: Box<dyn ShellComponent>) {

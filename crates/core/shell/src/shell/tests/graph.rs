@@ -1,5 +1,6 @@
 use super::common::*;
 use super::*;
+use std::fs;
 
 #[test]
 fn installed_module_graph_exposes_shell_package_choices() {
@@ -145,6 +146,48 @@ fn load_frontend_components_keeps_shell_shipped_debug_inspector_even_when_not_in
             .iter()
             .any(|runtime| runtime.surface_id == "@mesh/debug-inspector"),
         "built-in debug inspector should load as a shell surface even when absent from config/module.json"
+    );
+}
+
+#[test]
+fn invalid_graph_reload_keeps_the_last_known_good_graph() {
+    let mut shell = Shell::new();
+    let last_known_good = graph_from_json(
+        r#"{
+            "modulesDir": "modules",
+            "modules": {
+                "@test/old": {
+                    "kind": "frontend",
+                    "path": "old",
+                    "enabled": true
+                }
+            }
+        }"#,
+        vec![
+            r#"{
+                "name": "@test/old",
+                "version": "0.1.0",
+                "mesh": { "apiVersion": "0.1", "kind": "frontend" }
+            }"#,
+        ],
+    );
+    shell.installed_module_graph = Some(last_known_good);
+
+    let root = tempfile::tempdir().unwrap();
+    let invalid_graph = root.path().join("module.json");
+    fs::write(&invalid_graph, "{\"mesh\":").unwrap();
+
+    assert!(
+        shell
+            .reload_installed_module_graph_at(&invalid_graph)
+            .is_err()
+    );
+    assert!(
+        shell
+            .installed_module_graph
+            .as_ref()
+            .is_some_and(|graph| graph.module("@test/old").is_some()),
+        "a rejected graph candidate must not replace the active graph"
     );
 }
 

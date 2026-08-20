@@ -39,7 +39,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/02-module-system-and-installation/improvements.md)
 
-- [ ] Make invalid graph candidates fail closed and retain the last-known-good graph/runtime on reload failure.
 - [ ] Move install, update, uninstall, and rollback behind one locked, journaled, recoverable transaction engine.
 - [ ] Enforce required/optional module dependencies and compatible module/interface/provider version ranges before activation.
 - [ ] Preserve composition versions, dependency closure, sparse root overrides, active-host node slots, and lock provenance.

@@ -13,11 +13,10 @@ use mesh_core_module::lifecycle::{ModuleInstance, ModuleState};
 use mesh_core_module::package::{
     InstalledModuleGraph, ModuleKind, RootModuleGraphManifest, load_installed_module_graph,
 };
-use mesh_core_module::{DependencyGraphError, ModuleType, validate_module_dependency_graph};
+use mesh_core_module::{DependencyGraphError, validate_module_dependency_graph};
 use mesh_core_service::{
     InterfaceContract, InterfaceProvider, InterfaceRegistry, ServiceRegistry,
     canonical_interface_name, canonical_interface_name_cow, canonical_interface_name_owned,
-    parse_interface_contract,
 };
 use mesh_core_theme::ThemeEngine;
 use mesh_core_wayland::{ClipboardWriter, Layer, StubSurface, WaylandClipboard};

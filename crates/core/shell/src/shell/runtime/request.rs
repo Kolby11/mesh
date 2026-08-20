@@ -140,13 +140,11 @@ impl Shell {
             }
         };
 
-        self.installed_module_graph = None;
-        let graph = match self.load_installed_module_graph_cached() {
-            Ok(graph) => graph.clone(),
+        let previous_graph = self.installed_module_graph.clone();
+        let graph = match self.load_installed_module_graph_candidate() {
+            Ok(graph) => graph,
             Err(error) => {
                 let restore_error = rollback.restore().err();
-                self.installed_module_graph = None;
-                let _ = self.load_installed_module_graph_cached();
                 let message = format!(
                     "module {module_id} update produced an unloadable graph: {error}{}",
                     restore_error
@@ -174,13 +172,13 @@ impl Shell {
         };
         match runtime_result {
             Ok(requests) => {
+                self.commit_installed_module_graph(graph);
                 tracing::info!(module_id, enabled, "applied module enabled state live");
                 requests
             }
             Err(error) => {
                 let restore_error = rollback.restore().err();
-                self.installed_module_graph = None;
-                let _ = self.load_installed_module_graph_cached();
+                self.installed_module_graph = previous_graph;
                 let message = format!(
                     "failed to apply module {module_id} live: {error}{}",
                     restore_error
@@ -283,8 +281,20 @@ impl Shell {
                 provider_id,
             ) {
                 Ok(()) => {
-                    self.installed_module_graph = None;
-                    let _ = self.load_installed_module_graph_cached();
+                    match self.load_installed_module_graph_candidate() {
+                        Ok(candidate) => self.commit_installed_module_graph(candidate),
+                        Err(error) => {
+                            let message = format!(
+                                "provider selection for {interface} was saved but the candidate graph could not be loaded: {error}"
+                            );
+                            tracing::warn!(interface, provider_id, "{message}");
+                            self.diagnostics.record_lifecycle_error(
+                                "@mesh/settings".to_string(),
+                                "provider_selection_graph_reload_failed",
+                                message,
+                            );
+                        }
+                    }
                     tracing::info!(
                         interface,
                         provider_id,

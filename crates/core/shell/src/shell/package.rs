@@ -121,7 +121,7 @@ impl Shell {
         {
             self.module_dirs.push(modules_dir.clone());
         }
-        self.installed_module_graph = None;
+        self.commit_installed_module_graph(graph);
         self.discover_modules();
         self.resolve_modules()?;
 
@@ -274,9 +274,6 @@ impl Shell {
             .as_deref()
             .is_some_and(|profile_id| changed_profiles.iter().any(|id| id == profile_id));
         let mut requests = VecDeque::new();
-        if active_profile.is_none() && module_kind == ModuleKind::Frontend {
-            requests.extend(self.deactivate_frontend_module(module_id, Some(&graph))?);
-        }
 
         if installed_at.exists() {
             validate_module_tree(&installed_at)
@@ -288,15 +285,20 @@ impl Shell {
                 ))
             })?;
         }
+        let new_graph = load_installed_module_graph(&graph_path)
+            .map_err(|error| package_error(error.to_string()))?;
+        // Do not remove the in-memory module or its live runtime until the
+        // replacement graph has loaded successfully. A broken on-disk
+        // candidate must leave the last-known-good activation coherent.
         self.modules.remove(module_id);
-        self.installed_module_graph = None;
+        self.commit_installed_module_graph(new_graph.clone());
         self.discover_modules();
         self.resolve_modules()?;
-        let new_graph = self
-            .load_installed_module_graph_cached()
-            .map_err(|error| package_error(error.to_string()))?
-            .clone();
         self.register_interfaces_from_graph(&new_graph);
+
+        if active_profile.is_none() && module_kind == ModuleKind::Frontend {
+            requests.extend(self.deactivate_frontend_module(module_id, Some(&new_graph))?);
+        }
 
         if active_profile_changed {
             requests

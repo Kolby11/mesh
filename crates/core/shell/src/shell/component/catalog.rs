@@ -10,7 +10,7 @@ use mesh_core_frontend::{
 };
 use mesh_core_module::ModuleType;
 use mesh_core_module::lifecycle::ModuleInstance;
-use mesh_core_module::package::{InstalledModuleGraph, NodeSlotOverride};
+use mesh_core_module::package::{InstalledModuleGraph, ModuleKind, NodeSlotOverride};
 use rayon::prelude::*;
 
 use super::memo;
@@ -420,8 +420,22 @@ impl FrontendCatalog {
             .iter()
             .filter_map(|module_id| {
                 let module = modules.get(module_id)?;
-                mesh_core_frontend::is_frontend_module(&module.manifest)
-                    .then_some((module_id, module))
+                if !mesh_core_frontend::is_frontend_module(&module.manifest) {
+                    return None;
+                }
+                // A graph-backed catalog is an activation boundary. Compile
+                // only graph-enabled frontends (plus the shell-owned debug
+                // inspector); an invalid or absent graph must never turn
+                // discovery into an implicit allow-all filter.
+                if let Some(graph) = graph
+                    && *module_id != "@mesh/debug-inspector"
+                    && !graph
+                        .module(module_id)
+                        .is_some_and(|entry| entry.enabled && entry.kind == ModuleKind::Frontend)
+                {
+                    return None;
+                }
+                Some((module_id, module))
             })
             .collect();
         let compiled_entries = frontend_modules
