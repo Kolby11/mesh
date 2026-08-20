@@ -85,6 +85,12 @@ Allocation profiling now reports as available only after the runtime observes
 the counting allocator handling an allocation, so enabling its feature without
 installing that global allocator no longer advertises live counters.
 
+Module package boundaries now validate typed `@scope/name` identities and
+contained relative paths before filesystem use. Installed trees, manifests,
+locks, profiles, graph entries, installers, updates, and removals reject
+symlinks; recursive discovery, source scanning, and digest traversal use
+visited canonical directories and never follow links outside their roots.
+
 The Section 11 Luau runtime and sandbox audit is complete. Its logical process
 tree, confirmed findings, broader feature direction, and regression matrix are
 in [`sections/11-luau-runtime-and-sandbox/improvements.md`](log/sections/11-luau-runtime-and-sandbox/improvements.md);

@@ -375,18 +375,51 @@ pub(super) fn scan_files_recursive(
     extension: &str,
 ) -> Vec<(std::path::PathBuf, String)> {
     let mut results = Vec::new();
-    let Ok(entries) = std::fs::read_dir(dir) else {
+    let Ok(root_metadata) = std::fs::symlink_metadata(dir) else {
         return results;
+    };
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return results;
+    }
+    let Ok(root) = std::fs::canonicalize(dir) else {
+        return results;
+    };
+    let mut visited = std::collections::HashSet::new();
+    scan_files_recursive_into(dir, &root, extension, &mut visited, &mut results);
+    results
+}
+
+fn scan_files_recursive_into(
+    dir: &Path,
+    root: &Path,
+    extension: &str,
+    visited: &mut std::collections::HashSet<std::path::PathBuf>,
+    results: &mut Vec<(std::path::PathBuf, String)>,
+) {
+    let Ok(canonical) = std::fs::canonicalize(dir) else {
+        return;
+    };
+    if !canonical.starts_with(root) || !visited.insert(canonical) {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
-            results.extend(scan_files_recursive(&path, extension));
-        } else if path.extension().and_then(|e| e.to_str()) == Some(extension) {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                results.push((path, content));
-            }
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
+            scan_files_recursive_into(&path, root, extension, visited, results);
+        } else if metadata.is_file()
+            && path.extension().and_then(|e| e.to_str()) == Some(extension)
+            && let Ok(content) = std::fs::read_to_string(&path)
+        {
+            results.push((path, content));
         }
     }
-    results
 }

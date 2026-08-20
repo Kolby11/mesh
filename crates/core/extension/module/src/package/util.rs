@@ -1,6 +1,6 @@
-use super::ModuleManifestError;
+use super::{ModuleId, ModuleManifestError, ModuleRelativePath};
 use crate::manifest::DependencySpec;
-use std::path::{Component, Path};
+use std::path::Path;
 
 pub(crate) fn default_modules_dir() -> String {
     "modules".into()
@@ -30,22 +30,7 @@ pub(crate) fn validate_modules_dir(value: &str) -> Result<(), ModuleManifestErro
 }
 
 pub(crate) fn validate_relative_path(label: &str, value: &str) -> Result<(), ModuleManifestError> {
-    let path = Path::new(value);
-    if value.trim().is_empty() {
-        return Err(ModuleManifestError::Validation(format!(
-            "{label} cannot be empty"
-        )));
-    }
-    if path.is_absolute()
-        || path
-            .components()
-            .any(|component| matches!(component, Component::ParentDir))
-    {
-        return Err(ModuleManifestError::Validation(format!(
-            "{label} must be a relative path without '..': {value}"
-        )));
-    }
-    Ok(())
+    ModuleRelativePath::parse(label, value).map(|_| ())
 }
 
 pub(crate) fn parse_module_entrypoint(value: &str) -> Option<(&str, &str)> {
@@ -54,6 +39,10 @@ pub(crate) fn parse_module_entrypoint(value: &str) -> Option<(&str, &str)> {
         return None;
     }
     Some((module_id, entrypoint_id))
+}
+
+pub fn validate_module_id(value: &str) -> Result<(), ModuleManifestError> {
+    ModuleId::parse(value).map(|_| ())
 }
 
 pub(crate) fn dependency_spec_to_string(spec: &DependencySpec) -> String {

@@ -510,6 +510,8 @@ fn cmd_install(args: &[String]) {
         .parent()
         .expect("root graph path has a parent directory");
     let modules_dir = config_dir.join(&root.modules_dir);
+    std::fs::create_dir_all(&modules_dir)
+        .unwrap_or_else(|error| exit_error(format!("failed to create modules directory: {error}")));
     let source = install_source(source_arg, &modules_dir).unwrap_or_else(|error| exit_error(error));
     let source_path = source.path();
     let manifest_path = source_path.join("module.json");
@@ -544,7 +546,8 @@ fn cmd_install(args: &[String]) {
             _ => {}
         }
     }
-    let destination = modules_dir.join(manifest.name.trim_start_matches('@'));
+    let destination = mesh_core_module::package::module_install_path(&modules_dir, &manifest.name)
+        .unwrap_or_else(|error| exit_error(error));
     if destination.exists() {
         exit_error(format!(
             "module {} is already installed at {}",
@@ -781,6 +784,8 @@ impl InstallSource {
     }
 
     fn place_at(&self, destination: &std::path::Path) -> Result<(), String> {
+        mesh_core_module::package::validate_module_tree(self.path())
+            .map_err(|error| error.to_string())?;
         match self {
             Self::Local(path) => {
                 copy_module_tree(path, destination).map_err(|error| error.to_string())
@@ -811,7 +816,12 @@ struct GitProvenance {
 
 fn install_source(source: &str, modules_dir: &std::path::Path) -> Result<InstallSource, String> {
     let local = std::path::PathBuf::from(source);
-    if local.is_dir() {
+    if std::fs::symlink_metadata(&local)
+        .map(|metadata| metadata.is_dir())
+        .unwrap_or(false)
+    {
+        mesh_core_module::package::validate_module_tree(&local)
+            .map_err(|error| error.to_string())?;
         return Ok(InstallSource::Local(local));
     }
 
@@ -822,14 +832,20 @@ fn install_source(source: &str, modules_dir: &std::path::Path) -> Result<Install
             modules_dir.display()
         )
     })?;
-    let checkout = modules_dir.join(format!(
+    let checkout_name = format!(
         ".mesh-install-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos()
-    ));
+    );
+    let checkout = mesh_core_module::package::contained_path(
+        modules_dir,
+        &checkout_name,
+        "staged module path",
+    )
+    .map_err(|error| error.to_string())?;
     let cleanup = |message: String| {
         let _ = std::fs::remove_dir_all(&checkout);
         Err(message)
@@ -1068,7 +1084,8 @@ fn cmd_rollback(args: &[String]) {
 
 fn cmd_uninstall(args: &[String]) {
     let module_id = required_arg(args, 0, "mesh-shell uninstall <module-id>");
-    let (_, config_dir, modules_dir) = lock_paths();
+    let (root_path, config_dir, modules_dir) = lock_paths();
+    mesh_core_module::package::ModuleId::parse(module_id).unwrap_or_else(|error| exit_error(error));
     let lock_path = config_dir.join("mesh.lock");
     let mut lock = mesh_core_module::package::MeshLock::load_or_default(&lock_path)
         .unwrap_or_else(|error| exit_error(error));
@@ -1081,8 +1098,21 @@ fn cmd_uninstall(args: &[String]) {
         ));
     }
 
-    let installed_at = modules_dir.join(module_id.trim_start_matches('@'));
+    let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
+        .unwrap_or_else(|error| exit_error(error));
+    let installed_at = match root.modules.get(module_id) {
+        Some(entry) => mesh_core_module::package::contained_path(
+            &modules_dir,
+            &entry.path,
+            "installed module path",
+        )
+        .unwrap_or_else(|error| exit_error(error)),
+        None => mesh_core_module::package::module_install_path(&modules_dir, module_id)
+            .unwrap_or_else(|error| exit_error(error)),
+    };
     if installed_at.exists() {
+        mesh_core_module::package::validate_module_tree(&installed_at)
+            .unwrap_or_else(|error| exit_error(error));
         std::fs::remove_dir_all(&installed_at).unwrap_or_else(|error| {
             exit_error(format!(
                 "failed to remove {}: {error}",

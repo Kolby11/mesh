@@ -2,8 +2,9 @@ use super::component::FrontendCatalog;
 use super::*;
 use mesh_core_capability::{CapabilityCatalog, PrivilegeLevel};
 use mesh_core_module::package::{
-    InstalledModuleEntry, MeshLock, ModuleKind, ModuleManifest, ModuleSource, ProfilePaths,
-    RootModuleGraphManifest, ShellProfile, load_installed_module_graph, module_tree_digest,
+    InstalledModuleEntry, MeshLock, ModuleId, ModuleKind, ModuleManifest, ModuleSource,
+    ProfilePaths, RootModuleGraphManifest, ShellProfile, contained_path,
+    load_installed_module_graph, module_install_path, module_tree_digest, validate_module_tree,
 };
 use std::collections::VecDeque;
 use std::fs;
@@ -39,7 +40,14 @@ impl Shell {
             .map_err(|error| package_error(error.to_string()))?;
         check_install_capabilities(&manifest, allow_elevated, allow_high)?;
 
-        let destination = modules_dir.join(manifest.name.trim_start_matches('@'));
+        fs::create_dir_all(&modules_dir).map_err(|error| {
+            package_error(format!(
+                "failed to create {}: {error}",
+                modules_dir.display()
+            ))
+        })?;
+        let destination = module_install_path(&modules_dir, &manifest.name)
+            .map_err(|error| package_error(error.to_string()))?;
         if destination.exists() {
             return Err(package_error(format!(
                 "module {} is already installed at {}",
@@ -127,9 +135,7 @@ impl Shell {
         module_id: &str,
         force: bool,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        if module_id.trim().is_empty() {
-            return Err(package_error("module id cannot be empty"));
-        }
+        ModuleId::parse(module_id).map_err(|error| package_error(error.to_string()))?;
 
         let graph_path = self.installed_module_graph_path();
         let mut root = RootModuleGraphManifest::from_path(&graph_path)
@@ -140,13 +146,15 @@ impl Shell {
             .module(module_id)
             .ok_or_else(|| package_error(format!("module {module_id} is not installed")))?;
         let module_kind = node.kind;
-        let installed_relative_path = node.path.clone();
         let config_dir = graph_path
             .parent()
             .ok_or_else(|| package_error("root module graph has no parent directory"))?;
-        let installed_at = config_dir
-            .join(&root.modules_dir)
-            .join(&installed_relative_path);
+        let installed_at = contained_path(
+            &config_dir.join(&root.modules_dir),
+            &node.path,
+            "installed module path",
+        )
+        .map_err(|error| package_error(error.to_string()))?;
 
         let lock_path = config_dir.join("mesh.lock");
         let mut lock = MeshLock::load_or_default(&lock_path)
@@ -271,6 +279,8 @@ impl Shell {
         }
 
         if installed_at.exists() {
+            validate_module_tree(&installed_at)
+                .map_err(|error| package_error(error.to_string()))?;
             fs::remove_dir_all(&installed_at).map_err(|error| {
                 package_error(format!(
                     "failed to remove {}: {error}",
@@ -511,6 +521,7 @@ impl StagedModuleSource {
     }
 
     fn place_at(&mut self, destination: &Path) -> Result<(), ShellRunError> {
+        validate_module_tree(self.path()).map_err(|error| package_error(error.to_string()))?;
         match self {
             Self::Local(path) => copy_module_tree(path, destination)
                 .map_err(|error| package_error(error.to_string())),
@@ -534,7 +545,11 @@ fn stage_module_source(
     modules_dir: &Path,
 ) -> Result<StagedModuleSource, ShellRunError> {
     let local = PathBuf::from(source);
-    if local.is_dir() {
+    if fs::symlink_metadata(&local)
+        .map(|metadata| metadata.is_dir())
+        .unwrap_or(false)
+    {
+        validate_module_tree(&local).map_err(|error| package_error(error.to_string()))?;
         return Ok(StagedModuleSource::Local(local));
     }
 
@@ -545,14 +560,16 @@ fn stage_module_source(
             modules_dir.display()
         ))
     })?;
-    let checkout = modules_dir.join(format!(
+    let checkout_name = format!(
         ".mesh-install-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos()
-    ));
+    );
+    let checkout = contained_path(modules_dir, &checkout_name, "staged module path")
+        .map_err(|error| package_error(error.to_string()))?;
     let clone = Command::new("git")
         .args(["clone", "--quiet", &url])
         .arg(&checkout)

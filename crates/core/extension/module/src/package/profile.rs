@@ -1,6 +1,6 @@
 use super::{
-    ModuleKind, ModuleManifest, ModuleManifestError, RootLayoutSelection, RootModuleGraphManifest,
-    RootThemeSelection,
+    ModuleId, ModuleKind, ModuleManifest, ModuleManifestError, RootLayoutSelection,
+    RootModuleGraphManifest, RootThemeSelection,
 };
 use crate::manifest::SurfaceLayoutSection;
 use serde::{Deserialize, Serialize};
@@ -108,6 +108,7 @@ impl ShellProfile {
     }
 
     pub fn from_path(path: &Path) -> Result<Self, ModuleManifestError> {
+        super::validate_regular_file(path, "shell profile")?;
         let content = fs::read_to_string(path).map_err(|source| ModuleManifestError::Io {
             path: path.to_path_buf(),
             source,
@@ -429,6 +430,7 @@ impl ProfilePaths {
         if !path.exists() {
             return Ok(None);
         }
+        super::validate_regular_file(&path, "active profile pointer")?;
         let profile_id =
             fs::read_to_string(&path).map_err(|source| ModuleManifestError::Io { path, source })?;
         let profile_id = profile_id.trim();
@@ -442,6 +444,15 @@ impl ProfilePaths {
 
     pub fn load_or_default(&self, profile_id: &str) -> Result<ShellProfile, ModuleManifestError> {
         let path = self.profile_path(profile_id)?;
+        if fs::symlink_metadata(&path)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(ModuleManifestError::Validation(format!(
+                "shell profile {} must not be a symlink",
+                path.display()
+            )));
+        }
         if path.exists() {
             ShellProfile::from_path(&path)
         } else {
@@ -492,6 +503,15 @@ impl ProfilePaths {
         if !directory.exists() {
             return Ok(Vec::new());
         }
+        if fs::symlink_metadata(&directory)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(ModuleManifestError::Validation(format!(
+                "profiles directory {} must not be a symlink",
+                directory.display()
+            )));
+        }
         let mut ids = fs::read_dir(&directory)
             .map_err(|source| ModuleManifestError::Io {
                 path: directory.clone(),
@@ -511,6 +531,7 @@ impl ProfilePaths {
 }
 
 fn validate_instance_id(instance_id: &str, module_id: &str) -> Result<(), ModuleManifestError> {
+    ModuleId::parse(module_id)?;
     let expected_prefix = format!("{module_id}#");
     let suffix = instance_id
         .strip_prefix(&expected_prefix)
@@ -533,11 +554,11 @@ fn validate_module_ids<'a>(
     field: &str,
 ) -> Result<(), ModuleManifestError> {
     for id in ids {
-        if !id.starts_with('@') || id.trim() != id {
-            return Err(ModuleManifestError::Validation(format!(
+        ModuleId::parse(id).map_err(|_| {
+            ModuleManifestError::Validation(format!(
                 "profile {field} entry '{id}' must be a module id such as @scope/name"
-            )));
-        }
+            ))
+        })?;
     }
     Ok(())
 }
@@ -556,6 +577,7 @@ fn validate_profile_id(profile_id: &str) -> Result<(), ModuleManifestError> {
 }
 
 pub(super) fn atomic_write(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> {
+    super::validate_no_symlink_path(path, "package write target")?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| ModuleManifestError::Io {
             path: parent.to_path_buf(),

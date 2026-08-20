@@ -1,4 +1,4 @@
-use super::{ModuleManifestDiagnostic, ModuleManifestError, validate_relative_path};
+use super::{ModuleId, ModuleManifestDiagnostic, ModuleManifestError, validate_relative_path};
 use crate::manifest::{self, CapabilitiesSection, DependencySpec, Manifest, ModuleType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -29,6 +29,7 @@ impl ModuleManifest {
     }
 
     pub fn from_path(path: &Path) -> Result<Self, ModuleManifestError> {
+        super::validate_regular_file(path, "module manifest")?;
         let content = std::fs::read_to_string(path).map_err(|source| ModuleManifestError::Io {
             path: path.to_path_buf(),
             source,
@@ -49,11 +50,7 @@ impl ModuleManifest {
     }
 
     pub fn validate(&self) -> Result<(), ModuleManifestError> {
-        if self.name.trim().is_empty() {
-            return Err(ModuleManifestError::Validation(
-                "module name cannot be empty".into(),
-            ));
-        }
+        ModuleId::parse(&self.name)?;
         if self.version.trim().is_empty() {
             return Err(ModuleManifestError::Validation(format!(
                 "module {} version cannot be empty",
@@ -334,6 +331,12 @@ impl MeshModuleSection {
             ));
         }
         self.i18n.validate()?;
+        if let Some(entry) = &self.entry {
+            validate_relative_path("mesh.entry", entry)?;
+        }
+        if let Some(entry) = &self.entrypoints.main {
+            validate_relative_path("mesh.entrypoints.main", entry)?;
+        }
         if self.kind == ModuleKind::Interface
             && self.interface.is_none()
             && self.extension_points.is_empty()
@@ -810,17 +813,12 @@ impl MeshUses {
 }
 
 fn validate_module_dependency_id(field: &str, value: &str) -> Result<(), ModuleManifestError> {
-    if value.trim().is_empty() {
-        return Err(ModuleManifestError::Validation(format!(
-            "{field} entries cannot be empty"
-        )));
-    }
-    if !value.starts_with('@') {
-        return Err(ModuleManifestError::Validation(format!(
+    ModuleId::parse(value).map(|_| ()).map_err(|error| match error {
+        ModuleManifestError::Validation(_) => ModuleManifestError::Validation(format!(
             "{field} entry '{value}' must be a module id such as @scope/name; interfaces belong in mesh.uses.interfaces and host powers belong in mesh.uses.capabilities"
-        )));
-    }
-    Ok(())
+        )),
+        other => other,
+    })
 }
 
 fn validate_interface_dependency_id(value: &str) -> Result<(), ModuleManifestError> {

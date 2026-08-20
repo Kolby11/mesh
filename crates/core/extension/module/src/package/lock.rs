@@ -15,7 +15,9 @@
 //!   cannot ask "is there a compatible newer release" from a commit.
 //! - `requested_by` makes uninstall safe and explains version conflicts.
 
-use super::{ModuleManifestError, atomic_write};
+use super::{
+    ModuleId, ModuleManifestError, atomic_write, validate_module_tree, validate_regular_file,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -111,6 +113,7 @@ impl MeshLock {
     }
 
     pub fn from_path(path: &Path) -> Result<Self, ModuleManifestError> {
+        validate_regular_file(path, "mesh.lock")?;
         let content = fs::read_to_string(path).map_err(|source| ModuleManifestError::Io {
             path: path.to_path_buf(),
             source,
@@ -125,6 +128,15 @@ impl MeshLock {
     }
 
     pub fn load_or_default(path: &Path) -> Result<Self, ModuleManifestError> {
+        if fs::symlink_metadata(path)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(ModuleManifestError::Validation(format!(
+                "mesh.lock {} must not be a symlink",
+                path.display()
+            )));
+        }
         if path.exists() {
             Self::from_path(path)
         } else {
@@ -139,11 +151,17 @@ impl MeshLock {
                 self.schema_version
             )));
         }
+        if let Some(composition) = &self.composition {
+            ModuleId::parse(&composition.module)?;
+        }
         for (module_id, entry) in &self.modules {
-            if !module_id.starts_with('@') {
-                return Err(ModuleManifestError::Validation(format!(
+            ModuleId::parse(module_id).map_err(|_| {
+                ModuleManifestError::Validation(format!(
                     "mesh.lock entry '{module_id}' must be a module id such as @scope/name"
-                )));
+                ))
+            })?;
+            for requester in &entry.requested_by {
+                ModuleId::parse(requester)?;
             }
             if !entry.digest.starts_with("sha256:") {
                 return Err(ModuleManifestError::Validation(format!(
@@ -161,6 +179,9 @@ impl MeshLock {
     /// composition whose lock did not land cannot be rolled back.
     pub fn save(&mut self, path: &Path) -> Result<(), ModuleManifestError> {
         self.validate()?;
+        if path.exists() {
+            validate_regular_file(path, "mesh.lock")?;
+        }
         self.generation += 1;
         let mut content =
             serde_json::to_string_pretty(self).map_err(|source| ModuleManifestError::Json {
@@ -174,9 +195,19 @@ impl MeshLock {
     /// Archive the current on-disk lock before overwriting it, so
     /// `mesh rollback` has a previous generation to restore.
     pub fn archive(path: &Path, history_dir: &Path) -> Result<(), ModuleManifestError> {
+        if fs::symlink_metadata(path)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(ModuleManifestError::Validation(format!(
+                "mesh.lock {} must not be a symlink",
+                path.display()
+            )));
+        }
         if !path.exists() {
             return Ok(());
         }
+        validate_regular_file(path, "mesh.lock")?;
         let existing = Self::from_path(path)?;
         let content = fs::read(path).map_err(|source| ModuleManifestError::Io {
             path: path.to_path_buf(),
@@ -190,6 +221,12 @@ impl MeshLock {
 
     /// Lock generations available for rollback, newest first.
     pub fn history(history_dir: &Path) -> Vec<(u64, PathBuf)> {
+        let Ok(metadata) = fs::symlink_metadata(history_dir) else {
+            return Vec::new();
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Vec::new();
+        }
         let Ok(entries) = fs::read_dir(history_dir) else {
             return Vec::new();
         };
@@ -197,6 +234,9 @@ impl MeshLock {
             .filter_map(Result::ok)
             .filter_map(|entry| {
                 let path = entry.path();
+                if entry.file_type().ok()?.is_symlink() || !entry.file_type().ok()?.is_file() {
+                    return None;
+                }
                 let stem = path.file_stem()?.to_str()?.strip_prefix("mesh-")?;
                 Some((stem.parse::<u64>().ok()?, path))
             })
@@ -221,8 +261,10 @@ fn prune_history(history_dir: &Path, keep: usize) {
 /// a module directory, so an ordinary shell run cannot make a module look
 /// edited.
 pub fn module_tree_digest(root: &Path) -> Result<String, ModuleManifestError> {
+    validate_module_tree(root)?;
     let mut files = Vec::new();
-    collect_files(root, root, &mut files)?;
+    let mut visited = std::collections::HashSet::new();
+    collect_files(root, root, &mut files, &mut visited)?;
     files.sort();
 
     let mut hasher = Sha256::new();
@@ -261,7 +303,15 @@ fn collect_files(
     root: &Path,
     directory: &Path,
     files: &mut Vec<String>,
+    visited: &mut std::collections::HashSet<PathBuf>,
 ) -> Result<(), ModuleManifestError> {
+    let canonical = fs::canonicalize(directory).map_err(|source| ModuleManifestError::Io {
+        path: directory.to_path_buf(),
+        source,
+    })?;
+    if !visited.insert(canonical) {
+        return Ok(());
+    }
     let entries = fs::read_dir(directory).map_err(|source| ModuleManifestError::Io {
         path: directory.to_path_buf(),
         source,
@@ -274,18 +324,22 @@ fn collect_files(
         let path = entry.path();
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        let file_type = entry
-            .file_type()
-            .map_err(|source| ModuleManifestError::Io {
-                path: path.clone(),
-                source,
-            })?;
-        if file_type.is_dir() {
+        let metadata = fs::symlink_metadata(&path).map_err(|source| ModuleManifestError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(ModuleManifestError::Validation(format!(
+                "module tree contains unsupported symlink {}",
+                path.display()
+            )));
+        }
+        if metadata.is_dir() {
             if DIGEST_EXCLUDED_DIRS.contains(&name.as_ref()) {
                 continue;
             }
-            collect_files(root, &path, files)?;
-        } else if file_type.is_file() {
+            collect_files(root, &path, files, visited)?;
+        } else if metadata.is_file() {
             let relative = path
                 .strip_prefix(root)
                 .map_err(|_| {

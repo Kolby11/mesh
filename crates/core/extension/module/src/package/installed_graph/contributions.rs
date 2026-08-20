@@ -1,6 +1,6 @@
 use super::super::{
-    ModuleKind, ModuleManifest, ModuleManifestError, PathContribution, dependency_spec_to_string,
-    validate_relative_path,
+    ModuleKind, ModuleManifest, ModuleManifestError, PathContribution, contained_path,
+    dependency_spec_to_string, validate_relative_path,
 };
 use super::*;
 use crate::manifest;
@@ -80,7 +80,7 @@ impl ModuleContributionIndex {
                     module
                         .manifest_path
                         .parent()
-                        .map(|dir| dir.join(entrypoint))
+                        .and_then(|dir| contained_path(dir, entrypoint, "frontend entrypoint").ok())
                 })
                 .and_then(|path| std::fs::read_to_string(path).ok())
                 .and_then(|source| parse_component(&source).ok())

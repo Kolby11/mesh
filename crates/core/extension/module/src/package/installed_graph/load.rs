@@ -1,6 +1,7 @@
 use super::super::{
     InstalledModuleEntry, ModuleManifest, ModuleManifestDiagnostic, ModuleManifestError,
-    ProfilePaths, RootModuleGraphManifest, ShellProfile, resolve_composition,
+    ProfilePaths, RootModuleGraphManifest, ShellProfile, contained_path, resolve_composition,
+    validate_module_tree,
 };
 use super::graph::CompositionContext;
 use super::*;
@@ -68,8 +69,8 @@ fn load_installed_module_graph_with(
         let module_dirs = root
             .modules
             .values()
-            .map(|entry| modules_dir.join(&entry.path))
-            .collect::<Vec<_>>();
+            .map(|entry| contained_path(&modules_dir, &entry.path, "installed module path"))
+            .collect::<Result<Vec<_>, _>>()?;
         modules = load_manifests(&module_dirs)?;
     }
 
@@ -156,13 +157,44 @@ pub(in crate::package) fn load_module_manifests_serial(
 /// sorted for deterministic ordering.
 pub(in crate::package) fn discover_module_dirs(modules_dir: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
-    discover_module_dirs_into(modules_dir, &mut found);
+    let Ok(metadata) = std::fs::symlink_metadata(modules_dir) else {
+        return found;
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return found;
+    }
+    let Ok(root) = std::fs::canonicalize(modules_dir) else {
+        return found;
+    };
+    let mut visited = std::collections::HashSet::new();
+    discover_module_dirs_into(modules_dir, &root, &mut visited, &mut found);
     found.sort();
     found
 }
 
-fn discover_module_dirs_into(dir: &Path, found: &mut Vec<PathBuf>) {
-    if dir.join("module.json").is_file() {
+fn discover_module_dirs_into(
+    dir: &Path,
+    root: &Path,
+    visited: &mut std::collections::HashSet<PathBuf>,
+    found: &mut Vec<PathBuf>,
+) {
+    let Ok(metadata) = std::fs::symlink_metadata(dir) else {
+        return;
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return;
+    }
+    let Ok(canonical) = std::fs::canonicalize(dir) else {
+        return;
+    };
+    if !canonical.starts_with(root) || !visited.insert(canonical) {
+        return;
+    }
+    let module_json = dir.join("module.json");
+    if std::fs::symlink_metadata(&module_json)
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false)
+    {
         found.push(dir.to_path_buf());
         return;
     }
@@ -171,8 +203,12 @@ fn discover_module_dirs_into(dir: &Path, found: &mut Vec<PathBuf>) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
-            discover_module_dirs_into(&path, found);
+        if entry
+            .file_type()
+            .map(|file_type| file_type.is_dir())
+            .unwrap_or(false)
+        {
+            discover_module_dirs_into(&path, root, visited, found);
         }
     }
 }
@@ -180,6 +216,7 @@ fn discover_module_dirs_into(dir: &Path, found: &mut Vec<PathBuf>) {
 pub fn load_module_manifest(
     module_dir: &Path,
 ) -> Result<LoadedModuleManifest, ModuleManifestError> {
+    validate_module_tree(module_dir)?;
     let plugin_json = module_dir.join("plugin.json");
     if plugin_json.exists() {
         return Err(ModuleManifestError::Diagnostic {
@@ -300,7 +337,7 @@ fn resolve_external_interface_contracts(
         let Some(serde_json::Value::String(relative_path)) = declaration.contract.as_ref() else {
             continue;
         };
-        let path = module_dir.join(relative_path);
+        let path = contained_path(module_dir, relative_path, "external interface contract")?;
         let content = std::fs::read_to_string(&path).map_err(|source| ModuleManifestError::Io {
             path: path.clone(),
             source,

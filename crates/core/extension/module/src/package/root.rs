@@ -1,6 +1,6 @@
 use super::{
     ModuleManifestError, default_enabled, default_modules_dir, default_schema_version,
-    parse_module_entrypoint, validate_modules_dir, validate_relative_path,
+    parse_module_entrypoint, validate_module_id, validate_modules_dir, validate_relative_path,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -45,6 +45,7 @@ impl RootModuleGraphManifest {
     }
 
     pub fn from_path(path: &Path) -> Result<Self, ModuleManifestError> {
+        super::validate_regular_file(path, "root module graph")?;
         let content = std::fs::read_to_string(path).map_err(|source| ModuleManifestError::Io {
             path: path.to_path_buf(),
             source,
@@ -68,12 +69,17 @@ impl RootModuleGraphManifest {
         }
         validate_modules_dir(&self.modules_dir)?;
         for (module_id, entry) in &self.modules {
-            if module_id.trim().is_empty() {
-                return Err(ModuleManifestError::Validation(
-                    "module id cannot be empty".into(),
-                ));
-            }
+            validate_module_id(module_id)?;
             entry.validate(module_id)?;
+        }
+        for module_id in &self.disabled {
+            validate_module_id(module_id)?;
+        }
+        for module_id in self.providers.values() {
+            validate_module_id(module_id)?;
+        }
+        for module_id in self.capability_approvals.keys() {
+            validate_module_id(module_id)?;
         }
         if let Some(layout) = &self.layout {
             layout.validate()?;
@@ -90,6 +96,9 @@ impl RootModuleGraphManifest {
     /// accidentally drop the `mesh` wrapper and any author-owned fields.
     pub fn save(&self, path: &Path) -> Result<(), ModuleManifestError> {
         self.validate()?;
+        if path.exists() {
+            super::validate_regular_file(path, "root module graph")?;
+        }
         let mut document = if path.exists() {
             let content = fs::read_to_string(path).map_err(|source| ModuleManifestError::Io {
                 path: path.to_path_buf(),
@@ -205,9 +214,17 @@ pub struct RootLayoutSelection {
 
 impl RootLayoutSelection {
     fn validate(&self) -> Result<(), ModuleManifestError> {
-        if parse_module_entrypoint(&self.entrypoint).is_none() {
+        let Some((module_id, entrypoint)) = parse_module_entrypoint(&self.entrypoint) else {
             return Err(ModuleManifestError::Validation(format!(
                 "layout entrypoint must use <module-id>:<entrypoint-id>: {}",
+                self.entrypoint
+            )));
+        };
+        validate_module_id(module_id)?;
+        if entrypoint.contains('/') || entrypoint.contains('\\') || entrypoint.trim() != entrypoint
+        {
+            return Err(ModuleManifestError::Validation(format!(
+                "layout entrypoint id must be a simple name: {}",
                 self.entrypoint
             )));
         }

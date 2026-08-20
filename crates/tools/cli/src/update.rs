@@ -13,7 +13,8 @@
 
 use mesh_core_capability::{Capability, CapabilityCatalog, PrivilegeLevel};
 use mesh_core_module::package::{
-    LockedModule, MeshLock, ModuleManifest, ModuleSource, has_local_edits, module_tree_digest,
+    LockedModule, MeshLock, ModuleManifest, ModuleSource, has_local_edits, module_install_path,
+    module_tree_digest, validate_module_tree,
 };
 use mesh_core_service::{CompatibilityClass, diff_contracts, parse_interface_contract};
 use std::collections::BTreeMap;
@@ -171,7 +172,8 @@ pub fn plan_update(
         if only.is_some_and(|requested| requested != module_id) {
             continue;
         }
-        let installed_at = modules_dir.join(module_id.trim_start_matches('@'));
+        let installed_at =
+            module_install_path(modules_dir, module_id).map_err(|error| error.to_string())?;
         if !installed_at.exists() {
             continue;
         }
@@ -317,7 +319,8 @@ pub fn commit_update(
 ) -> Result<Vec<String>, String> {
     let mut updated = Vec::new();
     for candidate in plan.changed() {
-        let installed_at = modules_dir.join(candidate.module_id.trim_start_matches('@'));
+        let installed_at = module_install_path(modules_dir, &candidate.module_id)
+            .map_err(|error| error.to_string())?;
         let Some(revision) = &candidate.candidate_revision else {
             continue;
         };
@@ -366,6 +369,7 @@ pub fn rollback(
 ) -> Result<Vec<String>, String> {
     let lock_path = config_dir.join("mesh.lock");
     let history = config_dir.join("lock-history");
+    MeshLock::load_or_default(&lock_path).map_err(|error| error.to_string())?;
     let generations = MeshLock::history(&history);
     if generations.is_empty() {
         return Err("no previous lock generation to roll back to".into());
@@ -384,7 +388,8 @@ pub fn rollback(
         let Some(revision) = &entry.revision else {
             continue;
         };
-        let installed_at = modules_dir.join(module_id.trim_start_matches('@'));
+        let installed_at =
+            module_install_path(modules_dir, module_id).map_err(|error| error.to_string())?;
         if !installed_at.exists() {
             continue;
         }
@@ -402,6 +407,7 @@ pub fn rollback(
                 String::from_utf8_lossy(&checkout.stderr).trim()
             ));
         }
+        validate_module_tree(&installed_at).map_err(|error| error.to_string())?;
         restored.push(format!("{module_id} → {} ({revision})", entry.version));
     }
 
@@ -416,7 +422,9 @@ pub fn verify(modules_dir: &Path, lock: &MeshLock) -> Vec<(String, bool)> {
     lock.modules
         .iter()
         .filter_map(|(module_id, entry)| {
-            let installed_at = modules_dir.join(module_id.trim_start_matches('@'));
+            let Ok(installed_at) = module_install_path(modules_dir, module_id) else {
+                return Some((module_id.clone(), true));
+            };
             if !installed_at.exists() {
                 return Some((module_id.clone(), true));
             }
@@ -680,10 +688,15 @@ mod tests {
             .unwrap()
             .to_string_lossy()
             .to_string();
+        let module_id = format!("@test/{installed_name}");
+        let installed_at = modules_dir.join("test").join(&installed_name);
+        std::fs::create_dir_all(installed_at.parent().unwrap()).unwrap();
+        std::fs::rename(&repository, &installed_at).unwrap();
+        let repository = installed_at;
 
         let mut lock = MeshLock::new();
         lock.modules.insert(
-            format!("@{installed_name}"),
+            module_id.clone(),
             LockedModule {
                 version: "1.0.0".into(),
                 source: ModuleSource::Git {
@@ -707,7 +720,7 @@ mod tests {
         )
         .unwrap();
         assert!(plan.is_refused());
-        assert_eq!(plan.edited, vec![format!("@{installed_name}")]);
+        assert_eq!(plan.edited, vec![module_id]);
         // --keep excludes it instead of refusing the whole update.
         let kept = plan_update(
             &modules_dir,

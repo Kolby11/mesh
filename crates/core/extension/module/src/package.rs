@@ -13,6 +13,7 @@ mod util;
 #[cfg(test)]
 mod tests;
 
+pub use util::validate_module_id;
 pub(crate) use util::{
     default_enabled, default_modules_dir, default_schema_version, dependency_spec_to_string,
     parse_module_entrypoint, validate_modules_dir, validate_relative_path,

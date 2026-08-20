@@ -583,7 +583,8 @@ fn diagnose_frontend_source_contracts(
             .iter()
             .find(|c| c.locale == default_locale)
             .and_then(|c| {
-                let catalog_path = module_dir.join(&c.path);
+                let catalog_path =
+                    super::super::contained_path(module_dir, &c.path, "i18n catalog").ok()?;
                 let content = std::fs::read_to_string(&catalog_path).ok()?;
                 let map: serde_json::Map<String, serde_json::Value> =
                     serde_json::from_str(&content).ok()?;
