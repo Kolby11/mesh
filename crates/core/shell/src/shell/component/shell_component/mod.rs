@@ -1369,6 +1369,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         // a stationary cursor over an option drifts in and out of the subtree
         // and spuriously fires `pointerleave` on the popover.
         let mut subtree = node.clone();
+        // `hidden` is the parent-surface paint/input exclusion marker. The
+        // same retained node is painted again as the child window, where that
+        // marker must not prune the subtree.
+        subtree.attributes.remove("hidden");
         offset_widget_tree_layout(
             &mut subtree,
             -bounds.0 + content_offset.0,
@@ -1401,6 +1405,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let node = find_node_by_key(tree, node_key)?;
         let bounds = find_node_bounds_by_key(tree, node_key, 0.0, 0.0)?;
         let mut child_tree = node.clone();
+        child_tree.attributes.remove("hidden");
         // Must match `paint_child_surface`'s offset exactly: that call bakes
         // `-bounds + content_offset` in as the painter's starting offset
         // rather than into `.layout`, but for a pure translation the two are
@@ -1448,6 +1453,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         // the popover's own CSS transition resolves and advances through the
         // normal per-node transition engine like any other animated style.
         let _ = exiting;
+        // The retained node is hidden in the parent display list, but the
+        // promoted target owns the node's pixels and must paint its subtree.
+        let mut child_root = node.clone();
+        child_root.attributes.remove("hidden");
         let logical_width = ((buffer.width as f32) / scale.max(f32::EPSILON)).ceil() as u32;
         let logical_height = ((buffer.height as f32) / scale.max(f32::EPSILON)).ceil() as u32;
         let retained_generation = self
@@ -1457,7 +1466,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let mut child_display_lists = self.child_display_lists.borrow_mut();
         let display_list = child_display_lists.get_or_insert(node.id);
         display_list.update_at_for_retained_generation_with_dirty_nodes(
-            node,
+            &child_root,
             retained_generation,
             self.retained_tree.render_dirty(),
             self.retained_tree.render_dirty_node_ids(),
@@ -1770,6 +1779,29 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn set_popup_promoted(&mut self, promoted: bool) {
         self.popup_promoted = promoted;
+    }
+
+    fn set_child_surface_promoted(&mut self, node_key: &str, promoted: bool) -> bool {
+        if node_key == "root" || node_key.is_empty() {
+            return false;
+        }
+        let changed = if promoted {
+            self.promoted_window_keys.insert(node_key.to_string())
+        } else {
+            self.promoted_window_keys.remove(node_key)
+        };
+        if changed {
+            // The node remains owned by this tree, but its layout and paint
+            // ownership move across the parent/window seam.
+            self.invalidate(
+                ComponentDirtyFlags::TREE_REBUILD
+                    | ComponentDirtyFlags::STYLE
+                    | ComponentDirtyFlags::LAYOUT
+                    | ComponentDirtyFlags::PAINT
+                    | ComponentDirtyFlags::METRICS,
+            );
+        }
+        changed
     }
 
     fn display_list_paint_commands(&self) -> &[DisplayPaintCommand] {

@@ -329,6 +329,25 @@ fn absolute_child_with_top_left_insets() {
 }
 
 #[test]
+fn absolute_auto_child_keeps_intrinsic_content_size() {
+    let mut root = make_node("row", Dimension::Px(300.0), Dimension::Px(200.0));
+    let mut widget = make_node("widget", Dimension::Auto, Dimension::Auto);
+    widget.computed_style.position = Position::Absolute;
+    widget.children = vec![make_node(
+        "content",
+        Dimension::Px(80.0),
+        Dimension::Px(40.0),
+    )]
+    .into();
+    root.children = vec![widget].into();
+
+    LayoutEngine::compute(&mut root, 300.0, 200.0);
+
+    assert_eq!(root.children[0].layout.width, 80.0);
+    assert_eq!(root.children[0].layout.height, 40.0);
+}
+
+#[test]
 fn absolute_position_uses_inset_edges() {
     let mut root = make_node("container", Dimension::Px(300.0), Dimension::Px(200.0));
     root.computed_style.padding = Edges::all(10.0);

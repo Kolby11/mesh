@@ -96,7 +96,13 @@ impl Shell {
             let Some(surface) = self.surfaces.get(target_surface_id) else {
                 continue;
             };
-            let fixed_surface_size = if surface.width == 0 || surface.height == 0 {
+            let fixed_surface_size = if matches!(target, TargetRef::Child(child_index)
+                if self.components[index].children[child_index].kind
+                    == crate::shell::types::ChildSurfaceKind::Window)
+            {
+                self.presentation_engine
+                    .window_configured_size(target_surface_id)
+            } else if surface.width == 0 || surface.height == 0 {
                 None
             } else {
                 Some((surface.width.max(1), surface.height.max(1)))

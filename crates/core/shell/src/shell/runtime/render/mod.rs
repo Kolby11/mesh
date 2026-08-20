@@ -9,7 +9,7 @@ mod tests;
 use popup::*;
 
 use super::super::*;
-use crate::shell::types::{ChildSurface, SurfaceTarget};
+use crate::shell::types::{ChildSurface, ChildSurfaceKind, SurfaceTarget};
 use mesh_core_elements::style::BackgroundPaint;
 use mesh_core_elements::{PopoverAnchor, PopoverConstraintAdjustment, PopoverGrab, PopoverGravity};
 use mesh_core_presentation::{
@@ -708,7 +708,21 @@ impl Shell {
     /// transition.
     fn drain_window_close_requests(&mut self) -> Result<(), ShellRunError> {
         for surface_id in self.presentation_engine.take_close_requests() {
-            if self.component_index_for_surface(&surface_id).is_none() {
+            let Some((index, target)) = self.component_target_for_surface(&surface_id) else {
+                continue;
+            };
+            if let TargetRef::Child(child_index) = target
+                && self.components[index].children[child_index].kind == ChildSurfaceKind::Window
+            {
+                let node_key = self.components[index].children[child_index]
+                    .node_key
+                    .clone();
+                tracing::info!(surface_id, %node_key, "embedded widget window close requested; demoting widget");
+                self.set_child_surface_role(
+                    self.components[index].surface_id.clone(),
+                    node_key,
+                    SurfaceRole::Layer,
+                )?;
                 continue;
             }
             tracing::info!(surface_id, "window close requested; hiding surface");
@@ -757,8 +771,13 @@ impl Shell {
             .target
             .surface_id
             .clone();
+        let kind = self.components[index].children[child_index].kind;
         self.components[index].children.remove(child_index);
-        self.presentation_engine.destroy_popup(&surface_id);
+        if kind == ChildSurfaceKind::Window {
+            self.presentation_engine.destroy_surface(&surface_id);
+        } else {
+            self.presentation_engine.destroy_popup(&surface_id);
+        }
         self.core.surfaces.remove(&surface_id);
         self.surfaces.remove(&surface_id);
         self.component_by_surface.remove(&surface_id);

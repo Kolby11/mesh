@@ -5,6 +5,32 @@ pub(super) fn collect_child_surface_requests(
     node: &WidgetNode,
     requests: &mut Vec<ChildSurfaceRequest>,
 ) {
+    if node.is_promoted_window()
+        && let Some(node_key) = node.mesh_key()
+    {
+        let bounds = bounds_to_i32_rect((
+            node.layout.x,
+            node.layout.y,
+            node.layout.x + node.layout.width,
+            node.layout.y + node.layout.height,
+        ));
+        requests.push(ChildSurfaceRequest {
+            node_key: node_key.to_string(),
+            kind: ChildSurfaceKind::Window,
+            anchor_rect: bounds,
+            content_size: (
+                node.layout.width.ceil().max(1.0) as u32,
+                node.layout.height.ceil().max(1.0) as u32,
+            ),
+            content_padding: (0, 0, 0, 0),
+            placement: PopoverPlacement::default(),
+        });
+        // A promoted widget owns its entire subtree. Descendant popovers are
+        // intentionally not promoted as siblings of this window target; they
+        // will be handled by the window's own future child-surface scope.
+        return;
+    }
+
     if source_element_tag(node) == "popover"
         && popover_is_open(node)
         && let Some(node_key) = node.mesh_key()

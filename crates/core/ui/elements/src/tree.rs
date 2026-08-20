@@ -188,6 +188,7 @@ pub struct WidgetNodeAuthored {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WidgetCompositionMetadata {
     pub promoted_popover: bool,
+    pub promoted_window: bool,
 }
 
 /// A node produced by evaluating a template against script state.
@@ -279,6 +280,14 @@ impl WidgetNode {
 
     pub fn is_promoted_popover(&self) -> bool {
         self.composition.promoted_popover
+    }
+
+    pub fn mark_promoted_window(&mut self) {
+        self.composition.promoted_window = true;
+    }
+
+    pub fn is_promoted_window(&self) -> bool {
+        self.composition.promoted_window
     }
 
     pub fn set_mesh_key(&mut self, key: impl Into<String>) {

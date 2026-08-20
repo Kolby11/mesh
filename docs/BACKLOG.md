@@ -23,12 +23,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ## Shell features
 
-- [ ] Per-widget promotion — promote a widget _embedded in another surface_ into
-      its own window, rather than a whole surface. Depends on the shared surface
-      VM (the widget does not own a VM today) and on multi-instance frontend
-      modules. Whole-surface promotion shipped 2026-07-30. Design:
-      [`.planning/todos/pending/2026-07-28-toplevel-window-surfaces.md`](../.planning/todos/pending/2026-07-28-toplevel-window-surfaces.md).
-
 ## Section audit feature checklist
 
 These are the feature-level items extracted from the section improvement audits.

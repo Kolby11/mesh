@@ -198,6 +198,31 @@ fn open_popover_nodes_derive_child_surface_requests() {
 }
 
 #[test]
+fn promoted_widget_nodes_derive_toplevel_requests_and_own_descendants() {
+    let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 40.0);
+    let mut widget = keyed_node("box", "root/widget", 20.0, 4.0, 96.0, 36.0);
+    widget.mark_promoted_window();
+    widget.children.push(keyed_node(
+        "button",
+        "root/widget/action",
+        4.0,
+        4.0,
+        48.0,
+        24.0,
+    ));
+    root.children.push(widget);
+
+    let mut requests = Vec::new();
+    collect_child_surface_requests(&root, &root, &mut requests);
+
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].kind, ChildSurfaceKind::Window);
+    assert_eq!(requests[0].node_key, "root/widget");
+    assert_eq!(requests[0].content_size, (96, 36));
+    assert_eq!(requests[0].content_padding, (0, 0, 0, 0));
+}
+
+#[test]
 fn popover_with_descendant_box_shadow_gets_buffer_padding() {
     // No shadow on the popover node itself; a descendant (e.g. a
     // floating bubble button) carries the shadow, mirroring how

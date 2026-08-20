@@ -87,7 +87,7 @@ pub(super) fn apply_hidden_attribute_layout(node: &mut WidgetNode) {
             "" | "true" | "1" | "hidden" | "disabled" | "checked"
         )
     });
-    if hidden && !node.is_promoted_popover() {
+    if hidden && !node.is_promoted_popover() && !node.is_promoted_window() {
         node.computed_style.display = mesh_core_elements::style::Display::None;
     }
 }
@@ -127,6 +127,41 @@ pub(super) fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
     }
     for child in &mut node.children {
         collapse_promoted_popover_wrappers(child);
+    }
+}
+
+/// Promoted embedded widgets remain in the retained tree so their shared VM,
+/// state, and event handlers stay live, but their pixels are owned by the
+/// independent window target. Keep the subtree's geometry available for the
+/// child painter while removing the promoted node from the parent's layout and
+/// hit-test path.
+pub(super) fn collapse_promoted_window_widgets(node: &mut WidgetNode) {
+    if node.is_promoted_window() {
+        // Keep the widget's intrinsic dimensions available to the child-window
+        // request. Absolute positioning removes it from the parent's flex/grid
+        // flow without turning an auto-sized widget into a 0x0 window.
+        node.computed_style.position = mesh_core_elements::style::Position::Absolute;
+        node.computed_style.overflow_x = mesh_core_elements::style::Overflow::Visible;
+        node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Visible;
+    }
+    for child in &mut node.children {
+        collapse_promoted_window_widgets(child);
+    }
+}
+
+pub(super) fn mark_promoted_window_widgets(
+    node: &mut WidgetNode,
+    promoted_keys: &std::collections::HashSet<String>,
+) {
+    if node
+        .mesh_key()
+        .is_some_and(|key| promoted_keys.contains(key))
+    {
+        node.attributes.insert("hidden".into(), "true".into());
+        node.mark_promoted_window();
+    }
+    for child in &mut node.children {
+        mark_promoted_window_widgets(child, promoted_keys);
     }
 }
 

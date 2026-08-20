@@ -730,6 +730,7 @@ impl super::types::ShellComponent for FocusRecordingComponent {
 pub(super) struct PopoverHarnessState {
     pub(super) open: bool,
     pub(super) node_key: String,
+    pub(super) kind: super::types::ChildSurfaceKind,
     pub(super) anchor_rect: (i32, i32, i32, i32),
     pub(super) content_size: (u32, u32),
     /// Reserve around the popover content for descendant shadow/filter
@@ -750,6 +751,7 @@ impl Default for PopoverHarnessState {
         Self {
             open: true,
             node_key: "root/popover".into(),
+            kind: super::types::ChildSurfaceKind::Popover,
             anchor_rect: (8, 10, 40, 16),
             content_size: (72, 32),
             content_padding: (0, 0, 0, 0),
@@ -860,12 +862,29 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
         }
         vec![super::types::ChildSurfaceRequest {
             node_key: state.node_key.clone(),
-            kind: super::types::ChildSurfaceKind::Popover,
+            kind: state.kind,
             anchor_rect: state.anchor_rect,
             content_size: state.content_size,
             content_padding: state.content_padding,
             placement: mesh_core_elements::PopoverPlacement::default(),
         }]
+    }
+
+    fn set_child_surface_promoted(&mut self, node_key: &str, promoted: bool) -> bool {
+        let mut state = self.state.lock().unwrap();
+        if state.node_key != node_key {
+            return false;
+        }
+        let kind = if promoted {
+            super::types::ChildSurfaceKind::Window
+        } else {
+            super::types::ChildSurfaceKind::Popover
+        };
+        if state.kind == kind {
+            return false;
+        }
+        state.kind = kind;
+        true
     }
 
     fn paint_child_surface(

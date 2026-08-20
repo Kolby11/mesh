@@ -699,6 +699,10 @@ pub(super) struct FrontendSurfaceComponent {
     /// the normal transition engine while the shell keeps its child surface
     /// mapped. Set by the shell via `set_closing_child_keys`.
     closing_child_keys: HashSet<String>,
+    /// Retained node keys whose embedded widget is currently realized as an
+    /// independent `xdg_toplevel` child surface. The node stays in this
+    /// component's tree so its shared surface VM and state remain live.
+    promoted_window_keys: HashSet<String>,
     /// `_mesh_key`s of newly opened child popovers receiving a controlled
     /// first paint in their collapsed entrance state.
     entering_child_keys: HashSet<String>,
@@ -1085,6 +1089,7 @@ impl FrontendSurfaceComponent {
             surface_exiting: false,
             surface_entering: false,
             closing_child_keys: HashSet::new(),
+            promoted_window_keys: HashSet::new(),
             entering_child_keys: HashSet::new(),
             dirty: true,
             style_only_dirty: false,

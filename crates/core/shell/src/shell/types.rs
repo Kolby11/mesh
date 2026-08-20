@@ -66,12 +66,14 @@ impl SurfaceTarget {
     }
 }
 
-/// A child surface auto-derived from an in-tree escape-bounds node (today a
-/// `<popover open>`). Realized as an `xdg_popup` child of the component's
-/// parent surface and painted from the *same* component VM. Keyed by the
-/// originating node's stable retained key so it survives re-renders.
+/// A child surface derived from an in-tree node. Popovers and overflow nodes
+/// are realized as `xdg_popup` children; explicitly promoted widgets are
+/// realized as independent `xdg_toplevel` windows. Every target is painted
+/// from the *same* component VM and keyed by the originating node's stable
+/// retained key so it survives re-renders.
 pub(super) struct ChildSurface {
     pub(super) target: SurfaceTarget,
+    pub(super) kind: ChildSurfaceKind,
     // `node_key` and `anchor_rect` are written when a child surface is derived
     // and consumed by the child reconcile/positioner pass (popup placement +
     // re-matching a node to its surface across re-renders), which is not yet

@@ -497,6 +497,13 @@ impl FrontendSurfaceComponent {
         )
         .with_window_state(self.window_states);
         annotate_runtime_and_overflow_tree(tree, "root".to_string(), &mut annotation_context);
+        // Runtime keys are assigned by annotation, so apply the promotion mark
+        // afterwards. This is still before style resolution, allowing the
+        // explicit hidden attribute to keep the subtree out of the parent
+        // display list while its typed metadata preserves child-window layout.
+        if !self.promoted_window_keys.is_empty() {
+            mark_promoted_window_widgets(tree, &self.promoted_window_keys);
+        }
         if self.surface_exiting {
             append_class_recursive(tree, "mesh-surface-exiting");
             tree.attributes
@@ -750,6 +757,9 @@ impl FrontendSurfaceComponent {
         // and push its trigger row's siblings into overlap. Must run before layout.
         if self.has_promoted_popover_wrappers.get() {
             collapse_promoted_popover_wrappers(tree);
+        }
+        if !self.promoted_window_keys.is_empty() {
+            collapse_promoted_window_widgets(tree);
         }
         if self.has_error_placeholders.get() {
             constrain_error_placeholders(tree);

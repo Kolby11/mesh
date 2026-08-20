@@ -229,6 +229,18 @@ Because the roles size in opposite directions (below), a promotable surface goes
 through a fresh first-configure pass on every change rather than carrying over a
 size measured under the other role.
 
+#### Promoted embedded widgets
+
+**Status: shipped.** An embedded widget can be promoted without promoting its
+parent surface. The shell keeps the widget's retained node and shared surface
+VM in place, removes its pixels from the parent layout, and paints the keyed
+subtree into an independent `xdg_toplevel`. Its state, live `bind:this`
+references, handlers, and service subscriptions therefore continue across the
+move. A widget can be controlled from Luau with
+`shell.promote-widget` / `shell.demote-widget`, each carrying the owning
+`surface_id` and retained `node_key`; `shell.set-widget-role` is the explicit
+role form. Closing the promoted window demotes the widget back into its parent.
+
 Surface **sizing is CSS**: the laid-out box of the component root
 (`width: 100%` spans the anchored edge, `fit-content` shrinks to content,
 `min-*`/`max-*` clamp), measured by `measure_content_size()`. The show/hide

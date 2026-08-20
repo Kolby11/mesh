@@ -640,6 +640,11 @@ impl Shell {
                 };
                 self.set_surface_role(surface_id, role)
             }
+            CoreRequest::SetChildSurfaceRole {
+                surface_id,
+                node_key,
+                role,
+            } => self.set_child_surface_role(surface_id, node_key, role),
             CoreRequest::PublishDiagnostics { message } => {
                 tracing::info!("diagnostic: {message}");
                 Ok(VecDeque::new())
@@ -1475,6 +1480,48 @@ impl Shell {
         Ok(VecDeque::new())
     }
 
+    pub(in crate::shell) fn set_child_surface_role(
+        &mut self,
+        surface_id: SurfaceId,
+        node_key: String,
+        role: mesh_core_wayland::SurfaceRole,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        if node_key.is_empty() || node_key == "root" {
+            tracing::warn!(%surface_id, %node_key, "cannot change the role of the surface root as a widget");
+            return Ok(VecDeque::new());
+        }
+        let Some(index) = self.component_index_for_surface(&surface_id) else {
+            tracing::warn!(%surface_id, "cannot change embedded widget role: no such surface");
+            return Ok(VecDeque::new());
+        };
+        if role == mesh_core_wayland::SurfaceRole::Window
+            && !self.presentation_engine.window_role_supported()
+        {
+            tracing::warn!(%surface_id, %node_key, "cannot promote embedded widget: the compositor does not expose xdg_wm_base");
+            return Ok(VecDeque::new());
+        }
+
+        let promoted = role == mesh_core_wayland::SurfaceRole::Window;
+        if !self.components[index]
+            .component
+            .set_child_surface_promoted(&node_key, promoted)
+        {
+            return Ok(VecDeque::new());
+        }
+
+        // A role switch destroys the old child compositor object before the
+        // next parent frame requests its replacement. The component VM and
+        // retained node are deliberately untouched.
+        if let Some(child_index) = self.components[index]
+            .children
+            .iter()
+            .position(|child| child.node_key == node_key)
+        {
+            self.destroy_child_surface_at(index, child_index);
+        }
+        Ok(VecDeque::new())
+    }
+
     fn set_surface_visibility(
         &mut self,
         surface_id: SurfaceId,
@@ -1983,6 +2030,7 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::ToggleSurface { .. } => "toggle_surface",
         CoreRequest::SetSurfaceRole { .. } => "set_surface_role",
         CoreRequest::ToggleSurfaceRole { .. } => "toggle_surface_role",
+        CoreRequest::SetChildSurfaceRole { .. } => "set_child_surface_role",
         CoreRequest::ShowSurface { .. } => "show_surface",
         CoreRequest::HideSurface { .. } => "hide_surface",
         CoreRequest::HidePopover { .. } => "hide_popover",

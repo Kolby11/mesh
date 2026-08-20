@@ -109,6 +109,8 @@ Thin wrappers over the declared shell channels
 ```
 surface.show / hide / toggle { surface }
 surface.promote / demote / toggle_role { surface }
+widget.promote / demote { surface, node_key }
+widget.set_role { surface, node_key, role }
 shell.publish { channel, payload }     # declared shell.* channels only
 ```
 
@@ -123,6 +125,12 @@ the CLI instead:
 ```
 bind = SUPER, S, exec, mesh surface toggle-role @mesh/settings
 ```
+
+The widget forms apply the same non-destructive transition to one retained
+widget embedded in a surface. The parent surface and shared component VM stay
+alive; only the widget's child target changes between inline layout and an
+`xdg_toplevel` window. `node_key` is the stable retained key from the semantic
+tree, so automation targets the widget without relying on coordinates.
 
 **Status: shipped** on the raw IPC line protocol
 (`shell:promote_surface:<id>`, `shell:demote_surface:<id>`,

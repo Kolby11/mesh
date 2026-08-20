@@ -17,6 +17,9 @@ pub enum ShellOperation {
     HidePopover,
     SetSurfaceRole,
     ToggleSurfaceRole,
+    PromoteWidget,
+    DemoteWidget,
+    SetWidgetRole,
     ToggleSurface,
     PositionSurface,
     ActivatePopover,
@@ -146,6 +149,9 @@ fn definition(
             Some("shell.surface"),
             None,
         ),
+        "shell.promote-widget" => (ShellOperation::PromoteWidget, Some("shell.surface"), None),
+        "shell.demote-widget" => (ShellOperation::DemoteWidget, Some("shell.surface"), None),
+        "shell.set-widget-role" => (ShellOperation::SetWidgetRole, Some("shell.surface"), None),
         "shell.toggle-surface" => (ShellOperation::ToggleSurface, Some("shell.surface"), None),
         "shell.position-surface" => (ShellOperation::PositionSurface, Some("shell.surface"), None),
         "shell.activate-popover" => (ShellOperation::ActivatePopover, Some("shell.surface"), None),
@@ -193,6 +199,8 @@ enum PayloadShape {
     SurfaceId,
     HidePopover,
     SurfaceRole,
+    WidgetTarget,
+    WidgetRole,
     PositionSurface,
     ActivatePopover,
     Locale,
@@ -210,6 +218,8 @@ fn payload_shape(operation: ShellOperation) -> PayloadShape {
         | ShellOperation::ToggleSurface => PayloadShape::SurfaceId,
         ShellOperation::HidePopover => PayloadShape::HidePopover,
         ShellOperation::SetSurfaceRole => PayloadShape::SurfaceRole,
+        ShellOperation::PromoteWidget | ShellOperation::DemoteWidget => PayloadShape::WidgetTarget,
+        ShellOperation::SetWidgetRole => PayloadShape::WidgetRole,
         ShellOperation::PositionSurface => PayloadShape::PositionSurface,
         ShellOperation::ActivatePopover => PayloadShape::ActivatePopover,
         ShellOperation::SetLocale => PayloadShape::Locale,
@@ -255,6 +265,25 @@ fn validate_payload_shape(shape: PayloadShape, payload: &Value) -> Result<(), St
         PayloadShape::SurfaceRole => {
             expect_keys(object, &["surface_id", "role"])?;
             require_string(object, "surface_id")?;
+            let role = require_string(object, "role")?;
+            if matches!(
+                role.trim().to_ascii_lowercase().as_str(),
+                "layer" | "window" | "toplevel"
+            ) {
+                Ok(())
+            } else {
+                Err("role must be layer, window, or toplevel".into())
+            }
+        }
+        PayloadShape::WidgetTarget => {
+            expect_keys(object, &["surface_id", "node_key"])?;
+            require_string(object, "surface_id")?;
+            require_string(object, "node_key").map(|_| ())
+        }
+        PayloadShape::WidgetRole => {
+            expect_keys(object, &["surface_id", "node_key", "role"])?;
+            require_string(object, "surface_id")?;
+            require_string(object, "node_key")?;
             let role = require_string(object, "role")?;
             if matches!(
                 role.trim().to_ascii_lowercase().as_str(),
@@ -430,6 +459,60 @@ mod tests {
         );
         assert!(matches!(
             result,
+            Err(OperationRejection::MalformedPayload { .. })
+        ));
+    }
+
+    #[test]
+    fn widget_role_operations_require_a_surface_and_node_target() {
+        let registry = OperationRegistry::builtin();
+        let capabilities = capabilities(&["shell.surface"]);
+        let target = serde_json::json!({
+            "surface_id": "@mesh/panel",
+            "node_key": "root/widgets/media"
+        });
+
+        assert_eq!(
+            registry
+                .authorize_event(
+                    "shell.promote-widget",
+                    &target,
+                    "@mesh/panel",
+                    &capabilities,
+                )
+                .unwrap(),
+            Some(ShellOperation::PromoteWidget)
+        );
+        assert_eq!(
+            registry
+                .authorize_event("shell.demote-widget", &target, "@mesh/panel", &capabilities,)
+                .unwrap(),
+            Some(ShellOperation::DemoteWidget)
+        );
+        assert_eq!(
+            registry
+                .authorize_event(
+                    "shell.set-widget-role",
+                    &serde_json::json!({
+                        "surface_id": "@mesh/panel",
+                        "node_key": "root/widgets/media",
+                        "role": "toplevel"
+                    }),
+                    "@mesh/panel",
+                    &capabilities,
+                )
+                .unwrap(),
+            Some(ShellOperation::SetWidgetRole)
+        );
+
+        let malformed = registry.authorize_event(
+            "shell.promote-widget",
+            &serde_json::json!({ "surface_id": "@mesh/panel" }),
+            "@mesh/panel",
+            &capabilities,
+        );
+        assert!(matches!(
+            malformed,
             Err(OperationRejection::MalformedPayload { .. })
         ));
     }

@@ -238,6 +238,24 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
             .map(|id| CoreRequest::ToggleSurfaceRole {
                 surface_id: id.to_string(),
             }),
+        "shell.promote-widget" | "shell.demote-widget" | "shell.set-widget-role" => {
+            let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
+            let node_key = event.payload.get("node_key").and_then(|v| v.as_str())?;
+            let role = match event.channel.as_str() {
+                "shell.promote-widget" => mesh_core_wayland::SurfaceRole::Window,
+                "shell.demote-widget" => mesh_core_wayland::SurfaceRole::Layer,
+                _ => event
+                    .payload
+                    .get("role")
+                    .and_then(|v| v.as_str())
+                    .and_then(mesh_core_surface_config::parse_surface_role)?,
+            };
+            Some(CoreRequest::SetChildSurfaceRole {
+                surface_id: surface_id.to_string(),
+                node_key: node_key.to_string(),
+                role,
+            })
+        }
         "shell.toggle-surface" => event
             .payload
             .get("surface_id")
@@ -450,6 +468,50 @@ mod tests {
             }
             other => panic!("expected network ServiceCommand, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn script_events_to_requests_maps_widget_role_operations() {
+        let requests = script_events_to_requests(vec![
+            event_with(
+                "shell.promote-widget",
+                serde_json::json!({
+                    "surface_id": "@mesh/panel",
+                    "node_key": "root/widgets/media"
+                }),
+                "@mesh/panel",
+                &["shell.surface"],
+            ),
+            event_with(
+                "shell.set-widget-role",
+                serde_json::json!({
+                    "surface_id": "@mesh/panel",
+                    "node_key": "root/widgets/media",
+                    "role": "layer"
+                }),
+                "@mesh/panel",
+                &["shell.surface"],
+            ),
+        ]);
+
+        assert!(matches!(
+            &requests[..],
+            [
+                CoreRequest::SetChildSurfaceRole {
+                    surface_id,
+                    node_key,
+                    role: mesh_core_wayland::SurfaceRole::Window,
+                },
+                CoreRequest::SetChildSurfaceRole {
+                    surface_id: second_surface_id,
+                    node_key: second_node_key,
+                    role: mesh_core_wayland::SurfaceRole::Layer,
+                },
+            ] if surface_id == "@mesh/panel"
+                && node_key == "root/widgets/media"
+                && second_surface_id == surface_id
+                && second_node_key == node_key
+        ));
     }
 
     /// Composition and configuration writes are ordinary service commands, so

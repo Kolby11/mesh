@@ -19,9 +19,12 @@ Phases 1–3 shipped 2026-07-29 — static `role: "window"`, popups over topleve
 title/app_id/resizable/decorations, close handling, and the diagnostics.
 **Phase 4 shipped 2026-07-30** — runtime promote/demote for whole surfaces, the
 `promotable` manifest opt-in, the `:windowed` CSS state, and the IPC verbs.
-Records: [`../../log/2026-07.md`](../../log/2026-07.md). What follows is the
-original design; phase 5 (per-widget promotion) is still open and is the reason
-this file is still in `pending/`.
+**Phase 5 shipped 2026-08-20** — an embedded retained widget can be promoted to
+an independent `xdg_toplevel`, demoted back into its parent, assigned an
+explicit window role, and closed without tearing down the parent component VM.
+Records: [`../../log/2026-07.md`](../../log/2026-07.md) and
+[`../../log/2026-08.md`](../../log/2026-08.md). The original design below is
+retained as the rationale and historical implementation guide.
 
 Two things §6 did not anticipate, both in the phase-4 record: the role-mismatch
 diagnostic from phase 1 makes a surface that holds *both* roles unexpressible, so

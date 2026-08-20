@@ -19,6 +19,11 @@ The 16 section improvement audits now have a feature-level checkbox checklist
 in `docs/BACKLOG.md`; implementation detail, evidence, and regression matrices
 remain in each section's `improvements.md`.
 
+Per-widget promotion is complete: an embedded retained widget can move between
+its parent surface and an independent `xdg_toplevel` while retaining the shared
+component VM, state, paint, and input path. The backlog item and design record
+are closed; validation details are in the 2026-08 log.
+
 Section 01 improvement 1 is complete: module capability declarations now resolve
 against a closed catalog and persisted root-graph approvals before activation;
 required grants fail without approval, optional grants default to denied, and

@@ -33,6 +33,7 @@ fn component_runtime_resolves_parent_and_child_surface_targets() {
                 child_id.clone(),
                 mesh_core_presentation::LayerSurfaceSizePolicy::Flexible,
             ),
+            kind: super::types::ChildSurfaceKind::Popover,
             node_key: "root/0/popover".to_string(),
             anchor_rect: (12, 0, 40, 56),
             content_padding: (0, 0, 0, 0),
@@ -142,6 +143,117 @@ fn child_surface_reconcile_creates_popup_and_paints_subtree() {
     assert_eq!(
         state.lock().unwrap().painted_nodes.as_slice(),
         ["root/popover"]
+    );
+}
+
+#[test]
+fn promoting_an_embedded_child_replaces_its_popup_with_a_toplevel() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(Arc::clone(&state))));
+
+    render_components_until_child_popup(&mut shell);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    let paints_before = state.lock().unwrap().painted_nodes.len();
+
+    shell
+        .apply_request(CoreRequest::SetChildSurfaceRole {
+            surface_id: "@test/popover-host".into(),
+            node_key: "root/popover".into(),
+            role: mesh_core_wayland::SurfaceRole::Window,
+        })
+        .unwrap();
+
+    assert_eq!(
+        state.lock().unwrap().kind,
+        super::types::ChildSurfaceKind::Window
+    );
+    assert_eq!(
+        shell.presentation_engine.testing_destroyed_popups(),
+        [child_id.clone()]
+    );
+
+    render_components_until_child_popup(&mut shell);
+
+    assert_eq!(shell.components[0].children.len(), 1);
+    let child = &shell.components[0].children[0];
+    assert_eq!(child.target.surface_id, child_id);
+    assert_eq!(child.kind, super::types::ChildSurfaceKind::Window);
+    assert!(child.target.popup_parent_surface.is_none());
+    assert!(
+        shell
+            .presentation_engine
+            .testing_popup_config(&child_id)
+            .is_none()
+    );
+    let (_, config) = shell
+        .presentation_engine
+        .testing_surface_configs()
+        .into_iter()
+        .find(|(surface_id, _)| surface_id == &child_id)
+        .expect("promoted child should configure an xdg_toplevel");
+    assert_eq!(config.role, mesh_core_wayland::SurfaceRole::Window);
+    assert_eq!((config.width, config.height), (72, 32));
+    assert!(
+        shell
+            .presentation_engine
+            .testing_presented_surfaces()
+            .iter()
+            .any(|surface| surface == &child_id)
+    );
+    assert!(state.lock().unwrap().painted_nodes.len() > paints_before);
+}
+
+#[test]
+fn closing_a_promoted_child_demotes_it_without_tearing_down_the_component() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(Arc::clone(&state))));
+
+    render_components_until_child_popup(&mut shell);
+    let mut emitted = shell
+        .apply_request(CoreRequest::SetChildSurfaceRole {
+            surface_id: "@test/popover-host".into(),
+            node_key: "root/popover".into(),
+            role: mesh_core_wayland::SurfaceRole::Window,
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    render_components_until_child_popup(&mut shell);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+
+    shell
+        .presentation_engine
+        .testing_push_close_request(child_id.clone());
+    shell.render_components().unwrap();
+
+    assert_eq!(
+        state.lock().unwrap().kind,
+        super::types::ChildSurfaceKind::Popover
+    );
+    assert!(shell.components.iter().any(|runtime| {
+        runtime.surface_id == "@test/popover-host" && runtime.children.is_empty()
+    }));
+    assert_eq!(
+        shell.presentation_engine.testing_destroyed_surfaces(),
+        [child_id.clone()]
+    );
+
+    render_components_until_child_popup(&mut shell);
+    assert_eq!(shell.components[0].children[0].target.surface_id, child_id);
+    assert_eq!(
+        shell.components[0].children[0].kind,
+        super::types::ChildSurfaceKind::Popover
+    );
+    assert!(
+        shell
+            .presentation_engine
+            .testing_popup_config(&child_id)
+            .is_some()
     );
 }
 

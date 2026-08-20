@@ -46,6 +46,8 @@ pub struct ChildSurfaceRequest {
 pub enum ChildSurfaceKind {
     Popover,
     Overflow,
+    /// An embedded widget promoted into its own `xdg_toplevel` window.
+    Window,
 }
 
 /// The two sizes a surface paints against, which are not the same size.
@@ -298,6 +300,14 @@ pub enum CoreRequest {
     ToggleSurfaceRole {
         surface_id: SurfaceId,
     },
+    /// Move one embedded widget between its parent's retained tree and an
+    /// independent `xdg_toplevel`. The owning surface and shared component VM
+    /// remain alive in both states.
+    SetChildSurfaceRole {
+        surface_id: SurfaceId,
+        node_key: String,
+        role: mesh_core_wayland::SurfaceRole,
+    },
     /// Reposition below a trigger element, anchored top-left.
     PositionSurface {
         surface_id: SurfaceId,
@@ -521,6 +531,11 @@ pub trait ShellComponent: Send {
     }
     /// Whether [`CoreRequest::SetSurfaceRole`] applies to this surface.
     fn surface_promotable(&self) -> bool {
+        false
+    }
+    /// Promote or demote an embedded widget identified by its retained node
+    /// key. The default is a no-op for non-frontend components.
+    fn set_child_surface_promoted(&mut self, _node_key: &str, _promoted: bool) -> bool {
         false
     }
     fn render(&mut self, surface: &mut dyn ShellSurface) -> Result<(), ComponentError>;

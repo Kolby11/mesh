@@ -31,26 +31,19 @@ impl Shell {
         self.components[index]
             .dismissed_child_node_keys
             .retain(|node_key| requested_keys.contains(&node_key.as_str()));
-        if !self.presentation_engine.popup_supported() {
-            self.destroy_all_child_surfaces(index);
-            self.components[index].entering_child_node_keys.clear();
-            self.components[index]
-                .component
-                .set_closing_child_keys_from_slice(&[]);
-            self.components[index]
-                .component
-                .set_entering_child_keys_from_slice(&[]);
-            return Ok(false);
-        }
+        let popup_supported = self.presentation_engine.popup_supported();
+        let window_supported = self.presentation_engine.window_role_supported();
 
         let now = std::time::Instant::now();
         let mut child_index = 0;
         while child_index < self.components[index].children.len() {
-            if requested_keys.contains(
-                &self.components[index].children[child_index]
-                    .node_key
-                    .as_str(),
-            ) {
+            let child = &self.components[index].children[child_index];
+            let still_requested = requests.iter().any(|request| {
+                request.node_key == child.node_key
+                    && request.kind == child.kind
+                    && child_kind_supported(request.kind, popup_supported, window_supported)
+            });
+            if still_requested {
                 self.components[index].children[child_index].closing_until = None;
                 child_index += 1;
                 continue;
@@ -101,11 +94,23 @@ impl Shell {
 
         let mut any_presented = false;
         for request in &requests {
+            if !child_kind_supported(request.kind, popup_supported, window_supported) {
+                continue;
+            }
             if self.components[index]
                 .dismissed_child_node_keys
                 .contains(&request.node_key)
             {
                 continue;
+            }
+            let existing_child = self.components[index]
+                .children
+                .iter()
+                .position(|child| child.node_key == request.node_key);
+            if let Some(existing) = existing_child
+                && self.components[index].children[existing].kind != request.kind
+            {
+                self.destroy_child_surface_at(index, existing);
             }
             let existing_child = self.components[index]
                 .children
@@ -141,10 +146,13 @@ impl Shell {
             } else {
                 let mut target =
                     SurfaceTarget::new(child_surface_id.clone(), LayerSurfaceSizePolicy::Flexible);
-                target.popup_parent_surface = Some(parent_surface_id.to_string());
+                if request.kind != ChildSurfaceKind::Window {
+                    target.popup_parent_surface = Some(parent_surface_id.to_string());
+                }
                 target.force_full_present = true;
                 self.components[index].children.push(ChildSurface {
                     target,
+                    kind: request.kind,
                     node_key: request.node_key.clone(),
                     anchor_rect: request.anchor_rect,
                     content_padding: request.content_padding,
@@ -171,34 +179,19 @@ impl Shell {
                 continue;
             }
 
-            // The buffer is padded (pad_left/top/right/bottom) beyond the
-            // measured popover content so descendant `box-shadow`/`filter`
-            // overshoot has pixels to paint into instead of clipping at the
-            // buffer edge; the positioner offset is adjusted so the *visible*
-            // content — not the padded buffer — lands where it would with a
-            // zero-padding buffer. The correction depends on how the
-            // positioner anchors this axis: an edge-pinned anchor needs the
-            // padding on that edge subtracted back out, while a center-based
-            // anchor already centers the padded buffer (which centers the
-            // visible content too when padding is symmetric).
-            let (pad_left, pad_top, pad_right, pad_bottom) = request.content_padding;
+            let is_window = request.kind == ChildSurfaceKind::Window;
+            // Popovers and overflow surfaces reserve a shadow/filter ring. A
+            // promoted widget is a real toplevel, so its buffer is exactly its
+            // content and the compositor owns its placement.
+            let (pad_left, pad_top, pad_right, pad_bottom) = if is_window {
+                (0, 0, 0, 0)
+            } else {
+                request.content_padding
+            };
             let padded_size = (
                 request.content_size.0 + pad_left + pad_right,
                 request.content_size.1 + pad_top + pad_bottom,
             );
-            let offset_x = request.placement.offset_x
-                + axis_padding_compensation(
-                    popover_gravity_horizontal_alignment(request.placement.gravity),
-                    pad_left,
-                    pad_right,
-                );
-            let offset_y = request.placement.offset_y
-                + axis_padding_compensation(
-                    popover_gravity_vertical_alignment(request.placement.gravity),
-                    pad_top,
-                    pad_bottom,
-                );
-
             self.core
                 .surfaces
                 .entry(child_surface_id.clone())
@@ -210,58 +203,118 @@ impl Shell {
                     visible: true,
                     closing_until: None,
                 });
+            let parent_window = self
+                .surfaces
+                .get(parent_surface_id)
+                .map(|parent| parent.window.clone())
+                .unwrap_or_default();
             let surface = self.surfaces.entry(child_surface_id.clone()).or_default();
             surface.visible = true;
             surface.width = padded_size.0.max(1);
             surface.height = padded_size.1.max(1);
 
-            let popup_config = PopupConfig {
-                parent_surface_id: parent_surface_id.to_string(),
-                // The reserve travels with the padded size it produced, so the
-                // popup's input region is confined to the visible content and
-                // clicks over the shadow ring reach whatever is behind it.
-                padding: SurfacePadding {
-                    left: pad_left,
-                    top: pad_top,
-                    right: pad_right,
-                    bottom: pad_bottom,
-                },
-                placement: PopupPlacement {
-                    anchor_rect: request.anchor_rect,
-                    size: padded_size,
-                    anchor: map_popover_anchor(request.placement.anchor),
-                    gravity: map_popover_gravity(request.placement.gravity),
-                    constraint: map_popover_constraint(request.placement.constraint_adjustment),
-                    offset: (offset_x, offset_y),
-                },
-                grab: request.placement.grab == PopoverGrab::Click,
-                grab_serial: None,
-            };
-
-            let popup_config_changed = {
-                let child = &mut self.components[index].children[child_index];
-                let changed = child.target.popup_config.as_ref() != Some(&popup_config);
+            let (width, height) = if is_window {
+                surface.role = mesh_core_wayland::SurfaceRole::Window;
+                surface.edge = None;
+                surface.layer = Some(Layer::Top);
+                surface.exclusive_zone = 0;
+                surface.keyboard_mode = mesh_core_wayland::KeyboardMode::None;
+                surface.window = parent_window;
+                let config = SurfaceConfig {
+                    role: mesh_core_wayland::SurfaceRole::Window,
+                    window: surface.window.clone(),
+                    edge: None,
+                    layer: Layer::Top,
+                    size_policy: LayerSurfaceSizePolicy::Flexible,
+                    width: padded_size.0.max(1),
+                    height: padded_size.1.max(1),
+                    padding: SurfacePadding::default(),
+                    exclusive_zone: 0,
+                    keyboard_mode: mesh_core_wayland::KeyboardMode::None,
+                    namespace: child_surface_id.clone(),
+                    margin_top: 0,
+                    margin_right: 0,
+                    margin_bottom: 0,
+                    margin_left: 0,
+                    blur: false,
+                };
+                let changed = self.components[index].children[child_index]
+                    .target
+                    .last_surface_config
+                    .as_ref()
+                    != Some(&config);
                 if changed {
-                    child.target.popup_config = Some(popup_config.clone());
+                    self.presentation_engine
+                        .configure(&child_surface_id, config.clone());
+                    self.components[index].children[child_index]
+                        .target
+                        .last_surface_config = Some(config);
+                    self.components[index].children[child_index]
+                        .target
+                        .known_surface_size = None;
                 }
-                child.target.known_surface_size = Some(padded_size);
-                if child.target.last_popup_size != Some(padded_size) {
-                    child.target.last_popup_size = Some(padded_size);
+                self.presentation_engine
+                    .window_configured_size(&child_surface_id)
+                    .unwrap_or((padded_size.0.max(1), padded_size.1.max(1)))
+            } else {
+                let offset_x = request.placement.offset_x
+                    + axis_padding_compensation(
+                        popover_gravity_horizontal_alignment(request.placement.gravity),
+                        pad_left,
+                        pad_right,
+                    );
+                let offset_y = request.placement.offset_y
+                    + axis_padding_compensation(
+                        popover_gravity_vertical_alignment(request.placement.gravity),
+                        pad_top,
+                        pad_bottom,
+                    );
+                let popup_config = PopupConfig {
+                    parent_surface_id: parent_surface_id.to_string(),
+                    // The reserve travels with the padded size it produced, so
+                    // the popup's input region is confined to the visible
+                    // content and clicks over the shadow ring reach whatever
+                    // is behind it.
+                    padding: SurfacePadding {
+                        left: pad_left,
+                        top: pad_top,
+                        right: pad_right,
+                        bottom: pad_bottom,
+                    },
+                    placement: PopupPlacement {
+                        anchor_rect: request.anchor_rect,
+                        size: padded_size,
+                        anchor: map_popover_anchor(request.placement.anchor),
+                        gravity: map_popover_gravity(request.placement.gravity),
+                        constraint: map_popover_constraint(request.placement.constraint_adjustment),
+                        offset: (offset_x, offset_y),
+                    },
+                    grab: request.placement.grab == PopoverGrab::Click,
+                    grab_serial: None,
+                };
+                let popup_config_changed = {
+                    let child = &mut self.components[index].children[child_index];
+                    let changed = child.target.popup_config.as_ref() != Some(&popup_config);
+                    if changed {
+                        child.target.popup_config = Some(popup_config.clone());
+                    }
+                    child.target.known_surface_size = Some(padded_size);
+                    if child.target.last_popup_size != Some(padded_size) {
+                        child.target.last_popup_size = Some(padded_size);
+                    }
+                    changed
+                };
+                if popup_config_changed
+                    && let Err(error) = self
+                        .presentation_engine
+                        .configure_popup(&child_surface_id, popup_config)
+                {
+                    tracing::warn!("configure_popup for child {child_surface_id} failed: {error}");
+                    self.destroy_child_surface_at(index, child_index);
+                    continue;
                 }
-                changed
+                padded_size
             };
-            if popup_config_changed
-                && let Err(error) = self
-                    .presentation_engine
-                    .configure_popup(&child_surface_id, popup_config)
-            {
-                tracing::warn!("configure_popup for child {child_surface_id} failed: {error}");
-                self.destroy_child_surface_at(index, child_index);
-                continue;
-            }
-
-            let width = padded_size.0.max(1);
-            let height = padded_size.1.max(1);
             let presented = self.paint_and_present_child_surface(
                 index,
                 child_index,
@@ -480,6 +533,17 @@ pub(super) fn child_surface_id(parent_surface_id: &str, node_key: &str) -> Strin
         let _ = write!(&mut encoded, "{byte:02x}");
     }
     format!("{parent_surface_id}::child::{encoded}")
+}
+
+fn child_kind_supported(
+    kind: ChildSurfaceKind,
+    popup_supported: bool,
+    window_supported: bool,
+) -> bool {
+    match kind {
+        ChildSurfaceKind::Popover | ChildSurfaceKind::Overflow => popup_supported,
+        ChildSurfaceKind::Window => window_supported,
+    }
 }
 
 #[inline]
