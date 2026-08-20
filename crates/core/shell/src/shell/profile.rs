@@ -412,6 +412,14 @@ impl Shell {
             shared
         };
 
+        let mut effective = effective;
+        if let Some(graph) = self.installed_module_graph.as_ref() {
+            super::discovery::register_graph_settings_schemas(&mut effective, graph).map_err(
+                |error| ShellRunError::FrontendComposition {
+                    message: format!("failed to register settings schemas: {error}"),
+                },
+            )?;
+        }
         self.settings_store = Arc::new(effective);
         self.settings = self.settings_store.shell().clone();
         self.settings_watch.modified_at = std::fs::metadata(&self.settings_watch.path)
@@ -471,7 +479,18 @@ impl Shell {
             }
         };
         let settings = match super::discovery::effective_profile_settings(shared, Some(&profile)) {
-            Ok(settings) => Arc::new(settings),
+            Ok(mut settings) => {
+                if let Err(error) =
+                    super::discovery::register_graph_settings_schemas(&mut settings, &graph)
+                {
+                    self.reject_profile_switch(
+                        profile_id,
+                        format!("failed to register candidate settings schemas: {error}"),
+                    );
+                    return VecDeque::new();
+                }
+                Arc::new(settings)
+            }
             Err(error) => {
                 self.reject_profile_switch(profile_id, error.to_string());
                 return VecDeque::new();

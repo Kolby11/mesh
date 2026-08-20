@@ -62,6 +62,11 @@ The settings store now recovers from a successfully parsed non-object document b
 using an empty default store and retaining an error diagnostic at the document
 root. I/O and irrecoverable JSON parse failures remain fatal.
 
+Module settings namespaces now receive complete owner-registered schema snapshots
+from the installed graph. Registration and graph replacement stage validation
+before commit; invalid values are omitted from the runtime projection while raw
+unknown or uninstalled namespaces remain available for lifecycle repair.
+
 The Section 11 Luau runtime and sandbox audit is complete. Its logical process
 tree, confirmed findings, broader feature direction, and regression matrix are
 in [`sections/11-luau-runtime-and-sandbox/improvements.md`](log/sections/11-luau-runtime-and-sandbox/improvements.md);

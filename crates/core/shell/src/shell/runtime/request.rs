@@ -162,9 +162,7 @@ impl Shell {
                 return VecDeque::new();
             }
         };
-        if enabled {
-            self.register_interfaces_from_graph(&graph);
-        }
+        self.register_interfaces_from_graph(&graph);
         let runtime_result = if module_kind == ModuleKind::Frontend {
             if enabled {
                 self.activate_frontend_module(module_id, &graph)

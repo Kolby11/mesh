@@ -1,7 +1,7 @@
 use super::component::{FrontendCatalog, FrontendCatalogHandle, FrontendSurfaceComponent};
 use super::*;
 use rayon::prelude::*;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 const BUILTIN_DEBUG_INSPECTOR_ID: &str = "@mesh/debug-inspector";
 
@@ -177,6 +177,165 @@ pub(super) fn load_shell_module_manifests(
             loaded: mesh_core_module::manifest::load_manifest(dir),
         })
         .collect()
+}
+
+/// Translate the graph's owner declarations into one complete schema snapshot
+/// before any module receives settings. The config foundation keeps the raw
+/// document; this graph-owned registration produces the validated projection.
+pub(in crate::shell) fn register_graph_settings_schemas(
+    store: &mut SettingsStore,
+    graph: &InstalledModuleGraph,
+) -> Result<(), mesh_core_config::SettingsSchemaError> {
+    let mut properties_by_namespace: BTreeMap<String, serde_json::Map<String, serde_json::Value>> =
+        graph
+            .modules()
+            .into_iter()
+            .map(|module| (module.id.clone(), module_settings_properties()))
+            .collect();
+
+    for contribution in graph.settings_schemas() {
+        let properties = properties_by_namespace
+            .get_mut(&contribution.namespace)
+            .ok_or_else(|| mesh_core_config::SettingsSchemaError::OwnerMismatch {
+                namespace: contribution.namespace.clone(),
+                owner: contribution.module_id.clone(),
+            })?;
+        let schema = if contribution.source.local_id == "props" {
+            let prop_schema = normalize_object_schema(&contribution.schema);
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "global": prop_schema,
+                    "instances": {
+                        "type": "object",
+                        "additionalProperties": prop_schema
+                    }
+                }
+            })
+        } else {
+            normalize_object_schema(&contribution.schema)
+        };
+        let Some(fields) = schema
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+        else {
+            continue;
+        };
+        for (key, value) in fields {
+            merge_schema_property(properties, key, value);
+        }
+    }
+
+    let schemas = properties_by_namespace
+        .into_iter()
+        .map(|(namespace, properties)| {
+            SettingsNamespaceSchema::new(
+                namespace.clone(),
+                namespace,
+                serde_json::json!({
+                    "type": "object",
+                    "properties": properties
+                }),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    store.replace_namespace_schemas_transactionally(schemas)
+}
+
+fn normalize_object_schema(schema: &serde_json::Value) -> serde_json::Value {
+    if schema.as_object().is_some_and(|schema| {
+        schema.get("type").and_then(serde_json::Value::as_str) == Some("object")
+    }) {
+        return schema.clone();
+    }
+    serde_json::json!({
+        "type": "object",
+        "properties": schema
+    })
+}
+
+fn merge_schema_property(
+    properties: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: &serde_json::Value,
+) {
+    let Some(existing) = properties.get_mut(key) else {
+        properties.insert(key.to_string(), value.clone());
+        return;
+    };
+    let Some(existing_properties) = existing
+        .get_mut("properties")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        *existing = value.clone();
+        return;
+    };
+    let Some(incoming_properties) = value
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+    else {
+        *existing = value.clone();
+        return;
+    };
+    for (nested_key, nested_value) in incoming_properties {
+        existing_properties.insert(nested_key.clone(), nested_value.clone());
+    }
+}
+
+fn module_settings_properties() -> serde_json::Map<String, serde_json::Value> {
+    serde_json::json!({
+        "surface": {
+            "type": "object",
+            "properties": {
+                "role": { "type": "string" },
+                "promotable": { "type": "boolean" },
+                "title": { "type": "string" },
+                "app_id": { "type": "string" },
+                "resizable": { "type": "boolean" },
+                "decorations": { "type": "string" },
+                "anchor": { "type": "string" },
+                "layer": { "type": "string" },
+                "exclusive_zone": { "type": "integer" },
+                "keyboard_mode": { "type": "string" },
+                "visible_on_start": { "type": "boolean" },
+                "margin_top": { "type": "integer" },
+                "margin_right": { "type": "integer" },
+                "margin_bottom": { "type": "integer" },
+                "margin_left": { "type": "integer" },
+                "blur": { "type": "boolean" }
+            }
+        },
+        "props": {
+            "type": "object",
+            "properties": {
+                "global": { "type": "object" },
+                "instances": {
+                    "type": "object",
+                    "additionalProperties": { "type": "object" }
+                }
+            }
+        },
+        "icons": {
+            "type": "object",
+            "properties": {
+                "use_packs": { "type": "array", "items": { "type": "string" } },
+                "overrides": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" }
+                },
+                "ignore_shell_default": { "type": "boolean" }
+            }
+        },
+        "i18n": {
+            "type": "object",
+            "properties": {
+                "default_locale": { "type": "string" }
+            }
+        }
+    })
+    .as_object()
+    .cloned()
+    .expect("module settings schema is an object")
 }
 
 #[cfg(test)]
@@ -536,6 +695,20 @@ impl Shell {
         &mut self,
         graph: &InstalledModuleGraph,
     ) {
+        let mut settings = self.settings_store.as_ref().clone();
+        match register_graph_settings_schemas(&mut settings, graph) {
+            Ok(()) => {
+                self.settings = settings.shell().clone();
+                self.settings_store = Arc::new(settings);
+                mesh_core_config::log_settings_diagnostics(
+                    "registered settings schemas",
+                    self.settings_store.diagnostics(),
+                );
+            }
+            Err(error) => tracing::warn!(
+                "failed to register graph-owned settings schemas transactionally: {error}"
+            ),
+        }
         for contract in graph.interface_contracts().values() {
             self.interfaces.register_contract(contract.clone());
         }

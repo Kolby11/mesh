@@ -346,7 +346,18 @@ impl Shell {
             });
             super::super::discovery::effective_profile_settings(shared, profile.as_ref())
         }) {
-            Ok(store) => Arc::new(store),
+            Ok(mut store) => {
+                if let Some(graph) = self.installed_module_graph.as_ref()
+                    && let Err(error) =
+                        super::super::discovery::register_graph_settings_schemas(&mut store, graph)
+                {
+                    tracing::warn!(
+                        "failed to register settings schemas during reload; retaining previous snapshot: {error}"
+                    );
+                    return Ok(requests);
+                }
+                Arc::new(store)
+            }
             Err(e) => {
                 tracing::warn!("failed to reload settings: {e}");
                 return Ok(requests);

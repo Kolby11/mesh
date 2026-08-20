@@ -108,6 +108,31 @@ fn installed_module_graph_exposes_shell_package_choices() {
 }
 
 #[test]
+fn installed_graph_registers_each_module_settings_owner_before_consumption() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let graph = mesh_core_module::package::load_installed_module_graph(
+        &workspace_root.join("config/module.json"),
+    )
+    .unwrap();
+    let mut shell = Shell::new();
+
+    shell.register_interfaces_from_graph(&graph);
+
+    for module in graph.modules() {
+        assert_eq!(
+            shell
+                .settings_store
+                .schema_registry()
+                .get(&module.id)
+                .map(|schema| schema.owner.as_str()),
+            Some(module.id.as_str()),
+            "module {} must register its own settings namespace",
+            module.id
+        );
+    }
+}
+
+#[test]
 fn load_frontend_components_keeps_shell_shipped_debug_inspector_even_when_not_in_package_graph() {
     let mut shell = Shell::new();
     shell.discover_modules();

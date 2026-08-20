@@ -17,9 +17,13 @@
 //! }
 //! ```
 
-use crate::validate::{SettingsDiagnostic, describe, unknown_key_diagnostic_from, validate_object};
+use crate::validate::{
+    SettingsDiagnostic, describe, unknown_key_diagnostic_from, validate_json_schema,
+    validate_object,
+};
 use crate::{ConfigError, SHELL_SETTINGS_FIELDS, ShellSettings, mesh_home_path};
 use serde_json::{Map as JsonMap, Value as JsonValue};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const SETTINGS_SCHEMA_VERSION: u64 = 1;
@@ -31,12 +35,127 @@ pub const SHELL_NAMESPACE: &str = "shell";
 
 const SCHEMA_VERSION_KEY: &str = "schemaVersion";
 
+/// A schema registered by the owner of one settings namespace.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SettingsNamespaceSchema {
+    pub namespace: String,
+    pub owner: String,
+    pub schema: JsonValue,
+}
+
+impl SettingsNamespaceSchema {
+    pub fn new(
+        namespace: impl Into<String>,
+        owner: impl Into<String>,
+        schema: JsonValue,
+    ) -> Result<Self, SettingsSchemaError> {
+        let candidate = Self {
+            namespace: namespace.into(),
+            owner: owner.into(),
+            schema,
+        };
+        candidate.validate()?;
+        Ok(candidate)
+    }
+
+    fn validate(&self) -> Result<(), SettingsSchemaError> {
+        if !is_namespace_id(&self.namespace) || self.namespace.contains('#') {
+            return Err(SettingsSchemaError::InvalidNamespace {
+                namespace: self.namespace.clone(),
+            });
+        }
+        if self.owner.trim().is_empty() {
+            return Err(SettingsSchemaError::EmptyOwner {
+                namespace: self.namespace.clone(),
+            });
+        }
+        if self.owner != self.namespace {
+            return Err(SettingsSchemaError::OwnerMismatch {
+                namespace: self.namespace.clone(),
+                owner: self.owner.clone(),
+            });
+        }
+        if self
+            .schema
+            .get("type")
+            .and_then(JsonValue::as_str)
+            .is_some_and(|kind| kind != "object")
+        {
+            return Err(SettingsSchemaError::InvalidSchema {
+                path: "type".into(),
+                message: "a namespace schema must describe an object".into(),
+            });
+        }
+        validate_schema_definition(&self.schema, "")
+    }
+
+    fn normalized(mut self) -> Self {
+        // Manifest contributions historically used a bare field map while
+        // component props use an explicit object schema.
+        if self
+            .schema
+            .as_object()
+            .is_some_and(|schema| !schema.contains_key("type"))
+        {
+            self.schema = serde_json::json!({
+                "type": "object",
+                "properties": self.schema,
+            });
+        }
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SettingsSchemaError {
+    #[error("settings namespace '{namespace}' is invalid")]
+    InvalidNamespace { namespace: String },
+    #[error("settings namespace '{namespace}' has no owner")]
+    EmptyOwner { namespace: String },
+    #[error("owner '{owner}' cannot register settings namespace '{namespace}'")]
+    OwnerMismatch { namespace: String, owner: String },
+    #[error("settings namespace '{namespace}' has more than one owner")]
+    DuplicateNamespace { namespace: String },
+    #[error("invalid settings schema at '{path}': {message}")]
+    InvalidSchema { path: String, message: String },
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SettingsSchemaRegistry {
+    schemas: BTreeMap<String, SettingsNamespaceSchema>,
+}
+
+impl SettingsSchemaRegistry {
+    pub fn get(&self, namespace: &str) -> Option<&SettingsNamespaceSchema> {
+        self.schemas.get(namespace)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &SettingsNamespaceSchema> {
+        self.schemas.values()
+    }
+
+    fn register(&mut self, schema: SettingsNamespaceSchema) -> Result<(), SettingsSchemaError> {
+        let schema = schema.normalized();
+        schema.validate()?;
+        if self.schemas.contains_key(&schema.namespace) {
+            return Err(SettingsSchemaError::DuplicateNamespace {
+                namespace: schema.namespace,
+            });
+        }
+        self.schemas.insert(schema.namespace.clone(), schema);
+        Ok(())
+    }
+}
+
 /// Every user-owned setting in the shell, loaded from one file.
 #[derive(Debug, Clone)]
 pub struct SettingsStore {
     path: PathBuf,
     root: JsonMap<String, JsonValue>,
+    schemas: SettingsSchemaRegistry,
+    validated_root: JsonMap<String, JsonValue>,
     shell: ShellSettings,
+    document_diagnostics: Vec<SettingsDiagnostic>,
     diagnostics: Vec<SettingsDiagnostic>,
 }
 
@@ -45,7 +164,10 @@ impl Default for SettingsStore {
         Self {
             path: default_settings_path(),
             root: JsonMap::new(),
+            schemas: SettingsSchemaRegistry::default(),
+            validated_root: JsonMap::new(),
             shell: ShellSettings::default(),
+            document_diagnostics: Vec::new(),
             diagnostics: Vec::new(),
         }
     }
@@ -58,7 +180,7 @@ impl SettingsStore {
     }
 
     pub fn load_from(path: &Path) -> Result<Self, ConfigError> {
-        let (root, mut diagnostics) = if path.exists() {
+        let (root, diagnostics) = if path.exists() {
             let content = std::fs::read_to_string(path)?;
             match serde_json::from_str::<JsonValue>(&content)? {
                 JsonValue::Object(map) => (map, Vec::new()),
@@ -74,42 +196,48 @@ impl SettingsStore {
             (JsonMap::new(), Vec::new())
         };
 
-        let (shell, shell_diagnostics) = resolve_shell_settings(&root);
-        diagnostics.extend(shell_diagnostics);
-        Ok(Self {
+        let mut store = Self {
             path: path.to_path_buf(),
             root,
-            shell,
-            diagnostics,
-        })
+            schemas: SettingsSchemaRegistry::default(),
+            validated_root: JsonMap::new(),
+            shell: ShellSettings::default(),
+            document_diagnostics: diagnostics,
+            diagnostics: Vec::new(),
+        };
+        store.rebuild_validation();
+        Ok(store)
     }
 
     /// Build a store from an already-parsed document.
     pub fn from_value(path: impl Into<PathBuf>, value: JsonValue) -> Result<Self, ConfigError> {
         let path = path.into();
-        let (root, mut diagnostics) = match value {
+        let (root, diagnostics) = match value {
             JsonValue::Object(map) => (map, Vec::new()),
             other => (
                 JsonMap::new(),
                 vec![non_object_document_diagnostic("settings must be", &other)],
             ),
         };
-        let (shell, shell_diagnostics) = resolve_shell_settings(&root);
-        diagnostics.extend(shell_diagnostics);
-        Ok(Self {
+        let mut store = Self {
             path,
             root,
-            shell,
-            diagnostics,
-        })
+            schemas: SettingsSchemaRegistry::default(),
+            validated_root: JsonMap::new(),
+            shell: ShellSettings::default(),
+            document_diagnostics: diagnostics,
+            diagnostics: Vec::new(),
+        };
+        store.rebuild_validation();
+        Ok(store)
     }
 
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Everything rejected while resolving the `"shell"` namespace and the
-    /// file's top level. Module namespaces are validated by their own readers.
+    /// Everything rejected while resolving the shell namespace, file top
+    /// level, and owner-registered namespaces.
     pub fn diagnostics(&self) -> &[SettingsDiagnostic] {
         &self.diagnostics
     }
@@ -119,16 +247,77 @@ impl SettingsStore {
         &self.shell
     }
 
-    /// The raw stored overrides for one namespace, or `{}`. For an instance
-    /// key (`@mesh/navigation-bar#top`) the bare module namespace is the base
-    /// and the instance object layers over it.
+    /// Runtime-facing overrides for one namespace, or `{}`. Invalid values in
+    /// a registered schema are omitted; the raw document remains available
+    /// through [`Self::to_value`]. For an instance key
+    /// (`@mesh/navigation-bar#top`) the bare module namespace is the base and
+    /// the instance object layers over it.
     pub fn namespace(&self, name: &str) -> JsonValue {
         let mut resolved = match name.split_once('#') {
-            Some((base, _)) => self.stored(base),
+            Some((base, _)) => self.resolved_stored(base),
             None => JsonValue::Object(JsonMap::new()),
         };
-        merge_json(&mut resolved, &self.stored(name));
+        merge_json(&mut resolved, &self.resolved_stored(name));
         resolved
+    }
+
+    /// Owner-registered schemas currently used to validate module settings.
+    pub fn schema_registry(&self) -> &SettingsSchemaRegistry {
+        &self.schemas
+    }
+
+    /// Register a batch of namespace schemas as one state transition.
+    ///
+    /// Validation and duplicate-owner checks happen against a staged
+    /// registry. A failure leaves the existing registry and runtime-facing
+    /// settings projection untouched.
+    pub fn register_namespace_schemas_transactionally<I>(
+        &mut self,
+        schemas: I,
+    ) -> Result<(), SettingsSchemaError>
+    where
+        I: IntoIterator<Item = SettingsNamespaceSchema>,
+    {
+        let mut candidate = self.schemas.clone();
+        for schema in schemas {
+            candidate.register(schema)?;
+        }
+        self.commit_schema_registry(candidate);
+        Ok(())
+    }
+
+    /// Replace the complete owner snapshot atomically. This is used when a
+    /// candidate installed graph is prepared or committed.
+    pub fn replace_namespace_schemas_transactionally<I>(
+        &mut self,
+        schemas: I,
+    ) -> Result<(), SettingsSchemaError>
+    where
+        I: IntoIterator<Item = SettingsNamespaceSchema>,
+    {
+        let mut candidate = SettingsSchemaRegistry::default();
+        for schema in schemas {
+            candidate.register(schema)?;
+        }
+        self.commit_schema_registry(candidate);
+        Ok(())
+    }
+
+    fn commit_schema_registry(&mut self, candidate: SettingsSchemaRegistry) {
+        let mut staged = self.clone();
+        staged.schemas = candidate;
+        staged.rebuild_validation();
+        self.schemas = staged.schemas;
+        self.validated_root = staged.validated_root;
+        self.shell = staged.shell;
+        self.diagnostics = staged.diagnostics;
+    }
+
+    pub fn register_namespace_schema(
+        &mut self,
+        schema: SettingsNamespaceSchema,
+    ) -> Result<(), SettingsSchemaError> {
+        self.register_namespace_schemas_transactionally([schema])
     }
 
     /// Whether anything is stored under `name` or, for an instance key, its
@@ -153,7 +342,8 @@ impl SettingsStore {
 
     /// Replace one namespace's overrides; an empty object removes it so the
     /// store stays sparse. A value the schema rejects still lands in the file
-    /// and surfaces in [`Self::diagnostics`], as a hand-edited one would.
+    /// and surfaces in diagnostics, while readers receive only the validated
+    /// projection.
     pub fn set_namespace(&mut self, name: &str, value: JsonValue) {
         let is_empty = value.as_object().is_some_and(JsonMap::is_empty);
         if value.is_null() || is_empty {
@@ -161,11 +351,7 @@ impl SettingsStore {
         } else {
             self.root.insert(name.to_string(), value);
         }
-        if name == SHELL_NAMESPACE {
-            let (shell, diagnostics) = resolve_shell_settings(&self.root);
-            self.shell = shell;
-            self.diagnostics = diagnostics;
-        }
+        self.rebuild_validation();
     }
 
     /// Merge overrides into a namespace, keeping unrelated stored keys.
@@ -209,6 +395,132 @@ impl SettingsStore {
             .get(name)
             .cloned()
             .unwrap_or_else(|| JsonValue::Object(JsonMap::new()))
+    }
+
+    fn resolved_stored(&self, name: &str) -> JsonValue {
+        if self.schemas.get(name).is_some() {
+            return self
+                .validated_root
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| JsonValue::Object(JsonMap::new()));
+        }
+        self.stored(name)
+    }
+
+    fn rebuild_validation(&mut self) {
+        let (shell, shell_diagnostics) = resolve_shell_settings(&self.root);
+        let mut diagnostics = self.document_diagnostics.clone();
+        diagnostics.extend(shell_diagnostics);
+        let mut validated_root = JsonMap::new();
+        for (name, value) in &self.root {
+            let base = name.split('#').next().unwrap_or(name);
+            let Some(schema) = self.schemas.get(base) else {
+                continue;
+            };
+            let validated = validate_json_schema(name, "", &schema.schema, value, &mut diagnostics);
+            if !validated.is_null() {
+                validated_root.insert(name.clone(), validated);
+            }
+        }
+        self.shell = shell;
+        self.diagnostics = diagnostics;
+        self.validated_root = validated_root;
+    }
+}
+
+fn validate_schema_definition(schema: &JsonValue, path: &str) -> Result<(), SettingsSchemaError> {
+    let Some(schema) = schema.as_object() else {
+        return Err(SettingsSchemaError::InvalidSchema {
+            path: path.to_string(),
+            message: "schema must be an object".into(),
+        });
+    };
+    if let Some(kind) = schema.get("type") {
+        let Some(kind) = kind.as_str() else {
+            return Err(SettingsSchemaError::InvalidSchema {
+                path: join_schema_path(path, "type"),
+                message: "type must be a string".into(),
+            });
+        };
+        if !matches!(
+            kind,
+            "any"
+                | "object"
+                | "array"
+                | "string"
+                | "str"
+                | "size"
+                | "duration"
+                | "color"
+                | "enum"
+                | "boolean"
+                | "bool"
+                | "integer"
+                | "int"
+                | "number"
+                | "float"
+        ) {
+            return Err(SettingsSchemaError::InvalidSchema {
+                path: join_schema_path(path, "type"),
+                message: format!("unsupported type '{kind}'"),
+            });
+        }
+    }
+    if let Some(properties) = schema.get("properties") {
+        let Some(properties) = properties.as_object() else {
+            return Err(SettingsSchemaError::InvalidSchema {
+                path: join_schema_path(path, "properties"),
+                message: "properties must be an object".into(),
+            });
+        };
+        for (key, child) in properties {
+            validate_schema_definition(child, &join_schema_path(path, key))?;
+        }
+    }
+    if let Some(items) = schema.get("items") {
+        validate_schema_definition(items, &join_schema_path(path, "items"))?;
+    }
+    if let Some(additional) = schema.get("additionalProperties") {
+        if !additional.is_boolean() && !additional.is_object() {
+            return Err(SettingsSchemaError::InvalidSchema {
+                path: join_schema_path(path, "additionalProperties"),
+                message: "additionalProperties must be a boolean or schema object".into(),
+            });
+        }
+        if additional.is_object() {
+            validate_schema_definition(
+                additional,
+                &join_schema_path(path, "additionalProperties"),
+            )?;
+        }
+    }
+    for bound in ["minimum", "maximum"] {
+        if let Some(value) = schema.get(bound)
+            && !value.is_number()
+        {
+            return Err(SettingsSchemaError::InvalidSchema {
+                path: join_schema_path(path, bound),
+                message: "numeric bounds must be numbers".into(),
+            });
+        }
+    }
+    if let Some(enumeration) = schema.get("enum")
+        && !enumeration.is_array()
+    {
+        return Err(SettingsSchemaError::InvalidSchema {
+            path: join_schema_path(path, "enum"),
+            message: "enum must be an array".into(),
+        });
+    }
+    Ok(())
+}
+
+fn join_schema_path(prefix: &str, key: &str) -> String {
+    if prefix.is_empty() {
+        key.to_string()
+    } else {
+        format!("{prefix}.{key}")
     }
 }
 
@@ -405,6 +717,81 @@ mod tests {
             json!({ "surface": { "anchor": "bottom" } })
         );
         assert_eq!(store.namespace("@mesh/quick-settings"), json!({}));
+    }
+
+    #[test]
+    fn owner_schema_filters_runtime_values_but_keeps_raw_orphans_for_repair() {
+        let mut store = store(json!({
+            "@mesh/test": {
+                "enabled": true,
+                "limit": 0,
+                "unknown": "kept"
+            },
+            "@mesh/test#alternate": { "enabled": false }
+        }));
+        let schema = SettingsNamespaceSchema::new(
+            "@mesh/test",
+            "@mesh/test",
+            json!({
+                "type": "object",
+                "properties": {
+                    "enabled": { "type": "boolean" },
+                    "limit": { "type": "integer", "minimum": 1 }
+                },
+                "additionalProperties": false
+            }),
+        )
+        .unwrap();
+
+        store
+            .replace_namespace_schemas_transactionally([schema])
+            .unwrap();
+
+        assert_eq!(store.namespace("@mesh/test"), json!({ "enabled": true }));
+        assert_eq!(
+            store.namespace("@mesh/test#alternate"),
+            json!({ "enabled": false })
+        );
+        assert_eq!(store.to_value()["@mesh/test"]["unknown"], json!("kept"));
+        assert_eq!(
+            store
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| diagnostic.namespace == "@mesh/test")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn schema_registration_is_atomic_across_duplicate_owners() {
+        let mut store = store(json!({
+            "@mesh/test": { "enabled": "wrong" }
+        }));
+        let first = SettingsNamespaceSchema::new(
+            "@mesh/test",
+            "@mesh/test",
+            json!({ "enabled": { "type": "boolean" } }),
+        )
+        .unwrap();
+        let duplicate = SettingsNamespaceSchema::new(
+            "@mesh/test",
+            "@mesh/test",
+            json!({ "enabled": { "type": "string" } }),
+        )
+        .unwrap();
+
+        let error = store
+            .replace_namespace_schemas_transactionally([first, duplicate])
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            SettingsSchemaError::DuplicateNamespace { .. }
+        ));
+        assert!(store.schema_registry().iter().next().is_none());
+        assert_eq!(store.namespace("@mesh/test")["enabled"], json!("wrong"));
+        assert!(store.diagnostics().is_empty());
     }
 
     #[test]

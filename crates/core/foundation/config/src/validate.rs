@@ -248,6 +248,168 @@ pub fn validate_object(
     JsonValue::Object(accepted)
 }
 
+/// Validate a value against the small JSON-schema vocabulary used by module
+/// settings declarations.
+///
+/// The schema is deliberately data-only so module owners can register it after
+/// graph resolution without making the foundation config crate depend on the
+/// module system. Objects are open unless a schema explicitly sets
+/// additionalProperties to false; this lets an owner describe only the portion
+/// of a namespace it owns while other portions remain available to core
+/// readers.
+pub fn validate_json_schema(
+    namespace: &str,
+    key_path: &str,
+    schema: &JsonValue,
+    value: &JsonValue,
+    diagnostics: &mut Vec<SettingsDiagnostic>,
+) -> JsonValue {
+    let Some(schema) = schema.as_object() else {
+        return value.clone();
+    };
+
+    if let Some(expected) = schema.get("type").and_then(JsonValue::as_str)
+        && !json_schema_type_matches(expected, value)
+    {
+        diagnostics.push(SettingsDiagnostic::error(
+            namespace,
+            key_path,
+            format!(
+                "expected {}, found {}",
+                json_schema_expectation(expected),
+                describe(value)
+            ),
+            "remove the value or replace it with the declared type",
+        ));
+        return JsonValue::Null;
+    }
+
+    if let Some(enumeration) = schema.get("enum").and_then(JsonValue::as_array)
+        && !enumeration.iter().any(|candidate| candidate == value)
+    {
+        diagnostics.push(SettingsDiagnostic::error(
+            namespace,
+            key_path,
+            format!("value is not one of {}", describe_enum_values(enumeration)),
+            format!("use one of {}", describe_enum_values(enumeration)),
+        ));
+        return JsonValue::Null;
+    }
+
+    if let Some(minimum) = schema.get("minimum").and_then(JsonValue::as_f64)
+        && value.as_f64().is_some_and(|number| number < minimum)
+    {
+        diagnostics.push(SettingsDiagnostic::error(
+            namespace,
+            key_path,
+            format!("value must be greater than or equal to {minimum}"),
+            "raise the value to the declared minimum or remove it",
+        ));
+        return JsonValue::Null;
+    }
+    if let Some(maximum) = schema.get("maximum").and_then(JsonValue::as_f64)
+        && value.as_f64().is_some_and(|number| number > maximum)
+    {
+        diagnostics.push(SettingsDiagnostic::error(
+            namespace,
+            key_path,
+            format!("value must be less than or equal to {maximum}"),
+            "lower the value to the declared maximum or remove it",
+        ));
+        return JsonValue::Null;
+    }
+
+    if let Some(object) = value.as_object() {
+        let properties = schema
+            .get("properties")
+            .and_then(JsonValue::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let allow_unknown = schema
+            .get("additionalProperties")
+            .and_then(JsonValue::as_bool)
+            .unwrap_or(true);
+        let additional_schema = schema
+            .get("additionalProperties")
+            .filter(|value| value.is_object());
+        let mut accepted = JsonMap::new();
+        for (key, entry) in object {
+            let path = join_path(key_path, key);
+            if let Some(child_schema) = properties.get(key) {
+                let kept = validate_json_schema(namespace, &path, child_schema, entry, diagnostics);
+                if !kept.is_null() {
+                    accepted.insert(key.clone(), kept);
+                }
+            } else if let Some(child_schema) = additional_schema {
+                let kept = validate_json_schema(namespace, &path, child_schema, entry, diagnostics);
+                if !kept.is_null() {
+                    accepted.insert(key.clone(), kept);
+                }
+            } else if allow_unknown {
+                accepted.insert(key.clone(), entry.clone());
+            } else {
+                let known = properties.keys().map(String::as_str).collect::<Vec<_>>();
+                diagnostics.push(unknown_key_diagnostic_from(
+                    namespace, key_path, key, &known,
+                ));
+            }
+        }
+        return JsonValue::Object(accepted);
+    }
+
+    if let Some(items_schema) = schema.get("items")
+        && let Some(items) = value.as_array()
+    {
+        let accepted = items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                let path = join_path(key_path, &format!("[{index}]"));
+                let kept = validate_json_schema(namespace, &path, items_schema, item, diagnostics);
+                (!kept.is_null()).then_some(kept)
+            })
+            .collect();
+        return JsonValue::Array(accepted);
+    }
+
+    value.clone()
+}
+
+fn json_schema_type_matches(expected: &str, value: &JsonValue) -> bool {
+    match expected {
+        "any" => true,
+        "object" => value.is_object(),
+        "array" => value.is_array(),
+        "string" | "str" | "color" | "enum" => value.is_string(),
+        "size" | "duration" => value.is_string() || value.is_number(),
+        "boolean" | "bool" => value.is_boolean(),
+        "integer" | "int" => value.as_i64().is_some() || value.as_u64().is_some(),
+        "number" | "float" => value.as_f64().is_some_and(f64::is_finite),
+        _ => true,
+    }
+}
+
+fn json_schema_expectation(expected: &str) -> &'static str {
+    match expected {
+        "object" => "an object",
+        "array" => "an array",
+        "string" | "str" | "color" | "enum" => "a string",
+        "size" | "duration" => "a string or number",
+        "boolean" | "bool" => "a boolean",
+        "integer" | "int" => "an integer",
+        "number" | "float" => "a number",
+        _ => "the declared type",
+    }
+}
+
+fn describe_enum_values(values: &[JsonValue]) -> String {
+    let values = values
+        .iter()
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>();
+    format!("[{}]", values.join(", "))
+}
+
 /// Validate one stored value. `None` means "reject it and keep the default".
 pub fn validate_value(
     namespace: &str,

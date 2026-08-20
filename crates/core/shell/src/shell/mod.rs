@@ -1,7 +1,7 @@
 use mesh_core_capability::{CapabilityPolicy, EffectiveCapabilities};
 use mesh_core_config::{
-    ModuleSettingsOverrides, SettingsStore, ShellConfig, ShellSettings, load_config,
-    resolve_discovery_paths,
+    ModuleSettingsOverrides, SettingsNamespaceSchema, SettingsStore, ShellConfig, ShellSettings,
+    load_config, resolve_discovery_paths,
 };
 use mesh_core_debug::{
     BackendRuntimeEntry, DebugOverlayState, DebugSnapshot, HealthEntry, InterfaceEntry,
