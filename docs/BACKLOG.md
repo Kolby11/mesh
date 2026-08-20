@@ -30,9 +30,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ## Foundation contracts
 
-- [ ] Version the debug telemetry boundary and serialize complete debug DTOs
-      without a second hand-maintained JSON contract.
-
 ## Module system
 
 The 2026-06-18 redesign largely shipped: canonical `module.json` with

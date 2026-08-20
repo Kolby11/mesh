@@ -3,7 +3,13 @@
 
 pub mod allocation;
 
-#[derive(Debug, Clone, Default)]
+use serde::{Serialize, Serializer};
+
+/// Version of the JSON telemetry DTO carried by the `mesh.debug` service.
+/// Shell overlay/controller state is deliberately kept outside this DTO.
+pub const DEBUG_TELEMETRY_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct DebugSnapshot {
     pub modules: Vec<ModuleEntry>,
     pub module_graph: Vec<ModuleGraphEntry>,
@@ -21,7 +27,7 @@ pub struct DebugSnapshot {
 pub const DEBUG_INTERFACE: &str = "mesh.debug";
 pub const DEBUG_SOURCE_MODULE_ID: &str = "@mesh/core-debug";
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct DebugKeybindEntry {
     pub surface_id: String,
     pub module_id: String,
@@ -69,12 +75,12 @@ impl DebugInspectorView {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct DebugBenchmarkSnapshot {
     pub scenarios: Vec<BenchmarkScenarioSnapshot>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BenchmarkScenarioSnapshot {
     pub id: BenchmarkScenarioId,
     pub label: String,
@@ -99,6 +105,15 @@ pub enum BenchmarkScenarioId {
     Resize,
     KeyboardTraversal,
     BackendUpdate,
+}
+
+impl Serialize for BenchmarkScenarioId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.id())
+    }
 }
 
 impl BenchmarkScenarioId {
@@ -148,6 +163,15 @@ pub enum BenchmarkScenarioStatus {
     Skipped,
 }
 
+impl Serialize for BenchmarkScenarioStatus {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.label())
+    }
+}
+
 impl BenchmarkScenarioStatus {
     pub fn label(self) -> &'static str {
         match self {
@@ -162,13 +186,13 @@ impl BenchmarkScenarioStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DebugBenchmarkRunState {
     pub scenario_id: BenchmarkScenarioId,
     pub status: BenchmarkScenarioStatus,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ProfilingSnapshot {
     pub session_id: u64,
     pub allocation_profiling_available: bool,
@@ -177,7 +201,7 @@ pub struct ProfilingSnapshot {
     pub backends: Vec<ProfilingBackendSnapshot>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ProfilingScopeSnapshot {
     pub stages: Vec<ProfilingStageSummary>,
     /// Top cumulative attributed costs, sorted by total time descending.
@@ -190,7 +214,7 @@ pub struct ProfilingScopeSnapshot {
     pub allocations: Option<ProfilingAllocationSummary>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ProfilingSurfaceSnapshot {
     pub surface_id: String,
     pub module_id: Option<String>,
@@ -203,7 +227,7 @@ pub struct ProfilingSurfaceSnapshot {
     pub allocations: Option<ProfilingAllocationSummary>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ProfilingAllocationSummary {
     pub sample_count: u64,
     pub allocation_count: u64,
@@ -215,7 +239,7 @@ pub struct ProfilingAllocationSummary {
     pub recent_samples: Vec<ProfilingAllocationSample>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ProfilingAllocationSample {
     pub order: u64,
     pub timestamp_micros: u64,
@@ -226,13 +250,13 @@ pub struct ProfilingAllocationSample {
     pub reallocation_count: u64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ProfilingWasteSummary {
     pub kind: String,
     pub count: u64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ProfilingInvalidationSnapshot {
     pub full_rebuild: bool,
     pub retained_path: bool,
@@ -247,7 +271,7 @@ pub struct ProfilingInvalidationSnapshot {
     pub affected_node_count: u64,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct ComponentInvalidationCounts {
     pub script: u64,
     pub state: u64,
@@ -261,7 +285,7 @@ pub struct ComponentInvalidationCounts {
     pub script_narrow: u64,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct RetainedInvalidationCounts {
     pub inserted: u64,
     pub removed: u64,
@@ -272,7 +296,7 @@ pub struct RetainedInvalidationCounts {
     pub state: u64,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct RetainedPaintSnapshot {
     pub retained_generation: u64,
     pub entries_total: u64,
@@ -326,7 +350,8 @@ pub struct RetainedPaintSnapshot {
     pub skia_glyph_cache_capacity: u64,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RepaintPolicySnapshot {
     MinimalDamage,
     BoundingRect,
@@ -344,7 +369,7 @@ impl RepaintPolicySnapshot {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct DisplayBatchBarrierSnapshot {
     pub text: u64,
     pub icon: u64,
@@ -354,7 +379,7 @@ pub struct DisplayBatchBarrierSnapshot {
     pub material_change: u64,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct TextCacheSnapshot {
     pub layout_hits: u64,
     pub layout_misses: u64,
@@ -364,7 +389,7 @@ pub struct TextCacheSnapshot {
     pub shaping_micros: u64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ProfilingStageSummary {
     pub stage: ProfilingStage,
     pub sample_count: u64,
@@ -373,7 +398,7 @@ pub struct ProfilingStageSummary {
     pub recent_samples: Vec<ProfilingSample>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ProfilingAttributionSummary {
     pub stage: ProfilingStage,
     pub key: String,
@@ -382,14 +407,14 @@ pub struct ProfilingAttributionSummary {
     pub max_micros: u64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ProfilingBackendSnapshot {
     pub interface: String,
     pub provider_id: String,
     pub stages: Vec<ProfilingBackendStageSummary>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ProfilingBackendStageSummary {
     pub stage: ProfilingBackendStage,
     pub sample_count: u64,
@@ -398,7 +423,7 @@ pub struct ProfilingBackendStageSummary {
     pub recent_samples: Vec<ProfilingBackendSample>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ProfilingBackendSample {
     pub stage: ProfilingBackendStage,
     pub order: u64,
@@ -408,7 +433,7 @@ pub struct ProfilingBackendSample {
     pub trigger_kind: Option<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ProfilingSample {
     pub stage: ProfilingStage,
     pub order: u64,
@@ -421,7 +446,8 @@ pub struct ProfilingSample {
     pub trigger_kind: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProfilingBackendStage {
     PollUpdate,
     CommandHandling,
@@ -439,7 +465,8 @@ impl ProfilingBackendStage {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProfilingStage {
     InputHandling,
     RuntimeUpdateHandling,
@@ -481,7 +508,7 @@ impl ProfilingStage {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ModuleEntry {
     pub id: String,
     pub module_type: String,
@@ -490,7 +517,7 @@ pub struct ModuleEntry {
     pub last_error: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ModuleGraphEntry {
     pub module_id: String,
     pub kind: String,
@@ -543,14 +570,14 @@ pub struct ModuleGraphEntry {
     pub health: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ModuleBinaryHealthEntry {
     pub name: String,
     pub optional: bool,
     pub available: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ModuleObjectEntry {
     pub instance_id: String,
     pub module_id: String,
@@ -562,19 +589,19 @@ pub struct ModuleObjectEntry {
     pub capabilities: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct InterfaceEntry {
     pub name: String,
     pub providers: Vec<ProviderEntry>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProviderEntry {
     pub backend_name: String,
     pub priority: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BackendRuntimeEntry {
     pub interface: String,
     pub provider_id: String,
@@ -584,7 +611,7 @@ pub struct BackendRuntimeEntry {
     pub failure_count: u64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MethodCallEntry {
     pub interface: String,
     pub provider_id: Option<String>,
@@ -596,7 +623,7 @@ pub struct MethodCallEntry {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct HealthEntry {
     pub module_id: String,
     pub status: String,

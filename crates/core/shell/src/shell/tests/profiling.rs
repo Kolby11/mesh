@@ -753,6 +753,12 @@ fn profiling_debug_payload_serializes_phase26_surface_attribution_labels() {
                 shaping_micros: 34,
                 ..Default::default()
             },
+            narrow_path: true,
+            affected_node_count: 5,
+            component: ComponentInvalidationCounts {
+                script_narrow: 2,
+                ..Default::default()
+            },
             ..Default::default()
         },
     );
@@ -777,6 +783,22 @@ fn profiling_debug_payload_serializes_phase26_surface_attribution_labels() {
     assert_eq!(
         latest.state["profiling"]["surfaces"][0]["invalidation"]["text"]["shaping_micros"],
         serde_json::json!(34)
+    );
+    assert_eq!(
+        latest.state["schema_version"],
+        serde_json::json!(mesh_core_debug::DEBUG_TELEMETRY_SCHEMA_VERSION)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["narrow_path"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["affected_node_count"],
+        serde_json::json!(5)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["component"]["script_narrow"],
+        serde_json::json!(2)
     );
     assert_eq!(
         latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["omitted_subtrees"],

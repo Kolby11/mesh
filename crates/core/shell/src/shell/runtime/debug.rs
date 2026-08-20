@@ -154,29 +154,78 @@ fn debug_service_payload(
     debug: &mesh_core_debug::DebugOverlayState,
     snapshot: &DebugSnapshot,
 ) -> serde_json::Value {
-    serde_json::json!({
-        "overlay_enabled": debug.enabled,
-        "layout_bounds_enabled": debug.show_layout_bounds,
-        "element_picker_enabled": debug.element_picker_enabled,
-        "inspected_element": debug.inspected_element.clone(),
-        "profiling_enabled": debug.profiling_enabled,
-        "profiling_session_id": debug.profiling_session_id,
-        "allocation_profiling_available": mesh_core_debug::allocation::profiling_available(),
-        "active_view": debug.active_view.label(),
-        "modules": snapshot.modules.iter().map(module_entry_json).collect::<Vec<_>>(),
-        "module_graph": snapshot.module_graph.iter().map(module_graph_entry_json).collect::<Vec<_>>(),
-        "module_instances": snapshot.module_instances.iter().map(module_object_entry_json).collect::<Vec<_>>(),
-        "interfaces": snapshot.interfaces.iter().map(interface_entry_json).collect::<Vec<_>>(),
-        "backend_runtimes": snapshot.backend_runtimes.iter().map(backend_runtime_entry_json).collect::<Vec<_>>(),
-        "method_calls": snapshot.method_calls.iter().map(method_call_entry_json).collect::<Vec<_>>(),
-        "health": snapshot.health.iter().map(health_entry_json).collect::<Vec<_>>(),
-        "keybinds": snapshot.keybinds.iter().map(keybind_entry_json).collect::<Vec<_>>(),
-        "active_surfaces": snapshot.active_surfaces.clone(),
-        "benchmarks": benchmark_snapshot_json(&snapshot.benchmarks),
-        "profiling": snapshot.profiling.as_ref().map(profiling_snapshot_json),
-        "profiling_stream": snapshot.profiling.as_ref().map(profiling_stream_json),
-        "chrome_trace": snapshot.profiling.as_ref().map(profiling_chrome_trace_json),
-    })
+    let mut payload = serde_json::to_value(snapshot).expect("debug snapshot DTOs serialize");
+    let object = payload
+        .as_object_mut()
+        .expect("debug snapshot DTO serializes to an object");
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::json!(mesh_core_debug::DEBUG_TELEMETRY_SCHEMA_VERSION),
+    );
+    object.insert(
+        "overlay_enabled".to_string(),
+        serde_json::json!(debug.enabled),
+    );
+    object.insert(
+        "layout_bounds_enabled".to_string(),
+        serde_json::json!(debug.show_layout_bounds),
+    );
+    object.insert(
+        "element_picker_enabled".to_string(),
+        serde_json::json!(debug.element_picker_enabled),
+    );
+    object.insert(
+        "inspected_element".to_string(),
+        debug
+            .inspected_element
+            .clone()
+            .unwrap_or(serde_json::Value::Null),
+    );
+    object.insert(
+        "profiling_enabled".to_string(),
+        serde_json::json!(debug.profiling_enabled),
+    );
+    object.insert(
+        "profiling_session_id".to_string(),
+        serde_json::json!(debug.profiling_session_id),
+    );
+    object.insert(
+        "allocation_profiling_available".to_string(),
+        serde_json::json!(mesh_core_debug::allocation::profiling_available()),
+    );
+    object.insert(
+        "active_view".to_string(),
+        serde_json::json!(debug.active_view.label()),
+    );
+    // Module graph entries intentionally keep their established nested wire
+    // shape; the DTO owns the complete field set while this compatibility
+    // adapter preserves the public `uses`/`provides`/`surface` grouping.
+    object.insert(
+        "module_graph".to_string(),
+        snapshot
+            .module_graph
+            .iter()
+            .map(module_graph_entry_json)
+            .collect::<Vec<_>>()
+            .into(),
+    );
+    object.insert(
+        "profiling_stream".to_string(),
+        snapshot
+            .profiling
+            .as_ref()
+            .map(profiling_stream_json)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    object.insert(
+        "chrome_trace".to_string(),
+        snapshot
+            .profiling
+            .as_ref()
+            .map(profiling_chrome_trace_json)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    payload
 }
 
 impl Shell {
@@ -1159,38 +1208,6 @@ fn profiling_backend_stage_metric(
     )
 }
 
-fn benchmark_snapshot_json(
-    snapshot: &mesh_core_debug::DebugBenchmarkSnapshot,
-) -> serde_json::Value {
-    serde_json::json!({
-        "scenarios": snapshot.scenarios.iter().map(benchmark_scenario_json).collect::<Vec<_>>(),
-    })
-}
-
-fn benchmark_scenario_json(
-    scenario: &mesh_core_debug::BenchmarkScenarioSnapshot,
-) -> serde_json::Value {
-    serde_json::json!({
-        "id": scenario.id.id(),
-        "label": scenario.label,
-        "target": scenario.target,
-        "status": scenario.status.label(),
-        "primary_metric": scenario.primary_metric,
-        "secondary_metric": scenario.secondary_metric,
-        "hint": scenario.hint,
-    })
-}
-
-fn module_entry_json(entry: &ModuleEntry) -> serde_json::Value {
-    serde_json::json!({
-        "id": entry.id,
-        "module_type": entry.module_type,
-        "state": entry.state,
-        "error_count": entry.error_count,
-        "last_error": entry.last_error,
-    })
-}
-
 fn module_graph_entry_json(entry: &mesh_core_debug::ModuleGraphEntry) -> serde_json::Value {
     serde_json::json!({
         "module_id": entry.module_id,
@@ -1250,19 +1267,6 @@ fn module_graph_entry_json(entry: &mesh_core_debug::ModuleGraphEntry) -> serde_j
     })
 }
 
-fn module_object_entry_json(entry: &mesh_core_debug::ModuleObjectEntry) -> serde_json::Value {
-    serde_json::json!({
-        "instance_id": entry.instance_id,
-        "module_id": entry.module_id,
-        "object_kind": entry.object_kind,
-        "interface": entry.interface,
-        "version": entry.version,
-        "lifecycle": entry.lifecycle,
-        "active": entry.active,
-        "capabilities": entry.capabilities,
-    })
-}
-
 fn sorted_keys<T>(map: &std::collections::HashMap<String, T>) -> Vec<String> {
     let mut keys = map.keys().cloned().collect::<Vec<_>>();
     keys.sort();
@@ -1299,79 +1303,6 @@ fn resolve_debug_manifest_text(
     }
 }
 
-fn interface_entry_json(entry: &InterfaceEntry) -> serde_json::Value {
-    serde_json::json!({
-        "name": entry.name,
-        "providers": entry.providers.iter().map(provider_entry_json).collect::<Vec<_>>(),
-    })
-}
-
-fn provider_entry_json(entry: &ProviderEntry) -> serde_json::Value {
-    serde_json::json!({
-        "backend_name": entry.backend_name,
-        "priority": entry.priority,
-    })
-}
-
-fn backend_runtime_entry_json(entry: &BackendRuntimeEntry) -> serde_json::Value {
-    serde_json::json!({
-        "interface": entry.interface,
-        "provider_id": entry.provider_id,
-        "status": entry.status,
-        "message": entry.message,
-        "failure_count": entry.failure_count,
-    })
-}
-
-fn method_call_entry_json(entry: &mesh_core_debug::MethodCallEntry) -> serde_json::Value {
-    serde_json::json!({
-        "interface": entry.interface,
-        "provider_id": entry.provider_id,
-        "source_module_id": entry.source_module_id,
-        "command": entry.command,
-        "status": entry.status,
-        "queued": entry.queued,
-        "result": entry.result,
-        "error": entry.error,
-    })
-}
-
-fn health_entry_json(entry: &HealthEntry) -> serde_json::Value {
-    serde_json::json!({
-        "module_id": entry.module_id,
-        "status": entry.status,
-    })
-}
-
-fn keybind_entry_json(entry: &mesh_core_debug::DebugKeybindEntry) -> serde_json::Value {
-    serde_json::json!({
-        "surface_id": entry.surface_id,
-        "module_id": entry.module_id,
-        "action_id": entry.action_id,
-        "label": entry.label,
-        "description": entry.description,
-        "category": entry.category,
-        "label_key": entry.label_key,
-        "description_key": entry.description_key,
-        "category_key": entry.category_key,
-        "key": entry.key,
-        "modifiers": entry.modifiers,
-        "trigger_kind": entry.trigger_kind,
-        "source": entry.source,
-        "accessibility_shortcut": entry.accessibility_shortcut,
-    })
-}
-
-fn profiling_snapshot_json(snapshot: &mesh_core_debug::ProfilingSnapshot) -> serde_json::Value {
-    serde_json::json!({
-        "session_id": snapshot.session_id,
-        "allocation_profiling_available": snapshot.allocation_profiling_available,
-        "shell": profiling_scope_snapshot_json(&snapshot.shell),
-        "surfaces": snapshot.surfaces.iter().map(profiling_surface_snapshot_json).collect::<Vec<_>>(),
-        "backends": snapshot.backends.iter().map(profiling_backend_snapshot_json).collect::<Vec<_>>(),
-    })
-}
-
 /// Bounded, order-stable samples for consumers that need an event stream rather
 /// than aggregate stage summaries. Surface samples are sourced from their
 /// per-surface buckets so records duplicated into the shell roll-up appear once.
@@ -1383,12 +1314,16 @@ fn profiling_stream_json(snapshot: &mesh_core_debug::ProfilingSnapshot) -> serde
                 .recent_samples
                 .iter()
                 .filter(|sample| sample.surface_id.is_none())
-                .map(profiling_sample_json),
+                .map(|sample| serde_json::to_value(sample).expect("profiling sample serializes")),
         );
     }
     for surface in &snapshot.surfaces {
         for summary in &surface.stages {
-            samples.extend(summary.recent_samples.iter().map(profiling_sample_json));
+            samples.extend(
+                summary.recent_samples.iter().map(|sample| {
+                    serde_json::to_value(sample).expect("profiling sample serializes")
+                }),
+            );
         }
     }
     samples.sort_by_key(|sample| sample["order"].as_u64().unwrap_or(u64::MAX));
@@ -1421,256 +1356,8 @@ fn profiling_chrome_trace_json(snapshot: &mesh_core_debug::ProfilingSnapshot) ->
     serde_json::json!({ "traceEvents": events, "displayTimeUnit": "ms" })
 }
 
-fn profiling_scope_snapshot_json(
-    snapshot: &mesh_core_debug::ProfilingScopeSnapshot,
-) -> serde_json::Value {
-    serde_json::json!({
-        "stages": snapshot.stages.iter().map(profiling_stage_summary_json).collect::<Vec<_>>(),
-        "attribution": snapshot.attribution.iter().map(|entry| serde_json::json!({
-            "stage": entry.stage.label(),
-            "key": entry.key,
-            "sample_count": entry.sample_count,
-            "total_micros": entry.total_micros,
-            "max_micros": entry.max_micros,
-        })).collect::<Vec<_>>(),
-        "wasted_work_avoided": snapshot.wasted_work_avoided.iter().map(|entry| serde_json::json!({
-            "kind": entry.kind,
-            "count": entry.count,
-        })).collect::<Vec<_>>(),
-        "redraw_count": snapshot.redraw_count,
-        "total_surface_render_time_micros": snapshot.total_surface_render_time_micros,
-        "allocations": snapshot.allocations.as_ref().map(profiling_allocation_summary_json),
-    })
-}
-
-fn profiling_surface_snapshot_json(
-    snapshot: &mesh_core_debug::ProfilingSurfaceSnapshot,
-) -> serde_json::Value {
-    serde_json::json!({
-        "surface_id": snapshot.surface_id,
-        "module_id": snapshot.module_id,
-        "stages": snapshot.stages.iter().map(profiling_stage_summary_json).collect::<Vec<_>>(),
-        "attribution": snapshot.attribution.iter().map(|entry| serde_json::json!({
-            "stage": entry.stage.label(),
-            "key": entry.key,
-            "sample_count": entry.sample_count,
-            "total_micros": entry.total_micros,
-            "max_micros": entry.max_micros,
-        })).collect::<Vec<_>>(),
-        "wasted_work_avoided": snapshot.wasted_work_avoided.iter().map(|entry| serde_json::json!({
-            "kind": entry.kind,
-            "count": entry.count,
-        })).collect::<Vec<_>>(),
-        "redraw_count": snapshot.redraw_count,
-        "total_surface_render_time_micros": snapshot.total_surface_render_time_micros,
-        "invalidation": snapshot.invalidation.as_ref().map(profiling_invalidation_json),
-        "allocations": snapshot.allocations.as_ref().map(profiling_allocation_summary_json),
-    })
-}
-
-fn profiling_allocation_summary_json(
-    summary: &mesh_core_debug::ProfilingAllocationSummary,
-) -> serde_json::Value {
-    serde_json::json!({
-        "sample_count": summary.sample_count,
-        "allocation_count": summary.allocation_count,
-        "allocated_bytes": summary.allocated_bytes,
-        "deallocation_count": summary.deallocation_count,
-        "deallocated_bytes": summary.deallocated_bytes,
-        "reallocation_count": summary.reallocation_count,
-        "max_allocated_bytes_per_pass": summary.max_allocated_bytes_per_pass,
-        "recent_samples": summary.recent_samples.iter().map(|sample| serde_json::json!({
-            "order": sample.order,
-            "timestamp_micros": sample.timestamp_micros,
-            "allocation_count": sample.allocation_count,
-            "allocated_bytes": sample.allocated_bytes,
-            "deallocation_count": sample.deallocation_count,
-            "deallocated_bytes": sample.deallocated_bytes,
-            "reallocation_count": sample.reallocation_count,
-        })).collect::<Vec<_>>(),
-    })
-}
-
-fn profiling_invalidation_json(
-    snapshot: &mesh_core_debug::ProfilingInvalidationSnapshot,
-) -> serde_json::Value {
-    serde_json::json!({
-        "full_rebuild": snapshot.full_rebuild,
-        "retained_path": snapshot.retained_path,
-        "retained_generation": snapshot.retained_generation,
-        "component": {
-            "script": snapshot.component.script,
-            "state": snapshot.component.state,
-            "style": snapshot.component.style,
-            "layout": snapshot.component.layout,
-            "paint": snapshot.component.paint,
-            "text": snapshot.component.text,
-            "accessibility": snapshot.component.accessibility,
-            "metrics": snapshot.component.metrics,
-            "surface_config": snapshot.component.surface_config,
-        },
-        "retained": {
-            "inserted": snapshot.retained.inserted,
-            "removed": snapshot.retained.removed,
-            "layout": snapshot.retained.layout,
-            "style": snapshot.retained.style,
-            "attributes": snapshot.retained.attributes,
-            "children": snapshot.retained.children,
-            "state": snapshot.retained.state,
-        },
-        "paint": profiling_paint_snapshot_json(&snapshot.paint),
-        "text": {
-            "layout_hits": snapshot.text.layout_hits,
-            "layout_misses": snapshot.text.layout_misses,
-            "layout_invalidations": snapshot.text.layout_invalidations,
-            "shaped_entries": snapshot.text.shaped_entries,
-            "glyph_cache_active": snapshot.text.glyph_cache_active,
-            "shaping_micros": snapshot.text.shaping_micros,
-        },
-    })
-}
-
-fn profiling_paint_snapshot_json(
-    paint: &mesh_core_debug::RetainedPaintSnapshot,
-) -> serde_json::Value {
-    let mut snapshot = serde_json::json!({
-        "retained_generation": paint.retained_generation,
-        "entries_total": paint.entries_total,
-        "entries_reused": paint.entries_reused,
-        "entries_rebuilt": paint.entries_rebuilt,
-        "entries_removed": paint.entries_removed,
-        "subtree_segments_reused": paint.subtree_segments_reused,
-        "subtree_segments_rebuilt": paint.subtree_segments_rebuilt,
-        "subtree_commands_rebuilt": paint.subtree_commands_rebuilt,
-        "changed_layout_count": paint.changed_layout_count,
-        "changed_paint_count": paint.changed_paint_count,
-        "effect_overflow_count": paint.effect_overflow_count,
-        "fallback_promotion_count": paint.fallback_promotion_count,
-        "full_fallback_count": paint.full_fallback_count,
-        "broad_dirty_fallback_count": paint.broad_dirty_fallback_count,
-        "damage_rect_count": paint.damage_rect_count,
-        "damage_area": paint.damage_area,
-        "surface_area": paint.surface_area,
-        "full_surface_damage": paint.full_surface_damage,
-        "partial_present_supported": paint.partial_present_supported,
-        "skipped_paint_pixels": paint.skipped_paint_pixels,
-        "omitted_subtrees": paint.omitted_subtrees,
-        "omitted_nodes": paint.omitted_nodes,
-        "omitted_commands": paint.omitted_commands,
-        "preclipped_descendants": paint.preclipped_descendants,
-        "repaint_policy": paint.repaint_policy.as_str(),
-        "filtered_span_count": paint.filtered_span_count,
-        "filtered_command_count": paint.filtered_command_count,
-        "filtered_commands_skipped": paint.filtered_commands_skipped,
-        "filtered_fallback_count": paint.filtered_fallback_count,
-        "batch_count": paint.batch_count,
-        "batched_primitives": paint.batched_primitives,
-        "barrier_count": paint.barrier_count,
-        "barriers": profiling_paint_barriers_json(&paint.barriers),
-        "raster_cache_hits": paint.raster_cache_hits,
-        "raster_cache_misses": paint.raster_cache_misses,
-        "raster_cache_bypasses": paint.raster_cache_bypasses,
-        "raster_cache_opaque_hits": paint.raster_cache_opaque_hits,
-        "raster_cache_translucent_hits": paint.raster_cache_translucent_hits,
-    });
-    let object = snapshot
-        .as_object_mut()
-        .expect("profiling paint snapshot is an object");
-    for (name, value) in [
-        ("glyph_cache_hits", paint.glyph_cache_hits),
-        ("glyph_cache_misses", paint.glyph_cache_misses),
-        ("glyph_cache_entries", paint.glyph_cache_entries),
-        ("glyph_cache_capacity", paint.glyph_cache_capacity),
-        ("font_bytes_cache_hits", paint.font_bytes_cache_hits),
-        ("font_bytes_cache_misses", paint.font_bytes_cache_misses),
-        ("font_bytes_cache_entries", paint.font_bytes_cache_entries),
-        ("font_bytes_cache_capacity", paint.font_bytes_cache_capacity),
-        ("skia_glyph_cache_hits", paint.skia_glyph_cache_hits),
-        ("skia_glyph_cache_misses", paint.skia_glyph_cache_misses),
-        ("skia_glyph_cache_entries", paint.skia_glyph_cache_entries),
-        ("skia_glyph_cache_capacity", paint.skia_glyph_cache_capacity),
-    ] {
-        object.insert(name.to_string(), value.into());
-    }
-    snapshot
-}
-
-fn profiling_paint_barriers_json(
-    barriers: &mesh_core_debug::DisplayBatchBarrierSnapshot,
-) -> serde_json::Value {
-    serde_json::json!({
-        "text": barriers.text,
-        "icon": barriers.icon,
-        "opacity": barriers.opacity,
-        "clip": barriers.clip,
-        "translucency": barriers.translucency,
-        "material_change": barriers.material_change,
-    })
-}
-
-fn profiling_stage_summary_json(
-    summary: &mesh_core_debug::ProfilingStageSummary,
-) -> serde_json::Value {
-    serde_json::json!({
-        "stage": summary.stage.label(),
-        "sample_count": summary.sample_count,
-        "total_micros": summary.total_micros,
-        "max_micros": summary.max_micros,
-        "recent_samples": summary.recent_samples.iter().map(profiling_sample_json).collect::<Vec<_>>(),
-    })
-}
-
-fn profiling_sample_json(sample: &mesh_core_debug::ProfilingSample) -> serde_json::Value {
-    serde_json::json!({
-        "stage": sample.stage.label(),
-        "order": sample.order,
-        "timestamp_micros": sample.timestamp_micros,
-        "duration_micros": sample.duration_micros,
-        "surface_id": sample.surface_id,
-        "module_id": sample.module_id,
-        "redraw_count": sample.redraw_count,
-        "trigger_kind": sample.trigger_kind,
-    })
-}
-
-fn profiling_backend_snapshot_json(
-    snapshot: &mesh_core_debug::ProfilingBackendSnapshot,
-) -> serde_json::Value {
-    serde_json::json!({
-        "interface": snapshot.interface,
-        "provider_id": snapshot.provider_id,
-        "stages": snapshot.stages.iter().map(profiling_backend_stage_summary_json).collect::<Vec<_>>(),
-    })
-}
-
-fn profiling_backend_stage_summary_json(
-    summary: &mesh_core_debug::ProfilingBackendStageSummary,
-) -> serde_json::Value {
-    serde_json::json!({
-        "stage": summary.stage.label(),
-        "sample_count": summary.sample_count,
-        "total_micros": summary.total_micros,
-        "max_micros": summary.max_micros,
-        "recent_samples": summary.recent_samples.iter().map(profiling_backend_sample_json).collect::<Vec<_>>(),
-    })
-}
-
-fn profiling_backend_sample_json(
-    sample: &mesh_core_debug::ProfilingBackendSample,
-) -> serde_json::Value {
-    serde_json::json!({
-        "stage": sample.stage.label(),
-        "order": sample.order,
-        "timestamp_micros": sample.timestamp_micros,
-        "duration_micros": sample.duration_micros,
-        "trigger_kind": sample.trigger_kind,
-    })
-}
-
 #[cfg(test)]
 mod allocation_profiling_json_tests {
-    use super::*;
-
     #[test]
     fn allocation_summary_json_keeps_cumulative_and_recent_pass_counts() {
         let summary = mesh_core_debug::ProfilingAllocationSummary {
@@ -1692,7 +1379,7 @@ mod allocation_profiling_json_tests {
             }],
         };
 
-        let json = profiling_allocation_summary_json(&summary);
+        let json = serde_json::to_value(&summary).expect("allocation DTO serializes");
         assert_eq!(json["sample_count"], serde_json::json!(2));
         assert_eq!(json["allocated_bytes"], serde_json::json!(4_096));
         assert_eq!(
@@ -1707,10 +1394,11 @@ mod allocation_profiling_json_tests {
 
     #[test]
     fn profiling_snapshot_json_advertises_allocator_mode() {
-        let json = profiling_snapshot_json(&mesh_core_debug::ProfilingSnapshot {
+        let json = serde_json::to_value(mesh_core_debug::ProfilingSnapshot {
             allocation_profiling_available: true,
             ..mesh_core_debug::ProfilingSnapshot::default()
-        });
+        })
+        .expect("profiling DTOs serialize");
 
         assert_eq!(
             json["allocation_profiling_available"],

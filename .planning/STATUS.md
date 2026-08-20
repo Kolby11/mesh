@@ -35,6 +35,12 @@ misleading publish/subscribe contract were removed from the workspace. Live
 extension events continue through the typed scripting queue and shell service
 router, leaving one operational event path.
 
+Section 01 improvement 6 is complete: public debug inspection and profiling DTOs
+now derive the versioned telemetry wire shape, including the invalidation fields
+that had drifted out of the shell payload. The shell adds the schema version and
+keeps only overlay/controller state plus the established module-graph compatibility
+adapter outside the DTO boundary.
+
 The Section 11 Luau runtime and sandbox audit is complete. Its logical process
 tree, confirmed findings, broader feature direction, and regression matrix are
 in [`sections/11-luau-runtime-and-sandbox/improvements.md`](log/sections/11-luau-runtime-and-sandbox/improvements.md);
