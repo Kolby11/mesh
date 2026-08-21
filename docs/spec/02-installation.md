@@ -145,8 +145,10 @@ step before the commit can refuse without touching the running shell:
    back. The last ten generations are kept under
    `~/.local/state/mesh/lock-history/`.
 
-`--dry-run` prints the resolution, the contract diff, and the capability diff
-without staging anything. It is the primary review surface.
+`--dry-run` prints the resolution, normalized graph diff (module additions,
+removals, updates, enable/disable changes, provider selection, and profile
+layout/slot effects), contract diff, and capability diff without changing live
+source, lock, or profile state. It is the primary review surface.
 
 ### 1.4 `mesh.lock`
 

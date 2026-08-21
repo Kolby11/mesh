@@ -299,6 +299,40 @@ pub struct InstalledModuleGraph {
     layout_entrypoint: Option<ResolvedLayoutEntrypoint>,
 }
 
+/// The normalized, user-facing change set between two resolved graphs.
+/// Package planning and dry-run output use this rather than comparing raw
+/// manifests, so disabled modules and provider selections are included in the
+/// same decision surface as module additions and removals.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModuleGraphDiff {
+    pub added_modules: Vec<String>,
+    pub removed_modules: Vec<String>,
+    pub updated_modules: Vec<String>,
+    pub enabled_modules: Vec<String>,
+    pub disabled_modules: Vec<String>,
+    pub provider_changes: Vec<ProviderChange>,
+    pub profile_effects: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderChange {
+    pub interface: String,
+    pub before: Option<String>,
+    pub after: Option<String>,
+}
+
+impl ModuleGraphDiff {
+    pub fn is_empty(&self) -> bool {
+        self.added_modules.is_empty()
+            && self.removed_modules.is_empty()
+            && self.updated_modules.is_empty()
+            && self.enabled_modules.is_empty()
+            && self.disabled_modules.is_empty()
+            && self.provider_changes.is_empty()
+            && self.profile_effects.is_empty()
+    }
+}
+
 /// What the active composition contributes to graph resolution beyond the
 /// module set: how it arranges extension points, and which user overrides it no
 /// longer has a home for.
@@ -822,6 +856,101 @@ impl InstalledModuleGraph {
 
     pub fn module(&self, id: &str) -> Option<&InstalledModuleNode> {
         self.modules.get(id)
+    }
+
+    /// Compare two already-validated graphs after dependency, provider, and
+    /// profile resolution. This keeps dry-run output tied to the same
+    /// normalized inventory the runtime will activate.
+    pub fn diff(&self, next: &Self) -> ModuleGraphDiff {
+        let before_ids = self.modules.keys().cloned().collect::<BTreeSet<_>>();
+        let after_ids = next.modules.keys().cloned().collect::<BTreeSet<_>>();
+        let mut diff = ModuleGraphDiff {
+            added_modules: after_ids.difference(&before_ids).cloned().collect(),
+            removed_modules: before_ids.difference(&after_ids).cloned().collect(),
+            ..ModuleGraphDiff::default()
+        };
+
+        for module_id in before_ids.intersection(&after_ids) {
+            let before = &self.modules[module_id];
+            let after = &next.modules[module_id];
+            if before.kind != after.kind
+                || before.path != after.path
+                || before.manifest.version != after.manifest.version
+            {
+                diff.updated_modules.push(module_id.clone());
+            }
+            match (before.enabled, after.enabled) {
+                (false, true) => diff.enabled_modules.push(module_id.clone()),
+                (true, false) => diff.disabled_modules.push(module_id.clone()),
+                _ => {}
+            }
+        }
+
+        let mut interfaces = self
+            .active_providers
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        interfaces.extend(next.active_providers.keys().cloned());
+        for interface in interfaces {
+            let before = self
+                .active_provider(&interface)
+                .map(|provider| provider.module_id.clone());
+            let after = next
+                .active_provider(&interface)
+                .map(|provider| provider.module_id.clone());
+            if before != after {
+                diff.provider_changes.push(ProviderChange {
+                    interface,
+                    before,
+                    after,
+                });
+            }
+        }
+
+        let before_layout = self
+            .layout_entrypoint
+            .as_ref()
+            .map(|layout| format!("{}:{}", layout.module_id, layout.entrypoint_id));
+        let after_layout = next
+            .layout_entrypoint
+            .as_ref()
+            .map(|layout| format!("{}:{}", layout.module_id, layout.entrypoint_id));
+        if before_layout != after_layout {
+            diff.profile_effects.push(format!(
+                "layout: {} -> {}",
+                before_layout.as_deref().unwrap_or("none"),
+                after_layout.as_deref().unwrap_or("none")
+            ));
+        }
+
+        let mut slots = BTreeSet::new();
+        slots.extend(self.node_slots.iter().flat_map(|(root, values)| {
+            values.keys().map(move |slot| (root.clone(), slot.clone()))
+        }));
+        slots.extend(next.node_slots.iter().flat_map(|(root, values)| {
+            values.keys().map(move |slot| (root.clone(), slot.clone()))
+        }));
+        for (root, slot) in slots {
+            if self
+                .node_slots
+                .get(&root)
+                .and_then(|values| values.get(&slot))
+                != next
+                    .node_slots
+                    .get(&root)
+                    .and_then(|values| values.get(&slot))
+            {
+                diff.profile_effects
+                    .push(format!("node slot {root}:{slot} changed"));
+            }
+        }
+
+        diff.updated_modules.sort();
+        diff.provider_changes
+            .sort_by(|left, right| left.interface.cmp(&right.interface));
+        diff.profile_effects.sort();
+        diff
     }
 
     pub fn enabled_modules(&self) -> Vec<&InstalledModuleNode> {

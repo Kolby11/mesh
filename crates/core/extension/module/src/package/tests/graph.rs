@@ -4,6 +4,103 @@ use crate::ModuleType;
 use std::collections::HashMap;
 
 #[test]
+fn graph_diff_reports_inventory_activation_and_provider_changes() {
+    let before_root = root_with_modules(
+        &[
+            ("@mesh/front", ModuleKind::Frontend),
+            ("@mesh/back", ModuleKind::Backend),
+        ],
+        &[("mesh.audio", "@mesh/back")],
+        None,
+    );
+    let before_modules = vec![
+        loaded_module(
+            "@mesh/front",
+            ModuleKind::Frontend,
+            MeshDependencies::default(),
+            vec![],
+            MeshContributes::default(),
+        ),
+        loaded_module(
+            "@mesh/back",
+            ModuleKind::Backend,
+            MeshDependencies::default(),
+            vec![MeshProvidesDeclaration {
+                interface: "mesh.audio".into(),
+                version: None,
+                base_module: None,
+                provider: Some("before".into()),
+                label: None,
+                priority: 10,
+            }],
+            MeshContributes::default(),
+        ),
+    ];
+    let before = InstalledModuleGraph::from_parts(before_root, before_modules).unwrap();
+
+    let mut after_root = root_with_modules(
+        &[
+            ("@mesh/front", ModuleKind::Frontend),
+            ("@mesh/back", ModuleKind::Backend),
+            ("@mesh/extra", ModuleKind::Backend),
+        ],
+        &[("mesh.audio", "@mesh/extra")],
+        None,
+    );
+    after_root.modules.get_mut("@mesh/back").unwrap().enabled = false;
+    let after_modules = vec![
+        loaded_module(
+            "@mesh/front",
+            ModuleKind::Frontend,
+            MeshDependencies::default(),
+            vec![],
+            MeshContributes::default(),
+        ),
+        loaded_module(
+            "@mesh/back",
+            ModuleKind::Backend,
+            MeshDependencies::default(),
+            vec![MeshProvidesDeclaration {
+                interface: "mesh.audio".into(),
+                version: None,
+                base_module: None,
+                provider: Some("before".into()),
+                label: None,
+                priority: 10,
+            }],
+            MeshContributes::default(),
+        ),
+        loaded_module(
+            "@mesh/extra",
+            ModuleKind::Backend,
+            MeshDependencies::default(),
+            vec![MeshProvidesDeclaration {
+                interface: "mesh.audio".into(),
+                version: None,
+                base_module: None,
+                provider: Some("after".into()),
+                label: None,
+                priority: 20,
+            }],
+            MeshContributes::default(),
+        ),
+    ];
+    let after = InstalledModuleGraph::from_parts(after_root, after_modules).unwrap();
+
+    let diff = before.diff(&after);
+    assert_eq!(diff.added_modules, vec!["@mesh/extra"]);
+    assert_eq!(diff.disabled_modules, vec!["@mesh/back"]);
+    assert_eq!(
+        diff.provider_changes,
+        vec![ProviderChange {
+            interface: "mesh.audio".into(),
+            before: Some("@mesh/back".into()),
+            after: Some("@mesh/extra".into()),
+        }]
+    );
+}
+
+#[test]
 fn installed_module_graph_exposes_kind_views_from_single_modules_map() {
     let root = root_with_modules(
         &[

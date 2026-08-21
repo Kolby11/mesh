@@ -1131,6 +1131,7 @@ fn cmd_update(args: &[String]) {
     for graph_breaking in &plan.graph_breaking {
         eprintln!("breaking: {graph_breaking}");
     }
+    print_graph_diff(plan.graph_diff.as_ref());
     if plan.is_refused() {
         let _ = transaction.abort();
         exit_error("update refused; nothing was changed");
@@ -1163,6 +1164,34 @@ fn cmd_update(args: &[String]) {
         println!("updated {entry}");
     }
     println!("lock generation {}", lock.generation);
+}
+
+fn print_graph_diff(diff: Option<&mesh_core_module::package::ModuleGraphDiff>) {
+    let Some(diff) = diff else {
+        return;
+    };
+    print_graph_diff_list("added", &diff.added_modules);
+    print_graph_diff_list("removed", &diff.removed_modules);
+    print_graph_diff_list("updated", &diff.updated_modules);
+    print_graph_diff_list("enabled", &diff.enabled_modules);
+    print_graph_diff_list("disabled", &diff.disabled_modules);
+    for provider in &diff.provider_changes {
+        println!(
+            "provider {}: {} → {}",
+            provider.interface,
+            provider.before.as_deref().unwrap_or("none"),
+            provider.after.as_deref().unwrap_or("none")
+        );
+    }
+    for effect in &diff.profile_effects {
+        println!("profile effect: {effect}");
+    }
+}
+
+fn print_graph_diff_list(label: &str, modules: &[String]) {
+    for module_id in modules {
+        println!("graph {label}: {module_id}");
+    }
 }
 
 fn cmd_rollback(args: &[String]) {

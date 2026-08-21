@@ -15,9 +15,9 @@ use mesh_core_capability::{
     Capability, CapabilityCatalog, CapabilityPolicy, EffectiveCapabilities, PrivilegeLevel,
 };
 use mesh_core_module::package::{
-    InstalledModuleGraph, LockedModule, MeshLock, ModuleManifest, ModuleSource, PackageTransaction,
-    RootModuleGraphManifest, has_local_edits, load_installed_module_graph, module_install_path,
-    module_tree_digest, validate_module_tree,
+    InstalledModuleGraph, LockedModule, MeshLock, ModuleGraphDiff, ModuleManifest, ModuleSource,
+    PackageTransaction, RootModuleGraphManifest, has_local_edits, load_installed_module_graph,
+    module_install_path, module_tree_digest, validate_module_tree,
 };
 use mesh_core_service::{CompatibilityClass, diff_contracts, parse_interface_contract};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -65,6 +65,9 @@ pub struct UpdatePlan {
     pub graph_breaking: Vec<String>,
     /// The exact capability decisions made for the staged graph.
     pub capability_decisions: BTreeMap<String, EffectiveCapabilities>,
+    /// Normalized activation changes between the installed and candidate
+    /// graphs. This is the source for dry-run provider/profile output.
+    pub graph_diff: Option<ModuleGraphDiff>,
     /// Candidate module trees materialized before the plan is classified. These
     /// paths remain inside the transaction workspace until commit or abort.
     pub staged_paths: BTreeMap<String, PathBuf>,
@@ -279,11 +282,14 @@ pub fn plan_update_from_staged_graph(
     approvals: &BTreeMap<String, Vec<String>>,
     transaction: &mut PackageTransaction,
 ) -> Result<UpdatePlan, String> {
+    let installed_graph = load_installed_module_graph(root_path)
+        .map_err(|error| format!("installed graph validation failed: {error}"))?;
     let mut plan = collect_update_candidates(modules_dir, lock, only, policy)?;
     let candidate_root =
         stage_candidate_graph(root_path, modules_dir, installed, &mut plan, transaction)?;
     let candidate_graph = load_installed_module_graph(&candidate_root)
         .map_err(|error| format!("candidate graph validation failed: {error}"))?;
+    plan.graph_diff = Some(installed_graph.diff(&candidate_graph));
 
     for candidate in &mut plan.candidates {
         let module = candidate_graph
