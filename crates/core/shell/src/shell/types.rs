@@ -6,7 +6,7 @@ pub use mesh_core_frontend_host::{
 };
 use mesh_core_presentation::{LayerSurfaceSizePolicy, PopupConfig, SurfaceConfig};
 use mesh_core_render::{DamageRect, PixelBuffer};
-use mesh_core_service::{InterfaceContract, TypeExpr};
+use mesh_core_service::{InterfaceContract, InterfaceTypeDef, TypeExpr};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -195,6 +195,7 @@ impl ServiceDeliveryIndex {
 #[derive(Debug, Clone)]
 pub(super) struct ContractValidationCache {
     pub(super) contract: Arc<InterfaceContract>,
+    pub(super) types: HashMap<String, InterfaceTypeDef>,
     pub(super) state_fields: Vec<CompiledContractField>,
     pub(super) events: HashMap<String, Vec<CompiledContractField>>,
 }

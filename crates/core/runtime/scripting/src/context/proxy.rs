@@ -2,7 +2,7 @@ use super::PublishedEvent;
 use super::state::ServiceContextState;
 use mesh_core_capability::{Capability, CapabilitySet};
 pub(super) use mesh_core_service::service_name_from_interface;
-use mesh_core_service::{InterfaceContract, InterfaceResolution};
+use mesh_core_service::{InterfaceContract, InterfaceResolution, TypeExpr};
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -66,6 +66,9 @@ pub(super) fn create_service_proxy(
     pending_side_channels: Arc<AtomicBool>,
 ) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
+    // Method closures use this private marker to distinguish a Lua colon-call
+    // on the proxy from a legitimate table-valued first argument.
+    proxy.set("__mesh_interface_proxy", true)?;
     let meta = lua.create_table()?;
 
     let methods = contract
@@ -195,16 +198,53 @@ pub(super) fn create_service_proxy(
                             )
                             .map(LuaValue::Table);
                         }
-                        let offset = consume_self_arg(&args);
+                        let offset = consume_self_arg(&args)?;
+                        let supplied = args.len().saturating_sub(offset);
+                        let required = method
+                            .args
+                            .iter()
+                            .filter(|argument| {
+                                !TypeExpr::parse(&argument.arg_type)
+                                    .map(|value_type| value_type.optional)
+                                    .unwrap_or(false)
+                            })
+                            .count();
+                        if supplied < required || supplied > method.args.len() {
+                            return Err(mlua::Error::runtime(format!(
+                                "service method '{}.{}' expects {}..{} arguments, got {}",
+                                iface,
+                                method.name,
+                                required,
+                                method.args.len(),
+                                supplied
+                            )));
+                        }
                         let payload = method
                             .args
                             .iter()
                             .enumerate()
+                            .take(supplied)
                             .map(|(index, arg)| {
-                                let lua_value =
-                                    args.get(index + offset).cloned().unwrap_or(LuaValue::Nil);
-                                lua.from_value::<Value>(lua_value)
-                                    .map(|value| (arg.name.clone(), value))
+                                let lua_value = args
+                                    .get(index + offset)
+                                    .cloned()
+                                    .expect("validated service method argument count");
+                                let value = lua.from_value::<Value>(lua_value)?;
+                                let value_type =
+                                    TypeExpr::parse(&arg.arg_type).map_err(mlua::Error::runtime)?;
+                                if let Some(contract) = method_contract.as_ref()
+                                    && !value_type.matches_with_types(&value, &contract.types)
+                                {
+                                    return Err(mlua::Error::runtime(format!(
+                                        "service method '{}.{}' argument '{}' expected {}, got {}",
+                                        iface,
+                                        method.name,
+                                        arg.name,
+                                        arg.arg_type,
+                                        json_type_name(&value)
+                                    )));
+                                }
+                                Ok((arg.name.clone(), value))
                             })
                             .collect::<mlua::Result<serde_json::Map<String, Value>>>()?;
                         let call_id = NEXT_SERVICE_CALL_ID.fetch_add(1, Ordering::Relaxed);
@@ -589,10 +629,23 @@ fn create_service_call_ticket(
     Ok(ticket)
 }
 
-fn consume_self_arg(args: &mlua::Variadic<LuaValue>) -> usize {
+fn consume_self_arg(args: &mlua::Variadic<LuaValue>) -> mlua::Result<usize> {
     match args.get(0) {
-        Some(LuaValue::Table(_)) => 1,
-        _ => 0,
+        Some(LuaValue::Table(table)) => Ok(table
+            .raw_get::<bool>("__mesh_interface_proxy")
+            .map(|is_proxy| usize::from(is_proxy))?),
+        _ => Ok(0),
+    }
+}
+
+fn json_type_name(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
     }
 }
 

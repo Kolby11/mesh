@@ -66,6 +66,14 @@ profile startup, and debug inspection consume one coherent contract/provider
 epoch; an already-published catalog remains unchanged when later registrations
 arrive.
 
+Service contracts now validate recursive named fields, arrays, optional values,
+and `Result` returns across state, events, method inputs, and provider outputs.
+Invalid snapshots preserve the last-known-good state, invalid events and
+commands are rejected at their boundaries, and provider result violations settle
+as contract failures. Luau method proxies enforce arity and argument types with
+proxy-specific colon-call detection. Cargo verification remains blocked by the
+unavailable `sha2` registry cache and network access.
+
 The guarded `scripts/codex-backlog-runner.sh` can process one unchecked backlog
 item at a time directly on `main`, using Codex's explicit unrestricted mode for
 unattended turns by default (`CODEX_ALLOW_ALL=0` opts back into workspace-write),

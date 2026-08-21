@@ -1,7 +1,7 @@
 use semver::{Version, VersionReq};
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A parsed interface contract.
 ///
@@ -248,6 +248,80 @@ impl TypeExpr {
             BaseType::Named(_) => value.is_object(),
         }
     }
+
+    /// Check a value against this expression and the contract's complete named
+    /// type graph. Arrays validate every member and named objects validate
+    /// every declared field recursively, including optional presence/null
+    /// semantics. Cyclic graphs fail closed at the edge that would recurse.
+    pub fn matches_with_types(
+        &self,
+        value: &JsonValue,
+        types: &HashMap<String, InterfaceTypeDef>,
+    ) -> bool {
+        let mut visiting = HashSet::new();
+        self.matches_inner(value, types, &mut visiting)
+    }
+
+    fn matches_inner(
+        &self,
+        value: &JsonValue,
+        types: &HashMap<String, InterfaceTypeDef>,
+        visiting: &mut HashSet<String>,
+    ) -> bool {
+        if value.is_null() {
+            return self.optional;
+        }
+        if self.array {
+            return value.as_array().is_some_and(|items| {
+                items.iter().all(|item| {
+                    let item_expr = Self {
+                        base: self.base.clone(),
+                        array: false,
+                        optional: false,
+                    };
+                    item_expr.matches_inner(item, types, visiting)
+                })
+            });
+        }
+        match &self.base {
+            BaseType::String => value.is_string(),
+            BaseType::Int => value.as_i64().is_some() || value.as_u64().is_some(),
+            BaseType::Float => value.is_number(),
+            BaseType::Boolean => value.is_boolean(),
+            BaseType::Object => value.is_object(),
+            BaseType::Any => true,
+            BaseType::Named(name) if name == BUILTIN_RESULT_TYPE => {
+                let Some(object) = value.as_object() else {
+                    return false;
+                };
+                object.get("ok").is_some_and(|ok| ok.is_boolean())
+                    && object
+                        .get("error")
+                        .is_none_or(|error| error.is_string() || error.is_null())
+            }
+            BaseType::Named(name) => {
+                if !visiting.insert(name.clone()) {
+                    return false;
+                }
+                let matched = types.get(name).is_some_and(|definition| {
+                    let Some(object) = value.as_object() else {
+                        return false;
+                    };
+                    definition.fields.iter().all(|field| {
+                        let Ok(field_type) = TypeExpr::parse(&field.arg_type) else {
+                            return false;
+                        };
+                        match object.get(&field.name) {
+                            Some(value) => field_type.matches_inner(value, types, visiting),
+                            None => field_type.optional,
+                        }
+                    })
+                });
+                visiting.remove(name);
+                matched
+            }
+        }
+    }
 }
 
 /// Parse and validate an inline or external contract JSON object into an
@@ -413,6 +487,34 @@ fn check_type_expr(
     }
 }
 
+fn named_type_cycle(
+    name: &str,
+    types: &HashMap<String, InterfaceTypeDef>,
+    visiting: &mut HashSet<String>,
+    visited: &mut HashSet<String>,
+) -> bool {
+    if !visiting.insert(name.to_string()) {
+        return true;
+    }
+    let cycle = types.get(name).is_some_and(|definition| {
+        definition.fields.iter().any(|field| {
+            let Ok(expr) = TypeExpr::parse(&field.arg_type) else {
+                return false;
+            };
+            let BaseType::Named(next) = expr.base else {
+                return false;
+            };
+            next != BUILTIN_RESULT_TYPE
+                && types.contains_key(&next)
+                && !visited.contains(&next)
+                && named_type_cycle(&next, types, visiting, visited)
+        })
+    });
+    visiting.remove(name);
+    visited.insert(name.to_string());
+    cycle
+}
+
 /// Collect every type-grammar violation in the contract. Empty means valid.
 pub fn contract_type_errors(contract: &InterfaceContract) -> Vec<String> {
     let mut errors = Vec::new();
@@ -525,6 +627,14 @@ pub fn contract_type_errors(contract: &InterfaceContract) -> Vec<String> {
                 format!("type '{}' field '{}'", def.name, field.name),
                 &field.arg_type,
             );
+        }
+    }
+    let mut visited = HashSet::new();
+    for name in contract.types.keys() {
+        if !visited.contains(name)
+            && named_type_cycle(name, &contract.types, &mut HashSet::new(), &mut visited)
+        {
+            errors.push(format!("named type '{name}' contains a recursive cycle"));
         }
     }
     errors
@@ -924,5 +1034,60 @@ mod tests {
         assert!(TypeExpr::parse("lowercaseNamed").is_err());
         assert!(TypeExpr::parse("").is_err());
         assert!(TypeExpr::parse("[Sensor]").is_err());
+    }
+
+    #[test]
+    fn recursively_validates_named_arrays_optional_fields_and_results() {
+        let contract = serde_json::json!({
+            "types": {
+                "Reading": {
+                    "fields": [
+                        { "name": "label", "type": "string" },
+                        { "name": "unit", "type": "string?" }
+                    ]
+                },
+                "Batch": {
+                    "fields": [
+                        { "name": "readings", "type": "Reading[]" }
+                    ]
+                }
+            }
+        });
+        let parsed = parse_interface_contract("mesh.test", "1.0", &contract).unwrap();
+        let batch = TypeExpr::parse("Batch").unwrap();
+        let valid = serde_json::json!({
+            "readings": [
+                { "label": "temperature" },
+                { "label": "humidity", "unit": null }
+            ]
+        });
+        assert!(batch.matches_with_types(&valid, &parsed.types));
+        assert!(!batch.matches_with_types(
+            &serde_json::json!({ "readings": [{ "label": 7 }] }),
+            &parsed.types
+        ));
+        assert!(!batch.matches_with_types(
+            &serde_json::json!({ "readings": [{ "label": "temperature", "unit": 7 }] }),
+            &parsed.types
+        ));
+
+        let result = TypeExpr::parse("Result").unwrap();
+        assert!(result.matches_with_types(
+            &serde_json::json!({ "ok": true, "value": { "count": 2 } }),
+            &parsed.types
+        ));
+        assert!(!result.matches_with_types(&serde_json::json!({ "ok": "yes" }), &parsed.types));
+    }
+
+    #[test]
+    fn rejects_recursive_named_type_cycles() {
+        let contract = serde_json::json!({
+            "types": {
+                "Node": { "fields": [{ "name": "next", "type": "Node?" }] }
+            }
+        });
+        let err = parse_interface_contract("mesh.test", "1.0", &contract).unwrap_err();
+        assert!(matches!(err, ContractError::InvalidType { .. }));
+        assert!(err.to_string().contains("recursive cycle"));
     }
 }

@@ -406,15 +406,55 @@ impl Shell {
                             == provider_id
                     });
                 if provider_is_active {
-                    self.record_backend_method_result(
-                        interface,
-                        provider_id,
-                        call_id,
-                        command,
-                        result.clone(),
-                        outcome,
-                    );
-                    self.complete_service_call_route(call_id, outcome.as_str(), &result);
+                    let contract = self.interfaces.resolve(&interface, None).contract;
+                    let warnings = contract.as_ref().map_or_else(Vec::new, |contract| {
+                        service_state::service_method_result_contract_warnings(
+                            contract, &command, &result,
+                        )
+                    });
+                    if warnings.is_empty() {
+                        self.record_backend_method_result(
+                            interface,
+                            provider_id,
+                            call_id,
+                            command,
+                            result.clone(),
+                            outcome,
+                        );
+                        self.complete_service_call_route(call_id, outcome.as_str(), &result);
+                    } else {
+                        let message = warnings.join("; ");
+                        tracing::warn!(
+                            interface,
+                            provider_id,
+                            command,
+                            error = %message,
+                            "rejected service command result with invalid contract payload"
+                        );
+                        self.diagnostics.record_lifecycle_error(
+                            provider_id.clone(),
+                            "invalid_service_command_result",
+                            message.clone(),
+                        );
+                        let invalid_result = serde_json::json!({
+                            "ok": false,
+                            "status": "invalid_service_command_result",
+                            "error": message,
+                        });
+                        self.record_backend_method_result(
+                            interface,
+                            provider_id,
+                            call_id,
+                            command,
+                            invalid_result.clone(),
+                            mesh_core_backend::BackendCommandOutcome::Failed,
+                        );
+                        self.complete_service_call_route(
+                            call_id,
+                            "invalid_service_command_result",
+                            &invalid_result,
+                        );
+                    }
                 } else {
                     self.complete_service_call_route(
                         call_id,

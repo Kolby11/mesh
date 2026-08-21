@@ -268,6 +268,45 @@ end
 }
 
 #[test]
+fn interface_proxy_validates_method_arity_and_types_without_confusing_table_args() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.control"));
+    let mut ctx = ScriptContext::new_for_instance(
+        "@test/audio-widget",
+        "@test/audio-widget",
+        "@test/audio-widget#bottom",
+        caps,
+    )
+    .unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+function valid_colon_call()
+    local audio = require("mesh.audio@>=1.0")
+    ticket = audio:set_volume("default", 55)
+end
+
+function invalid_type_call()
+    local audio = require("mesh.audio@>=1.0")
+    audio.set_volume("default", "loud")
+end
+
+function invalid_arity_call()
+    local audio = require("mesh.audio@>=1.0")
+    audio.set_volume("default")
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_handler("valid_colon_call", &[]).unwrap();
+    assert_eq!(ctx.drain_published_events().len(), 1);
+    assert!(ctx.call_handler("invalid_type_call", &[]).is_err());
+    assert!(ctx.call_handler("invalid_arity_call", &[]).is_err());
+    assert!(ctx.drain_published_events().is_empty());
+}
+
+#[test]
 fn service_ticket_cancel_publishes_correlated_cancellation() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("service.audio.control"));

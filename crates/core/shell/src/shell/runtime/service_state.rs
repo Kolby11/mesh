@@ -1,7 +1,7 @@
 use super::super::*;
 #[cfg(test)]
 use mesh_core_service::InterfaceArgument;
-use mesh_core_service::TypeExpr;
+use mesh_core_service::{InterfaceContract, TypeExpr};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -153,7 +153,14 @@ impl Shell {
         {
             return false;
         }
-        self.validate_service_state_shape(&interface, source_module, &payload);
+        if !self.validate_service_state_shape(&interface, source_module, &payload) {
+            tracing::warn!(
+                interface = %interface,
+                source_module,
+                "ignored service state snapshot with invalid contract shape"
+            );
+            return false;
+        }
         let interface = interface.into_owned();
         self.latest_service_state.insert(
             interface.clone(),
@@ -650,18 +657,20 @@ impl Shell {
         interface: &str,
         provider_id: &str,
         payload: &serde_json::Value,
-    ) {
+    ) -> bool {
         let resolution = self.interfaces.resolve(interface, None);
         let Some(contract) = resolution.contract else {
-            return;
+            return true;
         };
         let warnings = {
             let cache = self.validation_cache_for_contract(contract);
             service_state_contract_warnings_cached(cache, payload)
         };
+        let valid = warnings.is_empty();
         for warning in warnings {
             self.record_service_contract_warning(interface, provider_id, warning);
         }
+        valid
     }
 
     fn service_event_contract_warnings(
@@ -783,6 +792,7 @@ fn build_contract_validation_cache(contract: Arc<InterfaceContract>) -> Contract
         })
         .collect();
     ContractValidationCache {
+        types: contract.types.clone(),
         contract,
         state_fields,
         events,
@@ -808,14 +818,16 @@ fn service_state_contract_warnings(
             continue;
         }
         let Some(value) = object.get(&field.name) else {
-            warnings.push(format!(
-                "missing required state field '{}' for {}",
-                field.name, contract.interface
-            ));
+            if !cached_contract_value_type(&field.field_type).optional {
+                warnings.push(format!(
+                    "missing required state field '{}' for {}",
+                    field.name, contract.interface
+                ));
+            }
             continue;
         };
         let compiled_type = cached_contract_value_type(&field.field_type);
-        if !compiled_type.matches(value) {
+        if !compiled_type.matches_with_types(value, &contract.types) {
             warnings.push(format!(
                 "state field '{}' for {} expected {}, got {}",
                 field.name,
@@ -843,13 +855,15 @@ fn service_state_contract_warnings_cached(
     let mut warnings = Vec::new();
     for field in &cache.state_fields {
         let Some(value) = object.get(&field.name) else {
-            warnings.push(format!(
-                "missing required state field '{}' for {}",
-                field.name, cache.contract.interface
-            ));
+            if !field.value_type.optional {
+                warnings.push(format!(
+                    "missing required state field '{}' for {}",
+                    field.name, cache.contract.interface
+                ));
+            }
             continue;
         };
-        if !field.value_type.matches(value) {
+        if !field.value_type.matches_with_types(value, &cache.types) {
             warnings.push(format!(
                 "state field '{}' for {} expected {}, got {}",
                 field.name,
@@ -879,10 +893,12 @@ fn event_payload_contract_warnings(
     let mut warnings = Vec::new();
     for field in fields {
         let Some(value) = object.get(field.name.as_str()) else {
-            warnings.push(format!(
-                "event '{event_name}' for {interface} missing required payload field '{}'",
-                field.name
-            ));
+            if !cached_contract_value_type(&field.arg_type).optional {
+                warnings.push(format!(
+                    "event '{event_name}' for {interface} missing required payload field '{}'",
+                    field.name
+                ));
+            }
             continue;
         };
         if !cached_contract_value_type(&field.arg_type).matches(value) {
@@ -909,15 +925,33 @@ fn event_payload_contract_warnings_cached(
         )];
     };
     if fields.is_empty() {
-        return Vec::new();
+        return match payload.as_object() {
+            Some(object) if object.is_empty() => Vec::new(),
+            Some(_) => vec![format!(
+                "event '{event_name}' for {} expected an empty object payload",
+                cache.contract.interface
+            )],
+            None => vec![format!(
+                "event '{event_name}' for {} must be a JSON object, got {}",
+                cache.contract.interface,
+                json_type_name(payload)
+            )],
+        };
     }
-    compiled_event_payload_contract_warnings(&cache.contract.interface, event_name, fields, payload)
+    compiled_event_payload_contract_warnings(
+        &cache.contract.interface,
+        event_name,
+        fields,
+        &cache.types,
+        payload,
+    )
 }
 
 fn compiled_event_payload_contract_warnings(
     interface: &str,
     event_name: &str,
     fields: &[CompiledContractField],
+    types: &HashMap<String, mesh_core_service::InterfaceTypeDef>,
     payload: &serde_json::Value,
 ) -> Vec<String> {
     let Some(object) = payload.as_object() else {
@@ -930,13 +964,15 @@ fn compiled_event_payload_contract_warnings(
     let mut warnings = Vec::new();
     for field in fields {
         let Some(value) = object.get(field.name.as_str()) else {
-            warnings.push(format!(
-                "event '{event_name}' for {interface} missing required payload field '{}'",
-                field.name
-            ));
+            if !field.value_type.optional {
+                warnings.push(format!(
+                    "event '{event_name}' for {interface} missing required payload field '{}'",
+                    field.name
+                ));
+            }
             continue;
         };
-        if !field.value_type.matches(value) {
+        if !field.value_type.matches_with_types(value, types) {
             let field_name = field.name.as_str();
             warnings.push(format!(
                 "event '{event_name}' for {interface} payload field '{field_name}' expected {}, got {}",
@@ -946,6 +982,89 @@ fn compiled_event_payload_contract_warnings(
         }
     }
     warnings
+}
+
+/// Validate the JSON object sent to a declared interface method before it is
+/// placed on a backend queue. This is the shell-side safety net for direct
+/// callers that bypass the Luau proxy.
+pub(in crate::shell) fn service_method_input_contract_warnings(
+    contract: &InterfaceContract,
+    command: &str,
+    payload: &serde_json::Value,
+) -> Vec<String> {
+    let Some(method) = contract
+        .methods
+        .iter()
+        .find(|method| method.name == command)
+    else {
+        return vec![format!(
+            "method '{command}' is not declared for {}",
+            contract.interface
+        )];
+    };
+    let Some(object) = payload.as_object() else {
+        return vec![format!(
+            "method '{command}' for {} must receive a JSON object, got {}",
+            contract.interface,
+            json_type_name(payload)
+        )];
+    };
+
+    let mut warnings = Vec::new();
+    for argument in &method.args {
+        let value_type = cached_contract_value_type(&argument.arg_type);
+        let Some(value) = object.get(&argument.name) else {
+            if !value_type.optional {
+                warnings.push(format!(
+                    "method '{command}' for {} missing required argument '{}'",
+                    contract.interface, argument.name
+                ));
+            }
+            continue;
+        };
+        if !value_type.matches_with_types(value, &contract.types) {
+            warnings.push(format!(
+                "method '{command}' for {} argument '{}' expected {}, got {}",
+                contract.interface,
+                argument.name,
+                argument.arg_type,
+                json_type_name(value)
+            ));
+        }
+    }
+    warnings
+}
+
+/// Validate a provider's result before completing a frontend service ticket.
+pub(in crate::shell) fn service_method_result_contract_warnings(
+    contract: &InterfaceContract,
+    command: &str,
+    result: &serde_json::Value,
+) -> Vec<String> {
+    let Some(method) = contract
+        .methods
+        .iter()
+        .find(|method| method.name == command)
+    else {
+        return vec![format!(
+            "method '{command}' is not declared for {}",
+            contract.interface
+        )];
+    };
+    let Some(returns) = method.returns.as_deref() else {
+        return Vec::new();
+    };
+    let value_type = cached_contract_value_type(returns);
+    if value_type.matches_with_types(result, &contract.types) {
+        Vec::new()
+    } else {
+        vec![format!(
+            "method '{command}' for {} returned {}, got {}",
+            contract.interface,
+            returns,
+            json_type_name(result)
+        )]
+    }
 }
 
 fn is_runtime_metadata_state_field(name: &str) -> bool {

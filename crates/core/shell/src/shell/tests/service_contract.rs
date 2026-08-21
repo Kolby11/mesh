@@ -155,6 +155,13 @@ fn state_shape_mismatch_records_service_contract_warning() {
         .broadcast_service_event(service_update(
             "mesh.audio",
             "@mesh/pipewire-audio",
+            serde_json::json!({ "available": true, "percent": 40.0, "muted": false }),
+        ))
+        .unwrap();
+    shell
+        .broadcast_service_event(service_update(
+            "mesh.audio",
+            "@mesh/pipewire-audio",
             serde_json::json!({ "available": true, "percent": "loud" }),
         ))
         .unwrap();
@@ -167,8 +174,11 @@ fn state_shape_mismatch_records_service_contract_warning() {
                 .to_string()
                 .contains("service_contract_warning")
     }));
-    let latest = shell.latest_service_state.get("mesh.audio").unwrap();
-    assert!(latest.state.get("source_module").is_none());
+    assert_eq!(
+        shell.latest_service_state["mesh.audio"].state["percent"],
+        serde_json::json!(40.0),
+        "invalid state must not replace the last-known-good snapshot"
+    );
 }
 
 #[test]
@@ -254,6 +264,44 @@ fn service_command_dispatch_records_debug_method_call() {
 }
 
 #[test]
+fn service_command_rejects_invalid_contract_payload_before_queueing() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .interfaces
+        .register_contract(test_contract("mesh.audio"));
+    register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
+    let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.audio.control",
+    ));
+
+    let result = shell.dispatch_service_command(
+        "mesh.audio",
+        "set_muted",
+        &serde_json::json!({ "device_id": "default", "muted": "yes" }),
+        "@mesh/panel",
+        &capabilities,
+    );
+
+    assert_eq!(result["ok"], serde_json::json!(false));
+    assert_eq!(
+        result["status"],
+        serde_json::json!("invalid_service_command_payload")
+    );
+    assert!(rx.try_recv().is_err());
+    assert!(shell.diagnostics.snapshot().iter().any(|entry| {
+        entry.module_id == "@mesh/panel"
+            && entry
+                .health
+                .to_string()
+                .contains("invalid_service_command_payload")
+    }));
+}
+
+#[test]
 fn backend_command_result_records_debug_method_result() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
@@ -285,6 +333,49 @@ fn backend_command_result_records_debug_method_result() {
             && entry.command == "set_volume"
             && entry.status == "completed"
             && !entry.queued
+    }));
+}
+
+#[test]
+fn backend_command_result_rejects_invalid_contract_output() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .interfaces
+        .register_contract(test_contract("mesh.audio"));
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let mut pending = VecDeque::new();
+
+    shell
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::BackendCommandResult {
+                interface: "mesh.audio".to_string(),
+                provider_id: "@mesh/pipewire-audio".to_string(),
+                call_id: mesh_core_backend::CallId::from_raw(0),
+                command: "set_volume".to_string(),
+                result: serde_json::json!({ "ok": "yes" }),
+                outcome: mesh_core_backend::BackendCommandOutcome::Completed,
+            },
+        )
+        .unwrap();
+
+    assert!(shell.diagnostics.snapshot().iter().any(|entry| {
+        entry.module_id == "@mesh/pipewire-audio"
+            && entry
+                .health
+                .to_string()
+                .contains("invalid_service_command_result")
+    }));
+    let snapshot = shell.build_debug_snapshot();
+    assert!(snapshot.method_calls.iter().any(|entry| {
+        entry.command == "set_volume"
+            && entry.status == "failed"
+            && entry
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("expected Result"))
     }));
 }
 

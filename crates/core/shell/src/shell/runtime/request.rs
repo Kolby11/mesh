@@ -1119,6 +1119,47 @@ impl Shell {
             });
         }
 
+        if let Some(contract) = contract.as_ref() {
+            let warnings =
+                service_state::service_method_input_contract_warnings(contract, command, payload);
+            if !warnings.is_empty() {
+                let message = warnings.join("; ");
+                tracing::warn!(
+                    source_module_id,
+                    interface,
+                    command,
+                    error = %message,
+                    "rejected service command with invalid contract payload"
+                );
+                self.diagnostics.record_lifecycle_error(
+                    source_module_id.to_string(),
+                    "invalid_service_command_payload",
+                    message.clone(),
+                );
+                let result = serde_json::json!({
+                    "ok": false,
+                    "error": message,
+                    "status": "invalid_service_command_payload",
+                    "call_id": call_id.raw(),
+                });
+                self.record_method_call(mesh_core_debug::MethodCallEntry {
+                    call_id: call_id.raw(),
+                    interface: interface_canonical.to_string(),
+                    provider_id: None,
+                    source_module_id: source_module_id.to_string(),
+                    command: command.to_string(),
+                    status: "invalid_service_command_payload".to_string(),
+                    queued: false,
+                    result: Some(result.clone()),
+                    error: result
+                        .get("error")
+                        .and_then(|value| value.as_str())
+                        .map(ToOwned::to_owned),
+                });
+                return result;
+            }
+        }
+
         let interface = interface_canonical.as_ref();
         // Interfaces the shell provides itself answer here rather than on a
         // backend command queue. The capability check above already ran, so a
