@@ -6,9 +6,9 @@
 use serde::de::{MapAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const LEGACY_DEFAULT_SHELL_ANIMATION_PREFIX: &str = "animation.default.";
@@ -193,6 +193,184 @@ pub struct ThemeModule {
     pub tokens: HashMap<String, TokenValue>,
     #[serde(default)]
     pub defaults: ThemeDefaults,
+}
+
+/// A source selected by an installed theme contribution.
+///
+/// The handle deliberately stores the owning module root separately from the
+/// manifest-relative path. Callers must obtain it from the graph catalog;
+/// free-form theme IDs never become filesystem paths. Opening the handle
+/// safely against symlink and race attacks is a separate I/O boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThemeSourceHandle {
+    module_root: PathBuf,
+    relative_path: PathBuf,
+}
+
+impl ThemeSourceHandle {
+    pub fn new(
+        module_root: impl Into<PathBuf>,
+        relative_path: impl AsRef<Path>,
+    ) -> Result<Self, String> {
+        let module_root = module_root.into();
+        if module_root.as_os_str().is_empty() {
+            return Err("theme source module root cannot be empty".into());
+        }
+        let relative_path = relative_path.as_ref();
+        if relative_path.as_os_str().is_empty() || relative_path.is_absolute() {
+            return Err(format!(
+                "theme source path must be a non-empty relative path: {}",
+                relative_path.display()
+            ));
+        }
+        if relative_path.components().any(|component| {
+            matches!(
+                component,
+                Component::CurDir
+                    | Component::ParentDir
+                    | Component::RootDir
+                    | Component::Prefix(_)
+            )
+        }) {
+            return Err(format!(
+                "theme source path contains an unsafe component: {}",
+                relative_path.display()
+            ));
+        }
+        Ok(Self {
+            module_root,
+            relative_path: relative_path.to_path_buf(),
+        })
+    }
+
+    pub fn module_root(&self) -> &Path {
+        &self.module_root
+    }
+
+    pub fn relative_path(&self) -> &Path {
+        &self.relative_path
+    }
+
+    /// Return the lexical candidate path for the later contained-open step.
+    pub fn candidate_path(&self) -> PathBuf {
+        self.module_root.join(&self.relative_path)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThemeModeDescriptor {
+    pub name: String,
+    pub source: ThemeSourceHandle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThemePackDescriptor {
+    /// Canonical graph-scoped identity (`owner-module:local-id`).
+    pub id: String,
+    pub owner_module: String,
+    pub local_id: String,
+    pub label: Option<String>,
+    pub modes: BTreeMap<String, ThemeModeDescriptor>,
+    pub default_mode: String,
+}
+
+impl ThemePackDescriptor {
+    pub fn new(
+        id: impl Into<String>,
+        owner_module: impl Into<String>,
+        local_id: impl Into<String>,
+        label: Option<String>,
+        module_root: impl Into<PathBuf>,
+        modes: impl IntoIterator<Item = (String, String)>,
+        default_mode: Option<String>,
+    ) -> Result<Self, String> {
+        let id = id.into();
+        let owner_module = owner_module.into();
+        let local_id = local_id.into();
+        if id.trim().is_empty() || owner_module.trim().is_empty() || local_id.trim().is_empty() {
+            return Err("theme descriptor identity and owner cannot be empty".into());
+        }
+
+        let module_root = module_root.into();
+        let mut descriptors = BTreeMap::new();
+        for (name, path) in modes {
+            if name.trim().is_empty() {
+                return Err(format!("theme {id} contains an empty mode name"));
+            }
+            if descriptors.contains_key(&name) {
+                return Err(format!("theme {id} contains duplicate mode {name}"));
+            }
+            let source = ThemeSourceHandle::new(&module_root, path)?;
+            descriptors.insert(name.clone(), ThemeModeDescriptor { name, source });
+        }
+        if descriptors.is_empty() {
+            return Err(format!("theme {id} must declare at least one mode"));
+        }
+        let default_mode = default_mode
+            .or_else(|| descriptors.keys().next().cloned())
+            .ok_or_else(|| format!("theme {id} has no default mode"))?;
+        if !descriptors.contains_key(&default_mode) {
+            return Err(format!(
+                "theme {id} default mode {default_mode} is not declared"
+            ));
+        }
+
+        Ok(Self {
+            id,
+            owner_module,
+            local_id,
+            label,
+            modes: descriptors,
+            default_mode,
+        })
+    }
+
+    pub fn mode(&self, name: &str) -> Option<&ThemeModeDescriptor> {
+        self.modes.get(name)
+    }
+
+    pub fn default_source(&self) -> &ThemeSourceHandle {
+        &self.modes[&self.default_mode].source
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ThemeCatalog {
+    descriptors: BTreeMap<String, ThemePackDescriptor>,
+}
+
+impl ThemeCatalog {
+    pub fn from_descriptors(
+        descriptors: impl IntoIterator<Item = ThemePackDescriptor>,
+    ) -> Result<Self, String> {
+        let mut catalog = Self::default();
+        for descriptor in descriptors {
+            if catalog
+                .descriptors
+                .insert(descriptor.id.clone(), descriptor)
+                .is_some()
+            {
+                return Err("theme catalog contains duplicate scoped identity".into());
+            }
+        }
+        Ok(catalog)
+    }
+
+    pub fn get(&self, id: &str) -> Option<&ThemePackDescriptor> {
+        self.descriptors.get(id)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &ThemePackDescriptor> {
+        self.descriptors.values()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.descriptors.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.descriptors.len()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1317,5 +1495,45 @@ mod tests {
             .modules_mut()
             .insert("@mesh/example".into(), ThemeModule::default());
         assert_ne!(theme.revision(), after_defaults);
+    }
+
+    #[test]
+    fn theme_catalog_scopes_owner_and_selects_a_deterministic_default_mode() {
+        let descriptor = ThemePackDescriptor::new(
+            "@mesh/example-theme:desk",
+            "@mesh/example-theme",
+            "desk",
+            Some("Desk".into()),
+            "/modules/@mesh/example-theme",
+            [
+                ("light".into(), "themes/light/theme.css".into()),
+                ("dark".into(), "themes/dark/theme.css".into()),
+            ],
+            None,
+        )
+        .expect("descriptor is valid");
+        let catalog = ThemeCatalog::from_descriptors([descriptor]).expect("catalog is valid");
+        let descriptor = catalog.get("@mesh/example-theme:desk").unwrap();
+
+        assert_eq!(descriptor.default_mode, "dark");
+        assert_eq!(descriptor.owner_module, "@mesh/example-theme");
+        assert_eq!(
+            descriptor.default_source().relative_path(),
+            Path::new("themes/dark/theme.css")
+        );
+        assert_eq!(
+            catalog
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ["@mesh/example-theme:desk"]
+        );
+    }
+
+    #[test]
+    fn theme_source_handle_rejects_escape_paths() {
+        assert!(ThemeSourceHandle::new("/modules/theme", "../outside.css").is_err());
+        assert!(ThemeSourceHandle::new("/modules/theme", "/outside.css").is_err());
+        assert!(ThemeSourceHandle::new("/modules/theme", "themes/dark/theme.css").is_ok());
     }
 }

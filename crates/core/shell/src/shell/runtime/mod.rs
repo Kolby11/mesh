@@ -197,9 +197,34 @@ impl Shell {
 
     pub fn run(&mut self) -> Result<(), ShellRunError> {
         self.discover_modules();
-        for theme in mesh_core_theme::load_themes_from_dir(&mesh_core_theme::theme_dir_path()) {
-            tracing::debug!("registering theme '{}'", theme.id);
-            self.theme.register_theme(theme);
+        if let Some(graph) = self.installed_module_graph.as_ref() {
+            for descriptor in graph.theme_catalog().iter() {
+                let source = descriptor.default_source();
+                let path = source.candidate_path();
+                match mesh_core_theme::load_theme_from_path(&path) {
+                    Ok(mut theme) => {
+                        // The graph identity, not CSS metadata, is the
+                        // activation identity. CSS labels remain content,
+                        // while ownership and mode selection come from the
+                        // authorized descriptor.
+                        theme.id = descriptor.id.clone();
+                        if let Some(label) = &descriptor.label {
+                            theme.name = label.clone();
+                        }
+                        tracing::debug!(
+                            "registering graph-authorized theme '{}' mode '{}'",
+                            descriptor.id,
+                            descriptor.default_mode
+                        );
+                        self.theme.register_theme(theme);
+                    }
+                    Err(error) => tracing::warn!(
+                        "failed to load graph-authorized theme '{}' mode '{}': {error}",
+                        descriptor.id,
+                        descriptor.default_mode
+                    ),
+                }
+            }
         }
         self.resolve_modules()?;
         self.load_frontend_components()?;

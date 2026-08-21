@@ -868,6 +868,17 @@ fn installed_module_graph_indexes_theme_icon_font_i18n_contributions() {
     assert_eq!(graph.contributed_icons().len(), 1);
     assert_eq!(graph.contributed_fonts().len(), 1);
     assert_eq!(graph.contributed_i18n().len(), 1);
+    let theme_catalog = graph.theme_catalog();
+    assert_eq!(theme_catalog.len(), 1);
+    let theme = theme_catalog
+        .get("@mesh/theme:mesh-default")
+        .expect("graph-scoped theme descriptor");
+    assert_eq!(theme.owner_module, "@mesh/theme");
+    assert_eq!(theme.default_mode, "dark");
+    assert_eq!(
+        theme.default_source().relative_path(),
+        std::path::Path::new("themes/dark/theme.css")
+    );
 }
 
 #[test]

@@ -10,6 +10,7 @@ use crate::manifest;
 use mesh_core_service::{
     InterfaceContract, parse_contract_version, parse_interface_contract, parse_version_req,
 };
+use mesh_core_theme::{ThemeCatalog, ThemePackDescriptor};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
@@ -292,6 +293,7 @@ pub struct InstalledModuleGraph {
     diagnostics: Vec<ModuleGraphDiagnostic>,
     health: Vec<ModuleGraphHealthRecord>,
     contributions: ModuleContributionIndex,
+    theme_catalog: ThemeCatalog,
     resolution: ResolutionOutcome,
     /// Host↔contribution matching for every declared extension point, keyed by
     /// `(host module id, point contract name)`.
@@ -805,6 +807,31 @@ impl InstalledModuleGraph {
             }
         }
 
+        let theme_descriptors = contributions
+            .themes
+            .iter()
+            .map(|theme| {
+                let module_root = theme.source.manifest_path.parent().ok_or_else(|| {
+                    ModuleManifestError::Validation(format!(
+                        "theme {} has no owning module root",
+                        theme.source.scoped_id
+                    ))
+                })?;
+                ThemePackDescriptor::new(
+                    theme.source.scoped_id.clone(),
+                    theme.module_id.clone(),
+                    theme.id.clone(),
+                    theme.label_text().map(str::to_owned),
+                    module_root.to_path_buf(),
+                    theme.modes.clone(),
+                    theme.default_mode.clone(),
+                )
+                .map_err(ModuleManifestError::Validation)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let theme_catalog = ThemeCatalog::from_descriptors(theme_descriptors)
+            .map_err(ModuleManifestError::Validation)?;
+
         let layout_entrypoint = match root.layout {
             Some(layout) => {
                 let (module_id, entrypoint_id) = parse_module_entrypoint(&layout.entrypoint)
@@ -924,6 +951,7 @@ impl InstalledModuleGraph {
             diagnostics,
             health,
             contributions,
+            theme_catalog,
             resolution,
             extension_points,
             node_slots: composition.node_slots,
@@ -1161,6 +1189,10 @@ impl InstalledModuleGraph {
 
     pub fn contributed_themes(&self) -> &[ContributedTheme] {
         &self.contributions.themes
+    }
+
+    pub fn theme_catalog(&self) -> &ThemeCatalog {
+        &self.theme_catalog
     }
 
     pub fn contributed_icons(&self) -> &[ContributedPathResource] {

@@ -48,8 +48,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 ### 4. Themes
 
 [Audit](../.planning/log/sections/04-themes/improvements.md)
-
-- [ ] Build the theme catalog only from graph-authorized descriptors with scoped ownership, modes, and contained source handles.
 - [ ] Resolve theme selections through catalog identities with symlink-safe, bounded, UTF-8-checked source opening.
 - [ ] Prepare and atomically commit theme/profile/reload candidates while retaining the last-known-good snapshot on failure.
 - [ ] Implement the base, selected pack/mode, owned module contribution, and sparse user override cascade with provenance.
