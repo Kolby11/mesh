@@ -24,6 +24,7 @@
 /// - The **interface catalog** tracks discovered contracts and providers.
 pub mod compatibility;
 pub mod contract;
+pub mod generator;
 pub mod interface;
 
 pub use compatibility::{
@@ -39,6 +40,10 @@ pub use contract::{
     compile_interface_contract, contract_type_errors, parse_compiled_contract,
     parse_compiled_contract_with_provenance, parse_contract_version, parse_interface_contract,
     parse_version_req,
+};
+pub use generator::{
+    GeneratedContractArtifacts, generate_contract_artifacts, generate_contract_documentation,
+    generate_luau_consumer_types, generate_luau_mock, generate_luau_provider_stub,
 };
 pub use interface::{
     InterfaceCatalog, InterfaceProvider, InterfaceRegistry, InterfaceResolution,

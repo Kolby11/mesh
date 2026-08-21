@@ -76,6 +76,11 @@ behavior metadata, schema/policy/behavior fingerprints, and declaration
 provenance. Catalog resolutions carry that artifact while retaining the raw
 contract view for migration callers.
 
+The compiled artifact now drives deterministic Luau consumer type declarations,
+provider `start(self)` stubs, in-memory mocks, and standalone Markdown contract
+documentation. Generators return content without filesystem access so CLI/LSP
+callers can choose their own output policy.
+
 Service contracts now validate recursive named fields, arrays, optional values,
 and `Result` returns across state, events, method inputs, and provider outputs.
 Invalid snapshots preserve the last-known-good state, invalid events and
