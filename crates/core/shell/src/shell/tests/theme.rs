@@ -2,7 +2,7 @@ use super::common::*;
 use super::*;
 
 #[test]
-fn inactive_shell_theme_update_is_ignored_when_theme_provider_is_active() {
+fn provider_theme_update_is_ignored_when_shell_snapshot_is_authoritative() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
     let seen_events = Arc::new(Mutex::new(Vec::new()));
@@ -17,7 +17,7 @@ fn inactive_shell_theme_update_is_ignored_when_theme_provider_is_active() {
     shell
         .broadcast_service_event(service_update(
             "mesh.theme",
-            "@mesh/shell",
+            "@mesh/shell-theme",
             serde_json::json!({
                 "current": "mesh-default-light",
                 "theme_id": "mesh-default-light",
@@ -31,17 +31,17 @@ fn inactive_shell_theme_update_is_ignored_when_theme_provider_is_active() {
 }
 
 #[test]
-fn theme_snapshot_is_published_by_the_active_provider() {
+fn theme_snapshot_is_published_by_the_shell() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
     let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.theme", "@mesh/shell-theme");
     shell.replace_backend_runtime("mesh.theme".to_string(), slot);
 
-    shell.sync_theme_service_state("mesh-default-dark").unwrap();
+    shell.sync_theme_service_state().unwrap();
 
     assert_eq!(
         shell.latest_service_state["mesh.theme"].provider_id,
-        "@mesh/shell-theme"
+        "@mesh/shell"
     );
 }
 
@@ -74,12 +74,17 @@ fn theme_service_state_lists_every_registered_theme() {
         shell.theme.register_theme(theme);
     }
 
-    shell.sync_theme_service_state("mesh-default-dark").unwrap();
+    shell.sync_theme_service_state().unwrap();
 
     let state = &shell.latest_service_state["mesh.theme"].state;
     assert_eq!(
         state["available"],
-        serde_json::json!(["gruvbox-dark", "mesh-default-dark", "mesh-default-light"])
+        serde_json::json!([
+            "gruvbox-dark",
+            "mesh-default-dark",
+            "mesh-default-light",
+            "tokyo-night"
+        ])
     );
     assert_eq!(
         state["themes"]
@@ -103,6 +108,7 @@ fn theme_service_state_lists_every_registered_theme() {
                 "mesh-default-light".to_string(),
                 "MESH Default Light".to_string(),
             ),
+            ("tokyo-night".to_string(), "Tokyo Night".to_string()),
         ]
     );
     assert_eq!(
@@ -119,14 +125,18 @@ fn theme_service_state_lists_every_registered_theme() {
 }
 
 #[test]
-fn tokyo_night_is_reported_as_a_dark_theme() {
+fn explicit_color_scheme_is_reported_without_id_heuristics() {
     let mut shell = Shell::new();
 
-    shell.sync_theme_service_state("tokyo-night").unwrap();
+    shell.sync_theme_service_state().unwrap();
 
     assert_eq!(
         shell.latest_service_state["mesh.theme"].state["is_dark"],
         serde_json::json!(true)
+    );
+    assert_eq!(
+        shell.latest_service_state["mesh.theme"].state["color_scheme"],
+        serde_json::json!("dark")
     );
 }
 
@@ -189,6 +199,7 @@ fn shell_theme_fallback_backend_restart_keeps_latest_state_on_resolved_theme() {
 
     let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.theme", "@mesh/shell-theme");
     shell.replace_backend_runtime("mesh.theme".to_string(), slot);
+    shell.sync_theme_service_state().unwrap();
     shell
         .broadcast_service_event(service_update(
             "mesh.theme",
@@ -220,7 +231,7 @@ fn shell_theme_fallback_backend_restart_keeps_latest_state_on_resolved_theme() {
     assert_eq!(shell.theme.active().id, "tokyo-night");
     assert_eq!(
         latest.state["current"],
-        serde_json::json!("mesh-default-dark")
+        serde_json::json!("tokyo-night")
     );
     assert_eq!(latest.state["is_dark"], serde_json::json!(true));
 }

@@ -433,7 +433,21 @@ fn shell_registers_theme_provider_for_frontend_theme_proxy() {
         .collect::<Vec<_>>();
     assert_eq!(
         fields,
-        ["current", "theme_id", "is_dark", "themes", "available"],
+        [
+            "current",
+            "theme_id",
+            "mode",
+            "color_scheme",
+            "contrast",
+            "tokens",
+            "provenance",
+            "revision",
+            "fingerprint",
+            "is_dark",
+            "themes",
+            "available",
+            "system_resources",
+        ],
         "theme registry fields must be declared so frontend reads are reactive"
     );
 }

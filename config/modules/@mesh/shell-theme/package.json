@@ -18,6 +18,10 @@
             "dark": "themes/mesh-default-dark/theme.css",
             "light": "themes/mesh-default-light/theme.css"
           },
+          "mode_metadata": {
+            "dark": { "color_scheme": "dark", "contrast": "normal" },
+            "light": { "color_scheme": "light", "contrast": "normal" }
+          },
           "default_mode": "dark"
         }
       ],

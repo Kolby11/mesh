@@ -10,7 +10,7 @@ use crate::manifest;
 use mesh_core_service::{
     InterfaceContract, parse_contract_version, parse_interface_contract, parse_version_req,
 };
-use mesh_core_theme::{ThemeCatalog, ThemePackDescriptor};
+use mesh_core_theme::{ThemeCatalog, ThemeMetadata, ThemePackDescriptor};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
@@ -826,6 +826,20 @@ impl InstalledModuleGraph {
                     theme.modes.clone(),
                     theme.default_mode.clone(),
                 )
+                .and_then(|descriptor| {
+                    descriptor.with_mode_metadata(theme.mode_metadata.iter().map(
+                        |(mode, metadata)| {
+                            (
+                                mode.clone(),
+                                ThemeMetadata::new(
+                                    mode.clone(),
+                                    metadata.color_scheme.clone(),
+                                    metadata.contrast.clone(),
+                                ),
+                            )
+                        },
+                    ))
+                })
                 .map_err(ModuleManifestError::Validation)
             })
             .collect::<Result<Vec<_>, _>>()?;

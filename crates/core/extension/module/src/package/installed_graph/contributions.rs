@@ -189,6 +189,7 @@ impl ModuleContributionIndex {
                 label: contribution.label.clone(),
                 modes: contribution.modes.clone(),
                 default_mode: contribution.default_mode.clone(),
+                mode_metadata: contribution.mode_metadata.clone(),
             });
         }
         for contribution in &manifest.mesh.contributes.icons {
@@ -344,6 +345,7 @@ pub struct ContributedTheme {
     pub label: Option<manifest::LocalizedText>,
     pub modes: HashMap<String, String>,
     pub default_mode: Option<String>,
+    pub mode_metadata: HashMap<String, manifest::ThemeModeMetadata>,
 }
 
 impl ContributedTheme {

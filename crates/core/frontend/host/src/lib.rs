@@ -472,8 +472,7 @@ pub enum CoreEvent {
         visible: bool,
     },
     ThemeChanged {
-        theme_id: String,
-        is_dark: bool,
+        snapshot: mesh_core_theme::ThemeSnapshot,
     },
     LocaleChanged {
         locale: String,

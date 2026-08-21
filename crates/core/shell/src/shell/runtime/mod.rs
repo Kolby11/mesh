@@ -269,8 +269,7 @@ impl Shell {
         let mut pending = VecDeque::new();
         pending.extend(self.mount_components()?);
         pending.extend(self.replay_cached_service_events()?);
-        let active_theme_id = self.theme.active().id.clone();
-        pending.extend(self.sync_theme_service_state(&active_theme_id)?);
+        pending.extend(self.sync_theme_service_state()?);
         self.mark_components_locale_changed()?;
         pending.extend(self.sync_locale_service_state()?);
         pending.extend(self.broadcast_core_event(CoreEvent::Started)?);

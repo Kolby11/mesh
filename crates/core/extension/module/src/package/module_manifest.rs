@@ -1467,6 +1467,18 @@ pub struct ThemeContribution {
     pub modes: HashMap<String, String>,
     #[serde(default)]
     pub default_mode: Option<String>,
+    /// Explicit rendering semantics for each mode. These are kept separate
+    /// from the source path so the shell never infers them from an ID.
+    #[serde(default)]
+    pub mode_metadata: HashMap<String, ThemeModeMetadata>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ThemeModeMetadata {
+    #[serde(default)]
+    pub color_scheme: String,
+    #[serde(default)]
+    pub contrast: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

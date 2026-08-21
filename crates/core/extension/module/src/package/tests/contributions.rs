@@ -715,6 +715,7 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
                 )),
                 modes: theme_modes,
                 default_mode: Some("dark".into()),
+                mode_metadata: HashMap::new(),
             }],
             ..MeshContributes::default()
         },

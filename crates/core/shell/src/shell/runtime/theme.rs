@@ -46,10 +46,6 @@ fn theme_source_fingerprint(shell: &Shell) -> Result<u64, mesh_core_theme::Theme
     }
 }
 
-fn is_dark_theme_id(theme_id: &str) -> bool {
-    theme_id.contains("dark") || theme_id.eq_ignore_ascii_case("tokyo-night")
-}
-
 fn theme_preview_palette(theme: &mesh_core_theme::Theme) -> serde_json::Value {
     let color = |name: &str, fallback: &str| {
         theme
@@ -223,7 +219,7 @@ impl Shell {
                 "theme identity changed during reload: {old_theme_id} -> {new_theme_id}"
             );
         }
-        self.sync_theme_service_state(&new_theme_id)
+        self.sync_theme_service_state()
     }
 
     fn record_theme_reload_failure(&mut self, error: &dyn std::fmt::Display) {
@@ -236,8 +232,7 @@ impl Shell {
     }
 
     pub(in crate::shell) fn mark_components_theme_changed(&mut self) -> Result<(), ShellRunError> {
-        let theme_id = self.theme.active().id.clone();
-        let is_dark = is_dark_theme_id(&theme_id);
+        let snapshot = self.theme.active().snapshot();
         for runtime in &mut self.components {
             runtime
                 .component
@@ -249,7 +244,7 @@ impl Shell {
         // invalidation is handled by `theme_changed()` above; the event is
         // additive — components that opt in via `handle_core_event` can use it
         // for non-visual derived state (e.g. icon name based on dark mode).
-        let _ = self.broadcast_core_event(CoreEvent::ThemeChanged { theme_id, is_dark })?;
+        let _ = self.broadcast_core_event(CoreEvent::ThemeChanged { snapshot })?;
         Ok(())
     }
 
@@ -289,7 +284,7 @@ impl Shell {
             "theme": { "active": theme_id, "mode": null }
         }));
         self.mark_components_theme_changed()?;
-        let mut requests = self.sync_theme_service_state(theme_id)?;
+        let mut requests = self.sync_theme_service_state()?;
         requests.extend(self.sync_settings_service_state()?);
         Ok(requests)
     }
@@ -313,8 +308,7 @@ impl Shell {
         }));
         mesh_core_icon::set_default_shell_pack(Some(theme_id.to_owned()));
         self.mark_components_theme_changed()?;
-        let active_theme_id = self.theme.active().id.clone();
-        let mut requests = self.sync_theme_service_state(&active_theme_id)?;
+        let mut requests = self.sync_theme_service_state()?;
         requests.extend(self.sync_settings_service_state()?);
         Ok(requests)
     }
@@ -339,17 +333,17 @@ impl Shell {
         apply_font_family(self.theme.active_mut(), Some(family));
         self.theme_watch.revision = self.theme.active().revision();
         self.mark_components_theme_changed()?;
-        let active_theme_id = self.theme.active().id.clone();
-        let mut requests = self.sync_theme_service_state(&active_theme_id)?;
+        let mut requests = self.sync_theme_service_state()?;
         requests.extend(self.sync_settings_service_state()?);
         Ok(requests)
     }
 
     pub(in crate::shell) fn sync_theme_service_state(
         &mut self,
-        theme_id: &str,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        let is_dark = is_dark_theme_id(theme_id);
+        let snapshot = self.theme.active().snapshot();
+        let theme_id = snapshot.id.clone();
+        let is_dark = snapshot.color_scheme.eq_ignore_ascii_case("dark");
         let mut themes = self
             .theme
             .available_themes()
@@ -364,7 +358,7 @@ impl Shell {
             .collect::<Vec<_>>();
         if !themes
             .iter()
-            .any(|theme| theme["id"].as_str() == Some(theme_id))
+            .any(|theme| theme["id"].as_str() == Some(theme_id.as_str()))
         {
             themes.push(serde_json::json!({
                 "id": self.theme.active().id,
@@ -384,21 +378,23 @@ impl Shell {
             .map(str::to_owned)
             .collect::<Vec<_>>();
         let payload = serde_json::json!({
-            "current": theme_id,
-            "theme_id": theme_id,
-            "mode": self.theme_watch.mode,
-            "revision": format!("{:016x}", self.theme_watch.revision),
+            "current": snapshot.id,
+            "theme_id": snapshot.id,
+            "mode": snapshot.mode,
+            "color_scheme": snapshot.color_scheme,
+            "contrast": snapshot.contrast,
+            "tokens": snapshot.tokens,
+            "provenance": snapshot.provenance,
+            "revision": format!("{:016x}", snapshot.revision),
             "fingerprint": self.theme_watch.fingerprint,
             "is_dark": is_dark,
             "themes": themes,
             "available": available,
             "system_resources": system_resources_json(&self.settings),
         });
-        // The shell derives the system theme snapshot, but the selected
-        // provider owns the interface state. Publishing under that provider
-        // keeps the optimistic update on the same generic routing path as
-        // the provider's later confirmation.
-        let source_module = self.active_service_provider_or("mesh.theme", "@mesh/shell");
+        // The renderer owns this snapshot. The backend receives a mirror for
+        // compatibility and side effects, but it cannot replace render facts.
+        let source_module = "@mesh/shell";
         if let Some(tx) = self.service_handlers.get("mesh.theme") {
             let _ = tx.send(ServiceCommandMsg {
                 call_id: mesh_core_backend::CallId::next(),
@@ -409,7 +405,7 @@ impl Shell {
         }
         self.broadcast_service_event(ServiceEvent::Updated {
             service: "mesh.theme".into(),
-            source_module,
+            source_module: source_module.into(),
             payload,
         })
     }
@@ -514,7 +510,7 @@ impl Shell {
             self.theme = theme;
             self.theme_watch = theme_watch;
             self.mark_components_theme_changed()?;
-            requests.extend(self.sync_theme_service_state(&active_theme_id)?);
+            requests.extend(self.sync_theme_service_state()?);
         }
 
         if old_icons != new_settings.icons {

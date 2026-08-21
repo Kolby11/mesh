@@ -938,8 +938,7 @@ impl Shell {
             if let Err(error) = self.mark_components_theme_changed() {
                 tracing::warn!("profile theme refresh failed after commit: {error}");
             }
-            let theme_id = self.theme.active().id.clone();
-            if let Ok(next) = self.sync_theme_service_state(&theme_id) {
+            if let Ok(next) = self.sync_theme_service_state() {
                 requests.extend(next);
             }
         }

@@ -179,6 +179,12 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
         state_fields: [
             ("current", "string"),
             ("theme_id", "string"),
+            ("mode", "string?"),
+            ("color_scheme", "string?"),
+            ("contrast", "string?"),
+            ("tokens", "object?"),
+            ("provenance", "object?"),
+            ("revision", "string?"),
             ("is_dark", "boolean"),
             ("themes", "object[]"),
             ("available", "string[]"),

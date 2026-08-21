@@ -2,22 +2,21 @@ use super::*;
 
 #[test]
 fn state_preservation_restyle_service_payload_survives_hover_restyle() {
-    let mut component = test_frontend_component(
+    let mut component = test_frontend_component_with_catalog(
         r#"
 <template>
   <button />
 </template>
 <script lang="luau">
--- Track whenever a reactive global is updated to detect accidental wipes.
+local audio = require("mesh.audio")
 vol_pct = -1
 function render()
-    -- Read directly from the service state table if it exists.
-    if __mesh_svc_audio then
-        vol_pct = __mesh_svc_audio.percent or -1
-    end
+    vol_pct = audio.percent or -1
 end
 </script>
 "#,
+        audio_network_catalog(),
+        &["service.audio.read"],
     );
 
     let theme = default_theme();

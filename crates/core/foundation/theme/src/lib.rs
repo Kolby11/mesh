@@ -227,6 +227,65 @@ pub enum ThemeProvenance {
     UserOverride,
 }
 
+/// Rendering metadata selected together with a theme mode.
+///
+/// These values are explicit inputs to the rendered snapshot. Consumers must
+/// not infer color scheme or contrast from a theme identifier or display name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThemeMetadata {
+    pub mode: String,
+    pub color_scheme: String,
+    pub contrast: String,
+}
+
+impl Default for ThemeMetadata {
+    fn default() -> Self {
+        Self {
+            mode: "default".into(),
+            color_scheme: "unknown".into(),
+            contrast: "normal".into(),
+        }
+    }
+}
+
+impl ThemeMetadata {
+    pub fn new(
+        mode: impl Into<String>,
+        color_scheme: impl Into<String>,
+        contrast: impl Into<String>,
+    ) -> Self {
+        Self {
+            mode: normalize_metadata_value(mode.into(), "default"),
+            color_scheme: normalize_metadata_value(color_scheme.into(), "unknown"),
+            contrast: normalize_metadata_value(contrast.into(), "normal"),
+        }
+    }
+}
+
+/// Immutable, serializable description of the exact theme state used by the
+/// renderer. The shell publishes this value as the authoritative `mesh.theme`
+/// state and as the payload of revisioned theme-change events.
+#[derive(Debug, Clone, Serialize)]
+pub struct ThemeSnapshot {
+    pub id: String,
+    pub name: String,
+    pub mode: String,
+    pub color_scheme: String,
+    pub contrast: String,
+    pub revision: u64,
+    pub tokens: HashMap<String, TokenValue>,
+    pub provenance: BTreeMap<String, ThemeProvenance>,
+}
+
+fn normalize_metadata_value(value: String, fallback: &str) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        fallback.into()
+    } else {
+        value.into()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ThemeModuleLayer {
     pub module_id: String,
@@ -481,6 +540,7 @@ fn read_bounded_utf8(
 pub struct ThemeModeDescriptor {
     pub name: String,
     pub source: ThemeSourceHandle,
+    pub metadata: ThemeMetadata,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -521,7 +581,14 @@ impl ThemePackDescriptor {
                 return Err(format!("theme {id} contains duplicate mode {name}"));
             }
             let source = ThemeSourceHandle::new(&module_root, path)?;
-            descriptors.insert(name.clone(), ThemeModeDescriptor { name, source });
+            descriptors.insert(
+                name.clone(),
+                ThemeModeDescriptor {
+                    name,
+                    source,
+                    metadata: ThemeMetadata::default(),
+                },
+            );
         }
         if descriptors.is_empty() {
             return Err(format!("theme {id} must declare at least one mode"));
@@ -543,6 +610,43 @@ impl ThemePackDescriptor {
             modes: descriptors,
             default_mode,
         })
+    }
+
+    /// Attach explicit color-scheme and contrast metadata to declared modes.
+    /// Unknown mode names are rejected so metadata cannot silently describe a
+    /// different source than the one selected by the graph.
+    pub fn with_mode_metadata(
+        mut self,
+        metadata: impl IntoIterator<Item = (String, ThemeMetadata)>,
+    ) -> Result<Self, String> {
+        for (mode, mut value) in metadata {
+            let Some(descriptor) = self.modes.get_mut(&mode) else {
+                return Err(format!(
+                    "theme {} metadata names undeclared mode {mode}",
+                    self.id
+                ));
+            };
+            if value.color_scheme.trim().is_empty() {
+                return Err(format!(
+                    "theme {} mode {mode} has an empty color scheme",
+                    self.id
+                ));
+            }
+            if value.contrast.trim().is_empty() {
+                return Err(format!(
+                    "theme {} mode {mode} has an empty contrast",
+                    self.id
+                ));
+            }
+            value.mode = mode.clone();
+            descriptor.metadata = value;
+        }
+        for (mode, descriptor) in &mut self.modes {
+            if descriptor.metadata.mode == "default" {
+                descriptor.metadata.mode = mode.clone();
+            }
+        }
+        Ok(self)
     }
 
     pub fn mode(&self, name: &str) -> Option<&ThemeModeDescriptor> {
@@ -604,6 +708,8 @@ pub struct Theme {
     #[serde(default)]
     pub keyframes: HashMap<String, Vec<ThemeKeyframeStop>>,
     #[serde(default)]
+    metadata: ThemeMetadata,
+    #[serde(default)]
     modules: HashMap<String, ThemeModule>,
     #[serde(default)]
     rules: Vec<ThemeStyleRule>,
@@ -627,6 +733,7 @@ impl Theme {
             tokens: HashMap::new(),
             defaults: ThemeDefaults::default(),
             keyframes: HashMap::new(),
+            metadata: ThemeMetadata::default(),
             modules: HashMap::new(),
             rules: Vec::new(),
             provenance: BTreeMap::new(),
@@ -636,6 +743,36 @@ impl Theme {
 
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    pub fn metadata(&self) -> &ThemeMetadata {
+        &self.metadata
+    }
+
+    pub fn set_render_metadata(
+        &mut self,
+        mode: impl Into<String>,
+        color_scheme: impl Into<String>,
+        contrast: impl Into<String>,
+    ) {
+        let metadata = ThemeMetadata::new(mode, color_scheme, contrast);
+        if self.metadata != metadata {
+            self.metadata = metadata;
+            self.revision = next_theme_revision();
+        }
+    }
+
+    pub fn snapshot(&self) -> ThemeSnapshot {
+        ThemeSnapshot {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            mode: self.metadata.mode.clone(),
+            color_scheme: self.metadata.color_scheme.clone(),
+            contrast: self.metadata.contrast.clone(),
+            revision: self.revision,
+            tokens: self.tokens.clone(),
+            provenance: self.provenance.clone(),
+        }
     }
 
     pub fn tokens(&self) -> &HashMap<String, TokenValue> {
@@ -715,6 +852,8 @@ impl Theme {
         let mut composed = base.clone();
         composed.id = pack.id.clone();
         composed.name = pack.name.clone();
+        composed.metadata = pack.metadata.clone();
+        composed.metadata.mode = mode.clone();
         composed.provenance.clear();
 
         for token in composed.tokens.keys() {
@@ -979,6 +1118,8 @@ struct RawTheme {
     #[serde(default)]
     modules: HashMap<String, ThemeModule>,
     #[serde(default)]
+    metadata: ThemeMetadata,
+    #[serde(default)]
     rules: Vec<ThemeStyleRule>,
     #[serde(default)]
     default_shell_animations: HashMap<String, String>,
@@ -992,6 +1133,7 @@ impl From<RawTheme> for Theme {
             tokens: raw.tokens,
             defaults: raw.defaults,
             keyframes: HashMap::new(),
+            metadata: raw.metadata,
             modules: raw.modules,
             rules: raw.rules,
             provenance: BTreeMap::new(),
@@ -1260,10 +1402,17 @@ pub enum ThemeError {
 
 pub fn default_theme() -> Theme {
     match load_theme_from_path(&default_theme_path()) {
-        Ok(theme) => theme,
+        Ok(mut theme) => {
+            // The bundled recovery theme's semantics are configuration, not
+            // an inference from its `tokyo-night` identifier.
+            theme.set_render_metadata("default", "dark", "normal");
+            theme
+        }
         Err(err) => {
             tracing::warn!("failed to load default theme, using embedded fallback: {err}");
-            embedded_default_theme()
+            let mut theme = embedded_default_theme();
+            theme.set_render_metadata("default", "dark", "normal");
+            theme
         }
     }
 }
@@ -1435,6 +1584,7 @@ fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String>
         tokens: HashMap::new(),
         defaults: ThemeDefaults::default(),
         keyframes: HashMap::new(),
+        metadata: ThemeMetadata::default(),
         modules: HashMap::new(),
         rules: Vec::new(),
         provenance: BTreeMap::new(),

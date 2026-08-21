@@ -128,6 +128,11 @@ pub(super) fn prepare_theme_for_graph(
         module_layers,
         &user_overrides,
     )?;
+    theme.set_render_metadata(
+        mode.to_string(),
+        mode_descriptor.metadata.color_scheme.clone(),
+        mode_descriptor.metadata.contrast.clone(),
+    );
     theme.id = descriptor.id.clone();
     if let Some(label) = &descriptor.label {
         theme.name = label.clone();
