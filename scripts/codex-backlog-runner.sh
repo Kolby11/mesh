@@ -33,6 +33,10 @@ Environment:
   CODEX_ALLOW_ALL          Set to 0 to use workspace-write instead
                             (default: 1; unattended mode bypasses approvals)
   CODEX_AUTO_APPROVE        Set to 0 to omit --approve-for-me (default: 1)
+  CODEX_WIFI_RECOVERY       Set to 0 to disable NetworkManager recovery
+                            (default: 1)
+  CODEX_WIFI_RECOVERY_COOLDOWN_SECONDS
+                            Minimum seconds between recovery attempts (default: 30)
   CODEX_BIN                 Codex executable (default: codex)
 EOF
 }
@@ -86,12 +90,16 @@ CODEX_CONTEXT_WINDOW_TOKENS=${CODEX_CONTEXT_WINDOW_TOKENS:-1050000}
 CODEX_CONTEXT_LEFT_PERCENT=${CODEX_CONTEXT_LEFT_PERCENT:-30}
 CODEX_ALLOW_ALL=${CODEX_ALLOW_ALL:-1}
 CODEX_AUTO_APPROVE=${CODEX_AUTO_APPROVE:-1}
+CODEX_WIFI_RECOVERY=${CODEX_WIFI_RECOVERY:-1}
+CODEX_WIFI_RECOVERY_COOLDOWN_SECONDS=${CODEX_WIFI_RECOVERY_COOLDOWN_SECONDS:-30}
 CODEX_MODEL=${CODEX_MODEL:-}
 
 [[ "$CODEX_CONTEXT_WINDOW_TOKENS" =~ ^[1-9][0-9]*$ ]] || die "CODEX_CONTEXT_WINDOW_TOKENS must be a positive integer"
 [[ "$CODEX_CONTEXT_LEFT_PERCENT" =~ ^([1-9][0-9]?|100)$ ]] || die "CODEX_CONTEXT_LEFT_PERCENT must be between 1 and 100"
 [[ "$CODEX_ALLOW_ALL" == 0 || "$CODEX_ALLOW_ALL" == 1 ]] || die "CODEX_ALLOW_ALL must be 0 or 1"
 [[ "$CODEX_AUTO_APPROVE" == 0 || "$CODEX_AUTO_APPROVE" == 1 ]] || die "CODEX_AUTO_APPROVE must be 0 or 1"
+[[ "$CODEX_WIFI_RECOVERY" == 0 || "$CODEX_WIFI_RECOVERY" == 1 ]] || die "CODEX_WIFI_RECOVERY must be 0 or 1"
+[[ "$CODEX_WIFI_RECOVERY_COOLDOWN_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "CODEX_WIFI_RECOVERY_COOLDOWN_SECONDS must be a positive integer"
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(git -C "$SCRIPT_DIR/.." rev-parse --show-toplevel 2>/dev/null) || die "not inside a Git repository"
@@ -136,6 +144,7 @@ print_configuration() {
     printf 'allow all permissions: %s\n' "$CODEX_ALLOW_ALL"
     printf 'auto approval: %s\n' "$CODEX_AUTO_APPROVE"
     printf 'allow dirty recovery: %s\n' "$ALLOW_DIRTY"
+    printf 'Wi-Fi recovery: %s (cooldown %ss)\n' "$CODEX_WIFI_RECOVERY" "$CODEX_WIFI_RECOVERY_COOLDOWN_SECONDS"
 }
 
 if [[ -z "$(next_backlog_line)" ]]; then
@@ -172,6 +181,69 @@ create_temp_dir() {
 TMP_DIR=''
 create_temp_dir
 trap 'rm -rf -- "$TMP_DIR"' EXIT
+
+last_saved_wifi_uuid() {
+    local profiles
+
+    command -v nmcli >/dev/null 2>&1 || return 1
+    profiles=$(nmcli -t -f UUID,TYPE,TIMESTAMP,AUTOCONNECT connection show 2>/dev/null) || return 1
+    awk -F: '
+        $2 == "802-11-wireless" {
+            if ($3 ~ /^[0-9]+$/ && $3 + 0 > best_timestamp + 0) {
+                best_timestamp = $3
+                best_uuid = $1
+            }
+            if (fallback_uuid == "" && ($4 == "yes" || $4 == "true")) {
+                fallback_uuid = $1
+            }
+        }
+        END {
+            if (best_uuid != "") {
+                print best_uuid
+            } else if (fallback_uuid != "") {
+                print fallback_uuid
+            }
+        }
+    ' <<<"$profiles"
+}
+
+recover_wifi() {
+    ((CODEX_WIFI_RECOVERY)) || return 0
+
+    if ! command -v nmcli >/dev/null 2>&1; then
+        printf '[wifi] nmcli is unavailable; skipping Wi-Fi recovery\n' >&2
+        return 0
+    fi
+
+    local now last_attempt='' wifi_uuid
+    now=$(date +%s)
+    if [[ -f "$TMP_DIR/wifi-recovery.last" ]]; then
+        read -r last_attempt <"$TMP_DIR/wifi-recovery.last" || true
+    fi
+    if [[ "$last_attempt" =~ ^[0-9]+$ ]] \
+        && ((now - last_attempt < CODEX_WIFI_RECOVERY_COOLDOWN_SECONDS)); then
+        return 0
+    fi
+    printf '%s\n' "$now" >"$TMP_DIR/wifi-recovery.last"
+
+    printf '[wifi] network wait detected; attempting saved Wi-Fi recovery\n' >&2
+    if ! nmcli radio wifi on >/dev/null 2>&1; then
+        printf '[wifi] could not access NetworkManager; skipping recovery\n' >&2
+        return 0
+    fi
+
+    wifi_uuid=$(last_saved_wifi_uuid || true)
+    if [[ -z "$wifi_uuid" ]]; then
+        printf '[wifi] no saved Wi-Fi profile found; skipping recovery\n' >&2
+        return 0
+    fi
+
+    if nmcli --wait 15 connection up uuid "$wifi_uuid" >/dev/null 2>&1; then
+        printf '[wifi] requested the most recently used saved Wi-Fi profile\n' >&2
+    else
+        printf '[wifi] saved Wi-Fi profile is unavailable; continuing Codex retry\n' >&2
+    fi
+}
 
 session_id=''
 successful_features=0
@@ -283,7 +355,13 @@ run_turn() {
             else
                 empty
             end
-        '
+        ' \
+        | while IFS= read -r progress; do
+            printf '%s\n' "$progress"
+            if [[ "$progress" == "[codex] error:"* && "$progress" == *"waiting for network"* ]]; then
+                recover_wifi
+            fi
+        done
     pipeline_status=("${PIPESTATUS[@]}")
     result=${pipeline_status[0]}
     set -e

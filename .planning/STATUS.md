@@ -15,6 +15,10 @@ runtime-reported context threshold. It is intentionally blocked by any
 pre-existing dirty working tree unless `--allow-dirty` is explicitly supplied
 to recover an interrupted turn.
 
+On NetworkManager hosts, live Codex network-wait errors trigger a throttled
+attempt to restore the most recently used saved Wi-Fi profile; set
+`CODEX_WIFI_RECOVERY=0` to disable it.
+
 The 16 section improvement audits now have a feature-level checkbox checklist
 in `docs/BACKLOG.md`; implementation detail, evidence, and regression matrices
 remain in each section's `improvements.md`.
