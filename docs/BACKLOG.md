@@ -39,7 +39,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/02-module-system-and-installation/improvements.md)
 
-- [ ] Separate graph construction from incremental component/Luau indexing so source failures remain scoped diagnostics.
 - [ ] Integrate signed provenance and trust tiers into candidate planning and activation policy.
 
 ### 3. Service contracts

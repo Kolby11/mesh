@@ -5,8 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use mesh_core_frontend::{
-    CompileFrontendError, CompiledFrontendModule, compile_frontend_entrypoint,
-    compile_frontend_module,
+    CompiledFrontendModule, compile_frontend_entrypoint, compile_frontend_module,
 };
 use mesh_core_module::ModuleType;
 use mesh_core_module::lifecycle::ModuleInstance;
@@ -16,35 +15,13 @@ use rayon::prelude::*;
 use super::memo;
 use crate::shell::ShellRunError;
 
-/// Compile a module's primary entry plus every extension point contribution it
-/// declares.
-///
-/// A contribution is a module-owned component with the same import and
-/// authoring rules as `main`, so it is compiled eagerly — an invalid page must
-/// not lurk until a host happens to mount it. Its dependency paths join the
-/// module's watch set, so editing one triggers catalog validation and reload.
-fn compile_module_entrypoints(
-    manifest: &mesh_core_module::Manifest,
-    module_dir: &std::path::Path,
-) -> Result<CompiledFrontendModule, CompileFrontendError> {
-    let mut compiled = compile_frontend_module(manifest, module_dir)?;
-    for contributions in manifest.extension_point_contributions.values() {
-        for contribution in contributions {
-            let contributed =
-                compile_frontend_entrypoint(manifest, module_dir, &contribution.entry)?;
-            for path in contributed.watched_paths {
-                if !compiled.watched_paths.contains(&path) {
-                    compiled.watched_paths.push(path);
-                }
-            }
-        }
-    }
-    Ok(compiled)
-}
-
 #[derive(Debug, Clone, Default)]
 pub(in crate::shell) struct FrontendCatalog {
     pub(in crate::shell) modules: HashMap<String, FrontendCatalogEntry>,
+    /// Source/indexing failures are kept with the catalog generation instead
+    /// of aborting unrelated module compilation. The shell reports these as
+    /// scoped diagnostics while graph construction remains authoritative.
+    pub(in crate::shell) diagnostics: Vec<FrontendCatalogDiagnostic>,
     /// Contributions each host renders, keyed by
     /// [`extension_point_key`]`(host module id, point contract name)`.
     ///
@@ -59,6 +36,39 @@ pub(in crate::shell) struct FrontendCatalog {
     /// Sparse effective placement overrides, keyed by root instance then slot.
     pub(super) node_slot_placements:
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, NodeSlotOverride>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::shell) struct FrontendCatalogDiagnostic {
+    pub(in crate::shell) module_id: String,
+    pub(in crate::shell) contribution_id: Option<String>,
+    pub(in crate::shell) source_path: PathBuf,
+    pub(in crate::shell) message: String,
+}
+
+impl FrontendCatalogDiagnostic {
+    fn module(module_id: &str, source_path: PathBuf, error: &ShellRunError) -> Self {
+        Self {
+            module_id: module_id.to_string(),
+            contribution_id: None,
+            source_path,
+            message: error.to_string(),
+        }
+    }
+
+    fn contribution(
+        module_id: &str,
+        contribution_id: &str,
+        source_path: PathBuf,
+        error: &ShellRunError,
+    ) -> Self {
+        Self {
+            module_id: module_id.to_string(),
+            contribution_id: Some(contribution_id.to_string()),
+            source_path,
+            message: error.to_string(),
+        }
+    }
 }
 
 /// Index key for the contributions one host renders at one extension point.
@@ -158,13 +168,25 @@ fn compile_catalog_entry(
     module_id: &str,
     module: &ModuleInstance,
 ) -> Result<FrontendCatalogEntry, ShellRunError> {
-    let compiled =
-        compile_module_entrypoints(&module.manifest, &module.path).map_err(|source| {
+    let mut compiled =
+        compile_frontend_module(&module.manifest, &module.path).map_err(|source| {
             ShellRunError::FrontendCompile {
                 module_id: module_id.to_string(),
                 source,
             }
         })?;
+    // Contributions are indexed independently below, but their entry files
+    // still belong to the host's watch set. This lets a later source edit
+    // retry a contribution that was previously rejected without reparsing the
+    // whole graph or silently losing hot reload coverage.
+    for contributions in module.manifest.extension_point_contributions.values() {
+        for contribution in contributions {
+            let path = module.path.join(&contribution.entry);
+            if !compiled.watched_paths.contains(&path) {
+                compiled.watched_paths.push(path);
+            }
+        }
+    }
     Ok(FrontendCatalogEntry {
         module_dir: module.path.clone(),
         compiled: compiled.into(),
@@ -394,6 +416,10 @@ impl FrontendCatalog {
         self.modules.get(module_id)
     }
 
+    pub(in crate::shell) fn diagnostics(&self) -> &[FrontendCatalogDiagnostic] {
+        &self.diagnostics
+    }
+
     pub(in crate::shell) fn from_modules(
         modules: &HashMap<String, ModuleInstance>,
         graph: Option<&InstalledModuleGraph>,
@@ -438,7 +464,7 @@ impl FrontendCatalog {
                 Some((module_id, module))
             })
             .collect();
-        let compiled_entries = frontend_modules
+        let compiled_results = frontend_modules
             .par_iter()
             .map(|(module_id, module)| {
                 let current_manifest_fingerprint = manifest_fingerprint(&module.manifest);
@@ -453,15 +479,36 @@ impl FrontendCatalog {
                             source_fingerprint(&entry.compiled.watched_paths) == Some(fingerprint)
                         })
                 {
-                    return Ok(((*module_id).clone(), entry.clone()));
+                    return ((*module_id).clone(), module.path.clone(), Ok(entry.clone()));
                 }
 
-                compile_catalog_entry(module_id, module).map(|entry| ((*module_id).clone(), entry))
+                (
+                    (*module_id).clone(),
+                    module.path.clone(),
+                    compile_catalog_entry(module_id, module),
+                )
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Vec<_>>();
+
+        let mut diagnostics = Vec::new();
+        let compiled_entries = compiled_results
+            .into_iter()
+            .filter_map(|(module_id, module_path, result)| match result {
+                Ok(entry) => Some((module_id, entry)),
+                Err(error) => {
+                    diagnostics.push(FrontendCatalogDiagnostic::module(
+                        &module_id,
+                        module_path,
+                        &error,
+                    ));
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
         let mut catalog = Self {
             modules: compiled_entries.into_iter().collect(),
+            diagnostics,
             extension_point_contributions: HashMap::new(),
             extension_point_entries: HashMap::new(),
             node_slot_placements: graph
@@ -489,6 +536,9 @@ impl FrontendCatalog {
                     else {
                         continue;
                     };
+                    if !catalog.modules.contains_key(&contribution.source_module_id) {
+                        continue;
+                    }
                     let entry_key = contribution_entry_key(
                         &contribution.source_module_id,
                         &contribution.contribution_id,
@@ -508,11 +558,24 @@ impl FrontendCatalog {
                             .cloned();
                         let compiled = match reused {
                             Some(compiled) => compiled,
-                            None => compile_contribution_entry(
+                            None => match compile_contribution_entry(
                                 &contribution.source_module_id,
                                 module,
                                 &contribution.entry,
-                            )?,
+                            ) {
+                                Ok(compiled) => compiled,
+                                Err(error) => {
+                                    catalog.diagnostics.push(
+                                        FrontendCatalogDiagnostic::contribution(
+                                            &contribution.source_module_id,
+                                            &contribution.contribution_id,
+                                            module.path.join(&contribution.entry),
+                                            &error,
+                                        ),
+                                    );
+                                    continue;
+                                }
+                            },
                         };
                         catalog
                             .extension_point_entries
@@ -567,6 +630,23 @@ impl FrontendCatalog {
                     .validate_interface_imports(module_id, &entry.compiled, graph)
                     .map_err(|message| ShellRunError::FrontendComposition { message })?;
             }
+        }
+
+        catalog.diagnostics.sort_by(|left, right| {
+            left.module_id
+                .cmp(&right.module_id)
+                .then_with(|| left.contribution_id.cmp(&right.contribution_id))
+                .then_with(|| left.source_path.cmp(&right.source_path))
+                .then_with(|| left.message.cmp(&right.message))
+        });
+        for diagnostic in &catalog.diagnostics {
+            tracing::warn!(
+                module_id = %diagnostic.module_id,
+                contribution_id = ?diagnostic.contribution_id,
+                source_path = %diagnostic.source_path.display(),
+                error = %diagnostic.message,
+                "frontend source indexing skipped an invalid entry"
+            );
         }
 
         catalog.validate_node_slot_placements()?;
@@ -984,6 +1064,47 @@ mod performance_tests {
                 &*rebuilt_entry.compiled,
             ));
         }
+    }
+
+    #[test]
+    fn invalid_source_is_scoped_to_one_catalog_entry() {
+        let mut modules = shipped_frontend_modules();
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let manifest = std::fs::read_to_string(
+            workspace_root.join("modules/frontend/debug-inspector/module.json"),
+        )
+        .unwrap()
+        .replace("@mesh/debug-inspector", "@test/broken");
+        std::fs::write(temp.path().join("module.json"), manifest).unwrap();
+        std::fs::write(temp.path().join("src/main.mesh"), "<template><").unwrap();
+
+        let loaded = mesh_core_module::manifest::load_canonical_manifest(temp.path()).unwrap();
+        let module_id = loaded.manifest.package.id.clone();
+        modules.insert(
+            module_id.clone(),
+            ModuleInstance::new(
+                loaded.manifest,
+                temp.path().to_path_buf(),
+                loaded.path,
+                loaded.source,
+            ),
+        );
+
+        let catalog = FrontendCatalog::from_modules(&modules, None).unwrap();
+
+        assert!(catalog.module("@mesh/debug-inspector").is_some());
+        assert!(catalog.module(&module_id).is_none());
+        assert!(catalog.diagnostics().iter().any(|diagnostic| {
+            diagnostic.module_id == module_id
+                && diagnostic.contribution_id.is_none()
+                && diagnostic.source_path == temp.path()
+                && diagnostic
+                    .message
+                    .contains("failed to compile frontend module")
+        }));
     }
 
     // cargo test -p mesh-core-shell --release --lib shared_compiled_handle_clone_beats_deep_clone -- --ignored --nocapture

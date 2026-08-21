@@ -7,13 +7,16 @@ lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
 
-The first three Section 2 items are complete. Package commits publish
+The first four Section 2 items are complete. Package commits publish
 validated module trees into a read-only SHA-256 object store and activate
 generation-stamped snapshots. Installed-graph and shell discovery resolve the
 active object set, while editable module trees remain the authoring/update
 source. Shell runtime instances and catalogs now come only from the validated
-resolved graph, and invalid startup/reload candidates fail closed. Focused
-package tests and a deterministic candidate graph diff are added; Cargo
+resolved graph, and invalid startup/reload candidates fail closed. Candidate
+updates explain normalized graph changes before commit, while frontend primary
+entries and extension-point contributions are indexed incrementally with
+module-scoped source diagnostics and retryable watch paths. Focused package and
+catalog tests are added; Cargo
 execution is currently blocked
 because the local registry cache lacks `sha2` and network access is unavailable.
 

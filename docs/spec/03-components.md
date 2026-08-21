@@ -11,6 +11,17 @@ mount that component as a top-level surface or another component may embed it.
 Configuration belongs to the component's source as a typed `<props>` public
 API; packaging stays in the manifest.
 
+## 0.1. Incremental source indexing
+
+**Status: shipped.** Installed-graph construction validates module manifests and
+activation separately from frontend source indexing. The shell compiles each
+primary entrypoint and extension-point contribution independently, reuses
+unchanged compiled entries by manifest/source fingerprint, and records a
+module- or contribution-scoped diagnostic when a `.mesh` or Luau source fails.
+One invalid source therefore does not make unrelated graph-authorized modules
+disappear. The failed source remains in the watch set so an edit can retry its
+index entry without mutating the resolved graph.
+
 ## 1. The `.mesh` file
 
 ```

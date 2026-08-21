@@ -33,6 +33,7 @@ fn memo_surface(parent_src: &str, locals: &[(&str, &str)]) -> FrontendSurfaceCom
                 compiled: compiled.clone().into(),
             },
         )]),
+        diagnostics: Default::default(),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
@@ -493,6 +494,7 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
                 compiled: parent_compiled.clone().into(),
             },
         )]),
+        diagnostics: Default::default(),
         extension_point_contributions: HashMap::from([(
             extension_point_key(PARENT_ID, POINT),
             (0..contribution_count)
@@ -882,6 +884,7 @@ import MenuPopover from "@mesh/menu-popover"
                 },
             ),
         ]),
+        diagnostics: Default::default(),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),

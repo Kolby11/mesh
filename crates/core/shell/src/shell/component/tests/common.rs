@@ -521,6 +521,7 @@ pub(super) fn test_frontend_component_with_local_components(
                 compiled: compiled.clone().into(),
             },
         )]),
+        diagnostics: Default::default(),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
@@ -558,6 +559,7 @@ pub(super) fn test_frontend_component_with_manifest(
     };
     let catalog = FrontendCatalog {
         modules: HashMap::new(),
+        diagnostics: Default::default(),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
@@ -625,6 +627,7 @@ pub(super) fn test_frontend_component_with_required_icons(
     };
     let catalog = FrontendCatalog {
         modules: HashMap::new(),
+        diagnostics: Default::default(),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
@@ -668,6 +671,7 @@ pub(super) fn test_frontend_component_with_catalog(
     };
     let catalog = FrontendCatalog {
         modules: HashMap::new(),
+        diagnostics: Default::default(),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
@@ -1026,6 +1030,7 @@ pub(super) fn real_frontend_module_component(
                 },
             ),
         ]),
+        diagnostics: Default::default(),
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
