@@ -450,6 +450,53 @@ fn backend_interface_event_drops_invalid_payload_with_diagnostic() {
 }
 
 #[test]
+fn terminal_provider_interface_events_are_dropped_after_stop() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .interfaces
+        .register_contract(test_contract("mesh.audio"));
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    shell.register_component(Box::new(RecordingComponent::new(events.clone())));
+
+    shell
+        .broadcast_backend_interface_event(
+            "mesh.audio".to_string(),
+            "@mesh/pipewire-audio".to_string(),
+            "VolumeChanged".to_string(),
+            serde_json::json!({ "device_id": "default", "level": 42.0 }),
+        )
+        .unwrap();
+    shell.stop_backend_runtime("mesh.audio");
+    shell
+        .broadcast_backend_interface_event(
+            "mesh.audio".to_string(),
+            "@mesh/pipewire-audio".to_string(),
+            "VolumeChanged".to_string(),
+            serde_json::json!({ "device_id": "default", "level": 5.0 }),
+        )
+        .unwrap();
+
+    let events = events.lock().unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, ServiceEvent::InterfaceEvent { name, .. } if name == "VolumeChanged"))
+            .count(),
+        1
+    );
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            ServiceEvent::Updated { payload, .. }
+                if payload.get("available") == Some(&serde_json::Value::Bool(false))
+        )
+    }));
+}
+
+#[test]
 fn closed_service_command_channel_returns_unavailable_result() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();

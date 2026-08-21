@@ -371,7 +371,21 @@ fn terminal_provider_update_does_not_replace_latest_state_or_reach_components() 
         ))
         .unwrap();
 
-    assert_eq!(seen_events.lock().unwrap().len(), 1);
+    let events = seen_events.lock().unwrap();
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            ServiceEvent::Updated { payload, .. }
+                if payload.get("available") == Some(&serde_json::Value::Bool(false))
+        )
+    }));
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            ServiceEvent::InterfaceEvent { name, payload, .. }
+                if name == "health" && payload["state"] == "unavailable"
+        )
+    }));
     assert_eq!(
         shell
             .latest_service_state

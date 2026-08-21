@@ -127,7 +127,9 @@ impl Shell {
         };
         let interface = canonical_interface_name_cow(service);
         if let Some(slot) = self.backend_runtimes.get(interface.as_ref()) {
-            if slot.provider_id != *source_module {
+            if slot.provider_id != *source_module
+                || !self.backend_provider_is_active(interface.as_ref(), source_module)
+            {
                 tracing::debug!(
                     interface = interface.as_ref(),
                     source_module,
@@ -616,17 +618,7 @@ impl Shell {
         name: String,
         payload: serde_json::Value,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        let provider_is_active = self.backend_runtimes.get(&interface).is_some_and(|slot| {
-            *slot
-                .event_provider_id
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                == provider_id
-        });
-        let provider_is_terminal = self
-            .backend_runtime_status(&interface, &provider_id)
-            .is_some_and(|entry| entry.status.rejects_provider_messages());
-        if !provider_is_active || provider_is_terminal {
+        if !self.backend_provider_is_active(&interface, &provider_id) {
             tracing::debug!(
                 interface,
                 provider_id,

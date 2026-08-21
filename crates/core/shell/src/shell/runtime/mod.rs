@@ -356,14 +356,7 @@ impl Shell {
                 {
                     return Ok(());
                 }
-                let provider_is_active =
-                    self.backend_runtimes.get(&interface).is_some_and(|slot| {
-                        *slot
-                            .event_provider_id
-                            .read()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner())
-                            == provider_id
-                    });
+                let provider_is_active = self.backend_provider_is_active(&interface, &provider_id);
                 if !provider_is_active {
                     tracing::debug!(
                         interface,
@@ -402,14 +395,7 @@ impl Shell {
                 result,
                 outcome,
             } => {
-                let provider_is_active =
-                    self.backend_runtimes.get(&interface).is_some_and(|slot| {
-                        *slot
-                            .event_provider_id
-                            .read()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner())
-                            == provider_id
-                    });
+                let provider_is_active = self.backend_provider_is_active(&interface, &provider_id);
                 if provider_is_active {
                     let contract = self.interfaces.resolve(&interface, None).contract;
                     let warnings = contract.as_ref().map_or_else(Vec::new, |contract| {

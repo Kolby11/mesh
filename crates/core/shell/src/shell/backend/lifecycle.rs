@@ -3,6 +3,23 @@ use super::{BackendRuntimeStatus, BackendRuntimeStatusEntry};
 use mesh_core_module::manifest::ModuleType;
 
 impl Shell {
+    pub(in crate::shell) fn backend_provider_is_active(
+        &self,
+        interface: &str,
+        provider_id: &str,
+    ) -> bool {
+        self.backend_runtimes.get(interface).is_some_and(|slot| {
+            *slot
+                .event_provider_id
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                == provider_id
+                && !self
+                    .backend_runtime_status(interface, provider_id)
+                    .is_some_and(|entry| entry.status.rejects_provider_messages())
+        })
+    }
+
     pub(in crate::shell) fn backend_runtime_status(
         &self,
         interface: &str,
@@ -269,7 +286,7 @@ impl Shell {
     }
 
     pub(in crate::shell) fn stop_backend_runtime(&mut self, interface: &str) {
-        self.stop_backend_runtime_with_health(interface, false);
+        self.stop_backend_runtime_with_health(interface, true);
     }
 
     fn stop_backend_runtime_with_health(&mut self, interface: &str, publish_health: bool) {
@@ -444,6 +461,25 @@ impl Shell {
         message: String,
     ) {
         let runtime_status = BackendRuntimeStatus::from_str(&status);
+        let is_prepared_provider = self
+            .pending_backend_runtimes
+            .get(&interface)
+            .is_some_and(|pending| pending.slot.provider_id == provider_id)
+            || self.profile_candidate_is_pending(&interface, &provider_id);
+        if !is_prepared_provider
+            && !self.backend_provider_is_active(&interface, &provider_id)
+            && self
+                .backend_runtime_status(&interface, &provider_id)
+                .is_some_and(|entry| entry.status.rejects_provider_messages())
+        {
+            tracing::debug!(
+                interface,
+                provider_id,
+                status = runtime_status.as_str(),
+                "ignored lifecycle transition from a terminal provider generation"
+            );
+            return;
+        }
         self.record_backend_runtime_status(
             interface.clone(),
             provider_id.clone(),
@@ -512,8 +548,7 @@ impl Shell {
                 stage = stage,
                 "cleaning backend runtime slot"
             );
-            self.stop_backend_runtime(&interface);
-            self.clear_active_provider_service_state(&interface, &provider_id);
+            self.stop_backend_runtime_with_health(&interface, false);
             self.supervise_backend_failure(&interface, &provider_id);
         }
     }
@@ -601,36 +636,5 @@ impl Shell {
                 ),
             }
         }
-    }
-
-    /// Replace `latest_service_state` for the given interface with an unavailable
-    /// payload when the active provider is known to be failing.
-    fn clear_active_provider_service_state(&mut self, interface: &str, provider_id: &str) {
-        let unavailable_payload = if let Some(existing) = self.latest_service_state.get(interface) {
-            let mut obj = if existing.state.is_object() {
-                existing.state.clone()
-            } else {
-                serde_json::json!({})
-            };
-            if let Some(map) = obj.as_object_mut() {
-                map.insert("available".to_string(), serde_json::Value::Bool(false));
-            }
-            obj
-        } else {
-            serde_json::json!({ "available": false })
-        };
-        self.latest_service_state.insert(
-            interface.to_string(),
-            LatestServiceState::new(
-                interface.to_string(),
-                provider_id.to_string(),
-                unavailable_payload,
-            ),
-        );
-        tracing::debug!(
-            interface,
-            provider_id,
-            "cleared stale public service state after provider failure"
-        );
     }
 }

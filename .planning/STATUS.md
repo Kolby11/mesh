@@ -81,6 +81,11 @@ prepared output and replay it once after commit; invalid preparation leaves the
 current provider and state in place. Health transitions are published after the
 new runtime is active.
 
+Backend state, interface events, command results, and lifecycle transitions now
+share active-provider and terminal-generation filtering. Late messages from
+stopped or replaced providers are rejected, while explicit stop/failure paths
+publish unavailable state and health through normal service delivery.
+
 The guarded `scripts/codex-backlog-runner.sh` can process one unchecked backlog
 item at a time directly on `main`, using Codex's explicit unrestricted mode for
 unattended turns by default (`CODEX_ALLOW_ALL=0` opts back into workspace-write),
