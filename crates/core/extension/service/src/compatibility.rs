@@ -48,6 +48,24 @@ pub struct BidirectionalContractDiff {
     pub provider: ContractDiff,
 }
 
+/// Independent compatibility outcomes for the two sides of an interface
+/// update. A change can be safe for existing consumers while unsafe for an
+/// existing provider, or vice versa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompatibilityClassification {
+    pub consumer: CompatibilityClass,
+    pub provider: CompatibilityClass,
+}
+
+impl BidirectionalContractDiff {
+    pub fn classification(&self) -> CompatibilityClassification {
+        CompatibilityClassification {
+            consumer: self.consumer.class(),
+            provider: self.provider.class(),
+        }
+    }
+}
+
 impl ContractDiff {
     pub fn class(&self) -> CompatibilityClass {
         self.changes
@@ -861,6 +879,8 @@ mod tests {
         );
         let diffs = diff_contracts_bidirectional(&locked, &candidate);
         assert!(!diffs.consumer.is_breaking());
+        assert_eq!(diffs.classification().consumer, CompatibilityClass::Additive);
+        assert_eq!(diffs.classification().provider, CompatibilityClass::Breaking);
         assert!(
             diffs
                 .provider

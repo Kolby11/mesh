@@ -28,18 +28,19 @@ pub mod generator;
 pub mod interface;
 
 pub use compatibility::{
-    BidirectionalContractDiff, CompatibilityClass, ContractChange, ContractDiff, diff_contracts,
-    diff_contracts_bidirectional,
+    BidirectionalContractDiff, CompatibilityClass, CompatibilityClassification, ContractChange,
+    ContractDiff, diff_contracts, diff_contracts_bidirectional,
 };
 pub use contract::{
-    BaseType, CompiledBehavioralMetadata, CompiledContract, CompiledEventSchema, CompiledField,
-    CompiledMethodBehavior, CompiledMethodSchema, CompiledOperationPolicy, CompiledSchemas,
-    CompiledStateField, CompiledTypeSchema, ContractCapabilities, ContractError,
-    ContractStateField, DeclarationProvenance, InterfaceArgument, InterfaceContract,
+    BaseType, CompiledBehavioralMetadata, CompiledContract, CompiledEventSchema,
+    CompiledFeatureGroup, CompiledField, CompiledMethodBehavior, CompiledMethodSchema,
+    CompiledOperationPolicy, CompiledSchemas, CompiledStateField, CompiledTypeSchema,
+    ContractCapabilities, ContractError, ContractFeatureGroup, ContractStateField,
+    DeclarationProvenance, FeatureNegotiation, InterfaceArgument, InterfaceContract,
     InterfaceEvent, InterfaceMethod, InterfaceTypeDef, StateBinding, TypeExpr,
-    compile_interface_contract, contract_type_errors, parse_compiled_contract,
-    parse_compiled_contract_with_provenance, parse_contract_version, parse_interface_contract,
-    parse_version_req,
+    compile_interface_contract, contract_type_errors, negotiate_feature_groups,
+    parse_compiled_contract, parse_compiled_contract_with_provenance, parse_contract_version,
+    parse_interface_contract, parse_version_req,
 };
 pub use generator::{
     GeneratedContractArtifacts, generate_contract_artifacts, generate_contract_documentation,

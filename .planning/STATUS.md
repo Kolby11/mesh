@@ -87,6 +87,11 @@ in the generation-stamped catalog: optional groups degrade without rejecting the
 provider, while missing required groups make the provider unavailable and are
 reported in interface lookup diagnostics.
 
+Bidirectional contract diffs now expose a typed `CompatibilityClassification`
+with independent consumer and provider classes. A change can therefore be
+additive for existing consumers while breaking old providers without collapsing
+those outcomes into one label.
+
 Service contracts now validate recursive named fields, arrays, optional values,
 and `Result` returns across state, events, method inputs, and provider outputs.
 Invalid snapshots preserve the last-known-good state, invalid events and
