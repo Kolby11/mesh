@@ -677,7 +677,10 @@ fn declared_contracts(
         };
         let version = declaration.version.as_deref().unwrap_or("1.0");
         if let Ok(contract) = parse_interface_contract(&declaration.name, version, value) {
-            contracts.insert(declaration.name.clone(), contract);
+            contracts.insert(
+                mesh_core_service::canonical_interface_name(&declaration.name),
+                contract,
+            );
         }
     }
     contracts

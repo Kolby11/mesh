@@ -19,12 +19,12 @@ fn validate_unique_graph_identities(
         .values()
         .filter(|module| module.enabled && module.kind == ModuleKind::Interface)
         .filter_map(|module| {
-            module
-                .manifest
-                .mesh
-                .interface
-                .as_ref()
-                .map(|interface| (interface.name.clone(), module.id.clone()))
+            module.manifest.mesh.interface.as_ref().map(|interface| {
+                (
+                    mesh_core_service::canonical_interface_name(&interface.name),
+                    module.id.clone(),
+                )
+            })
         })
         .collect::<Vec<_>>();
     interfaces.sort();
@@ -532,28 +532,34 @@ impl InstalledModuleGraph {
             if node.kind == ModuleKind::Interface
                 && let Some(interface) = &node.manifest.mesh.interface
             {
+                let name = mesh_core_service::canonical_interface_name(&interface.name);
                 let declaration = InterfaceDeclarationNode {
-                    source: ContributionSource::new(node, &interface.name),
+                    source: ContributionSource::new(node, &name),
                     module_id: node.id.clone(),
-                    name: interface.name.clone(),
+                    name: name.clone(),
                     version: interface.version.clone(),
                     contract: interface.contract.clone(),
                     domain: interface.domain.clone(),
-                    extends: interface.extends.clone(),
+                    extends: interface
+                        .extends
+                        .as_deref()
+                        .map(mesh_core_service::canonical_interface_name),
                     relationship: interface.effective_relationship(),
                     reason: interface.reason.clone(),
                 };
-                interface_declarations.insert(declaration.name.clone(), declaration);
+                interface_declarations.insert(name, declaration);
             }
             if node.kind == ModuleKind::Backend {
                 for provided in node.manifest.mesh.implementations() {
+                    let interface =
+                        mesh_core_service::canonical_interface_name(&provided.interface);
                     let provider = BackendProviderNode {
                         source: ContributionSource::new(
                             node,
-                            provided.provider.as_deref().unwrap_or(&provided.interface),
+                            provided.provider.as_deref().unwrap_or(&interface),
                         ),
                         module_id: node.id.clone(),
-                        interface: provided.interface.clone(),
+                        interface: interface.clone(),
                         version: provided.version.clone(),
                         base_module: provided.base_module.clone(),
                         provider: provided.provider.clone(),
@@ -563,7 +569,7 @@ impl InstalledModuleGraph {
                         optional_capabilities: node.manifest.mesh.capabilities.optional.clone(),
                     };
                     backend_providers
-                        .entry(provided.interface.clone())
+                        .entry(interface)
                         .or_default()
                         .push(provider);
                 }
@@ -605,20 +611,24 @@ impl InstalledModuleGraph {
                 continue;
             };
             for interface in &node.manifest.mesh.interfaces {
+                let name = mesh_core_service::canonical_interface_name(&interface.name);
                 let candidate = InterfaceDeclarationNode {
-                    source: ContributionSource::new(node, &interface.name),
+                    source: ContributionSource::new(node, &name),
                     module_id: module_id.clone(),
-                    name: interface.name.clone(),
+                    name: name.clone(),
                     version: interface.version.clone(),
                     contract: interface.contract.clone(),
                     domain: interface.domain.clone(),
-                    extends: interface.extends.clone(),
+                    extends: interface
+                        .extends
+                        .as_deref()
+                        .map(mesh_core_service::canonical_interface_name),
                     relationship: interface.effective_relationship(),
                     reason: interface.reason.clone(),
                 };
-                match interface_declarations.get(&candidate.name) {
+                match interface_declarations.get(&name) {
                     None => {
-                        interface_declarations.insert(candidate.name.clone(), candidate);
+                        interface_declarations.insert(name.clone(), candidate);
                     }
                     Some(existing) => {
                         let existing_is_interface_module = graph_modules
@@ -699,7 +709,7 @@ impl InstalledModuleGraph {
             let version = declaration.version.as_deref().unwrap_or("1.0");
             match parse_interface_contract(&declaration.name, version, value) {
                 Ok(contract) => {
-                    interface_contracts.insert(declaration.name.clone(), contract);
+                    interface_contracts.insert(contract.interface.clone(), contract);
                 }
                 Err(err) => manual_diagnostics.push(ModuleGraphDiagnostic {
                     module_id: declaration.module_id.clone(),
@@ -720,15 +730,24 @@ impl InstalledModuleGraph {
             .values()
             .filter(|node| !node.enabled && node.kind == ModuleKind::Backend)
             .flat_map(|node| {
-                node.manifest
-                    .mesh
-                    .implementations()
-                    .map(|implementation| implementation.interface.clone())
+                node.manifest.mesh.implementations().map(|implementation| {
+                    mesh_core_service::canonical_interface_name(&implementation.interface)
+                })
             })
             .collect::<BTreeSet<_>>();
+        let requested_providers = root
+            .providers
+            .iter()
+            .map(|(interface, module_id)| {
+                (
+                    mesh_core_service::canonical_interface_name(interface),
+                    module_id.clone(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
         let (active_providers, compatibility_diagnostics, blocked_frontends) =
             resolve_active_providers(
-                &root.providers,
+                &requested_providers,
                 &backend_providers,
                 &disabled_provider_interfaces,
                 &frontend_requirements,
@@ -1046,7 +1065,8 @@ impl InstalledModuleGraph {
     }
 
     pub fn declared_interface(&self, interface: &str) -> Option<&InterfaceDeclarationNode> {
-        self.interface_declarations.get(interface)
+        self.interface_declarations
+            .get(&mesh_core_service::canonical_interface_name(interface))
     }
 
     pub fn interface_guidance(&self) -> &[InterfaceGuidanceRecord] {
@@ -1069,15 +1089,17 @@ impl InstalledModuleGraph {
     }
 
     pub fn backend_providers_for_interface(&self, interface: &str) -> &[BackendProviderNode] {
+        let interface = mesh_core_service::canonical_interface_name(interface);
         self.backend_providers
-            .get(interface)
+            .get(&interface)
             .map(Vec::as_slice)
             .unwrap_or(&[])
     }
 
     pub fn active_provider(&self, interface: &str) -> Option<&BackendProviderNode> {
-        let module_id = self.active_providers.get(interface)?;
-        self.backend_providers_for_interface(interface)
+        let interface = mesh_core_service::canonical_interface_name(interface);
+        let module_id = self.active_providers.get(&interface)?;
+        self.backend_providers_for_interface(&interface)
             .iter()
             .find(|provider| &provider.module_id == module_id)
     }
@@ -1217,7 +1239,8 @@ impl InstalledModuleGraph {
     }
 
     pub fn interface_contract(&self, interface: &str) -> Option<&InterfaceContract> {
-        self.interface_contracts.get(interface)
+        self.interface_contracts
+            .get(&mesh_core_service::canonical_interface_name(interface))
     }
 
     pub fn declared_interfaces(&self) -> Vec<&InterfaceDeclarationNode> {

@@ -335,26 +335,33 @@ pub fn parse_interface_contract(
     interface_version: &str,
     contract: &JsonValue,
 ) -> Result<InterfaceContract, ContractError> {
+    let interface_name = crate::interface::canonical_interface_name(interface_name);
+    if interface_name.is_empty() {
+        return Err(ContractError::Parse {
+            interface: interface_name,
+            message: "interface identity cannot be empty".to_string(),
+        });
+    }
     let contract = normalize_keyed_contract_declarations(contract.clone()).map_err(|message| {
         ContractError::Parse {
-            interface: interface_name.to_string(),
+            interface: interface_name.clone(),
             message,
         }
     })?;
     let parsed: ContractJson =
         serde_json::from_value(contract).map_err(|source| ContractError::Parse {
-            interface: interface_name.to_string(),
+            interface: interface_name.clone(),
             message: source.to_string(),
         })?;
 
     let version =
         parse_contract_version(interface_version).ok_or_else(|| ContractError::InvalidVersion {
-            interface: interface_name.to_string(),
+            interface: interface_name.clone(),
             value: interface_version.to_string(),
         })?;
 
     let contract = InterfaceContract {
-        interface: interface_name.to_string(),
+        interface: interface_name.clone(),
         version,
         state_fields: parsed
             .state
@@ -419,7 +426,7 @@ pub fn parse_interface_contract(
 
     if let Some(message) = contract_type_errors(&contract).into_iter().next() {
         return Err(ContractError::InvalidType {
-            interface: interface_name.to_string(),
+            interface: interface_name,
             message,
         });
     }
@@ -778,6 +785,12 @@ mod tests {
     fn parses_short_semver_contract_version() {
         let version = parse_contract_version("1.0").unwrap();
         assert_eq!(version.to_string(), "1.0.0");
+    }
+
+    #[test]
+    fn canonicalizes_short_interface_identity_when_compiling() {
+        let contract = parse_interface_contract("audio", "1.0", &serde_json::json!({})).unwrap();
+        assert_eq!(contract.interface, "mesh.audio");
     }
 
     #[test]

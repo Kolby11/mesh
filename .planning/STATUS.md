@@ -94,6 +94,11 @@ classification, and provider-side breakage is reported independently. Cargo
 verification remains blocked by the unavailable `sha2` registry cache and
 network access; formatting and whitespace checks pass.
 
+Contract identity is now canonicalized when compiled and at every graph,
+runtime, diagnostics, update, and LSP index boundary. Short aliases resolve to
+the same `InterfaceContract` artifact as canonical names, including provider
+selection and frontend requirements; empty identities are rejected.
+
 The guarded `scripts/codex-backlog-runner.sh` can process one unchecked backlog
 item at a time directly on `main`, using Codex's explicit unrestricted mode for
 unattended turns by default (`CODEX_ALLOW_ALL=0` opts back into workspace-write),

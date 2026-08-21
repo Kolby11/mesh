@@ -167,7 +167,7 @@ fn complete_interface_proxy(
         return items;
     }
 
-    let shape = registry.interface_shapes.get(iface_name);
+    let shape = registry.interface_shape(iface_name);
 
     // State fields from backend script analysis
     if let Some(shape) = shape {
@@ -641,7 +641,7 @@ fn complete_import_member(
         return items;
     }
 
-    if let Some(shape) = registry.interface_shapes.get(canonical) {
+    if let Some(shape) = registry.interface_shape(canonical) {
         let mut items: Vec<CompletionItem> = Vec::new();
         for field in &shape.state_fields {
             if let Some(item) = member_item(

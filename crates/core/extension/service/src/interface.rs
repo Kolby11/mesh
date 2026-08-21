@@ -61,6 +61,8 @@ impl InterfaceRegistry {
 
     pub fn register_contract(&self, contract: InterfaceContract) {
         let mut snapshot = self.snapshot.write().unwrap();
+        let mut contract = contract;
+        contract.interface = canonical_interface_name_owned(contract.interface);
         let entry = snapshot
             .contracts
             .entry(contract.interface.clone())
@@ -301,8 +303,9 @@ impl InterfaceCatalog {
 
 fn register_contract_in_map(
     contracts: &mut HashMap<String, Vec<InterfaceContract>>,
-    contract: InterfaceContract,
+    mut contract: InterfaceContract,
 ) {
+    contract.interface = canonical_interface_name_owned(contract.interface);
     let entry = contracts.entry(contract.interface.clone()).or_default();
     entry.retain(|existing| existing.version != contract.version);
     entry.push(contract);
@@ -311,8 +314,9 @@ fn register_contract_in_map(
 
 fn register_provider_in_map(
     providers: &mut HashMap<String, Vec<InterfaceProvider>>,
-    provider: InterfaceProvider,
+    mut provider: InterfaceProvider,
 ) {
+    provider.interface = canonical_interface_name_owned(provider.interface);
     let entry = providers.entry(provider.interface.clone()).or_default();
     entry.retain(|existing| {
         !(existing.provider_module == provider.provider_module
@@ -390,6 +394,15 @@ mod tests {
         assert_eq!(canonical_interface_name("audio"), "mesh.audio");
         assert_eq!(canonical_interface_name("mesh.audio"), "mesh.audio");
         assert_eq!(canonical_interface_name("alice.thermal"), "alice.thermal");
+    }
+
+    #[test]
+    fn registry_canonicalizes_contract_identity_at_registration() {
+        let registry = InterfaceRegistry::new();
+        registry.register_contract(test_contract("audio", 1));
+
+        let contract = registry.resolve("mesh.audio", None).contract.unwrap();
+        assert_eq!(contract.interface, "mesh.audio");
     }
 
     #[test]

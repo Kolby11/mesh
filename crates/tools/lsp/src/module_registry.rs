@@ -1,6 +1,6 @@
 use mesh_core_config::{default_config_path, load_config, resolve_discovery_paths};
 use mesh_core_module::manifest::{Manifest, ModuleType, load_canonical_manifest};
-use mesh_core_service::{InterfaceContract, parse_interface_contract};
+use mesh_core_service::{InterfaceContract, canonical_interface_name, parse_interface_contract};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -130,23 +130,23 @@ impl ModuleRegistry {
         let standalone_interface = manifest.package.module_type == ModuleType::Interface;
         let declarations = manifest.interface.iter().chain(manifest.interfaces.iter());
         for declaration in declarations {
+            let interface_name = canonical_interface_name(&declaration.name);
             self.interface_fields
-                .entry(declaration.name.clone())
+                .entry(interface_name.clone())
                 .or_default();
             let Some(contract_json) = declaration.contract.as_ref() else {
                 continue;
             };
             let Ok(contract) =
-                parse_interface_contract(&declaration.name, &declaration.version, contract_json)
+                parse_interface_contract(&interface_name, &declaration.version, contract_json)
             else {
                 continue;
             };
             if standalone_interface {
-                self.interface_contracts
-                    .insert(declaration.name.clone(), contract);
+                self.interface_contracts.insert(interface_name, contract);
             } else {
                 self.interface_contracts
-                    .entry(declaration.name.clone())
+                    .entry(interface_name)
                     .or_insert(contract);
             }
         }
@@ -155,7 +155,9 @@ impl ModuleRegistry {
         // declaration has no contract yet.
         if manifest.package.module_type == ModuleType::Interface {
             if let Some(iface) = &manifest.interface {
-                self.interface_fields.entry(iface.name.clone()).or_default();
+                self.interface_fields
+                    .entry(canonical_interface_name(&iface.name))
+                    .or_default();
             }
         }
 
@@ -166,11 +168,12 @@ impl ModuleRegistry {
             let mut names: Vec<String> = manifest
                 .provides
                 .iter()
-                .map(|p| p.interface.clone())
+                .map(|p| canonical_interface_name(&p.interface))
                 .collect();
             if let Some(svc) = manifest.primary_service() {
-                if !names.contains(&svc.provides) {
-                    names.push(svc.provides.clone());
+                let provides = canonical_interface_name(&svc.provides);
+                if !names.contains(&provides) {
+                    names.push(provides);
                 }
             }
             names
@@ -252,7 +255,13 @@ impl ModuleRegistry {
 
     /// The validated contract for an interface, when one was declared.
     pub fn interface_contract(&self, interface: &str) -> Option<&InterfaceContract> {
-        self.interface_contracts.get(interface)
+        self.interface_contracts
+            .get(&canonical_interface_name(interface))
+    }
+
+    pub fn interface_shape(&self, interface: &str) -> Option<&InterfaceShape> {
+        self.interface_shapes
+            .get(&canonical_interface_name(interface))
     }
 
     /// A one-line description of a module, for completion documentation.

@@ -5,6 +5,7 @@ use super::super::{
 use super::*;
 use crate::manifest;
 use mesh_core_component::parse_component;
+use mesh_core_service::canonical_interface_name;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,8 +33,20 @@ impl FrontendRequirementSet {
         Self {
             module_id: module_id.into(),
             modules,
-            backend: dependencies.backend.clone(),
-            optional_backend: dependencies.optional_backend.clone(),
+            backend: dependencies
+                .backend
+                .iter()
+                .map(|(interface, requirement)| {
+                    (canonical_interface_name(interface), requirement.clone())
+                })
+                .collect(),
+            optional_backend: dependencies
+                .optional_backend
+                .iter()
+                .map(|(interface, requirement)| {
+                    (canonical_interface_name(interface), requirement.clone())
+                })
+                .collect(),
             icons: dependencies.icons.clone(),
             fonts: dependencies.fonts.clone(),
             i18n: dependencies.i18n.clone(),
