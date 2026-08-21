@@ -706,26 +706,30 @@ pub(super) fn real_frontend_module_component(
     let debug_inspector_dir = root.join("modules/frontend/debug-inspector");
     let settings_dir = root.join("modules/frontend/settings");
 
-    let navigation_manifest = mesh_core_module::manifest::load_manifest(&navigation_dir)
+    let navigation_manifest = mesh_core_module::manifest::load_canonical_manifest(&navigation_dir)
         .expect("navigation manifest")
         .manifest;
-    let audio_popover_manifest = mesh_core_module::manifest::load_manifest(&audio_popover_dir)
-        .expect("audio manifest")
-        .manifest;
+    let audio_popover_manifest =
+        mesh_core_module::manifest::load_canonical_manifest(&audio_popover_dir)
+            .expect("audio manifest")
+            .manifest;
     let language_popover_manifest =
-        mesh_core_module::manifest::load_manifest(&language_popover_dir)
+        mesh_core_module::manifest::load_canonical_manifest(&language_popover_dir)
             .expect("language popover manifest")
             .manifest;
-    let theme_selector_manifest = mesh_core_module::manifest::load_manifest(&theme_selector_dir)
-        .expect("theme selector manifest")
-        .manifest;
-    let quick_settings_manifest = mesh_core_module::manifest::load_manifest(&quick_settings_dir)
-        .expect("quick settings manifest")
-        .manifest;
-    let debug_inspector_manifest = mesh_core_module::manifest::load_manifest(&debug_inspector_dir)
-        .expect("debug inspector manifest")
-        .manifest;
-    let settings_manifest = mesh_core_module::manifest::load_manifest(&settings_dir)
+    let theme_selector_manifest =
+        mesh_core_module::manifest::load_canonical_manifest(&theme_selector_dir)
+            .expect("theme selector manifest")
+            .manifest;
+    let quick_settings_manifest =
+        mesh_core_module::manifest::load_canonical_manifest(&quick_settings_dir)
+            .expect("quick settings manifest")
+            .manifest;
+    let debug_inspector_manifest =
+        mesh_core_module::manifest::load_canonical_manifest(&debug_inspector_dir)
+            .expect("debug inspector manifest")
+            .manifest;
+    let settings_manifest = mesh_core_module::manifest::load_canonical_manifest(&settings_dir)
         .expect("settings manifest")
         .manifest;
 

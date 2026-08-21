@@ -180,7 +180,7 @@ pub(super) fn load_shell_module_manifests(
         .par_iter()
         .map(|dir| DiscoveredModuleManifest {
             dir: dir.clone(),
-            loaded: mesh_core_module::manifest::load_manifest(dir),
+            loaded: mesh_core_module::manifest::load_canonical_manifest(dir),
         })
         .collect()
 }
@@ -352,7 +352,7 @@ pub(super) fn load_shell_module_manifests_serial(
         .iter()
         .map(|dir| DiscoveredModuleManifest {
             dir: dir.clone(),
-            loaded: mesh_core_module::manifest::load_manifest(dir),
+            loaded: mesh_core_module::manifest::load_canonical_manifest(dir),
         })
         .collect()
 }

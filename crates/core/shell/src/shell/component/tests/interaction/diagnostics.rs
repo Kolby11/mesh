@@ -420,7 +420,7 @@ fn icon_reliability_core_surfaces_proof() {
 
     let surface_manifests = [root.join("modules/frontend/navigation-bar")];
     for module_dir in surface_manifests {
-        let loaded = mesh_core_module::manifest::load_manifest(&module_dir).unwrap();
+        let loaded = mesh_core_module::manifest::load_canonical_manifest(&module_dir).unwrap();
         assert!(
             loaded
                 .manifest

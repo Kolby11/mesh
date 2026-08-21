@@ -878,7 +878,8 @@ mod performance_tests {
             .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
             .filter_map(|entry| {
                 let module_dir = entry.path();
-                let loaded = mesh_core_module::manifest::load_manifest(&module_dir).ok()?;
+                let loaded =
+                    mesh_core_module::manifest::load_canonical_manifest(&module_dir).ok()?;
                 let module_id = loaded.manifest.package.id.clone();
                 Some((
                     module_id,

@@ -587,7 +587,7 @@ fn parses_canonical_module_json_module_manifest() {
     )
     .unwrap();
 
-    let loaded = load_manifest(&dir).unwrap();
+    let loaded = load_canonical_manifest(&dir).unwrap();
     assert_eq!(loaded.path, dir.join("module.json"));
     assert_eq!(loaded.source, ManifestSource::CanonicalModuleJson);
     assert_eq!(loaded.manifest.package.id, "@mesh/pipewire-audio");
@@ -644,7 +644,7 @@ fn canonical_manifest_loader_resolves_external_interface_contract() {
     )
     .unwrap();
 
-    let loaded = load_manifest(&dir).unwrap();
+    let loaded = load_canonical_manifest(&dir).unwrap();
     let contract = loaded
         .manifest
         .interface
@@ -655,6 +655,52 @@ fn canonical_manifest_loader_resolves_external_interface_contract() {
     assert!(contract["state"]["percent"].is_object());
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn canonical_runtime_loader_routes_legacy_inputs_to_migration_diagnostics() {
+    let cases = [
+        (
+            "package.json",
+            r#"{"name":"@mesh/legacy","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend"}}"#,
+            "rename package.json to module.json",
+        ),
+        (
+            "mesh.toml",
+            "[package]\nid = \"@mesh/legacy\"\nversion = \"1.0.0\"\ntype = \"surface\"\napi_version = \"0.1\"\n",
+            "replace mesh.toml with canonical module.json",
+        ),
+        (
+            "module.json",
+            r#"{"id":"@mesh/legacy","version":"1.0.0","type":"surface","api_version":"0.1"}"#,
+            "replace legacy module.json fields with canonical name/version/mesh",
+        ),
+    ];
+
+    for (index, (file_name, content, suggested_action)) in cases.into_iter().enumerate() {
+        let dir = std::env::temp_dir().join(format!(
+            "mesh-canonical-runtime-legacy-{}-{index}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(file_name), content).unwrap();
+
+        let error = load_canonical_manifest(&dir).unwrap_err();
+        let ManifestError::Canonical(crate::package::ModuleManifestError::Diagnostic {
+            diagnostic,
+        }) = error
+        else {
+            panic!("expected migration diagnostic for {file_name}");
+        };
+        assert_eq!(diagnostic.suggested_action, suggested_action);
+        assert_eq!(
+            diagnostic.severity,
+            crate::package::ModuleManifestDiagnosticSeverity::Error
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[test]
@@ -710,7 +756,7 @@ fn parses_module_json_icon_requirements() {
 fn navigation_bar_declares_icon_pack_dependency() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../modules/frontend/navigation-bar");
-    let loaded = super::load_manifest(&dir).expect("navigation-bar manifest should load");
+    let loaded = super::load_canonical_manifest(&dir).expect("navigation-bar manifest should load");
     assert!(
         loaded
             .manifest
@@ -737,7 +783,8 @@ fn navigation_bar_declares_icon_pack_dependency() {
 fn material_symbols_module_parses_with_font_requirement() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../modules/icon-packs/material-symbols");
-    let loaded = super::load_manifest(&dir).expect("material-symbols manifest should load");
+    let loaded =
+        super::load_canonical_manifest(&dir).expect("material-symbols manifest should load");
     let ip = loaded.manifest.icon_pack.expect("icon_pack section");
     assert_eq!(ip.id, "material-rounded");
     assert_eq!(ip.requires.fonts.len(), 1);
@@ -761,7 +808,7 @@ fn material_symbols_module_parses_with_font_requirement() {
 fn icons_default_module_parses_as_icon_pack() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../modules/icon-packs/default");
-    let loaded = super::load_manifest(&dir).expect("icons-default manifest should load");
+    let loaded = super::load_canonical_manifest(&dir).expect("icons-default manifest should load");
     let icon_pack = loaded.manifest.icon_pack.expect("icon_pack section");
     assert_eq!(icon_pack.id, "default");
     assert_eq!(

@@ -290,10 +290,11 @@ fn shipped_tiny_nav_popovers_are_embeddable_components_without_surface_geometry(
         .unwrap();
 
     for module in ["language-popover", "theme-selector"] {
-        let manifest =
-            mesh_core_module::manifest::load_manifest(&root.join("modules/frontend").join(module))
-                .unwrap_or_else(|err| panic!("{module} manifest should load: {err}"))
-                .manifest;
+        let manifest = mesh_core_module::manifest::load_canonical_manifest(
+            &root.join("modules/frontend").join(module),
+        )
+        .unwrap_or_else(|err| panic!("{module} manifest should load: {err}"))
+        .manifest;
 
         assert_eq!(
             manifest.package.module_type,

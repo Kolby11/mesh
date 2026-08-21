@@ -1,5 +1,5 @@
 use mesh_core_config::{default_config_path, load_config, resolve_discovery_paths};
-use mesh_core_module::manifest::{Manifest, ModuleType, load_manifest};
+use mesh_core_module::manifest::{Manifest, ModuleType, load_canonical_manifest};
 use mesh_core_service::{InterfaceContract, parse_interface_contract};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -105,7 +105,7 @@ impl ModuleRegistry {
     }
 
     fn try_load_module(&mut self, dir: &Path) {
-        let Ok(loaded) = load_manifest(dir) else {
+        let Ok(loaded) = load_canonical_manifest(dir) else {
             return;
         };
         let manifest = loaded.manifest;

@@ -236,7 +236,7 @@ fn selection_fixture_preview_tree_paints_nonempty_surface() {
         .canonicalize()
         .unwrap();
     let module_dir = root.join("modules/frontend/text-selection-proof");
-    let loaded = mesh_core_module::manifest::load_manifest(&module_dir).unwrap();
+    let loaded = mesh_core_module::manifest::load_canonical_manifest(&module_dir).unwrap();
     let compiled = compile_frontend_module(&loaded.manifest, &module_dir).unwrap();
     let tree = compiled.build_preview_tree(&default_theme(), 360, 176);
 

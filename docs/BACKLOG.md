@@ -39,7 +39,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/02-module-system-and-installation/improvements.md)
 
-- [ ] Make the canonical manifest loader the only production path and route legacy inputs through explicit migration diagnostics.
 - [ ] Make lifecycle and health authoritative across graph/runtime state, recovery, unload, restart, quarantine, and availability delivery.
 - [ ] Align lock schema versions and populate dependency, composition, provenance, and deterministic duplicate-identity metadata.
 - [ ] Adopt a content-addressed immutable module store with generation-based activation snapshots.

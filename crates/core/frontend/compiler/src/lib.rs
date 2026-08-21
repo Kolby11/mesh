@@ -462,7 +462,7 @@ mod tests {
 
         let module_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../../modules/frontend/settings");
-        let loaded = mesh_core_module::manifest::load_manifest(&module_dir)
+        let loaded = mesh_core_module::manifest::load_canonical_manifest(&module_dir)
             .expect("settings manifest should load");
         let compiled = compile_frontend_module(&loaded.manifest, &module_dir)
             .expect("settings module should compile");
@@ -500,7 +500,7 @@ mod tests {
     fn compiles_a_declared_alternate_frontend_entrypoint() {
         let module_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../../modules/frontend/settings");
-        let loaded = mesh_core_module::manifest::load_manifest(&module_dir)
+        let loaded = mesh_core_module::manifest::load_canonical_manifest(&module_dir)
             .expect("settings manifest should load");
 
         let compiled = compile_frontend_entrypoint(
@@ -533,7 +533,7 @@ mod tests {
 
         let module_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../../modules/frontend/touch-gesture-proof");
-        let loaded = mesh_core_module::manifest::load_manifest(&module_dir)
+        let loaded = mesh_core_module::manifest::load_canonical_manifest(&module_dir)
             .expect("touch gesture proof manifest should load");
         let compiled = compile_frontend_module(&loaded.manifest, &module_dir)
             .expect("touch gesture proof module should compile");
@@ -1336,7 +1336,7 @@ mod tests {
 
         let module_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../../modules/frontend/navigation-bar");
-        let loaded = mesh_core_module::manifest::load_manifest(&module_dir)
+        let loaded = mesh_core_module::manifest::load_canonical_manifest(&module_dir)
             .expect("navigation manifest should load");
         let compiled = compile_frontend_module(&loaded.manifest, &module_dir)
             .expect("navigation module should compile");

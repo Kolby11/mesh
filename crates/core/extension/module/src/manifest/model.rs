@@ -1001,18 +1001,12 @@ pub struct IconRequirementsSection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManifestSource {
     CanonicalModuleJson,
-    LegacyPackageJson,
-    LegacyMeshToml,
-    LegacyModuleJson,
 }
 
 impl std::fmt::Display for ManifestSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CanonicalModuleJson => write!(f, "module.json"),
-            Self::LegacyPackageJson => write!(f, "package.json (legacy migration)"),
-            Self::LegacyMeshToml => write!(f, "mesh.toml (legacy migration)"),
-            Self::LegacyModuleJson => write!(f, "module.json (legacy migration)"),
         }
     }
 }
