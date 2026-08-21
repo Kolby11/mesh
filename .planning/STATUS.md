@@ -15,8 +15,10 @@ symlink-safe, bounded UTF-8 source opening. Transactional theme/profile commits
 now prepare candidates before profile commit and retain the last-known-good
 snapshot after reload failures. The active snapshot now composes recovery
 defaults, the selected graph pack/mode, module-owned frontend layers, and sparse
-user token overrides with per-value provenance. Durable/fingerprinted selection
-is the next theme item.
+user token overrides with per-value provenance. Theme selection is durable and
+publishes its selected mode, source fingerprint, and snapshot revision; reload
+polling follows content fingerprints even after a source directory changes.
+The restricted CSS parser is the next theme item.
 
 The first four Section 2 items are complete. Package commits publish
 validated module trees into a read-only SHA-256 object store and activate

@@ -440,6 +440,9 @@ impl Shell {
             &[
                 ("current", "string"),
                 ("theme_id", "string"),
+                ("mode", "string?"),
+                ("revision", "string"),
+                ("fingerprint", "integer?"),
                 ("is_dark", "boolean"),
                 ("themes", "object[]"),
                 ("available", "string[]"),

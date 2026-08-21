@@ -330,6 +330,9 @@ impl LatestServiceState {
 pub(super) struct ThemeWatchState {
     pub(super) path: PathBuf,
     pub(super) modified_at: Option<SystemTime>,
+    pub(super) fingerprint: Option<u64>,
+    pub(super) mode: Option<String>,
+    pub(super) revision: u64,
 }
 
 #[derive(Debug, Clone)]

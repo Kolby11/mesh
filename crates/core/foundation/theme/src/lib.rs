@@ -316,6 +316,26 @@ impl ThemeSourceHandle {
             })
         }
     }
+
+    /// Return a stable content fingerprint for change detection without
+    /// turning the source handle into a caller-controlled filesystem path.
+    pub fn fingerprint(&self) -> Result<u64, ThemeSourceError> {
+        Ok(fingerprint_bytes(
+            self.read_utf8_bounded(DEFAULT_MAX_THEME_SOURCE_BYTES)?
+                .as_bytes(),
+        ))
+    }
+}
+
+/// Stable non-cryptographic fingerprint for watcher/change-detection use.
+/// Module provenance and safe source opening provide the trust boundary; this
+/// value only avoids treating an unchanged mtime as an unchanged source.
+pub fn fingerprint_bytes(bytes: &[u8]) -> u64 {
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+    bytes.iter().fold(FNV_OFFSET, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(FNV_PRIME)
+    })
 }
 
 #[derive(Debug, thiserror::Error)]

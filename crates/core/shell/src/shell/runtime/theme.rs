@@ -5,6 +5,47 @@ const THEME_RELOAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::fro
 const SHELL_SETTINGS_RELOAD_POLL_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(500);
 
+fn theme_source_fingerprint(shell: &Shell) -> Result<u64, mesh_core_theme::ThemeError> {
+    if let Some(graph) = shell.installed_module_graph.as_ref().filter(|graph| {
+        graph
+            .theme_catalog()
+            .get(&shell.settings.theme.active)
+            .is_some()
+    }) {
+        let descriptor = graph
+            .theme_catalog()
+            .get(&shell.settings.theme.active)
+            .expect("catalog presence checked");
+        let mode = shell
+            .settings
+            .theme
+            .mode
+            .as_deref()
+            .unwrap_or(&descriptor.default_mode);
+        let source = descriptor.mode(mode).ok_or_else(|| {
+            mesh_core_theme::ThemeError::Composition(format!(
+                "theme '{}' has no mode '{mode}'",
+                descriptor.id
+            ))
+        })?;
+        source
+            .source
+            .fingerprint()
+            .map_err(|error| mesh_core_theme::ThemeError::Source {
+                path: source.source.candidate_path(),
+                message: error.to_string(),
+            })
+    } else {
+        let bytes = std::fs::read(&shell.theme_watch.path).map_err(|source| {
+            mesh_core_theme::ThemeError::Io {
+                path: shell.theme_watch.path.clone(),
+                source,
+            }
+        })?;
+        Ok(mesh_core_theme::fingerprint_bytes(&bytes))
+    }
+}
+
 fn is_dark_theme_id(theme_id: &str) -> bool {
     theme_id.contains("dark") || theme_id.eq_ignore_ascii_case("tokyo-night")
 }
@@ -103,33 +144,39 @@ impl Shell {
         if now < self.next_theme_reload_check {
             return Ok(VecDeque::new());
         }
-        self.next_theme_reload_check = now
-            + if self.file_watcher_active {
-                super::FILE_WATCHER_RELOAD_PARK
-            } else {
-                THEME_RELOAD_POLL_INTERVAL
-            };
+        // Keep polling even when inotify is active. Theme selection can move
+        // the source into a directory that the startup watcher did not know;
+        // the fingerprint makes this poll cheap and content-sensitive.
+        self.next_theme_reload_check = now + THEME_RELOAD_POLL_INTERVAL;
 
-        let Ok(metadata) = std::fs::metadata(&self.theme_watch.path) else {
-            return Ok(VecDeque::new());
-        };
-        let Ok(modified_at) = metadata.modified() else {
-            return Ok(VecDeque::new());
+        let fingerprint = match theme_source_fingerprint(self) {
+            Ok(fingerprint) => fingerprint,
+            Err(error) => {
+                self.record_theme_reload_failure(&error);
+                return Ok(VecDeque::new());
+            }
         };
 
-        if self.theme_watch.modified_at == Some(modified_at) {
+        let modified_at = std::fs::metadata(&self.theme_watch.path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok());
+
+        if self.theme_watch.fingerprint == Some(fingerprint)
+            && self.theme_watch.modified_at == modified_at
+        {
             return Ok(VecDeque::new());
         }
 
         let old_theme_id = self.theme.active().id.clone();
-        let mut theme = if let Some(graph) = self.installed_module_graph.as_ref().filter(|graph| {
-            graph
-                .theme_catalog()
-                .get(&self.settings.theme.active)
-                .is_some()
-        }) {
+        let (mut theme, mut candidate_watch) = if let Some(graph) =
+            self.installed_module_graph.as_ref().filter(|graph| {
+                graph
+                    .theme_catalog()
+                    .get(&self.settings.theme.active)
+                    .is_some()
+            }) {
             match prepare_theme_for_graph(&self.settings, graph) {
-                Ok((theme, _watch)) => theme,
+                Ok(candidate) => candidate,
                 Err(error) => {
                     self.record_theme_reload_failure(&error);
                     return Ok(VecDeque::new());
@@ -137,7 +184,16 @@ impl Shell {
             }
         } else {
             match mesh_core_theme::load_theme_from_path(&self.theme_watch.path) {
-                Ok(theme) => theme,
+                Ok(theme) => (
+                    theme.clone(),
+                    ThemeWatchState {
+                        path: self.theme_watch.path.clone(),
+                        modified_at,
+                        fingerprint: Some(fingerprint),
+                        mode: None,
+                        revision: theme.revision(),
+                    },
+                ),
                 Err(error) => {
                     self.record_theme_reload_failure(&error);
                     return Ok(VecDeque::new());
@@ -145,15 +201,16 @@ impl Shell {
             }
         };
         apply_font_family(&mut theme, self.settings.fonts.ui_family.as_deref());
+        candidate_watch.revision = theme.revision();
         tracing::info!(
             "reloaded active theme '{}' from {}",
             theme.id,
-            self.theme_watch.path.display()
+            candidate_watch.path.display()
         );
         let previous_theme = self.theme.active().clone();
         let previous_watch = self.theme_watch.clone();
         self.theme.replace_active(theme);
-        self.theme_watch.modified_at = Some(modified_at);
+        self.theme_watch = candidate_watch;
         if let Err(error) = self.mark_components_theme_changed() {
             self.theme.replace_active(previous_theme);
             self.theme_watch = previous_watch;
@@ -162,9 +219,11 @@ impl Shell {
         }
         let new_theme_id = self.theme.active().id.clone();
         if new_theme_id != old_theme_id {
-            return self.sync_theme_service_state(&new_theme_id);
+            tracing::info!(
+                "theme identity changed during reload: {old_theme_id} -> {new_theme_id}"
+            );
         }
-        Ok(VecDeque::new())
+        self.sync_theme_service_state(&new_theme_id)
     }
 
     fn record_theme_reload_failure(&mut self, error: &dyn std::fmt::Display) {
@@ -225,8 +284,14 @@ impl Shell {
         self.theme_watch = watch;
         tracing::info!("active theme changed to '{theme_id}'");
         self.settings.theme.active = theme_id.to_string();
+        self.settings.theme.mode = None;
+        self.persist_shell_appearance_override(serde_json::json!({
+            "theme": { "active": theme_id, "mode": null }
+        }));
         self.mark_components_theme_changed()?;
-        self.sync_theme_service_state(theme_id)
+        let mut requests = self.sync_theme_service_state(theme_id)?;
+        requests.extend(self.sync_settings_service_state()?);
+        Ok(requests)
     }
 
     pub(in crate::shell) fn apply_set_icon_theme(
@@ -272,6 +337,7 @@ impl Shell {
             "fonts": { "ui_family": family }
         }));
         apply_font_family(self.theme.active_mut(), Some(family));
+        self.theme_watch.revision = self.theme.active().revision();
         self.mark_components_theme_changed()?;
         let active_theme_id = self.theme.active().id.clone();
         let mut requests = self.sync_theme_service_state(&active_theme_id)?;
@@ -320,6 +386,9 @@ impl Shell {
         let payload = serde_json::json!({
             "current": theme_id,
             "theme_id": theme_id,
+            "mode": self.theme_watch.mode,
+            "revision": format!("{:016x}", self.theme_watch.revision),
+            "fingerprint": self.theme_watch.fingerprint,
             "is_dark": is_dark,
             "themes": themes,
             "available": available,

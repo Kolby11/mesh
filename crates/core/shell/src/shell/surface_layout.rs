@@ -8,7 +8,8 @@ use mesh_core_config::ShellSettings;
 use mesh_core_module::package::{InstalledModuleGraph, ModuleKind};
 use mesh_core_theme::{
     Theme, ThemeDefaults, ThemeEngine, ThemeError, ThemeModule, ThemeModuleLayer, ThemeProvenance,
-    TokenValue, default_theme, load_theme_from_path, load_theme_from_source, theme_path_for_id,
+    TokenValue, default_theme, fingerprint_bytes, load_theme_from_path, load_theme_from_source,
+    theme_path_for_id,
 };
 use std::collections::HashMap;
 
@@ -35,8 +36,13 @@ pub(super) fn load_active_theme(settings: &ShellSettings) -> (ThemeEngine, Theme
     (
         ThemeEngine::new(theme),
         ThemeWatchState {
-            path: theme_path,
+            path: theme_path.clone(),
             modified_at,
+            fingerprint: std::fs::read(&theme_path)
+                .ok()
+                .map(|bytes| fingerprint_bytes(&bytes)),
+            mode: None,
+            revision: theme.revision(),
         },
     )
 }
@@ -130,7 +136,24 @@ pub(super) fn prepare_theme_for_graph(
     let modified_at = std::fs::metadata(&path)
         .ok()
         .and_then(|metadata| metadata.modified().ok());
-    Ok((theme, ThemeWatchState { path, modified_at }))
+    let fingerprint = mode_descriptor
+        .source
+        .fingerprint()
+        .map_err(|error| ThemeError::Source {
+            path: mode_descriptor.source.candidate_path(),
+            message: error.to_string(),
+        })?;
+    let revision = theme.revision();
+    Ok((
+        theme,
+        ThemeWatchState {
+            path,
+            modified_at,
+            fingerprint: Some(fingerprint),
+            mode: Some(mode.to_string()),
+            revision,
+        },
+    ))
 }
 
 pub(super) fn apply_font_family(theme: &mut Theme, family: Option<&str>) {
