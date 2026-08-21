@@ -12,7 +12,8 @@ contributions produce owner-scoped descriptors with validated modes/defaults and
 module-root-relative source handles, and runtime registration no longer scans
 `config/themes`. Theme selection and reload now use graph identities and
 symlink-safe, bounded UTF-8 source opening. Transactional theme/profile commits
-remain the next theme work.
+now prepare candidates before profile commit and retain the last-known-good
+snapshot after reload failures. Theme cascade composition remains the next work.
 
 The first four Section 2 items are complete. Package commits publish
 validated module trees into a read-only SHA-256 object store and activate
