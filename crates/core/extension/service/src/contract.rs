@@ -1,7 +1,8 @@
 use semver::{Version, VersionReq};
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 /// A parsed interface contract.
 ///
@@ -21,6 +22,212 @@ pub struct InterfaceContract {
     pub events: Vec<InterfaceEvent>,
     pub types: HashMap<String, InterfaceTypeDef>,
     pub capabilities: ContractCapabilities,
+}
+
+/// Where an interface declaration came from. A missing value is intentional:
+/// contracts assembled by tests or older callers have no file-backed source.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeclarationProvenance {
+    pub module: Option<String>,
+    pub source: Option<String>,
+}
+
+impl DeclarationProvenance {
+    pub fn unknown() -> Self {
+        Self::default()
+    }
+
+    pub fn new(module: impl Into<String>, source: impl Into<String>) -> Self {
+        Self {
+            module: Some(module.into()),
+            source: Some(source.into()),
+        }
+    }
+}
+
+/// A normalized field in a compiled schema.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledField {
+    pub name: String,
+    pub type_expr: TypeExpr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledStateField {
+    pub name: String,
+    pub type_expr: TypeExpr,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledMethodSchema {
+    pub name: String,
+    pub args: Arc<[CompiledField]>,
+    pub returns: Option<TypeExpr>,
+    pub coalesce: bool,
+    pub state_binding: Option<StateBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledEventSchema {
+    pub name: String,
+    pub payload: Arc<[CompiledField]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledTypeSchema {
+    pub name: String,
+    pub fields: Arc<[CompiledField]>,
+}
+
+/// The complete recursive schema after all expressions have been parsed.
+/// `BTreeMap` gives the artifact deterministic ordering independent of JSON
+/// object insertion order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledSchemas {
+    pub state_fields: Arc<[CompiledStateField]>,
+    pub methods: Arc<[CompiledMethodSchema]>,
+    pub events: Arc<[CompiledEventSchema]>,
+    pub types: Arc<BTreeMap<String, CompiledTypeSchema>>,
+}
+
+/// Capability policy after legacy fallback and ordering normalization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledOperationPolicy {
+    pub read: Option<Arc<[String]>>,
+    pub events: Arc<BTreeMap<String, Arc<[String]>>>,
+    pub methods: Arc<BTreeMap<String, Arc<[String]>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledMethodBehavior {
+    pub coalesce: bool,
+    pub state_binding: Option<StateBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledBehavioralMetadata {
+    pub methods: Arc<BTreeMap<String, CompiledMethodBehavior>>,
+}
+
+/// The immutable runtime/tooling artifact for one canonical contract version.
+/// Raw declarations remain available through `to_interface_contract()` for
+/// compatibility with authoring and migration consumers, while all runtime
+/// decisions should use the normalized schema and policy fields here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledContract {
+    pub(crate) raw: Arc<InterfaceContract>,
+    pub interface: String,
+    pub version: Version,
+    pub state_fields: Arc<[ContractStateField]>,
+    pub methods: Arc<[InterfaceMethod]>,
+    pub events: Arc<[InterfaceEvent]>,
+    pub types: Arc<HashMap<String, InterfaceTypeDef>>,
+    pub capabilities: Arc<ContractCapabilities>,
+    pub schemas: CompiledSchemas,
+    pub operation_policy: CompiledOperationPolicy,
+    pub behavioral: CompiledBehavioralMetadata,
+    pub schema_fingerprint: u64,
+    pub policy_fingerprint: u64,
+    pub behavior_fingerprint: u64,
+    pub provenance: DeclarationProvenance,
+}
+
+impl CompiledContract {
+    pub fn compile(
+        mut contract: InterfaceContract,
+        provenance: DeclarationProvenance,
+    ) -> Result<Self, ContractError> {
+        contract.interface = crate::interface::canonical_interface_name_owned(contract.interface);
+        if contract.interface.is_empty() {
+            return Err(ContractError::Parse {
+                interface: contract.interface,
+                message: "interface identity cannot be empty".to_string(),
+            });
+        }
+        if let Some(message) = contract_type_errors(&contract).into_iter().next() {
+            return Err(ContractError::InvalidType {
+                interface: contract.interface,
+                message,
+            });
+        }
+        validate_unique_symbols(&contract)?;
+
+        let schemas = compile_schemas(&contract)?;
+        let operation_policy = compile_operation_policy(&contract.capabilities);
+        let behavioral = CompiledBehavioralMetadata {
+            methods: Arc::new(
+                contract
+                    .methods
+                    .iter()
+                    .map(|method| {
+                        (
+                            method.name.clone(),
+                            CompiledMethodBehavior {
+                                coalesce: method.coalesce,
+                                state_binding: method.state_binding.clone(),
+                            },
+                        )
+                    })
+                    .collect(),
+            ),
+        };
+        let schema_fingerprint = fingerprint_schemas(&schemas);
+        let policy_fingerprint = fingerprint_policy(&operation_policy);
+        let behavior_fingerprint = fingerprint_behavior(&behavioral);
+        let raw = Arc::new(contract.clone());
+
+        Ok(Self {
+            raw,
+            interface: contract.interface.clone(),
+            version: contract.version.clone(),
+            state_fields: arc_slice(contract.state_fields.clone()),
+            methods: arc_slice(contract.methods.clone()),
+            events: arc_slice(contract.events.clone()),
+            types: Arc::new(contract.types.clone()),
+            capabilities: Arc::new(contract.capabilities.clone()),
+            schemas,
+            operation_policy,
+            behavioral,
+            schema_fingerprint,
+            policy_fingerprint,
+            behavior_fingerprint,
+            provenance,
+        })
+    }
+
+    pub fn to_interface_contract(&self) -> InterfaceContract {
+        InterfaceContract {
+            interface: self.interface.clone(),
+            version: self.version.clone(),
+            state_fields: self.state_fields.to_vec(),
+            methods: self.methods.to_vec(),
+            events: self.events.to_vec(),
+            types: (*self.types).clone(),
+            capabilities: (*self.capabilities).clone(),
+        }
+    }
+
+    pub fn method(&self, name: &str) -> Option<&InterfaceMethod> {
+        self.methods.iter().find(|method| method.name == name)
+    }
+
+    pub fn event(&self, name: &str) -> Option<&InterfaceEvent> {
+        self.events.iter().find(|event| event.name == name)
+    }
+
+    pub fn type_definition(&self, name: &str) -> Option<&InterfaceTypeDef> {
+        self.types.get(name)
+    }
+}
+
+impl InterfaceContract {
+    pub fn compile(
+        &self,
+        provenance: DeclarationProvenance,
+    ) -> Result<CompiledContract, ContractError> {
+        CompiledContract::compile(self.clone(), provenance)
+    }
 }
 
 /// A documented core state field that providers must include in emitted payloads.
@@ -154,6 +361,9 @@ pub enum ContractError {
 
     #[error("invalid type in contract for {interface}: {message}")]
     InvalidType { interface: String, message: String },
+
+    #[error("invalid declaration in contract for {interface}: {message}")]
+    InvalidDeclaration { interface: String, message: String },
 }
 
 /// A parsed type expression from the contract type grammar.
@@ -324,6 +534,372 @@ impl TypeExpr {
     }
 }
 
+fn arc_slice<T>(values: Vec<T>) -> Arc<[T]> {
+    values.into()
+}
+
+fn validate_unique_symbols(contract: &InterfaceContract) -> Result<(), ContractError> {
+    let duplicate = |kind: &str, name: &str| ContractError::InvalidDeclaration {
+        interface: contract.interface.clone(),
+        message: format!("duplicate {kind} declaration '{name}'"),
+    };
+
+    let mut symbols = HashSet::new();
+    for (kind, names) in [
+        (
+            "state field",
+            contract
+                .state_fields
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+        ),
+        (
+            "method",
+            contract
+                .methods
+                .iter()
+                .map(|method| method.name.as_str())
+                .collect::<Vec<_>>(),
+        ),
+        (
+            "event",
+            contract
+                .events
+                .iter()
+                .map(|event| event.name.as_str())
+                .collect::<Vec<_>>(),
+        ),
+    ] {
+        let mut local = HashSet::new();
+        for name in names {
+            if !local.insert(name) {
+                return Err(duplicate(kind, name));
+            }
+            if !symbols.insert(name) {
+                return Err(ContractError::InvalidDeclaration {
+                    interface: contract.interface.clone(),
+                    message: format!("symbol '{name}' overlaps another declaration"),
+                });
+            }
+        }
+    }
+
+    let mut type_names = HashSet::new();
+    for (name, definition) in &contract.types {
+        if !type_names.insert(name.as_str()) {
+            return Err(duplicate("named type", name));
+        }
+        let mut fields = HashSet::new();
+        for field in &definition.fields {
+            if !fields.insert(field.name.as_str()) {
+                return Err(duplicate("type field", &format!("{}.{}", name, field.name)));
+            }
+        }
+    }
+
+    for method in &contract.methods {
+        let mut args = HashSet::new();
+        for arg in &method.args {
+            if !args.insert(arg.name.as_str()) {
+                return Err(duplicate(
+                    "method argument",
+                    &format!("{}.{}", method.name, arg.name),
+                ));
+            }
+        }
+    }
+    for event in &contract.events {
+        let mut fields = HashSet::new();
+        for field in &event.payload {
+            if !fields.insert(field.name.as_str()) {
+                return Err(duplicate(
+                    "event payload field",
+                    &format!("{}.{}", event.name, field.name),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_compiled_type(
+    interface: &str,
+    context: String,
+    value: &str,
+) -> Result<TypeExpr, ContractError> {
+    TypeExpr::parse(value).map_err(|message| ContractError::InvalidType {
+        interface: interface.to_string(),
+        message: format!("{context}: {message}"),
+    })
+}
+
+fn compile_schemas(contract: &InterfaceContract) -> Result<CompiledSchemas, ContractError> {
+    let state_fields = contract
+        .state_fields
+        .iter()
+        .map(|field| {
+            Ok(CompiledStateField {
+                name: field.name.clone(),
+                type_expr: parse_compiled_type(
+                    &contract.interface,
+                    format!("state field '{}'", field.name),
+                    &field.field_type,
+                )?,
+                description: field.description.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>, ContractError>>()?;
+    let methods = contract
+        .methods
+        .iter()
+        .map(|method| {
+            let args = method
+                .args
+                .iter()
+                .map(|arg| {
+                    Ok(CompiledField {
+                        name: arg.name.clone(),
+                        type_expr: parse_compiled_type(
+                            &contract.interface,
+                            format!("method '{}' arg '{}'", method.name, arg.name),
+                            &arg.arg_type,
+                        )?,
+                    })
+                })
+                .collect::<Result<Vec<_>, ContractError>>()?;
+            let returns = method
+                .returns
+                .as_deref()
+                .map(|value| {
+                    parse_compiled_type(
+                        &contract.interface,
+                        format!("method '{}' returns", method.name),
+                        value,
+                    )
+                })
+                .transpose()?;
+            Ok(CompiledMethodSchema {
+                name: method.name.clone(),
+                args: arc_slice(args),
+                returns,
+                coalesce: method.coalesce,
+                state_binding: method.state_binding.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>, ContractError>>()?;
+    let events = contract
+        .events
+        .iter()
+        .map(|event| {
+            let payload = event
+                .payload
+                .iter()
+                .map(|field| {
+                    Ok(CompiledField {
+                        name: field.name.clone(),
+                        type_expr: parse_compiled_type(
+                            &contract.interface,
+                            format!("event '{}' payload field '{}'", event.name, field.name),
+                            &field.arg_type,
+                        )?,
+                    })
+                })
+                .collect::<Result<Vec<_>, ContractError>>()?;
+            Ok(CompiledEventSchema {
+                name: event.name.clone(),
+                payload: arc_slice(payload),
+            })
+        })
+        .collect::<Result<Vec<_>, ContractError>>()?;
+    let mut types = BTreeMap::new();
+    for (name, definition) in &contract.types {
+        let fields = definition
+            .fields
+            .iter()
+            .map(|field| {
+                Ok(CompiledField {
+                    name: field.name.clone(),
+                    type_expr: parse_compiled_type(
+                        &contract.interface,
+                        format!("type '{}' field '{}'", name, field.name),
+                        &field.arg_type,
+                    )?,
+                })
+            })
+            .collect::<Result<Vec<_>, ContractError>>()?;
+        types.insert(
+            name.clone(),
+            CompiledTypeSchema {
+                name: name.clone(),
+                fields: arc_slice(fields),
+            },
+        );
+    }
+
+    Ok(CompiledSchemas {
+        state_fields: arc_slice(state_fields),
+        methods: arc_slice(methods),
+        events: arc_slice(events),
+        types: Arc::new(types),
+    })
+}
+
+fn normalize_capabilities(values: &[String]) -> Arc<[String]> {
+    let mut values = values.to_vec();
+    values.sort();
+    values.dedup();
+    arc_slice(values)
+}
+
+fn compile_operation_policy(capabilities: &ContractCapabilities) -> CompiledOperationPolicy {
+    let read = capabilities
+        .read_policy()
+        .map(|values| normalize_capabilities(&values));
+    let events = capabilities
+        .events
+        .iter()
+        .map(|(name, values)| (name.clone(), normalize_capabilities(values)))
+        .collect();
+    let methods = capabilities
+        .methods
+        .iter()
+        .map(|(name, values)| (name.clone(), normalize_capabilities(values)))
+        .collect();
+    CompiledOperationPolicy {
+        read,
+        events: Arc::new(events),
+        methods: Arc::new(methods),
+    }
+}
+
+#[derive(Default)]
+struct FingerprintBuilder {
+    bytes: Vec<u8>,
+}
+
+impl FingerprintBuilder {
+    fn string(&mut self, value: &str) {
+        self.bytes
+            .extend_from_slice(&(value.len() as u64).to_le_bytes());
+        self.bytes.extend_from_slice(value.as_bytes());
+    }
+
+    fn bool(&mut self, value: bool) {
+        self.bytes.push(u8::from(value));
+    }
+
+    fn type_expr(&mut self, value: &TypeExpr) {
+        match &value.base {
+            BaseType::String => self.bytes.push(1),
+            BaseType::Int => self.bytes.push(2),
+            BaseType::Float => self.bytes.push(3),
+            BaseType::Boolean => self.bytes.push(4),
+            BaseType::Object => self.bytes.push(5),
+            BaseType::Any => self.bytes.push(6),
+            BaseType::Named(name) => {
+                self.bytes.push(7);
+                self.string(name);
+            }
+        }
+        self.bool(value.array);
+        self.bool(value.optional);
+    }
+
+    fn finish(self) -> u64 {
+        let mut hash = 0xcbf29ce484222325u64;
+        for byte in self.bytes {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash
+    }
+}
+
+fn fingerprint_schemas(schemas: &CompiledSchemas) -> u64 {
+    let mut builder = FingerprintBuilder::default();
+    for field in schemas.state_fields.iter() {
+        builder.string(&field.name);
+        builder.type_expr(&field.type_expr);
+    }
+    for method in schemas.methods.iter() {
+        builder.string(&method.name);
+        for arg in method.args.iter() {
+            builder.string(&arg.name);
+            builder.type_expr(&arg.type_expr);
+        }
+        if let Some(returns) = &method.returns {
+            builder.bool(true);
+            builder.type_expr(returns);
+        } else {
+            builder.bool(false);
+        }
+    }
+    for event in schemas.events.iter() {
+        builder.string(&event.name);
+        for field in event.payload.iter() {
+            builder.string(&field.name);
+            builder.type_expr(&field.type_expr);
+        }
+    }
+    for (name, definition) in schemas.types.iter() {
+        builder.string(name);
+        for field in definition.fields.iter() {
+            builder.string(&field.name);
+            builder.type_expr(&field.type_expr);
+        }
+    }
+    builder.finish()
+}
+
+fn fingerprint_behavior(behavioral: &CompiledBehavioralMetadata) -> u64 {
+    let mut builder = FingerprintBuilder::default();
+    for (name, behavior) in behavioral.methods.iter() {
+        builder.string(name);
+        builder.bool(behavior.coalesce);
+        if let Some(binding) = &behavior.state_binding {
+            builder.bool(true);
+            builder.string(&binding.field);
+            if let Some(from_arg) = &binding.from_arg {
+                builder.bool(true);
+                builder.string(from_arg);
+            } else {
+                builder.bool(false);
+            }
+            builder.bool(binding.toggle);
+        } else {
+            builder.bool(false);
+        }
+    }
+    builder.finish()
+}
+
+fn fingerprint_policy(policy: &CompiledOperationPolicy) -> u64 {
+    let mut builder = FingerprintBuilder::default();
+    if let Some(read) = &policy.read {
+        builder.bool(true);
+        for capability in read.iter() {
+            builder.string(capability);
+        }
+    } else {
+        builder.bool(false);
+    }
+    for (name, capabilities) in policy.events.iter() {
+        builder.string(name);
+        for capability in capabilities.iter() {
+            builder.string(capability);
+        }
+    }
+    for (name, capabilities) in policy.methods.iter() {
+        builder.string(name);
+        for capability in capabilities.iter() {
+            builder.string(capability);
+        }
+    }
+    builder.finish()
+}
+
 /// Parse and validate an inline or external contract JSON object into an
 /// [`InterfaceContract`].
 ///
@@ -432,6 +1008,37 @@ pub fn parse_interface_contract(
     }
 
     Ok(contract)
+}
+
+/// Parse and compile a contract into the immutable artifact consumed by the
+/// service catalog.
+pub fn parse_compiled_contract(
+    interface_name: &str,
+    interface_version: &str,
+    contract: &JsonValue,
+) -> Result<CompiledContract, ContractError> {
+    parse_compiled_contract_with_provenance(
+        interface_name,
+        interface_version,
+        contract,
+        DeclarationProvenance::unknown(),
+    )
+}
+
+pub fn parse_compiled_contract_with_provenance(
+    interface_name: &str,
+    interface_version: &str,
+    contract: &JsonValue,
+    provenance: DeclarationProvenance,
+) -> Result<CompiledContract, ContractError> {
+    parse_interface_contract(interface_name, interface_version, contract)?.compile(provenance)
+}
+
+pub fn compile_interface_contract(
+    contract: InterfaceContract,
+    provenance: DeclarationProvenance,
+) -> Result<CompiledContract, ContractError> {
+    CompiledContract::compile(contract, provenance)
 }
 
 /// The compact external `contract.json` format keys state, methods, and
@@ -791,6 +1398,106 @@ mod tests {
     fn canonicalizes_short_interface_identity_when_compiling() {
         let contract = parse_interface_contract("audio", "1.0", &serde_json::json!({})).unwrap();
         assert_eq!(contract.interface, "mesh.audio");
+    }
+
+    #[test]
+    fn compiles_immutable_schema_policy_and_provenance_artifact() {
+        let contract = serde_json::json!({
+            "state": [{ "name": "percent", "type": "float" }],
+            "methods": [{
+                "name": "set_percent",
+                "args": [{ "name": "value", "type": "float" }],
+                "returns": "Result",
+                "coalesce": true,
+                "stateBinding": { "field": "percent", "fromArg": "value" }
+            }],
+            "types": {
+                "Reading": {
+                    "fields": [{ "name": "value", "type": "float" }]
+                }
+            },
+            "capabilities": {
+                "read": ["service.audio.read"],
+                "methods": { "set_percent": ["service.audio.control"] }
+            }
+        });
+        let compiled = parse_compiled_contract_with_provenance(
+            "audio",
+            "1.0",
+            &contract,
+            DeclarationProvenance::new("@mesh/audio", "contract.json"),
+        )
+        .unwrap();
+
+        assert_eq!(compiled.interface, "mesh.audio");
+        assert_eq!(
+            compiled.schemas.state_fields[0].type_expr,
+            TypeExpr::parse("float").unwrap()
+        );
+        assert_eq!(compiled.schemas.types["Reading"].fields[0].name, "value");
+        assert_eq!(
+            compiled.operation_policy.read.as_ref().unwrap().as_ref(),
+            &["service.audio.read".to_string()][..]
+        );
+        assert!(compiled.behavioral.methods["set_percent"].coalesce);
+        assert_eq!(compiled.provenance.module.as_deref(), Some("@mesh/audio"));
+        assert_ne!(compiled.schema_fingerprint, 0);
+        assert_ne!(compiled.policy_fingerprint, 0);
+        assert_ne!(compiled.behavior_fingerprint, 0);
+    }
+
+    #[test]
+    fn compiled_fingerprints_ignore_capability_order_but_track_schema_changes() {
+        let first = parse_compiled_contract(
+            "mesh.audio",
+            "1.0",
+            &serde_json::json!({
+                "state": [{ "name": "percent", "type": "float" }],
+                "capabilities": { "read": ["b", "a"] }
+            }),
+        )
+        .unwrap();
+        let reordered = parse_compiled_contract(
+            "mesh.audio",
+            "1.0",
+            &serde_json::json!({
+                "state": [{ "name": "percent", "type": "float" }],
+                "capabilities": { "read": ["a", "b"] }
+            }),
+        )
+        .unwrap();
+        let changed = parse_compiled_contract(
+            "mesh.audio",
+            "1.0",
+            &serde_json::json!({
+                "state": [{ "name": "percent", "type": "int" }],
+                "capabilities": { "read": ["a", "b"] }
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(first.policy_fingerprint, reordered.policy_fingerprint);
+        assert_eq!(first.schema_fingerprint, reordered.schema_fingerprint);
+        assert_ne!(first.schema_fingerprint, changed.schema_fingerprint);
+    }
+
+    #[test]
+    fn compiled_contract_rejects_duplicate_and_overlapping_symbols() {
+        let parsed = parse_interface_contract(
+            "mesh.audio",
+            "1.0",
+            &serde_json::json!({
+                "state": [
+                    { "name": "percent", "type": "float" },
+                    { "name": "percent", "type": "float" }
+                ]
+            }),
+        )
+        .unwrap();
+        let error = parsed
+            .compile(DeclarationProvenance::unknown())
+            .unwrap_err();
+        assert!(matches!(error, ContractError::InvalidDeclaration { .. }));
     }
 
     #[test]

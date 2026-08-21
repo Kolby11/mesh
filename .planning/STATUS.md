@@ -70,6 +70,12 @@ The transitional untyped `ServiceRegistry` has been removed. Shell service
 authority now lives only in the generation-stamped interface catalog; no
 `TypeId`/`Any` backend store remains.
 
+Interface registrations now compile one immutable `CompiledContract` artifact
+with canonical identity, parsed recursive schemas, normalized operation policy,
+behavior metadata, schema/policy/behavior fingerprints, and declaration
+provenance. Catalog resolutions carry that artifact while retaining the raw
+contract view for migration callers.
+
 Service contracts now validate recursive named fields, arrays, optional values,
 and `Result` returns across state, events, method inputs, and provider outputs.
 Invalid snapshots preserve the last-known-good state, invalid events and

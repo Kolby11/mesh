@@ -1,4 +1,7 @@
-use crate::contract::{InterfaceContract, parse_contract_version, parse_version_req};
+use crate::contract::{
+    CompiledContract, ContractError, DeclarationProvenance, InterfaceContract,
+    parse_contract_version, parse_version_req,
+};
 use semver::Version;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -9,7 +12,7 @@ pub struct InterfaceCatalog {
     /// Monotonic identity for this immutable catalog view. Builders advance
     /// it on mutation; runtimes retain the value with every resolution.
     pub generation: u64,
-    pub contracts: HashMap<String, Vec<InterfaceContract>>,
+    pub contracts: HashMap<String, Vec<Arc<CompiledContract>>>,
     pub providers: HashMap<String, Vec<InterfaceProvider>>,
 }
 
@@ -36,13 +39,16 @@ pub struct InterfaceResolution {
     pub requested_version: Option<String>,
     pub generation: u64,
     pub contract: Option<Arc<InterfaceContract>>,
+    /// Canonical compiled artifact for the same contract exposed by the
+    /// compatibility `contract` view.
+    pub compiled_contract: Option<Arc<CompiledContract>>,
     pub provider: Option<InterfaceProvider>,
 }
 
 #[derive(Debug, Default)]
 struct InterfaceRegistrySnapshot {
     generation: u64,
-    contracts: HashMap<String, Vec<Arc<InterfaceContract>>>,
+    contracts: HashMap<String, Vec<Arc<CompiledContract>>>,
     providers: HashMap<String, Vec<InterfaceProvider>>,
 }
 
@@ -60,15 +66,24 @@ impl InterfaceRegistry {
     }
 
     pub fn register_contract(&self, contract: InterfaceContract) {
+        let _ = self.try_register_contract(contract);
+    }
+
+    pub fn try_register_contract(&self, contract: InterfaceContract) -> Result<(), ContractError> {
+        let contract = CompiledContract::compile(contract, DeclarationProvenance::unknown())?;
+        self.register_compiled_contract(contract);
+        Ok(())
+    }
+
+    pub fn register_compiled_contract(&self, contract: CompiledContract) {
+        let contract = Arc::new(contract);
         let mut snapshot = self.snapshot.write().unwrap();
-        let mut contract = contract;
-        contract.interface = canonical_interface_name_owned(contract.interface);
         let entry = snapshot
             .contracts
             .entry(contract.interface.clone())
             .or_default();
         entry.retain(|existing| existing.version != contract.version);
-        entry.push(Arc::new(contract));
+        entry.push(contract);
         entry.sort_by(|a, b| b.version.cmp(&a.version));
         snapshot.generation = snapshot.generation.saturating_add(1);
     }
@@ -82,7 +97,7 @@ impl InterfaceRegistry {
     pub fn resolve(&self, requested: &str, requested_version: Option<&str>) -> InterfaceResolution {
         let canonical = canonical_interface_name(requested);
         let snapshot = self.snapshot.read().unwrap();
-        let contract = snapshot.contracts.get(&canonical).and_then(|contracts| {
+        let compiled_contract = snapshot.contracts.get(&canonical).and_then(|contracts| {
             contracts
                 .iter()
                 .find(|contract| version_matches_contract(requested_version, &contract.version))
@@ -95,7 +110,7 @@ impl InterfaceRegistry {
                     version_matches_provider(
                         requested_version,
                         provider.version.as_deref(),
-                        contract.as_deref(),
+                        compiled_contract.as_deref(),
                     )
                 })
                 .cloned()
@@ -105,7 +120,10 @@ impl InterfaceRegistry {
             requested: canonical,
             requested_version: requested_version.map(ToOwned::to_owned),
             generation: snapshot.generation,
-            contract,
+            contract: compiled_contract
+                .as_ref()
+                .map(|contract| Arc::clone(&contract.raw)),
+            compiled_contract,
             provider,
         }
     }
@@ -131,7 +149,7 @@ impl InterfaceRegistry {
             .map(|contracts| {
                 contracts
                     .iter()
-                    .map(|contract| (**contract).clone())
+                    .map(|contract| contract.to_interface_contract())
                     .collect()
             })
             .unwrap_or_default()
@@ -162,15 +180,7 @@ impl InterfaceRegistry {
             contracts: snapshot
                 .contracts
                 .iter()
-                .map(|(name, contracts)| {
-                    (
-                        name.clone(),
-                        contracts
-                            .iter()
-                            .map(|contract| (**contract).clone())
-                            .collect(),
-                    )
-                })
+                .map(|(name, contracts)| (name.clone(), contracts.iter().cloned().collect()))
                 .collect(),
             providers: snapshot
                 .providers
@@ -246,7 +256,20 @@ pub fn service_name_from_interface_cow(interface: &str) -> Cow<'_, str> {
 
 impl InterfaceCatalog {
     pub fn register_contract(&mut self, contract: InterfaceContract) {
-        register_contract_in_map(&mut self.contracts, contract);
+        let _ = self.try_register_contract(contract);
+    }
+
+    pub fn try_register_contract(
+        &mut self,
+        contract: InterfaceContract,
+    ) -> Result<(), ContractError> {
+        let contract = CompiledContract::compile(contract, DeclarationProvenance::unknown())?;
+        self.register_compiled_contract(contract);
+        Ok(())
+    }
+
+    pub fn register_compiled_contract(&mut self, contract: CompiledContract) {
+        register_compiled_contract_in_map(&mut self.contracts, Arc::new(contract));
         self.generation = self.generation.saturating_add(1);
     }
 
@@ -257,12 +280,11 @@ impl InterfaceCatalog {
 
     pub fn resolve(&self, requested: &str, requested_version: Option<&str>) -> InterfaceResolution {
         let canonical = canonical_interface_name(requested);
-        let contract = self.contracts.get(&canonical).and_then(|contracts| {
+        let compiled_contract = self.contracts.get(&canonical).and_then(|contracts| {
             contracts
                 .iter()
                 .find(|contract| version_matches_contract(requested_version, &contract.version))
                 .cloned()
-                .map(Arc::new)
         });
         let provider = self.providers.get(&canonical).and_then(|providers| {
             providers
@@ -271,7 +293,7 @@ impl InterfaceCatalog {
                     version_matches_provider(
                         requested_version,
                         provider.version.as_deref(),
-                        contract.as_deref(),
+                        compiled_contract.as_deref(),
                     )
                 })
                 .cloned()
@@ -281,7 +303,10 @@ impl InterfaceCatalog {
             requested: canonical,
             requested_version: requested_version.map(ToOwned::to_owned),
             generation: self.generation,
-            contract,
+            contract: compiled_contract
+                .as_ref()
+                .map(|contract| Arc::clone(&contract.raw)),
+            compiled_contract,
             provider,
         }
     }
@@ -302,14 +327,20 @@ impl InterfaceCatalog {
 }
 
 fn register_contract_in_map(
-    contracts: &mut HashMap<String, Vec<InterfaceContract>>,
-    mut contract: InterfaceContract,
+    contracts: &mut HashMap<String, Vec<Arc<CompiledContract>>>,
+    contract: Arc<CompiledContract>,
 ) {
-    contract.interface = canonical_interface_name_owned(contract.interface);
     let entry = contracts.entry(contract.interface.clone()).or_default();
     entry.retain(|existing| existing.version != contract.version);
     entry.push(contract);
     entry.sort_by(|a, b| b.version.cmp(&a.version));
+}
+
+fn register_compiled_contract_in_map(
+    contracts: &mut HashMap<String, Vec<Arc<CompiledContract>>>,
+    contract: Arc<CompiledContract>,
+) {
+    register_contract_in_map(contracts, contract);
 }
 
 fn register_provider_in_map(
@@ -343,7 +374,7 @@ fn version_matches_contract(requested: Option<&str>, contract_version: &Version)
 fn version_matches_provider(
     requested: Option<&str>,
     provider_version: Option<&str>,
-    contract: Option<&InterfaceContract>,
+    contract: Option<&CompiledContract>,
 ) -> bool {
     let Some(requested) = requested.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;

@@ -31,9 +31,14 @@ pub use compatibility::{
     diff_contracts_bidirectional,
 };
 pub use contract::{
-    BaseType, ContractCapabilities, ContractError, ContractStateField, InterfaceArgument,
-    InterfaceContract, InterfaceEvent, InterfaceMethod, InterfaceTypeDef, StateBinding, TypeExpr,
-    contract_type_errors, parse_contract_version, parse_interface_contract, parse_version_req,
+    BaseType, CompiledBehavioralMetadata, CompiledContract, CompiledEventSchema, CompiledField,
+    CompiledMethodBehavior, CompiledMethodSchema, CompiledOperationPolicy, CompiledSchemas,
+    CompiledStateField, CompiledTypeSchema, ContractCapabilities, ContractError,
+    ContractStateField, DeclarationProvenance, InterfaceArgument, InterfaceContract,
+    InterfaceEvent, InterfaceMethod, InterfaceTypeDef, StateBinding, TypeExpr,
+    compile_interface_contract, contract_type_errors, parse_compiled_contract,
+    parse_compiled_contract_with_provenance, parse_contract_version, parse_interface_contract,
+    parse_version_req,
 };
 pub use interface::{
     InterfaceCatalog, InterfaceProvider, InterfaceRegistry, InterfaceResolution,
