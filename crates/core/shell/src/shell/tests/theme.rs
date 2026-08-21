@@ -385,6 +385,47 @@ fn settings_theme_reload_publishes_resolved_fallback_theme_state() {
 }
 
 #[test]
+fn malformed_theme_reload_retains_last_known_good_snapshot() {
+    let _env_lock = settings_env_lock();
+    let dir = tempfile::tempdir().unwrap();
+    let theme_dir = dir.path().join("themes");
+    fs::create_dir_all(&theme_dir).unwrap();
+    let settings_path = dir.path().join("settings.json");
+    fs::write(
+        &settings_path,
+        r#"{"shell":{"theme":{"active":"reload-theme"}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        theme_dir.join("reload-theme.json"),
+        r##"{"id":"reload-theme","name":"Reload","tokens":{"color.surface":"#123456"}}"##,
+    )
+    .unwrap();
+    let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
+    let _theme_dir = EnvGuard::set("MESH_THEME_DIR", &theme_dir);
+    let mut shell = Shell::new();
+    shell.theme_watch.modified_at = None;
+    shell.next_theme_reload_check = std::time::Instant::now();
+    fs::write(theme_dir.join("reload-theme.json"), "{ malformed").unwrap();
+
+    let requests = shell.reload_theme_if_changed().unwrap();
+
+    assert!(requests.is_empty());
+    assert_eq!(shell.theme.active().id, "reload-theme");
+    assert_eq!(
+        shell
+            .diagnostics
+            .snapshot()
+            .iter()
+            .flat_map(|module| module.instances.iter())
+            .flat_map(|instance| instance.active_issues.iter())
+            .filter(|issue| issue.issue_code == "theme_reload_rejected")
+            .count(),
+        1,
+    );
+}
+
+#[test]
 fn theme_file_recovery_syncs_mesh_theme_latest_state_and_components() {
     let _env_lock = settings_env_lock();
     let runtime = Runtime::new().unwrap();

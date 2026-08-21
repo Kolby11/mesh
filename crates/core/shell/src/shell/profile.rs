@@ -134,6 +134,7 @@ pub(super) struct PendingProfileSwitch {
     profile_id: String,
     graph: InstalledModuleGraph,
     settings: Arc<SettingsStore>,
+    prepared_theme: Option<(mesh_core_theme::Theme, ThemeWatchState)>,
     catalog: FrontendCatalog,
     desired_surfaces: HashSet<String>,
     desired_providers: HashMap<String, String>,
@@ -625,7 +626,31 @@ impl Shell {
             self.reject_profile_switch(profile_id, status.message.clone());
             return VecDeque::new();
         }
-        let candidate_theme_id = load_active_theme(settings.shell()).0.active().id.clone();
+        let theme_changed = self.settings.theme.active != settings.shell().theme.active
+            || self.settings.fonts != settings.shell().fonts;
+        let prepared_theme = if theme_changed {
+            if graph.theme_catalog().is_empty() {
+                let (engine, watch) = load_active_theme(settings.shell());
+                Some((engine.active().clone(), watch))
+            } else {
+                match prepare_theme_for_graph(settings.shell(), &graph) {
+                    Ok(prepared) => Some(prepared),
+                    Err(error) => {
+                        self.reject_profile_switch(
+                            profile_id,
+                            format!("candidate theme is invalid: {error}"),
+                        );
+                        return VecDeque::new();
+                    }
+                }
+            }
+        } else {
+            None
+        };
+        let candidate_theme_id = prepared_theme
+            .as_ref()
+            .map(|(theme, _)| theme.id.clone())
+            .unwrap_or_else(|| self.theme.active().id.clone());
         for candidate in &mut candidates {
             Self::apply_runtime_settings(
                 candidate,
@@ -682,6 +707,7 @@ impl Shell {
             profile_id: profile_id.to_string(),
             graph,
             settings,
+            prepared_theme,
             catalog,
             desired_surfaces,
             desired_providers,
@@ -893,13 +919,20 @@ impl Shell {
         }
 
         let old_theme = self.settings.theme.active.clone();
+        let old_fonts = self.settings.fonts.clone();
         let old_locale = self.settings.i18n.clone();
+        let prepared_theme = pending.prepared_theme.take();
         self.settings_store = pending.settings;
         self.settings = self.settings_store.shell().clone();
         mesh_core_icon::set_default_shell_pack(self.settings.icons.default_pack.clone());
         mesh_core_render::set_blur_quality(blur_quality_from_settings(&self.settings.render.blur));
-        if old_theme != self.settings.theme.active {
-            let (theme, watch) = load_active_theme(&self.settings);
+        if old_theme != self.settings.theme.active || old_fonts != self.settings.fonts {
+            let (theme, watch) = prepared_theme
+                .map(|(theme, watch)| (self.theme.with_active(theme), watch))
+                .unwrap_or_else(|| {
+                    let (theme, watch) = load_active_theme(&self.settings);
+                    (theme, watch)
+                });
             self.theme = theme;
             self.theme_watch = watch;
             if let Err(error) = self.mark_components_theme_changed() {

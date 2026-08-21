@@ -5,8 +5,10 @@ pub(super) use mesh_core_surface_config::{
 };
 
 use mesh_core_config::ShellSettings;
+use mesh_core_module::package::InstalledModuleGraph;
 use mesh_core_theme::{
-    Theme, ThemeEngine, TokenValue, default_theme, load_theme_from_path, theme_path_for_id,
+    Theme, ThemeEngine, ThemeError, TokenValue, default_theme, load_theme_from_path,
+    load_theme_from_source, theme_path_for_id,
 };
 
 use super::types::ThemeWatchState;
@@ -36,6 +38,27 @@ pub(super) fn load_active_theme(settings: &ShellSettings) -> (ThemeEngine, Theme
             modified_at,
         },
     )
+}
+
+pub(super) fn prepare_theme_for_graph(
+    settings: &ShellSettings,
+    graph: &InstalledModuleGraph,
+) -> Result<(Theme, ThemeWatchState), ThemeError> {
+    let descriptor = graph
+        .theme_catalog()
+        .get(&settings.theme.active)
+        .ok_or_else(|| ThemeError::NotFound(settings.theme.active.clone()))?;
+    let mut theme = load_theme_from_source(descriptor.default_source())?;
+    theme.id = descriptor.id.clone();
+    if let Some(label) = &descriptor.label {
+        theme.name = label.clone();
+    }
+    apply_font_family(&mut theme, settings.fonts.ui_family.as_deref());
+    let path = descriptor.default_source().candidate_path();
+    let modified_at = std::fs::metadata(&path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok());
+    Ok((theme, ThemeWatchState { path, modified_at }))
 }
 
 pub(super) fn apply_font_family(theme: &mut Theme, family: Option<&str>) {

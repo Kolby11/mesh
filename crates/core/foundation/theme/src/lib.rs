@@ -737,7 +737,7 @@ fn flatten_module_tokens_into(
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ThemeEngine {
     active: Theme,
     available: Vec<Theme>,
@@ -779,6 +779,13 @@ impl ThemeEngine {
 
     pub fn replace_active(&mut self, theme: Theme) {
         self.active = theme;
+    }
+
+    pub fn with_active(&self, theme: Theme) -> Self {
+        Self {
+            active: theme,
+            available: self.available.clone(),
+        }
     }
 }
 

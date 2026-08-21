@@ -48,7 +48,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 ### 4. Themes
 
 [Audit](../.planning/log/sections/04-themes/improvements.md)
-- [ ] Prepare and atomically commit theme/profile/reload candidates while retaining the last-known-good snapshot on failure.
 - [ ] Implement the base, selected pack/mode, owned module contribution, and sparse user override cascade with provenance.
 - [ ] Make theme selection durable, fingerprinted, watchable, and revision-consistent across settings/profile changes.
 - [ ] Share a restricted CSS parser/lowering and selector matcher between component and theme styles.

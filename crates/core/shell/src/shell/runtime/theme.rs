@@ -128,16 +128,27 @@ impl Shell {
             .and_then(|graph| graph.theme_catalog().get(&old_theme_id))
             .cloned();
         let mut theme = if let Some(descriptor) = &graph_descriptor {
-            let mut theme = mesh_core_theme::load_theme_from_source(descriptor.default_source())
-                .map_err(ShellRunError::Theme)?;
+            let mut theme =
+                match mesh_core_theme::load_theme_from_source(descriptor.default_source()) {
+                    Ok(theme) => theme,
+                    Err(error) => {
+                        self.record_theme_reload_failure(&error);
+                        return Ok(VecDeque::new());
+                    }
+                };
             theme.id = descriptor.id.clone();
             if let Some(label) = &descriptor.label {
                 theme.name = label.clone();
             }
             theme
         } else {
-            mesh_core_theme::load_theme_from_path(&self.theme_watch.path)
-                .map_err(ShellRunError::Theme)?
+            match mesh_core_theme::load_theme_from_path(&self.theme_watch.path) {
+                Ok(theme) => theme,
+                Err(error) => {
+                    self.record_theme_reload_failure(&error);
+                    return Ok(VecDeque::new());
+                }
+            }
         };
         apply_font_family(&mut theme, self.settings.fonts.ui_family.as_deref());
         tracing::info!(
@@ -145,14 +156,30 @@ impl Shell {
             theme.id,
             self.theme_watch.path.display()
         );
+        let previous_theme = self.theme.active().clone();
+        let previous_watch = self.theme_watch.clone();
         self.theme.replace_active(theme);
         self.theme_watch.modified_at = Some(modified_at);
-        self.mark_components_theme_changed()?;
+        if let Err(error) = self.mark_components_theme_changed() {
+            self.theme.replace_active(previous_theme);
+            self.theme_watch = previous_watch;
+            self.record_theme_reload_failure(&error);
+            return Ok(VecDeque::new());
+        }
         let new_theme_id = self.theme.active().id.clone();
         if new_theme_id != old_theme_id {
             return self.sync_theme_service_state(&new_theme_id);
         }
         Ok(VecDeque::new())
+    }
+
+    fn record_theme_reload_failure(&mut self, error: &dyn std::fmt::Display) {
+        self.diagnostics.record_lifecycle_error(
+            "@mesh/shell",
+            "theme_reload_rejected",
+            error.to_string(),
+        );
+        tracing::warn!("retaining last-known-good theme after reload failure: {error}");
     }
 
     pub(in crate::shell) fn mark_components_theme_changed(&mut self) -> Result<(), ShellRunError> {
