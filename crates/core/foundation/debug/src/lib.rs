@@ -617,6 +617,7 @@ pub struct BackendRuntimeEntry {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MethodCallEntry {
+    pub call_id: u64,
     pub interface: String,
     pub provider_id: Option<String>,
     pub source_module_id: String,

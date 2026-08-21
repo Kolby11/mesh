@@ -3,6 +3,7 @@ use super::super::element_ref::install_bound_element_proxies;
 use super::super::lookup::{lua_err, map_lua_error};
 use super::super::proxy::interface_event_channel;
 use super::*;
+use crate::host_api::InterfaceProxy;
 use mesh_core_elements::VariableStore;
 use mlua::{Function, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value;
@@ -10,8 +11,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 impl ScriptContext {
-    /// Copy the latest service payload into the Lua runtime, so interface
-    /// proxies can read state fields without callback or binding APIs.
+    /// Copy a capability-authorized service payload into this context's
+    /// Rust-owned snapshot store. Interface proxies read that store lazily.
     pub fn apply_service_payload(&mut self, service: &str, payload: &Value) {
         let fingerprint = Self::service_payload_fingerprint(payload);
         self.apply_service_payload_with_fingerprint(service, payload, fingerprint);
@@ -30,64 +31,26 @@ impl ScriptContext {
         payload: &Value,
         payload_fingerprint: u64,
     ) {
-        let _ = self.ensure_initialized();
-        // Luau numbers cannot preserve every bit of a u64. Compare the raw
-        // bytes against the borrowed Lua string instead: unchanged fan-out
-        // probes allocate nothing, while changed payloads create one compact
-        // eight-byte marker.
-        let marker = payload_fingerprint.to_ne_bytes();
-        if !self.ensure_service_payload_fingerprint_table() {
+        if !InterfaceProxy::can_read_service(&self.capabilities, service) {
             return;
         }
-        let marker_table = self
-            .cached_service_payload_fingerprints
-            .as_ref()
-            .expect("service payload fingerprint table initialized");
-        if marker_table
-            .get::<Option<mlua::String>>(service)
-            .ok()
-            .flatten()
-            .is_some_and(|previous| previous.as_bytes().as_ref() == marker)
-        {
-            return;
-        }
-        let service_key = format!("__mesh_svc_{service}");
-        if let Ok(lua_value) = self.lua().to_value(payload) {
-            // On globals() so proxy __index (service_payload_field) finds it;
-            // env __index falls through, so direct `__mesh_svc_*` reads work too.
-            let _ = self.lua().globals().set(service_key.as_str(), lua_value);
-            if let Ok(marker) = self.lua().create_string(marker) {
-                let _ = marker_table.set(service, marker);
-            }
-        }
-        if service == "locale"
-            && let Some(locale) = payload
-                .get("locale")
-                .or_else(|| payload.get("current"))
-                .and_then(|value| value.as_str())
-        {
-            let _ = self.lua().globals().set("__mesh_locale_current", locale);
-        }
+        self.service_context_state
+            .lock()
+            .unwrap()
+            .update(service, payload, payload_fingerprint);
     }
 
-    fn ensure_service_payload_fingerprint_table(&mut self) -> bool {
-        if self.cached_service_payload_fingerprints.is_some() {
-            return true;
-        }
-        let globals = self.lua().globals();
-        let Some(table) = globals
-            .get::<Table>("__mesh_service_payload_fingerprints")
-            .or_else(|_| {
-                let table = self.lua().create_table()?;
-                globals.set("__mesh_service_payload_fingerprints", table.clone())?;
-                Ok::<_, mlua::Error>(table)
-            })
-            .ok()
-        else {
-            return false;
-        };
-        self.cached_service_payload_fingerprints = Some(table);
-        true
+    /// Generation of the last capability-authorized service snapshot in this
+    /// context. Equal payloads do not advance it.
+    pub fn service_context_generation(&self) -> u64 {
+        self.service_context_state.lock().unwrap().generation()
+    }
+
+    pub fn service_payload_generation(&self, service: &str) -> Option<u64> {
+        self.service_context_state
+            .lock()
+            .unwrap()
+            .payload_generation(service)
     }
 
     /// Publish per-paint element metrics so live `refs.<name>` reads reflect the

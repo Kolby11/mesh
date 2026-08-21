@@ -50,6 +50,22 @@ fn apply_runtime_props(
 }
 
 impl FrontendSurfaceComponent {
+    pub(super) fn deliver_service_call_result_to_instance(
+        &mut self,
+        instance_id: &str,
+        call_id: u64,
+        status: &str,
+        result: &serde_json::Value,
+    ) -> bool {
+        let mut runtimes = self.runtimes.lock().unwrap();
+        let Some(runtime) = runtimes.get_mut(instance_id) else {
+            return false;
+        };
+        runtime
+            .script_ctx
+            .complete_service_call(call_id, status, result.clone())
+    }
+
     fn drain_local_script_events(
         &mut self,
         instance_key: &str,
@@ -393,14 +409,12 @@ impl FrontendSurfaceComponent {
         );
         for (service_name, payload) in &self.cached_service_payloads {
             let interface = format!("mesh.{service_name}");
-            // Always seed the Lua-level service payload so interface proxies
-            // can read state fields regardless of read capability.
-            script_ctx.apply_service_payload_with_fingerprint(
-                service_name,
-                payload.value.as_ref(),
-                payload.fingerprint,
-            );
             if script_has_service_read(&script_ctx, &interface, service_name) {
+                script_ctx.apply_service_payload_with_fingerprint(
+                    service_name,
+                    payload.value.as_ref(),
+                    payload.fingerprint,
+                );
                 apply_service_update_with_name_and_fingerprint(
                     script_ctx.state_mut(),
                     true,
@@ -1510,13 +1524,13 @@ fn validate_json_prop(
 
 pub(super) fn script_has_service_read(
     script_ctx: &ScriptContext,
-    interface: &str,
+    _interface: &str,
     service_name: &str,
 ) -> bool {
-    let capabilities = &script_ctx.capabilities;
-    capabilities.is_granted(&Capability::new(format!("service.{service_name}.read")))
-        || (interface == "mesh.theme" && capabilities.is_granted(&Capability::new("theme.read")))
-        || (interface == "mesh.locale" && capabilities.is_granted(&Capability::new("locale.read")))
+    mesh_core_scripting::host_api::InterfaceProxy::can_read_service(
+        &script_ctx.capabilities,
+        service_name,
+    )
 }
 
 impl FrontendSurfaceComponent {

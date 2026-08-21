@@ -16,6 +16,7 @@ use mesh_core_presentation::{
 /// backend command rate stays below the process-launch cost.
 pub(in crate::shell) const COMMAND_THROTTLE_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(100);
+const SERVICE_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
 const POPOVER_HOVER_BRIDGE_DELAY: std::time::Duration = std::time::Duration::from_millis(180);
 const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 
@@ -679,6 +680,59 @@ impl Shell {
                 );
                 Ok(VecDeque::new())
             }
+            CoreRequest::ServiceCall {
+                interface,
+                command,
+                payload,
+                call_id,
+                source_instance_id,
+                source_module_id,
+                source_capabilities,
+            } => {
+                let route = ServiceCallRoute {
+                    interface: interface.clone(),
+                    instance_id: source_instance_id,
+                    module_id: source_module_id.clone(),
+                };
+                self.pending_service_call_routes.insert(call_id, route);
+                let result = self.dispatch_service_command_with_call_id(
+                    &interface,
+                    &command,
+                    &payload,
+                    &source_module_id,
+                    &source_capabilities,
+                    mesh_core_backend::CallId::from_raw(call_id),
+                );
+                if result.get("queued").and_then(|value| value.as_bool()) != Some(true) {
+                    let status = result
+                        .get("status")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("failed")
+                        .to_string();
+                    self.complete_service_call_route(
+                        mesh_core_backend::CallId::from_raw(call_id),
+                        &status,
+                        &result,
+                    );
+                }
+                Ok(VecDeque::new())
+            }
+            CoreRequest::CancelServiceCall {
+                interface,
+                call_id,
+                source_instance_id,
+                source_module_id,
+                source_capabilities,
+            } => {
+                self.cancel_service_call(
+                    &interface,
+                    call_id,
+                    &source_instance_id,
+                    &source_module_id,
+                    &source_capabilities,
+                );
+                Ok(VecDeque::new())
+            }
             CoreRequest::ActivatePopover {
                 surface_id,
                 trigger_surface,
@@ -962,6 +1016,25 @@ impl Shell {
         source_module_id: &str,
         source_capabilities: &mesh_core_capability::CapabilitySet,
     ) -> serde_json::Value {
+        self.dispatch_service_command_with_call_id(
+            interface,
+            command,
+            payload,
+            source_module_id,
+            source_capabilities,
+            mesh_core_backend::CallId::next(),
+        )
+    }
+
+    fn dispatch_service_command_with_call_id(
+        &mut self,
+        interface: &str,
+        command: &str,
+        payload: &serde_json::Value,
+        source_module_id: &str,
+        source_capabilities: &mesh_core_capability::CapabilitySet,
+        call_id: mesh_core_backend::CallId,
+    ) -> serde_json::Value {
         let interface_canonical = canonical_interface_name_cow(interface);
         let service_caps = service_capabilities(interface_canonical.as_ref());
         let required = &service_caps.control;
@@ -974,6 +1047,7 @@ impl Shell {
                 "denied unauthorized service command dispatch"
             );
             self.record_method_call(mesh_core_debug::MethodCallEntry {
+                call_id: call_id.raw(),
                 interface: interface_canonical.to_string(),
                 provider_id: None,
                 source_module_id: source_module_id.to_string(),
@@ -991,6 +1065,7 @@ impl Shell {
                 "ok": false,
                 "error": "capability_denied",
                 "status": "capability_denied",
+                "call_id": call_id.raw(),
             });
         }
 
@@ -1008,6 +1083,7 @@ impl Shell {
                 message.clone(),
             );
             self.record_method_call(mesh_core_debug::MethodCallEntry {
+                call_id: call_id.raw(),
                 interface: interface_canonical.to_string(),
                 provider_id: None,
                 source_module_id: source_module_id.to_string(),
@@ -1025,6 +1101,7 @@ impl Shell {
                 "ok": false,
                 "error": message,
                 "status": "unsupported_service_command",
+                "call_id": call_id.raw(),
             });
         }
 
@@ -1075,7 +1152,9 @@ impl Shell {
                             pending: None,
                         },
                     );
-                    match self.send_service_command_message(interface, command, payload, coalesce) {
+                    match self.send_service_command_message(
+                        interface, command, payload, coalesce, call_id,
+                    ) {
                         Some(Ok(())) => serde_json::json!({ "ok": true, "queued": true }),
                         Some(Err(())) | None => service_unavailable_response(),
                     }
@@ -1087,11 +1166,27 @@ impl Shell {
                                 last_send: now,
                                 pending: None,
                             });
-                    state.pending = Some(payload.clone());
+                    let superseded = state.pending.replace(PendingServiceCommand {
+                        call_id,
+                        payload: payload.clone(),
+                    });
+                    if let Some(superseded) = superseded {
+                        self.complete_service_call_route(
+                            superseded.call_id,
+                            "superseded",
+                            &serde_json::json!({
+                                "ok": false,
+                                "status": "superseded",
+                                "error": "throttled by a newer invocation",
+                            }),
+                        );
+                    }
                     serde_json::json!({ "ok": true, "queued": true, "throttled": true })
                 }
             } else {
-                match self.send_service_command_message(interface, command, payload, coalesce) {
+                match self
+                    .send_service_command_message(interface, command, payload, coalesce, call_id)
+                {
                     Some(Ok(())) => serde_json::json!({ "ok": true, "queued": true }),
                     Some(Err(())) | None => service_unavailable_response(),
                 }
@@ -1100,6 +1195,8 @@ impl Shell {
             tracing::debug!("no handler registered for service: {interface}");
             service_unavailable_response()
         };
+
+        dispatch_result["call_id"] = serde_json::json!(call_id.raw());
 
         if dispatch_result
             .get("ok")
@@ -1151,6 +1248,7 @@ impl Shell {
             .and_then(|value| value.as_str())
             .map(ToOwned::to_owned);
         self.record_method_call(mesh_core_debug::MethodCallEntry {
+            call_id: call_id.raw(),
             interface: interface.to_string(),
             provider_id,
             source_module_id: source_module_id.to_string(),
@@ -1164,14 +1262,116 @@ impl Shell {
         dispatch_result
     }
 
+    pub(super) fn complete_service_call_route(
+        &mut self,
+        call_id: mesh_core_backend::CallId,
+        status: &str,
+        result: &serde_json::Value,
+    ) {
+        let Some(route) = self.pending_service_call_routes.remove(&call_id.raw()) else {
+            return;
+        };
+        let delivered = self.components.iter_mut().any(|runtime| {
+            runtime.component.deliver_service_call_result(
+                &route.instance_id,
+                call_id.raw(),
+                status,
+                result,
+            )
+        });
+        if !delivered {
+            self.diagnostics.record_lifecycle_error(
+                route.module_id,
+                "service_call_result_dropped",
+                format!(
+                    "dropped {status} result for {} call {}: originating instance '{}' is no longer mounted",
+                    route.interface,
+                    call_id.raw(),
+                    route.instance_id
+                ),
+            );
+        }
+    }
+
+    fn cancel_service_call(
+        &mut self,
+        interface: &str,
+        call_id: u64,
+        source_instance_id: &str,
+        source_module_id: &str,
+        source_capabilities: &mesh_core_capability::CapabilitySet,
+    ) {
+        let call = mesh_core_backend::CallId::from_raw(call_id);
+        let Some(route) = self.pending_service_call_routes.get(&call_id) else {
+            return;
+        };
+        let required = service_capabilities(interface).control;
+        if !source_capabilities.is_granted(&required)
+            || route.instance_id != source_instance_id
+            || route.module_id != source_module_id
+        {
+            self.diagnostics.record_lifecycle_error(
+                source_module_id.to_string(),
+                "service_call_cancel_denied",
+                format!("denied cancellation for {interface} call {call_id}"),
+            );
+            return;
+        }
+
+        let mut removed_from_throttle = false;
+        let mut empty_throttle_keys = Vec::new();
+        for (key, state) in &mut self.command_throttle {
+            if state
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.call_id == call)
+            {
+                state.pending = None;
+                removed_from_throttle = true;
+                empty_throttle_keys.push(key.clone());
+            }
+        }
+        for key in empty_throttle_keys {
+            self.command_throttle.remove(&key);
+        }
+
+        if removed_from_throttle {
+            self.complete_service_call_route(
+                call,
+                "cancelled",
+                &serde_json::json!({
+                    "ok": false,
+                    "status": "cancelled",
+                    "error": "cancelled before dispatch",
+                }),
+            );
+        } else if !mesh_core_backend::cancel_call(call) {
+            // A call-control entry disappears only after the backend has
+            // emitted its terminal result. If it is not present here, the
+            // call cannot produce another useful result, so close the ticket
+            // instead of leaving Luau polling forever.
+            self.complete_service_call_route(
+                call,
+                "cancelled",
+                &serde_json::json!({
+                    "ok": false,
+                    "status": "cancelled",
+                    "error": "cancelled",
+                }),
+            );
+        }
+    }
+
     fn send_service_command_message(
         &mut self,
         interface: &str,
         command: &str,
         payload: &serde_json::Value,
         coalesce: bool,
+        call_id: mesh_core_backend::CallId,
     ) -> Option<Result<(), ()>> {
         let tx = self.service_handlers.get(interface).cloned()?;
+        mesh_core_backend::register_call(call_id, SERVICE_CALL_TIMEOUT);
         let active_provider_id = self
             .backend_runtimes
             .get(interface)
@@ -1180,11 +1380,15 @@ impl Shell {
             .then(std::time::Instant::now);
         let result = tx
             .send(ServiceCommandMsg {
+                call_id,
                 command: command.to_string(),
                 payload: payload.clone(),
                 coalesce,
             })
             .map_err(|_| ());
+        if result.is_err() {
+            mesh_core_backend::finish_call(call_id);
+        }
         if let (Some(provider_id), Some(started)) = (active_provider_id, profiling_started) {
             self.record_backend_profiling_stage(
                 interface,
@@ -1348,14 +1552,14 @@ impl Shell {
             return;
         }
         let now = std::time::Instant::now();
-        let mut to_send: Vec<(String, String, serde_json::Value)> = Vec::new();
+        let mut to_send: Vec<(String, String, PendingServiceCommand)> = Vec::new();
         let mut to_remove: Vec<(String, String)> = Vec::new();
         for (key, state) in self.command_throttle.iter_mut() {
             if now.duration_since(state.last_send) < COMMAND_THROTTLE_INTERVAL {
                 continue;
             }
-            if let Some(payload) = state.pending.take() {
-                to_send.push((key.0.clone(), key.1.clone(), payload));
+            if let Some(command) = state.pending.take() {
+                to_send.push((key.0.clone(), key.1.clone(), command));
                 state.last_send = now;
             } else if now.duration_since(state.last_send)
                 >= COMMAND_THROTTLE_INTERVAL.saturating_mul(8)
@@ -1363,8 +1567,21 @@ impl Shell {
                 to_remove.push(key.clone());
             }
         }
-        for (interface, command, payload) in to_send {
-            let _ = self.send_service_command_message(&interface, &command, &payload, true);
+        for (interface, command, pending) in to_send {
+            let sent = self.send_service_command_message(
+                &interface,
+                &command,
+                &pending.payload,
+                true,
+                pending.call_id,
+            );
+            if !matches!(sent, Some(Ok(()))) {
+                self.complete_service_call_route(
+                    pending.call_id,
+                    "service_unavailable",
+                    &service_unavailable_response(),
+                );
+            }
         }
         for key in to_remove {
             self.command_throttle.remove(&key);
@@ -2044,6 +2261,8 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::HidePopover { .. } => "hide_popover",
         CoreRequest::PublishDiagnostics { .. } => "publish_diagnostics",
         CoreRequest::ServiceCommand { .. } => "service_command",
+        CoreRequest::ServiceCall { .. } => "service_call",
+        CoreRequest::CancelServiceCall { .. } => "cancel_service_call",
         CoreRequest::WriteClipboard { .. } => "write_clipboard",
         CoreRequest::SetTheme { .. } => "set_theme",
         CoreRequest::SetIconTheme { .. } => "set_icon_theme",

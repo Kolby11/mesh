@@ -1,4 +1,5 @@
 use super::PublishedEvent;
+use super::state::ServiceContextState;
 use mesh_core_capability::{Capability, CapabilitySet};
 pub(super) use mesh_core_service::service_name_from_interface;
 use mesh_core_service::{InterfaceContract, InterfaceResolution};
@@ -7,15 +8,24 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
+
+// Backend-owned CallId is intentionally kept in mesh-core-backend, which
+// already depends on this crate. Reserve the high half of the u64 transport
+// space for frontend-issued IDs so the shell can preserve the same identity
+// without introducing a scripting/backend dependency cycle.
+static NEXT_SERVICE_CALL_ID: AtomicU64 = AtomicU64::new(1 << 63);
 
 pub(super) fn create_interface_proxy(
     lua: &Lua,
     scope: &Table,
     resolution: InterfaceResolution,
     source_module_id: String,
+    source_instance_id: String,
     source_capabilities: CapabilitySet,
+    service_context_state: Arc<Mutex<ServiceContextState>>,
+    service_call_completions: Arc<Mutex<HashMap<u64, super::ServiceCallCompletion>>>,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
@@ -28,7 +38,10 @@ pub(super) fn create_interface_proxy(
         resolution.contract,
         resolution.requested,
         source_module_id,
+        source_instance_id,
         source_capabilities,
+        service_context_state,
+        service_call_completions,
         tracked_service_fields,
         subscribed_interface_events,
         published_events,
@@ -43,7 +56,10 @@ pub(super) fn create_service_proxy(
     contract: Option<Arc<InterfaceContract>>,
     interface_name: String,
     source_module_id: String,
+    source_instance_id: String,
     source_capabilities: CapabilitySet,
+    service_context_state: Arc<Mutex<ServiceContextState>>,
+    service_call_completions: Arc<Mutex<HashMap<u64, super::ServiceCallCompletion>>>,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
@@ -65,10 +81,10 @@ pub(super) fn create_service_proxy(
     let state_proxy = create_service_state_proxy(
         lua,
         service_name.clone(),
+        Arc::clone(&service_context_state),
         Arc::clone(&tracked_service_fields),
         Arc::clone(&observed_state_fields),
     )?;
-    proxy.set("state", state_proxy)?;
     let events_proxy = create_events_proxy(
         lua,
         scope,
@@ -85,7 +101,8 @@ pub(super) fn create_service_proxy(
             .unwrap_or_default(),
         Arc::clone(&subscribed_interface_events),
     )?;
-    proxy.set("events", events_proxy)?;
+    let state_for_index = state_proxy.clone();
+    let events_for_index = events_proxy.clone();
     let event_names = contract
         .as_ref()
         .map(|contract| {
@@ -114,9 +131,12 @@ pub(super) fn create_service_proxy(
     let index_scope = scope.clone();
     meta.set(
         "__index",
-        lua.create_function(move |lua, (table, key): (Table, String)| {
-            if key == "state" || key == "events" {
-                return table.get::<LuaValue>(key);
+        lua.create_function(move |lua, (_table, key): (Table, String)| {
+            if key == "state" {
+                return Ok(LuaValue::Table(state_for_index.clone()));
+            }
+            if key == "events" {
+                return Ok(LuaValue::Table(events_for_index.clone()));
             }
             if event_names.iter().any(|name| name == &key)
                 && !method_names.contains(&key)
@@ -139,7 +159,9 @@ pub(super) fn create_service_proxy(
                 let events = Arc::clone(&published_events);
                 let pending_side_channels = Arc::clone(&pending_side_channels);
                 let source_module_id = source_module_id.clone();
+                let source_instance_id = source_instance_id.clone();
                 let source_capabilities = source_capabilities.clone();
+                let service_call_completions = Arc::clone(&service_call_completions);
                 return Ok(LuaValue::Function(lua.create_function(
                     move |lua, args: mlua::Variadic<LuaValue>| {
                         if !source_capabilities.is_granted(&required_capability) {
@@ -163,14 +185,28 @@ pub(super) fn create_service_proxy(
                                     .map(|value| (arg.name.clone(), value))
                             })
                             .collect::<mlua::Result<serde_json::Map<String, Value>>>()?;
+                        let call_id = NEXT_SERVICE_CALL_ID.fetch_add(1, Ordering::Relaxed);
                         pending_side_channels.store(true, Ordering::Release);
                         events.lock().unwrap().push(PublishedEvent {
                             channel: format!("{}.{}", iface, method.name),
                             payload: Value::Object(payload),
                             source_module_id: source_module_id.clone(),
                             source_capabilities: source_capabilities.clone(),
+                            call_id: Some(call_id),
+                            source_instance_id: Some(source_instance_id.clone()),
                         });
-                        command_result_table(lua, true, true, None).map(LuaValue::Table)
+                        create_service_call_ticket(
+                            lua,
+                            call_id,
+                            iface.clone(),
+                            source_module_id.clone(),
+                            source_instance_id.clone(),
+                            source_capabilities.clone(),
+                            Arc::clone(&service_call_completions),
+                            Arc::clone(&events),
+                            Arc::clone(&pending_side_channels),
+                        )
+                        .map(LuaValue::Table)
                     },
                 )?));
             }
@@ -182,7 +218,15 @@ pub(super) fn create_service_proxy(
                 &service_name,
                 &key,
             );
-            service_payload_field(lua, &service_name, &key)
+            service_payload_field(lua, &service_context_state, &service_name, &key)
+        })?,
+    )?;
+    meta.set(
+        "__newindex",
+        lua.create_function(|_, (_table, key, _value): (Table, String, LuaValue)| {
+            Err::<(), _>(mlua::Error::runtime(format!(
+                "service state field '{key}' is read-only"
+            )))
         })?,
     )?;
     proxy.set_metatable(Some(meta))?;
@@ -323,6 +367,7 @@ pub(super) fn create_event_channel(
 fn create_service_state_proxy(
     lua: &Lua,
     service_name: String,
+    service_context_state: Arc<Mutex<ServiceContextState>>,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     observed_state_fields: Arc<Mutex<HashSet<String>>>,
 ) -> mlua::Result<Table> {
@@ -337,7 +382,15 @@ fn create_service_state_proxy(
                 &service_name,
                 &key,
             );
-            service_payload_field(lua, &service_name, &key)
+            service_payload_field(lua, &service_context_state, &service_name, &key)
+        })?,
+    )?;
+    meta.set(
+        "__newindex",
+        lua.create_function(|_, (_table, key, _value): (Table, String, LuaValue)| {
+            Err::<(), _>(mlua::Error::runtime(format!(
+                "service state field '{key}' is read-only"
+            )))
         })?,
     )?;
     state.set_metatable(Some(meta))?;
@@ -365,15 +418,20 @@ fn record_tracked_field_once(
         .insert(key.to_string());
 }
 
-fn service_payload_field(lua: &Lua, service_name: &str, key: &str) -> mlua::Result<LuaValue> {
-    let svc_key = format!("__mesh_svc_{service_name}");
-    let table = match lua.globals().get::<LuaValue>(svc_key.as_str()) {
-        Ok(LuaValue::Table(table)) => Some(table),
-        _ => None,
-    };
-    Ok(table
-        .and_then(|table| table.get::<LuaValue>(key).ok())
-        .unwrap_or(LuaValue::Nil))
+fn service_payload_field(
+    lua: &Lua,
+    service_context_state: &Arc<Mutex<ServiceContextState>>,
+    service_name: &str,
+    key: &str,
+) -> mlua::Result<LuaValue> {
+    let value = service_context_state
+        .lock()
+        .unwrap()
+        .field(service_name, key);
+    value
+        .map(|value| lua.to_value(&value))
+        .transpose()
+        .map(|value| value.unwrap_or(LuaValue::Nil))
 }
 
 fn command_result_table(
@@ -391,6 +449,85 @@ fn command_result_table(
         result.set("error", error)?;
     }
     Ok(result)
+}
+
+fn service_call_snapshot(
+    lua: &Lua,
+    call_id: u64,
+    completions: &Arc<Mutex<HashMap<u64, super::ServiceCallCompletion>>>,
+) -> mlua::Result<Table> {
+    let snapshot = lua.create_table()?;
+    snapshot.set("call_id", call_id)?;
+    let completion = completions.lock().unwrap().get(&call_id).cloned();
+    if let Some(completion) = completion {
+        snapshot.set("done", true)?;
+        snapshot.set("status", completion.status)?;
+        snapshot.set("result", lua.to_value(&completion.result)?)?;
+    } else {
+        snapshot.set("done", false)?;
+        snapshot.set("status", "pending")?;
+    }
+    Ok(snapshot)
+}
+
+fn create_service_call_ticket(
+    lua: &Lua,
+    call_id: u64,
+    interface: String,
+    source_module_id: String,
+    source_instance_id: String,
+    source_capabilities: CapabilitySet,
+    completions: Arc<Mutex<HashMap<u64, super::ServiceCallCompletion>>>,
+    published_events: Arc<Mutex<Vec<PublishedEvent>>>,
+    pending_side_channels: Arc<AtomicBool>,
+) -> mlua::Result<Table> {
+    let ticket = lua.create_table()?;
+    ticket.set("call_id", call_id)?;
+    ticket.set("status", "pending")?;
+
+    let poll_completions = Arc::clone(&completions);
+    let poll = lua.create_function(move |lua, _args: mlua::Variadic<LuaValue>| {
+        service_call_snapshot(lua, call_id, &poll_completions)
+    })?;
+    ticket.set("poll", poll.clone())?;
+    // Handler execution is synchronous, so `await` is a cooperative poll
+    // point. It has the same stable shape as poll and can be called from a
+    // later tick/handler without blocking the shell thread.
+    ticket.set("await", poll)?;
+
+    let cancel_completions = Arc::clone(&completions);
+    let cancel_events = Arc::clone(&published_events);
+    let cancel_pending = Arc::clone(&pending_side_channels);
+    let cancel_module = source_module_id.clone();
+    let cancel_instance = source_instance_id.clone();
+    let cancel_capabilities = source_capabilities.clone();
+    let cancel_requested = Arc::new(AtomicBool::new(false));
+    let cancel_requested_for_call = Arc::clone(&cancel_requested);
+    ticket.set(
+        "cancel",
+        lua.create_function(move |_lua, _args: mlua::Variadic<LuaValue>| {
+            if cancel_requested_for_call.swap(true, Ordering::AcqRel)
+                || cancel_completions.lock().unwrap().contains_key(&call_id)
+            {
+                return Ok(false);
+            }
+            cancel_pending.store(true, Ordering::Release);
+            cancel_events.lock().unwrap().push(PublishedEvent {
+                channel: "mesh.service.cancel".to_string(),
+                payload: serde_json::json!({
+                    "interface": interface,
+                    "call_id": call_id,
+                }),
+                source_module_id: cancel_module,
+                source_capabilities: cancel_capabilities,
+                call_id: Some(call_id),
+                source_instance_id: Some(cancel_instance),
+            });
+            Ok(true)
+        })?,
+    )?;
+
+    Ok(ticket)
 }
 
 fn consume_self_arg(args: &mlua::Variadic<LuaValue>) -> usize {

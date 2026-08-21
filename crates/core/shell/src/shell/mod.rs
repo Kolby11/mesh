@@ -58,8 +58,9 @@ use sounds::{SoundKind, shell_sound_request};
 use surface_layout::{apply_font_family, default_surface_visibility, load_active_theme};
 use types::{
     CommandThrottleState, CompiledContractField, ComponentRuntime, ContractValidationCache,
-    LatestServiceState, ServiceCommandMsg, ServiceDeliveryIndex, SettingsWatchState,
-    ShellCoreState, ShellMessage, SurfaceState, TargetRef, ThemeWatchState,
+    LatestServiceState, PendingServiceCommand, ServiceCallRoute, ServiceCommandMsg,
+    ServiceDeliveryIndex, SettingsWatchState, ShellCoreState, ShellMessage, SurfaceState,
+    TargetRef, ThemeWatchState,
 };
 pub use types::{
     ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, KeyModifiers,
@@ -457,6 +458,7 @@ pub struct Shell {
     /// (interface, state field).
     pending_bound_service_state: HashMap<(String, String), serde_json::Value>,
     command_throttle: HashMap<(String, String), CommandThrottleState>,
+    pending_service_call_routes: HashMap<u64, ServiceCallRoute>,
     pending_popover_hides: HashMap<SurfaceId, std::time::Instant>,
     profiling: runtime::profiling::ProfilingRuntimeState,
 }

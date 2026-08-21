@@ -7,6 +7,18 @@ pub struct PublishedEvent {
     pub payload: Value,
     pub source_module_id: String,
     pub source_capabilities: CapabilitySet,
+    /// Stable identity for a service invocation published by a Luau proxy.
+    /// Other published events leave this unset and retain their legacy route.
+    pub call_id: Option<u64>,
+    /// The originating frontend instance, used to deliver a terminal service
+    /// result back to the ticket that published it.
+    pub source_instance_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServiceCallCompletion {
+    pub status: String,
+    pub result: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

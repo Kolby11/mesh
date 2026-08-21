@@ -102,23 +102,23 @@ impl InterfaceProxy {
         }
     }
 
-    /// Whether the capability set can read an interface. Permissive for
-    /// non-core interfaces; contract-level enforcement lands with dynamically
-    /// loaded interface contracts.
+    /// Whether the capability set can read an interface.
     pub fn can_read(caps: &CapabilitySet, interface: &str) -> bool {
-        match interface {
-            "mesh.theme" => caps.is_granted(&Capability::new("theme.read")),
-            "mesh.locale" => caps.is_granted(&Capability::new("locale.read")),
-            other => {
-                let short = other
-                    .strip_prefix("mesh.")
-                    .unwrap_or(other)
-                    .split('.')
-                    .next_back()
-                    .unwrap_or(other);
-                has_service_capability(caps, short, "read")
-                    || has_service_capability(caps, short, "control")
-                    || !other.starts_with("mesh.")
+        if let Some(service_name) = interface.strip_prefix("mesh.") {
+            return Self::can_read_service(caps, service_name);
+        }
+        true
+    }
+
+    /// Whether a context may receive the Rust-owned snapshot for a service.
+    /// Control access implies read access, matching interface resolution.
+    pub fn can_read_service(caps: &CapabilitySet, service_name: &str) -> bool {
+        match service_name {
+            "theme" => caps.is_granted(&Capability::new("theme.read")),
+            "locale" => caps.is_granted(&Capability::new("locale.read")),
+            _ => {
+                has_service_capability(caps, service_name, "read")
+                    || has_service_capability(caps, service_name, "control")
             }
         }
     }

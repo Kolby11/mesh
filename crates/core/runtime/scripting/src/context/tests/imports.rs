@@ -110,6 +110,29 @@ end
 }
 
 #[test]
+fn locale_current_reads_the_rust_owned_service_snapshot() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("locale.read"));
+    let mut ctx = ScriptContext::new("@mesh/locale-test", caps).unwrap();
+    ctx.load_script(
+        r#"
+current_locale = ""
+function read_locale()
+    current_locale = mesh.locale.current()
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.apply_service_payload("locale", &serde_json::json!({ "current": "sk-SK" }));
+    ctx.call_handler("read_locale", &[]).unwrap();
+    assert_eq!(
+        ctx.state.get("current_locale"),
+        Some(serde_json::json!("sk-SK"))
+    );
+}
+
+#[test]
 fn require_resolves_mesh_i18n_library_alias() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/i18n-test", caps).unwrap();

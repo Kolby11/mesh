@@ -607,23 +607,37 @@ impl Shell {
         &mut self,
         interface: String,
         provider_id: String,
+        call_id: mesh_core_backend::CallId,
         command: String,
         result: serde_json::Value,
+        outcome: mesh_core_backend::BackendCommandOutcome,
     ) {
-        let ok = result
-            .get("ok")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(true);
         let error = result
             .get("error")
             .and_then(|value| value.as_str())
             .map(ToOwned::to_owned);
+        let terminal_status = outcome.as_str().to_string();
+        if let Some(entry) = self
+            .debug
+            .recent_method_calls
+            .iter_mut()
+            .rev()
+            .find(|entry| entry.call_id == call_id.raw())
+        {
+            entry.provider_id = Some(provider_id);
+            entry.status = terminal_status;
+            entry.queued = false;
+            entry.result = Some(result);
+            entry.error = error;
+            return;
+        }
         self.record_method_call(mesh_core_debug::MethodCallEntry {
+            call_id: call_id.raw(),
             interface,
             provider_id: Some(provider_id),
             source_module_id: "<backend>".to_string(),
             command,
-            status: if ok { "completed" } else { "failed" }.to_string(),
+            status: terminal_status,
             queued: false,
             result: Some(result),
             error,

@@ -296,6 +296,7 @@ impl Shell {
         let source_module = self.active_service_provider_or("mesh.theme", "@mesh/shell");
         if let Some(tx) = self.service_handlers.get("mesh.theme") {
             let _ = tx.send(ServiceCommandMsg {
+                call_id: mesh_core_backend::CallId::next(),
                 command: "set-current".to_string(),
                 payload: payload.clone(),
                 coalesce: true,

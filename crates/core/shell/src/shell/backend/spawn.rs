@@ -171,8 +171,10 @@ impl Shell {
                         let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
                     }
                     BackendServiceEvent::CommandResult(result) => {
+                        let call_id = result.call_id;
                         let command = result.command;
                         let payload = result.result;
+                        let outcome = result.outcome;
                         tracing::debug!(
                             interface = bridge_interface.as_str(),
                             provider_id = bridge_provider_id.as_str(),
@@ -183,8 +185,10 @@ impl Shell {
                         let _ = shell_tx.send(ShellMessage::BackendCommandResult {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
+                            call_id,
                             command,
                             result: payload,
+                            outcome,
                         });
                         let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
                         let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());

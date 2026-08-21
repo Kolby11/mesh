@@ -39,14 +39,11 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/02-module-system-and-installation/improvements.md)
 
-- [ ] Integrate signed provenance and trust tiers into candidate planning and activation policy.
 
 ### 3. Service contracts
 
 [Audit](../.planning/log/sections/03-service-contracts/improvements.md)
 
-- [ ] Replace shared Luau service globals with generation-stamped, Rust-owned, capability-filtered context state.
-- [ ] Make service methods correlated awaitable transactions with call IDs, deadlines, cancellation, and terminal outcomes.
 - [ ] Make optimistic state writes settle or roll back transactionally without overriding newer writes.
 - [ ] Compile and enforce explicit read, event-subscription, and per-method operation policy at every service boundary.
 - [ ] Replace additive registry mutation with one immutable generation-stamped resolved service catalog.
@@ -347,9 +344,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Service contracts
 
-- [ ] Remove shared `__mesh_svc_*` Luau state: keep service payloads in a
-      capability-filtered per-context/Rust-owned store so one module cannot read
-      or mutate another module's service state. [Audit](../.planning/log/sections/03-service-contracts/improvements.md).
 - [ ] Replace the additive interface registry with one immutable, atomic
       graph-derived service catalog binding each consumer to the active compatible
       contract/provider/version/policy generation. [Audit](../.planning/log/sections/03-service-contracts/improvements.md).

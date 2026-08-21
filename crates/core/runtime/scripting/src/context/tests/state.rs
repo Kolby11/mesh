@@ -231,9 +231,8 @@ fn removed_legacy_module_state_mirror_avoids_proxy_snapshot_serialization() {
 
 #[test]
 fn unknown_method_reads_state_field_as_nil() {
-    // Unknown keys fall through to the live service state table (__mesh_svc_audio).
-    // When no service has emitted yet the table doesn't exist, so the result is nil
-    // and the call succeeds without error.
+    // Unknown keys fall through to the service proxy. When no service has
+    // emitted yet the Rust-owned context store is empty, so the result is nil.
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("service.audio.read"));
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();

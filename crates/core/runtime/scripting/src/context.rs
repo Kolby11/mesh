@@ -6,7 +6,9 @@ mod runtime;
 mod state;
 
 pub use element_ref::ElementAction;
-pub use errors::{PublishedEvent, ScriptDiagnostic, ScriptError, ScriptInterfaceImport};
+pub use errors::{
+    PublishedEvent, ScriptDiagnostic, ScriptError, ScriptInterfaceImport, ServiceCallCompletion,
+};
 pub use runtime::{ScriptContext, SurfaceVm};
 pub use state::{LocaleBoundState, ScriptState};
 

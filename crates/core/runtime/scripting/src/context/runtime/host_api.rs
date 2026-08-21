@@ -31,7 +31,7 @@ impl ScriptContext {
 
         self.install_events_api(&mesh_core_events)?;
         self.install_ui_api(globals, &mesh_ui_api)?;
-        self.install_locale_api(globals, &mesh_locale)?;
+        self.install_locale_api(&mesh_locale)?;
         self.install_log_api(&mesh_log)?;
         self.install_popover_api(&mesh_popover)?;
 
@@ -43,9 +43,6 @@ impl ScriptContext {
         mesh.set("locale", mesh_locale).map_err(lua_err)?;
         let mesh_for_require = mesh.clone();
         globals.set("mesh", mesh).map_err(lua_err)?;
-        globals
-            .set("__mesh_locale_current", "en")
-            .map_err(lua_err)?;
 
         self.install_loader_api(globals, &mesh_for_require, &manifest)?;
         self.install_refs_api(globals)?;
@@ -123,20 +120,21 @@ impl ScriptContext {
             .map_err(lua_err)
     }
 
-    fn install_locale_api(
-        &mut self,
-        globals: &mlua::Table,
-        mesh_locale: &Table,
-    ) -> Result<(), ScriptError> {
-        let env_for_locale = globals.clone();
+    fn install_locale_api(&mut self, mesh_locale: &Table) -> Result<(), ScriptError> {
+        let service_context_state = Arc::clone(&self.service_context_state);
         mesh_locale
             .set(
                 "current",
                 self.lua()
                     .create_function(move |_lua, ()| {
-                        env_for_locale
-                            .get::<Option<String>>("__mesh_locale_current")
-                            .map(|locale| locale.unwrap_or_else(|| "en".to_string()))
+                        let locale = {
+                            let state = service_context_state.lock().unwrap();
+                            state
+                                .field("locale", "locale")
+                                .or_else(|| state.field("locale", "current"))
+                        }
+                        .and_then(|value| value.as_str().map(str::to_owned));
+                        Ok(locale.unwrap_or_else(|| "en".to_string()))
                     })
                     .map_err(lua_err)?,
             )
@@ -345,6 +343,8 @@ impl ScriptContext {
             payload,
             source_module_id: module_id.to_string(),
             source_capabilities: capabilities.clone(),
+            call_id: None,
+            source_instance_id: None,
         });
         Ok(())
     }
@@ -363,8 +363,11 @@ impl ScriptContext {
         let pending_side_channels = Arc::clone(&self.pending_side_channels);
         let tracked_service_fields = Arc::clone(&self.tracked_service_fields);
         let subscribed_interface_events = Arc::clone(&self.subscribed_interface_events);
+        let service_context_state = Arc::clone(&self.service_context_state);
         let module_id_for_require = self.module_id.clone();
+        let instance_id_for_require = self.instance_id.clone();
         let capabilities_for_require = self.capabilities.clone();
+        let service_call_completions = Arc::clone(&self.service_call_completions);
         let diagnostics_for_require = Arc::clone(&self.shared_diagnostics);
         let pending_diagnostics_for_require = Arc::clone(&self.pending_side_channels);
         let optional_interfaces_for_require = Arc::clone(&self.optional_interfaces);
@@ -451,7 +454,10 @@ impl ScriptContext {
                     &scope_for_require,
                     resolution,
                     module_id_for_require.clone(),
+                    instance_id_for_require.clone(),
                     capabilities_for_require.clone(),
+                    Arc::clone(&service_context_state),
+                    Arc::clone(&service_call_completions),
                     Arc::clone(&tracked_service_fields),
                     Arc::clone(&subscribed_interface_events),
                     Arc::clone(&published_events),
@@ -604,7 +610,10 @@ impl ScriptContext {
                 &globals,
                 resolution,
                 self.module_id.clone(),
+                self.instance_id.clone(),
                 self.capabilities.clone(),
+                Arc::clone(&self.service_context_state),
+                Arc::clone(&self.service_call_completions),
                 Arc::clone(&self.tracked_service_fields),
                 Arc::clone(&self.subscribed_interface_events),
                 Arc::clone(&self.shared_published_events),

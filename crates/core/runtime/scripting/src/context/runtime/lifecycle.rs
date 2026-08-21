@@ -298,6 +298,31 @@ impl ScriptContext {
         std::mem::take(&mut self.published_events)
     }
 
+    /// Deliver a terminal result to a ticket created by this context.
+    ///
+    /// The result is intentionally stored outside Lua. A backend completion
+    /// can therefore arrive between handler calls without mutating the shared
+    /// VM or executing arbitrary script code on the shell thread.
+    pub fn complete_service_call(
+        &mut self,
+        call_id: u64,
+        status: impl Into<String>,
+        result: Value,
+    ) -> bool {
+        let mut completions = self.service_call_completions.lock().unwrap();
+        if completions.contains_key(&call_id) {
+            return false;
+        }
+        completions.insert(
+            call_id,
+            super::super::ServiceCallCompletion {
+                status: status.into(),
+                result,
+            },
+        );
+        true
+    }
+
     pub fn drain_diagnostics(&mut self) -> Vec<ScriptDiagnostic> {
         self.sync_side_channels();
         std::mem::take(&mut self.diagnostics)

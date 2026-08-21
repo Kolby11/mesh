@@ -233,10 +233,18 @@ fn service_command_dispatch_records_debug_method_call() {
     );
 
     assert_eq!(result["ok"], serde_json::json!(true));
-    assert_eq!(rx.try_recv().unwrap().command, "set_volume");
+    let command = rx.try_recv().unwrap();
+    assert_eq!(command.command, "set_volume");
+    assert_eq!(
+        command.call_id.raw(),
+        result["call_id"]
+            .as_u64()
+            .expect("dispatch returns call id")
+    );
     let snapshot = shell.build_debug_snapshot();
     assert!(snapshot.method_calls.iter().any(|entry| {
-        entry.interface == "mesh.audio"
+        entry.call_id == command.call_id.raw()
+            && entry.interface == "mesh.audio"
             && entry.provider_id.as_deref() == Some("@mesh/pipewire-audio")
             && entry.source_module_id == "@mesh/panel"
             && entry.command == "set_volume"
@@ -261,8 +269,10 @@ fn backend_command_result_records_debug_method_result() {
             super::types::ShellMessage::BackendCommandResult {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
+                call_id: mesh_core_backend::CallId::from_raw(0),
                 command: "set_volume".to_string(),
                 result: serde_json::json!({ "ok": true, "percent": 40 }),
+                outcome: mesh_core_backend::BackendCommandOutcome::Completed,
             },
         )
         .unwrap();

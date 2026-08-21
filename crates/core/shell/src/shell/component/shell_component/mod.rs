@@ -235,15 +235,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         for (instance_key, runtime) in runtimes.iter_mut() {
             let observes_event = Self::runtime_observes_service_event(runtime, event);
             let capabilities = &runtime.script_ctx.capabilities;
-            let has_read = capabilities.is_granted(&caps.read)
-                || caps
-                    .theme
-                    .as_ref()
-                    .is_some_and(|capability| capabilities.is_granted(capability))
-                || caps
-                    .locale
-                    .as_ref()
-                    .is_some_and(|capability| capabilities.is_granted(capability));
+            let has_read = mesh_core_scripting::host_api::InterfaceProxy::can_read_service(
+                capabilities,
+                service_name,
+            );
             if !has_read && !observes_event {
                 self.sync_runtime_generation(
                     instance_key,
@@ -251,14 +246,6 @@ impl ShellComponent for FrontendSurfaceComponent {
                 );
                 continue;
             }
-            // Always apply the Lua-level service payload so interface
-            // proxies can read state fields even when the runtime lacks
-            // the canonical SERVICE_NAME.read capability.
-            runtime.script_ctx.apply_service_payload_with_fingerprint(
-                service_name,
-                payload,
-                payload_fingerprint,
-            );
             if !has_read {
                 self.sync_runtime_generation(
                     instance_key,
@@ -266,6 +253,11 @@ impl ShellComponent for FrontendSurfaceComponent {
                 );
                 continue;
             }
+            runtime.script_ctx.apply_service_payload_with_fingerprint(
+                service_name,
+                payload,
+                payload_fingerprint,
+            );
             // Capability is module-wide, so every component instance of a
             // module that declares `service.x.read` is handed the payload —
             // including the five settings pages that never mention it. Once a
@@ -338,6 +330,16 @@ impl ShellComponent for FrontendSurfaceComponent {
             }
         }
         Ok(Vec::new())
+    }
+
+    fn deliver_service_call_result(
+        &mut self,
+        instance_id: &str,
+        call_id: u64,
+        status: &str,
+        result: &serde_json::Value,
+    ) -> bool {
+        self.deliver_service_call_result_to_instance(instance_id, call_id, status, result)
     }
 
     fn cache_service_payload(&mut self, event: &ServiceEvent) {

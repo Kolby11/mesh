@@ -5,6 +5,74 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
+/// Rust-owned service snapshots visible to one script context.
+///
+/// The store is deliberately independent of the Lua realm. Contexts may share
+/// a thread VM, but each context gets its own store and each changed payload is
+/// stamped with the store generation that published it. Lua receives copied
+/// fields through the service proxy rather than a mutable backing table.
+#[derive(Debug, Default)]
+pub struct ServiceContextState {
+    generation: u64,
+    payloads: HashMap<String, ServicePayload>,
+}
+
+#[derive(Debug)]
+struct ServicePayload {
+    generation: u64,
+    fingerprint: u64,
+    value: Arc<Value>,
+}
+
+impl ServiceContextState {
+    pub fn update(&mut self, service: &str, payload: &Value, fingerprint: u64) -> bool {
+        if self.payloads.get(service).is_some_and(|current| {
+            current.fingerprint == fingerprint && current.value.as_ref() == payload
+        }) {
+            return false;
+        }
+
+        self.generation = self.generation.wrapping_add(1);
+        self.payloads.insert(
+            service.to_string(),
+            ServicePayload {
+                generation: self.generation,
+                fingerprint,
+                value: Arc::new(payload.clone()),
+            },
+        );
+        true
+    }
+
+    pub fn clear(&mut self) {
+        if self.payloads.is_empty() {
+            return;
+        }
+        self.payloads.clear();
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn payload_generation(&self, service: &str) -> Option<u64> {
+        self.payloads.get(service).map(|payload| payload.generation)
+    }
+
+    pub fn fingerprint(&self, service: &str) -> Option<u64> {
+        self.payloads
+            .get(service)
+            .map(|payload| payload.fingerprint)
+    }
+
+    pub fn field(&self, service: &str, field: &str) -> Option<Value> {
+        self.payloads
+            .get(service)
+            .and_then(|payload| payload.value.get(field).cloned())
+    }
+}
+
 /// Reactive state exposed to and mutated by Luau scripts. A script write marks
 /// the state dirty, which is how the UI layer knows to rebuild the widget tree.
 pub struct ScriptState {

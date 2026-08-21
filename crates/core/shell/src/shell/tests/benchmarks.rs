@@ -387,6 +387,8 @@ fn benchmark_service_event_maps_to_run_request() {
         payload: serde_json::json!({ "scenario_id": "hover" }),
         source_module_id: "@mesh/debug-inspector".into(),
         source_capabilities: capabilities,
+        call_id: None,
+        source_instance_id: None,
     }]);
 
     match requests.as_slice() {

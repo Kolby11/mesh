@@ -392,8 +392,10 @@ impl Shell {
             ShellMessage::BackendCommandResult {
                 interface,
                 provider_id,
+                call_id,
                 command,
                 result,
+                outcome,
             } => {
                 let provider_is_active =
                     self.backend_runtimes.get(&interface).is_some_and(|slot| {
@@ -404,7 +406,25 @@ impl Shell {
                             == provider_id
                     });
                 if provider_is_active {
-                    self.record_backend_method_result(interface, provider_id, command, result);
+                    self.record_backend_method_result(
+                        interface,
+                        provider_id,
+                        call_id,
+                        command,
+                        result.clone(),
+                        outcome,
+                    );
+                    self.complete_service_call_route(call_id, outcome.as_str(), &result);
+                } else {
+                    self.complete_service_call_route(
+                        call_id,
+                        "stale_provider",
+                        &serde_json::json!({
+                            "ok": false,
+                            "status": "stale_provider",
+                            "error": "provider generation is no longer active",
+                        }),
+                    );
                 }
             }
             ShellMessage::BackendInterfaceEvent {

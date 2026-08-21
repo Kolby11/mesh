@@ -20,12 +20,28 @@ catalog tests are added; Cargo
 execution is currently blocked
 because the local registry cache lacks `sha2` and network access is unavailable.
 
-Trust-tier plumbing is the current Section 2 increment: lock entries now carry
-local/community/core/verified classification and detached-signature metadata,
-the root graph can set a minimum accepted tier, and install/update/activation
-paths report lower-tier candidates before commit. Cryptographic verification
-and registry key distribution are not yet implemented, so the trust backlog
-item remains open.
+Trust-tier plumbing is now complete for the current installer boundary: lock
+entries carry local/community/core/verified classification and detached
+signature metadata, `module.sig` signs a canonical module identity/version/
+digest payload, and root-graph `trustPolicy.keys` verify Ed25519 signatures
+before install, staged update review, lock verification, or graph activation.
+Invalid signatures and unknown keys fail closed with scoped diagnostics;
+registry key distribution remains a future integration.
+
+Service payloads now live in a generation-stamped Rust store owned by each
+frontend script context. Shared Lua VMs no longer receive `__mesh_svc_*`
+globals or marker tables; proxy reads are capability-filtered and copy values
+out of the store, service state is read-only, and the shell skips payload
+delivery to contexts without the matching read grant. The focused scripting
+tests are present, but Cargo execution remains blocked by the unavailable
+`sha2` registry cache and network access.
+
+Correlated service calls now complete end to end. Luau interface methods return
+cooperative tickets with `poll`/`await` snapshots and caller-driven
+cancellation; call IDs and originating instance identities survive shell
+dispatch, throttling, backend coalescing, provider replacement, and terminal
+result delivery. Missing providers, stale generations, timeouts, failures,
+supersession, and cancellation all settle the originating ticket exactly once.
 
 The guarded `scripts/codex-backlog-runner.sh` can process one unchecked backlog
 item at a time directly on `main`, using Codex's explicit unrestricted mode for

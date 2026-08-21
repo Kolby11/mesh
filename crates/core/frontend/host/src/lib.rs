@@ -324,6 +324,25 @@ pub enum CoreRequest {
         source_module_id: String,
         source_capabilities: CapabilitySet,
     },
+    /// A Luau service-proxy invocation whose terminal result must be routed
+    /// back to the originating context's ticket.
+    ServiceCall {
+        interface: String,
+        command: String,
+        payload: serde_json::Value,
+        call_id: u64,
+        source_instance_id: String,
+        source_module_id: String,
+        source_capabilities: CapabilitySet,
+    },
+    /// Caller-driven cancellation for a previously published service call.
+    CancelServiceCall {
+        interface: String,
+        call_id: u64,
+        source_instance_id: String,
+        source_module_id: String,
+        source_capabilities: CapabilitySet,
+    },
     WriteClipboard {
         text: String,
     },
@@ -490,6 +509,17 @@ pub trait ShellComponent: Send {
         &mut self,
         event: &ServiceEvent,
     ) -> Result<Vec<CoreRequest>, ComponentError>;
+    /// Deliver a terminal correlated service result to the matching frontend
+    /// instance. Returns true when this component owns the instance.
+    fn deliver_service_call_result(
+        &mut self,
+        _instance_id: &str,
+        _call_id: u64,
+        _status: &str,
+        _result: &serde_json::Value,
+    ) -> bool {
+        false
+    }
     fn observes_service_event(&self, _event: &ServiceEvent) -> bool {
         true
     }

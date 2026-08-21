@@ -193,6 +193,34 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
     }
 
     match event.channel.as_str() {
+        "mesh.service.cancel" => {
+            let interface = event
+                .payload
+                .get("interface")
+                .and_then(|value| value.as_str())?;
+            let call_id = event.call_id.or_else(|| {
+                event
+                    .payload
+                    .get("call_id")
+                    .and_then(|value| value.as_u64())
+            })?;
+            let required = service_capabilities(interface).control;
+            if !event.source_capabilities.is_granted(&required) {
+                return Some(CoreRequest::PublishDiagnostics {
+                    message: format!(
+                        "Denied service call cancellation for '{}' from '{}' without {}",
+                        interface, event.source_module_id, required
+                    ),
+                });
+            }
+            Some(CoreRequest::CancelServiceCall {
+                interface: interface.to_string(),
+                call_id,
+                source_instance_id: event.source_instance_id?,
+                source_module_id: event.source_module_id,
+                source_capabilities: event.source_capabilities,
+            })
+        }
         "shell.show-surface" => event
             .payload
             .get("surface_id")
@@ -347,12 +375,26 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                 let capabilities = service_capabilities(interface_name);
                 let required = &capabilities.control;
                 if event.source_capabilities.is_granted(required) {
-                    CoreRequest::ServiceCommand {
-                        interface: interface_name.to_string(),
-                        command: other[pos + 1..].to_string(),
-                        payload: event.payload,
-                        source_module_id: event.source_module_id,
-                        source_capabilities: event.source_capabilities,
+                    if let (Some(call_id), Some(source_instance_id)) =
+                        (event.call_id, event.source_instance_id)
+                    {
+                        CoreRequest::ServiceCall {
+                            interface: interface_name.to_string(),
+                            command: other[pos + 1..].to_string(),
+                            payload: event.payload,
+                            call_id,
+                            source_instance_id,
+                            source_module_id: event.source_module_id,
+                            source_capabilities: event.source_capabilities,
+                        }
+                    } else {
+                        CoreRequest::ServiceCommand {
+                            interface: interface_name.to_string(),
+                            command: other[pos + 1..].to_string(),
+                            payload: event.payload,
+                            source_module_id: event.source_module_id,
+                            source_capabilities: event.source_capabilities,
+                        }
                     }
                 } else {
                     tracing::warn!(
@@ -424,12 +466,16 @@ mod tests {
                 payload: serde_json::json!({ "percent": 55 }),
                 source_module_id: "@mesh/quick-settings".into(),
                 source_capabilities: audio_caps,
+                call_id: None,
+                source_instance_id: None,
             },
             PublishedEvent {
                 channel: "mesh.network.set_wifi_enabled".into(),
                 payload: serde_json::json!({ "enabled": true }),
                 source_module_id: "@mesh/quick-settings".into(),
                 source_capabilities: network_caps,
+                call_id: None,
+                source_instance_id: None,
             },
         ]);
 
@@ -468,6 +514,49 @@ mod tests {
             }
             other => panic!("expected network ServiceCommand, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn script_events_to_requests_preserves_ticket_route_identity() {
+        let mut capabilities = mesh_core_capability::CapabilitySet::new();
+        capabilities.grant(Capability::new("service.audio.control"));
+        let requests = script_events_to_requests(vec![PublishedEvent {
+            channel: "mesh.audio.set_volume".into(),
+            payload: serde_json::json!({ "percent": 55 }),
+            source_module_id: "@mesh/audio-popover".into(),
+            source_capabilities: capabilities.clone(),
+            call_id: Some(1 << 63),
+            source_instance_id: Some("@mesh/audio-popover#bottom".into()),
+        }]);
+
+        assert!(matches!(
+            requests.as_slice(),
+            [CoreRequest::ServiceCall {
+                call_id,
+                source_instance_id,
+                ..
+            }] if *call_id == 1 << 63 && source_instance_id == "@mesh/audio-popover#bottom"
+        ));
+
+        let cancel_requests = script_events_to_requests(vec![PublishedEvent {
+            channel: "mesh.service.cancel".into(),
+            payload: serde_json::json!({
+                "interface": "mesh.audio",
+                "call_id": 1 << 63,
+            }),
+            source_module_id: "@mesh/audio-popover".into(),
+            source_capabilities: capabilities,
+            call_id: Some(1 << 63),
+            source_instance_id: Some("@mesh/audio-popover#bottom".into()),
+        }]);
+        assert!(matches!(
+            cancel_requests.as_slice(),
+            [CoreRequest::CancelServiceCall {
+                call_id,
+                source_instance_id,
+                ..
+            }] if *call_id == 1 << 63 && source_instance_id == "@mesh/audio-popover#bottom"
+        ));
     }
 
     #[test]
@@ -533,6 +622,8 @@ mod tests {
             payload,
             source_module_id: module.into(),
             source_capabilities: capabilities,
+            call_id: None,
+            source_instance_id: None,
         }
     }
 
@@ -729,6 +820,8 @@ mod tests {
             }),
             source_module_id: "@mesh/navigation-bar".into(),
             source_capabilities: capabilities,
+            call_id: None,
+            source_instance_id: None,
         }]);
 
         match requests.as_slice() {
@@ -761,6 +854,8 @@ mod tests {
             }),
             source_module_id: "@mesh/quick-settings".into(),
             source_capabilities: capabilities,
+            call_id: None,
+            source_instance_id: None,
         }]);
 
         match requests.as_slice() {
@@ -786,6 +881,8 @@ mod tests {
             payload: serde_json::json!({ "step": 10 }),
             source_module_id: "@mesh/navigation-bar".into(),
             source_capabilities: caps,
+            call_id: None,
+            source_instance_id: None,
         }]);
 
         match requests.as_slice() {
@@ -808,6 +905,8 @@ mod tests {
             payload: serde_json::json!({ "percent": 55 }),
             source_module_id: "@mesh/panel".into(),
             source_capabilities: caps,
+            call_id: None,
+            source_instance_id: None,
         }]);
 
         match requests.as_slice() {
@@ -828,30 +927,40 @@ mod tests {
                 payload: serde_json::json!({}),
                 source_module_id: "@mesh/debug-inspector".into(),
                 source_capabilities: debug_capabilities.clone(),
+                call_id: None,
+                source_instance_id: None,
             },
             PublishedEvent {
                 channel: "shell.toggle-debug-layout-bounds".into(),
                 payload: serde_json::json!({}),
                 source_module_id: "@mesh/debug-inspector".into(),
                 source_capabilities: debug_capabilities.clone(),
+                call_id: None,
+                source_instance_id: None,
             },
             PublishedEvent {
                 channel: "shell.toggle-debug-element-picker".into(),
                 payload: serde_json::json!({}),
                 source_module_id: "@mesh/debug-inspector".into(),
                 source_capabilities: debug_capabilities.clone(),
+                call_id: None,
+                source_instance_id: None,
             },
             PublishedEvent {
                 channel: "shell.open-debug-source".into(),
                 payload: serde_json::json!({ "path": "/tmp/example.mesh", "line": 42 }),
                 source_module_id: "@mesh/debug-inspector".into(),
                 source_capabilities: debug_capabilities.clone(),
+                call_id: None,
+                source_instance_id: None,
             },
             PublishedEvent {
                 channel: "shell.toggle-debug-profiling".into(),
                 payload: serde_json::json!({}),
                 source_module_id: "@mesh/debug-inspector".into(),
                 source_capabilities: debug_capabilities,
+                call_id: None,
+                source_instance_id: None,
             },
         ]);
 
@@ -892,6 +1001,8 @@ mod tests {
                 }),
                 source_module_id: "@mesh/navigation-bar".into(),
                 source_capabilities: capabilities.clone(),
+                call_id: None,
+                source_instance_id: None,
             },
             PublishedEvent {
                 channel: "shell.position-surface".into(),
@@ -902,6 +1013,8 @@ mod tests {
                 }),
                 source_module_id: "@mesh/navigation-bar".into(),
                 source_capabilities: capabilities,
+                call_id: None,
+                source_instance_id: None,
             },
         ]);
 
@@ -1211,6 +1324,8 @@ mod tests {
             payload: serde_json::json!({ "percent": 55 }),
             source_module_id: "@mesh/benchmark".into(),
             source_capabilities: mesh_core_capability::CapabilitySet::new(),
+            call_id: None,
+            source_instance_id: None,
         };
         let iterations = 200_000usize;
 

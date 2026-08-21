@@ -648,6 +648,7 @@ impl Shell {
             service_contract_validation: HashMap::new(),
             pending_bound_service_state: HashMap::new(),
             command_throttle: HashMap::new(),
+            pending_service_call_routes: HashMap::new(),
             pending_popover_hides: HashMap::new(),
             profiling: runtime::profiling::ProfilingRuntimeState::default(),
         }

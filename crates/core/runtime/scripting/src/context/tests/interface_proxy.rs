@@ -214,6 +214,220 @@ end
 }
 
 #[test]
+fn interface_method_returns_ticket_and_receives_completion() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.control"));
+    let mut ctx = ScriptContext::new_for_instance(
+        "@test/audio-widget",
+        "@test/audio-widget",
+        "@test/audio-widget#bottom",
+        caps,
+    )
+    .unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+function invoke()
+    local audio = require("mesh.audio@>=1.0")
+    ticket = audio.set_volume("default", 55)
+end
+
+function inspect()
+    local snapshot = ticket:poll()
+    completed = snapshot.done
+    completion_status = snapshot.status
+    completion_value = snapshot.result and snapshot.result.percent or -1
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_handler("invoke", &[]).unwrap();
+    let events = ctx.drain_published_events();
+    let call_id = events
+        .iter()
+        .find_map(|event| event.call_id)
+        .expect("proxy invocation should publish a call id");
+    assert_eq!(events.len(), 1);
+
+    ctx.complete_service_call(
+        call_id,
+        "completed",
+        serde_json::json!({ "ok": true, "percent": 55 }),
+    );
+    ctx.call_handler("inspect", &[]).unwrap();
+    assert_eq!(ctx.state.get("completed"), Some(&serde_json::json!(true)));
+    assert_eq!(
+        ctx.state.get("completion_status"),
+        Some(&serde_json::json!("completed"))
+    );
+    assert_eq!(
+        ctx.state.get("completion_value"),
+        Some(&serde_json::json!(55))
+    );
+}
+
+#[test]
+fn service_ticket_cancel_publishes_correlated_cancellation() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.control"));
+    let mut ctx = ScriptContext::new_for_instance(
+        "@test/audio-widget",
+        "@test/audio-widget",
+        "@test/audio-widget#bottom",
+        caps,
+    )
+    .unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+function invoke()
+    local audio = require("mesh.audio@>=1.0")
+    ticket = audio.set_volume("default", 55)
+    cancelled = ticket:cancel()
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_handler("invoke", &[]).unwrap();
+    assert_eq!(ctx.state.get("cancelled"), Some(&serde_json::json!(true)));
+    let events = ctx.drain_published_events();
+    assert_eq!(events.len(), 2);
+    let call_id = events[0].call_id.expect("service call id");
+    assert_eq!(events[1].channel, "mesh.service.cancel");
+    assert_eq!(events[1].call_id, Some(call_id));
+    assert_eq!(
+        events[1].source_instance_id.as_deref(),
+        Some("@test/audio-widget#bottom")
+    );
+}
+
+#[test]
+fn service_state_is_context_local_capability_filtered_and_generation_stamped() {
+    let mut read_caps = CapabilitySet::new();
+    read_caps.grant(Capability::new("service.audio.read"));
+    let vm = SurfaceVm::new();
+
+    let mut first = ScriptContext::new("@test/first-audio", read_caps.clone()).unwrap();
+    first.attach_shared_vm(&vm);
+    first.set_interface_catalog(audio_catalog());
+    first
+        .load_script(
+            r#"
+audio = require("mesh.audio@>=1.0")
+observed = ""
+function read_audio()
+    observed = audio.devices[1].name
+end
+function mutate_copy()
+    local devices = audio.devices
+    devices[1].name = "mutated"
+end
+function write_state()
+    audio.percent = 100
+end
+function direct_global_present()
+    return __mesh_svc_audio ~= nil
+end
+"#,
+        )
+        .unwrap();
+
+    let mut second = ScriptContext::new("@test/second-audio", read_caps).unwrap();
+    second.attach_shared_vm(&vm);
+    second.set_interface_catalog(audio_catalog());
+    second
+        .load_script(
+            r#"
+audio = require("mesh.audio@>=1.0")
+observed = ""
+function read_audio()
+    observed = audio.devices[1].name
+end
+"#,
+        )
+        .unwrap();
+
+    let mut denied = ScriptContext::new("@test/denied-audio", CapabilitySet::new()).unwrap();
+    denied.attach_shared_vm(&vm);
+    denied
+        .load_script(
+            r#"
+direct_global_present = false
+function probe()
+    direct_global_present = __mesh_svc_audio ~= nil
+end
+"#,
+        )
+        .unwrap();
+
+    first.apply_service_payload(
+        "audio",
+        &serde_json::json!({ "percent": 31, "devices": [{ "name": "first" }] }),
+    );
+    second.apply_service_payload(
+        "audio",
+        &serde_json::json!({ "percent": 82, "devices": [{ "name": "second" }] }),
+    );
+    denied.apply_service_payload("audio", &serde_json::json!({ "percent": 99 }));
+
+    assert_eq!(first.service_context_generation(), 1);
+    assert_eq!(first.service_payload_generation("audio"), Some(1));
+    assert_eq!(second.service_context_generation(), 1);
+    assert_eq!(denied.service_context_generation(), 0);
+
+    first.call_handler("read_audio", &[]).unwrap();
+    second.call_handler("read_audio", &[]).unwrap();
+    denied.call_handler("probe", &[]).unwrap();
+    assert_eq!(
+        first.state.get("observed"),
+        Some(serde_json::json!("first"))
+    );
+    assert_eq!(
+        second.state.get("observed"),
+        Some(serde_json::json!("second"))
+    );
+    assert_eq!(
+        denied.state.get("direct_global_present"),
+        Some(serde_json::json!(false))
+    );
+
+    first.call_handler("mutate_copy", &[]).unwrap();
+    first.call_handler("read_audio", &[]).unwrap();
+    second.call_handler("read_audio", &[]).unwrap();
+    assert_eq!(
+        first.state.get("observed"),
+        Some(serde_json::json!("first"))
+    );
+    assert_eq!(
+        second.state.get("observed"),
+        Some(serde_json::json!("second"))
+    );
+
+    let error = first
+        .call_handler("write_state", &[])
+        .expect_err("service state must not be writable from Luau");
+    assert!(error.to_string().contains("read-only"));
+}
+
+#[test]
+fn equal_service_payloads_do_not_advance_context_generation() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.read"));
+    let mut ctx = ScriptContext::new("@test/audio-generation", caps).unwrap();
+    let payload = serde_json::json!({ "percent": 64 });
+
+    ctx.apply_service_payload("audio", &payload);
+    ctx.apply_service_payload("audio", &payload);
+    assert_eq!(ctx.service_context_generation(), 1);
+
+    ctx.apply_service_payload("audio", &serde_json::json!({ "percent": 65 }));
+    assert_eq!(ctx.service_context_generation(), 2);
+    assert_eq!(ctx.service_payload_generation("audio"), Some(2));
+}
+
+#[test]
 fn interface_proxy_reads_state_fields_without_callbacks() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("service.audio.read"));
@@ -375,37 +589,19 @@ fn binary_service_payload_markers_beat_formatted_strings() {
     assert!(binary < formatted);
 }
 
-// cargo test -p mesh-core-scripting --release -- cached_service_payload_marker_table_beats_global_lookup --ignored --nocapture
-#[test]
-#[ignore = "release-only service payload marker-table microbenchmark"]
-fn cached_service_payload_marker_table_beats_global_lookup() {
-    let mut ctx = ScriptContext::new("@mesh/marker-table-bench", CapabilitySet::new()).unwrap();
-    let iterations = 1_000_000usize;
-    let (global, cached, global_hits, cached_hits) =
-        ctx.benchmark_service_payload_table_access(iterations);
-
-    eprintln!(
-        "service payload marker table over {iterations} probes: global {global:?}; cached {cached:?}; ratio {:.2}x",
-        global.as_secs_f64() / cached.as_secs_f64()
-    );
-    assert_eq!(global_hits, iterations);
-    assert_eq!(cached_hits, iterations);
-    assert!(cached < global);
-}
-
 // cargo test -p mesh-core-scripting --release -- shared_service_payload_fingerprint_beats_per_context_hashing --ignored --nocapture
 #[test]
 #[ignore = "release-only service payload fan-out fingerprint microbenchmark"]
 fn shared_service_payload_fingerprint_beats_per_context_hashing() {
     fn make_contexts(count: usize) -> Vec<ScriptContext> {
         let vm = SurfaceVm::new();
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
         (0..count)
             .map(|index| {
-                let mut ctx = ScriptContext::new(
-                    format!("@mesh/fingerprint-bench-{index}"),
-                    CapabilitySet::new(),
-                )
-                .unwrap();
+                let mut ctx =
+                    ScriptContext::new(format!("@mesh/fingerprint-bench-{index}"), caps.clone())
+                        .unwrap();
                 ctx.attach_shared_vm(&vm);
                 ctx
             })
@@ -463,13 +659,13 @@ fn shared_service_payload_fingerprint_beats_per_context_hashing() {
 fn cached_service_payload_fingerprint_beats_runtime_seed_rehashing() {
     fn make_contexts(count: usize) -> Vec<ScriptContext> {
         let vm = SurfaceVm::new();
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
         (0..count)
             .map(|index| {
-                let mut ctx = ScriptContext::new(
-                    format!("@mesh/cached-seed-bench-{index}"),
-                    CapabilitySet::new(),
-                )
-                .unwrap();
+                let mut ctx =
+                    ScriptContext::new(format!("@mesh/cached-seed-bench-{index}"), caps.clone())
+                        .unwrap();
                 ctx.attach_shared_vm(&vm);
                 ctx
             })

@@ -269,6 +269,19 @@ impl ComponentRuntime {
 
 pub(super) type ServiceCommandMsg = mesh_core_backend::BackendServiceCommand;
 
+#[derive(Debug, Clone)]
+pub(super) struct PendingServiceCommand {
+    pub(super) call_id: mesh_core_backend::CallId,
+    pub(super) payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ServiceCallRoute {
+    pub(super) interface: String,
+    pub(super) instance_id: String,
+    pub(super) module_id: String,
+}
+
 /// Per-(interface, command) leading+trailing throttle state for coalescable
 /// service commands. Leading edge fires immediately; subsequent calls within
 /// the interval park as `pending` (last-wins) and are flushed by the main
@@ -276,7 +289,7 @@ pub(super) type ServiceCommandMsg = mesh_core_backend::BackendServiceCommand;
 #[derive(Debug, Clone)]
 pub(super) struct CommandThrottleState {
     pub(super) last_send: std::time::Instant,
-    pub(super) pending: Option<serde_json::Value>,
+    pub(super) pending: Option<PendingServiceCommand>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -326,8 +339,10 @@ pub(super) enum ShellMessage {
     BackendCommandResult {
         interface: String,
         provider_id: String,
+        call_id: mesh_core_backend::CallId,
         command: String,
         result: serde_json::Value,
+        outcome: mesh_core_backend::BackendCommandOutcome,
     },
     BackendInterfaceEvent {
         interface: String,

@@ -358,9 +358,11 @@ fn coalescable_service_commands_use_a_backend_cost_budget() {
         &capabilities,
     );
     assert_eq!(first["ok"], serde_json::json!(true));
+    let first_command = rx.try_recv().unwrap();
+    assert_eq!(first_command.payload["percent"], serde_json::json!(40));
     assert_eq!(
-        rx.try_recv().unwrap().payload["percent"],
-        serde_json::json!(40)
+        first_command.call_id.raw(),
+        first["call_id"].as_u64().expect("first call id")
     );
 
     let second = shell.dispatch_service_command(
@@ -375,10 +377,13 @@ fn coalescable_service_commands_use_a_backend_cost_budget() {
 
     std::thread::sleep(std::time::Duration::from_millis(110));
     shell.flush_throttled_commands();
+    let second_command = rx.try_recv().unwrap();
+    assert_eq!(second_command.payload["percent"], serde_json::json!(75));
     assert_eq!(
-        rx.try_recv().unwrap().payload["percent"],
-        serde_json::json!(75)
+        second_command.call_id.raw(),
+        second["call_id"].as_u64().expect("second call id")
     );
+    assert_ne!(first_command.call_id, second_command.call_id);
 }
 
 /// The capability is the whole gate. No module id is consulted, so a

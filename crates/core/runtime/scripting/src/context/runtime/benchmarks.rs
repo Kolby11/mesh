@@ -52,13 +52,11 @@ impl ScriptContext {
     }
 
     pub fn service_payload_marker_for_test(&mut self, service: &str) -> Option<Vec<u8>> {
-        let _ = self.ensure_initialized();
-        self.lua()
-            .globals()
-            .get::<Table>("__mesh_service_payload_fingerprints")
-            .ok()
-            .and_then(|table| table.get::<Option<mlua::String>>(service).ok().flatten())
-            .map(|marker| marker.as_bytes().to_vec())
+        self.service_context_state
+            .lock()
+            .unwrap()
+            .fingerprint(service)
+            .map(|fingerprint| fingerprint.to_ne_bytes().to_vec())
     }
 
     pub(crate) fn benchmark_service_payload_marker_probes(
@@ -112,62 +110,6 @@ impl ScriptContext {
         let binary_time = binary_started.elapsed();
 
         (formatted_time, binary_time, formatted_hits, binary_hits)
-    }
-
-    pub(crate) fn benchmark_service_payload_table_access(
-        &mut self,
-        iterations: usize,
-    ) -> (std::time::Duration, std::time::Duration, usize, usize) {
-        let _ = self.ensure_initialized();
-        let marker = 42u64.to_ne_bytes();
-        let table = self.lua().create_table().expect("marker table");
-        table
-            .set(
-                "audio",
-                self.lua()
-                    .create_string(marker)
-                    .expect("create marker string"),
-            )
-            .expect("seed marker");
-        self.lua()
-            .globals()
-            .set("__mesh_service_payload_fingerprints", table.clone())
-            .expect("install marker table");
-        self.cached_service_payload_fingerprints = Some(table);
-
-        let globals = self.lua().globals();
-        let global_started = std::time::Instant::now();
-        let mut global_hits = 0usize;
-        for _ in 0..iterations {
-            let table = globals
-                .get::<Table>("__mesh_service_payload_fingerprints")
-                .expect("resolve global marker table");
-            let previous = table
-                .get::<Option<mlua::String>>("audio")
-                .expect("read global marker");
-            global_hits += std::hint::black_box(
-                previous.is_some_and(|previous| previous.as_bytes().as_ref() == marker),
-            ) as usize;
-        }
-        let global_time = global_started.elapsed();
-
-        let cached_started = std::time::Instant::now();
-        let mut cached_hits = 0usize;
-        for _ in 0..iterations {
-            let table = self
-                .cached_service_payload_fingerprints
-                .as_ref()
-                .expect("cached marker table");
-            let previous = table
-                .get::<Option<mlua::String>>("audio")
-                .expect("read cached marker");
-            cached_hits += std::hint::black_box(
-                previous.is_some_and(|previous| previous.as_bytes().as_ref() == marker),
-            ) as usize;
-        }
-        let cached_time = cached_started.elapsed();
-
-        (global_time, cached_time, global_hits, cached_hits)
     }
 
     pub(crate) fn clear_refs_proxy_cache_for_benchmark(&mut self) {

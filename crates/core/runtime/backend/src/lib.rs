@@ -1,15 +1,115 @@
 use mesh_core_scripting::{BackendScriptContext, BackendScriptError};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 const MAX_CONSECUTIVE_POLL_FAILURES: u32 = 3;
 const MIN_POLL_INTERVAL_MS: u64 = 50;
 
+static NEXT_CALL_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Correlates one service invocation with every transport hop and its terminal
+/// result. Zero is reserved for test-created commands that do not originate
+/// at the shell dispatcher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CallId(u64);
+
+impl CallId {
+    pub const fn from_raw(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub fn next() -> Self {
+        Self(NEXT_CALL_ID.fetch_add(1, Ordering::Relaxed))
+    }
+
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendCommandOutcome {
+    Completed,
+    Failed,
+    Superseded,
+    TimedOut,
+    Cancelled,
+}
+
+impl BackendCommandOutcome {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Superseded => "superseded",
+            Self::TimedOut => "timed_out",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct CallControl {
+    deadline: Instant,
+    cancelled: bool,
+}
+
+fn call_controls() -> &'static Mutex<HashMap<CallId, CallControl>> {
+    static CONTROLS: OnceLock<Mutex<HashMap<CallId, CallControl>>> = OnceLock::new();
+    CONTROLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Register a bounded execution window for a shell-admitted call.
+pub fn register_call(call_id: CallId, timeout: Duration) {
+    call_controls().lock().unwrap().insert(
+        call_id,
+        CallControl {
+            deadline: Instant::now() + timeout,
+            cancelled: false,
+        },
+    );
+}
+
+/// Cancel a queued call. A backend that has already started the synchronous
+/// Luau handler cannot be interrupted safely, but queued calls observe this
+/// flag before entering the handler and still produce a terminal result.
+pub fn cancel_call(call_id: CallId) -> bool {
+    let mut controls = call_controls().lock().unwrap();
+    let Some(control) = controls.get_mut(&call_id) else {
+        return false;
+    };
+    control.cancelled = true;
+    true
+}
+
+fn take_pre_execution_outcome(call_id: CallId) -> Option<BackendCommandOutcome> {
+    let mut controls = call_controls().lock().unwrap();
+    let control = controls.get(&call_id)?;
+    let outcome = if control.cancelled {
+        Some(BackendCommandOutcome::Cancelled)
+    } else if Instant::now() >= control.deadline {
+        Some(BackendCommandOutcome::TimedOut)
+    } else {
+        None
+    };
+    if outcome.is_some() {
+        controls.remove(&call_id);
+    }
+    outcome
+}
+
+/// Release call-control state after a terminal result has been emitted.
+pub fn finish_call(call_id: CallId) {
+    call_controls().lock().unwrap().remove(&call_id);
+}
+
 #[derive(Debug, Clone)]
 pub struct BackendServiceCommand {
+    pub call_id: CallId,
     pub command: String,
     pub payload: serde_json::Value,
     /// When true, this command is an idempotent setter — if the receiver
@@ -57,10 +157,12 @@ pub struct BackendServiceUpdate {
 
 #[derive(Debug, Clone)]
 pub struct BackendCommandResult {
+    pub call_id: CallId,
     pub service: Arc<str>,
     pub source_module: Arc<str>,
     pub command: String,
     pub result: serde_json::Value,
+    pub outcome: BackendCommandOutcome,
 }
 
 #[derive(Debug, Clone)]
@@ -293,17 +395,78 @@ pub async fn spawn_backend_service(
                 while let Ok(next) = cmd_rx.try_recv() {
                     batch.push(next);
                 }
+                let original_batch = batch.clone();
                 let batch = coalesce_command_batch(batch, &mut coalesced_command_index);
+                for superseded in original_batch.into_iter().filter(|candidate| {
+                    candidate.coalesce
+                        && !batch
+                            .iter()
+                            .any(|retained| retained.call_id == candidate.call_id)
+                }) {
+                    finish_call(superseded.call_id);
+                    if tx.send(BackendServiceEvent::CommandResult(BackendCommandResult {
+                        call_id: superseded.call_id,
+                        service: service_name.clone(),
+                        source_module: module_id.clone(),
+                        command: superseded.command,
+                        result: serde_json::json!({
+                            "ok": false,
+                            "status": "superseded",
+                            "error": "coalesced by a newer invocation",
+                        }),
+                        outcome: BackendCommandOutcome::Superseded,
+                    })).is_err() {
+                        return;
+                    }
+                }
                 let mut stop = false;
                 for msg in batch {
+                    let call_id = msg.call_id;
+                    let command = msg.command.clone();
+                    if let Some(outcome) = take_pre_execution_outcome(call_id) {
+                        let status = outcome.as_str();
+                        if tx
+                            .send(BackendServiceEvent::CommandResult(BackendCommandResult {
+                                call_id,
+                                service: service_name.clone(),
+                                source_module: module_id.clone(),
+                                command,
+                                result: serde_json::json!({
+                                    "ok": false,
+                                    "status": status,
+                                    "error": status,
+                                }),
+                                outcome,
+                            }))
+                            .is_err()
+                        {
+                            stop = true;
+                            break;
+                        }
+                        continue;
+                    }
                     match ctx.run_command_with_result(&msg.command, &msg.payload) {
                         Ok(outcome) => {
                             refresh_interval(&ctx, &mut interval_ms, &mut tick);
+                            let terminal_outcome = if outcome.error.is_some()
+                                || outcome
+                                    .result
+                                    .get("ok")
+                                    .and_then(|value| value.as_bool())
+                                    == Some(false)
+                            {
+                                BackendCommandOutcome::Failed
+                            } else {
+                                BackendCommandOutcome::Completed
+                            };
+                            finish_call(call_id);
                             if tx.send(BackendServiceEvent::CommandResult(BackendCommandResult {
+                                call_id,
                                 service: service_name.clone(),
                                 source_module: module_id.clone(),
-                                command: msg.command.clone(),
+                                command,
                                 result: outcome.result,
+                                outcome: terminal_outcome,
                             })).is_err() {
                                 stop = true;
                                 break;
@@ -343,6 +506,19 @@ pub async fn spawn_backend_service(
                                 }
                                 _ => "command",
                             };
+                            finish_call(call_id);
+                            let _ = tx.send(BackendServiceEvent::CommandResult(BackendCommandResult {
+                                call_id,
+                                service: service_name.clone(),
+                                source_module: module_id.clone(),
+                                command,
+                                result: serde_json::json!({
+                                    "ok": false,
+                                    "status": "failed",
+                                    "error": err.to_string(),
+                                }),
+                                outcome: BackendCommandOutcome::Failed,
+                            }));
                             let _ = tx.send(BackendServiceEvent::Failed {
                                 service: service_name.clone(),
                                 source_module: module_id.clone(),
@@ -448,6 +624,7 @@ mod tests {
 
     fn cmd(name: &str, value: i64, coalesce: bool) -> BackendServiceCommand {
         BackendServiceCommand {
+            call_id: CallId::next(),
             command: name.to_string(),
             payload: serde_json::json!({ "v": value }),
             coalesce,
@@ -502,6 +679,24 @@ mod tests {
         let batch = vec![cmd("set_volume", 50, true), cmd("set_muted", 1, true)];
         let out = coalesce_for_test(batch);
         assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn call_control_produces_terminal_timeout_and_cancel_outcomes() {
+        let timed_out = CallId::next();
+        register_call(timed_out, Duration::ZERO);
+        assert_eq!(
+            take_pre_execution_outcome(timed_out),
+            Some(BackendCommandOutcome::TimedOut)
+        );
+
+        let cancelled = CallId::next();
+        register_call(cancelled, Duration::from_secs(1));
+        assert!(cancel_call(cancelled));
+        assert_eq!(
+            take_pre_execution_outcome(cancelled),
+            Some(BackendCommandOutcome::Cancelled)
+        );
     }
 
     fn bundled_backend_script_path(module_slug: &str) -> PathBuf {
@@ -657,6 +852,7 @@ mod tests {
 
         cmd_tx
             .send(BackendServiceCommand {
+                call_id: CallId::from_raw(0),
                 command: "set_volume".to_string(),
                 payload: serde_json::json!({ "device_id": "default", "percent": 42 }),
                 coalesce: false,
@@ -745,6 +941,7 @@ mod tests {
 
         cmd_tx
             .send(BackendServiceCommand {
+                call_id: CallId::from_raw(0),
                 command: "set-volume".to_string(),
                 payload: serde_json::json!({ "percent": 77 }),
                 coalesce: false,
@@ -845,6 +1042,7 @@ mod tests {
 
         cmd_tx
             .send(BackendServiceCommand {
+                call_id: CallId::from_raw(0),
                 command: "fast".to_string(),
                 payload: serde_json::json!({}),
                 coalesce: false,
@@ -909,6 +1107,7 @@ mod tests {
 
         cmd_tx
             .send(BackendServiceCommand {
+                call_id: CallId::from_raw(0),
                 command: "set-current".to_string(),
                 payload: serde_json::json!({ "theme_id": "mesh-default-light" }),
                 coalesce: false,
@@ -959,6 +1158,7 @@ mod tests {
 
         cmd_tx
             .send(BackendServiceCommand {
+                call_id: CallId::from_raw(0),
                 command: "set_volume".to_string(),
                 payload: serde_json::json!({
                     "device_id": "default",
@@ -1010,6 +1210,7 @@ mod tests {
 
         cmd_tx
             .send(BackendServiceCommand {
+                call_id: CallId::from_raw(0),
                 command: "fail".to_string(),
                 payload: serde_json::json!({}),
                 coalesce: false,
@@ -1084,6 +1285,7 @@ mod tests {
 
         cmd_tx
             .send(BackendServiceCommand {
+                call_id: CallId::from_raw(0),
                 command: "play-sound".to_string(),
                 payload: serde_json::json!({ "path": "../blocked.wav" }),
                 coalesce: false,
@@ -1145,6 +1347,7 @@ mod tests {
 
         cmd_tx
             .send(BackendServiceCommand {
+                call_id: CallId::from_raw(0),
                 command: "ping".to_string(),
                 payload: serde_json::json!({}),
                 coalesce: false,
@@ -1192,6 +1395,7 @@ mod tests {
 
         cmd_tx
             .send(BackendServiceCommand {
+                call_id: CallId::from_raw(0),
                 command: "nonexistent-command".to_string(),
                 payload: serde_json::json!({}),
                 coalesce: false,
@@ -1270,6 +1474,7 @@ mod tests {
 
         cmd_tx
             .send(BackendServiceCommand {
+                call_id: CallId::from_raw(0),
                 command: "bad-state".to_string(),
                 payload: serde_json::json!({}),
                 coalesce: false,
@@ -1326,6 +1531,7 @@ mod tests {
 
         cmd_tx
             .send(BackendServiceCommand {
+                call_id: CallId::from_raw(0),
                 command: "fail".to_string(),
                 payload: serde_json::json!({}),
                 coalesce: false,
@@ -1525,6 +1731,7 @@ mod tests {
         // Issue a play command — must return ok=true and update state to "playing"
         cmd_tx
             .send(BackendServiceCommand {
+                call_id: CallId::from_raw(0),
                 command: "play".to_string(),
                 payload: serde_json::json!({ "player_id": "default" }),
                 coalesce: false,
@@ -1558,6 +1765,7 @@ mod tests {
         // Issue next command — must advance the track
         cmd_tx
             .send(BackendServiceCommand {
+                call_id: CallId::from_raw(0),
                 command: "next".to_string(),
                 payload: serde_json::json!({ "player_id": "default" }),
                 coalesce: false,
@@ -1611,6 +1819,7 @@ mod tests {
         // (reference-media returns {ok=false, error="not currently playing"} from on_command_pause when state != "playing")
         cmd_tx
             .send(BackendServiceCommand {
+                call_id: CallId::from_raw(0),
                 command: "pause".to_string(),
                 payload: serde_json::json!({ "player_id": "default" }),
                 coalesce: false,

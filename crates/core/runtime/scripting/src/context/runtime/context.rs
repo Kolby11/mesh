@@ -1,7 +1,9 @@
 use super::super::element_ref::{ElementAction, ElementMetricsStore};
 use super::super::lookup::{lua_err, map_lua_error};
+use super::super::state::ServiceContextState;
 use super::super::{
     PublishedEvent, ScriptDiagnostic, ScriptError, ScriptInterfaceImport, ScriptState,
+    ServiceCallCompletion,
 };
 use super::*;
 use crate::pool;
@@ -25,6 +27,9 @@ use std::sync::{
 #[derive(Debug)]
 pub struct ScriptContext {
     pub module_id: String,
+    /// Stable frontend instance identity used for correlated service-result
+    /// delivery when several components share one Lua VM.
+    pub instance_id: String,
     pub capabilities: CapabilitySet,
     pub state: ScriptState,
     pub(super) optional_interfaces: Arc<HashSet<String>>,
@@ -85,7 +90,13 @@ pub struct ScriptContext {
     /// lower only their requested entry into Lua and cache it for this version.
     pub(super) shared_element_metrics: Arc<Mutex<ElementMetricsStore>>,
     pub(super) cached_self_table: Option<Table>,
-    pub(super) cached_service_payload_fingerprints: Option<Table>,
+    /// Capability-filtered service snapshots for this component instance.
+    /// Never lower the backing map into the shared Lua globals.
+    pub(super) service_context_state: Arc<Mutex<ServiceContextState>>,
+    /// Terminal results for correlated service-call tickets created by this
+    /// context. The shell writes completions through the owning component;
+    /// Luau ticket handles read this store without crossing the VM boundary.
+    pub(super) service_call_completions: Arc<Mutex<HashMap<u64, ServiceCallCompletion>>>,
     /// The module-scoped catalog currently visible to `mesh.i18n.t()`.
     /// The shell replaces this snapshot when its locale changes.
     pub(super) i18n_translations: Arc<Mutex<HashMap<String, String>>>,
@@ -257,6 +268,7 @@ impl ScriptContext {
             .collect();
         Ok(Self {
             module_id,
+            instance_id,
             capabilities,
             state: ScriptState::new(),
             optional_interfaces: Arc::new(HashSet::new()),
@@ -296,7 +308,8 @@ impl ScriptContext {
             last_element_metrics_fingerprint: None,
             shared_element_metrics: Arc::new(Mutex::new(ElementMetricsStore::default())),
             cached_self_table: None,
-            cached_service_payload_fingerprints: None,
+            service_context_state: Arc::new(Mutex::new(ServiceContextState::default())),
+            service_call_completions: Arc::new(Mutex::new(HashMap::new())),
             i18n_translations: Arc::new(Mutex::new(HashMap::new())),
         })
     }
@@ -393,7 +406,8 @@ impl ScriptContext {
     /// called afterward without a subsequent `ensure_initialized()`.
     pub fn uninit(&mut self) {
         self.cached_self_table = None;
-        self.cached_service_payload_fingerprints = None;
+        self.service_context_state.lock().unwrap().clear();
+        self.service_call_completions.lock().unwrap().clear();
         if let Some(env) = self.env_table.take() {
             // One realm per thread, so sever the _ENV graph explicitly to make
             // host callbacks and script closures collectible. Errors are
@@ -449,6 +463,7 @@ impl ScriptContext {
             self.interface_bindings_generation = shared_interface_bindings.generation;
         }
         self.shared_published_events.lock().unwrap().clear();
+        self.service_call_completions.lock().unwrap().clear();
         self.shared_diagnostics.lock().unwrap().clear();
         self.shared_element_actions.lock().unwrap().clear();
         self.changed_storage_keys.lock().unwrap().clear();
