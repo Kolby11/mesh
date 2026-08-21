@@ -21,11 +21,10 @@
 /// - An **interface contract** defines methods, events, and capability names.
 /// - A **backend module** provides an implementation of that contract.
 /// - A **frontend module** consumes the interface through runtime bindings.
-/// - The **registry** tracks discovered contracts and providers.
+/// - The **interface catalog** tracks discovered contracts and providers.
 pub mod compatibility;
 pub mod contract;
 pub mod interface;
-pub mod registry;
 
 pub use compatibility::{
     BidirectionalContractDiff, CompatibilityClass, ContractChange, ContractDiff, diff_contracts,
@@ -41,4 +40,3 @@ pub use interface::{
     ResolvedServiceCatalog, canonical_interface_name, canonical_interface_name_cow,
     canonical_interface_name_owned, service_name_from_interface, service_name_from_interface_cow,
 };
-pub use registry::{ServiceEntry, ServiceError, ServiceRegistry};

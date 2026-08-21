@@ -66,6 +66,10 @@ profile startup, and debug inspection consume one coherent contract/provider
 epoch; an already-published catalog remains unchanged when later registrations
 arrive.
 
+The transitional untyped `ServiceRegistry` has been removed. Shell service
+authority now lives only in the generation-stamped interface catalog; no
+`TypeId`/`Any` backend store remains.
+
 Service contracts now validate recursive named fields, arrays, optional values,
 and `Result` returns across state, events, method inputs, and provider outputs.
 Invalid snapshots preserve the last-known-good state, invalid events and

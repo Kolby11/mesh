@@ -44,7 +44,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/03-service-contracts/improvements.md)
 
-- [ ] Remove the transitional service registry after remaining callers migrate to the generation-stamped catalog.
 - [ ] Introduce an immutable compiled contract containing schemas, operation policy, fingerprints, and declaration provenance.
 - [ ] Generate Luau consumer types, provider stubs, mocks, and contract documentation from compiled contracts.
 - [ ] Model optional service feature groups explicitly and negotiate them per provider, or remove the unsupported claim.

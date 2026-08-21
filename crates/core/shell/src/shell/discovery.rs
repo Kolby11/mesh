@@ -604,7 +604,6 @@ impl Shell {
             theme,
             locale,
             diagnostics: DiagnosticsCollector::new(),
-            services: ServiceRegistry::new(),
             interfaces,
             capability_policy,
             effective_capabilities: Arc::new(HashMap::new()),
