@@ -36,6 +36,18 @@ pub struct ContractDiff {
     pub changes: Vec<ContractChange>,
 }
 
+/// The two compatibility checks needed when an interface contract changes.
+///
+/// `consumer` asks whether consumers compiled against the locked contract can
+/// use the candidate provider. `provider` reverses that question: whether a
+/// provider compiled against the locked contract can serve consumers compiled
+/// against the candidate contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BidirectionalContractDiff {
+    pub consumer: ContractDiff,
+    pub provider: ContractDiff,
+}
+
 impl ContractDiff {
     pub fn class(&self) -> CompatibilityClass {
         self.changes
@@ -60,9 +72,11 @@ impl ContractDiff {
 pub fn diff_contracts(locked: &InterfaceContract, candidate: &InterfaceContract) -> ContractDiff {
     let mut changes = Vec::new();
 
+    diff_identity(locked, candidate, &mut changes);
     diff_state_fields(locked, candidate, &mut changes);
     diff_methods(locked, candidate, &mut changes);
     diff_events(locked, candidate, &mut changes);
+    diff_types(locked, candidate, &mut changes);
     diff_capabilities(locked, candidate, &mut changes);
 
     changes.sort_by(|left, right| {
@@ -74,6 +88,44 @@ pub fn diff_contracts(locked: &InterfaceContract, candidate: &InterfaceContract)
     ContractDiff {
         interface: candidate.interface.clone(),
         changes,
+    }
+}
+
+/// Diff a contract in both upgrade directions.
+pub fn diff_contracts_bidirectional(
+    locked: &InterfaceContract,
+    candidate: &InterfaceContract,
+) -> BidirectionalContractDiff {
+    BidirectionalContractDiff {
+        consumer: diff_contracts(locked, candidate),
+        provider: diff_contracts(candidate, locked),
+    }
+}
+
+fn diff_identity(
+    locked: &InterfaceContract,
+    candidate: &InterfaceContract,
+    changes: &mut Vec<ContractChange>,
+) {
+    if locked.interface != candidate.interface {
+        changes.push(ContractChange {
+            class: CompatibilityClass::Breaking,
+            path: "interface".to_string(),
+            detail: format!(
+                "contract identity changed from '{}' to '{}'",
+                locked.interface, candidate.interface
+            ),
+        });
+    }
+    if locked.version != candidate.version {
+        changes.push(ContractChange {
+            class: CompatibilityClass::Breaking,
+            path: "version".to_string(),
+            detail: format!(
+                "contract version changed from {} to {}",
+                locked.version, candidate.version
+            ),
+        });
     }
 }
 
@@ -90,14 +142,25 @@ fn diff_state_fields(
 
     for field in &locked.state_fields {
         match candidate_fields.get(field.name.as_str()) {
-            None => changes.push(ContractChange {
-                class: CompatibilityClass::Breaking,
-                path: format!("state.{}", field.name),
-                detail: format!(
-                    "state field '{}' was removed; consumers reading it break",
-                    field.name
-                ),
-            }),
+            None => {
+                let optional = is_optional(&field.field_type);
+                changes.push(ContractChange {
+                    class: if optional {
+                        CompatibilityClass::Additive
+                    } else {
+                        CompatibilityClass::Breaking
+                    },
+                    path: format!("state.{}", field.name),
+                    detail: if optional {
+                        format!("optional state field '{}' was removed", field.name)
+                    } else {
+                        format!(
+                            "state field '{}' was removed; consumers reading it break",
+                            field.name
+                        )
+                    },
+                });
+            }
             Some(candidate_type) if *candidate_type != field.field_type => {
                 changes.push(ContractChange {
                     class: CompatibilityClass::Breaking,
@@ -162,6 +225,26 @@ fn diff_methods(
                 ),
             });
         }
+        if method.coalesce != candidate_method.coalesce {
+            changes.push(ContractChange {
+                class: CompatibilityClass::Breaking,
+                path: format!("methods.{}.coalesce", method.name),
+                detail: format!(
+                    "method '{}' coalesce behavior changed from {} to {}",
+                    method.name, method.coalesce, candidate_method.coalesce
+                ),
+            });
+        }
+        if method.state_binding != candidate_method.state_binding {
+            changes.push(ContractChange {
+                class: CompatibilityClass::Breaking,
+                path: format!("methods.{}.stateBinding", method.name),
+                detail: format!(
+                    "method '{}' state binding changed from {:?} to {:?}",
+                    method.name, method.state_binding, candidate_method.state_binding
+                ),
+            });
+        }
         diff_arguments(
             &format!("methods.{}", method.name),
             &method.args,
@@ -209,14 +292,28 @@ fn diff_events(
                 .iter()
                 .find(|other| other.name == field.name)
             {
-                None => changes.push(ContractChange {
-                    class: CompatibilityClass::Breaking,
-                    path: format!("events.{}.{}", event.name, field.name),
-                    detail: format!(
-                        "event '{}' no longer carries payload field '{}'",
-                        event.name, field.name
-                    ),
-                }),
+                None => {
+                    let optional = is_optional(&field.arg_type);
+                    changes.push(ContractChange {
+                        class: if optional {
+                            CompatibilityClass::Additive
+                        } else {
+                            CompatibilityClass::Breaking
+                        },
+                        path: format!("events.{}.{}", event.name, field.name),
+                        detail: if optional {
+                            format!(
+                                "event '{}' no longer carries optional payload field '{}'",
+                                event.name, field.name
+                            )
+                        } else {
+                            format!(
+                                "event '{}' no longer carries payload field '{}'",
+                                event.name, field.name
+                            )
+                        },
+                    });
+                }
                 Some(other) if other.arg_type != field.arg_type => {
                     changes.push(ContractChange {
                         class: CompatibilityClass::Breaking,
@@ -228,6 +325,18 @@ fn diff_events(
                     });
                 }
                 Some(_) => {}
+            }
+        }
+        for field in &candidate_event.payload {
+            if !event.payload.iter().any(|other| other.name == field.name) {
+                changes.push(ContractChange {
+                    class: CompatibilityClass::Additive,
+                    path: format!("events.{}.{}", event.name, field.name),
+                    detail: format!(
+                        "event '{}' payload field '{}' was added",
+                        event.name, field.name
+                    ),
+                });
             }
         }
     }
@@ -243,6 +352,86 @@ fn diff_events(
     }
 }
 
+fn diff_types(
+    locked: &InterfaceContract,
+    candidate: &InterfaceContract,
+    changes: &mut Vec<ContractChange>,
+) {
+    for (name, definition) in &locked.types {
+        let Some(candidate_definition) = candidate.types.get(name) else {
+            changes.push(ContractChange {
+                class: CompatibilityClass::Breaking,
+                path: format!("types.{name}"),
+                detail: format!("named type '{name}' was removed"),
+            });
+            continue;
+        };
+        diff_named_fields(
+            &format!("types.{name}"),
+            &definition.fields,
+            &candidate_definition.fields,
+            changes,
+        );
+    }
+
+    for name in candidate.types.keys() {
+        if !locked.types.contains_key(name) {
+            changes.push(ContractChange {
+                class: CompatibilityClass::Additive,
+                path: format!("types.{name}"),
+                detail: format!("named type '{name}' was added"),
+            });
+        }
+    }
+}
+
+fn diff_named_fields(
+    path: &str,
+    locked: &[InterfaceArgument],
+    candidate: &[InterfaceArgument],
+    changes: &mut Vec<ContractChange>,
+) {
+    for field in locked {
+        match candidate.iter().find(|other| other.name == field.name) {
+            None => changes.push(ContractChange {
+                class: if is_optional(&field.arg_type) {
+                    CompatibilityClass::Additive
+                } else {
+                    CompatibilityClass::Breaking
+                },
+                path: format!("{path}.{}", field.name),
+                detail: if is_optional(&field.arg_type) {
+                    format!("optional named type field '{}' was removed", field.name)
+                } else {
+                    format!("named type field '{}' was removed", field.name)
+                },
+            }),
+            Some(other) if other.arg_type != field.arg_type => changes.push(ContractChange {
+                class: CompatibilityClass::Breaking,
+                path: format!("{path}.{}", field.name),
+                detail: format!(
+                    "named type field '{}' changed type from {} to {}",
+                    field.name, field.arg_type, other.arg_type
+                ),
+            }),
+            Some(_) => {}
+        }
+    }
+    for field in candidate {
+        if !locked.iter().any(|other| other.name == field.name) {
+            changes.push(ContractChange {
+                class: CompatibilityClass::Additive,
+                path: format!("{path}.{}", field.name),
+                detail: format!("named type field '{}' was added", field.name),
+            });
+        }
+    }
+}
+
+fn is_optional(type_expression: &str) -> bool {
+    type_expression.trim().ends_with('?')
+}
+
 /// Arguments are positional at the call site, so a new argument is breaking
 /// unless its type is optional (`T?`) — an optional trailing argument is the
 /// one shape a caller written against the old signature still satisfies.
@@ -255,9 +444,17 @@ fn diff_arguments(
     for (index, argument) in locked.iter().enumerate() {
         match candidate.get(index) {
             None => changes.push(ContractChange {
-                class: CompatibilityClass::Breaking,
+                class: if is_optional(&argument.arg_type) {
+                    CompatibilityClass::Additive
+                } else {
+                    CompatibilityClass::Breaking
+                },
                 path: format!("{path}.args.{}", argument.name),
-                detail: format!("argument '{}' was removed", argument.name),
+                detail: if is_optional(&argument.arg_type) {
+                    format!("optional argument '{}' was removed", argument.name)
+                } else {
+                    format!("argument '{}' was removed", argument.name)
+                },
             }),
             Some(other) if other.arg_type != argument.arg_type => {
                 changes.push(ContractChange {
@@ -519,5 +716,84 @@ mod tests {
                 "capabilities":{"required":["service.audio.read"]}}"#,
         );
         assert!(diff_contracts(&base(), &candidate).is_breaking());
+    }
+
+    #[test]
+    fn named_type_changes_are_diffed_transitively() {
+        let locked = contract(
+            r#"{
+                "state":[{"name":"volume","type":"Volume"}],
+                "types":{"Volume":{"fields":[{"name":"level","type":"float"}]}},
+                "capabilities":{"required":["service.audio.read"]}
+            }"#,
+        );
+        let candidate = contract(
+            r#"{
+                "state":[{"name":"volume","type":"Volume"}],
+                "types":{"Volume":{"fields":[{"name":"level","type":"int"}]}},
+                "capabilities":{"required":["service.audio.read"]}
+            }"#,
+        );
+        let diff = diff_contracts(&locked, &candidate);
+        assert!(diff.breaking_changes().any(|change| {
+            change.path == "types.Volume.level" && change.detail.contains("float to int")
+        }));
+    }
+
+    #[test]
+    fn behavioral_annotations_are_breaking_when_changed() {
+        let locked = contract(
+            r#"{
+                "state":[{"name":"muted","type":"boolean"}],
+                "methods":[{"name":"set_muted","args":[{"name":"muted","type":"boolean"}],"returns":"Result"}],
+                "capabilities":{"required":["service.audio.read"]}
+            }"#,
+        );
+        let candidate = contract(
+            r#"{
+                "state":[{"name":"muted","type":"boolean"}],
+                "methods":[{"name":"set_muted","args":[{"name":"muted","type":"boolean"}],"returns":"Result",
+                    "coalesce":true,"stateBinding":{"field":"muted","fromArg":"muted"}}],
+                "capabilities":{"required":["service.audio.read"]}
+            }"#,
+        );
+        let diff = diff_contracts(&locked, &candidate);
+        assert!(
+            diff.breaking_changes()
+                .any(|change| { change.path == "methods.set_muted.coalesce" })
+        );
+        assert!(
+            diff.breaking_changes()
+                .any(|change| { change.path == "methods.set_muted.stateBinding" })
+        );
+    }
+
+    #[test]
+    fn bidirectional_diff_catches_provider_breakage_from_additions() {
+        let locked = base();
+        let candidate = contract(
+            r#"{
+                "state":[{"name":"percent","type":"float"},{"name":"muted","type":"boolean"},
+                    {"name":"device","type":"string"}],
+                "methods":[{"name":"set_volume","args":[{"name":"percent","type":"float"}],"returns":"Result"}],
+                "events":[{"name":"VolumeChanged","payload":[{"name":"level","type":"float"},
+                    {"name":"device","type":"string"}]}],
+                "capabilities":{"required":["service.audio.read"]}
+            }"#,
+        );
+        let diffs = diff_contracts_bidirectional(&locked, &candidate);
+        assert!(!diffs.consumer.is_breaking());
+        assert!(
+            diffs
+                .provider
+                .breaking_changes()
+                .any(|change| { change.path == "state.device" })
+        );
+        assert!(
+            diffs
+                .provider
+                .breaking_changes()
+                .any(|change| { change.path == "events.VolumeChanged.device" })
+        );
     }
 }

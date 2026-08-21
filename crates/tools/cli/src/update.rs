@@ -57,6 +57,9 @@ pub struct UpdatePlan {
     pub candidates: Vec<CandidateModule>,
     /// Contract changes that break an installed consumer.
     pub breaking: Vec<String>,
+    /// Contract changes where a provider built against the locked contract
+    /// cannot serve consumers built against the candidate contract.
+    pub provider_breaking: Vec<String>,
     /// New required capabilities needing explicit approval.
     pub capability_additions: Vec<(String, Capability, PrivilegeLevel)>,
     /// Modules with local edits, under `EditPolicy::Refuse`.
@@ -76,6 +79,7 @@ pub struct UpdatePlan {
 impl UpdatePlan {
     pub fn is_refused(&self) -> bool {
         !self.breaking.is_empty()
+            || !self.provider_breaking.is_empty()
             || !self.capability_additions.is_empty()
             || !self.edited.is_empty()
             || !self.graph_breaking.is_empty()
@@ -108,7 +112,79 @@ pub fn manifest_at_revision(repository: &Path, revision: &str) -> Result<ModuleM
         ));
     }
     let content = String::from_utf8_lossy(&output.stdout).to_string();
-    ModuleManifest::from_json_str(&content).map_err(|error| error.to_string())
+    let mut manifest =
+        ModuleManifest::from_json_str(&content).map_err(|error| error.to_string())?;
+    resolve_external_contracts_at_revision(repository, revision, &mut manifest)?;
+    Ok(manifest)
+}
+
+#[cfg(test)]
+fn resolve_external_contracts_at_revision(
+    repository: &Path,
+    revision: &str,
+    manifest: &mut ModuleManifest,
+) -> Result<(), String> {
+    let mut declarations = manifest
+        .mesh
+        .interface
+        .iter_mut()
+        .chain(manifest.mesh.interfaces.iter_mut());
+    for declaration in &mut declarations {
+        let Some(serde_json::Value::String(relative_path)) = declaration.contract.as_ref() else {
+            continue;
+        };
+        let relative_path = relative_path.clone();
+        let path = Path::new(&relative_path);
+        if path.as_os_str().is_empty()
+            || path.is_absolute()
+            || path.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::CurDir
+                        | std::path::Component::ParentDir
+                        | std::path::Component::RootDir
+                        | std::path::Component::Prefix(_)
+                )
+            })
+        {
+            return Err(format!(
+                "external contract path '{}' for interface {} is not module-relative",
+                relative_path, declaration.name
+            ));
+        }
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repository)
+            .arg("show")
+            .arg(format!("{revision}:{relative_path}"))
+            .output()
+            .map_err(|error| {
+                format!(
+                    "failed to read external contract '{}' at {revision}: {error}",
+                    relative_path
+                )
+            })?;
+        if !output.status.success() {
+            return Err(format!(
+                "git show {revision}:{relative_path} failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|error| {
+            format!(
+                "external contract '{}' at {revision} is not valid JSON: {error}",
+                relative_path
+            )
+        })?;
+        if !value.is_object() {
+            return Err(format!(
+                "external contract '{}' for interface {} must be a JSON object",
+                relative_path, declaration.name
+            ));
+        }
+        declaration.contract = Some(value);
+    }
+    Ok(())
 }
 
 /// Resolve the revision a git ref currently points at.
@@ -558,12 +634,25 @@ fn classify_contract_changes(plan: &mut UpdatePlan, installed: &BTreeMap<String,
                     "{} no longer declares interface {name}; its consumers break",
                     candidate.module_id
                 ));
+                plan.provider_breaking.push(format!(
+                    "{} no longer declares interface {name}; its providers and consumers break",
+                    candidate.module_id
+                ));
                 continue;
             };
-            let diff = diff_contracts(&locked_contract, &candidate_contract);
-            if diff.class() == CompatibilityClass::Breaking {
-                for change in diff.breaking_changes() {
+            let consumer_diff = diff_contracts(&locked_contract, &candidate_contract);
+            let provider_diff = diff_contracts(&candidate_contract, &locked_contract);
+            if consumer_diff.class() == CompatibilityClass::Breaking {
+                for change in consumer_diff.breaking_changes() {
                     plan.breaking.push(format!(
+                        "{} {name}: {} ({})",
+                        candidate.module_id, change.detail, change.path
+                    ));
+                }
+            }
+            if provider_diff.class() == CompatibilityClass::Breaking {
+                for change in provider_diff.breaking_changes() {
+                    plan.provider_breaking.push(format!(
                         "{} {name}: {} ({})",
                         candidate.module_id, change.detail, change.path
                     ));
@@ -1007,7 +1096,7 @@ mod tests {
     }
 
     #[test]
-    fn a_compatible_contract_change_does_not_refuse_the_update() {
+    fn a_consumer_compatible_change_can_break_old_providers() {
         let installed = BTreeMap::from([(
             "@me/audio".to_string(),
             manifest("@me/audio", "1.0.0", &[], BASE_CONTRACT),
@@ -1031,7 +1120,15 @@ mod tests {
             vec!["service.audio.read".to_string()],
         )]);
         classify_capability_changes(&mut plan, &approvals).unwrap();
-        assert!(!plan.is_refused(), "{:?}", plan.breaking);
+        assert!(plan.breaking.is_empty(), "{:?}", plan.breaking);
+        assert!(plan.is_refused());
+        assert!(
+            plan.provider_breaking
+                .iter()
+                .any(|change| change.contains("state.device")),
+            "{:?}",
+            plan.provider_breaking
+        );
     }
 
     #[test]
@@ -1304,6 +1401,36 @@ mod tests {
             vec!["service.audio.read"]
         );
         transaction.abort().unwrap();
+        std::fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn revision_only_planning_reads_external_candidate_contracts() {
+        let (workspace, root_path, _installed, lock, installed_manifests) =
+            staged_graph_fixture("revision-only");
+        let modules_dir = root_path.parent().unwrap().join("modules");
+        let approvals = BTreeMap::from([(
+            "@me/audio".to_string(),
+            vec!["service.audio.read".to_string()],
+        )]);
+
+        let plan = plan_update(
+            &modules_dir,
+            &lock,
+            None,
+            EditPolicy::Replace,
+            &installed_manifests,
+            &approvals,
+        )
+        .unwrap();
+
+        assert!(
+            plan.breaking
+                .iter()
+                .any(|change| change.contains("set_volume")),
+            "revision-only planning skipped the external candidate contract: {:?}",
+            plan.breaking
+        );
         std::fs::remove_dir_all(workspace).unwrap();
     }
 

@@ -27,7 +27,10 @@ pub mod contract;
 pub mod interface;
 pub mod registry;
 
-pub use compatibility::{CompatibilityClass, ContractChange, ContractDiff, diff_contracts};
+pub use compatibility::{
+    BidirectionalContractDiff, CompatibilityClass, ContractChange, ContractDiff, diff_contracts,
+    diff_contracts_bidirectional,
+};
 pub use contract::{
     BaseType, ContractCapabilities, ContractError, ContractStateField, InterfaceArgument,
     InterfaceContract, InterfaceEvent, InterfaceMethod, InterfaceTypeDef, StateBinding, TypeExpr,

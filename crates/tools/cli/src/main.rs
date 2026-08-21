@@ -1144,6 +1144,9 @@ fn cmd_update(args: &[String]) {
     for breaking in &plan.breaking {
         eprintln!("breaking: {breaking}");
     }
+    for breaking in &plan.provider_breaking {
+        eprintln!("provider-breaking: {breaking}");
+    }
     for (module_id, capability, level) in &plan.capability_additions {
         eprintln!("{module_id} now requests {level:?} capability {capability}");
     }

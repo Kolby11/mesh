@@ -44,7 +44,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/03-service-contracts/improvements.md)
 
-- [ ] Diff executable consumer/provider contracts in both directions, including external candidate contracts and behavioral annotations.
 - [ ] Canonicalize contract identities and make graph, runtime, LSP, codegen, docs, and diagnostics consume one compiled artifact.
 - [ ] Remove the transitional service registry after remaining callers migrate to the generation-stamped catalog.
 - [ ] Introduce an immutable compiled contract containing schemas, operation policy, fingerprints, and declaration provenance.

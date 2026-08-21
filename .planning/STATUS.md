@@ -86,6 +86,14 @@ share active-provider and terminal-generation filtering. Late messages from
 stopped or replaced providers are rejected, while explicit stop/failure paths
 publish unavailable state and health through normal service delivery.
 
+Service compatibility now diffs the executable contract in both consumer and
+provider directions, including recursive named types, identity/version,
+event-payload additions, `coalesce`, and `stateBinding`. Revision-only update
+planning resolves external contracts from the candidate Git revision before
+classification, and provider-side breakage is reported independently. Cargo
+verification remains blocked by the unavailable `sha2` registry cache and
+network access; formatting and whitespace checks pass.
+
 The guarded `scripts/codex-backlog-runner.sh` can process one unchecked backlog
 item at a time directly on `main`, using Codex's explicit unrestricted mode for
 unattended turns by default (`CODEX_ALLOW_ALL=0` opts back into workspace-write),
