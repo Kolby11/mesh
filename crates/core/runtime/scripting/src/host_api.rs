@@ -27,6 +27,7 @@
 /// mesh.log.error(msg)
 /// ```
 use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_service::{InterfaceContract, service_name_from_interface};
 use std::collections::HashSet;
 
 /// Describes what host APIs should be injected based on capabilities.
@@ -122,6 +123,46 @@ impl InterfaceProxy {
             }
         }
     }
+
+    /// Evaluate the contract-resolved read policy. A declared policy is
+    /// authoritative even for third-party interface names; only contracts
+    /// without any policy use the legacy service-name compatibility rule.
+    pub fn can_read_contract(caps: &CapabilitySet, contract: &InterfaceContract) -> bool {
+        capability_policy_granted(caps, contract.capabilities.read_policy().as_deref())
+            .unwrap_or_else(|| Self::can_read(caps, &contract.interface))
+    }
+
+    pub fn can_subscribe_contract_event(
+        caps: &CapabilitySet,
+        contract: &InterfaceContract,
+        event: &str,
+    ) -> bool {
+        capability_policy_granted(caps, contract.capabilities.event_policy(event).as_deref())
+            .unwrap_or_else(|| Self::can_read(caps, &contract.interface))
+    }
+
+    pub fn can_call_contract_method(
+        caps: &CapabilitySet,
+        contract: &InterfaceContract,
+        method: &str,
+    ) -> bool {
+        capability_policy_granted(caps, contract.capabilities.method_policy(method).as_deref())
+            .unwrap_or_else(|| {
+                caps.is_granted(&Capability::new(format!(
+                    "service.{}.control",
+                    service_name_from_interface(&contract.interface)
+                )))
+            })
+    }
+}
+
+fn capability_policy_granted(caps: &CapabilitySet, policy: Option<&[String]>) -> Option<bool> {
+    policy.map(|requirements| {
+        !requirements.is_empty()
+            && requirements
+                .iter()
+                .all(|required| caps.is_granted(&Capability::new(required)))
+    })
 }
 
 fn service_name_from_capability(capability: &str) -> Option<&str> {
@@ -144,4 +185,53 @@ fn service_capability_matches(capability: &str, service_name: &str, action: &str
         return false;
     };
     candidate_service == service_name && candidate_action == action
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mesh_core_service::parse_interface_contract;
+
+    fn thermal_contract() -> InterfaceContract {
+        parse_interface_contract(
+            "alice.thermal",
+            "1.0",
+            &serde_json::json!({
+                "state": [{ "name": "temperature", "type": "float" }],
+                "methods": [{ "name": "calibrate" }],
+                "events": [{ "name": "Changed" }],
+                "capabilities": {
+                    "read": ["alice.thermal.observe"],
+                    "events": { "Changed": ["alice.thermal.subscribe"] },
+                    "methods": { "calibrate": ["alice.thermal.calibrate"] }
+                }
+            }),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn custom_contract_policy_is_used_for_all_operations() {
+        let contract = thermal_contract();
+        let mut observe = CapabilitySet::new();
+        observe.grant(Capability::new("alice.thermal.observe"));
+        assert!(InterfaceProxy::can_read_contract(&observe, &contract));
+        assert!(!InterfaceProxy::can_subscribe_contract_event(
+            &observe, &contract, "Changed"
+        ));
+        assert!(!InterfaceProxy::can_call_contract_method(
+            &observe,
+            &contract,
+            "calibrate"
+        ));
+
+        let mut control = CapabilitySet::new();
+        control.grant(Capability::new("alice.thermal.calibrate"));
+        assert!(InterfaceProxy::can_call_contract_method(
+            &control,
+            &contract,
+            "calibrate"
+        ));
+        assert!(!InterfaceProxy::can_read_contract(&control, &contract));
+    }
 }

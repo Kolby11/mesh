@@ -438,6 +438,20 @@ impl ScriptContext {
         self.load_script_with_interface_imports(source, &[])
     }
 
+    /// Check the active contract policy for a service-state read. This is the
+    /// same resolved binding used by `require` and keeps shell-side cached
+    /// payload delivery from falling back to interface-name conventions.
+    pub fn can_read_service_interface(&self, interface: &str) -> bool {
+        let canonical = crate::host_api::InterfaceProxy::canonical_name(interface);
+        let resolution = self.interface_catalog.resolve(&canonical, None);
+        resolution.contract.as_ref().map_or_else(
+            || crate::host_api::InterfaceProxy::can_read(&self.capabilities, &canonical),
+            |contract| {
+                crate::host_api::InterfaceProxy::can_read_contract(&self.capabilities, contract)
+            },
+        )
+    }
+
     /// Load a script source after installing explicit interface imports as Lua globals.
     pub fn load_script_with_interface_imports(
         &mut self,

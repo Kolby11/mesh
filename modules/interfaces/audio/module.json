@@ -100,7 +100,19 @@
         },
         "capabilities": {
           "required": ["service.audio.read"],
-          "optional": ["service.audio.control"]
+          "optional": ["service.audio.control"],
+          "read": ["service.audio.read"],
+          "events": {
+            "VolumeChanged": ["service.audio.read"]
+          },
+          "methods": {
+            "set_volume": ["service.audio.control"],
+            "set_muted": ["service.audio.control"],
+            "volume_up": ["service.audio.control"],
+            "volume_down": ["service.audio.control"],
+            "toggle_mute": ["service.audio.control"],
+            "play_sound": ["service.audio.control"]
+          }
         }
       }
     }

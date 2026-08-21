@@ -320,6 +320,27 @@ fn diff_capabilities(
             });
         }
     }
+    if locked.capabilities.read != candidate.capabilities.read {
+        changes.push(ContractChange {
+            class: CompatibilityClass::Breaking,
+            path: "capabilities.read".to_string(),
+            detail: "the state-read operation policy changed".to_string(),
+        });
+    }
+    if locked.capabilities.events != candidate.capabilities.events {
+        changes.push(ContractChange {
+            class: CompatibilityClass::Breaking,
+            path: "capabilities.events".to_string(),
+            detail: "the event-subscription operation policy changed".to_string(),
+        });
+    }
+    if locked.capabilities.methods != candidate.capabilities.methods {
+        changes.push(ContractChange {
+            class: CompatibilityClass::Breaking,
+            path: "capabilities.methods".to_string(),
+            detail: "the method operation policy changed".to_string(),
+        });
+    }
 }
 
 #[cfg(test)]
@@ -349,6 +370,28 @@ mod tests {
         let diff = diff_contracts(&base(), &base());
         assert_eq!(diff.class(), CompatibilityClass::Compatible);
         assert!(diff.changes.is_empty());
+    }
+
+    #[test]
+    fn operation_policy_changes_are_breaking() {
+        let candidate = contract(
+            r#"{
+                "state": [{"name":"percent","type":"float"}],
+                "methods": [{"name":"set_volume","returns":"Result"}],
+                "events": [],
+                "capabilities": {
+                    "required":["service.audio.read"],
+                    "read":["service.audio.observe"]
+                }
+            }"#,
+        );
+        let diff = diff_contracts(&base(), &candidate);
+        assert_eq!(diff.class(), CompatibilityClass::Breaking);
+        assert!(
+            diff.changes
+                .iter()
+                .any(|change| change.path == "capabilities.read")
+        );
     }
 
     #[test]

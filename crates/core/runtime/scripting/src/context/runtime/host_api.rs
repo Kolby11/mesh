@@ -413,10 +413,18 @@ impl ScriptContext {
                 };
 
                 let canonical = InterfaceProxy::canonical_name(&interface);
-                let readable = canonical == "mesh.theme" && has_theme_read
-                    || canonical == "mesh.locale" && has_locale_read
-                    || allowed_interfaces.contains(&canonical)
-                    || !canonical.starts_with("mesh.");
+                let resolution = interface_catalog.resolve(&canonical, version.as_deref());
+                let readable = resolution.contract.as_ref().map_or_else(
+                    || {
+                        canonical == "mesh.theme" && has_theme_read
+                            || canonical == "mesh.locale" && has_locale_read
+                            || allowed_interfaces.contains(&canonical)
+                            || !canonical.starts_with("mesh.")
+                    },
+                    |contract| {
+                        InterfaceProxy::can_read_contract(&capabilities_for_require, contract)
+                    },
+                );
                 if canonical.starts_with("mesh.") && !readable {
                     return Err(record_lookup_diagnostic_lua(
                         &diagnostics_for_require,
@@ -428,8 +436,6 @@ impl ScriptContext {
                         ScriptError::CapabilityDenied(canonical.clone()),
                     ));
                 }
-
-                let resolution = interface_catalog.resolve(&canonical, version.as_deref());
                 if resolution.provider.is_none() {
                     if optional_interfaces_for_require.contains(&canonical) {
                         return Ok(LuaValue::Nil);
@@ -552,10 +558,18 @@ impl ScriptContext {
         let globals = self.env().clone();
         for import in imports {
             let canonical = InterfaceProxy::canonical_name(&import.interface);
-            let readable = canonical == "mesh.theme" && manifest.has_theme_read
-                || canonical == "mesh.locale" && manifest.has_locale_read
-                || manifest.interface_capabilities.contains(&canonical)
-                || !canonical.starts_with("mesh.");
+            let resolution = self
+                .interface_catalog
+                .resolve(&canonical, import.version.as_deref());
+            let readable = resolution.contract.as_ref().map_or_else(
+                || {
+                    canonical == "mesh.theme" && manifest.has_theme_read
+                        || canonical == "mesh.locale" && manifest.has_locale_read
+                        || manifest.interface_capabilities.contains(&canonical)
+                        || !canonical.starts_with("mesh.")
+                },
+                |contract| InterfaceProxy::can_read_contract(&self.capabilities, contract),
+            );
             if canonical.starts_with("mesh.") && !readable {
                 record_lookup_diagnostic(
                     &self.shared_diagnostics,
@@ -567,10 +581,6 @@ impl ScriptContext {
                 );
                 return Err(ScriptError::CapabilityDenied(canonical));
             }
-
-            let resolution = self
-                .interface_catalog
-                .resolve(&canonical, import.version.as_deref());
             if resolution.provider.is_none() {
                 // Optional interfaces resolve to `nil` rather than aborting: the
                 // script's own `require("mesh.x")` then returns nil via the lazy

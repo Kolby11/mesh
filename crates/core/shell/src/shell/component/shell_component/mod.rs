@@ -234,11 +234,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         };
         for (instance_key, runtime) in runtimes.iter_mut() {
             let observes_event = Self::runtime_observes_service_event(runtime, event);
-            let capabilities = &runtime.script_ctx.capabilities;
-            let has_read = mesh_core_scripting::host_api::InterfaceProxy::can_read_service(
-                capabilities,
-                service_name,
-            );
+            let has_read = runtime.script_ctx.can_read_service_interface(service);
             if !has_read && !observes_event {
                 self.sync_runtime_generation(
                     instance_key,

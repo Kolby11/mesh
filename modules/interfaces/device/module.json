@@ -74,7 +74,8 @@
           }
         ],
         "capabilities": {
-          "required": ["service.device.read"]
+          "required": ["service.device.read"],
+          "read": ["service.device.read"]
         }
       }
     }

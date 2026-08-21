@@ -308,7 +308,11 @@ An interface is a named, versioned declaration of:
 - **Methods** — request/response commands routed to the active provider.
 - **Events** — typed channels owned by the active provider.
 - **Types** — shared structs used by state, methods, events.
-- **Consumer capabilities** — what a *consumer* needs to read/control it.
+- **Consumer capabilities** — what a *consumer* needs to read/control it. The
+  compiled contract may declare `capabilities.read`, per-event
+  `capabilities.events`, and per-method `capabilities.methods` requirements;
+  these policies are authoritative for custom interface names and are checked
+  at activation, proxy creation, delivery, subscription, and dispatch.
 - **Shared props** — user preferences that survive provider swaps
   ([08 §4](08-settings.md)).
 
@@ -362,7 +366,15 @@ the contract inline:
             ]
           }
         ],
-        "capabilities": { "required": ["service.audio.read"] }
+        "capabilities": {
+          "required": ["service.audio.read"],
+          "read": ["service.audio.read"],
+          "events": { "VolumeChanged": ["service.audio.read"] },
+          "methods": {
+            "set_volume": ["service.audio.control"],
+            "set_muted": ["service.audio.control"]
+          }
+        }
       }
     }
   }

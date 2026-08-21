@@ -91,8 +91,14 @@ fn diagnose_frontend_requirements(
     for requirements in frontend_requirements.values() {
         for interface in requirements.backend.keys() {
             if let Some(capabilities) = contract_capabilities.get(interface) {
-                for required in &capabilities.required {
-                    if !requirements.capabilities.iter().any(|cap| cap == required) {
+                let mut required_capabilities = capabilities.required.clone();
+                if let Some(read_policy) = capabilities.read_policy() {
+                    required_capabilities.extend(read_policy);
+                }
+                required_capabilities.sort();
+                required_capabilities.dedup();
+                for required in required_capabilities {
+                    if !requirements.capabilities.iter().any(|cap| cap == &required) {
                         diagnostics.push(ModuleGraphDiagnostic {
                             module_id: requirements.module_id.clone(),
                             contribution_id: Some(format!(

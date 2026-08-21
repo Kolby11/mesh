@@ -83,6 +83,65 @@ pub struct InterfaceTypeDef {
 pub struct ContractCapabilities {
     pub required: Vec<String>,
     pub optional: Vec<String>,
+    /// Capability requirements for reading the state projection. When absent
+    /// on a legacy contract, callers may use the compatibility policy.
+    pub read: Vec<String>,
+    /// Capability requirements keyed by declared event name.
+    pub events: HashMap<String, Vec<String>>,
+    /// Capability requirements keyed by declared method name.
+    pub methods: HashMap<String, Vec<String>>,
+}
+
+impl ContractCapabilities {
+    fn has_legacy_declaration(&self) -> bool {
+        !self.required.is_empty() || !self.optional.is_empty()
+    }
+
+    /// Return the explicit read policy, or the legacy read subset when the
+    /// contract predates operation policies. `None` means use compatibility
+    /// behavior for an entirely undeclared test/legacy contract.
+    pub fn read_policy(&self) -> Option<Vec<String>> {
+        if !self.read.is_empty() {
+            Some(self.read.clone())
+        } else if self.has_legacy_declaration() {
+            Some(
+                self.required
+                    .iter()
+                    .filter(|capability| capability.ends_with(".read"))
+                    .cloned()
+                    .collect(),
+            )
+        } else {
+            None
+        }
+    }
+
+    pub fn event_policy(&self, event: &str) -> Option<Vec<String>> {
+        self.events
+            .get(event)
+            .cloned()
+            .or_else(|| self.read_policy())
+    }
+
+    /// Method policies fall back to declared control capabilities for legacy
+    /// contracts. An explicit empty list remains a deliberate deny-all policy.
+    pub fn method_policy(&self, method: &str) -> Option<Vec<String>> {
+        if let Some(policy) = self.methods.get(method) {
+            return Some(policy.clone());
+        }
+        if self.has_legacy_declaration() {
+            Some(
+                self.required
+                    .iter()
+                    .chain(self.optional.iter())
+                    .filter(|capability| capability.ends_with(".control"))
+                    .cloned()
+                    .collect(),
+            )
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -278,6 +337,9 @@ pub fn parse_interface_contract(
         capabilities: ContractCapabilities {
             required: parsed.capabilities.required,
             optional: parsed.capabilities.optional,
+            read: parsed.capabilities.read,
+            events: parsed.capabilities.events,
+            methods: parsed.capabilities.methods,
         },
     };
 
@@ -434,6 +496,28 @@ pub fn contract_type_errors(contract: &InterfaceContract) -> Vec<String> {
             );
         }
     }
+    for event in contract.capabilities.events.keys() {
+        if !contract
+            .events
+            .iter()
+            .any(|declared| declared.name == *event)
+        {
+            errors.push(format!(
+                "capabilities.events references undeclared event '{event}'"
+            ));
+        }
+    }
+    for method in contract.capabilities.methods.keys() {
+        if !contract
+            .methods
+            .iter()
+            .any(|declared| declared.name == *method)
+        {
+            errors.push(format!(
+                "capabilities.methods references undeclared method '{method}'"
+            ));
+        }
+    }
     for def in contract.types.values() {
         for field in &def.fields {
             check(
@@ -559,6 +643,12 @@ struct ContractCapabilitiesJson {
     required: Vec<String>,
     #[serde(default)]
     optional: Vec<String>,
+    #[serde(default)]
+    read: Vec<String>,
+    #[serde(default)]
+    events: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    methods: HashMap<String, Vec<String>>,
 }
 
 impl ContractFieldJson {
@@ -651,6 +741,42 @@ mod tests {
         assert_eq!(parsed.methods[0].name, "set_percent");
         assert_eq!(parsed.events[0].name, "Changed");
         assert!(parsed.types.contains_key("Device"));
+    }
+
+    #[test]
+    fn compiles_explicit_operation_capability_policy() {
+        let contract = serde_json::json!({
+            "state": [{ "name": "temperature", "type": "float" }],
+            "methods": [{ "name": "calibrate", "returns": "Result" }],
+            "events": [{ "name": "Changed" }],
+            "capabilities": {
+                "read": ["alice.thermal.observe"],
+                "events": { "Changed": ["alice.thermal.subscribe"] },
+                "methods": { "calibrate": ["alice.thermal.calibrate"] }
+            }
+        });
+        let parsed = parse_interface_contract("alice.thermal", "1.0", &contract).unwrap();
+        assert_eq!(
+            parsed.capabilities.read_policy(),
+            Some(vec!["alice.thermal.observe".to_string()])
+        );
+        assert_eq!(
+            parsed.capabilities.event_policy("Changed"),
+            Some(vec!["alice.thermal.subscribe".to_string()])
+        );
+        assert_eq!(
+            parsed.capabilities.method_policy("calibrate"),
+            Some(vec!["alice.thermal.calibrate".to_string()])
+        );
+    }
+
+    #[test]
+    fn rejects_operation_policy_for_unknown_declaration() {
+        let contract = serde_json::json!({
+            "capabilities": { "methods": { "calibrate": ["alice.thermal.calibrate"] } }
+        });
+        let err = parse_interface_contract("alice.thermal", "1.0", &contract).unwrap_err();
+        assert!(err.to_string().contains("undeclared method 'calibrate'"));
     }
 
     #[test]

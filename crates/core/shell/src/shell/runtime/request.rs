@@ -1038,7 +1038,21 @@ impl Shell {
         let interface_canonical = canonical_interface_name_cow(interface);
         let service_caps = service_capabilities(interface_canonical.as_ref());
         let required = &service_caps.control;
-        if !source_capabilities.is_granted(required) {
+        let contract = self
+            .interfaces
+            .resolve(interface_canonical.as_ref(), None)
+            .contract;
+        let authorized = contract.as_ref().map_or_else(
+            || source_capabilities.is_granted(required),
+            |contract| {
+                mesh_core_scripting::host_api::InterfaceProxy::can_call_contract_method(
+                    source_capabilities,
+                    contract,
+                    command,
+                )
+            },
+        );
+        if !authorized {
             tracing::warn!(
                 source_module_id,
                 interface,

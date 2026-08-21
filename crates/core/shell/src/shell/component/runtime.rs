@@ -1524,13 +1524,10 @@ fn validate_json_prop(
 
 pub(super) fn script_has_service_read(
     script_ctx: &ScriptContext,
-    _interface: &str,
-    service_name: &str,
+    interface: &str,
+    _service_name: &str,
 ) -> bool {
-    mesh_core_scripting::host_api::InterfaceProxy::can_read_service(
-        &script_ctx.capabilities,
-        service_name,
-    )
+    script_ctx.can_read_service_interface(interface)
 }
 
 impl FrontendSurfaceComponent {

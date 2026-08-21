@@ -52,6 +52,13 @@ the last provider value. The focused shell regression is present, but Cargo
 execution remains blocked by the unavailable `sha2` registry cache and network
 access.
 
+Service contracts now compile explicit `read`, per-event subscription, and
+per-method capability policies. The resolved contract policy is enforced at
+frontend activation diagnostics, Luau proxy creation and operation calls,
+event subscription, cached/live state delivery, and shell dispatch, including
+third-party interface names; legacy contracts retain a narrow compatibility
+fallback. Policy changes are included in contract compatibility diffs.
+
 The guarded `scripts/codex-backlog-runner.sh` can process one unchecked backlog
 item at a time directly on `main`, using Codex's explicit unrestricted mode for
 unattended turns by default (`CODEX_ALLOW_ALL=0` opts back into workspace-write),

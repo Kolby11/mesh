@@ -100,6 +100,8 @@ pub(super) fn create_service_proxy(
             })
             .unwrap_or_default(),
         Arc::clone(&subscribed_interface_events),
+        contract.clone(),
+        source_capabilities.clone(),
     )?;
     let state_for_index = state_proxy.clone();
     let events_for_index = events_proxy.clone();
@@ -128,6 +130,7 @@ pub(super) fn create_service_proxy(
         })
         .unwrap_or_default();
 
+    let contract_for_index = contract.clone();
     let index_scope = scope.clone();
     meta.set(
         "__index",
@@ -142,18 +145,27 @@ pub(super) fn create_service_proxy(
                 && !method_names.contains(&key)
                 && !state_field_names.contains(&key)
             {
+                let event_allowed = contract_for_index.as_ref().map_or(true, |contract| {
+                    crate::host_api::InterfaceProxy::can_subscribe_contract_event(
+                        &source_capabilities,
+                        contract,
+                        &key,
+                    )
+                });
                 return interface_event_channel(
                     lua,
                     &index_scope,
                     &service_name,
                     &key,
                     Some(Arc::clone(&subscribed_interface_events)),
+                    event_allowed,
                 )
                 .map(LuaValue::Table);
             }
             // Case A: known contract method — dispatch as a service command.
             if let Some(method) = methods.iter().find(|m| m.name == key) {
                 let required_capability = service_control_capability(&service_name);
+                let method_contract = contract_for_index.clone();
                 let method = method.clone();
                 let iface = interface_name.clone();
                 let events = Arc::clone(&published_events);
@@ -164,7 +176,17 @@ pub(super) fn create_service_proxy(
                 let service_call_completions = Arc::clone(&service_call_completions);
                 return Ok(LuaValue::Function(lua.create_function(
                     move |lua, args: mlua::Variadic<LuaValue>| {
-                        if !source_capabilities.is_granted(&required_capability) {
+                        let authorized = method_contract.as_ref().map_or_else(
+                            || source_capabilities.is_granted(&required_capability),
+                            |contract| {
+                                crate::host_api::InterfaceProxy::can_call_contract_method(
+                                    &source_capabilities,
+                                    contract,
+                                    &method.name,
+                                )
+                            },
+                        );
+                        if !authorized {
                             return command_result_table(
                                 lua,
                                 false,
@@ -239,6 +261,8 @@ pub(super) fn create_events_proxy(
     service_name: &str,
     event_names: Vec<String>,
     subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
+    contract: Option<Arc<InterfaceContract>>,
+    source_capabilities: CapabilitySet,
 ) -> mlua::Result<Table> {
     let events = lua.create_table()?;
     for name in event_names {
@@ -250,6 +274,13 @@ pub(super) fn create_events_proxy(
                 service_name,
                 &name,
                 Some(Arc::clone(&subscribed_interface_events)),
+                contract.as_ref().map_or(true, |contract| {
+                    crate::host_api::InterfaceProxy::can_subscribe_contract_event(
+                        &source_capabilities,
+                        contract,
+                        &name,
+                    )
+                }),
             )?,
         )?;
     }
@@ -267,6 +298,7 @@ pub(super) fn interface_event_channel(
     service_name: &str,
     event_name: &str,
     subscribed_interface_events: Option<Arc<Mutex<HashMap<String, HashMap<String, usize>>>>>,
+    subscription_allowed: bool,
 ) -> mlua::Result<Table> {
     let registry = match scope.raw_get::<LuaValue>("__mesh_interface_event_channels")? {
         LuaValue::Table(table) => table,
@@ -287,10 +319,14 @@ pub(super) fn interface_event_channel(
     match service_table.raw_get::<LuaValue>(event_name)? {
         LuaValue::Table(channel) => Ok(channel),
         _ => {
-            let channel = create_event_channel(
+            let channel = create_event_channel_with_policy(
                 lua,
                 subscribed_interface_events,
                 Some((service_name.to_string(), event_name.to_string())),
+                subscription_allowed,
+                Some(format!(
+                    "capability denied for service event '{service_name}.{event_name}'"
+                )),
             )?;
             service_table.raw_set(event_name, channel.clone())?;
             Ok(channel)
@@ -303,12 +339,35 @@ pub(super) fn create_event_channel(
     subscribed_interface_events: Option<Arc<Mutex<HashMap<String, HashMap<String, usize>>>>>,
     subscription_key: Option<(String, String)>,
 ) -> mlua::Result<Table> {
+    create_event_channel_with_policy(
+        lua,
+        subscribed_interface_events,
+        subscription_key,
+        true,
+        None,
+    )
+}
+
+fn create_event_channel_with_policy(
+    lua: &Lua,
+    subscribed_interface_events: Option<Arc<Mutex<HashMap<String, HashMap<String, usize>>>>>,
+    subscription_key: Option<(String, String)>,
+    subscription_allowed: bool,
+    denial_message: Option<String>,
+) -> mlua::Result<Table> {
     let channel = lua.create_table()?;
     let subscribers = lua.create_table()?;
     channel.set("__subscribers", subscribers.clone())?;
     channel.set(
         "subscribe",
         lua.create_function(move |lua, (table, callback): (Table, Function)| {
+            if !subscription_allowed {
+                return Err(mlua::Error::runtime(
+                    denial_message
+                        .clone()
+                        .unwrap_or_else(|| "capability denied".to_string()),
+                ));
+            }
             let subscribers: Table = table.get("__subscribers")?;
             let id = subscribers.raw_len() + 1;
             subscribers.raw_set(id, callback)?;

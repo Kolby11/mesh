@@ -107,7 +107,7 @@ impl ScriptContext {
     ) -> Result<(), ScriptError> {
         self.ensure_initialized()?;
         let scope = self.env().clone();
-        let channel = interface_event_channel(self.lua(), &scope, service, event_name, None)
+        let channel = interface_event_channel(self.lua(), &scope, service, event_name, None, true)
             .map_err(lua_err)?;
         let emit = channel.get::<Function>("emit").map_err(lua_err)?;
         let lua_payload = self.lua().to_value(payload).map_err(lua_err)?;
