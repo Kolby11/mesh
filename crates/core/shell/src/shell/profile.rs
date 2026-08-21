@@ -140,9 +140,28 @@ pub(super) struct PendingProfileSwitch {
     prepared_frontends: Vec<PreparedProfileFrontend>,
     candidate_backends: HashMap<String, BackendRuntimeSlot>,
     waiting_backends: HashSet<String>,
+    candidate_started: HashSet<String>,
+    candidate_initial_states: HashMap<String, serde_json::Value>,
 }
 
 impl Shell {
+    pub(in crate::shell) fn profile_candidate_is_pending(
+        &self,
+        interface: &str,
+        provider_id: &str,
+    ) -> bool {
+        self.pending_profile_switch
+            .as_ref()
+            .and_then(|pending| pending.candidate_backends.get(interface))
+            .is_some_and(|slot| {
+                *slot
+                    .event_provider_id
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    == provider_id
+            })
+    }
+
     pub(in crate::shell) fn apply_node_slot_edit(
         &mut self,
         profile_id: &str,
@@ -669,6 +688,8 @@ impl Shell {
             prepared_frontends,
             candidate_backends: HashMap::new(),
             waiting_backends: HashSet::new(),
+            candidate_started: HashSet::new(),
+            candidate_initial_states: HashMap::new(),
         };
         if !changed.is_empty() {
             let Some(ctx) = self.backend_respawn.clone() else {
@@ -718,6 +739,7 @@ impl Shell {
         provider_id: &str,
         status: BackendRuntimeStatus,
     ) -> bool {
+        let needs_initial_state = self.service_requires_initial_state(interface);
         let Some(pending) = self.pending_profile_switch.as_mut() else {
             return false;
         };
@@ -735,7 +757,10 @@ impl Shell {
             return false;
         }
         if status == BackendRuntimeStatus::Running {
-            pending.waiting_backends.remove(interface);
+            pending.candidate_started.insert(interface.to_string());
+            if !needs_initial_state || pending.candidate_initial_states.contains_key(interface) {
+                pending.waiting_backends.remove(interface);
+            }
             if pending.waiting_backends.is_empty() {
                 let requests = self.commit_pending_profile_switch();
                 self.deferred_requests.extend(requests);
@@ -750,6 +775,56 @@ impl Shell {
                 "provider {provider_id} failed to initialize for {interface}"
             ));
         }
+        true
+    }
+
+    pub(in crate::shell) fn capture_profile_backend_update(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        event: ServiceEvent,
+    ) -> bool {
+        let Some(pending) = self.pending_profile_switch.as_ref() else {
+            return false;
+        };
+        let Some(candidate) = pending.candidate_backends.get(interface) else {
+            return false;
+        };
+        let is_candidate = candidate
+            .event_provider_id
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_str()
+            == provider_id;
+        if !is_candidate {
+            return false;
+        }
+        let actual_provider_id = candidate.provider_id.clone();
+        let ServiceEvent::Updated { payload, .. } = self.normalize_service_event(event) else {
+            return true;
+        };
+        if !self.validate_service_state_shape(interface, &actual_provider_id, &payload) {
+            self.abort_pending_profile_switch(format!(
+                "provider {actual_provider_id} emitted an invalid initial service snapshot for {interface}"
+            ));
+            return true;
+        }
+        let should_commit = if let Some(pending) = self.pending_profile_switch.as_mut() {
+            pending
+                .candidate_initial_states
+                .insert(interface.to_string(), payload);
+            if pending.candidate_started.contains(interface) {
+                pending.waiting_backends.remove(interface);
+            }
+            pending.waiting_backends.is_empty()
+        } else {
+            false
+        };
+        if should_commit {
+            let requests = self.commit_pending_profile_switch();
+            self.deferred_requests.extend(requests);
+        }
+        tracing::debug!(interface, provider_id, "buffered prepared profile snapshot");
         true
     }
 
@@ -788,6 +863,9 @@ impl Shell {
             requests.extend(prepared.requests);
             self.register_component(Box::new(prepared.component));
         }
+        let initial_states = std::mem::take(&mut pending.candidate_initial_states);
+        let mut prepared_states = Vec::new();
+        let mut ready_providers = Vec::new();
 
         let obsolete = self
             .backend_runtimes
@@ -799,6 +877,8 @@ impl Shell {
             self.stop_backend_runtime(&interface);
         }
         for (interface, slot) in pending.candidate_backends {
+            let initial_state = initial_states.get(&interface).cloned();
+            let provider_id = slot.provider_id.clone();
             *slot
                 .event_provider_id
                 .write()
@@ -806,6 +886,10 @@ impl Shell {
             self.backend_supervision.remove(&interface);
             self.replace_backend_runtime(interface.clone(), slot);
             self.note_backend_running(&interface);
+            ready_providers.push((interface.clone(), provider_id.clone()));
+            if let Some(payload) = initial_state {
+                prepared_states.push((interface, provider_id, payload));
+            }
         }
 
         let old_theme = self.settings.theme.active.clone();
@@ -852,6 +936,30 @@ impl Shell {
             .expect("candidate graph was installed")
             .clone();
         self.register_interfaces_from_graph(&active_graph);
+        for (interface, provider_id, payload) in prepared_states {
+            let event = ServiceEvent::Updated {
+                service: interface,
+                source_module: provider_id,
+                payload,
+            };
+            if self.record_latest_service_state(&event) {
+                match self.deliver_service_event(&event) {
+                    Ok(next) => requests.extend(next),
+                    Err(error) => {
+                        tracing::warn!("failed to deliver prepared profile service state: {error}")
+                    }
+                }
+            }
+        }
+        for (interface, provider_id) in ready_providers {
+            self.publish_backend_health(
+                &interface,
+                &provider_id,
+                BackendRuntimeStatus::Running,
+                "backend runtime ready",
+                true,
+            );
+        }
         if let Ok(next) = self.sync_composition_service_state() {
             requests.extend(next);
         }

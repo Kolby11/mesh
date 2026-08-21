@@ -130,7 +130,7 @@ impl Shell {
     /// service observers and subscribers of the reserved `health` event. The
     /// provider cache is updated before delivery, so a newly mounted runtime
     /// and an already-mounted runtime see the same terminal state.
-    fn publish_backend_health(
+    pub(in crate::shell) fn publish_backend_health(
         &mut self,
         interface: &str,
         provider_id: &str,
@@ -157,7 +157,9 @@ impl Shell {
                             .get(interface)
                             .is_some_and(|slot| slot.provider_id == provider_id)
                 });
-        if pending_is_not_active {
+        let profile_candidate_is_not_active =
+            self.profile_candidate_is_pending(interface, provider_id);
+        if pending_is_not_active || profile_candidate_is_not_active {
             tracing::debug!(
                 interface,
                 provider_id,
@@ -215,6 +217,10 @@ impl Shell {
                     );
                 }
             }
+            let state_changed = self
+                .latest_service_state
+                .get(interface)
+                .is_none_or(|latest| latest.provider_id != provider_id || latest.state != payload);
             let event = ServiceEvent::Updated {
                 service: interface.to_string(),
                 source_module: provider_id.to_string(),
@@ -224,7 +230,7 @@ impl Shell {
                 interface.to_string(),
                 LatestServiceState::new(interface.to_string(), provider_id.to_string(), payload),
             );
-            if deliver {
+            if deliver && state_changed {
                 match self.deliver_service_event(&event) {
                     Ok(requests) => self.deferred_requests.extend(requests),
                     Err(error) => tracing::warn!(
@@ -308,12 +314,42 @@ impl Shell {
         self.backend_runtimes.insert(interface, slot);
     }
 
+    /// Keep a newly spawned runtime private until it has reported a lifecycle
+    /// start and, for stateful contracts, a valid initial snapshot.
+    pub(in crate::shell) fn stage_backend_runtime_activation(
+        &mut self,
+        interface: String,
+        slot: BackendRuntimeSlot,
+    ) {
+        self.stage_pending_backend_runtime(
+            interface,
+            PendingBackendRuntime {
+                slot,
+                graph_path: None,
+                started: false,
+                initial_state: None,
+            },
+        );
+    }
+
     pub(in crate::shell) fn stage_backend_runtime_switch(
         &mut self,
         interface: String,
         slot: BackendRuntimeSlot,
         graph_path: PathBuf,
     ) {
+        self.stage_pending_backend_runtime(
+            interface,
+            PendingBackendRuntime {
+                slot,
+                graph_path: Some(graph_path),
+                started: false,
+                initial_state: None,
+            },
+        );
+    }
+
+    fn stage_pending_backend_runtime(&mut self, interface: String, pending: PendingBackendRuntime) {
         if let Some(previous) = self.pending_backend_runtimes.remove(&interface) {
             previous.slot.task.abort();
             self.record_backend_runtime_status(
@@ -323,8 +359,7 @@ impl Shell {
                 "superseded by a newer provider switch".to_string(),
             );
         }
-        self.pending_backend_runtimes
-            .insert(interface, PendingBackendRuntime { slot, graph_path });
+        self.pending_backend_runtimes.insert(interface, pending);
     }
 
     fn complete_backend_runtime_switch(&mut self, interface: &str, provider_id: &str) {
@@ -337,50 +372,62 @@ impl Shell {
             return;
         }
 
-        if let Err(error) = crate::shell::module_config::write_composed_provider_selection(
-            &pending.graph_path,
-            interface,
-            provider_id,
-        ) {
-            pending.slot.task.abort();
-            let message = format!(
-                "provider {provider_id} became ready for {interface}, but its selection could not be saved: {error}"
-            );
-            self.record_backend_runtime_status(
-                interface.to_string(),
-                provider_id.to_string(),
-                BackendRuntimeStatus::Failed,
-                message.clone(),
-            );
-            self.diagnostics.record_lifecycle_error(
-                "@mesh/settings".to_string(),
-                "provider_selection_write_failed",
-                message.clone(),
-            );
-            tracing::warn!(interface, provider_id, "{message}");
-            return;
-        }
-
-        let candidate_graph = match self.load_installed_module_graph_candidate() {
-            Ok(graph) => graph,
-            Err(error) => {
+        if let Some(graph_path) = pending.graph_path.as_ref() {
+            if let Err(error) = crate::shell::module_config::write_composed_provider_selection(
+                graph_path,
+                interface,
+                provider_id,
+            ) {
                 pending.slot.task.abort();
                 let message = format!(
-                    "provider selection was saved but the candidate graph could not be refreshed: {error}"
+                    "provider {provider_id} became ready for {interface}, but its selection could not be saved: {error}"
+                );
+                self.record_backend_runtime_status(
+                    interface.to_string(),
+                    provider_id.to_string(),
+                    BackendRuntimeStatus::Failed,
+                    message.clone(),
+                );
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/settings".to_string(),
+                    "provider_selection_write_failed",
+                    message.clone(),
                 );
                 tracing::warn!(interface, provider_id, "{message}");
-                self.diagnostics.record_lifecycle_error(
-                    "@mesh/shell".to_string(),
-                    "provider_selection_graph_reload_failed",
-                    message,
-                );
                 return;
             }
-        };
-        self.commit_installed_module_graph(candidate_graph);
+            let candidate_graph = match self.load_installed_module_graph_candidate() {
+                Ok(graph) => graph,
+                Err(error) => {
+                    pending.slot.task.abort();
+                    let message = format!(
+                        "provider selection was saved but the candidate graph could not be refreshed: {error}"
+                    );
+                    tracing::warn!(interface, provider_id, "{message}");
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/shell".to_string(),
+                        "provider_selection_graph_reload_failed",
+                        message,
+                    );
+                    return;
+                }
+            };
+            self.commit_installed_module_graph(candidate_graph);
+        }
         self.backend_supervision.remove(interface);
+        let initial_state = pending.initial_state;
         self.replace_backend_runtime(interface.to_string(), pending.slot);
         self.note_backend_running(interface);
+        if let Some(payload) = initial_state {
+            self.publish_prepared_backend_state(interface, provider_id, payload);
+        }
+        self.publish_backend_health(
+            interface,
+            provider_id,
+            BackendRuntimeStatus::Running,
+            "backend runtime ready",
+            true,
+        );
         tracing::info!(
             interface,
             provider_id,
@@ -412,7 +459,23 @@ impl Shell {
             .is_some_and(|pending| pending.slot.provider_id == provider_id);
         if event_provider_is_pending {
             if runtime_status == BackendRuntimeStatus::Running {
-                self.complete_backend_runtime_switch(&interface, &provider_id);
+                let needs_initial_state = self.service_requires_initial_state(&interface)
+                    && self
+                        .pending_backend_runtimes
+                        .get(&interface)
+                        .is_some_and(|pending| pending.initial_state.is_none());
+                if needs_initial_state {
+                    if let Some(pending) = self.pending_backend_runtimes.get_mut(&interface) {
+                        pending.started = true;
+                    }
+                    tracing::info!(
+                        interface,
+                        provider_id,
+                        "provider started; waiting for a valid initial service snapshot"
+                    );
+                } else {
+                    self.complete_backend_runtime_switch(&interface, &provider_id);
+                }
             } else if matches!(
                 runtime_status,
                 BackendRuntimeStatus::InitFailed
@@ -452,6 +515,91 @@ impl Shell {
             self.stop_backend_runtime(&interface);
             self.clear_active_provider_service_state(&interface, &provider_id);
             self.supervise_backend_failure(&interface, &provider_id);
+        }
+    }
+
+    pub(in crate::shell) fn capture_pending_backend_update(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        event: ServiceEvent,
+    ) -> bool {
+        let matches_pending = self
+            .pending_backend_runtimes
+            .get(interface)
+            .is_some_and(|pending| pending.slot.provider_id == provider_id);
+        if !matches_pending {
+            return false;
+        }
+        let ServiceEvent::Updated {
+            service,
+            source_module: _,
+            payload,
+        } = self.normalize_service_event(event)
+        else {
+            return true;
+        };
+        if !self.validate_service_state_shape(interface, provider_id, &payload) {
+            self.abort_pending_backend_runtime(
+                interface,
+                provider_id,
+                "provider emitted an invalid initial service snapshot",
+            );
+            return true;
+        }
+        let should_commit = if let Some(pending) = self.pending_backend_runtimes.get_mut(interface)
+        {
+            pending.initial_state = Some(payload);
+            pending.started
+        } else {
+            false
+        };
+        if should_commit {
+            self.complete_backend_runtime_switch(interface, provider_id);
+        }
+        tracing::debug!(
+            interface,
+            provider_id,
+            service,
+            "buffered prepared provider snapshot"
+        );
+        true
+    }
+
+    fn abort_pending_backend_runtime(&mut self, interface: &str, provider_id: &str, message: &str) {
+        let Some(pending) = self.pending_backend_runtimes.remove(interface) else {
+            return;
+        };
+        pending.slot.task.abort();
+        self.record_backend_runtime_status(
+            interface.to_string(),
+            provider_id.to_string(),
+            BackendRuntimeStatus::Failed,
+            message.to_string(),
+        );
+        tracing::warn!(interface, provider_id, "{message}");
+    }
+
+    fn publish_prepared_backend_state(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        payload: serde_json::Value,
+    ) {
+        let event = ServiceEvent::Updated {
+            service: interface.to_string(),
+            source_module: provider_id.to_string(),
+            payload,
+        };
+        if self.record_latest_service_state(&event) {
+            match self.deliver_service_event(&event) {
+                Ok(requests) => self.deferred_requests.extend(requests),
+                Err(error) => tracing::warn!(
+                    interface,
+                    provider_id,
+                    "failed to deliver prepared provider snapshot: {error}"
+                ),
+            }
         }
     }
 

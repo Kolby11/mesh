@@ -351,6 +351,11 @@ impl Shell {
                 provider_id,
                 event,
             } => {
+                if self.capture_pending_backend_update(&interface, &provider_id, event.clone())
+                    || self.capture_profile_backend_update(&interface, &provider_id, event.clone())
+                {
+                    return Ok(());
+                }
                 let provider_is_active =
                     self.backend_runtimes.get(&interface).is_some_and(|slot| {
                         *slot

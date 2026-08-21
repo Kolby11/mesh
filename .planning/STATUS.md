@@ -74,6 +74,13 @@ as contract failures. Luau method proxies enforce arity and argument types with
 proxy-specific colon-call detection. Cargo verification remains blocked by the
 unavailable `sha2` registry cache and network access.
 
+Provider runtimes now prepare privately and activate only after lifecycle
+readiness plus a valid initial snapshot for stateful interfaces. Startup,
+supervised restart, live provider switch, and profile candidates all buffer
+prepared output and replay it once after commit; invalid preparation leaves the
+current provider and state in place. Health transitions are published after the
+new runtime is active.
+
 The guarded `scripts/codex-backlog-runner.sh` can process one unchecked backlog
 item at a time directly on `main`, using Codex's explicit unrestricted mode for
 unattended turns by default (`CODEX_ALLOW_ALL=0` opts back into workspace-write),

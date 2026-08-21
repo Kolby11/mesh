@@ -483,7 +483,9 @@ struct BackendRuntimeSlot {
 #[derive(Debug, Clone)]
 struct PendingBackendRuntime {
     slot: BackendRuntimeSlot,
-    graph_path: PathBuf,
+    graph_path: Option<PathBuf>,
+    started: bool,
+    initial_state: Option<serde_json::Value>,
 }
 
 pub fn default_ipc_socket_path() -> PathBuf {

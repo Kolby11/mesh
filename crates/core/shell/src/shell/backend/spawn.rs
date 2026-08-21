@@ -95,7 +95,7 @@ impl Shell {
     ) {
         let interface = candidate.interface.clone();
         let slot = self.start_backend_candidate(runtime, tx, candidate, eventfd_fd);
-        self.replace_backend_runtime(interface, slot);
+        self.stage_backend_runtime_activation(interface, slot);
     }
 
     /// Start a backend without publishing it as the active command handler.

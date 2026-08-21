@@ -596,6 +596,117 @@ fn pending_provider_init_failure_keeps_current_runtime_active() {
 }
 
 #[test]
+fn stateful_provider_waits_for_valid_initial_snapshot_before_activation() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .interfaces
+        .register_contract(test_contract("mesh.audio"));
+    let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/old-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+    let (candidate, _candidate_rx) =
+        backend_runtime_slot(&runtime, "mesh.audio", "@mesh/new-audio");
+    shell.stage_backend_runtime_activation("mesh.audio".to_string(), candidate);
+
+    shell.handle_backend_lifecycle(
+        "mesh.audio".to_string(),
+        "@mesh/new-audio".to_string(),
+        "runtime".to_string(),
+        "running".to_string(),
+        "backend runtime started".to_string(),
+    );
+    assert_eq!(
+        shell
+            .backend_runtimes
+            .get("mesh.audio")
+            .map(|slot| slot.provider_id.as_str()),
+        Some("@mesh/old-audio")
+    );
+
+    shell
+        .handle_shell_message(
+            &mut VecDeque::new(),
+            super::types::ShellMessage::BackendServiceUpdate {
+                interface: "mesh.audio".to_string(),
+                provider_id: "@mesh/new-audio".to_string(),
+                event: service_update(
+                    "mesh.audio",
+                    "@mesh/new-audio",
+                    serde_json::json!({
+                        "available": true,
+                        "percent": 55.0,
+                        "muted": false,
+                    }),
+                ),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        shell
+            .backend_runtimes
+            .get("mesh.audio")
+            .map(|slot| slot.provider_id.as_str()),
+        Some("@mesh/new-audio")
+    );
+    assert_eq!(
+        shell.latest_service_state["mesh.audio"].state["percent"],
+        serde_json::json!(55.0)
+    );
+}
+
+#[test]
+fn invalid_prepared_snapshot_keeps_current_provider_active() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .interfaces
+        .register_contract(test_contract("mesh.audio"));
+    let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/old-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+    let (candidate, _candidate_rx) =
+        backend_runtime_slot(&runtime, "mesh.audio", "@mesh/new-audio");
+    shell.stage_backend_runtime_activation("mesh.audio".to_string(), candidate);
+
+    shell.handle_backend_lifecycle(
+        "mesh.audio".to_string(),
+        "@mesh/new-audio".to_string(),
+        "runtime".to_string(),
+        "running".to_string(),
+        "backend runtime started".to_string(),
+    );
+    shell
+        .handle_shell_message(
+            &mut VecDeque::new(),
+            super::types::ShellMessage::BackendServiceUpdate {
+                interface: "mesh.audio".to_string(),
+                provider_id: "@mesh/new-audio".to_string(),
+                event: service_update(
+                    "mesh.audio",
+                    "@mesh/new-audio",
+                    serde_json::json!({ "available": true, "percent": "unknown" }),
+                ),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        shell
+            .backend_runtimes
+            .get("mesh.audio")
+            .map(|slot| slot.provider_id.as_str()),
+        Some("@mesh/old-audio")
+    );
+    assert!(!shell.pending_backend_runtimes.contains_key("mesh.audio"));
+    assert_eq!(
+        shell
+            .backend_runtime_status("mesh.audio", "@mesh/new-audio")
+            .map(|entry| entry.status),
+        Some(BackendRuntimeStatus::Failed)
+    );
+}
+
+#[test]
 fn ready_provider_is_persisted_before_live_runtime_handoff() {
     let runtime = Runtime::new().unwrap();
     let directory = tempfile::tempdir().unwrap();

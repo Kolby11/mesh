@@ -652,7 +652,7 @@ impl Shell {
         })
     }
 
-    fn validate_service_state_shape(
+    pub(in crate::shell) fn validate_service_state_shape(
         &mut self,
         interface: &str,
         provider_id: &str,
@@ -671,6 +671,18 @@ impl Shell {
             self.record_service_contract_warning(interface, provider_id, warning);
         }
         valid
+    }
+
+    pub(in crate::shell) fn service_requires_initial_state(&self, interface: &str) -> bool {
+        self.interfaces
+            .resolve(interface, None)
+            .contract
+            .is_some_and(|contract| {
+                contract
+                    .state_fields
+                    .iter()
+                    .any(|field| !is_runtime_metadata_state_field(&field.name))
+            })
     }
 
     fn service_event_contract_warnings(

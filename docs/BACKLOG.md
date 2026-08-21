@@ -44,7 +44,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/03-service-contracts/improvements.md)
 
-- [ ] Prepare provider output and commit provider selection only after validated readiness and initial state.
 - [ ] Deliver generation-stamped availability transitions and reject stale state, event, and result messages.
 - [ ] Diff executable consumer/provider contracts in both directions, including external candidate contracts and behavioral annotations.
 - [ ] Canonicalize contract identities and make graph, runtime, LSP, codegen, docs, and diagnostics consume one compiled artifact.
