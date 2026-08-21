@@ -81,6 +81,12 @@ provider `start(self)` stubs, in-memory mocks, and standalone Markdown contract
 documentation. Generators return content without filesystem access so CLI/LSP
 callers can choose their own output policy.
 
+Contracts now declare `capabilities.featureGroups` with explicit optional or
+required semantics. Provider feature advertisements are normalized per provider
+in the generation-stamped catalog: optional groups degrade without rejecting the
+provider, while missing required groups make the provider unavailable and are
+reported in interface lookup diagnostics.
+
 Service contracts now validate recursive named fields, arrays, optional values,
 and `Result` returns across state, events, method inputs, and provider outputs.
 Invalid snapshots preserve the last-known-good state, invalid events and

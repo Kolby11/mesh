@@ -1,6 +1,6 @@
 use crate::contract::{
-    CompiledContract, ContractError, DeclarationProvenance, InterfaceContract,
-    parse_contract_version, parse_version_req,
+    CompiledContract, ContractError, DeclarationProvenance, FeatureNegotiation, InterfaceContract,
+    negotiate_feature_groups, parse_contract_version, parse_version_req,
 };
 use semver::Version;
 use std::borrow::Cow;
@@ -14,6 +14,7 @@ pub struct InterfaceCatalog {
     pub generation: u64,
     pub contracts: HashMap<String, Vec<Arc<CompiledContract>>>,
     pub providers: HashMap<String, Vec<InterfaceProvider>>,
+    pub provider_features: HashMap<String, Vec<String>>,
 }
 
 /// The runtime-facing name for a catalog copied from the registration
@@ -42,6 +43,7 @@ pub struct InterfaceResolution {
     /// Canonical compiled artifact for the same contract exposed by the
     /// compatibility `contract` view.
     pub compiled_contract: Option<Arc<CompiledContract>>,
+    pub feature_negotiation: FeatureNegotiation,
     pub provider: Option<InterfaceProvider>,
 }
 
@@ -50,6 +52,7 @@ struct InterfaceRegistrySnapshot {
     generation: u64,
     contracts: HashMap<String, Vec<Arc<CompiledContract>>>,
     providers: HashMap<String, Vec<InterfaceProvider>>,
+    provider_features: HashMap<String, Vec<String>>,
 }
 
 /// Mutable registration boundary for named interfaces. Every read observes
@@ -94,6 +97,21 @@ impl InterfaceRegistry {
         snapshot.generation = snapshot.generation.saturating_add(1);
     }
 
+    pub fn register_provider_features(
+        &self,
+        provider_module: impl Into<String>,
+        features: impl IntoIterator<Item = impl Into<String>>,
+    ) {
+        let mut snapshot = self.snapshot.write().unwrap();
+        let mut features = features.into_iter().map(Into::into).collect::<Vec<_>>();
+        features.sort();
+        features.dedup();
+        snapshot
+            .provider_features
+            .insert(provider_module.into(), features);
+        snapshot.generation = snapshot.generation.saturating_add(1);
+    }
+
     pub fn resolve(&self, requested: &str, requested_version: Option<&str>) -> InterfaceResolution {
         let canonical = canonical_interface_name(requested);
         let snapshot = self.snapshot.read().unwrap();
@@ -103,7 +121,7 @@ impl InterfaceRegistry {
                 .find(|contract| version_matches_contract(requested_version, &contract.version))
                 .cloned()
         });
-        let provider = snapshot.providers.get(&canonical).and_then(|providers| {
+        let mut provider = snapshot.providers.get(&canonical).and_then(|providers| {
             providers
                 .iter()
                 .find(|provider| {
@@ -115,6 +133,23 @@ impl InterfaceRegistry {
                 })
                 .cloned()
         });
+        let feature_negotiation = compiled_contract
+            .as_ref()
+            .zip(provider.as_ref())
+            .map(|(contract, provider)| {
+                negotiate_feature_groups(
+                    contract,
+                    snapshot
+                        .provider_features
+                        .get(&provider.provider_module)
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            })
+            .unwrap_or_default();
+        if !feature_negotiation.is_compatible() {
+            provider = None;
+        }
 
         InterfaceResolution {
             requested: canonical,
@@ -124,6 +159,7 @@ impl InterfaceRegistry {
                 .as_ref()
                 .map(|contract| Arc::clone(&contract.raw)),
             compiled_contract,
+            feature_negotiation,
             provider,
         }
     }
@@ -195,6 +231,7 @@ impl InterfaceRegistry {
                     )
                 })
                 .collect(),
+            provider_features: snapshot.provider_features.clone(),
         }
     }
 
@@ -278,6 +315,19 @@ impl InterfaceCatalog {
         self.generation = self.generation.saturating_add(1);
     }
 
+    pub fn register_provider_features(
+        &mut self,
+        provider_module: impl Into<String>,
+        features: impl IntoIterator<Item = impl Into<String>>,
+    ) {
+        let mut features = features.into_iter().map(Into::into).collect::<Vec<_>>();
+        features.sort();
+        features.dedup();
+        self.provider_features
+            .insert(provider_module.into(), features);
+        self.generation = self.generation.saturating_add(1);
+    }
+
     pub fn resolve(&self, requested: &str, requested_version: Option<&str>) -> InterfaceResolution {
         let canonical = canonical_interface_name(requested);
         let compiled_contract = self.contracts.get(&canonical).and_then(|contracts| {
@@ -286,7 +336,7 @@ impl InterfaceCatalog {
                 .find(|contract| version_matches_contract(requested_version, &contract.version))
                 .cloned()
         });
-        let provider = self.providers.get(&canonical).and_then(|providers| {
+        let mut provider = self.providers.get(&canonical).and_then(|providers| {
             providers
                 .iter()
                 .find(|provider| {
@@ -298,6 +348,22 @@ impl InterfaceCatalog {
                 })
                 .cloned()
         });
+        let feature_negotiation = compiled_contract
+            .as_ref()
+            .zip(provider.as_ref())
+            .map(|(contract, provider)| {
+                negotiate_feature_groups(
+                    contract,
+                    self.provider_features
+                        .get(&provider.provider_module)
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            })
+            .unwrap_or_default();
+        if !feature_negotiation.is_compatible() {
+            provider = None;
+        }
 
         InterfaceResolution {
             requested: canonical,
@@ -307,6 +373,7 @@ impl InterfaceCatalog {
                 .as_ref()
                 .map(|contract| Arc::clone(&contract.raw)),
             compiled_contract,
+            feature_negotiation,
             provider,
         }
     }
@@ -397,8 +464,10 @@ fn version_matches_provider(
 mod tests {
     use super::*;
     use crate::contract::{
-        ContractCapabilities, InterfaceArgument, InterfaceEvent, InterfaceMethod,
+        ContractCapabilities, ContractFeatureGroup, InterfaceArgument, InterfaceEvent,
+        InterfaceMethod,
     };
+    use std::collections::BTreeMap;
 
     fn test_contract(interface: &str, method_count: usize) -> InterfaceContract {
         InterfaceContract {
@@ -517,6 +586,55 @@ mod tests {
         let second = registry.resolve("audio", None).contract.unwrap();
 
         assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn provider_feature_negotiation_keeps_optional_groups_and_rejects_required_gaps() {
+        let registry = InterfaceRegistry::new();
+        let mut capabilities = ContractCapabilities::default();
+        capabilities.feature_groups = BTreeMap::from([
+            ("recording".into(), ContractFeatureGroup::default()),
+            (
+                "exclusive_output".into(),
+                ContractFeatureGroup {
+                    required: true,
+                    capabilities: vec!["service.audio.exclusive".into()],
+                },
+            ),
+        ]);
+        registry.register_contract(InterfaceContract {
+            interface: "mesh.audio".into(),
+            version: Version::parse("1.0.0").unwrap(),
+            state_fields: vec![],
+            methods: vec![],
+            events: vec![],
+            types: HashMap::new(),
+            capabilities,
+        });
+        registry.register(InterfaceProvider {
+            interface: "mesh.audio".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider_module: "@mesh/audio".into(),
+            backend_name: "Audio".into(),
+            priority: 100,
+        });
+
+        let unavailable = registry.resolve("mesh.audio", None);
+        assert!(unavailable.provider.is_none());
+        assert_eq!(
+            unavailable.feature_negotiation.missing_required.as_ref(),
+            &["exclusive_output".to_string()][..]
+        );
+
+        registry.register_provider_features("@mesh/audio", ["recording", "exclusive_output"]);
+        let resolved = registry.resolve("mesh.audio", None);
+        assert!(resolved.provider.is_some());
+        assert!(resolved.feature_negotiation.is_compatible());
+        assert_eq!(
+            resolved.feature_negotiation.enabled.as_ref(),
+            &["exclusive_output".to_string(), "recording".to_string()][..]
+        );
     }
 
     #[test]

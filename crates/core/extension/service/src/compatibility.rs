@@ -78,6 +78,7 @@ pub fn diff_contracts(locked: &InterfaceContract, candidate: &InterfaceContract)
     diff_events(locked, candidate, &mut changes);
     diff_types(locked, candidate, &mut changes);
     diff_capabilities(locked, candidate, &mut changes);
+    diff_feature_groups(locked, candidate, &mut changes);
 
     changes.sort_by(|left, right| {
         right
@@ -540,6 +541,54 @@ fn diff_capabilities(
     }
 }
 
+fn diff_feature_groups(
+    locked: &InterfaceContract,
+    candidate: &InterfaceContract,
+    changes: &mut Vec<ContractChange>,
+) {
+    for (name, group) in &candidate.capabilities.feature_groups {
+        let Some(previous) = locked.capabilities.feature_groups.get(name) else {
+            changes.push(ContractChange {
+                class: if group.required {
+                    CompatibilityClass::Breaking
+                } else {
+                    CompatibilityClass::Additive
+                },
+                path: format!("capabilities.featureGroups.{name}"),
+                detail: format!(
+                    "{} provider feature group '{name}' was added",
+                    if group.required {
+                        "required"
+                    } else {
+                        "optional"
+                    }
+                ),
+            });
+            continue;
+        };
+        if previous != group {
+            changes.push(ContractChange {
+                class: CompatibilityClass::Breaking,
+                path: format!("capabilities.featureGroups.{name}"),
+                detail: format!("provider feature group '{name}' changed"),
+            });
+        }
+    }
+    for (name, group) in &locked.capabilities.feature_groups {
+        if !candidate.capabilities.feature_groups.contains_key(name) {
+            changes.push(ContractChange {
+                class: if group.required {
+                    CompatibilityClass::Breaking
+                } else {
+                    CompatibilityClass::Additive
+                },
+                path: format!("capabilities.featureGroups.{name}"),
+                detail: format!("provider feature group '{name}' was removed"),
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -704,6 +753,35 @@ mod tests {
             diff.breaking_changes()
                 .any(|change| change.path == "capabilities.service.audio.control")
         );
+    }
+
+    #[test]
+    fn optional_feature_groups_are_additive_but_required_groups_are_breaking() {
+        let optional = contract(
+            r#"{
+                "capabilities": {
+                    "featureGroups": { "recording": {} }
+                }
+            }"#,
+        );
+        let diff = diff_contracts(&base(), &optional);
+        assert!(!diff.is_breaking());
+        assert!(diff.changes.iter().any(|change| {
+            change.path == "capabilities.featureGroups.recording"
+                && change.class == CompatibilityClass::Additive
+        }));
+
+        let required = contract(
+            r#"{
+                "capabilities": {
+                    "featureGroups": {
+                        "exclusive_output": { "required": true }
+                    }
+                }
+            }"#,
+        );
+        let diff = diff_contracts(&base(), &required);
+        assert!(diff.is_breaking());
     }
 
     #[test]

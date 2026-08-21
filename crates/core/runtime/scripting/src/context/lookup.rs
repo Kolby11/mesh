@@ -54,6 +54,16 @@ pub(super) fn lookup_failure_reason(
     catalog: &InterfaceCatalog,
     resolution: &InterfaceResolution,
 ) -> String {
+    if !resolution.feature_negotiation.missing_required.is_empty() {
+        let groups = resolution
+            .feature_negotiation
+            .missing_required
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        return format!("provider is missing required feature groups: {groups}");
+    }
     let has_contracts = catalog
         .contracts
         .get(&resolution.requested)
