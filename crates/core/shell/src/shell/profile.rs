@@ -544,7 +544,7 @@ impl Shell {
                 entry.compiled.clone(),
                 entry.module_dir.clone(),
                 temporary_catalog.clone(),
-                Arc::new(self.interfaces.catalog()),
+                Arc::new(self.interfaces.resolved_catalog()),
                 settings.clone(),
             )
             .with_effective_capabilities(self.effective_capabilities.clone())

@@ -44,7 +44,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/03-service-contracts/improvements.md)
 
-- [ ] Replace additive registry mutation with one immutable generation-stamped resolved service catalog.
 - [ ] Compile recursive named/array/optional/result schemas and enforce them for state, events, inputs, and outputs.
 - [ ] Prepare provider output and commit provider selection only after validated readiness and initial state.
 - [ ] Deliver generation-stamped availability transitions and reject stale state, event, and result messages.

@@ -6,9 +6,17 @@ use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, Default)]
 pub struct InterfaceCatalog {
+    /// Monotonic identity for this immutable catalog view. Builders advance
+    /// it on mutation; runtimes retain the value with every resolution.
+    pub generation: u64,
     pub contracts: HashMap<String, Vec<InterfaceContract>>,
     pub providers: HashMap<String, Vec<InterfaceProvider>>,
 }
+
+/// The runtime-facing name for a catalog copied from the registration
+/// boundary. It is generation-stamped and is normally shared behind `Arc`
+/// without mutation.
+pub type ResolvedServiceCatalog = InterfaceCatalog;
 
 /// Metadata about an available interface provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,15 +34,24 @@ pub struct InterfaceProvider {
 pub struct InterfaceResolution {
     pub requested: String,
     pub requested_version: Option<String>,
+    pub generation: u64,
     pub contract: Option<Arc<InterfaceContract>>,
     pub provider: Option<InterfaceProvider>,
 }
 
-/// Dynamic registry of named interfaces, their contract metadata, and providers.
+#[derive(Debug, Default)]
+struct InterfaceRegistrySnapshot {
+    generation: u64,
+    contracts: HashMap<String, Vec<Arc<InterfaceContract>>>,
+    providers: HashMap<String, Vec<InterfaceProvider>>,
+}
+
+/// Mutable registration boundary for named interfaces. Every read observes
+/// one lock-protected snapshot, and `catalog()` publishes that snapshot as an
+/// immutable generation-stamped view for runtimes.
 #[derive(Debug, Default)]
 pub struct InterfaceRegistry {
-    contracts: RwLock<HashMap<String, Vec<Arc<InterfaceContract>>>>,
-    providers: RwLock<HashMap<String, Vec<InterfaceProvider>>>,
+    snapshot: RwLock<InterfaceRegistrySnapshot>,
 }
 
 impl InterfaceRegistry {
@@ -43,52 +60,49 @@ impl InterfaceRegistry {
     }
 
     pub fn register_contract(&self, contract: InterfaceContract) {
-        let mut contracts = self.contracts.write().unwrap();
-        let entry = contracts.entry(contract.interface.clone()).or_default();
+        let mut snapshot = self.snapshot.write().unwrap();
+        let entry = snapshot
+            .contracts
+            .entry(contract.interface.clone())
+            .or_default();
         entry.retain(|existing| existing.version != contract.version);
         entry.push(Arc::new(contract));
         entry.sort_by(|a, b| b.version.cmp(&a.version));
+        snapshot.generation = snapshot.generation.saturating_add(1);
     }
 
     pub fn register(&self, provider: InterfaceProvider) {
-        let mut providers = self.providers.write().unwrap();
-        register_provider_in_map(&mut providers, provider);
+        let mut snapshot = self.snapshot.write().unwrap();
+        register_provider_in_map(&mut snapshot.providers, provider);
+        snapshot.generation = snapshot.generation.saturating_add(1);
     }
 
     pub fn resolve(&self, requested: &str, requested_version: Option<&str>) -> InterfaceResolution {
         let canonical = canonical_interface_name(requested);
-        let contract = self
-            .contracts
-            .read()
-            .unwrap()
-            .get(&canonical)
-            .and_then(|contracts| {
-                contracts
-                    .iter()
-                    .find(|contract| version_matches_contract(requested_version, &contract.version))
-                    .cloned()
-            });
-        let provider = self
-            .providers
-            .read()
-            .unwrap()
-            .get(&canonical)
-            .and_then(|providers| {
-                providers
-                    .iter()
-                    .find(|provider| {
-                        version_matches_provider(
-                            requested_version,
-                            provider.version.as_deref(),
-                            contract.as_deref(),
-                        )
-                    })
-                    .cloned()
-            });
+        let snapshot = self.snapshot.read().unwrap();
+        let contract = snapshot.contracts.get(&canonical).and_then(|contracts| {
+            contracts
+                .iter()
+                .find(|contract| version_matches_contract(requested_version, &contract.version))
+                .cloned()
+        });
+        let provider = snapshot.providers.get(&canonical).and_then(|providers| {
+            providers
+                .iter()
+                .find(|provider| {
+                    version_matches_provider(
+                        requested_version,
+                        provider.version.as_deref(),
+                        contract.as_deref(),
+                    )
+                })
+                .cloned()
+        });
 
         InterfaceResolution {
             requested: canonical,
             requested_version: requested_version.map(ToOwned::to_owned),
+            generation: snapshot.generation,
             contract,
             provider,
         }
@@ -96,9 +110,10 @@ impl InterfaceRegistry {
 
     pub fn providers_for(&self, requested: &str) -> Vec<InterfaceProvider> {
         let canonical = canonical_interface_name(requested);
-        self.providers
+        self.snapshot
             .read()
             .unwrap()
+            .providers
             .get(&canonical)
             .cloned()
             .unwrap_or_default()
@@ -106,9 +121,10 @@ impl InterfaceRegistry {
 
     pub fn contracts_for(&self, requested: &str) -> Vec<InterfaceContract> {
         let canonical = canonical_interface_name(requested);
-        self.contracts
+        self.snapshot
             .read()
             .unwrap()
+            .contracts
             .get(&canonical)
             .map(|contracts| {
                 contracts
@@ -120,8 +136,9 @@ impl InterfaceRegistry {
     }
 
     pub fn list_interfaces(&self) -> Vec<String> {
-        let contracts = self.contracts.read().unwrap();
-        let providers = self.providers.read().unwrap();
+        let snapshot = self.snapshot.read().unwrap();
+        let contracts = &snapshot.contracts;
+        let providers = &snapshot.providers;
         let mut names = Vec::with_capacity(contracts.len() + providers.len());
         names.extend(contracts.keys().cloned());
         names.extend(providers.keys().cloned());
@@ -132,16 +149,16 @@ impl InterfaceRegistry {
 
     pub fn has(&self, requested: &str) -> bool {
         let canonical = canonical_interface_name(requested);
-        self.contracts.read().unwrap().contains_key(&canonical)
-            || self.providers.read().unwrap().contains_key(&canonical)
+        let snapshot = self.snapshot.read().unwrap();
+        snapshot.contracts.contains_key(&canonical) || snapshot.providers.contains_key(&canonical)
     }
 
     pub fn catalog(&self) -> InterfaceCatalog {
+        let snapshot = self.snapshot.read().unwrap();
         InterfaceCatalog {
-            contracts: self
+            generation: snapshot.generation,
+            contracts: snapshot
                 .contracts
-                .read()
-                .unwrap()
                 .iter()
                 .map(|(name, contracts)| {
                     (
@@ -153,8 +170,24 @@ impl InterfaceRegistry {
                     )
                 })
                 .collect(),
-            providers: self.providers.read().unwrap().clone(),
+            providers: snapshot
+                .providers
+                .iter()
+                .map(|(name, providers)| {
+                    (
+                        name.clone(),
+                        providers
+                            .iter()
+                            .map(|provider| (**provider).clone())
+                            .collect(),
+                    )
+                })
+                .collect(),
         }
+    }
+
+    pub fn resolved_catalog(&self) -> ResolvedServiceCatalog {
+        self.catalog()
     }
 }
 
@@ -212,10 +245,12 @@ pub fn service_name_from_interface_cow(interface: &str) -> Cow<'_, str> {
 impl InterfaceCatalog {
     pub fn register_contract(&mut self, contract: InterfaceContract) {
         register_contract_in_map(&mut self.contracts, contract);
+        self.generation = self.generation.saturating_add(1);
     }
 
     pub fn register_provider(&mut self, provider: InterfaceProvider) {
         register_provider_in_map(&mut self.providers, provider);
+        self.generation = self.generation.saturating_add(1);
     }
 
     pub fn resolve(&self, requested: &str, requested_version: Option<&str>) -> InterfaceResolution {
@@ -243,6 +278,7 @@ impl InterfaceCatalog {
         InterfaceResolution {
             requested: canonical,
             requested_version: requested_version.map(ToOwned::to_owned),
+            generation: self.generation,
             contract,
             provider,
         }
@@ -437,6 +473,52 @@ mod tests {
         let second = registry.resolve("audio", None).contract.unwrap();
 
         assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn resolved_catalog_is_an_immutable_generation_stamped_view() {
+        let registry = InterfaceRegistry::new();
+        registry.register_contract(test_contract("mesh.audio", 1));
+        registry.register(InterfaceProvider {
+            interface: "mesh.audio".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider_module: "@mesh/audio".into(),
+            backend_name: "Audio".into(),
+            priority: 100,
+        });
+
+        let snapshot = registry.resolved_catalog();
+        let snapshot_resolution = snapshot.resolve("mesh.audio", None);
+        let registry_generation = registry.resolve("mesh.audio", None).generation;
+        assert_eq!(snapshot_resolution.generation, snapshot.generation);
+        assert_eq!(snapshot_resolution.generation, registry_generation);
+
+        registry.register(InterfaceProvider {
+            interface: "mesh.audio".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider_module: "@mesh/audio-new".into(),
+            backend_name: "Audio New".into(),
+            priority: 200,
+        });
+        assert_eq!(
+            snapshot
+                .resolve("mesh.audio", None)
+                .provider
+                .unwrap()
+                .provider_module,
+            "@mesh/audio"
+        );
+        assert!(registry.resolve("mesh.audio", None).generation > snapshot.generation);
+        assert_eq!(
+            registry
+                .resolve("mesh.audio", None)
+                .provider
+                .unwrap()
+                .provider_module,
+            "@mesh/audio-new"
+        );
     }
 
     #[test]

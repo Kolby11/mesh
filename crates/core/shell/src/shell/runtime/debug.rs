@@ -33,7 +33,7 @@ impl Shell {
 
         let module_instances = self.module_object_entries();
 
-        let catalog = self.interfaces.catalog();
+        let catalog = self.interfaces.resolved_catalog();
         let mut interfaces: Vec<InterfaceEntry> = catalog
             .providers
             .iter()
@@ -563,7 +563,7 @@ impl Shell {
             });
         }
 
-        for (interface, providers) in self.interfaces.catalog().providers {
+        for (interface, providers) in self.interfaces.resolved_catalog().providers {
             for provider in providers {
                 let active = self
                     .backend_runtimes

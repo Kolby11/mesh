@@ -59,6 +59,13 @@ event subscription, cached/live state delivery, and shell dispatch, including
 third-party interface names; legacy contracts retain a narrow compatibility
 fallback. Policy changes are included in contract compatibility diffs.
 
+Service registration now serializes contract/provider mutations through one
+lock-protected snapshot and publishes generation-stamped `ResolvedServiceCatalog`
+views. Registry resolution, runtime catalog creation, frontend binding,
+profile startup, and debug inspection consume one coherent contract/provider
+epoch; an already-published catalog remains unchanged when later registrations
+arrive.
+
 The guarded `scripts/codex-backlog-runner.sh` can process one unchecked backlog
 item at a time directly on `main`, using Codex's explicit unrestricted mode for
 unattended turns by default (`CODEX_ALLOW_ALL=0` opts back into workspace-write),

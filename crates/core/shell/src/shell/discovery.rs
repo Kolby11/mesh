@@ -895,7 +895,7 @@ impl Shell {
         let frontend_catalog = self.frontend_catalog.snapshot().catalog;
         let enabled_frontends = self.installed_enabled_frontend_ids();
         let graph_i18n_catalogs = self.graph_i18n_catalog_paths();
-        let interface_catalog = std::sync::Arc::new(self.interfaces.catalog());
+        let interface_catalog = std::sync::Arc::new(self.interfaces.resolved_catalog());
         if let Some(profile_id) = self.active_profile_id.clone() {
             let paths = mesh_core_module::package::ProfilePaths::from_root_graph(
                 &self.installed_module_graph_path(),
@@ -988,7 +988,7 @@ impl Shell {
             .map(|runtime| runtime.surface_id.clone())
             .collect::<HashSet<_>>();
         let mounted = (|| {
-            let interface_catalog = std::sync::Arc::new(self.interfaces.catalog());
+            let interface_catalog = std::sync::Arc::new(self.interfaces.resolved_catalog());
             let mut mounted = Vec::new();
             for instance_id in instance_ids {
                 if existing.contains(&instance_id) {
