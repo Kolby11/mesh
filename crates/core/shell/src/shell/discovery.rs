@@ -654,54 +654,33 @@ impl Shell {
     }
 
     pub fn discover_modules(&mut self) {
-        let module_dirs = std::mem::take(&mut self.module_dirs);
-        let discovery_dirs = match active_module_dirs_for_graph(&self.installed_module_graph_path())
-        {
-            Ok(Some(directories)) => directories,
-            Ok(None) => module_dirs.clone(),
+        let graph = match self.load_installed_module_graph_candidate() {
+            Ok(graph) => graph,
             Err(error) => {
-                tracing::error!("active module snapshot is invalid: {error}");
-                Vec::new()
+                tracing::error!(
+                    "failed to load installed module graph; retaining last-known-good discovery: {error}"
+                );
+                return;
             }
         };
-        let discovered = discover_shell_module_manifests(&discovery_dirs);
-        for discovered in discovered {
-            match discovered.loaded {
-                Ok(loaded) => self.register_loaded_module(&discovered.dir, loaded),
-                Err(e) => tracing::warn!("failed to load module {}: {e}", discovered.dir.display()),
-            }
+        self.commit_installed_module_graph(graph.clone());
+        self.modules.clear();
+        for node in graph.modules() {
+            let Some(module_dir) = node.manifest_path.parent() else {
+                tracing::error!(module_id = %node.id, "graph module manifest has no parent directory");
+                continue;
+            };
+            self.register_loaded_module(
+                module_dir,
+                mesh_core_module::LoadedManifest {
+                    manifest: node.manifest.clone().into_runtime_manifest(),
+                    path: node.manifest_path.clone(),
+                    source: mesh_core_module::manifest::ManifestSource::CanonicalModuleJson,
+                },
+            );
         }
-        self.module_dirs = module_dirs;
-        self.register_installed_graph_interfaces();
-        tracing::info!("discovered {} modules", self.modules.len());
-    }
-
-    fn active_module_dirs_for_graph(
-        graph_path: &Path,
-    ) -> Result<Option<Vec<PathBuf>>, mesh_core_module::package::ModuleManifestError> {
-        let config_dir = graph_path.parent().ok_or_else(|| {
-            mesh_core_module::package::ModuleManifestError::Validation(format!(
-                "root module graph path must have a parent directory: {}",
-                graph_path.display()
-            ))
-        })?;
-        let store_root = mesh_core_module::package::module_store_dir(config_dir);
-        let active = store_root.join("active-generation");
-        match std::fs::symlink_metadata(&active) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => Err(
-                mesh_core_module::package::ModuleManifestError::Validation(format!(
-                    "active module generation {} must be a regular file",
-                    active.display()
-                )),
-            ),
-            Ok(_) => mesh_core_module::package::ModuleStore::new(store_root)
-                .and_then(|store| store.active_module_dirs()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(source) => Err(mesh_core_module::package::ModuleManifestError::Io {
-                path: active,
-                source,
-            }),
-        }
+        self.register_interfaces_from_graph(&graph);
+        tracing::info!("discovered {} graph-authorized modules", self.modules.len());
     }
 
     pub(in crate::shell) fn installed_module_graph_path(&self) -> PathBuf {
@@ -797,21 +776,6 @@ impl Shell {
         }
     }
 
-    fn register_installed_graph_interfaces(&mut self) {
-        let graph_path = self.installed_module_graph_path();
-        let graph = match self.load_installed_module_graph_cached() {
-            Ok(graph) => graph.clone(),
-            Err(err) => {
-                tracing::warn!(
-                    "failed to load installed module graph from {}; keeping discovered interfaces only: {err}",
-                    graph_path.display()
-                );
-                return;
-            }
-        };
-        self.register_interfaces_from_graph(&graph);
-    }
-
     pub(in crate::shell) fn register_interfaces_from_graph(
         &mut self,
         graph: &InstalledModuleGraph,
@@ -877,7 +841,6 @@ impl Shell {
     }
 
     pub fn resolve_modules(&mut self) -> Result<(), ShellRunError> {
-        validate_module_dependency_graph(self.modules.values().map(|module| &module.manifest))?;
         let active_graph = self.load_installed_module_graph_cached()?.clone();
         self.sync_module_graph_health(&active_graph);
         let mut effective_capabilities = HashMap::with_capacity(self.modules.len());

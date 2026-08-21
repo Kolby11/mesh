@@ -7,11 +7,13 @@ lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
 
-The highest-priority Section 2 item is complete: package commits publish
+The first two Section 2 items are complete. Package commits publish
 validated module trees into a read-only SHA-256 object store and activate
 generation-stamped snapshots. Installed-graph and shell discovery resolve the
 active object set, while editable module trees remain the authoring/update
-source. Focused package tests are added; Cargo execution is currently blocked
+source. Shell runtime instances and catalogs now come only from the validated
+resolved graph, and invalid startup/reload candidates fail closed. Focused
+package tests are added; Cargo execution is currently blocked
 because the local registry cache lacks `sha2` and network access is unavailable.
 
 The guarded `scripts/codex-backlog-runner.sh` can process one unchecked backlog
