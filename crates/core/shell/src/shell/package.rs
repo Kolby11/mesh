@@ -4,8 +4,8 @@ use mesh_core_capability::{CapabilityCatalog, PrivilegeLevel};
 use mesh_core_module::package::{
     InstalledModuleEntry, MeshLock, ModuleId, ModuleKind, ModuleManifest, ModuleSource,
     PackageTransaction, ProfilePaths, RootModuleGraphManifest, ShellProfile, TrustTier,
-    contained_path, load_installed_module_graph, module_install_path, module_store_dir,
-    module_tree_digest, validate_module_tree,
+    contained_path, load_installed_module_graph, load_module_signature, module_install_path,
+    module_store_dir, module_tree_digest, validate_module_tree,
 };
 use std::collections::VecDeque;
 use std::fs;
@@ -45,14 +45,28 @@ impl Shell {
         let manifest = ModuleManifest::from_path(&staged.path().join("module.json"))
             .map_err(|error| package_error(error.to_string()))?;
         check_install_capabilities(&manifest, allow_elevated, allow_high)?;
-        let trust = TrustTier::for_source(
+        let signature = load_module_signature(staged.path())
+            .map_err(|error| package_error(error.to_string()))?;
+        let digest =
+            module_tree_digest(staged.path()).map_err(|error| package_error(error.to_string()))?;
+        let trust = if signature.is_some() {
+            TrustTier::Verified
+        } else {
+            TrustTier::for_source(
+                &manifest.name,
+                matches!(&staged, StagedModuleSource::Git { .. }),
+            )
+        };
+        if let Err(error) = root.trust_policy.validate_candidate(
             &manifest.name,
-            matches!(&staged, StagedModuleSource::Git { .. }),
-        );
-        if !root.trust_policy.allows(trust) {
+            &manifest.version,
+            &digest,
+            trust,
+            signature.as_ref(),
+        ) {
             return Err(package_error(format!(
-                "module {} has {trust:?} provenance, below the configured {:?} trust minimum",
-                manifest.name, root.trust_policy.minimum
+                "module {} provenance rejected: {error}",
+                manifest.name
             )));
         }
 
@@ -556,10 +570,16 @@ fn record_lock_entry(
             Some(revision.clone()),
         ),
     };
-    let trust = TrustTier::for_source(
-        &manifest.name,
-        matches!(&module_source, ModuleSource::Git { .. }),
-    );
+    let signature =
+        load_module_signature(installed_at).map_err(|error| package_error(error.to_string()))?;
+    let trust = if signature.is_some() {
+        TrustTier::Verified
+    } else {
+        TrustTier::for_source(
+            &manifest.name,
+            matches!(&module_source, ModuleSource::Git { .. }),
+        )
+    };
     lock.modules.insert(
         manifest.name.clone(),
         mesh_core_module::package::LockedModule {
@@ -568,7 +588,7 @@ fn record_lock_entry(
             revision,
             digest,
             trust,
-            signature: None,
+            signature,
             dependencies: Default::default(),
             requested_by: Default::default(),
         },

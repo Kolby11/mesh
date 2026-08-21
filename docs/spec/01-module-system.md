@@ -873,9 +873,9 @@ default for a malformed argument.
 ## 7. Capabilities & security
 
 **Status: partially shipped** (capability model, sandbox policy, typed trust
-tiers, lock provenance metadata, and root-graph minimum-tier enforcement);
-cryptographic signature verification and registry key distribution remain
-target work.
+tiers, lock provenance metadata, root-graph minimum-tier enforcement, and
+detached Ed25519 verification against root-graph trust anchors). Registry key
+distribution remains target work.
 
 A capability is a named permission for a host API. Required capabilities must
 all be granted or the module does not load; optional ones may be denied and
@@ -904,14 +904,19 @@ Privilege levels (fixed set, part of install UX):
 
 Trust tiers: `core` (shipped, reviewed), `verified` (reviewed + signed),
 `community` (unreviewed, user accepts risk), `local` (developer path, no
-signature). Threats and mitigations: capability sandbox (no ambient fs/net/
-process in Luau), core-owned trusted chrome (modules cannot draw over
-permission dialogs), per-module budgets/isolation for resource abuse, reserved
-`@mesh` scope, capability-diff re-approval on update. The root graph may set
+signature). A detached `module.sig` contains the key id, algorithm, and
+base64 signature over the canonical module id/version/digest payload. Keys are
+configured under the root graph's `trustPolicy.keys`; an unknown key, changed
+payload, unsupported algorithm, or malformed signature blocks the module before
+dependency, provider, or frontend contribution activation. Threats and
+mitigations: capability sandbox (no ambient fs/net/process in Luau),
+core-owned trusted chrome (modules cannot draw over permission dialogs),
+per-module budgets/isolation for resource abuse, reserved `@mesh` scope,
+capability-diff re-approval on update. The root graph may set
 `trustPolicy.minimum`; graph construction blocks lower-tier modules before
 dependency, provider, or frontend contribution activation. Lock entries retain
-the tier and optional detached signature metadata, and `verified` entries must
-carry that metadata.
+the tier and detached signature metadata, and `verified` entries must carry a
+signature that a configured key verifies.
 
 ## 8. Module lifecycle
 

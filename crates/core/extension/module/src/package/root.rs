@@ -90,6 +90,9 @@ impl RootModuleGraphManifest {
         for module_id in self.capability_approvals.keys() {
             validate_module_id(module_id)?;
         }
+        self.trust_policy
+            .validate()
+            .map_err(ModuleManifestError::Validation)?;
         if let Some(layout) = &self.layout {
             layout.validate()?;
         }

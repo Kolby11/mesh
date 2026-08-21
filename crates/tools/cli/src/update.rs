@@ -16,8 +16,9 @@ use mesh_core_capability::{
 };
 use mesh_core_module::package::{
     InstalledModuleGraph, LockedModule, MeshLock, ModuleGraphDiff, ModuleManifest, ModuleSource,
-    PackageTransaction, RootModuleGraphManifest, has_local_edits, load_installed_module_graph,
-    module_install_path, module_tree_digest, validate_module_tree,
+    PackageTransaction, RootModuleGraphManifest, TrustTier, has_local_edits,
+    load_installed_module_graph, load_module_signature, module_install_path, module_tree_digest,
+    validate_module_tree,
 };
 use mesh_core_service::{CompatibilityClass, diff_contracts, parse_interface_contract};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -604,6 +605,7 @@ fn classify_candidate_graph(plan: &mut UpdatePlan, graph: &InstalledModuleGraph)
         "required_interface_version_mismatch",
         "missing_interface_contract",
         "missing_interface_required_capability",
+        "signature_invalid",
         "trust_policy_blocked",
     ]);
     for diagnostic in graph.diagnostics() {
@@ -763,10 +765,20 @@ pub fn commit_update(
             .replace_with(&installed_at, staged)
             .map_err(|error| error.to_string())?;
         let digest = module_tree_digest(&installed_at).map_err(|error| error.to_string())?;
+        let signature = load_module_signature(&installed_at).map_err(|error| error.to_string())?;
         if let Some(entry) = lock.modules.get_mut(&candidate.module_id) {
             entry.version = candidate.candidate_version.clone();
             entry.revision = Some(revision.clone());
             entry.digest = digest;
+            entry.trust = if signature.is_some() {
+                TrustTier::Verified
+            } else {
+                TrustTier::for_source(
+                    &candidate.module_id,
+                    matches!(&entry.source, ModuleSource::Git { .. }),
+                )
+            };
+            entry.signature = signature;
             entry.dependencies = candidate
                 .candidate_manifest
                 .mesh
@@ -1033,6 +1045,30 @@ pub fn verify(modules_dir: &Path, lock: &MeshLock) -> Vec<(String, bool)> {
             has_local_edits(&installed_at, entry)
                 .ok()
                 .map(|edited| (module_id.clone(), edited))
+        })
+        .collect()
+}
+
+/// Validate the signed provenance recorded for every locked module against the
+/// root graph's trust anchors and minimum tier.
+pub fn verify_provenance(
+    root: &RootModuleGraphManifest,
+    lock: &MeshLock,
+) -> Vec<(String, Option<String>)> {
+    lock.modules
+        .iter()
+        .map(|(module_id, entry)| {
+            let error = root
+                .trust_policy
+                .validate_candidate(
+                    module_id,
+                    &entry.version,
+                    &entry.digest,
+                    entry.trust,
+                    entry.signature.as_ref(),
+                )
+                .err();
+            (module_id.clone(), error)
         })
         .collect()
 }

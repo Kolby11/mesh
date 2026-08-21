@@ -18,8 +18,9 @@ compatibility gate, and capability re-approval are available through
 `mesh-shell` and the typed `mesh.packages` service. A CLI or package component
 is a client of that service, not a privileged management layer.
 
-v1 deliberately ships without a registry, package archives, or signing. The
-design must not block them (§6), but the first installer is:
+v1 deliberately ships without a registry or package archives. Detached module
+signing is supported through `module.sig` and root-graph trust anchors; the
+design must not block registry distribution (§6), and the first installer is:
 
 ```
 mesh install <path>              # copy a local module directory into the modules dir
@@ -173,11 +174,12 @@ source, lock, or profile state. It is the primary review surface.
 ```
 
 `digest` hashes relative path, executable bit, and bytes of every source file in
-sorted order, excluding `.git`. Compiled output lives in `~/.cache/mesh` and
-never inside a module directory, so an ordinary shell run cannot make a module
-read as edited. `requestedBy` is what lets `uninstall` refuse safely. A v2 lock
-is upgraded in memory to v3 on load; the next successful package transaction
-persists the migrated schema and direct dependency metadata.
+sorted order, excluding `.git` and the detached `module.sig` sidecar. Compiled
+output lives in `~/.cache/mesh` and never inside a module directory, so an
+ordinary shell run cannot make a module read as edited. `requestedBy` is what
+lets `uninstall` refuse safely. A v2 lock is upgraded in memory to v3 on load;
+the next successful package transaction persists the migrated schema and direct
+dependency metadata.
 
 ### 1.5 Immutable activation objects
 
@@ -293,23 +295,24 @@ end)
 Optional interfaces use `pcall(require, …)`; a failed require and an
 unavailable interface render the same fallback path.
 
-## 6. Future: registry, archives, signing
+## 6. Future: registry and archives; signing integration
 
-**Status: explicitly deferred; the v1 design keeps the door open.**
+**Status: registry and archive distribution are explicitly deferred; detached
+signing is shipped without registry key distribution.**
 
 - Module identity (`@scope/name` + semver) and the manifest's kinded
   dependency buckets are already registry-shaped; a registry adds *fetching*,
   not a new model.
-- Signing attaches at the module-directory boundary (a detached signature
-  over the tree); trust tiers ([01 §7](01-module-system.md)) already define
-  the policy that signatures will enforce. Unsigned = `local`/`community`
-  tier behavior.
-- Registry integrity and signature verification can extend the same lock
+- Signing attaches at the module-directory boundary in `module.sig`, a
+  detached Ed25519 signature over the canonical module id/version/digest
+  payload. Root-graph `trustPolicy.keys` provide the local trust anchors;
+  unsigned sources retain `local`/`community` tier behavior.
+- Registry integrity and registry key distribution can extend the same lock
   provenance without changing the editable module layout.
 - Lock provenance now carries a typed `trust` tier and optional detached
   `signature` record. The root graph's optional `trustPolicy.minimum` is
   enforced before activation and candidate graph review reports blocked tiers;
-  cryptographic signature verification is still pending the registry/key
-  integration.
+  candidate planning and graph activation verify signatures before accepting a
+  `verified` tier; registry key distribution remains pending.
 - Update flows must re-show capability diffs and require re-approval when a
   new version adds `elevated`/`high` capabilities.

@@ -1,7 +1,9 @@
+use super::super::trust::TrustAssessment;
 use super::super::{
     InstalledModuleEntry, MeshLock, ModuleId, ModuleManifest, ModuleManifestDiagnostic,
     ModuleManifestError, ModuleStore, ProfilePaths, RootModuleGraphManifest, ShellProfile,
-    TrustTier, contained_path, module_store_dir, resolve_composition, validate_module_tree,
+    TrustTier, contained_path, load_module_signature, module_store_dir, module_tree_digest,
+    resolve_composition, validate_module_tree,
 };
 use super::graph::CompositionContext;
 use super::*;
@@ -138,19 +140,48 @@ fn load_installed_module_graph_with(
         effective_profile.apply_to_root(&mut root, &manifests)?;
     }
 
-    let trust_by_module = modules
+    let provenance_by_module = modules
         .iter()
         .map(|loaded| {
             let module_id = loaded.manifest.name.clone();
-            let trust = lock
-                .modules
-                .get(&module_id)
-                .map(|entry| entry.trust)
-                .unwrap_or_else(|| TrustTier::default_for_module(&module_id));
-            (module_id, trust)
+            let (trust, digest, signature) = if let Some(entry) = lock.modules.get(&module_id) {
+                (entry.trust, entry.digest.clone(), entry.signature.clone())
+            } else {
+                let module_root = loaded.path.parent().ok_or_else(|| {
+                    ModuleManifestError::Validation(format!(
+                        "module {} manifest has no containing directory",
+                        loaded.manifest.name
+                    ))
+                })?;
+                let signature = load_module_signature(module_root)?;
+                let digest = if signature.is_some() {
+                    module_tree_digest(module_root)?
+                } else {
+                    String::new()
+                };
+                let trust = if signature.is_some() {
+                    TrustTier::Verified
+                } else {
+                    TrustTier::default_for_module(&module_id)
+                };
+                (trust, digest, signature)
+            };
+            let assessment = root.trust_policy.assess(
+                &module_id,
+                &loaded.manifest.version,
+                &digest,
+                trust,
+                signature.as_ref(),
+            );
+            Ok::<_, ModuleManifestError>((module_id, assessment))
         })
-        .collect();
-    InstalledModuleGraph::from_parts_with_trust(root, modules, composition, trust_by_module)
+        .collect::<Result<std::collections::BTreeMap<String, TrustAssessment>, _>>()?;
+    InstalledModuleGraph::from_parts_with_provenance(
+        root,
+        modules,
+        composition,
+        provenance_by_module,
+    )
 }
 
 fn load_active_store(

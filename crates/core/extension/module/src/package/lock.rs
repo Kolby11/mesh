@@ -16,9 +16,9 @@
 //! - `requested_by` makes uninstall safe and explains version conflicts.
 
 use super::{
-    ModuleId, ModuleKind, ModuleManifest, ModuleManifestError, SignedProvenance, TrustTier,
-    atomic_write, dependency_spec_to_string, resolve_closure, validate_module_tree,
-    validate_regular_file,
+    MODULE_SIGNATURE_FILE, ModuleId, ModuleKind, ModuleManifest, ModuleManifestError,
+    SignedProvenance, TrustTier, atomic_write, dependency_spec_to_string, resolve_closure,
+    validate_module_tree, validate_regular_file,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -554,6 +554,9 @@ fn collect_files(
                 })?
                 .to_string_lossy()
                 .replace('\\', "/");
+            if relative == MODULE_SIGNATURE_FILE {
+                continue;
+            }
             files.push(relative);
         }
     }
@@ -628,6 +631,19 @@ mod tests {
 
         write(&root, "src/extra.mesh", "<template/>");
         assert_ne!(before, module_tree_digest(&root).unwrap());
+    }
+
+    #[test]
+    fn digest_excludes_the_detached_signature_sidecar() {
+        let root = temp_dir("signature");
+        write(&root, "module.json", "{}");
+        let before = module_tree_digest(&root).unwrap();
+        write(
+            &root,
+            MODULE_SIGNATURE_FILE,
+            r#"{"keyId":"release","algorithm":"ed25519","signature":"AAAA"}"#,
+        );
+        assert_eq!(before, module_tree_digest(&root).unwrap());
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use super::super::trust::TrustAssessment;
 use super::super::{
     InterfaceRelationship, ModuleKind, ModuleManifest, ModuleManifestDiagnostic,
     ModuleManifestError, NodeSlotOverride, ResolutionOutcome, RootModuleGraphManifest,
@@ -368,6 +369,19 @@ impl InstalledModuleGraph {
         composition: CompositionContext,
         trust_by_module: BTreeMap<String, TrustTier>,
     ) -> Result<Self, ModuleManifestError> {
+        let provenance_by_module = trust_by_module
+            .into_iter()
+            .map(|(module_id, trust)| (module_id, TrustAssessment::accepted(trust)))
+            .collect();
+        Self::from_parts_with_provenance(root, modules, composition, provenance_by_module)
+    }
+
+    pub(in crate::package) fn from_parts_with_provenance(
+        root: RootModuleGraphManifest,
+        modules: Vec<LoadedModuleManifest>,
+        composition: CompositionContext,
+        provenance_by_module: BTreeMap<String, TrustAssessment>,
+    ) -> Result<Self, ModuleManifestError> {
         root.validate()?;
         let trust_policy = root.trust_policy.clone();
         let mut loaded_by_id = HashMap::new();
@@ -403,18 +417,31 @@ impl InstalledModuleGraph {
                 )));
             }
 
-            let trust = trust_by_module
+            let assessment = provenance_by_module
                 .get(module_id)
-                .copied()
-                .unwrap_or_else(|| TrustTier::default_for_module(module_id));
-            let trust_allowed = trust_policy.allows(trust);
-            if entry.enabled && !trust_allowed {
+                .cloned()
+                .unwrap_or_else(|| {
+                    TrustAssessment::accepted(TrustTier::default_for_module(module_id))
+                });
+            let trust_allowed = assessment.signature_valid && trust_policy.allows(assessment.tier);
+            if entry.enabled && !assessment.signature_valid {
+                manual_diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: module_id.clone(),
+                    contribution_id: Some(format!("{module_id}:signature")),
+                    status: "signature_invalid".into(),
+                    message: format!(
+                        "module {module_id} provenance signature is invalid: {}",
+                        assessment.error.as_deref().unwrap_or("verification failed")
+                    ),
+                });
+            } else if entry.enabled && !trust_allowed {
                 manual_diagnostics.push(ModuleGraphDiagnostic {
                     module_id: module_id.clone(),
                     contribution_id: Some(format!("{module_id}:trust")),
                     status: "trust_policy_blocked".into(),
                     message: format!(
-                        "module {module_id} has {trust:?} provenance, below the configured {:?} trust minimum",
+                        "module {module_id} has {:?} provenance, below the configured {:?} trust minimum",
+                        assessment.tier,
                         trust_policy.minimum
                     ),
                 });
@@ -425,7 +452,7 @@ impl InstalledModuleGraph {
                 kind: entry.kind,
                 path: entry.path.clone(),
                 enabled: entry.enabled && trust_allowed,
-                trust,
+                trust: assessment.tier,
                 manifest_path: loaded.path.clone(),
                 manifest_source: loaded.source,
                 manifest: loaded.manifest.clone(),

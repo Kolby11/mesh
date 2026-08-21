@@ -8,6 +8,7 @@ fn trust_policy_blocks_untrusted_modules_before_activation() {
     let mut root = root_with_modules(&[("@me/local", ModuleKind::Frontend)], &[], None);
     root.trust_policy = TrustPolicy {
         minimum: TrustTier::Verified,
+        ..Default::default()
     };
     let graph = InstalledModuleGraph::from_parts(
         root,

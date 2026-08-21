@@ -526,14 +526,28 @@ fn cmd_install(args: &[String]) {
     let manifest = mesh_core_module::package::ModuleManifest::from_path(&manifest_path)
         .unwrap_or_else(|error| exit_error(error));
 
-    let trust = mesh_core_module::package::TrustTier::for_source(
+    let signature = mesh_core_module::package::load_module_signature(source_path)
+        .unwrap_or_else(|error| exit_error(error.to_string()));
+    let digest = mesh_core_module::package::module_tree_digest(source_path)
+        .unwrap_or_else(|error| exit_error(error.to_string()));
+    let trust = if signature.is_some() {
+        mesh_core_module::package::TrustTier::Verified
+    } else {
+        mesh_core_module::package::TrustTier::for_source(
+            &manifest.name,
+            matches!(&source, InstallSource::Git { .. }),
+        )
+    };
+    if let Err(error) = root.trust_policy.validate_candidate(
         &manifest.name,
-        matches!(&source, InstallSource::Git { .. }),
-    );
-    if !root.trust_policy.allows(trust) {
+        &manifest.version,
+        &digest,
+        trust,
+        signature.as_ref(),
+    ) {
         exit_error(format!(
-            "module {} has {trust:?} provenance, below the configured {:?} trust minimum",
-            manifest.name, root.trust_policy.minimum
+            "module {} provenance rejected: {error}",
+            manifest.name
         ));
     }
 
@@ -1007,10 +1021,16 @@ fn record_lock_entry(
             Some(provenance.revision.clone()),
         ),
     };
-    let trust = TrustTier::for_source(
-        module_id,
-        matches!(&module_source, ModuleSource::Git { .. }),
-    );
+    let signature = mesh_core_module::package::load_module_signature(installed_at)
+        .map_err(|error| error.to_string())?;
+    let trust = if signature.is_some() {
+        TrustTier::Verified
+    } else {
+        TrustTier::for_source(
+            module_id,
+            matches!(&module_source, ModuleSource::Git { .. }),
+        )
+    };
     lock.modules.insert(
         module_id.to_string(),
         LockedModule {
@@ -1019,7 +1039,7 @@ fn record_lock_entry(
             revision,
             digest,
             trust,
-            signature: None,
+            signature,
             dependencies: Default::default(),
             requested_by: Default::default(),
         },
@@ -1324,12 +1344,22 @@ fn cmd_uninstall(args: &[String]) {
 fn cmd_lock(args: &[String]) {
     match args.first().map(String::as_str) {
         Some("verify") | None => {
-            let (_, config_dir, modules_dir) = lock_paths();
+            let (root_path, config_dir, modules_dir) = lock_paths();
+            let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
+                .unwrap_or_else(|error| exit_error(error));
             let lock =
                 mesh_core_module::package::MeshLock::load_or_default(&config_dir.join("mesh.lock"))
                     .unwrap_or_else(|error| exit_error(error));
             let results = update::verify(&modules_dir, &lock);
-            if results.is_empty() {
+            let provenance = update::verify_provenance(&root, &lock);
+            let provenance_failures = provenance
+                .iter()
+                .filter_map(|(module_id, error)| error.as_ref().map(|error| (module_id, error)))
+                .collect::<Vec<_>>();
+            for (module_id, error) in provenance_failures {
+                println!("untrusted {module_id}: {error}");
+            }
+            if results.is_empty() && provenance.iter().all(|(_, error)| error.is_none()) {
                 println!("no locked modules");
                 return;
             }
@@ -1343,6 +1373,9 @@ fn cmd_lock(args: &[String]) {
                 }
             }
             println!("{edited} module(s) differ from their locked digest");
+            if provenance.iter().any(|(_, error)| error.is_some()) {
+                std::process::exit(1);
+            }
         }
         Some(other) => exit_error(format!(
             "unknown lock subcommand: {other}\nsubcommands: verify"
