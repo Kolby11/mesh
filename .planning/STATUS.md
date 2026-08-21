@@ -7,6 +7,13 @@ lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
 
+The highest-priority Section 2 item is complete: package commits publish
+validated module trees into a read-only SHA-256 object store and activate
+generation-stamped snapshots. Installed-graph and shell discovery resolve the
+active object set, while editable module trees remain the authoring/update
+source. Focused package tests are added; Cargo execution is currently blocked
+because the local registry cache lacks `sha2` and network access is unavailable.
+
 The guarded `scripts/codex-backlog-runner.sh` can process one unchecked backlog
 item at a time directly on `main`, using Codex's explicit unrestricted mode for
 unattended turns by default (`CODEX_ALLOW_ALL=0` opts back into workspace-write),

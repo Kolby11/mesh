@@ -177,6 +177,17 @@ read as edited. `requestedBy` is what lets `uninstall` refuse safely. A v2 lock
 is upgraded in memory to v3 on load; the next successful package transaction
 persists the migrated schema and direct dependency metadata.
 
+### 1.5 Immutable activation objects
+
+**Status: shipped.** Each successful package transaction also publishes every
+locked module into `.mesh-store/objects/sha256/<digest>` and records the module
+set, versions, composition, and lock generation in an immutable activation
+snapshot under `.mesh-store/activations/<generation>/`. The active generation is
+advanced only after the matching lock bytes land. Graph and shell discovery use
+the active object paths when a snapshot exists, while the installed module tree
+remains the directly editable authoring source and is retained for update and
+local-edit checks.
+
 ## 2. Directories
 
 ```

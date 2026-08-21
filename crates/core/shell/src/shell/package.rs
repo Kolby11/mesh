@@ -4,7 +4,8 @@ use mesh_core_capability::{CapabilityCatalog, PrivilegeLevel};
 use mesh_core_module::package::{
     InstalledModuleEntry, MeshLock, ModuleId, ModuleKind, ModuleManifest, ModuleSource,
     PackageTransaction, ProfilePaths, RootModuleGraphManifest, ShellProfile, contained_path,
-    load_installed_module_graph, module_install_path, module_tree_digest, validate_module_tree,
+    load_installed_module_graph, module_install_path, module_store_dir, module_tree_digest,
+    validate_module_tree,
 };
 use std::collections::VecDeque;
 use std::fs;
@@ -129,6 +130,7 @@ impl Shell {
             config_dir,
             &manifest,
             &destination,
+            &modules_dir,
             &staged,
             &installed_manifests,
             !available_only,
@@ -363,8 +365,12 @@ impl Shell {
         if lock_changed || lock_path.exists() {
             MeshLock::archive(&lock_path, &config_dir.join("lock-history"))
                 .map_err(|error| package_error(error.to_string()))?;
-            lock.save(&lock_path)
-                .map_err(|error| package_error(error.to_string()))?;
+            lock.save_with_store(
+                &lock_path,
+                &config_dir.join(&root.modules_dir),
+                &module_store_dir(config_dir),
+            )
+            .map_err(|error| package_error(error.to_string()))?;
         }
 
         tracing::info!(module_id, "uninstalled module through mesh.packages");
@@ -510,6 +516,7 @@ fn record_lock_entry(
     config_dir: &Path,
     manifest: &ModuleManifest,
     installed_at: &Path,
+    modules_dir: &Path,
     source: &StagedModuleSource,
     installed_manifests: &[ModuleManifest],
     activate_composition: bool,
@@ -559,7 +566,7 @@ fn record_lock_entry(
     lock.refresh_metadata(installed_manifests.iter());
     MeshLock::archive(&lock_path, &config_dir.join("lock-history"))
         .map_err(|error| package_error(error.to_string()))?;
-    lock.save(&lock_path)
+    lock.save_with_store(&lock_path, modules_dir, &module_store_dir(config_dir))
         .map_err(|error| package_error(error.to_string()))
 }
 

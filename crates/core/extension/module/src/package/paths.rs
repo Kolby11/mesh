@@ -343,6 +343,11 @@ pub fn modules_dir() -> Result<PathBuf, ModuleManifestError> {
     Ok(mesh_home()?.join("modules"))
 }
 
+/// Durable content-addressed module objects and activation generations.
+pub fn module_store_dir(config_dir: &Path) -> PathBuf {
+    config_dir.join(".mesh-store")
+}
+
 pub fn themes_dir() -> Result<PathBuf, ModuleManifestError> {
     Ok(mesh_home()?.join("themes"))
 }

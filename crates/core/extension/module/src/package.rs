@@ -1,4 +1,5 @@
 mod composition;
+mod content_store;
 mod error;
 mod installed_graph;
 mod lock;
@@ -22,6 +23,7 @@ pub(crate) use util::{
 };
 
 pub use composition::*;
+pub use content_store::*;
 pub use error::*;
 pub use installed_graph::*;
 pub use lock::*;

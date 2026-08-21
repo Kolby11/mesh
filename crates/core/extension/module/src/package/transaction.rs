@@ -208,6 +208,7 @@ impl PackageTransaction {
             config_dir.join("lock-history"),
             config_dir.join("profiles"),
             config_dir.join("active-profile"),
+            config_dir.join(".mesh-store/active-generation"),
         ] {
             self.protect(&path)?;
         }

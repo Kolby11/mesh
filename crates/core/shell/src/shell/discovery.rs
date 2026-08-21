@@ -655,7 +655,16 @@ impl Shell {
 
     pub fn discover_modules(&mut self) {
         let module_dirs = std::mem::take(&mut self.module_dirs);
-        let discovered = discover_shell_module_manifests(&module_dirs);
+        let discovery_dirs = match active_module_dirs_for_graph(&self.installed_module_graph_path())
+        {
+            Ok(Some(directories)) => directories,
+            Ok(None) => module_dirs.clone(),
+            Err(error) => {
+                tracing::error!("active module snapshot is invalid: {error}");
+                Vec::new()
+            }
+        };
+        let discovered = discover_shell_module_manifests(&discovery_dirs);
         for discovered in discovered {
             match discovered.loaded {
                 Ok(loaded) => self.register_loaded_module(&discovered.dir, loaded),
@@ -665,6 +674,34 @@ impl Shell {
         self.module_dirs = module_dirs;
         self.register_installed_graph_interfaces();
         tracing::info!("discovered {} modules", self.modules.len());
+    }
+
+    fn active_module_dirs_for_graph(
+        graph_path: &Path,
+    ) -> Result<Option<Vec<PathBuf>>, mesh_core_module::package::ModuleManifestError> {
+        let config_dir = graph_path.parent().ok_or_else(|| {
+            mesh_core_module::package::ModuleManifestError::Validation(format!(
+                "root module graph path must have a parent directory: {}",
+                graph_path.display()
+            ))
+        })?;
+        let store_root = mesh_core_module::package::module_store_dir(config_dir);
+        let active = store_root.join("active-generation");
+        match std::fs::symlink_metadata(&active) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => Err(
+                mesh_core_module::package::ModuleManifestError::Validation(format!(
+                    "active module generation {} must be a regular file",
+                    active.display()
+                )),
+            ),
+            Ok(_) => mesh_core_module::package::ModuleStore::new(store_root)
+                .and_then(|store| store.active_module_dirs()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(mesh_core_module::package::ModuleManifestError::Io {
+                path: active,
+                source,
+            }),
+        }
     }
 
     pub(in crate::shell) fn installed_module_graph_path(&self) -> PathBuf {

@@ -269,6 +269,32 @@ impl MeshLock {
         atomic_write(path, content.as_bytes())
     }
 
+    /// Persist a lock generation together with the immutable module objects
+    /// and activation snapshot it names.
+    ///
+    /// The editable module tree remains the authoring source, but a package
+    /// commit is not considered publishable until every locked module has a
+    /// matching content-addressed object. The snapshot is written before the
+    /// lock and activated only after the lock bytes land, so a failed lock
+    /// write cannot advance the active generation.
+    pub fn save_with_store(
+        &mut self,
+        path: &Path,
+        modules_dir: &Path,
+        store_root: &Path,
+    ) -> Result<(), ModuleManifestError> {
+        self.validate()?;
+        let generation = self.generation.checked_add(1).ok_or_else(|| {
+            ModuleManifestError::Validation("mesh.lock generation overflow".into())
+        })?;
+        let store = super::ModuleStore::new(store_root.to_path_buf())?;
+        let snapshot = store.snapshot_from_lock(generation, self, modules_dir)?;
+        store.publish_snapshot(&snapshot)?;
+        self.generation = generation;
+        self.save_exact(path)?;
+        store.activate_generation(generation)
+    }
+
     /// Persist an already-resolved generation without advancing it.
     ///
     /// Rollback restores the selected lock generation exactly.  Calling
@@ -286,6 +312,23 @@ impl MeshLock {
             })?;
         content.push('\n');
         atomic_write(path, content.as_bytes())
+    }
+
+    /// Persist an already-selected generation and publish its matching
+    /// activation snapshot. This is used by rollback, where advancing the
+    /// generation would change the meaning of the archived lock.
+    pub fn save_exact_with_store(
+        &self,
+        path: &Path,
+        modules_dir: &Path,
+        store_root: &Path,
+    ) -> Result<(), ModuleManifestError> {
+        self.validate()?;
+        let store = super::ModuleStore::new(store_root.to_path_buf())?;
+        let snapshot = store.snapshot_from_lock(self.generation, self, modules_dir)?;
+        store.publish_snapshot(&snapshot)?;
+        self.save_exact(path)?;
+        store.activate_generation(self.generation)
     }
 
     /// Archive the current on-disk lock before overwriting it, so

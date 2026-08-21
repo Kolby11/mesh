@@ -708,7 +708,12 @@ pub fn commit_update(
     let lock_path = config_dir.join("mesh.lock");
     let history = config_dir.join("lock-history");
     MeshLock::archive(&lock_path, &history).map_err(|error| error.to_string())?;
-    lock.save(&lock_path).map_err(|error| error.to_string())?;
+    lock.save_with_store(
+        &lock_path,
+        modules_dir,
+        &mesh_core_module::package::module_store_dir(config_dir),
+    )
+    .map_err(|error| error.to_string())?;
     Ok(updated)
 }
 
@@ -771,7 +776,11 @@ pub fn rollback(
 
     MeshLock::archive(&lock_path, &history).map_err(|error| error.to_string())?;
     target
-        .save_exact(&lock_path)
+        .save_exact_with_store(
+            &lock_path,
+            modules_dir,
+            &mesh_core_module::package::module_store_dir(config_dir),
+        )
         .map_err(|error| error.to_string())?;
     restored.push(format!("lock restored to generation {target_generation}"));
     Ok(restored)

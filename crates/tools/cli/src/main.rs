@@ -644,6 +644,7 @@ fn cmd_install(args: &[String]) {
                 &manifest.name,
                 &manifest.version,
                 &destination,
+                &modules_dir,
                 &source,
                 &installed_manifests,
                 Some(mesh_core_module::package::LockedComposition {
@@ -665,6 +666,7 @@ fn cmd_install(args: &[String]) {
                 &manifest.name,
                 &manifest.version,
                 &destination,
+                &modules_dir,
                 &source,
                 &installed_manifests,
                 None,
@@ -686,6 +688,7 @@ fn cmd_install(args: &[String]) {
                 &manifest.name,
                 &manifest.version,
                 &destination,
+                &modules_dir,
                 &source,
                 &installed_manifests,
                 None,
@@ -735,6 +738,7 @@ fn cmd_install(args: &[String]) {
             &manifest.name,
             &manifest.version,
             &destination,
+            &modules_dir,
             &source,
             &installed_manifests,
             None,
@@ -964,6 +968,7 @@ fn record_lock_entry(
     module_id: &str,
     version: &str,
     installed_at: &std::path::Path,
+    modules_dir: &std::path::Path,
     source: &InstallSource,
     installed_manifests: &[mesh_core_module::package::ModuleManifest],
     composition: Option<mesh_core_module::package::LockedComposition>,
@@ -1005,7 +1010,12 @@ fn record_lock_entry(
     }
     lock.refresh_metadata(installed_manifests.iter());
     MeshLock::archive(&path, &history).map_err(|error| error.to_string())?;
-    lock.save(&path).map_err(|error| error.to_string())
+    lock.save_with_store(
+        &path,
+        modules_dir,
+        &mesh_core_module::package::module_store_dir(config_dir),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn lock_history_dir(config_dir: &std::path::Path) -> std::path::PathBuf {
@@ -1248,8 +1258,12 @@ fn cmd_uninstall(args: &[String]) {
     let history = config_dir.join("lock-history");
     mesh_core_module::package::MeshLock::archive(&lock_path, &history)
         .unwrap_or_else(|error| exit_error(error));
-    lock.save(&lock_path)
-        .unwrap_or_else(|error| exit_error(error));
+    lock.save_with_store(
+        &lock_path,
+        &modules_dir,
+        &mesh_core_module::package::module_store_dir(&config_dir),
+    )
+    .unwrap_or_else(|error| exit_error(error));
     transaction
         .commit()
         .unwrap_or_else(|error| exit_error(format!("failed to commit uninstall: {error}")));
@@ -1632,9 +1646,10 @@ mod tests {
         std::fs::create_dir_all(&installed).unwrap();
         std::fs::write(
             installed.join("module.json"),
-            r#"{"name":"@example/widget"}"#,
+            r#"{"name":"@example/widget","version":"1.2.3","mesh":{"apiVersion":"0.1","kind":"component","entry":"main.mesh"}}"#,
         )
         .unwrap();
+        std::fs::write(installed.join("main.mesh"), "<template><box/></template>").unwrap();
 
         let source = InstallSource::Git {
             checkout: installed.clone(),
@@ -1649,6 +1664,7 @@ mod tests {
             "@example/widget",
             "1.2.3",
             &installed,
+            &config_dir.join("modules"),
             &source,
             &[],
             None,

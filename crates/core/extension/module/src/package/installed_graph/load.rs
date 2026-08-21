@@ -1,7 +1,7 @@
 use super::super::{
-    InstalledModuleEntry, ModuleManifest, ModuleManifestDiagnostic, ModuleManifestError,
-    ProfilePaths, RootModuleGraphManifest, ShellProfile, contained_path, resolve_composition,
-    validate_module_tree,
+    InstalledModuleEntry, ModuleId, ModuleManifest, ModuleManifestDiagnostic, ModuleManifestError,
+    ModuleStore, ProfilePaths, RootModuleGraphManifest, ShellProfile, contained_path,
+    module_store_dir, resolve_composition, validate_module_tree,
 };
 use super::graph::CompositionContext;
 use super::*;
@@ -37,6 +37,7 @@ fn load_installed_module_graph_with(
         ))
     })?;
     let modules_dir = root_dir.join(&root.modules_dir);
+    let active_store = load_active_store(root_dir)?;
     let mut modules = Vec::new();
 
     if root.modules.is_empty() {
@@ -44,16 +45,24 @@ fn load_installed_module_graph_with(
         // and build the installed set from each module's own manifest. The root
         // file then holds only decisions — `disabled`, `providers`, `layout`,
         // `theme` — and a discovered module is enabled unless disabled there.
-        let module_dirs = discover_module_dirs(&modules_dir);
+        let module_dirs = if let Some((store, snapshot)) = &active_store {
+            snapshot_module_dirs(store, snapshot)?
+        } else {
+            discover_module_dirs(&modules_dir)
+        };
         let loaded_manifests = load_manifests(&module_dirs)?;
         for (module_dir, loaded) in module_dirs.iter().cloned().zip(loaded_manifests) {
             let name = loaded.manifest.name.clone();
             let kind = loaded.manifest.mesh.kind;
-            let relative = module_dir
-                .strip_prefix(&modules_dir)
-                .unwrap_or(&module_dir)
-                .to_string_lossy()
-                .replace('\\', "/");
+            let relative = if active_store.is_some() {
+                ModuleId::parse(&name)?.relative_path().to_string()
+            } else {
+                module_dir
+                    .strip_prefix(&modules_dir)
+                    .unwrap_or(&module_dir)
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            };
             let enabled = !root.disabled.iter().any(|disabled| disabled == &name);
             root.modules.insert(
                 name,
@@ -66,11 +75,31 @@ fn load_installed_module_graph_with(
             modules.push(loaded);
         }
     } else {
-        let module_dirs = root
-            .modules
-            .values()
-            .map(|entry| contained_path(&modules_dir, &entry.path, "installed module path"))
-            .collect::<Result<Vec<_>, _>>()?;
+        let use_snapshot = active_store.as_ref().is_some_and(|(_, snapshot)| {
+            root.modules.keys().all(|module_id| {
+                ModuleId::parse(module_id).is_ok() && snapshot.modules.contains_key(module_id)
+            })
+        });
+        let module_dirs = if use_snapshot {
+            let (store, snapshot) = active_store.as_ref().expect("snapshot was checked");
+            root.modules
+                .keys()
+                .map(|module_id| {
+                    ModuleId::parse(module_id)?;
+                    let module = snapshot.modules.get(module_id).ok_or_else(|| {
+                        ModuleManifestError::Validation(format!(
+                            "active module snapshot is missing {module_id}"
+                        ))
+                    })?;
+                    store.object(&module.digest)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            root.modules
+                .values()
+                .map(|entry| contained_path(&modules_dir, &entry.path, "installed module path"))
+                .collect::<Result<Vec<_>, _>>()?
+        };
         modules = load_manifests(&module_dirs)?;
     }
 
@@ -109,6 +138,47 @@ fn load_installed_module_graph_with(
     }
 
     InstalledModuleGraph::from_parts_with_composition(root, modules, composition)
+}
+
+fn load_active_store(
+    root_dir: &Path,
+) -> Result<Option<(ModuleStore, super::super::ActivationSnapshot)>, ModuleManifestError> {
+    let store_root = module_store_dir(root_dir);
+    let active = store_root.join("active-generation");
+    let metadata = match std::fs::symlink_metadata(&active) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(ModuleManifestError::Io {
+                path: active,
+                source,
+            });
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(ModuleManifestError::Validation(format!(
+            "active module generation {} must be a regular file",
+            active.display()
+        )));
+    }
+    let store = ModuleStore::new(store_root)?;
+    let snapshot = store.active_snapshot()?.ok_or_else(|| {
+        ModuleManifestError::Validation(
+            "active module generation exists without an activation snapshot".into(),
+        )
+    })?;
+    Ok(Some((store, snapshot)))
+}
+
+fn snapshot_module_dirs(
+    store: &ModuleStore,
+    snapshot: &super::super::ActivationSnapshot,
+) -> Result<Vec<PathBuf>, ModuleManifestError> {
+    snapshot
+        .modules
+        .values()
+        .map(|module| store.object(&module.digest))
+        .collect()
 }
 
 #[cfg(test)]
