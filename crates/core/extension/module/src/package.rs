@@ -10,6 +10,7 @@ mod profile;
 mod resolution;
 mod root;
 mod transaction;
+mod trust;
 mod util;
 
 #[cfg(test)]
@@ -33,3 +34,4 @@ pub use profile::*;
 pub use resolution::*;
 pub use root::*;
 pub use transaction::*;
+pub use trust::*;

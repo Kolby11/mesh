@@ -800,6 +800,8 @@ mod tests {
                 },
                 revision: None,
                 digest,
+                trust: Default::default(),
+                signature: None,
                 dependencies: Default::default(),
                 requested_by: Default::default(),
             },

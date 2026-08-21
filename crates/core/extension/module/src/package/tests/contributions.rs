@@ -550,6 +550,7 @@ fn disabled_modules_remain_catalog_nodes_but_not_runtime_contributions() {
         schema_version: 1,
         modules_dir: "modules".into(),
         capability_approvals: Default::default(),
+        trust_policy: Default::default(),
         modules: [
             ("@mesh/disabled-widget", ModuleKind::Frontend),
             ("@mesh/disabled-backend", ModuleKind::Backend),

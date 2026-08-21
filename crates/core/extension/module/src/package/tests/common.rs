@@ -174,6 +174,7 @@ pub(super) fn root_with_modules(
         schema_version: 1,
         modules_dir: "modules".into(),
         capability_approvals: Default::default(),
+        trust_policy: Default::default(),
         modules: modules
             .iter()
             .map(|(id, kind)| {

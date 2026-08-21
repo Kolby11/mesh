@@ -3,9 +3,9 @@ use super::*;
 use mesh_core_capability::{CapabilityCatalog, PrivilegeLevel};
 use mesh_core_module::package::{
     InstalledModuleEntry, MeshLock, ModuleId, ModuleKind, ModuleManifest, ModuleSource,
-    PackageTransaction, ProfilePaths, RootModuleGraphManifest, ShellProfile, contained_path,
-    load_installed_module_graph, module_install_path, module_store_dir, module_tree_digest,
-    validate_module_tree,
+    PackageTransaction, ProfilePaths, RootModuleGraphManifest, ShellProfile, TrustTier,
+    contained_path, load_installed_module_graph, module_install_path, module_store_dir,
+    module_tree_digest, validate_module_tree,
 };
 use std::collections::VecDeque;
 use std::fs;
@@ -45,6 +45,16 @@ impl Shell {
         let manifest = ModuleManifest::from_path(&staged.path().join("module.json"))
             .map_err(|error| package_error(error.to_string()))?;
         check_install_capabilities(&manifest, allow_elevated, allow_high)?;
+        let trust = TrustTier::for_source(
+            &manifest.name,
+            matches!(&staged, StagedModuleSource::Git { .. }),
+        );
+        if !root.trust_policy.allows(trust) {
+            return Err(package_error(format!(
+                "module {} has {trust:?} provenance, below the configured {:?} trust minimum",
+                manifest.name, root.trust_policy.minimum
+            )));
+        }
 
         fs::create_dir_all(&modules_dir).map_err(|error| {
             package_error(format!(
@@ -546,6 +556,10 @@ fn record_lock_entry(
             Some(revision.clone()),
         ),
     };
+    let trust = TrustTier::for_source(
+        &manifest.name,
+        matches!(&module_source, ModuleSource::Git { .. }),
+    );
     lock.modules.insert(
         manifest.name.clone(),
         mesh_core_module::package::LockedModule {
@@ -553,6 +567,8 @@ fn record_lock_entry(
             source: module_source,
             revision,
             digest,
+            trust,
+            signature: None,
             dependencies: Default::default(),
             requested_by: Default::default(),
         },

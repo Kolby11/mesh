@@ -4,6 +4,30 @@ use crate::ModuleType;
 use std::collections::HashMap;
 
 #[test]
+fn trust_policy_blocks_untrusted_modules_before_activation() {
+    let mut root = root_with_modules(&[("@me/local", ModuleKind::Frontend)], &[], None);
+    root.trust_policy = TrustPolicy {
+        minimum: TrustTier::Verified,
+    };
+    let graph = InstalledModuleGraph::from_parts(
+        root,
+        vec![loaded_module(
+            "@me/local",
+            ModuleKind::Frontend,
+            MeshDependencies::default(),
+            vec![],
+            MeshContributes::default(),
+        )],
+    )
+    .unwrap();
+
+    assert!(!graph.module("@me/local").unwrap().enabled);
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@me/local" && diagnostic.status == "trust_policy_blocked"
+    }));
+}
+
+#[test]
 fn graph_diff_reports_inventory_activation_and_provider_changes() {
     let before_root = root_with_modules(
         &[

@@ -1,7 +1,7 @@
 use super::super::{
-    InstalledModuleEntry, ModuleId, ModuleManifest, ModuleManifestDiagnostic, ModuleManifestError,
-    ModuleStore, ProfilePaths, RootModuleGraphManifest, ShellProfile, contained_path,
-    module_store_dir, resolve_composition, validate_module_tree,
+    InstalledModuleEntry, MeshLock, ModuleId, ModuleManifest, ModuleManifestDiagnostic,
+    ModuleManifestError, ModuleStore, ProfilePaths, RootModuleGraphManifest, ShellProfile,
+    TrustTier, contained_path, module_store_dir, resolve_composition, validate_module_tree,
 };
 use super::graph::CompositionContext;
 use super::*;
@@ -36,6 +36,7 @@ fn load_installed_module_graph_with(
             root_module_graph_path.display()
         ))
     })?;
+    let lock = MeshLock::load_or_default(&root_dir.join("mesh.lock"))?;
     let modules_dir = root_dir.join(&root.modules_dir);
     let active_store = load_active_store(root_dir)?;
     let mut modules = Vec::new();
@@ -137,7 +138,19 @@ fn load_installed_module_graph_with(
         effective_profile.apply_to_root(&mut root, &manifests)?;
     }
 
-    InstalledModuleGraph::from_parts_with_composition(root, modules, composition)
+    let trust_by_module = modules
+        .iter()
+        .map(|loaded| {
+            let module_id = loaded.manifest.name.clone();
+            let trust = lock
+                .modules
+                .get(&module_id)
+                .map(|entry| entry.trust)
+                .unwrap_or_else(|| TrustTier::default_for_module(&module_id));
+            (module_id, trust)
+        })
+        .collect();
+    InstalledModuleGraph::from_parts_with_trust(root, modules, composition, trust_by_module)
 }
 
 fn load_active_store(

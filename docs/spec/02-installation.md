@@ -304,7 +304,12 @@ unavailable interface render the same fallback path.
   over the tree); trust tiers ([01 §7](01-module-system.md)) already define
   the policy that signatures will enforce. Unsigned = `local`/`community`
   tier behavior.
-- The existing source-provenance lock can grow registry integrity and signature
-  metadata without changing the editable module layout.
+- Registry integrity and signature verification can extend the same lock
+  provenance without changing the editable module layout.
+- Lock provenance now carries a typed `trust` tier and optional detached
+  `signature` record. The root graph's optional `trustPolicy.minimum` is
+  enforced before activation and candidate graph review reports blocked tiers;
+  cryptographic signature verification is still pending the registry/key
+  integration.
 - Update flows must re-show capability diffs and require re-approval when a
   new version adds `elevated`/`high` capabilities.

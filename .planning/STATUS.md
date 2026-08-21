@@ -20,6 +20,13 @@ catalog tests are added; Cargo
 execution is currently blocked
 because the local registry cache lacks `sha2` and network access is unavailable.
 
+Trust-tier plumbing is the current Section 2 increment: lock entries now carry
+local/community/core/verified classification and detached-signature metadata,
+the root graph can set a minimum accepted tier, and install/update/activation
+paths report lower-tier candidates before commit. Cryptographic verification
+and registry key distribution are not yet implemented, so the trust backlog
+item remains open.
+
 The guarded `scripts/codex-backlog-runner.sh` can process one unchecked backlog
 item at a time directly on `main`, using Codex's explicit unrestricted mode for
 unattended turns by default (`CODEX_ALLOW_ALL=0` opts back into workspace-write),

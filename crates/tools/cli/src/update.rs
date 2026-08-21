@@ -307,9 +307,10 @@ pub fn plan_update_from_staged_graph(
     classify_contract_changes(&mut plan, installed);
     classify_capability_changes(&mut plan, approvals)?;
     resolve_candidate_capabilities(&mut plan, &candidate_graph, approvals)?;
-    if plan.changed().next().is_some() {
-        classify_candidate_graph(&mut plan, &candidate_graph);
-    }
+    // Trust-policy and other graph diagnostics can change even when every
+    // locked revision is unchanged, so candidate graph review is never gated
+    // on a source update.
+    classify_candidate_graph(&mut plan, &candidate_graph);
     Ok(plan)
 }
 
@@ -527,6 +528,7 @@ fn classify_candidate_graph(plan: &mut UpdatePlan, graph: &InstalledModuleGraph)
         "required_interface_version_mismatch",
         "missing_interface_contract",
         "missing_interface_required_capability",
+        "trust_policy_blocked",
     ]);
     for diagnostic in graph.diagnostics() {
         if required_interface_statuses.contains(diagnostic.status.as_str()) {
@@ -993,6 +995,8 @@ mod tests {
                 },
                 revision: Some("old".into()),
                 digest: "sha256:0".into(),
+                trust: Default::default(),
+                signature: None,
                 dependencies: BTreeMap::new(),
                 requested_by: BTreeSet::new(),
             },
@@ -1237,6 +1241,8 @@ mod tests {
                 },
                 revision: Some(old_revision),
                 digest,
+                trust: Default::default(),
+                signature: None,
                 dependencies: BTreeMap::new(),
                 requested_by: BTreeSet::new(),
             },
@@ -1363,6 +1369,8 @@ mod tests {
                 revision: Some("irrelevant".into()),
                 // A digest that cannot match: the tree reads as edited.
                 digest: "sha256:0000".into(),
+                trust: Default::default(),
+                signature: None,
                 dependencies: BTreeMap::new(),
                 requested_by: BTreeSet::new(),
             },
@@ -1407,6 +1415,8 @@ mod tests {
                 },
                 revision: None,
                 digest: "sha256:0".into(),
+                trust: Default::default(),
+                signature: None,
                 dependencies: BTreeMap::new(),
                 requested_by: BTreeSet::from(["@me/desk".to_string()]),
             },

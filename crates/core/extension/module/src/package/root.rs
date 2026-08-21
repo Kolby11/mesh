@@ -1,5 +1,5 @@
 use super::{
-    ModuleManifestError, default_enabled, default_modules_dir, default_schema_version,
+    ModuleManifestError, TrustPolicy, default_enabled, default_modules_dir, default_schema_version,
     parse_module_entrypoint, validate_module_id, validate_modules_dir, validate_relative_path,
 };
 use serde::{Deserialize, Serialize};
@@ -26,6 +26,15 @@ pub struct RootModuleGraphManifest {
     /// they are also listed.
     #[serde(default)]
     pub capability_approvals: BTreeMap<String, Vec<String>>,
+    /// Minimum provenance tier accepted into the active graph. The default is
+    /// permissive for existing developer workspaces; installations may raise
+    /// it to `community` or `verified` explicitly.
+    #[serde(
+        default,
+        rename = "trustPolicy",
+        skip_serializing_if = "TrustPolicy::is_default"
+    )]
+    pub trust_policy: TrustPolicy,
     #[serde(default)]
     pub layout: Option<RootLayoutSelection>,
     #[serde(default)]
@@ -157,6 +166,7 @@ impl RootModuleGraphJson {
             disabled: mesh.disabled,
             providers: mesh.providers,
             capability_approvals: mesh.capability_approvals,
+            trust_policy: mesh.trust_policy,
             layout: mesh.layout,
             theme: mesh.theme,
         })
@@ -182,6 +192,8 @@ struct RootMeshSection {
         alias = "capability_approvals"
     )]
     capability_approvals: BTreeMap<String, Vec<String>>,
+    #[serde(default, rename = "trustPolicy")]
+    trust_policy: TrustPolicy,
     #[serde(default)]
     layout: Option<RootLayoutSelection>,
     #[serde(default)]

@@ -860,8 +860,10 @@ default for a malformed argument.
 
 ## 7. Capabilities & security
 
-**Status: shipped** (capability model, sandbox policy); signing/registry
-enforcement is **target** and deliberately not blocked by installer v1.
+**Status: partially shipped** (capability model, sandbox policy, typed trust
+tiers, lock provenance metadata, and root-graph minimum-tier enforcement);
+cryptographic signature verification and registry key distribution remain
+target work.
 
 A capability is a named permission for a host API. Required capabilities must
 all be granted or the module does not load; optional ones may be denied and
@@ -893,7 +895,11 @@ Trust tiers: `core` (shipped, reviewed), `verified` (reviewed + signed),
 signature). Threats and mitigations: capability sandbox (no ambient fs/net/
 process in Luau), core-owned trusted chrome (modules cannot draw over
 permission dialogs), per-module budgets/isolation for resource abuse, reserved
-`@mesh` scope, capability-diff re-approval on update.
+`@mesh` scope, capability-diff re-approval on update. The root graph may set
+`trustPolicy.minimum`; graph construction blocks lower-tier modules before
+dependency, provider, or frontend contribution activation. Lock entries retain
+the tier and optional detached signature metadata, and `verified` entries must
+carry that metadata.
 
 ## 8. Module lifecycle
 

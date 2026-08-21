@@ -526,6 +526,17 @@ fn cmd_install(args: &[String]) {
     let manifest = mesh_core_module::package::ModuleManifest::from_path(&manifest_path)
         .unwrap_or_else(|error| exit_error(error));
 
+    let trust = mesh_core_module::package::TrustTier::for_source(
+        &manifest.name,
+        matches!(&source, InstallSource::Git { .. }),
+    );
+    if !root.trust_policy.allows(trust) {
+        exit_error(format!(
+            "module {} has {trust:?} provenance, below the configured {:?} trust minimum",
+            manifest.name, root.trust_policy.minimum
+        ));
+    }
+
     let allow_elevated = args.iter().any(|arg| arg == "--allow-elevated");
     let allow_high = args.iter().any(|arg| arg == "--allow-high");
     let catalog = mesh_core_capability::CapabilityCatalog::builtin();
@@ -973,7 +984,9 @@ fn record_lock_entry(
     installed_manifests: &[mesh_core_module::package::ModuleManifest],
     composition: Option<mesh_core_module::package::LockedComposition>,
 ) -> Result<(), String> {
-    use mesh_core_module::package::{LockedModule, MeshLock, ModuleSource, module_tree_digest};
+    use mesh_core_module::package::{
+        LockedModule, MeshLock, ModuleSource, TrustTier, module_tree_digest,
+    };
 
     let path = config_dir.join("mesh.lock");
     let history = lock_history_dir(config_dir);
@@ -994,6 +1007,10 @@ fn record_lock_entry(
             Some(provenance.revision.clone()),
         ),
     };
+    let trust = TrustTier::for_source(
+        module_id,
+        matches!(&module_source, ModuleSource::Git { .. }),
+    );
     lock.modules.insert(
         module_id.to_string(),
         LockedModule {
@@ -1001,6 +1018,8 @@ fn record_lock_entry(
             source: module_source,
             revision,
             digest,
+            trust,
+            signature: None,
             dependencies: Default::default(),
             requested_by: Default::default(),
         },

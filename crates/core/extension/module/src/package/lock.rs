@@ -16,8 +16,9 @@
 //! - `requested_by` makes uninstall safe and explains version conflicts.
 
 use super::{
-    ModuleId, ModuleKind, ModuleManifest, ModuleManifestError, atomic_write,
-    dependency_spec_to_string, resolve_closure, validate_module_tree, validate_regular_file,
+    ModuleId, ModuleKind, ModuleManifest, ModuleManifestError, SignedProvenance, TrustTier,
+    atomic_write, dependency_spec_to_string, resolve_closure, validate_module_tree,
+    validate_regular_file,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -65,6 +66,12 @@ pub struct LockedModule {
     pub revision: Option<String>,
     /// `sha256:<hex>` over the installed tree at install time.
     pub digest: String,
+    /// Provenance classification selected by the package source.
+    #[serde(default)]
+    pub trust: TrustTier,
+    /// Optional detached signature metadata for a verified provenance record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<SignedProvenance>,
     /// Direct module dependency requirements from the normalized manifest.
     /// BTreeMap keeps the serialized lock deterministic across discovery order.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -209,6 +216,18 @@ impl MeshLock {
             if !entry.digest.starts_with("sha256:") {
                 return Err(ModuleManifestError::Validation(format!(
                     "mesh.lock entry '{module_id}' has a digest without its algorithm prefix"
+                )));
+            }
+            if let Some(signature) = &entry.signature {
+                signature.validate().map_err(|message| {
+                    ModuleManifestError::Validation(format!(
+                        "mesh.lock entry '{module_id}' has invalid signed provenance: {message}"
+                    ))
+                })?;
+            }
+            if entry.trust.requires_signature() && entry.signature.is_none() {
+                return Err(ModuleManifestError::Validation(format!(
+                    "mesh.lock entry '{module_id}' claims verified provenance without a signature"
                 )));
             }
         }
@@ -574,6 +593,8 @@ mod tests {
             },
             revision: None,
             digest: digest.into(),
+            trust: Default::default(),
+            signature: None,
             dependencies: BTreeMap::new(),
             requested_by: BTreeSet::new(),
         }
@@ -645,6 +666,8 @@ mod tests {
                 },
                 revision: Some("abc123".into()),
                 digest: "sha256:deadbeef".into(),
+                trust: Default::default(),
+                signature: None,
                 dependencies: BTreeMap::new(),
                 requested_by: BTreeSet::from(["@me/desk".to_string()]),
             },

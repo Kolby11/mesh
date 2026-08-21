@@ -1,14 +1,15 @@
 use super::super::{
     InterfaceRelationship, ModuleKind, ModuleManifest, ModuleManifestDiagnostic,
     ModuleManifestError, NodeSlotOverride, ResolutionOutcome, RootModuleGraphManifest,
-    SlotOverride, apply_slot_override, parse_module_entrypoint, resolve_closure,
+    SlotOverride, TrustPolicy, TrustTier, apply_slot_override, parse_module_entrypoint,
+    resolve_closure,
 };
 use super::*;
 use crate::manifest;
 use mesh_core_service::{
     InterfaceContract, parse_contract_version, parse_interface_contract, parse_version_req,
 };
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
 fn validate_unique_graph_identities(
@@ -279,6 +280,7 @@ pub enum ModuleManifestSource {
 #[derive(Debug, Clone)]
 pub struct InstalledModuleGraph {
     modules: HashMap<String, InstalledModuleNode>,
+    trust_policy: TrustPolicy,
     backend_providers: HashMap<String, Vec<BackendProviderNode>>,
     active_providers: HashMap<String, String>,
     frontend_requirements: HashMap<String, FrontendRequirementSet>,
@@ -357,7 +359,17 @@ impl InstalledModuleGraph {
         modules: Vec<LoadedModuleManifest>,
         composition: CompositionContext,
     ) -> Result<Self, ModuleManifestError> {
+        Self::from_parts_with_trust(root, modules, composition, BTreeMap::new())
+    }
+
+    pub(in crate::package) fn from_parts_with_trust(
+        root: RootModuleGraphManifest,
+        modules: Vec<LoadedModuleManifest>,
+        composition: CompositionContext,
+        trust_by_module: BTreeMap<String, TrustTier>,
+    ) -> Result<Self, ModuleManifestError> {
         root.validate()?;
+        let trust_policy = root.trust_policy.clone();
         let mut loaded_by_id = HashMap::new();
         for loaded in modules {
             loaded.manifest.validate()?;
@@ -391,11 +403,29 @@ impl InstalledModuleGraph {
                 )));
             }
 
+            let trust = trust_by_module
+                .get(module_id)
+                .copied()
+                .unwrap_or_else(|| TrustTier::default_for_module(module_id));
+            let trust_allowed = trust_policy.allows(trust);
+            if entry.enabled && !trust_allowed {
+                manual_diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: module_id.clone(),
+                    contribution_id: Some(format!("{module_id}:trust")),
+                    status: "trust_policy_blocked".into(),
+                    message: format!(
+                        "module {module_id} has {trust:?} provenance, below the configured {:?} trust minimum",
+                        trust_policy.minimum
+                    ),
+                });
+            }
+
             let node = InstalledModuleNode {
                 id: module_id.clone(),
                 kind: entry.kind,
                 path: entry.path.clone(),
-                enabled: entry.enabled,
+                enabled: entry.enabled && trust_allowed,
+                trust,
                 manifest_path: loaded.path.clone(),
                 manifest_source: loaded.source,
                 manifest: loaded.manifest.clone(),
@@ -838,6 +868,7 @@ impl InstalledModuleGraph {
 
         Ok(Self {
             modules: graph_modules,
+            trust_policy,
             backend_providers,
             active_providers,
             frontend_requirements,
@@ -858,6 +889,10 @@ impl InstalledModuleGraph {
         self.modules.get(id)
     }
 
+    pub fn trust_policy(&self) -> &TrustPolicy {
+        &self.trust_policy
+    }
+
     /// Compare two already-validated graphs after dependency, provider, and
     /// profile resolution. This keeps dry-run output tied to the same
     /// normalized inventory the runtime will activate.
@@ -876,6 +911,7 @@ impl InstalledModuleGraph {
             if before.kind != after.kind
                 || before.path != after.path
                 || before.manifest.version != after.manifest.version
+                || before.trust != after.trust
             {
                 diff.updated_modules.push(module_id.clone());
             }
@@ -1215,6 +1251,7 @@ pub struct InstalledModuleNode {
     pub kind: ModuleKind,
     pub path: String,
     pub enabled: bool,
+    pub trust: TrustTier,
     pub manifest_path: PathBuf,
     pub manifest_source: ModuleManifestSource,
     pub manifest: ModuleManifest,
