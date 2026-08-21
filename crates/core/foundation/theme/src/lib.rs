@@ -3,6 +3,8 @@
 //! Themes define design tokens across standard groups — colors, typography,
 //! spacing, radius, elevation, borders, motion, shadows — which components
 //! inherit from the active theme.
+pub mod css;
+
 use serde::de::{MapAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -202,6 +204,14 @@ pub struct ThemeModule {
     pub tokens: HashMap<String, TokenValue>,
     #[serde(default)]
     pub defaults: ThemeDefaults,
+    #[serde(default)]
+    pub rules: Vec<ThemeStyleRule>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThemeStyleRule {
+    pub selector: css::Selector,
+    pub declarations: ComponentDefaults,
 }
 
 /// The layer which supplied an effective theme value.
@@ -595,6 +605,8 @@ pub struct Theme {
     pub keyframes: HashMap<String, Vec<ThemeKeyframeStop>>,
     #[serde(default)]
     modules: HashMap<String, ThemeModule>,
+    #[serde(default)]
+    rules: Vec<ThemeStyleRule>,
     /// Effective-value provenance for a composed snapshot. It is deliberately
     /// not serialized because it describes the current graph/settings inputs,
     /// not portable theme-file content.
@@ -616,6 +628,7 @@ impl Theme {
             defaults: ThemeDefaults::default(),
             keyframes: HashMap::new(),
             modules: HashMap::new(),
+            rules: Vec::new(),
             provenance: BTreeMap::new(),
             revision: next_theme_revision(),
         }
@@ -662,6 +675,10 @@ impl Theme {
     pub fn modules_mut(&mut self) -> &mut HashMap<String, ThemeModule> {
         self.revision = next_theme_revision();
         &mut self.modules
+    }
+
+    pub fn style_rules(&self) -> &[ThemeStyleRule] {
+        &self.rules
     }
 
     pub fn provenance(&self) -> &BTreeMap<String, ThemeProvenance> {
@@ -818,6 +835,8 @@ struct RawTheme {
     #[serde(default)]
     modules: HashMap<String, ThemeModule>,
     #[serde(default)]
+    rules: Vec<ThemeStyleRule>,
+    #[serde(default)]
     default_shell_animations: HashMap<String, String>,
 }
 
@@ -830,6 +849,7 @@ impl From<RawTheme> for Theme {
             defaults: raw.defaults,
             keyframes: HashMap::new(),
             modules: raw.modules,
+            rules: raw.rules,
             provenance: BTreeMap::new(),
             revision: next_theme_revision(),
         };
@@ -911,6 +931,16 @@ fn merge_theme_layer(composed: &mut Theme, layer: &Theme, provenance: &ThemeProv
             .provenance
             .insert(format!("keyframes.{name}"), provenance.clone());
     }
+    let rule_start = composed.rules.len();
+    composed.rules.extend(layer.rules.clone());
+    for (index, rule) in layer.rules.iter().enumerate() {
+        for property in rule.declarations.iter().map(|(property, _)| property) {
+            composed.provenance.insert(
+                format!("rules.global.{0}.{property}", rule_start + index),
+                provenance.clone(),
+            );
+        }
+    }
     for (module_id, module) in &layer.modules {
         let mut target = composed.modules.get(module_id).cloned().unwrap_or_default();
         merge_theme_module(
@@ -945,6 +975,15 @@ fn merge_theme_module(
             target_defaults.insert(property.clone(), value.clone());
             provenance.insert(
                 format!("module:{module_id}.defaults.{component}.{property}"),
+                source.clone(),
+            );
+        }
+    }
+    target.rules.extend(layer.rules.clone());
+    for (index, rule) in layer.rules.iter().enumerate() {
+        for property in rule.declarations.iter().map(|(property, _)| property) {
+            provenance.insert(
+                format!("rules.module:{module_id}.{index}.{property}"),
                 source.clone(),
             );
         }
@@ -1245,7 +1284,7 @@ fn load_theme_package_metadata(path: &Path) -> Result<(String, String), ThemeErr
 }
 
 fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String> {
-    let content = strip_css_comments(content);
+    let content = strip_css_comments(content)?;
     let mut theme = Theme {
         id: id.to_string(),
         name: name.to_string(),
@@ -1253,6 +1292,7 @@ fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String>
         defaults: ThemeDefaults::default(),
         keyframes: HashMap::new(),
         modules: HashMap::new(),
+        rules: Vec::new(),
         provenance: BTreeMap::new(),
         revision: next_theme_revision(),
     };
@@ -1263,7 +1303,7 @@ fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String>
     Ok(theme)
 }
 
-fn strip_css_comments(content: &str) -> String {
+fn strip_css_comments(content: &str) -> Result<String, String> {
     let mut output = String::with_capacity(content.len());
     let mut rest = content;
     while let Some(start) = rest.find("/*") {
@@ -1272,11 +1312,11 @@ fn strip_css_comments(content: &str) -> String {
         if let Some(end) = after_start.find("*/") {
             rest = &after_start[end + 2..];
         } else {
-            return output;
+            return Err("unterminated CSS comment".into());
         }
     }
     output.push_str(rest);
-    output
+    Ok(output)
 }
 
 fn parse_theme_css_blocks(mut rest: &str, theme: &mut Theme) -> Result<(), String> {
@@ -1288,6 +1328,9 @@ fn parse_theme_css_blocks(mut rest: &str, theme: &mut Theme) -> Result<(), Strin
         let body = &rest[body_start..close];
         parse_theme_css_block(selector, body, theme)?;
         rest = &rest[close + 1..];
+    }
+    if !rest.trim().is_empty() {
+        return Err(format!("unexpected trailing CSS: '{}'", rest.trim()));
     }
     Ok(())
 }
@@ -1341,12 +1384,35 @@ fn parse_theme_css_block(selector: &str, body: &str, theme: &mut Theme) -> Resul
     }
 
     let component = if selector == "node" { "base" } else { selector };
-    theme
-        .defaults
-        .components
-        .entry(component.to_string())
-        .or_default()
-        .extend(declarations);
+    push_theme_rule(
+        selector,
+        component,
+        declarations,
+        &mut theme.defaults,
+        &mut theme.rules,
+    )?;
+    Ok(())
+}
+
+fn push_theme_rule(
+    selector_source: &str,
+    simple_component: &str,
+    declarations: ComponentDefaults,
+    defaults: &mut ThemeDefaults,
+    rules: &mut Vec<ThemeStyleRule>,
+) -> Result<(), String> {
+    let selector = css::parse_selector(selector_source)?;
+    match selector {
+        css::Selector::Tag(_) => defaults
+            .components
+            .entry(simple_component.to_string())
+            .or_default()
+            .extend(declarations),
+        selector => rules.push(ThemeStyleRule {
+            selector,
+            declarations,
+        }),
+    }
     Ok(())
 }
 
@@ -1423,33 +1489,108 @@ fn parse_theme_module_css_block(
     }
 
     let component = if selector == "node" { "base" } else { selector };
-    module
-        .defaults
-        .components
-        .entry(component.to_string())
-        .or_default()
-        .extend(declarations);
+    push_theme_rule(
+        selector,
+        component,
+        declarations,
+        &mut module.defaults,
+        &mut module.rules,
+    )?;
     Ok(())
 }
 
 fn parse_css_declarations(body: &str) -> Result<ComponentDefaults, String> {
     let mut declarations = ComponentDefaults::new();
-    for raw in body.split(';') {
+    for raw in split_css_top_level(body, ';')? {
         let declaration = raw.trim();
         if declaration.is_empty() {
             continue;
         }
-        let Some((property, value)) = declaration.split_once(':') else {
+        let Some(colon) = find_css_top_level_delimiter(declaration, ':')? else {
             return Err(format!("invalid declaration '{declaration}'"));
         };
-        let property = property.trim();
-        let value = value.trim();
+        let property = declaration[..colon].trim();
+        let value = declaration[colon + 1..].trim();
         if property.is_empty() || value.is_empty() {
             return Err(format!("invalid declaration '{declaration}'"));
         }
         declarations.insert(property.to_string(), value.to_string());
     }
     Ok(declarations)
+}
+
+fn split_css_top_level(input: &str, delimiter: char) -> Result<Vec<&str>, String> {
+    let mut pieces = Vec::new();
+    let mut start = 0;
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in input.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' && quote.is_some() {
+            escaped = true;
+            continue;
+        }
+        if let Some(active_quote) = quote {
+            if character == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' => quote = Some(character),
+            '(' => depth += 1,
+            ')' if depth == 0 => return Err("unmatched ')' in CSS declaration".into()),
+            ')' => depth -= 1,
+            value if value == delimiter && depth == 0 => {
+                pieces.push(&input[start..index]);
+                start = index + value.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    if quote.is_some() || depth != 0 || escaped {
+        return Err("unterminated quote or function in CSS declaration".into());
+    }
+    pieces.push(&input[start..]);
+    Ok(pieces)
+}
+
+fn find_css_top_level_delimiter(input: &str, delimiter: char) -> Result<Option<usize>, String> {
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in input.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' && quote.is_some() {
+            escaped = true;
+            continue;
+        }
+        if let Some(active_quote) = quote {
+            if character == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' => quote = Some(character),
+            '(' => depth += 1,
+            ')' if depth == 0 => return Err("unmatched ')' in CSS declaration".into()),
+            ')' => depth -= 1,
+            value if value == delimiter && depth == 0 => return Ok(Some(index)),
+            _ => {}
+        }
+    }
+    if quote.is_some() || depth != 0 || escaped {
+        return Err("unterminated quote or function in CSS declaration".into());
+    }
+    Ok(None)
 }
 
 fn css_variable_to_token_name(property: &str) -> Option<String> {
@@ -1604,6 +1745,36 @@ mod tests {
                 .map(String::as_str),
             Some("tooltip-enter 150ms ease-out")
         );
+    }
+
+    #[test]
+    fn theme_css_keeps_supported_state_rules_for_the_shared_matcher() {
+        let theme = parse_theme_css(
+            "selectors",
+            "Selectors",
+            r#"
+            button:hover { color: var(--color-primary); }
+            .warning { color: #f00; }
+            "#,
+        )
+        .expect("restricted selectors parse");
+
+        assert_eq!(theme.style_rules().len(), 2);
+        assert!(matches!(
+            &theme.style_rules()[0].selector,
+            css::Selector::State(_, state) if state == "hover"
+        ));
+        assert!(matches!(
+            &theme.style_rules()[1].selector,
+            css::Selector::Class(class) if class == "warning"
+        ));
+    }
+
+    #[test]
+    fn theme_css_rejects_unterminated_comments_and_trailing_text() {
+        assert!(parse_theme_css("bad", "Bad", "/* unfinished").is_err());
+        assert!(parse_theme_css("bad", "Bad", "button { color: #fff; } trailing").is_err());
+        assert!(parse_theme_css("bad", "Bad", "button { color: \"unterminated; }").is_err());
     }
 
     #[test]

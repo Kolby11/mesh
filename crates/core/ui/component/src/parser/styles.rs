@@ -2,7 +2,6 @@ use crate::style::{
     ContainerQuery, Declaration, KeyframeRule, KeyframeStop, Selector, StyleBlock, StyleRule,
     StyleValue, is_transition_safe_keyframe_property,
 };
-use cssparser::{Parser, ParserInput, ToCss as CssParserToCss, Token};
 use lightningcss::{
     media_query::{
         MediaFeatureComparison, MediaFeatureName, MediaFeatureValue, Operator,
@@ -464,66 +463,8 @@ enum ContainerAxis {
 }
 
 fn parse_selector(source: &str) -> Result<Selector, ParseError> {
-    let mut input = ParserInput::new(source);
-    let mut parser = Parser::new(&mut input);
-    let mut parts = Vec::new();
-
-    while let Ok(token) = parser.next() {
-        match token {
-            Token::Delim('*') => parts.push(Selector::Universal),
-            Token::Delim('.') => {
-                let class =
-                    parser
-                        .expect_ident_cloned()
-                        .map_err(|err| ParseError::InvalidStyle {
-                            message: format!("{err:?}"),
-                            line: 0,
-                        })?;
-                parts.push(Selector::Class(class.to_string()));
-            }
-            Token::IDHash(id) => parts.push(Selector::Id(id.to_string())),
-            Token::Colon => {
-                let state =
-                    parser
-                        .expect_ident_cloned()
-                        .map_err(|err| ParseError::InvalidStyle {
-                            message: format!("{err:?}"),
-                            line: 0,
-                        })?;
-                match parts.pop() {
-                    Some(Selector::Tag(tag)) => {
-                        parts.push(Selector::State(tag, state.to_string()));
-                    }
-                    Some(previous) => {
-                        parts.push(previous);
-                        parts.push(Selector::State("*".into(), state.to_string()));
-                    }
-                    None => parts.push(Selector::State("*".into(), state.to_string())),
-                }
-            }
-            Token::Ident(tag) => parts.push(Selector::Tag(tag.to_string())),
-            Token::WhiteSpace(_) => {}
-            other => {
-                return Err(ParseError::InvalidStyle {
-                    message: format!("unsupported selector token {}", other.to_css_string()),
-                    line: 0,
-                });
-            }
-        }
-    }
-
-    if parts.is_empty() {
-        return Err(ParseError::InvalidStyle {
-            message: "empty selector".into(),
-            line: 0,
-        });
-    }
-
-    if parts.len() == 1 {
-        Ok(parts.remove(0))
-    } else {
-        Ok(Selector::Compound(parts))
-    }
+    mesh_core_theme::css::parse_selector(source)
+        .map_err(|message| ParseError::InvalidStyle { message, line: 0 })
 }
 
 fn classify_style_value(value: &str) -> StyleValue {

@@ -48,7 +48,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 ### 4. Themes
 
 [Audit](../.planning/log/sections/04-themes/improvements.md)
-- [ ] Share a restricted CSS parser/lowering and selector matcher between component and theme styles.
 - [ ] Share keyframes across theme and component styles and resolve token dependencies, cycles, and inherited custom properties.
 - [ ] Make the rendered theme snapshot authoritative for mode, color scheme, contrast, tokens, provenance, and revisioned events.
 - [ ] Make theme snapshots immutable and reject duplicate or ambiguous identities for deterministic caching.

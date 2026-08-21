@@ -235,6 +235,7 @@ fn module_component_defaults_are_subtree_scoped() {
                     ),
                 ]),
             },
+            rules: Vec::new(),
         },
     );
 

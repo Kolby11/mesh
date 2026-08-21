@@ -90,6 +90,7 @@ pub(super) fn prepare_theme_for_graph(
                             })
                             .collect(),
                     },
+                    rules: Vec::new(),
                 },
             })
         });

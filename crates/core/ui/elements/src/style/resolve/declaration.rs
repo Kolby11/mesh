@@ -1,4 +1,5 @@
 use super::StyleResolver;
+use super::attrs::StyleNodeAttrs;
 use super::index::*;
 use super::matching::*;
 use crate::style::parse::*;
@@ -157,6 +158,38 @@ impl<'a> StyleResolver<'a> {
             variables
                 .entry(key.clone())
                 .or_insert_with(|| value.clone());
+        }
+    }
+
+    pub(super) fn apply_theme_style_rules(
+        &self,
+        style: &mut ComputedStyle,
+        attrs: &StyleNodeAttrs,
+        diagnostics: &mut Option<&mut Vec<StyleDiagnostic>>,
+        variables: &mut HashMap<String, StyleValue>,
+    ) {
+        let mut apply = |rules: &[mesh_core_theme::ThemeStyleRule], scope: &str| {
+            for (index, rule) in rules.iter().enumerate() {
+                if !selector_matches_attrs(&rule.selector, attrs) {
+                    continue;
+                }
+                let declarations =
+                    indexed_theme_defaults(self.theme.revision(), &rule.declarations);
+                let selector = format!("@theme:{scope}:rule:{index}");
+                for declaration in declarations.iter() {
+                    let diagnostic_sink = diagnostics
+                        .as_mut()
+                        .map(|diagnostics| (selector.as_str(), &mut **diagnostics));
+                    self.apply_indexed_declaration(style, declaration, diagnostic_sink, variables);
+                }
+            }
+        };
+
+        apply(self.theme.style_rules(), "global");
+        if let Some(module_id) = attrs.module_id
+            && let Some(module) = self.theme.modules().get(module_id)
+        {
+            apply(&module.rules, module_id);
         }
     }
 

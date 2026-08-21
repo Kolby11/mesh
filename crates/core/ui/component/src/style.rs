@@ -76,22 +76,7 @@ impl ContainerQuery {
     }
 }
 
-/// A CSS-like selector.
-#[derive(Debug, Clone)]
-pub enum Selector {
-    /// Tag selector: `button`.
-    Tag(String),
-    /// Class selector: `.container`.
-    Class(String),
-    /// ID selector: `#main`.
-    Id(String),
-    /// Pseudo-state: `button:hover`, `input:focused`.
-    State(String, String),
-    /// Multiple selectors combined: `button.primary`.
-    Compound(Vec<Selector>),
-    /// Universal selector: `*`.
-    Universal,
-}
+pub use mesh_core_theme::css::Selector;
 
 /// A pre-compiled selector shape used at runtime by `StyleResolver`.
 ///

@@ -313,6 +313,13 @@ impl<'a> StyleResolver<'a> {
                 _ => {}
             }
 
+            self.apply_theme_style_rules(
+                &mut style,
+                attrs,
+                &mut diagnostics,
+                &mut scratch_variables,
+            );
+
             if let Some(attribution) = attribution.as_deref_mut() {
                 index.for_each_candidate_rule_index(attrs, |rule_idx| {
                     let Some(rule) = rules.get(rule_idx) else {
