@@ -187,6 +187,33 @@ fn module_manifest_rejects_legacy_surface_layout_with_migration_diagnostic() {
 }
 
 #[test]
+fn module_manifest_rejects_duplicate_contribution_identities() {
+    let content = r#"
+{
+  "name": "@mesh/duplicate-contributions",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "provides": {
+      "extensionPoints": {
+        "mesh.settings.page": [{"id":"shared","entry":"src/one.mesh"}],
+        "mesh.other.page": [{"id":"shared","entry":"src/two.mesh"}]
+      }
+    }
+  }
+}
+"#;
+
+    let error = ModuleManifest::from_json_str(content).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "invalid module manifest: mesh.provides.extensionPoints contributions contains duplicate contribution identity 'shared'"
+    );
+}
+
+#[test]
 fn interface_module_without_contract_file_is_valid() {
     // v0: an interface module may ship only name/version/domain and infer the
     // contract from emitted state — no `interface.toml` required.

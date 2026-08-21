@@ -996,13 +996,14 @@ fn record_lock_entry(
             source: module_source,
             revision,
             digest,
+            dependencies: Default::default(),
             requested_by: Default::default(),
         },
     );
     if composition.is_some() {
         lock.composition = composition;
     }
-    lock.refresh_requested_by(installed_manifests.iter());
+    lock.refresh_metadata(installed_manifests.iter());
     MeshLock::archive(&path, &history).map_err(|error| error.to_string())?;
     lock.save(&path).map_err(|error| error.to_string())
 }
@@ -1243,7 +1244,7 @@ fn cmd_uninstall(args: &[String]) {
         lock.composition = None;
     }
     let remaining_manifests = installed_manifests(&root_path);
-    lock.refresh_requested_by(remaining_manifests.values());
+    lock.refresh_metadata(remaining_manifests.values());
     let history = config_dir.join("lock-history");
     mesh_core_module::package::MeshLock::archive(&lock_path, &history)
         .unwrap_or_else(|error| exit_error(error));

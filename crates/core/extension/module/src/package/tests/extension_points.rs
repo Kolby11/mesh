@@ -37,6 +37,28 @@ fn declaring_interface(multiple: bool) -> LoadedModuleManifest {
     module
 }
 
+#[test]
+fn duplicate_extension_point_declarations_are_rejected_deterministically() {
+    let first = declaring_interface(true);
+    let mut second = declaring_interface(true);
+    second.manifest.name = "@mesh/other-shell-ui-interface".into();
+    let root = root_with_modules(
+        &[
+            ("@mesh/shell-ui-interface", ModuleKind::Interface),
+            ("@mesh/other-shell-ui-interface", ModuleKind::Interface),
+        ],
+        &[],
+        None,
+    );
+
+    let error = InstalledModuleGraph::from_parts(root, vec![first, second]).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "invalid module manifest: duplicate active extension point declaration 'mesh.settings.page' in modules @mesh/other-shell-ui-interface and @mesh/shell-ui-interface"
+    );
+}
+
 fn host(module_id: &str, version_req: Option<&str>) -> LoadedModuleManifest {
     let mut module = loaded_module(
         module_id,

@@ -11,6 +11,56 @@ use mesh_core_service::{
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 
+fn validate_unique_graph_identities(
+    modules: &HashMap<String, InstalledModuleNode>,
+) -> Result<(), ModuleManifestError> {
+    let mut interfaces = modules
+        .values()
+        .filter(|module| module.enabled && module.kind == ModuleKind::Interface)
+        .filter_map(|module| {
+            module
+                .manifest
+                .mesh
+                .interface
+                .as_ref()
+                .map(|interface| (interface.name.clone(), module.id.clone()))
+        })
+        .collect::<Vec<_>>();
+    interfaces.sort();
+    for pair in interfaces.windows(2) {
+        if pair[0].0 == pair[1].0 {
+            return Err(ModuleManifestError::Validation(format!(
+                "duplicate active interface declaration '{}' in modules {} and {}",
+                pair[0].0, pair[0].1, pair[1].1
+            )));
+        }
+    }
+
+    let mut extension_points = modules
+        .values()
+        .filter(|module| module.enabled && module.kind == ModuleKind::Interface)
+        .flat_map(|module| {
+            module
+                .manifest
+                .mesh
+                .extension_points
+                .keys()
+                .map(|name| (name.clone(), module.id.clone()))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    extension_points.sort();
+    for pair in extension_points.windows(2) {
+        if pair[0].0 == pair[1].0 {
+            return Err(ModuleManifestError::Validation(format!(
+                "duplicate active extension point declaration '{}' in modules {} and {}",
+                pair[0].0, pair[0].1, pair[1].1
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct LoadedModuleManifest {
     pub manifest: ModuleManifest,
@@ -338,6 +388,7 @@ impl InstalledModuleGraph {
         for node in graph_modules.values_mut() {
             node.enabled = active_module_ids.contains(&node.id);
         }
+        validate_unique_graph_identities(&graph_modules)?;
         for (module_id, reasons) in &resolution.blocked {
             manual_diagnostics.push(ModuleGraphDiagnostic {
                 module_id: module_id.clone(),

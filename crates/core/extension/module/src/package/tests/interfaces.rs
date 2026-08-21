@@ -179,6 +179,39 @@ fn duplicate_interface_declaration_prefers_interface_module() {
 }
 
 #[test]
+fn duplicate_standalone_interface_declarations_are_rejected_deterministically() {
+    let first = interface_module(
+        "@mesh/z-interface",
+        "mesh.example",
+        "example",
+        InterfaceRelationship::Base,
+        None,
+    );
+    let second = interface_module(
+        "@mesh/a-interface",
+        "mesh.example",
+        "example",
+        InterfaceRelationship::Base,
+        None,
+    );
+    let root = root_with_modules(
+        &[
+            ("@mesh/z-interface", ModuleKind::Interface),
+            ("@mesh/a-interface", ModuleKind::Interface),
+        ],
+        &[],
+        None,
+    );
+
+    let error = InstalledModuleGraph::from_parts(root, vec![first, second]).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "invalid module manifest: duplicate active interface declaration 'mesh.example' in modules @mesh/a-interface and @mesh/z-interface"
+    );
+}
+
+#[test]
 fn invalid_interface_contract_becomes_graph_diagnostic() {
     let root = root_with_modules(
         &[("@mesh/test-interface", ModuleKind::Interface)],

@@ -1322,6 +1322,52 @@ pub struct MeshContributes {
 
 impl MeshContributes {
     fn validate(&self) -> Result<(), ModuleManifestError> {
+        validate_unique_contribution_ids(
+            "mesh.provides.layout",
+            self.layout
+                .iter()
+                .map(|contribution| contribution.id.as_str()),
+        )?;
+        validate_unique_contribution_ids(
+            "mesh.provides.themes",
+            self.themes
+                .iter()
+                .map(|contribution| contribution.id.as_str()),
+        )?;
+        validate_unique_contribution_ids(
+            "mesh.provides.icons",
+            self.icons
+                .iter()
+                .map(|contribution| contribution.id.as_str()),
+        )?;
+        validate_unique_contribution_ids(
+            "mesh.provides.fonts",
+            self.fonts
+                .iter()
+                .map(|contribution| contribution.id.as_str()),
+        )?;
+        validate_unique_contribution_ids(
+            "mesh.provides.i18n",
+            self.i18n
+                .iter()
+                .map(|contribution| contribution.id.as_str()),
+        )?;
+        validate_unique_contribution_ids(
+            "mesh.provides.libraries",
+            self.libraries
+                .iter()
+                .map(|contribution| contribution.namespace.as_str()),
+        )?;
+
+        let extension_point_ids = self.extension_points.values().flat_map(|contributions| {
+            contributions
+                .iter()
+                .map(|contribution| contribution.id.as_str())
+        });
+        validate_unique_contribution_ids(
+            "mesh.provides.extensionPoints contributions",
+            extension_point_ids,
+        )?;
         for (point, contributions) in &self.extension_points {
             validate_extension_point_name("mesh.provides.extensionPoints", point)?;
             for contribution in contributions {
@@ -1378,6 +1424,23 @@ impl MeshContributes {
             self.settings = provides.settings.clone();
         }
     }
+}
+
+fn validate_unique_contribution_ids<'a>(
+    field: &str,
+    ids: impl IntoIterator<Item = &'a str>,
+) -> Result<(), ModuleManifestError> {
+    let mut ids = ids.into_iter().map(str::to_string).collect::<Vec<_>>();
+    ids.sort();
+    for pair in ids.windows(2) {
+        if pair[0] == pair[1] {
+            return Err(ModuleManifestError::Validation(format!(
+                "{field} contains duplicate contribution identity '{}'",
+                pair[0]
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -11,8 +11,9 @@ installer checks" and "what the runtime verifies".
 
 **Status: shipped.** Local-path and Git installation, composition
 installation, capability gates, kind-aware activation, profile commands,
-validation, `mesh.lock` v2 (version, source, resolved revision, content digest,
-requesters), `update`/`rollback`/`uninstall`/`lock verify`, the interface
+validation, `mesh.lock` v3 (version, direct dependency requirements, source,
+resolved revision, content digest, requesters, and active composition),
+`update`/`rollback`/`uninstall`/`lock verify`, the interface
 compatibility gate, and capability re-approval are available through
 `mesh-shell` and the typed `mesh.packages` service. A CLI or package component
 is a client of that service, not a privileged management layer.
@@ -162,6 +163,7 @@ without staging anything. It is the primary review surface.
       "source": { "kind": "git", "url": "https://github.com/mesh/navigation-bar", "reference": "v3" },
       "revision": "abc123…",
       "digest": "sha256:…",
+      "dependencies": { "@mesh/shell-ui": "^1.0.0" },
       "requestedBy": ["@alice/desk"]
     }
   }
@@ -171,7 +173,9 @@ without staging anything. It is the primary review surface.
 `digest` hashes relative path, executable bit, and bytes of every source file in
 sorted order, excluding `.git`. Compiled output lives in `~/.cache/mesh` and
 never inside a module directory, so an ordinary shell run cannot make a module
-read as edited. `requestedBy` is what lets `uninstall` refuse safely.
+read as edited. `requestedBy` is what lets `uninstall` refuse safely. A v2 lock
+is upgraded in memory to v3 on load; the next successful package transaction
+persists the migrated schema and direct dependency metadata.
 
 ## 2. Directories
 

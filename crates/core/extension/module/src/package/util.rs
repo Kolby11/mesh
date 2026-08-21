@@ -45,7 +45,7 @@ pub fn validate_module_id(value: &str) -> Result<(), ModuleManifestError> {
     ModuleId::parse(value).map(|_| ())
 }
 
-pub(crate) fn dependency_spec_to_string(spec: &DependencySpec) -> String {
+pub fn dependency_spec_to_string(spec: &DependencySpec) -> String {
     match spec {
         DependencySpec::Simple(value) => value.clone(),
         DependencySpec::Detailed { version, .. } => version.clone(),

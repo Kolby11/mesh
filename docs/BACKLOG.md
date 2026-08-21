@@ -39,7 +39,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/02-module-system-and-installation/improvements.md)
 
-- [ ] Align lock schema versions and populate dependency, composition, provenance, and deterministic duplicate-identity metadata.
 - [ ] Adopt a content-addressed immutable module store with generation-based activation snapshots.
 - [ ] Make the resolved module graph the sole normalized inventory and runtime input.
 - [ ] Provide graph-diff and dry-run output for grants, providers, disabled modules, contract breaks, and profile effects.

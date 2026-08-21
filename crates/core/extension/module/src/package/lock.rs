@@ -16,8 +16,8 @@
 //! - `requested_by` makes uninstall safe and explains version conflicts.
 
 use super::{
-    ModuleId, ModuleManifest, ModuleManifestError, atomic_write, resolve_closure,
-    validate_module_tree, validate_regular_file,
+    ModuleId, ModuleKind, ModuleManifest, ModuleManifestError, atomic_write,
+    dependency_spec_to_string, resolve_closure, validate_module_tree, validate_regular_file,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -25,7 +25,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const LOCK_SCHEMA_VERSION: u32 = 2;
+/// Current on-disk lock format. Version 3 adds direct dependency requirements
+/// to each module entry and is the format described by the installation spec.
+pub const LOCK_SCHEMA_VERSION: u32 = 3;
+const LEGACY_LOCK_SCHEMA_VERSION: u32 = 2;
 
 /// Directories never part of a module's content identity.
 const DIGEST_EXCLUDED_DIRS: [&str; 3] = [".git", "node_modules", "target"];
@@ -62,6 +65,10 @@ pub struct LockedModule {
     pub revision: Option<String>,
     /// `sha256:<hex>` over the installed tree at install time.
     pub digest: String,
+    /// Direct module dependency requirements from the normalized manifest.
+    /// BTreeMap keeps the serialized lock deterministic across discovery order.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dependencies: BTreeMap<String, String>,
     /// Module ids that required this one; empty means the user asked directly.
     #[serde(default)]
     pub requested_by: BTreeSet<String>,
@@ -145,8 +152,14 @@ impl MeshLock {
             path: path.to_path_buf(),
             source,
         })?;
-        let lock: Self =
+        let mut document: serde_json::Value =
             serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        migrate_lock_document(&mut document, path)?;
+        let lock: Self =
+            serde_json::from_value(document).map_err(|source| ModuleManifestError::Json {
                 path: path.to_path_buf(),
                 source,
             })?;
@@ -190,6 +203,9 @@ impl MeshLock {
             for requester in &entry.requested_by {
                 ModuleId::parse(requester)?;
             }
+            for dependency_id in entry.dependencies.keys() {
+                ModuleId::parse(dependency_id)?;
+            }
             if !entry.digest.starts_with("sha256:") {
                 return Err(ModuleManifestError::Validation(format!(
                     "mesh.lock entry '{module_id}' has a digest without its algorithm prefix"
@@ -197,6 +213,40 @@ impl MeshLock {
             }
         }
         Ok(())
+    }
+
+    /// Rebuild both direct dependency requirements and reverse requester
+    /// metadata from the normalized installed manifests.
+    pub fn refresh_metadata<'a>(
+        &mut self,
+        manifests: impl IntoIterator<Item = &'a ModuleManifest>,
+    ) {
+        let manifests = manifests.into_iter().collect::<Vec<_>>();
+        for manifest in &manifests {
+            if let Some(entry) = self.modules.get_mut(&manifest.name) {
+                entry.dependencies = manifest
+                    .mesh
+                    .dependencies
+                    .modules
+                    .iter()
+                    .map(|(module_id, spec)| (module_id.clone(), dependency_spec_to_string(spec)))
+                    .collect();
+                if manifest.mesh.kind == ModuleKind::Composition
+                    && let Some(extends) = &manifest.mesh.extends
+                {
+                    entry.dependencies.insert(extends.clone(), "*".into());
+                }
+            }
+        }
+        self.refresh_requested_by(manifests.iter().copied());
+        for manifest in &manifests {
+            if manifest.mesh.kind == ModuleKind::Composition
+                && let Some(extends) = &manifest.mesh.extends
+                && let Some(entry) = self.modules.get_mut(extends)
+            {
+                entry.requested_by.insert(manifest.name.clone());
+            }
+        }
     }
 
     /// Write the next generation.
@@ -297,6 +347,52 @@ fn prune_history(history_dir: &Path, keep: usize) {
     for (_, path) in generations.into_iter().skip(keep) {
         let _ = fs::remove_file(path);
     }
+}
+
+/// Upgrade the previous lock format before strict deserialization.
+///
+/// Version 2 already carried source, revision, digest, requester, and
+/// composition provenance. Version 3 makes direct dependency requirements
+/// explicit, so old entries migrate with an empty map and are populated on the
+/// next package operation when their manifests are available.
+fn migrate_lock_document(
+    document: &mut serde_json::Value,
+    path: &Path,
+) -> Result<(), ModuleManifestError> {
+    let Some(object) = document.as_object_mut() else {
+        // Let serde produce the normal shape error for malformed documents.
+        return Ok(());
+    };
+    let schema_version = match object.get("schemaVersion") {
+        None => LEGACY_LOCK_SCHEMA_VERSION,
+        Some(value) => value.as_u64().ok_or_else(|| {
+            ModuleManifestError::Validation(format!(
+                "mesh.lock {} has a non-numeric schemaVersion",
+                path.display()
+            ))
+        })? as u32,
+    };
+    if schema_version != LEGACY_LOCK_SCHEMA_VERSION {
+        return Ok(());
+    }
+
+    object.insert(
+        "schemaVersion".into(),
+        serde_json::Value::from(LOCK_SCHEMA_VERSION),
+    );
+    if let Some(modules) = object
+        .get_mut("modules")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for module in modules.values_mut() {
+            if let Some(module) = module.as_object_mut() {
+                module
+                    .entry("dependencies")
+                    .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Content digest of an installed module tree.
@@ -435,6 +531,7 @@ mod tests {
             },
             revision: None,
             digest: digest.into(),
+            dependencies: BTreeMap::new(),
             requested_by: BTreeSet::new(),
         }
     }
@@ -505,6 +602,7 @@ mod tests {
                 },
                 revision: Some("abc123".into()),
                 digest: "sha256:deadbeef".into(),
+                dependencies: BTreeMap::new(),
                 requested_by: BTreeSet::from(["@me/desk".to_string()]),
             },
         );
@@ -555,13 +653,73 @@ mod tests {
         lock.modules
             .insert("@me/shared".into(), locked("sha256:shared"));
 
-        lock.refresh_requested_by([&requester, &shared]);
+        lock.refresh_metadata([&requester, &shared]);
 
         assert_eq!(
             lock.modules["@me/shared"].requested_by,
             BTreeSet::from(["@me/desk".to_string()])
         );
+        assert_eq!(
+            lock.modules["@me/desk"].dependencies,
+            BTreeMap::from([("@me/shared".to_string(), "^1.0.0".to_string())])
+        );
         assert!(lock.modules["@me/desk"].requested_by.is_empty());
+    }
+
+    #[test]
+    fn schema_v2_lock_is_migrated_to_the_authoritative_v3_format() {
+        let dir = temp_dir("migrate-v2");
+        let path = dir.join("mesh.lock");
+        write(
+            &dir,
+            "mesh.lock",
+            r#"{
+              "schemaVersion": 2,
+              "generation": 4,
+              "modules": {
+                "@me/x": {
+                  "version": "1.0.0",
+                  "source": {"kind":"path","path":"modules/x"},
+                  "digest": "sha256:deadbeef",
+                  "requestedBy": []
+                }
+              }
+            }"#,
+        );
+
+        let lock = MeshLock::from_path(&path).unwrap();
+
+        assert_eq!(lock.schema_version, LOCK_SCHEMA_VERSION);
+        assert!(lock.modules["@me/x"].dependencies.is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn composition_extends_edges_are_locked_as_dependency_provenance() {
+        let derived = ModuleManifest::from_json_str(
+            r#"{"name":"@me/derived","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"composition","extends":"@me/base","compose":{}}}"#,
+        )
+        .unwrap();
+        let base = ModuleManifest::from_json_str(
+            r#"{"name":"@me/base","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"composition","compose":{}}}"#,
+        )
+        .unwrap();
+        let mut lock = MeshLock::new();
+        lock.modules
+            .insert("@me/derived".into(), locked("sha256:derived"));
+        lock.modules
+            .insert("@me/base".into(), locked("sha256:base"));
+
+        lock.refresh_metadata([&derived, &base]);
+
+        assert_eq!(
+            lock.modules["@me/derived"].dependencies,
+            BTreeMap::from([("@me/base".to_string(), "*".to_string())])
+        );
+        assert_eq!(
+            lock.modules["@me/base"].requested_by,
+            BTreeSet::from(["@me/derived".to_string()])
+        );
     }
 
     #[test]

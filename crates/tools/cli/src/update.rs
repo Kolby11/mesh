@@ -667,12 +667,43 @@ pub fn commit_update(
             entry.version = candidate.candidate_version.clone();
             entry.revision = Some(revision.clone());
             entry.digest = digest;
+            entry.dependencies = candidate
+                .candidate_manifest
+                .mesh
+                .dependencies
+                .modules
+                .iter()
+                .map(|(module_id, spec)| {
+                    (
+                        module_id.clone(),
+                        mesh_core_module::package::dependency_spec_to_string(spec),
+                    )
+                })
+                .collect();
+        }
+        if lock
+            .composition
+            .as_ref()
+            .is_some_and(|composition| composition.module == candidate.module_id)
+        {
+            if let Some(composition) = lock.composition.as_mut() {
+                composition.version = candidate.candidate_version.clone();
+            }
         }
         updated.push(format!(
             "{} {} → {}",
             candidate.module_id, candidate.locked.version, candidate.candidate_version
         ));
     }
+
+    let manifests = lock
+        .modules
+        .keys()
+        .filter_map(|module_id| module_install_path(modules_dir, module_id).ok())
+        .filter(|path| path.exists())
+        .map(|path| ModuleManifest::from_path(&path).map_err(|error| error.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    lock.refresh_metadata(manifests.iter());
 
     let lock_path = config_dir.join("mesh.lock");
     let history = config_dir.join("lock-history");
@@ -947,6 +978,7 @@ mod tests {
                 },
                 revision: Some("old".into()),
                 digest: "sha256:0".into(),
+                dependencies: BTreeMap::new(),
                 requested_by: BTreeSet::new(),
             },
             candidate_version: version.into(),
@@ -1190,6 +1222,7 @@ mod tests {
                 },
                 revision: Some(old_revision),
                 digest,
+                dependencies: BTreeMap::new(),
                 requested_by: BTreeSet::new(),
             },
         );
@@ -1315,6 +1348,7 @@ mod tests {
                 revision: Some("irrelevant".into()),
                 // A digest that cannot match: the tree reads as edited.
                 digest: "sha256:0000".into(),
+                dependencies: BTreeMap::new(),
                 requested_by: BTreeSet::new(),
             },
         );
@@ -1358,6 +1392,7 @@ mod tests {
                 },
                 revision: None,
                 digest: "sha256:0".into(),
+                dependencies: BTreeMap::new(),
                 requested_by: BTreeSet::from(["@me/desk".to_string()]),
             },
         );

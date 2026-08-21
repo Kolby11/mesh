@@ -359,7 +359,7 @@ impl Shell {
             .into_iter()
             .map(|module| module.manifest.clone())
             .collect::<Vec<_>>();
-        lock.refresh_requested_by(remaining_manifests.iter());
+        lock.refresh_metadata(remaining_manifests.iter());
         if lock_changed || lock_path.exists() {
             MeshLock::archive(&lock_path, &config_dir.join("lock-history"))
                 .map_err(|error| package_error(error.to_string()))?;
@@ -546,6 +546,7 @@ fn record_lock_entry(
             source: module_source,
             revision,
             digest,
+            dependencies: Default::default(),
             requested_by: Default::default(),
         },
     );
@@ -555,7 +556,7 @@ fn record_lock_entry(
             version: manifest.version.clone(),
         });
     }
-    lock.refresh_requested_by(installed_manifests.iter());
+    lock.refresh_metadata(installed_manifests.iter());
     MeshLock::archive(&lock_path, &config_dir.join("lock-history"))
         .map_err(|error| package_error(error.to_string()))?;
     lock.save(&lock_path)
