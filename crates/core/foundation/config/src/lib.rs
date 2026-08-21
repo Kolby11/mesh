@@ -50,7 +50,11 @@ pub struct ShellSettings {
 pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
     FieldSpec::new(
         "theme",
-        FieldKind::Section(&[FieldSpec::new("active", FieldKind::Str)]),
+        FieldKind::Section(&[
+            FieldSpec::new("active", FieldKind::Str),
+            FieldSpec::new("mode", FieldKind::Str),
+            FieldSpec::new("tokens", FieldKind::Map(&THEME_TOKEN_VALUE)),
+        ]),
     ),
     FieldSpec::new(
         "i18n",
@@ -129,6 +133,8 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
         ]),
     ),
 ];
+
+const THEME_TOKEN_VALUE: FieldKind = FieldKind::Token;
 
 /// Accepted values for [`TooltipSettings::position`]. A `mesh-core-shell` test
 /// walks this list to keep anchor resolution from drifting apart from it.
@@ -240,16 +246,22 @@ pub struct ShellSounds {
     pub notification: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThemeSettings {
     #[serde(default = "default_theme_id")]
     pub active: String,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub tokens: HashMap<String, JsonValue>,
 }
 
 impl Default for ThemeSettings {
     fn default() -> Self {
         Self {
             active: default_theme_id(),
+            mode: None,
+            tokens: HashMap::new(),
         }
     }
 }

@@ -626,7 +626,7 @@ impl Shell {
             self.reject_profile_switch(profile_id, status.message.clone());
             return VecDeque::new();
         }
-        let theme_changed = self.settings.theme.active != settings.shell().theme.active
+        let theme_changed = self.settings.theme != settings.shell().theme
             || self.settings.fonts != settings.shell().fonts;
         let prepared_theme = if theme_changed {
             if graph.theme_catalog().is_empty() {
@@ -918,7 +918,7 @@ impl Shell {
             }
         }
 
-        let old_theme = self.settings.theme.active.clone();
+        let old_theme = self.settings.theme.clone();
         let old_fonts = self.settings.fonts.clone();
         let old_locale = self.settings.i18n.clone();
         let prepared_theme = pending.prepared_theme.take();
@@ -926,7 +926,7 @@ impl Shell {
         self.settings = self.settings_store.shell().clone();
         mesh_core_icon::set_default_shell_pack(self.settings.icons.default_pack.clone());
         mesh_core_render::set_blur_quality(blur_quality_from_settings(&self.settings.render.blur));
-        if old_theme != self.settings.theme.active || old_fonts != self.settings.fonts {
+        if old_theme != self.settings.theme || old_fonts != self.settings.fonts {
             let (theme, watch) = prepared_theme
                 .map(|(theme, watch)| (self.theme.with_active(theme), watch))
                 .unwrap_or_else(|| {

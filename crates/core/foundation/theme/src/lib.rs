@@ -204,6 +204,25 @@ pub struct ThemeModule {
     pub defaults: ThemeDefaults,
 }
 
+/// The layer which supplied an effective theme value.
+///
+/// Provenance is kept on the composed snapshot rather than inferred from the
+/// winning value. This makes diagnostics and tooling able to explain why a
+/// value won, even when two layers happen to contain the same value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ThemeProvenance {
+    BaseRecovery,
+    ThemePack { id: String, mode: String },
+    ModuleContribution { module_id: String },
+    UserOverride,
+}
+
+#[derive(Debug, Clone)]
+pub struct ThemeModuleLayer {
+    pub module_id: String,
+    pub module: ThemeModule,
+}
+
 /// A source selected by an installed theme contribution.
 ///
 /// The handle deliberately stores the owning module root separately from the
@@ -556,6 +575,11 @@ pub struct Theme {
     pub keyframes: HashMap<String, Vec<ThemeKeyframeStop>>,
     #[serde(default)]
     modules: HashMap<String, ThemeModule>,
+    /// Effective-value provenance for a composed snapshot. It is deliberately
+    /// not serialized because it describes the current graph/settings inputs,
+    /// not portable theme-file content.
+    #[serde(skip, default)]
+    provenance: BTreeMap<String, ThemeProvenance>,
     /// Monotonic identity for the style-bearing data, retained across clones
     /// so consumers can share derived style caches. Every mutable accessor
     /// advances it, so an in-place edit cannot reuse stale lowered values.
@@ -572,6 +596,7 @@ impl Theme {
             defaults: ThemeDefaults::default(),
             keyframes: HashMap::new(),
             modules: HashMap::new(),
+            provenance: BTreeMap::new(),
             revision: next_theme_revision(),
         }
     }
@@ -587,6 +612,18 @@ impl Theme {
     pub fn tokens_mut(&mut self) -> &mut HashMap<String, TokenValue> {
         self.revision = next_theme_revision();
         &mut self.tokens
+    }
+
+    pub fn set_token(
+        &mut self,
+        name: impl Into<String>,
+        value: TokenValue,
+        provenance: ThemeProvenance,
+    ) {
+        let name = name.into();
+        self.tokens.insert(name.clone(), value);
+        self.provenance.insert(name, provenance);
+        self.revision = next_theme_revision();
     }
 
     pub fn defaults(&self) -> &ThemeDefaults {
@@ -605,6 +642,106 @@ impl Theme {
     pub fn modules_mut(&mut self) -> &mut HashMap<String, ThemeModule> {
         self.revision = next_theme_revision();
         &mut self.modules
+    }
+
+    pub fn provenance(&self) -> &BTreeMap<String, ThemeProvenance> {
+        &self.provenance
+    }
+
+    pub fn provenance_for(&self, value: &str) -> Option<&ThemeProvenance> {
+        self.provenance.get(value)
+    }
+
+    /// Compose one immutable style snapshot from the four runtime layers:
+    /// recovery defaults, a selected graph theme pack/mode, module-owned
+    /// contributions, and sparse user token overrides.
+    pub fn compose_layers(
+        base: &Theme,
+        pack: &Theme,
+        pack_id: impl Into<String>,
+        mode: impl Into<String>,
+        module_layers: impl IntoIterator<Item = ThemeModuleLayer>,
+        user_overrides: &HashMap<String, TokenValue>,
+    ) -> Result<Self, ThemeError> {
+        let pack_id = pack_id.into();
+        let mode = mode.into();
+        if pack_id.trim().is_empty() || mode.trim().is_empty() {
+            return Err(ThemeError::Composition(
+                "theme pack identity and mode must not be empty".into(),
+            ));
+        }
+
+        let pack_provenance = ThemeProvenance::ThemePack {
+            id: pack_id.clone(),
+            mode: mode.clone(),
+        };
+        let mut composed = base.clone();
+        composed.id = pack.id.clone();
+        composed.name = pack.name.clone();
+        composed.provenance.clear();
+
+        for token in composed.tokens.keys() {
+            composed
+                .provenance
+                .insert(token.clone(), ThemeProvenance::BaseRecovery);
+        }
+        for (component, defaults) in &composed.defaults.components {
+            for property in defaults.iter().map(|(property, _)| property) {
+                composed.provenance.insert(
+                    format!("defaults.{component}.{property}"),
+                    ThemeProvenance::BaseRecovery,
+                );
+            }
+        }
+        for (name, module) in &composed.modules {
+            for token in module.tokens.keys() {
+                composed
+                    .provenance
+                    .insert(format!("{name}.{token}"), ThemeProvenance::BaseRecovery);
+            }
+            for (component, defaults) in &module.defaults.components {
+                for property in defaults.iter().map(|(property, _)| property) {
+                    composed.provenance.insert(
+                        format!("module:{name}.defaults.{component}.{property}"),
+                        ThemeProvenance::BaseRecovery,
+                    );
+                }
+            }
+        }
+
+        merge_theme_layer(&mut composed, pack, &pack_provenance);
+
+        for layer in module_layers {
+            let module_id = layer.module_id.trim();
+            if module_id.is_empty() {
+                return Err(ThemeError::Composition(
+                    "module theme contribution has an empty owner".into(),
+                ));
+            }
+            let provenance = ThemeProvenance::ModuleContribution {
+                module_id: module_id.to_string(),
+            };
+            let mut target = composed
+                .modules
+                .entry(module_id.to_string())
+                .or_default()
+                .clone();
+            merge_theme_module(
+                module_id,
+                &mut target,
+                &layer.module,
+                &mut composed.provenance,
+                &provenance,
+            );
+            composed.modules.insert(module_id.to_string(), target);
+        }
+
+        flatten_module_tokens_into(&mut composed.tokens, &composed.modules);
+        for (token, value) in user_overrides {
+            apply_user_token_override(&mut composed, token, value.clone())?;
+        }
+        composed.revision = next_theme_revision();
+        Ok(composed)
     }
 
     /// Look up a token by dotted name, e.g. `color.primary`.
@@ -673,6 +810,7 @@ impl From<RawTheme> for Theme {
             defaults: raw.defaults,
             keyframes: HashMap::new(),
             modules: raw.modules,
+            provenance: BTreeMap::new(),
             revision: next_theme_revision(),
         };
         normalize_legacy_default_shell_animations(
@@ -724,6 +862,107 @@ fn normalize_legacy_default_shell_animations(
             .components
             .insert("base".into(), base_defaults);
     }
+}
+
+fn merge_theme_layer(composed: &mut Theme, layer: &Theme, provenance: &ThemeProvenance) {
+    for (token, value) in &layer.tokens {
+        composed.tokens.insert(token.clone(), value.clone());
+        composed
+            .provenance
+            .insert(token.clone(), provenance.clone());
+    }
+    for (component, defaults) in &layer.defaults.components {
+        let target = composed
+            .defaults
+            .components
+            .entry(component.clone())
+            .or_default();
+        for (property, value) in defaults {
+            target.insert(property.clone(), value.clone());
+            composed.provenance.insert(
+                format!("defaults.{component}.{property}"),
+                provenance.clone(),
+            );
+        }
+    }
+    for (name, stops) in &layer.keyframes {
+        composed.keyframes.insert(name.clone(), stops.clone());
+        composed
+            .provenance
+            .insert(format!("keyframes.{name}"), provenance.clone());
+    }
+    for (module_id, module) in &layer.modules {
+        let mut target = composed.modules.get(module_id).cloned().unwrap_or_default();
+        merge_theme_module(
+            module_id,
+            &mut target,
+            module,
+            &mut composed.provenance,
+            provenance,
+        );
+        composed.modules.insert(module_id.clone(), target);
+    }
+}
+
+fn merge_theme_module(
+    module_id: &str,
+    target: &mut ThemeModule,
+    layer: &ThemeModule,
+    provenance: &mut BTreeMap<String, ThemeProvenance>,
+    source: &ThemeProvenance,
+) {
+    for (token, value) in &layer.tokens {
+        target.tokens.insert(token.clone(), value.clone());
+        provenance.insert(format!("{module_id}.{token}"), source.clone());
+    }
+    for (component, defaults) in &layer.defaults.components {
+        let target_defaults = target
+            .defaults
+            .components
+            .entry(component.clone())
+            .or_default();
+        for (property, value) in defaults {
+            target_defaults.insert(property.clone(), value.clone());
+            provenance.insert(
+                format!("module:{module_id}.defaults.{component}.{property}"),
+                source.clone(),
+            );
+        }
+    }
+}
+
+fn apply_user_token_override(
+    composed: &mut Theme,
+    token: &str,
+    value: TokenValue,
+) -> Result<(), ThemeError> {
+    let token = token.trim();
+    if token.is_empty() || token.split('.').any(|part| part.trim().is_empty()) {
+        return Err(ThemeError::Composition(format!(
+            "user theme token '{token}' must use a dotted name"
+        )));
+    }
+    if let Some((module_id, local_name)) = split_explicit_module_token(token) {
+        let Some(module) = composed.modules.get_mut(module_id) else {
+            return Err(ThemeError::Composition(format!(
+                "user theme token '{token}' targets an unknown module"
+            )));
+        };
+        module.tokens.insert(local_name.to_string(), value);
+        composed
+            .tokens
+            .insert(token.to_string(), module.tokens[local_name].clone());
+    } else if !token.contains('.') {
+        return Err(ThemeError::Composition(format!(
+            "user theme token '{token}' must use a dotted name"
+        )));
+    } else {
+        composed.tokens.insert(token.to_string(), value);
+    }
+    composed
+        .provenance
+        .insert(token.to_string(), ThemeProvenance::UserOverride);
+    Ok(())
 }
 
 fn flatten_module_tokens_into(
@@ -811,6 +1050,9 @@ pub enum ThemeError {
 
     #[error("failed to open graph-authorized theme source {path}: {message}")]
     Source { path: PathBuf, message: String },
+
+    #[error("invalid theme composition: {0}")]
+    Composition(String),
 }
 
 pub fn default_theme() -> Theme {
@@ -991,6 +1233,7 @@ fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String>
         defaults: ThemeDefaults::default(),
         keyframes: HashMap::new(),
         modules: HashMap::new(),
+        provenance: BTreeMap::new(),
         revision: next_theme_revision(),
     };
 
@@ -1689,6 +1932,64 @@ mod tests {
             .modules_mut()
             .insert("@mesh/example".into(), ThemeModule::default());
         assert_ne!(theme.revision(), after_defaults);
+    }
+
+    #[test]
+    fn theme_composer_applies_layers_with_scoped_provenance() {
+        let mut base = Theme::new("recovery", "Recovery");
+        base.tokens_mut()
+            .insert("color.primary".into(), TokenValue::String("#000".into()));
+
+        let mut pack = Theme::new("pack", "Pack");
+        pack.tokens_mut()
+            .insert("color.primary".into(), TokenValue::String("#111".into()));
+        pack.tokens_mut()
+            .insert("color.surface".into(), TokenValue::String("#fff".into()));
+
+        let mut module = ThemeModule::default();
+        module
+            .tokens
+            .insert("color.accent".into(), TokenValue::String("#f00".into()));
+        let mut user = HashMap::new();
+        user.insert("color.surface".into(), TokenValue::String("#eee".into()));
+        user.insert(
+            "@mesh/weather.color.accent".into(),
+            TokenValue::String("#0f0".into()),
+        );
+
+        let composed = Theme::compose_layers(
+            &base,
+            &pack,
+            "@mesh/pack:default",
+            "dark",
+            [ThemeModuleLayer {
+                module_id: "@mesh/weather".into(),
+                module,
+            }],
+            &user,
+        )
+        .expect("theme composition succeeds");
+
+        assert_eq!(composed.token("color.primary").unwrap().to_string(), "#111");
+        assert_eq!(composed.token("color.surface").unwrap().to_string(), "#eee");
+        assert_eq!(
+            composed
+                .token("@mesh/weather.color.accent")
+                .unwrap()
+                .to_string(),
+            "#0f0"
+        );
+        assert_eq!(
+            composed.provenance_for("color.primary"),
+            Some(&ThemeProvenance::ThemePack {
+                id: "@mesh/pack:default".into(),
+                mode: "dark".into(),
+            })
+        );
+        assert_eq!(
+            composed.provenance_for("@mesh/weather.color.accent"),
+            Some(&ThemeProvenance::UserOverride)
+        );
     }
 
     #[test]

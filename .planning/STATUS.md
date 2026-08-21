@@ -13,7 +13,10 @@ module-root-relative source handles, and runtime registration no longer scans
 `config/themes`. Theme selection and reload now use graph identities and
 symlink-safe, bounded UTF-8 source opening. Transactional theme/profile commits
 now prepare candidates before profile commit and retain the last-known-good
-snapshot after reload failures. Theme cascade composition remains the next work.
+snapshot after reload failures. The active snapshot now composes recovery
+defaults, the selected graph pack/mode, module-owned frontend layers, and sparse
+user token overrides with per-value provenance. Durable/fingerprinted selection
+is the next theme item.
 
 The first four Section 2 items are complete. Package commits publish
 validated module trees into a read-only SHA-256 object store and activate

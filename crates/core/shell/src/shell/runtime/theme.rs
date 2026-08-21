@@ -122,25 +122,19 @@ impl Shell {
         }
 
         let old_theme_id = self.theme.active().id.clone();
-        let graph_descriptor = self
-            .installed_module_graph
-            .as_ref()
-            .and_then(|graph| graph.theme_catalog().get(&old_theme_id))
-            .cloned();
-        let mut theme = if let Some(descriptor) = &graph_descriptor {
-            let mut theme =
-                match mesh_core_theme::load_theme_from_source(descriptor.default_source()) {
-                    Ok(theme) => theme,
-                    Err(error) => {
-                        self.record_theme_reload_failure(&error);
-                        return Ok(VecDeque::new());
-                    }
-                };
-            theme.id = descriptor.id.clone();
-            if let Some(label) = &descriptor.label {
-                theme.name = label.clone();
+        let mut theme = if let Some(graph) = self.installed_module_graph.as_ref().filter(|graph| {
+            graph
+                .theme_catalog()
+                .get(&self.settings.theme.active)
+                .is_some()
+        }) {
+            match prepare_theme_for_graph(&self.settings, graph) {
+                Ok((theme, _watch)) => theme,
+                Err(error) => {
+                    self.record_theme_reload_failure(&error);
+                    return Ok(VecDeque::new());
+                }
             }
-            theme
         } else {
             match mesh_core_theme::load_theme_from_path(&self.theme_watch.path) {
                 Ok(theme) => theme,
@@ -204,53 +198,33 @@ impl Shell {
         &mut self,
         theme_id: &str,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        let catalog_descriptor = self
+        let Some(graph) = self
             .installed_module_graph
             .as_ref()
-            .and_then(|graph| graph.theme_catalog().get(theme_id))
-            .cloned();
-        if catalog_descriptor.is_none() {
+            .filter(|graph| graph.theme_catalog().get(theme_id).is_some())
+            .cloned()
+        else {
             tracing::warn!(
                 "cannot select theme '{theme_id}': it is not a graph-authorized catalog identity"
             );
             return Ok(VecDeque::new());
-        }
-        if self.theme.set_active(theme_id).is_err() {
-            let descriptor = catalog_descriptor
-                .clone()
-                .expect("catalog descriptor checked");
-            let mut theme =
-                match mesh_core_theme::load_theme_from_source(descriptor.default_source()) {
-                    Ok(theme) => theme,
-                    Err(error) => {
-                        tracing::warn!("cannot load theme '{theme_id}': {error}");
-                        return Ok(VecDeque::new());
-                    }
-                };
-            theme.id = descriptor.id.clone();
-            if let Some(label) = descriptor.label {
-                theme.name = label;
-            }
-            self.theme.register_theme(theme);
-            if let Err(error) = self.theme.set_active(theme_id) {
-                tracing::warn!("failed to activate theme '{theme_id}': {error}");
+        };
+        let mut candidate_settings = self.settings.clone();
+        candidate_settings.theme.active = theme_id.to_string();
+        // A mode is scoped to its pack; switching packs starts at the
+        // descriptor's validated default instead of reusing a stale mode.
+        candidate_settings.theme.mode = None;
+        let (theme, watch) = match prepare_theme_for_graph(&candidate_settings, &graph) {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                tracing::warn!("cannot compose theme '{theme_id}': {error}");
                 return Ok(VecDeque::new());
             }
-        }
+        };
+        self.theme.replace_active(theme);
+        self.theme_watch = watch;
         tracing::info!("active theme changed to '{theme_id}'");
         self.settings.theme.active = theme_id.to_string();
-        apply_font_family(
-            self.theme.active_mut(),
-            self.settings.fonts.ui_family.as_deref(),
-        );
-        let path = catalog_descriptor
-            .expect("catalog descriptor checked")
-            .default_source()
-            .candidate_path();
-        let modified_at = std::fs::metadata(&path)
-            .ok()
-            .and_then(|metadata| metadata.modified().ok());
-        self.theme_watch = ThemeWatchState { path, modified_at };
         self.mark_components_theme_changed()?;
         self.sync_theme_service_state(theme_id)
     }
@@ -443,10 +417,25 @@ impl Shell {
         let locale_changed = old_i18n.locale != new_i18n.locale
             || old_i18n.fallback_locale != new_i18n.fallback_locale;
 
-        let theme_changed =
-            old_theme.active != new_settings.theme.active || old_fonts != new_settings.fonts;
+        let theme_changed = old_theme != new_settings.theme || old_fonts != new_settings.fonts;
         if theme_changed {
-            let (theme, theme_watch) = load_active_theme(&new_settings);
+            let (theme, theme_watch) = if let Some(graph) =
+                self.installed_module_graph.as_ref().filter(|graph| {
+                    graph
+                        .theme_catalog()
+                        .get(&new_settings.theme.active)
+                        .is_some()
+                }) {
+                match prepare_theme_for_graph(&new_settings, graph) {
+                    Ok(candidate) => candidate,
+                    Err(error) => {
+                        self.record_theme_reload_failure(&error);
+                        return Ok(requests);
+                    }
+                }
+            } else {
+                load_active_theme(&new_settings)
+            };
             let active_theme_id = theme.active().id.clone();
             tracing::info!(
                 "active theme changed: {} -> {}",

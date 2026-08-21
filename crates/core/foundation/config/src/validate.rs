@@ -182,6 +182,8 @@ pub enum FieldKind {
     /// Contents pass through untouched — used where the schema is owned
     /// elsewhere, such as `props`.
     Opaque,
+    /// A scalar theme token: string, finite number, or boolean.
+    Token,
 }
 
 impl FieldKind {
@@ -200,6 +202,7 @@ impl FieldKind {
             Self::StrArray => "an array of strings".to_string(),
             Self::Enum { values, .. } => format!("one of [{}]", values.join(", ")),
             Self::Section(_) | Self::Map(_) | Self::Opaque => "an object".to_string(),
+            Self::Token => "a string, number, or boolean".to_string(),
         }
     }
 
@@ -448,6 +451,13 @@ pub fn validate_value(
             .and_then(canonicalize)
             .map(|canonical| JsonValue::String(canonical.to_string())),
         FieldKind::Opaque => value.is_object().then(|| value.clone()),
+        FieldKind::Token => match value {
+            JsonValue::String(_) | JsonValue::Bool(_) => Some(value.clone()),
+            JsonValue::Number(number) if number.as_f64().is_some_and(f64::is_finite) => {
+                Some(value.clone())
+            }
+            _ => None,
+        },
         FieldKind::Section(fields) => Some(validate_object(
             namespace,
             key_path,

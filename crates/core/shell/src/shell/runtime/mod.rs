@@ -225,6 +225,20 @@ impl Shell {
                 }
             }
         }
+        if let Some(graph) = self.installed_module_graph.clone()
+            && !graph.theme_catalog().is_empty()
+        {
+            match prepare_theme_for_graph(&self.settings, &graph) {
+                Ok((theme, watch)) => {
+                    self.theme.replace_active(theme);
+                    self.theme_watch = watch;
+                }
+                Err(error) => tracing::warn!(
+                    "failed to compose selected graph theme '{}': {error}; retaining recovery theme",
+                    self.settings.theme.active
+                ),
+            }
+        }
         self.resolve_modules()?;
         self.load_frontend_components()?;
 

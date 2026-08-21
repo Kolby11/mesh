@@ -5,11 +5,12 @@ pub(super) use mesh_core_surface_config::{
 };
 
 use mesh_core_config::ShellSettings;
-use mesh_core_module::package::InstalledModuleGraph;
+use mesh_core_module::package::{InstalledModuleGraph, ModuleKind};
 use mesh_core_theme::{
-    Theme, ThemeEngine, ThemeError, TokenValue, default_theme, load_theme_from_path,
-    load_theme_from_source, theme_path_for_id,
+    Theme, ThemeDefaults, ThemeEngine, ThemeError, ThemeModule, ThemeModuleLayer, ThemeProvenance,
+    TokenValue, default_theme, load_theme_from_path, load_theme_from_source, theme_path_for_id,
 };
+use std::collections::HashMap;
 
 use super::types::ThemeWatchState;
 
@@ -48,13 +49,84 @@ pub(super) fn prepare_theme_for_graph(
         .theme_catalog()
         .get(&settings.theme.active)
         .ok_or_else(|| ThemeError::NotFound(settings.theme.active.clone()))?;
-    let mut theme = load_theme_from_source(descriptor.default_source())?;
+    let mode = settings
+        .theme
+        .mode
+        .as_deref()
+        .unwrap_or(&descriptor.default_mode);
+    let mode_descriptor = descriptor.mode(mode).ok_or_else(|| {
+        ThemeError::Composition(format!("theme '{}' has no mode '{mode}'", descriptor.id))
+    })?;
+    let pack = load_theme_from_source(&mode_descriptor.source)?;
+    let base = default_theme();
+    let module_layers = graph
+        .modules_by_kind(ModuleKind::Frontend)
+        .into_iter()
+        .filter_map(|module| {
+            let section = module.manifest.mesh.theme.as_ref()?;
+            Some(ThemeModuleLayer {
+                module_id: module.id.clone(),
+                module: ThemeModule {
+                    tokens: section.tokens.clone(),
+                    defaults: ThemeDefaults {
+                        components: section
+                            .defaults
+                            .components
+                            .iter()
+                            .map(|(component, declarations)| {
+                                (
+                                    component.clone(),
+                                    declarations
+                                        .iter()
+                                        .map(|(property, value)| (property.clone(), value.clone()))
+                                        .collect(),
+                                )
+                            })
+                            .collect(),
+                    },
+                },
+            })
+        });
+    let user_overrides = settings
+        .theme
+        .tokens
+        .iter()
+        .map(|(name, value)| {
+            let token = match value {
+                serde_json::Value::String(value) => TokenValue::String(value.clone()),
+                serde_json::Value::Bool(value) => TokenValue::Bool(*value),
+                serde_json::Value::Number(value) => value
+                    .as_f64()
+                    .filter(|value| value.is_finite())
+                    .map(TokenValue::Number)
+                    .ok_or_else(|| {
+                        ThemeError::Composition(format!(
+                            "user theme token '{name}' must contain a finite number"
+                        ))
+                    })?,
+                _ => {
+                    return Err(ThemeError::Composition(format!(
+                        "user theme token '{name}' must be a string, number, or boolean"
+                    )));
+                }
+            };
+            Ok((name.clone(), token))
+        })
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    let mut theme = Theme::compose_layers(
+        &base,
+        &pack,
+        descriptor.id.clone(),
+        mode.to_string(),
+        module_layers,
+        &user_overrides,
+    )?;
     theme.id = descriptor.id.clone();
     if let Some(label) = &descriptor.label {
         theme.name = label.clone();
     }
     apply_font_family(&mut theme, settings.fonts.ui_family.as_deref());
-    let path = descriptor.default_source().candidate_path();
+    let path = mode_descriptor.source.candidate_path();
     let modified_at = std::fs::metadata(&path)
         .ok()
         .and_then(|metadata| metadata.modified().ok());
@@ -65,12 +137,15 @@ pub(super) fn apply_font_family(theme: &mut Theme, family: Option<&str>) {
     let Some(family) = family.map(str::trim).filter(|family| !family.is_empty()) else {
         return;
     };
-    let tokens = theme.tokens_mut();
     for token in [
         "typography.family",
         "typography.family.brand",
         "typography.family.plain",
     ] {
-        tokens.insert(token.into(), TokenValue::String(family.into()));
+        theme.set_token(
+            token,
+            TokenValue::String(family.into()),
+            ThemeProvenance::UserOverride,
+        );
     }
 }
