@@ -58,6 +58,33 @@ impl<'a> StyleResolver<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub fn resolve_node_style_for_module_indexed_with_parent_style(
+        &self,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
+        tag: &str,
+        classes: &[String],
+        id: Option<&str>,
+        context: StyleContext,
+        state: ElementState,
+        module_id: Option<&str>,
+        parent_style: Option<&ComputedStyle>,
+    ) -> ComputedStyle {
+        debug_assert!(index.is_for(rules));
+        let mut attrs = StyleNodeAttrs::new(tag, classes, id, state);
+        attrs.module_id = module_id;
+        self.resolve_node_style_with_attrs_indexed_inner(
+            rules,
+            index,
+            &attrs,
+            context,
+            None,
+            None,
+            parent_style.map(|style| &style.custom_properties),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn resolve_node_style_for_module_indexed_with_inline_style(
         &self,
         rules: &[StyleRule],
@@ -75,6 +102,35 @@ impl<'a> StyleResolver<'a> {
         attrs.module_id = module_id;
         attrs.inline_style = inline_style;
         self.resolve_node_style_with_attrs_indexed_no_diagnostics(rules, index, &attrs, context)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_node_style_for_module_indexed_with_inline_style_and_parent_style(
+        &self,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
+        tag: &str,
+        classes: &[String],
+        id: Option<&str>,
+        inline_style: Option<&str>,
+        context: StyleContext,
+        state: ElementState,
+        module_id: Option<&str>,
+        parent_style: Option<&ComputedStyle>,
+    ) -> ComputedStyle {
+        debug_assert!(index.is_for(rules));
+        let mut attrs = StyleNodeAttrs::new(tag, classes, id, state);
+        attrs.module_id = module_id;
+        attrs.inline_style = inline_style;
+        self.resolve_node_style_with_attrs_indexed_inner(
+            rules,
+            index,
+            &attrs,
+            context,
+            None,
+            None,
+            parent_style.map(|style| &style.custom_properties),
+        )
     }
 
     pub fn resolve_node_style_with_diagnostics(
@@ -171,7 +227,9 @@ impl<'a> StyleResolver<'a> {
         attrs: &StyleNodeAttrs,
         context: StyleContext,
     ) -> ComputedStyle {
-        self.resolve_node_style_with_attrs_indexed_inner(rules, index, attrs, context, None, None)
+        self.resolve_node_style_with_attrs_indexed_inner(
+            rules, index, attrs, context, None, None, None,
+        )
     }
 
     pub(super) fn cached_theme_component_defaults_no_diagnostics(
@@ -264,6 +322,7 @@ impl<'a> StyleResolver<'a> {
             context,
             Some(&mut diagnostics),
             None,
+            None,
         );
         (style, diagnostics)
     }
@@ -276,6 +335,7 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
         mut diagnostics: Option<&mut Vec<StyleDiagnostic>>,
         mut attribution: Option<&mut StyleRuleAttribution>,
+        inherited_variables: Option<&HashMap<String, mesh_core_component::style::StyleValue>>,
     ) -> ComputedStyle {
         // `shared` holds the defaults by reference when they came from the
         // no-diagnostics cache; the diagnostics path still builds its own copy
@@ -297,6 +357,13 @@ impl<'a> StyleResolver<'a> {
         VARIABLE_SCRATCH.with(|scratch| {
             let mut scratch_variables = scratch.borrow_mut();
             scratch_variables.clear();
+            if let Some(inherited_variables) = inherited_variables {
+                scratch_variables.extend(
+                    inherited_variables
+                        .iter()
+                        .map(|(name, value)| (name.clone(), value.clone())),
+                );
+            }
             // Themes usually declare no default custom properties at all, so
             // the common case seeds nothing and every lookup falls through to
             // the node's own declarations.
@@ -394,6 +461,9 @@ impl<'a> StyleResolver<'a> {
             }
         });
 
+        VARIABLE_SCRATCH.with(|scratch| {
+            style.custom_properties = scratch.borrow().clone();
+        });
         style
     }
 

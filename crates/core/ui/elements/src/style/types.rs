@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use mesh_core_component::style::StyleValue;
 use mesh_core_theme::TokenValue;
 
 /// Author-facing style diagnostic emitted while resolving supported shell CSS.
@@ -636,6 +638,11 @@ impl TooltipAnchor {
 /// Fully resolved style for a widget node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputedStyle {
+    /// CSS custom properties after this node's cascade. Keeping them on the
+    /// immutable style snapshot lets both initial tree construction and
+    /// targeted restyles pass inherited variables without a separate side
+    /// channel.
+    pub custom_properties: HashMap<String, StyleValue>,
     pub width: Dimension,
     pub height: Dimension,
     pub min_width: Dimension,
@@ -710,6 +717,7 @@ pub struct ComputedStyle {
 impl Default for ComputedStyle {
     fn default() -> Self {
         Self {
+            custom_properties: HashMap::new(),
             width: Dimension::Auto,
             height: Dimension::Auto,
             min_width: Dimension::Auto,

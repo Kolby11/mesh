@@ -20,8 +20,10 @@ publishes its selected mode, source fingerprint, and snapshot revision; reload
 polling follows content fingerprints even after a source directory changes.
 Component and theme CSS now lower through one restricted selector AST; theme
 state/class rules execute through the same element matcher, and malformed
-theme CSS is rejected with bounded declaration parsing. Shared keyframes and
-token dependency resolution are the next theme item.
+theme CSS is rejected with bounded declaration parsing. Theme and component
+keyframes now share runtime lowering, token aliases resolve transitively with
+cycle diagnostics, and computed style snapshots carry inherited custom
+properties. The rendered theme snapshot is the next theme item.
 
 The first four Section 2 items are complete. Package commits publish
 validated module trees into a read-only SHA-256 object store and activate

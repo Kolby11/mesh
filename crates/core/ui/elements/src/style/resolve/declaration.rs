@@ -88,8 +88,23 @@ impl<'a> StyleResolver<'a> {
         declarations: &[mesh_core_component::style::Declaration],
         selector: Option<&str>,
     ) -> Vec<StyleDiagnostic> {
+        self.apply_declarations_with_diagnostics_and_variables(
+            style,
+            declarations,
+            selector,
+            &HashMap::new(),
+        )
+    }
+
+    pub fn apply_declarations_with_diagnostics_and_variables(
+        &self,
+        style: &mut ComputedStyle,
+        declarations: &[mesh_core_component::style::Declaration],
+        selector: Option<&str>,
+        inherited_variables: &HashMap<String, StyleValue>,
+    ) -> Vec<StyleDiagnostic> {
         let mut diagnostics = Vec::new();
-        let mut variables = HashMap::new();
+        let mut variables = inherited_variables.clone();
 
         for decl in declarations {
             self.apply_declaration_with_diagnostics(
@@ -252,15 +267,18 @@ impl<'a> StyleResolver<'a> {
                 if let StyleValue::Var(variable_name) = &decl.value
                     && !*strict_animation
                     && !variables.contains_key(variable_name)
-                    && self.cached_theme_token_value(variable_name).is_missing()
                 {
-                    push_indexed_style_diagnostic(
-                        &mut diagnostics,
-                        name.clone(),
-                        format!(
-                            "unsupported CSS variable reference '{variable_name}' for property '{name}'"
-                        ),
-                    );
+                    if let Some(error) = self.cached_theme_token_error(variable_name) {
+                        push_indexed_style_diagnostic(&mut diagnostics, name.clone(), error);
+                    } else if self.cached_theme_token_value(variable_name).is_missing() {
+                        push_indexed_style_diagnostic(
+                            &mut diagnostics,
+                            name.clone(),
+                            format!(
+                                "unsupported CSS variable reference '{variable_name}' for property '{name}'"
+                            ),
+                        );
+                    }
                 }
                 if *strict_animation
                     && let Err(token_name) =
@@ -398,16 +416,22 @@ impl<'a> StyleResolver<'a> {
         if let StyleValue::Var(name) = &decl.value
             && !is_strict_animation_property(&decl.property)
             && !variables.contains_key(name)
-            && self.cached_theme_token_value(name).is_missing()
         {
-            diagnostics.push(StyleDiagnostic {
-                property: decl.property.clone(),
-                selector: selector.clone(),
-                message: format!(
-                    "unsupported CSS variable reference '{name}' for property '{}'",
-                    decl.property
-                ),
+            let message = self.cached_theme_token_error(name).or_else(|| {
+                self.cached_theme_token_value(name).is_missing().then(|| {
+                    format!(
+                        "unsupported CSS variable reference '{name}' for property '{}'",
+                        decl.property
+                    )
+                })
             });
+            if let Some(message) = message {
+                diagnostics.push(StyleDiagnostic {
+                    property: decl.property.clone(),
+                    selector: selector.clone(),
+                    message,
+                });
+            }
         }
         if is_strict_animation_property(&decl.property)
             && let Err(token_name) =

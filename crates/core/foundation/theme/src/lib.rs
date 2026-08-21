@@ -794,6 +794,31 @@ impl Theme {
             })
     }
 
+    /// Resolve a token and any `var(--...)` references it contains.
+    ///
+    /// Token references are resolved against the same immutable theme
+    /// snapshot that supplied the token. This keeps aliases deterministic and
+    /// makes cycles explicit instead of relying on a depth limit in each
+    /// consumer.
+    pub fn resolve_token_value(&self, name: &str) -> Result<Option<TokenValue>, ThemeTokenError> {
+        let name = canonical_token_name(name);
+        if self.token(&name).is_none() {
+            return Ok(None);
+        }
+        let mut stack = Vec::new();
+        self.resolve_named_token(&name, &mut stack).map(Some)
+    }
+
+    /// Resolve all `var(--...)` references embedded in a raw theme value.
+    ///
+    /// This is useful for consumers that parse a shorthand after token
+    /// substitution, such as animation declarations. A missing reference may
+    /// use the CSS fallback form `var(--missing, fallback)`.
+    pub fn resolve_token_references(&self, raw: &str) -> Result<String, ThemeTokenError> {
+        let mut stack = Vec::new();
+        self.resolve_string_references(raw, &mut stack)
+    }
+
     /// Every token whose dotted name starts with `group`.
     pub fn tokens_in_group(&self, group: &str) -> HashMap<&str, &TokenValue> {
         let prefix = format!("{group}.");
@@ -822,6 +847,125 @@ impl Theme {
             .get(module_id)
             .and_then(|module| module.defaults.components.get(component))
     }
+
+    fn resolve_named_token(
+        &self,
+        name: &str,
+        stack: &mut Vec<String>,
+    ) -> Result<TokenValue, ThemeTokenError> {
+        if let Some(position) = stack.iter().position(|entry| entry == name) {
+            let mut cycle = stack[position..].to_vec();
+            cycle.push(name.to_string());
+            return Err(ThemeTokenError::Cycle(cycle));
+        }
+
+        let Some(value) = self.token(name).cloned() else {
+            return Err(ThemeTokenError::Missing(name.to_string()));
+        };
+        stack.push(name.to_string());
+        let resolved = match value {
+            TokenValue::String(value) => {
+                let trimmed = value.trim();
+                if let Some(reference) = exact_var_reference(trimmed) {
+                    self.resolve_reference_value(reference, stack)?
+                } else {
+                    TokenValue::String(self.resolve_string_references(&value, stack)?)
+                }
+            }
+            value => value,
+        };
+        stack.pop();
+        Ok(resolved)
+    }
+
+    fn resolve_reference_value(
+        &self,
+        reference: &str,
+        stack: &mut Vec<String>,
+    ) -> Result<TokenValue, ThemeTokenError> {
+        let name = canonical_token_name(reference);
+        if let Some(value) = self.token(&name) {
+            let _ = value;
+            return self.resolve_named_token(&name, stack);
+        }
+        Err(ThemeTokenError::Missing(name))
+    }
+
+    fn resolve_string_references(
+        &self,
+        raw: &str,
+        stack: &mut Vec<String>,
+    ) -> Result<String, ThemeTokenError> {
+        let mut output = String::with_capacity(raw.len());
+        let mut rest = raw;
+        while let Some(start) = rest.find("var(") {
+            output.push_str(&rest[..start]);
+            let reference_start = start + "var(".len();
+            let Some(end) = find_matching_parenthesis(&rest[reference_start..]) else {
+                return Err(ThemeTokenError::Malformed(raw.to_string()));
+            };
+            let inside = rest[reference_start..reference_start + end].trim();
+            let (reference, fallback) = inside
+                .split_once(',')
+                .map_or((inside, None), |(reference, fallback)| {
+                    (reference.trim(), Some(fallback.trim()))
+                });
+            if reference.is_empty() {
+                return Err(ThemeTokenError::Malformed(raw.to_string()));
+            }
+            match self.resolve_reference_value(reference, stack) {
+                Ok(value) => output.push_str(&value.to_string()),
+                Err(ThemeTokenError::Missing(_)) if fallback.is_some() => {
+                    output.push_str(fallback.unwrap_or_default())
+                }
+                Err(error) => return Err(error),
+            }
+            rest = &rest[reference_start + end + 1..];
+        }
+        output.push_str(rest);
+        Ok(output)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ThemeTokenError {
+    #[error("missing theme token '{0}'")]
+    Missing(String),
+    #[error("theme token dependency cycle: {0:?}")]
+    Cycle(Vec<String>),
+    #[error("malformed theme token reference in '{0}'")]
+    Malformed(String),
+}
+
+fn canonical_token_name(name: &str) -> String {
+    let name = name.trim().strip_prefix("--").unwrap_or(name.trim());
+    name.replace('-', ".")
+}
+
+fn exact_var_reference(value: &str) -> Option<&str> {
+    let end = value.strip_prefix("var(")?.strip_suffix(')')?;
+    if end.contains(',') {
+        return None;
+    }
+    let reference = end.trim();
+    (!reference.is_empty()).then_some(reference)
+}
+
+fn find_matching_parenthesis(value: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (offset, byte) in value.bytes().enumerate() {
+        match byte {
+            b'(' => depth += 1,
+            b')' => {
+                if depth == 0 {
+                    return Some(offset);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 #[derive(Debug, Deserialize)]
@@ -1917,6 +2061,63 @@ mod tests {
                 .map(String::as_str),
             Some("var(--radius-md)")
         );
+    }
+
+    #[test]
+    fn theme_token_aliases_resolve_transitively_and_keep_scalar_types() {
+        let mut theme = Theme::new("aliases", "Aliases");
+        theme.tokens_mut().extend([
+            ("color.primary".into(), TokenValue::String("#123456".into())),
+            (
+                "color.accent".into(),
+                TokenValue::String("var(--color-primary)".into()),
+            ),
+            ("spacing.small".into(), TokenValue::Number(8.0)),
+            (
+                "spacing.medium".into(),
+                TokenValue::String("var(--spacing-small)".into()),
+            ),
+        ]);
+
+        assert!(matches!(
+            theme.resolve_token_value("color.accent"),
+            Ok(Some(TokenValue::String(value))) if value == "#123456"
+        ));
+        assert!(matches!(
+            theme.resolve_token_value("spacing.medium"),
+            Ok(Some(TokenValue::Number(value))) if value == 8.0
+        ));
+        assert_eq!(
+            theme
+                .resolve_token_references(
+                    "linear-gradient(var(--color-accent), var(--color-primary))"
+                )
+                .expect("aliases resolve"),
+            "linear-gradient(#123456, #123456)"
+        );
+    }
+
+    #[test]
+    fn theme_token_alias_cycles_are_reported_with_the_cycle_path() {
+        let mut theme = Theme::new("cycles", "Cycles");
+        theme.tokens_mut().extend([
+            (
+                "color.one".into(),
+                TokenValue::String("var(--color-two)".into()),
+            ),
+            (
+                "color.two".into(),
+                TokenValue::String("var(--color-one)".into()),
+            ),
+        ]);
+
+        let error = theme
+            .resolve_token_value("color.one")
+            .expect_err("cycle must be rejected");
+        assert!(matches!(error, ThemeTokenError::Cycle(path) if path
+            .iter()
+            .map(String::as_str)
+            .eq(["color.one", "color.two", "color.one"])));
     }
 
     #[test]

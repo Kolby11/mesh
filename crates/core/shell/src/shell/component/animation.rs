@@ -14,6 +14,7 @@ use mesh_core_elements::{
     NodeId, StyleResolver, TransitionStyle, WidgetNode,
     style::{AnimationPlayState, AnimationPropertyBucket},
 };
+use mesh_core_theme::{Theme, ThemeKeyframeStop};
 
 use super::FrontendSurfaceComponent;
 
@@ -141,6 +142,7 @@ impl FrontendSurfaceComponent {
             tree,
             previous_styles,
             &resolver,
+            &theme,
             now,
             false,
             &mut live_keys,
@@ -187,6 +189,7 @@ impl FrontendSurfaceComponent {
         node: &mut WidgetNode,
         previous_styles: &HashMap<NodeId, AnimatableStyle>,
         resolver: &StyleResolver,
+        theme: &Theme,
         now: Instant,
         ancestor_entering: bool,
         live_keys: &mut HashSet<NodeId>,
@@ -230,6 +233,7 @@ impl FrontendSurfaceComponent {
             self.apply_node_keyframe_animation(
                 node,
                 resolver,
+                theme,
                 now,
                 live_keyframe_keys,
                 has_active_keyframe_animation,
@@ -245,6 +249,7 @@ impl FrontendSurfaceComponent {
                 child,
                 previous_styles,
                 resolver,
+                theme,
                 now,
                 entering,
                 live_keys,
@@ -301,6 +306,7 @@ impl FrontendSurfaceComponent {
         &mut self,
         node: &mut WidgetNode,
         resolver: &StyleResolver,
+        theme: &Theme,
         now: Instant,
         live_keyframe_keys: &mut HashSet<String>,
         has_active_keyframe_animation: &mut bool,
@@ -329,8 +335,11 @@ impl FrontendSurfaceComponent {
             let animation_key = format!("{key}::{animation_name}");
             live_keyframe_keys.insert(animation_key.clone());
 
-            let Some(parsed_rule) = self.find_component_keyframe_rule(&animation_name).cloned()
-            else {
+            let stops = self
+                .find_component_keyframe_rule(&animation_name)
+                .map(|rule| rule.stops.clone())
+                .or_else(|| theme_keyframe_stops(theme, &animation_name));
+            let Some(stops) = stops else {
                 self.record_runtime_animation_diagnostic(format!(
                     "unresolved animation '{animation_name}'"
                 ));
@@ -338,7 +347,7 @@ impl FrontendSurfaceComponent {
             };
 
             let render_rule =
-                self.build_render_keyframe_rule(&animation_key, &parsed_rule, node, resolver);
+                self.build_render_keyframe_rule(&animation_key, &stops, node, resolver);
             let keyframe_bucket = keyframe_rule_animation_bucket(&render_rule);
             self.keyframe_rules
                 .insert(animation_key.clone(), render_rule.clone());
@@ -400,7 +409,7 @@ impl FrontendSurfaceComponent {
     fn build_render_keyframe_rule(
         &self,
         animation_key: &str,
-        parsed_rule: &component_style::KeyframeRule,
+        parsed_stops: &[component_style::KeyframeStop],
         node: &WidgetNode,
         resolver: &StyleResolver,
     ) -> RenderKeyframeRule {
@@ -410,12 +419,13 @@ impl FrontendSurfaceComponent {
             .unwrap_or_else(|| node.tag.clone());
         let mut stops = Vec::new();
 
-        for stop in &parsed_rule.stops {
+        for stop in parsed_stops {
             let mut computed_style = node.computed_style.clone();
-            for diagnostic in resolver.apply_declarations_with_diagnostics(
+            for diagnostic in resolver.apply_declarations_with_diagnostics_and_variables(
                 &mut computed_style,
                 &stop.declarations,
                 Some(&selector),
+                &node.computed_style.custom_properties,
             ) {
                 self.record_runtime_animation_diagnostic(diagnostic.message);
             }
@@ -439,6 +449,39 @@ impl FrontendSurfaceComponent {
         if let Some(diagnostics) = &self.diagnostics {
             diagnostics.error(message);
         }
+    }
+}
+
+fn theme_keyframe_stops(theme: &Theme, name: &str) -> Option<Vec<component_style::KeyframeStop>> {
+    Some(
+        theme
+            .keyframe_stops(name)?
+            .iter()
+            .map(theme_keyframe_stop)
+            .collect(),
+    )
+}
+
+fn theme_keyframe_stop(stop: &ThemeKeyframeStop) -> component_style::KeyframeStop {
+    component_style::KeyframeStop {
+        offset: stop.offset,
+        declarations: stop
+            .declarations
+            .iter()
+            .map(|(property, value)| component_style::Declaration {
+                property: property.clone(),
+                value: theme_style_value(value),
+            })
+            .collect(),
+    }
+}
+
+fn theme_style_value(value: &str) -> component_style::StyleValue {
+    let value = value.trim();
+    if value.starts_with("var(") && value.ends_with(')') {
+        component_style::StyleValue::Var(value[4..value.len() - 1].trim().to_string())
+    } else {
+        component_style::StyleValue::Literal(value.to_string())
     }
 }
 

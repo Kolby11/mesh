@@ -81,8 +81,15 @@ impl<'a> StyleResolver<'a> {
         parent_style: Option<&ParentInheritedStyle>,
     ) {
         let attrs = StyleNodeAttrs::from_node(node);
-        node.computed_style = self
-            .resolve_node_style_with_attrs_indexed_no_diagnostics(rules, index, &attrs, context);
+        node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
+            rules,
+            index,
+            &attrs,
+            context,
+            None,
+            None,
+            parent_style.map(|parent| &parent.custom_properties),
+        );
         if let Some(parent) = parent_style {
             inherit_retained_text_style(&mut node.computed_style, parent);
         }
@@ -110,6 +117,7 @@ impl<'a> StyleResolver<'a> {
             context,
             None,
             Some(attribution),
+            parent_style.map(|parent| &parent.custom_properties),
         );
         if let Some(parent) = parent_style {
             inherit_retained_text_style(&mut node.computed_style, parent);
@@ -209,8 +217,14 @@ impl<'a> StyleResolver<'a> {
             // For descendants of targets: inherit updated values from the
             // restyled ancestor.
             let attrs = StyleNodeAttrs::from_node(node);
-            node.computed_style = self.resolve_node_style_with_attrs_indexed_no_diagnostics(
-                rules, index, &attrs, context,
+            node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
+                rules,
+                index,
+                &attrs,
+                context,
+                None,
+                None,
+                parent_style.map(|parent| &parent.custom_properties),
             );
             if let Some(parent) = parent_style {
                 inherit_retained_text_style(&mut node.computed_style, parent);
@@ -275,6 +289,7 @@ impl<'a> StyleResolver<'a> {
                 context,
                 None,
                 Some(attribution),
+                parent_style.map(|parent| &parent.custom_properties),
             );
             if let Some(parent) = parent_style {
                 inherit_retained_text_style(&mut node.computed_style, parent);

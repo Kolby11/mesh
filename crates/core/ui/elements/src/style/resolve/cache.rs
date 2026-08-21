@@ -2,7 +2,7 @@ use super::index::*;
 use crate::lru::LruCache;
 use crate::style::*;
 use mesh_core_component::style::StyleValue;
-use mesh_core_theme::TokenValue;
+use mesh_core_theme::{ThemeTokenError, TokenValue};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
@@ -35,11 +35,12 @@ pub(super) const MAX_SHARED_THEME_REVISIONS: usize = 16;
 pub(super) const MAX_SHARED_THEME_DEFAULTS_PER_REVISION: usize = 256;
 pub(super) const MAX_THEME_DEFAULT_DECLARATION_CACHE_ENTRIES: usize = 512;
 
-/// The five CSS-inherited fields from a parent node. Used instead of cloning
+/// The CSS-inherited fields from a parent node. Used instead of cloning
 /// the full `ComputedStyle` (~60 fields) when passing parent context into
 /// recursive restyle calls.
 #[derive(PartialEq)]
 pub(super) struct ParentInheritedStyle {
+    pub(super) custom_properties: HashMap<String, StyleValue>,
     pub(super) color: Color,
     pub(super) font_family: Arc<str>,
     pub(super) font_size: f32,
@@ -50,6 +51,7 @@ pub(super) struct ParentInheritedStyle {
 impl From<&ComputedStyle> for ParentInheritedStyle {
     fn from(s: &ComputedStyle) -> Self {
         Self {
+            custom_properties: s.custom_properties.clone(),
             color: s.color,
             font_family: s.font_family.clone(),
             font_size: s.font_size,
@@ -211,6 +213,7 @@ pub(super) type ThemeDefaultDiagnosticPrototype = (
 #[derive(Debug, Clone)]
 pub(super) enum CachedThemeTokenValue {
     Missing,
+    Error(Arc<str>),
     String(Arc<str>),
     Number(f64),
     Bool(bool),
@@ -226,7 +229,17 @@ impl CachedThemeTokenValue {
         }
     }
 
+    pub(super) fn from_resolution(value: Result<Option<TokenValue>, ThemeTokenError>) -> Self {
+        match value {
+            Ok(Some(TokenValue::String(value))) => Self::String(Arc::from(value)),
+            Ok(Some(TokenValue::Number(value))) => Self::Number(value),
+            Ok(Some(TokenValue::Bool(value))) => Self::Bool(value),
+            Ok(None) => Self::Missing,
+            Err(error) => Self::Error(Arc::from(error.to_string())),
+        }
+    }
+
     pub(super) fn is_missing(&self) -> bool {
-        matches!(self, Self::Missing)
+        matches!(self, Self::Missing | Self::Error(_))
     }
 }

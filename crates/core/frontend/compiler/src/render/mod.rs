@@ -425,16 +425,19 @@ fn build_widget_node_inner(
             attach_module_id(&mut node, &manifest.package.id);
             node.attributes
                 .insert("content".into(), text.content.clone());
-            node.computed_style = build_style.resolver.resolve_node_style_for_module_indexed(
-                build_style.rules,
-                build_style.index.as_ref(),
-                "text",
-                &[],
-                None,
-                container_context,
-                Default::default(),
-                Some(&manifest.package.id),
-            );
+            node.computed_style = build_style
+                .resolver
+                .resolve_node_style_for_module_indexed_with_parent_style(
+                    build_style.rules,
+                    build_style.index.as_ref(),
+                    "text",
+                    &[],
+                    None,
+                    container_context,
+                    Default::default(),
+                    Some(&manifest.package.id),
+                    parent_style,
+                );
             if let Some(parent_style) = parent_style {
                 inherit_text_style(
                     &mut node.computed_style,
@@ -463,16 +466,19 @@ fn build_widget_node_inner(
                 .unwrap_or_else(|| format!("{{ {} }}", expr.expression));
             node.attributes.insert("content".into(), content);
             node.service_field_reads = tracking_store.map(|t| t.into_reads()).unwrap_or_default();
-            node.computed_style = build_style.resolver.resolve_node_style_for_module_indexed(
-                build_style.rules,
-                build_style.index.as_ref(),
-                "text",
-                &[],
-                None,
-                container_context,
-                Default::default(),
-                Some(&manifest.package.id),
-            );
+            node.computed_style = build_style
+                .resolver
+                .resolve_node_style_for_module_indexed_with_parent_style(
+                    build_style.rules,
+                    build_style.index.as_ref(),
+                    "text",
+                    &[],
+                    None,
+                    container_context,
+                    Default::default(),
+                    Some(&manifest.package.id),
+                    parent_style,
+                );
             if let Some(parent_style) = parent_style {
                 inherit_text_style(
                     &mut node.computed_style,
@@ -799,7 +805,7 @@ fn build_element_node(
 
     let computed_style = build_style
         .resolver
-        .resolve_node_style_for_module_indexed_with_inline_style(
+        .resolve_node_style_for_module_indexed_with_inline_style_and_parent_style(
             build_style.rules,
             build_style.index.as_ref(),
             tag,
@@ -809,6 +815,7 @@ fn build_element_node(
             container_context,
             Default::default(),
             Some(&manifest.package.id),
+            parent_style,
         );
 
     let mut node = WidgetNode::new(tag);

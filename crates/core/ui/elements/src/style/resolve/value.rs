@@ -123,6 +123,7 @@ impl<'a> StyleResolver<'a> {
             CachedThemeTokenValue::String(s) => Ok(s.to_string()),
             CachedThemeTokenValue::Number(n) => Ok(format!("{n}")),
             CachedThemeTokenValue::Bool(b) => Ok(format!("{b}")),
+            CachedThemeTokenValue::Error(error) => Err(error.to_string()),
             CachedThemeTokenValue::Missing => {
                 let token_name = self.cached_theme_token_name(name);
                 if strict_animation_tokens && token_name.starts_with("animation.") {
@@ -191,6 +192,12 @@ impl<'a> StyleResolver<'a> {
                     CachedThemeTokenValue::String(s) => output.push_str(&s),
                     CachedThemeTokenValue::Number(n) => output.push_str(&format!("{n}")),
                     CachedThemeTokenValue::Bool(b) => output.push_str(&format!("{b}")),
+                    CachedThemeTokenValue::Error(error) => {
+                        if strict_animation_tokens {
+                            return Err(error.to_string());
+                        }
+                        tracing::warn!("unresolved theme token dependency: {error}");
+                    }
                     CachedThemeTokenValue::Missing => {
                         let token_name = self.cached_theme_token_name(name);
                         if strict_animation_tokens && token_name.starts_with("animation.") {
@@ -280,12 +287,12 @@ impl<'a> StyleResolver<'a> {
                 .map(|value| self.validate_animation_value_with_variables(value, variables))
                 .unwrap_or_else(|| {
                     let token_name = self.cached_theme_token_name(name);
-                    if token_name.starts_with("animation.")
-                        && self.cached_theme_token_value(name).is_missing()
-                    {
-                        Err(token_name.to_string())
-                    } else {
-                        Ok(())
+                    match self.cached_theme_token_value(name) {
+                        CachedThemeTokenValue::Error(error) => Err(error.to_string()),
+                        value if token_name.starts_with("animation.") && value.is_missing() => {
+                            Err(token_name.to_string())
+                        }
+                        _ => Ok(()),
                     }
                 }),
             StyleValue::Prop(name) => self
@@ -339,6 +346,7 @@ impl<'a> StyleResolver<'a> {
                     CachedThemeTokenValue::Number(_) | CachedThemeTokenValue::Bool(_) => {
                         Some(Color::TRANSPARENT)
                     }
+                    CachedThemeTokenValue::Error(_) => None,
                     CachedThemeTokenValue::Missing => None,
                 }
             }
@@ -392,6 +400,7 @@ impl<'a> StyleResolver<'a> {
                     CachedThemeTokenValue::Number(value) => Some(value as f32),
                     CachedThemeTokenValue::String(value) => Some(parse_px(&value)),
                     CachedThemeTokenValue::Bool(_) => Some(0.0),
+                    CachedThemeTokenValue::Error(_) => None,
                     CachedThemeTokenValue::Missing => None,
                 }
             }
@@ -432,10 +441,21 @@ impl<'a> StyleResolver<'a> {
             return value.clone();
         }
         let token_name = self.cached_theme_token_name(reference);
-        let value = CachedThemeTokenValue::from_token(self.theme.token(&token_name));
+        let value =
+            CachedThemeTokenValue::from_resolution(self.theme.resolve_token_value(&token_name));
         self.theme_value_cache
             .borrow_mut()
             .insert(reference.to_owned(), value.clone());
         value
+    }
+
+    pub(super) fn cached_theme_token_error(&self, reference: &str) -> Option<String> {
+        match self.cached_theme_token_value(reference) {
+            CachedThemeTokenValue::Error(error) => Some(error.to_string()),
+            CachedThemeTokenValue::Missing
+            | CachedThemeTokenValue::String(_)
+            | CachedThemeTokenValue::Number(_)
+            | CachedThemeTokenValue::Bool(_) => None,
+        }
     }
 }

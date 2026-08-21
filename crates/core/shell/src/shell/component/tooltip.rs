@@ -156,29 +156,17 @@ impl TooltipAnimation {
 /// duration tokens are bare millisecond numbers, so a var substitution that
 /// yields a bare number is suffixed with `ms` to stay a valid CSS time.
 fn resolve_theme_value_tokens(theme: &Theme, raw: &str) -> String {
-    raw.split_whitespace()
-        .map(|token| {
-            let Some(variable) = token
-                .strip_prefix("var(")
-                .and_then(|s| s.strip_suffix(')'))
-                .map(str::trim)
-            else {
-                return token.to_string();
-            };
-            let resolved = variable
-                .strip_prefix("--")
-                .map(|name| name.replace('-', "."))
-                .and_then(|token_name| theme.token(&token_name).map(|v| v.to_string()));
-            match resolved {
-                Some(value) if value.trim().parse::<f64>().is_ok() => {
-                    format!("{}ms", value.trim())
-                }
-                Some(value) => value,
-                None => token.to_string(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    let resolved = theme
+        .resolve_token_references(raw)
+        .unwrap_or_else(|_| raw.to_string());
+    if raw.trim().starts_with("var(")
+        && raw.trim().ends_with(')')
+        && resolved.trim().parse::<f64>().is_ok()
+    {
+        format!("{}ms", resolved.trim())
+    } else {
+        resolved
+    }
 }
 
 /// Result of tooltip placement computation.

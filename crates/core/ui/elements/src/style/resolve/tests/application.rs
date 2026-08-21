@@ -349,6 +349,7 @@ fn cached_theme_token_value_matches_theme_lookup() {
         ),
         CachedThemeTokenValue::Number(_)
         | CachedThemeTokenValue::Bool(_)
+        | CachedThemeTokenValue::Error(_)
         | CachedThemeTokenValue::Missing => panic!("expected string color token"),
     }
     assert!(
@@ -708,4 +709,58 @@ fn state_to_rules_multiple_rules_for_same_bit() {
     assert_eq!(result.len(), 2);
     assert!(result.contains(&0));
     assert!(result.contains(&1));
+}
+
+#[test]
+fn custom_properties_inherit_through_initial_style_resolution() {
+    let theme = mesh_core_theme::default_theme();
+    let rules = vec![
+        StyleRule {
+            selector: Selector::Class("parent".into()),
+            declarations: vec![Declaration {
+                property: "--accent".into(),
+                value: StyleValue::Literal("#123456".into()),
+            }],
+            container_query: None,
+        },
+        StyleRule {
+            selector: Selector::Tag("text".into()),
+            declarations: vec![Declaration {
+                property: "color".into(),
+                value: StyleValue::Var("--accent".into()),
+            }],
+            container_query: None,
+        },
+    ];
+    let index = StyleRuleIndex::new(&rules);
+    let resolver = StyleResolver::new(&theme);
+    let parent_classes = vec!["parent".to_string()];
+    let parent = resolver.resolve_node_style_for_module_indexed_with_parent_style(
+        &rules,
+        &index,
+        "box",
+        &parent_classes,
+        None,
+        StyleContext::default(),
+        ElementState::default(),
+        None,
+        None,
+    );
+    let child = resolver.resolve_node_style_for_module_indexed_with_parent_style(
+        &rules,
+        &index,
+        "text",
+        &[],
+        None,
+        StyleContext::default(),
+        ElementState::default(),
+        None,
+        Some(&parent),
+    );
+
+    assert_eq!(
+        child.custom_properties.get("--accent"),
+        Some(&StyleValue::Literal("#123456".into()))
+    );
+    assert_eq!(child.color, Color::from_css("#123456").unwrap());
 }
