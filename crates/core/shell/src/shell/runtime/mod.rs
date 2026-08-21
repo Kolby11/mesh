@@ -200,8 +200,7 @@ impl Shell {
         if let Some(graph) = self.installed_module_graph.as_ref() {
             for descriptor in graph.theme_catalog().iter() {
                 let source = descriptor.default_source();
-                let path = source.candidate_path();
-                match mesh_core_theme::load_theme_from_path(&path) {
+                match mesh_core_theme::load_theme_from_source(source) {
                     Ok(mut theme) => {
                         // The graph identity, not CSS metadata, is the
                         // activation identity. CSS labels remain content,

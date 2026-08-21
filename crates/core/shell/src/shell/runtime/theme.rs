@@ -122,8 +122,23 @@ impl Shell {
         }
 
         let old_theme_id = self.theme.active().id.clone();
-        let mut theme = mesh_core_theme::load_theme_from_path(&self.theme_watch.path)
-            .map_err(ShellRunError::Theme)?;
+        let graph_descriptor = self
+            .installed_module_graph
+            .as_ref()
+            .and_then(|graph| graph.theme_catalog().get(&old_theme_id))
+            .cloned();
+        let mut theme = if let Some(descriptor) = &graph_descriptor {
+            let mut theme = mesh_core_theme::load_theme_from_source(descriptor.default_source())
+                .map_err(ShellRunError::Theme)?;
+            theme.id = descriptor.id.clone();
+            if let Some(label) = &descriptor.label {
+                theme.name = label.clone();
+            }
+            theme
+        } else {
+            mesh_core_theme::load_theme_from_path(&self.theme_watch.path)
+                .map_err(ShellRunError::Theme)?
+        };
         apply_font_family(&mut theme, self.settings.fonts.ui_family.as_deref());
         tracing::info!(
             "reloaded active theme '{}' from {}",
@@ -162,20 +177,37 @@ impl Shell {
         &mut self,
         theme_id: &str,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let catalog_descriptor = self
+            .installed_module_graph
+            .as_ref()
+            .and_then(|graph| graph.theme_catalog().get(theme_id))
+            .cloned();
+        if catalog_descriptor.is_none() {
+            tracing::warn!(
+                "cannot select theme '{theme_id}': it is not a graph-authorized catalog identity"
+            );
+            return Ok(VecDeque::new());
+        }
         if self.theme.set_active(theme_id).is_err() {
-            let path = mesh_core_theme::theme_path_for_id(theme_id);
-            match mesh_core_theme::load_theme_from_path(&path) {
-                Ok(theme) => {
-                    self.theme.register_theme(theme);
-                    if let Err(e) = self.theme.set_active(theme_id) {
-                        tracing::warn!("failed to activate theme '{theme_id}': {e}");
+            let descriptor = catalog_descriptor
+                .clone()
+                .expect("catalog descriptor checked");
+            let mut theme =
+                match mesh_core_theme::load_theme_from_source(descriptor.default_source()) {
+                    Ok(theme) => theme,
+                    Err(error) => {
+                        tracing::warn!("cannot load theme '{theme_id}': {error}");
                         return Ok(VecDeque::new());
                     }
-                }
-                Err(e) => {
-                    tracing::warn!("cannot load theme '{theme_id}': {e}");
-                    return Ok(VecDeque::new());
-                }
+                };
+            theme.id = descriptor.id.clone();
+            if let Some(label) = descriptor.label {
+                theme.name = label;
+            }
+            self.theme.register_theme(theme);
+            if let Err(error) = self.theme.set_active(theme_id) {
+                tracing::warn!("failed to activate theme '{theme_id}': {error}");
+                return Ok(VecDeque::new());
             }
         }
         tracing::info!("active theme changed to '{theme_id}'");
@@ -184,7 +216,10 @@ impl Shell {
             self.theme.active_mut(),
             self.settings.fonts.ui_family.as_deref(),
         );
-        let path = mesh_core_theme::theme_path_for_id(theme_id);
+        let path = catalog_descriptor
+            .expect("catalog descriptor checked")
+            .default_source()
+            .candidate_path();
         let modified_at = std::fs::metadata(&path)
             .ok()
             .and_then(|metadata| metadata.modified().ok());

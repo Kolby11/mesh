@@ -8,10 +8,19 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[cfg(unix)]
+use std::ffi::CString;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
+use std::os::unix::io::{AsRawFd, FromRawFd};
+
 const LEGACY_DEFAULT_SHELL_ANIMATION_PREFIX: &str = "animation.default.";
+pub const DEFAULT_MAX_THEME_SOURCE_BYTES: usize = 2 * 1024 * 1024;
 static NEXT_THEME_REVISION: AtomicU64 = AtomicU64::new(1);
 
 fn next_theme_revision() -> u64 {
@@ -255,6 +264,168 @@ impl ThemeSourceHandle {
     pub fn candidate_path(&self) -> PathBuf {
         self.module_root.join(&self.relative_path)
     }
+
+    /// Open the selected source beneath its owning module root without
+    /// following symlinks in the root, intermediate directories, or file.
+    pub fn read_utf8_bounded(&self, max_bytes: usize) -> Result<String, ThemeSourceError> {
+        #[cfg(unix)]
+        {
+            let mut directory = open_directory(&self.module_root)?;
+            let mut components = self.relative_path.components().peekable();
+            while let Some(component) = components.next() {
+                let Component::Normal(component) = component else {
+                    return Err(ThemeSourceError::UnsafePath {
+                        path: self.candidate_path(),
+                    });
+                };
+                if components.peek().is_some() {
+                    directory = open_directory_at(&directory, component, &self.candidate_path())?;
+                } else {
+                    let file = open_file_at(&directory, component, &self.candidate_path())?;
+                    return read_bounded_utf8(file, &self.candidate_path(), max_bytes);
+                }
+            }
+            Err(ThemeSourceError::UnsafePath {
+                path: self.candidate_path(),
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = max_bytes;
+            Err(ThemeSourceError::UnsupportedPlatform {
+                path: self.candidate_path(),
+            })
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ThemeSourceError {
+    #[error("I/O error opening theme source {path}: {source}")]
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("theme source is not a regular file: {path}")]
+    NotRegularFile { path: PathBuf },
+    #[error("theme source exceeds {max_bytes} bytes: {path}")]
+    TooLarge { path: PathBuf, max_bytes: usize },
+    #[error("theme source is not valid UTF-8: {path}")]
+    InvalidUtf8 { path: PathBuf },
+    #[error("theme source path is unsafe: {path}")]
+    UnsafePath { path: PathBuf },
+    #[error("safe theme source opening is unavailable on this platform: {path}")]
+    UnsupportedPlatform { path: PathBuf },
+}
+
+#[cfg(unix)]
+fn open_directory(path: &Path) -> Result<std::fs::File, ThemeSourceError> {
+    let name =
+        CString::new(path.as_os_str().as_bytes()).map_err(|_| ThemeSourceError::UnsafePath {
+            path: path.to_path_buf(),
+        })?;
+    let fd = unsafe {
+        libc::open(
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+        )
+    };
+    if fd < 0 {
+        return Err(ThemeSourceError::Io {
+            path: path.to_path_buf(),
+            source: std::io::Error::last_os_error(),
+        });
+    }
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn open_directory_at(
+    parent: &std::fs::File,
+    component: &std::ffi::OsStr,
+    path: &Path,
+) -> Result<std::fs::File, ThemeSourceError> {
+    let name = CString::new(component.as_bytes()).map_err(|_| ThemeSourceError::UnsafePath {
+        path: path.to_path_buf(),
+    })?;
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+            0,
+        )
+    };
+    if fd < 0 {
+        return Err(ThemeSourceError::Io {
+            path: path.to_path_buf(),
+            source: std::io::Error::last_os_error(),
+        });
+    }
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn open_file_at(
+    parent: &std::fs::File,
+    component: &std::ffi::OsStr,
+    path: &Path,
+) -> Result<std::fs::File, ThemeSourceError> {
+    let name = CString::new(component.as_bytes()).map_err(|_| ThemeSourceError::UnsafePath {
+        path: path.to_path_buf(),
+    })?;
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+            0,
+        )
+    };
+    if fd < 0 {
+        return Err(ThemeSourceError::Io {
+            path: path.to_path_buf(),
+            source: std::io::Error::last_os_error(),
+        });
+    }
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn read_bounded_utf8(
+    mut file: std::fs::File,
+    path: &Path,
+    max_bytes: usize,
+) -> Result<String, ThemeSourceError> {
+    if !file
+        .metadata()
+        .map_err(|source| ThemeSourceError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?
+        .file_type()
+        .is_file()
+    {
+        return Err(ThemeSourceError::NotRegularFile {
+            path: path.to_path_buf(),
+        });
+    }
+    let mut bytes = Vec::new();
+    file.take(max_bytes.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|source| ThemeSourceError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if bytes.len() > max_bytes {
+        return Err(ThemeSourceError::TooLarge {
+            path: path.to_path_buf(),
+            max_bytes,
+        });
+    }
+    String::from_utf8(bytes).map_err(|_| ThemeSourceError::InvalidUtf8 {
+        path: path.to_path_buf(),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -630,6 +801,9 @@ pub enum ThemeError {
 
     #[error("failed to parse theme css {path}: {message}")]
     CssParse { path: PathBuf, message: String },
+
+    #[error("failed to open graph-authorized theme source {path}: {message}")]
+    Source { path: PathBuf, message: String },
 }
 
 pub fn default_theme() -> Theme {
@@ -711,6 +885,19 @@ pub fn load_theme_from_path(path: &Path) -> Result<Theme, ThemeError> {
             source,
         }),
     }
+}
+
+/// Load CSS through a graph-provided source handle. Unlike the legacy path
+/// loader, this cannot select JSON or construct a path from a theme ID.
+pub fn load_theme_from_source(source: &ThemeSourceHandle) -> Result<Theme, ThemeError> {
+    let path = source.candidate_path();
+    let content = source
+        .read_utf8_bounded(DEFAULT_MAX_THEME_SOURCE_BYTES)
+        .map_err(|error| ThemeError::Source {
+            path: path.clone(),
+            message: error.to_string(),
+        })?;
+    parse_theme_css_file(&path, &content)
 }
 
 fn embedded_default_theme() -> Theme {
@@ -1535,5 +1722,36 @@ mod tests {
         assert!(ThemeSourceHandle::new("/modules/theme", "../outside.css").is_err());
         assert!(ThemeSourceHandle::new("/modules/theme", "/outside.css").is_err());
         assert!(ThemeSourceHandle::new("/modules/theme", "themes/dark/theme.css").is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn graph_theme_source_open_is_bounded_utf8_and_symlink_safe() {
+        use std::os::unix::fs::symlink;
+
+        let root =
+            std::env::temp_dir().join(format!("mesh-theme-source-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("themes")).unwrap();
+        std::fs::write(root.join("themes/main.css"), "node { color: #fff; }").unwrap();
+
+        let source = ThemeSourceHandle::new(&root, "themes/main.css").unwrap();
+        assert_eq!(
+            source.read_utf8_bounded(1024).unwrap(),
+            "node { color: #fff; }"
+        );
+        assert!(source.read_utf8_bounded(4).is_err());
+
+        std::fs::write(root.join("themes/binary.css"), [0xff, 0xfe]).unwrap();
+        let binary = ThemeSourceHandle::new(&root, "themes/binary.css").unwrap();
+        assert!(matches!(
+            binary.read_utf8_bounded(1024),
+            Err(ThemeSourceError::InvalidUtf8 { .. })
+        ));
+
+        symlink(root.join("themes"), root.join("link")).unwrap();
+        let escaped = ThemeSourceHandle::new(&root, "link/main.css").unwrap();
+        assert!(escaped.read_utf8_bounded(1024).is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

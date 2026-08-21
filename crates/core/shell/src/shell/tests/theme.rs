@@ -275,6 +275,8 @@ fn settings_theme_reload_syncs_theme_service_state() {
 
 #[test]
 fn set_theme_forces_full_present_on_existing_components() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("theme.css"), "node { color: #fff; }").unwrap();
     let mut shell = Shell::new();
     let seen_events = Arc::new(Mutex::new(Vec::new()));
     shell
@@ -283,12 +285,15 @@ fn set_theme_forces_full_present_on_existing_components() {
             RecordingComponent::new(seen_events),
         )));
 
-    let mut light = mesh_core_theme::default_theme();
-    light.id = "test-light-present".into();
-    light.name = "test-light-present".into();
-    shell.theme.register_theme(light);
+    shell.installed_module_graph = Some(graph_with_theme_source(
+        dir.path(),
+        "test-light-present",
+        "theme.css",
+    ));
 
-    shell.apply_set_theme("test-light-present").unwrap();
+    shell
+        .apply_set_theme("@mesh/test-theme:test-light-present")
+        .unwrap();
 
     assert!(
         shell.components[0].parent.force_full_present,
@@ -298,12 +303,31 @@ fn set_theme_forces_full_present_on_existing_components() {
 
 #[test]
 fn set_theme_loads_css_package_and_updates_runtime_setting() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("theme.css"),
+        ":root { --color-surface: #FFFBFE; }",
+    )
+    .unwrap();
     let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(
+        dir.path(),
+        "mesh-default-light",
+        "theme.css",
+    ));
 
-    shell.apply_set_theme("mesh-default-light").unwrap();
+    shell
+        .apply_set_theme("@mesh/test-theme:mesh-default-light")
+        .unwrap();
 
-    assert_eq!(shell.theme.active().id, "mesh-default-light");
-    assert_eq!(shell.settings.theme.active, "mesh-default-light");
+    assert_eq!(
+        shell.theme.active().id,
+        "@mesh/test-theme:mesh-default-light"
+    );
+    assert_eq!(
+        shell.settings.theme.active,
+        "@mesh/test-theme:mesh-default-light"
+    );
     assert_eq!(
         shell
             .theme
@@ -313,10 +337,7 @@ fn set_theme_loads_css_package_and_updates_runtime_setting() {
         Some("#FFFBFE".into())
     );
     assert!(
-        shell
-            .theme_watch
-            .path
-            .ends_with("mesh-default-light/theme.css"),
+        shell.theme_watch.path.ends_with("theme.css"),
         "theme watcher should follow the active CSS package"
     );
 }

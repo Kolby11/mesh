@@ -183,6 +183,56 @@ pub(super) fn graph_from_json(root: &str, modules: Vec<&str>) -> InstalledModule
     .unwrap()
 }
 
+pub(super) fn graph_with_theme_source(
+    module_root: &Path,
+    theme_id: &str,
+    source_path: &str,
+) -> InstalledModuleGraph {
+    let module = format!(
+        r#"{{
+            "name": "@mesh/test-theme",
+            "version": "0.1.0",
+            "mesh": {{
+                "apiVersion": "0.1",
+                "kind": "theme",
+                "provides": {{
+                    "themes": [{
+                        "id": "{theme_id}",
+                        "label": "Test theme",
+                        "modes": {{ "default": "{source_path}" }},
+                        "default_mode": "default"
+                    }]
+                }}
+            }}
+        }}"#
+    );
+    let loaded = LoadedModuleManifest {
+        manifest: ModuleManifest::from_json_str(&module).unwrap(),
+        path: module_root.join("module.json"),
+        source: ModuleManifestSource::CanonicalModuleJson,
+        diagnostics: Vec::new(),
+    };
+    let root = r#"{
+        "name": "@mesh/test-config",
+        "version": "0.1.0",
+        "mesh": {
+            "schemaVersion": 1,
+            "modulesDir": "modules",
+            "modules": {
+                "@mesh/test-theme": {
+                    "kind": "theme",
+                    "path": "@mesh/test-theme"
+                }
+            }
+        }
+    }"#;
+    InstalledModuleGraph::from_parts(
+        RootModuleGraphManifest::from_json_str(root).unwrap(),
+        vec![loaded],
+    )
+    .unwrap()
+}
+
 pub(super) fn test_contract(interface: &str) -> InterfaceContract {
     InterfaceContract {
         interface: interface.to_string(),
