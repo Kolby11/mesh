@@ -7,6 +7,12 @@ lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
 
+Theme availability now comes from the enabled installed graph: canonical theme
+contributions produce owner-scoped descriptors with validated modes/defaults and
+module-root-relative source handles, and runtime registration no longer scans
+`config/themes`. Safe no-follow source opening and active mode selection remain
+the next theme work.
+
 The first four Section 2 items are complete. Package commits publish
 validated module trees into a read-only SHA-256 object store and activate
 generation-stamped snapshots. Installed-graph and shell discovery resolve the
