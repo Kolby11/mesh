@@ -647,6 +647,7 @@ impl Shell {
             latest_service_health: HashMap::new(),
             service_contract_validation: HashMap::new(),
             pending_bound_service_state: HashMap::new(),
+            bound_service_state_transactions: HashMap::new(),
             command_throttle: HashMap::new(),
             pending_service_call_routes: HashMap::new(),
             pending_popover_hides: HashMap::new(),

@@ -43,6 +43,15 @@ dispatch, throttling, backend coalescing, provider replacement, and terminal
 result delivery. Missing providers, stale generations, timeouts, failures,
 supersession, and cancellation all settle the originating ticket exactly once.
 
+Optimistic contract-bound service writes are now CallId- and provider-generation
+scoped transactions. Successful calls retain their overlay until a matching
+provider snapshot confirms the value; failed, timed-out, cancelled, superseded,
+unavailable, and replaced-provider calls roll back to the prior visible state.
+Older completions cannot roll back a newer write, and chained failures unwind to
+the last provider value. The focused shell regression is present, but Cargo
+execution remains blocked by the unavailable `sha2` registry cache and network
+access.
+
 The guarded `scripts/codex-backlog-runner.sh` can process one unchecked backlog
 item at a time directly on `main`, using Codex's explicit unrestricted mode for
 unattended turns by default (`CODEX_ALLOW_ALL=0` opts back into workspace-write),

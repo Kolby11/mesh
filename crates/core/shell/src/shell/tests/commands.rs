@@ -63,8 +63,9 @@ fn set_muted_command_broadcasts_bound_audio_state_until_backend_confirms() {
     assert_eq!(
         shell
             .pending_bound_service_state
-            .get(&("mesh.audio".to_string(), "muted".to_string())),
-        Some(&serde_json::json!(false)),
+            .get(&("mesh.audio".to_string(), "muted".to_string()))
+            .map(|pending| pending.optimistic.clone()),
+        Some(serde_json::json!(false)),
         "inactive provider updates must not clear pending mute state"
     );
 
@@ -227,6 +228,113 @@ fn set_volume_updates_canonical_audio_percent_until_backend_confirms() {
             .pending_bound_service_state
             .contains_key(&("mesh.audio".to_string(), "percent".to_string())),
         "matching provider state should confirm and clear the bound value"
+    );
+}
+
+#[test]
+fn failed_bound_write_rolls_back_and_older_failure_cannot_override_newer_write() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let mut contract = test_contract("mesh.audio");
+    contract.methods[0].args = vec![InterfaceArgument {
+        name: "percent".to_string(),
+        arg_type: "float".to_string(),
+    }];
+    contract.methods[0].state_binding = Some(mesh_core_service::StateBinding {
+        field: "percent".to_string(),
+        from_arg: Some("percent".to_string()),
+        toggle: false,
+    });
+    shell.interfaces.register_contract(contract);
+    register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
+    let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    shell
+        .broadcast_service_event(service_update(
+            "mesh.audio",
+            "@mesh/pipewire-audio",
+            serde_json::json!({ "available": true, "percent": 42.0 }),
+        ))
+        .unwrap();
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.audio.control",
+    ));
+
+    let first = shell.dispatch_service_command(
+        "mesh.audio",
+        "set_volume",
+        &serde_json::json!({ "percent": 60 }),
+        "@mesh/settings",
+        &capabilities,
+    );
+    let first_command = rx.try_recv().unwrap();
+    assert_eq!(first["ok"], serde_json::json!(true));
+
+    let second = shell.dispatch_service_command(
+        "mesh.audio",
+        "set_volume",
+        &serde_json::json!({ "percent": 73 }),
+        "@mesh/settings",
+        &capabilities,
+    );
+    let second_command = rx.try_recv().unwrap();
+    assert_eq!(second["ok"], serde_json::json!(true));
+    assert_eq!(
+        shell.latest_service_state["mesh.audio"].state["percent"],
+        serde_json::json!(73)
+    );
+
+    let mut pending = VecDeque::new();
+    shell
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::BackendCommandResult {
+                interface: "mesh.audio".to_string(),
+                provider_id: "@mesh/pipewire-audio".to_string(),
+                call_id: first_command.call_id,
+                command: "set_volume".to_string(),
+                result: serde_json::json!({
+                    "ok": false,
+                    "status": "failed",
+                    "error": "rejected",
+                }),
+                outcome: mesh_core_backend::BackendCommandOutcome::Failed,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        shell.latest_service_state["mesh.audio"].state["percent"],
+        serde_json::json!(73),
+        "an older failure must not roll back a newer optimistic write"
+    );
+
+    shell
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::BackendCommandResult {
+                interface: "mesh.audio".to_string(),
+                provider_id: "@mesh/pipewire-audio".to_string(),
+                call_id: second_command.call_id,
+                command: "set_volume".to_string(),
+                result: serde_json::json!({
+                    "ok": false,
+                    "status": "failed",
+                    "error": "rejected",
+                }),
+                outcome: mesh_core_backend::BackendCommandOutcome::Failed,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        shell.latest_service_state["mesh.audio"].state["percent"],
+        serde_json::json!(42.0),
+        "when both writes fail, rollback must reach the last provider value"
+    );
+    assert!(
+        !shell
+            .pending_bound_service_state
+            .contains_key(&("mesh.audio".to_string(), "percent".to_string()))
     );
 }
 

@@ -44,7 +44,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/03-service-contracts/improvements.md)
 
-- [ ] Make optimistic state writes settle or roll back transactionally without overriding newer writes.
 - [ ] Compile and enforce explicit read, event-subscription, and per-method operation policy at every service boundary.
 - [ ] Replace additive registry mutation with one immutable generation-stamped resolved service catalog.
 - [ ] Compile recursive named/array/optional/result schemas and enforce them for state, events, inputs, and outputs.

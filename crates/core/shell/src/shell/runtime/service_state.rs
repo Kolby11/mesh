@@ -95,16 +95,18 @@ impl Shell {
             .collect();
         for field in pending_fields {
             let key = (interface.clone(), field);
-            let Some(expected) = self.pending_bound_service_state.get(&key) else {
+            let Some(expected) = self.pending_bound_service_state.get(&key).cloned() else {
                 continue;
             };
             if payload
                 .get(&key.1)
-                .is_some_and(|actual| service_values_equivalent(actual, expected))
+                .is_some_and(|actual| service_values_equivalent(actual, &expected.optimistic))
             {
-                self.pending_bound_service_state.remove(&key);
+                if let Some(confirmed) = self.pending_bound_service_state.remove(&key) {
+                    self.forget_bound_service_state_chain(confirmed.call_id);
+                }
             } else {
-                payload[key.1.as_str()] = expected.clone();
+                payload[key.1.as_str()] = expected.optimistic.clone();
             }
         }
         ServiceEvent::Updated {
@@ -168,9 +170,8 @@ impl Shell {
         interface: &str,
         field: &str,
         value: serde_json::Value,
+        call_id: Option<mesh_core_backend::CallId>,
     ) {
-        self.pending_bound_service_state
-            .insert((interface.to_string(), field.to_string()), value.clone());
         let interface = interface.to_string();
         let provider_id = self
             .backend_runtimes
@@ -187,7 +188,38 @@ impl Shell {
             .get(&interface)
             .map(|latest| latest.state.clone())
             .unwrap_or_else(|| serde_json::json!({ "available": true }));
+        let previous = payload.get(field).cloned();
+        if let Some(call_id) = call_id {
+            let key = (interface.clone(), field.to_string());
+            let previous_call_id = self
+                .pending_bound_service_state
+                .get(&key)
+                .map(|pending| pending.call_id);
+            let pending = PendingBoundServiceState {
+                call_id,
+                interface: interface.clone(),
+                field: field.to_string(),
+                provider_id: provider_id.clone(),
+                previous_call_id,
+                previous,
+                optimistic: value.clone(),
+                terminal_status: None,
+            };
+            self.pending_bound_service_state
+                .insert(key, pending.clone());
+            self.bound_service_state_transactions
+                .insert(call_id, pending);
+        }
         payload[field] = value;
+        self.publish_bound_service_state(interface, provider_id, payload);
+    }
+
+    fn publish_bound_service_state(
+        &mut self,
+        interface: String,
+        provider_id: String,
+        payload: serde_json::Value,
+    ) {
         self.latest_service_state.insert(
             interface.clone(),
             LatestServiceState::new(interface.clone(), provider_id.clone(), payload.clone()),
@@ -197,6 +229,183 @@ impl Shell {
             source_module: provider_id,
             payload,
         });
+    }
+
+    /// Apply a terminal result to the optimistic write that owns `call_id`.
+    /// Success leaves the optimistic overlay in place until the provider
+    /// snapshot confirms it. Every non-success outcome restores the value that
+    /// was visible before that write, but only when the call still owns the
+    /// field; a newer write is never overwritten by an older completion.
+    pub(in crate::shell) fn settle_bound_service_state(
+        &mut self,
+        call_id: mesh_core_backend::CallId,
+        status: &str,
+    ) {
+        let key = self
+            .pending_bound_service_state
+            .iter()
+            .find(|(_, pending)| pending.call_id == call_id)
+            .map(|(key, _)| key.clone())
+            .or_else(|| {
+                self.bound_service_state_transactions
+                    .get(&call_id)
+                    .map(|pending| (pending.interface.clone(), pending.field.clone()))
+            });
+        let Some(key) = key else { return };
+        if status == "completed" {
+            if let Some(pending) = self.bound_service_state_transactions.get_mut(&call_id) {
+                pending.terminal_status = Some(status.to_string());
+            }
+            return;
+        }
+        if let Some(pending) = self.bound_service_state_transactions.get_mut(&call_id) {
+            pending.terminal_status = Some(status.to_string());
+        }
+        let is_current = self
+            .pending_bound_service_state
+            .get(&key)
+            .is_some_and(|pending| pending.call_id == call_id);
+        if !is_current {
+            return;
+        }
+        self.rollback_bound_service_state(call_id);
+    }
+
+    /// Provider replacement and stop are terminal failures for writes admitted
+    /// to the old provider generation. Roll back only entries owned by that
+    /// generation so unrelated interfaces remain untouched.
+    pub(in crate::shell) fn rollback_bound_service_states_for_provider(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+    ) {
+        loop {
+            let call_id = self
+                .pending_bound_service_state
+                .iter()
+                .find(|((pending_interface, _), pending)| {
+                    pending_interface == interface && pending.provider_id == provider_id
+                })
+                .map(|(_, pending)| pending.call_id);
+            let Some(call_id) = call_id else { break };
+            self.settle_bound_service_state(call_id, "stale_provider");
+        }
+    }
+
+    fn rollback_bound_service_state(&mut self, call_id: mesh_core_backend::CallId) {
+        let Some(transaction) = self.bound_service_state_transactions.remove(&call_id) else {
+            return;
+        };
+        let key = (transaction.interface.clone(), transaction.field.clone());
+        if self
+            .pending_bound_service_state
+            .get(&key)
+            .is_some_and(|pending| pending.call_id == call_id)
+        {
+            self.pending_bound_service_state.remove(&key);
+        }
+
+        if let Some(previous_call_id) = transaction.previous_call_id {
+            let previous_failed = self
+                .bound_service_state_transactions
+                .get(&previous_call_id)
+                .and_then(|previous| previous.terminal_status.as_deref())
+                .is_some_and(Self::is_failed_bound_service_status);
+            if previous_failed {
+                self.rollback_bound_service_state(previous_call_id);
+                return;
+            }
+            if let Some(previous) = self
+                .bound_service_state_transactions
+                .get(&previous_call_id)
+                .cloned()
+            {
+                let provider_id = self
+                    .backend_runtimes
+                    .get(&key.0)
+                    .map(|slot| slot.provider_id.clone())
+                    .unwrap_or_else(|| previous.provider_id.clone());
+                self.pending_bound_service_state
+                    .insert(key.clone(), previous.clone());
+                self.restore_bound_service_state_value(
+                    &key.0,
+                    &key.1,
+                    provider_id,
+                    previous.optimistic,
+                );
+                return;
+            }
+        }
+        self.restore_bound_service_state(&key.0, &key.1, transaction.previous);
+    }
+
+    fn forget_bound_service_state_chain(&mut self, call_id: mesh_core_backend::CallId) {
+        let mut next = Some(call_id);
+        while let Some(call_id) = next {
+            next = self
+                .bound_service_state_transactions
+                .remove(&call_id)
+                .and_then(|transaction| transaction.previous_call_id);
+        }
+    }
+
+    fn restore_bound_service_state(
+        &mut self,
+        interface: &str,
+        field: &str,
+        previous: Option<serde_json::Value>,
+    ) {
+        let interface = interface.to_string();
+        let provider_id = self
+            .backend_runtimes
+            .get(&interface)
+            .map(|slot| slot.provider_id.clone())
+            .or_else(|| {
+                self.latest_service_state
+                    .get(&interface)
+                    .map(|latest| latest.provider_id.clone())
+            })
+            .unwrap_or_else(|| "@mesh/shell".to_string());
+        let mut payload = self
+            .latest_service_state
+            .get(&interface)
+            .map(|latest| latest.state.clone())
+            .unwrap_or_else(|| serde_json::json!({ "available": true }));
+        if let Some(previous) = previous {
+            payload[field] = previous;
+        } else if let Some(object) = payload.as_object_mut() {
+            object.remove(field);
+        }
+        self.publish_bound_service_state(interface, provider_id, payload);
+    }
+
+    fn restore_bound_service_state_value(
+        &mut self,
+        interface: &str,
+        field: &str,
+        provider_id: String,
+        value: serde_json::Value,
+    ) {
+        let interface = interface.to_string();
+        let mut payload = self
+            .latest_service_state
+            .get(&interface)
+            .map(|latest| latest.state.clone())
+            .unwrap_or_else(|| serde_json::json!({ "available": true }));
+        payload[field] = value;
+        self.publish_bound_service_state(interface, provider_id, payload);
+    }
+
+    fn is_failed_bound_service_status(status: &str) -> bool {
+        matches!(
+            status,
+            "failed"
+                | "superseded"
+                | "timed_out"
+                | "cancelled"
+                | "service_unavailable"
+                | "stale_provider"
+        )
     }
 
     /// Resolve a command's state-bound value: either copy the declared

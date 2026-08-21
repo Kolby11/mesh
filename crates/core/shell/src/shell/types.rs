@@ -275,6 +275,22 @@ pub(super) struct PendingServiceCommand {
     pub(super) payload: serde_json::Value,
 }
 
+/// One optimistic state write awaiting its correlated backend result and/or
+/// the provider snapshot that confirms the desired value. The previous value
+/// is captured at admission time so a failed write can restore exactly what
+/// the caller saw, while a newer write can take ownership of the field.
+#[derive(Debug, Clone)]
+pub(super) struct PendingBoundServiceState {
+    pub(super) call_id: mesh_core_backend::CallId,
+    pub(super) interface: String,
+    pub(super) field: String,
+    pub(super) provider_id: String,
+    pub(super) previous_call_id: Option<mesh_core_backend::CallId>,
+    pub(super) previous: Option<serde_json::Value>,
+    pub(super) optimistic: serde_json::Value,
+    pub(super) terminal_status: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct ServiceCallRoute {
     pub(super) interface: String,

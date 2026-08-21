@@ -270,6 +270,7 @@ impl Shell {
         self.service_handlers.remove(interface);
         if let Some(slot) = self.backend_runtimes.remove(interface) {
             slot.task.abort();
+            self.rollback_bound_service_states_for_provider(&slot.interface, &slot.provider_id);
             let terminal_failure_already_recorded = self
                 .backend_runtime_status(&slot.interface, &slot.provider_id)
                 .map(|entry| {

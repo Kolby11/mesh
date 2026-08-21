@@ -58,9 +58,9 @@ use sounds::{SoundKind, shell_sound_request};
 use surface_layout::{apply_font_family, default_surface_visibility, load_active_theme};
 use types::{
     CommandThrottleState, CompiledContractField, ComponentRuntime, ContractValidationCache,
-    LatestServiceState, PendingServiceCommand, ServiceCallRoute, ServiceCommandMsg,
-    ServiceDeliveryIndex, SettingsWatchState, ShellCoreState, ShellMessage, SurfaceState,
-    TargetRef, ThemeWatchState,
+    LatestServiceState, PendingBoundServiceState, PendingServiceCommand, ServiceCallRoute,
+    ServiceCommandMsg, ServiceDeliveryIndex, SettingsWatchState, ShellCoreState, ShellMessage,
+    SurfaceState, TargetRef, ThemeWatchState,
 };
 pub use types::{
     ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, KeyModifiers,
@@ -455,8 +455,12 @@ pub struct Shell {
     latest_service_health: HashMap<String, ServiceEvent>,
     service_contract_validation: HashMap<String, ContractValidationCache>,
     /// Command-bound service state awaiting provider confirmation, keyed by
-    /// (interface, state field).
-    pending_bound_service_state: HashMap<(String, String), serde_json::Value>,
+    /// (interface, state field). Replacing an entry makes the newer CallId the
+    /// sole owner of rollback for that field.
+    pending_bound_service_state: HashMap<(String, String), PendingBoundServiceState>,
+    /// Historical owners let a newer failed write reveal an older still-live
+    /// write, or skip over older writes that already failed.
+    bound_service_state_transactions: HashMap<mesh_core_backend::CallId, PendingBoundServiceState>,
     command_throttle: HashMap<(String, String), CommandThrottleState>,
     pending_service_call_routes: HashMap<u64, ServiceCallRoute>,
     pending_popover_hides: HashMap<SurfaceId, std::time::Instant>,

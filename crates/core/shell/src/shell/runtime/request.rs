@@ -1219,7 +1219,16 @@ impl Shell {
                 && let Some(value) =
                     self.bound_value_for_command(interface_canonical.as_ref(), &binding, payload)
             {
-                self.apply_bound_service_state(interface_canonical.as_ref(), &binding.field, value);
+                self.apply_bound_service_state(
+                    interface_canonical.as_ref(),
+                    &binding.field,
+                    value,
+                    dispatch_result
+                        .get("queued")
+                        .and_then(|queued| queued.as_bool())
+                        .unwrap_or(false)
+                        .then_some(call_id),
+                );
                 dispatch_result["state_bound"] = serde_json::json!(true);
             }
         }
@@ -1268,6 +1277,7 @@ impl Shell {
         status: &str,
         result: &serde_json::Value,
     ) {
+        self.settle_bound_service_state(call_id, status);
         let Some(route) = self.pending_service_call_routes.remove(&call_id.raw()) else {
             return;
         };
