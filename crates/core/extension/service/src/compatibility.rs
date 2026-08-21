@@ -879,8 +879,14 @@ mod tests {
         );
         let diffs = diff_contracts_bidirectional(&locked, &candidate);
         assert!(!diffs.consumer.is_breaking());
-        assert_eq!(diffs.classification().consumer, CompatibilityClass::Additive);
-        assert_eq!(diffs.classification().provider, CompatibilityClass::Breaking);
+        assert_eq!(
+            diffs.classification().consumer,
+            CompatibilityClass::Additive
+        );
+        assert_eq!(
+            diffs.classification().provider,
+            CompatibilityClass::Breaking
+        );
         assert!(
             diffs
                 .provider

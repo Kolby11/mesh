@@ -92,6 +92,11 @@ with independent consumer and provider classes. A change can therefore be
 additive for existing consumers while breaking old providers without collapsing
 those outcomes into one label.
 
+Service calls now share one `CallId` transaction across Luau awaitable tickets,
+shell routing, backend deadlines/cancellation, coalescing supersession,
+tracing/debug records, and optimistic state rollback. Each terminal outcome is
+settled once and older provider generations cannot affect newer transactions.
+
 Service contracts now validate recursive named fields, arrays, optional values,
 and `Result` returns across state, events, method inputs, and provider outputs.
 Invalid snapshots preserve the last-known-good state, invalid events and

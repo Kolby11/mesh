@@ -44,7 +44,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/03-service-contracts/improvements.md)
 
-- [ ] Use one call transaction model for awaitable results, cancellation, deadlines, coalescing, tracing, and optimistic rollback.
 
 ### 4. Themes
 
