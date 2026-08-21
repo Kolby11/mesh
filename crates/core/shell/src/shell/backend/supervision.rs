@@ -22,10 +22,23 @@ pub(in crate::shell) struct BackendSupervisionState {
     pub(in crate::shell) restart_count: u32,
     /// A restart wake-up has been scheduled and not yet handled.
     pub(in crate::shell) restart_pending: bool,
+    /// Provider identity and monotonic token for the pending wake-up. A
+    /// delayed task is not allowed to resurrect a provider after a graph or
+    /// runtime replacement has superseded it.
+    pub(in crate::shell) pending_provider_id: Option<String>,
+    pub(in crate::shell) restart_generation: u64,
     /// When the current provider last reported `running`.
     pub(in crate::shell) running_since: Option<Instant>,
     /// Providers benched for this session after exhausting restart cycles.
     pub(in crate::shell) quarantined_providers: HashSet<String>,
+}
+
+impl BackendSupervisionState {
+    pub(in crate::shell) fn invalidate_pending_restart(&mut self) {
+        self.restart_pending = false;
+        self.pending_provider_id = None;
+        self.restart_generation = self.restart_generation.saturating_add(1);
+    }
 }
 
 /// Handles the shell loop needs to respawn backend runtimes outside the
@@ -84,7 +97,7 @@ impl Shell {
                 BackendRuntimeStatus::Quarantined,
                 message,
             );
-            self.schedule_backend_restart(interface, RESTART_BASE_DELAY);
+            self.schedule_backend_restart(interface, provider_id, RESTART_BASE_DELAY);
             return;
         }
 
@@ -104,21 +117,31 @@ impl Shell {
             delay_ms = delay.as_millis() as u64,
             "scheduling supervised backend restart"
         );
-        self.schedule_backend_restart(interface, delay);
+        self.schedule_backend_restart(interface, provider_id, delay);
     }
 
-    fn schedule_backend_restart(&mut self, interface: &str, delay: Duration) {
+    fn schedule_backend_restart(&mut self, interface: &str, provider_id: &str, delay: Duration) {
         let Some(ctx) = self.backend_respawn.clone() else {
             tracing::debug!(interface, "no respawn context; skipping supervised restart");
             return;
         };
-        if let Some(state) = self.backend_supervision.get_mut(interface) {
+        let restart_generation = if let Some(state) = self.backend_supervision.get_mut(interface) {
             state.restart_pending = true;
-        }
+            state.pending_provider_id = Some(provider_id.to_string());
+            state.restart_generation = state.restart_generation.saturating_add(1);
+            state.restart_generation
+        } else {
+            return;
+        };
         let interface = interface.to_string();
+        let provider_id = provider_id.to_string();
         ctx.handle.spawn(async move {
             tokio::time::sleep(delay).await;
-            let _ = ctx.tx.send(ShellMessage::BackendRestartDue { interface });
+            let _ = ctx.tx.send(ShellMessage::BackendRestartDue {
+                interface,
+                provider_id,
+                restart_generation,
+            });
             let evfd = unsafe { BorrowedFd::borrow_raw(ctx.eventfd_fd) };
             let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
         });
@@ -128,10 +151,29 @@ impl Shell {
     /// for the interface (config-selected first, then priority order) and
     /// respawn it. With every provider quarantined, the interface stays down
     /// with a health record until the shell restarts or config changes.
-    pub(in crate::shell) fn handle_backend_restart_due(&mut self, interface: &str) {
-        if let Some(state) = self.backend_supervision.get_mut(interface) {
-            state.restart_pending = false;
+    pub(in crate::shell) fn handle_backend_restart_due(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        restart_generation: u64,
+    ) {
+        let Some(state) = self.backend_supervision.get_mut(interface) else {
+            return;
+        };
+        if !state.restart_pending
+            || state.restart_generation != restart_generation
+            || state.pending_provider_id.as_deref() != Some(provider_id)
+        {
+            tracing::debug!(
+                interface,
+                provider_id,
+                restart_generation,
+                "ignored stale backend restart deadline"
+            );
+            return;
         }
+        state.restart_pending = false;
+        state.pending_provider_id = None;
         let Some(ctx) = self.backend_respawn.clone() else {
             return;
         };

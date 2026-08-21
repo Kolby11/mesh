@@ -68,6 +68,24 @@ impl BackendRuntimeStatus {
             _ => Self::Failed,
         }
     }
+
+    pub(in crate::shell) fn rejects_provider_messages(self) -> bool {
+        matches!(
+            self,
+            Self::NoActiveProvider
+                | Self::UnmetBackendRequirement
+                | Self::OptionalBackendUnavailable
+                | Self::OptionalBackendInactive
+                | Self::InvalidManifest
+                | Self::MissingCapability
+                | Self::MissingEntrypoint
+                | Self::MissingBinary
+                | Self::InitFailed
+                | Self::Failed
+                | Self::Stopped
+                | Self::Quarantined
+        )
+    }
 }
 
 #[derive(Debug, Clone)]

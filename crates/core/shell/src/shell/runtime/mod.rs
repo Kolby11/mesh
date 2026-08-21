@@ -420,8 +420,12 @@ impl Shell {
                     payload,
                 )?);
             }
-            ShellMessage::BackendRestartDue { interface } => {
-                self.handle_backend_restart_due(&interface);
+            ShellMessage::BackendRestartDue {
+                interface,
+                provider_id,
+                restart_generation,
+            } => {
+                self.handle_backend_restart_due(&interface, &provider_id, restart_generation);
             }
             ShellMessage::FilesystemChanged => {
                 self.schedule_reload_checks_now();

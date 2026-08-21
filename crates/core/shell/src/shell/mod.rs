@@ -449,6 +449,9 @@ pub struct Shell {
     backend_supervision: HashMap<String, backend::BackendSupervisionState>,
     backend_respawn: Option<backend::BackendRespawnContext>,
     latest_service_state: HashMap<String, LatestServiceState>,
+    /// Last committed provider health event, replayed when a consumer mounts
+    /// after a graph/runtime transition.
+    latest_service_health: HashMap<String, ServiceEvent>,
     service_contract_validation: HashMap<String, ContractValidationCache>,
     /// Command-bound service state awaiting provider confirmation, keyed by
     /// (interface, state field).

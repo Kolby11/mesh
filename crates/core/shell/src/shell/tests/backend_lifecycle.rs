@@ -1,10 +1,16 @@
 use super::common::*;
 use super::*;
+use crate::shell::backend::BackendSupervisionState;
+use mesh_core_module::{ModuleHealthState, ModuleState};
 
 #[test]
 fn backend_supervision_quarantines_provider_after_exhausted_restart_cycles() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
+    let (_dir, module) = module_instance("@mesh/pipewire-audio", Some("src/main.luau"));
+    shell
+        .modules
+        .insert("@mesh/pipewire-audio".to_string(), module);
 
     // Each terminal failure of the current provider schedules a supervised
     // restart; after the restart budget is exhausted the provider is
@@ -49,6 +55,116 @@ fn backend_supervision_quarantines_provider_after_exhausted_restart_cycles() {
             .map(|entry| entry.status),
         Some(BackendRuntimeStatus::Quarantined)
     );
+    let module = shell.module("@mesh/pipewire-audio").unwrap();
+    assert_eq!(module.state, ModuleState::Quarantined);
+    assert_eq!(module.health().state, ModuleHealthState::Unavailable);
+}
+
+#[test]
+fn backend_status_updates_authoritative_module_lifecycle_and_health() {
+    let mut shell = Shell::new();
+    let (_dir, module) = module_instance("@mesh/pipewire-audio", Some("src/main.luau"));
+    shell
+        .modules
+        .insert("@mesh/pipewire-audio".to_string(), module);
+
+    shell.record_backend_runtime_status(
+        "mesh.audio".to_string(),
+        "@mesh/pipewire-audio".to_string(),
+        BackendRuntimeStatus::Running,
+        "backend runtime started".to_string(),
+    );
+    let module = shell.module("@mesh/pipewire-audio").unwrap();
+    assert_eq!(module.state, ModuleState::Running);
+    assert_eq!(module.health().state, ModuleHealthState::Healthy);
+
+    shell.record_backend_runtime_status(
+        "mesh.audio".to_string(),
+        "@mesh/pipewire-audio".to_string(),
+        BackendRuntimeStatus::Failed,
+        "poll loop stopped".to_string(),
+    );
+    let module = shell.module("@mesh/pipewire-audio").unwrap();
+    assert_eq!(module.state, ModuleState::Errored);
+    assert_eq!(module.health().state, ModuleHealthState::Unavailable);
+
+    shell.record_backend_runtime_status(
+        "mesh.audio".to_string(),
+        "@mesh/pipewire-audio".to_string(),
+        BackendRuntimeStatus::Running,
+        "provider recovered".to_string(),
+    );
+    let module = shell.module("@mesh/pipewire-audio").unwrap();
+    assert_eq!(module.state, ModuleState::Running);
+    assert_eq!(module.health().state, ModuleHealthState::Healthy);
+}
+
+#[test]
+fn backend_failure_delivers_unavailable_state_and_health_event() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let seen_events = Arc::new(Mutex::new(Vec::new()));
+    shell.register_component(Box::new(RecordingComponent::new(Arc::clone(&seen_events))));
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    shell.record_latest_service_state(&service_update(
+        "mesh.audio",
+        "@mesh/pipewire-audio",
+        serde_json::json!({ "available": true, "percent": 75 }),
+    ));
+
+    shell.handle_backend_lifecycle(
+        "mesh.audio".to_string(),
+        "@mesh/pipewire-audio".to_string(),
+        "poll".to_string(),
+        "failed".to_string(),
+        "poll loop stopped".to_string(),
+    );
+
+    let events = seen_events.lock().unwrap();
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            ServiceEvent::Updated { payload, .. }
+                if payload.get("available") == Some(&serde_json::Value::Bool(false))
+        )
+    }));
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            ServiceEvent::InterfaceEvent { name, payload, .. }
+                if name == "health" && payload["state"] == "unavailable"
+        )
+    }));
+}
+
+#[test]
+fn stale_restart_deadline_cannot_clear_or_run_a_newer_supervision_token() {
+    let mut shell = Shell::new();
+    shell.backend_supervision.insert(
+        "mesh.audio".to_string(),
+        BackendSupervisionState {
+            restart_count: 1,
+            restart_pending: true,
+            pending_provider_id: Some("@mesh/old-audio".to_string()),
+            restart_generation: 7,
+            running_since: None,
+            quarantined_providers: std::collections::HashSet::new(),
+        },
+    );
+
+    shell.handle_backend_restart_due("mesh.audio", "@mesh/new-audio", 7);
+    let state = shell.backend_supervision.get("mesh.audio").unwrap();
+    assert!(state.restart_pending);
+    assert_eq!(
+        state.pending_provider_id.as_deref(),
+        Some("@mesh/old-audio")
+    );
+
+    shell.handle_backend_restart_due("mesh.audio", "@mesh/old-audio", 7);
+    let state = shell.backend_supervision.get("mesh.audio").unwrap();
+    assert!(!state.restart_pending);
+    assert!(state.pending_provider_id.is_none());
 }
 
 #[test]

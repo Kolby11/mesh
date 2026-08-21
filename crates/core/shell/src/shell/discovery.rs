@@ -1,5 +1,6 @@
 use super::component::{FrontendCatalog, FrontendCatalogHandle, FrontendSurfaceComponent};
 use super::*;
+use mesh_core_module::ModuleHealthRecord;
 use rayon::prelude::*;
 use std::collections::{BTreeMap, HashSet};
 
@@ -643,6 +644,7 @@ impl Shell {
             backend_supervision: HashMap::new(),
             backend_respawn: None,
             latest_service_state: HashMap::new(),
+            latest_service_health: HashMap::new(),
             service_contract_validation: HashMap::new(),
             pending_bound_service_state: HashMap::new(),
             command_throttle: HashMap::new(),
@@ -703,7 +705,59 @@ impl Shell {
 
     /// Commit a graph only after its runtime candidate has been prepared.
     pub(in crate::shell) fn commit_installed_module_graph(&mut self, graph: InstalledModuleGraph) {
+        self.sync_module_graph_health(&graph);
         self.installed_module_graph = Some(graph);
+    }
+
+    /// Project immutable graph diagnostics into the live module records. The
+    /// graph remains static and reloadable; runtime failures are recorded on
+    /// the corresponding ModuleInstance instead of mutating this snapshot.
+    fn sync_module_graph_health(&mut self, graph: &InstalledModuleGraph) {
+        for (module_id, module) in &mut self.modules {
+            let Some(node) = graph.module(module_id) else {
+                continue;
+            };
+            let diagnostics = graph
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| diagnostic.module_id == *module_id)
+                .map(|diagnostic| (diagnostic.status.as_str(), diagnostic.message.as_str()));
+            let health_records = graph
+                .health()
+                .iter()
+                .filter(|record| record.module_id == *module_id)
+                .map(|record| (record.status.as_str(), record.message.as_str()));
+
+            let mut unavailable_reason = None;
+            let mut degraded_reason = None;
+            for (status, message) in diagnostics.chain(health_records) {
+                if status.contains("required")
+                    || status.contains("missing")
+                    || status.contains("blocked")
+                    || status.contains("conflict")
+                    || status == "provider_unavailable"
+                    || status == "interface_unavailable"
+                {
+                    unavailable_reason.get_or_insert(message.to_string());
+                } else if status.contains("optional")
+                    || status == "interface_unconfigured"
+                    || status == "provider_degraded"
+                {
+                    degraded_reason.get_or_insert(message.to_string());
+                }
+            }
+
+            let health = if !node.enabled {
+                ModuleHealthRecord::unavailable("module disabled by the installed graph", false)
+            } else if let Some(reason) = unavailable_reason {
+                ModuleHealthRecord::unavailable(reason, true)
+            } else if let Some(reason) = degraded_reason {
+                ModuleHealthRecord::degraded(reason)
+            } else {
+                ModuleHealthRecord::healthy()
+            };
+            module.set_static_health(health);
+        }
     }
 
     fn register_installed_graph_interfaces(&mut self) {
@@ -788,6 +842,7 @@ impl Shell {
     pub fn resolve_modules(&mut self) -> Result<(), ShellRunError> {
         validate_module_dependency_graph(self.modules.values().map(|module| &module.manifest))?;
         let active_graph = self.load_installed_module_graph_cached()?.clone();
+        self.sync_module_graph_health(&active_graph);
         let mut effective_capabilities = HashMap::with_capacity(self.modules.len());
         for (module_id, module) in &self.modules {
             if !active_graph
@@ -807,7 +862,7 @@ impl Shell {
         let ids: Vec<String> = self.modules.keys().cloned().collect();
         for id in ids {
             if let Some(module) = self.modules.get_mut(&id) {
-                if module.state == ModuleState::Discovered {
+                if module.state == ModuleState::Discovered && active_graph.module(&id).is_some() {
                     if let Err(e) = module.transition(ModuleState::Resolved) {
                         tracing::warn!("failed to resolve module {id}: {e}");
                     }
@@ -937,6 +992,14 @@ impl Shell {
                 if existing.contains(&instance_id) {
                     continue;
                 }
+                if let Some(module) = self.modules.get_mut(module_id) {
+                    if let Err(error) = module.mark_loaded() {
+                        tracing::warn!(
+                            module_id,
+                            "frontend activation did not load module: {error}"
+                        );
+                    }
+                }
                 let mut component = FrontendSurfaceComponent::new(
                     entry.compiled.clone(),
                     entry.module_dir.clone(),
@@ -983,14 +1046,27 @@ impl Shell {
         let mounted = match mounted {
             Ok(mounted) => mounted,
             Err(error) => {
+                if let Some(module) = self.modules.get_mut(module_id) {
+                    let _ = module.mark_failed(error.to_string());
+                }
                 self.frontend_catalog.restore(previous_catalog);
                 return Err(error);
             }
         };
         let mut requests = VecDeque::new();
         for (component, component_requests) in mounted {
+            let module_id = component.id().to_string();
             requests.extend(component_requests);
             self.register_component(Box::new(component));
+            if let Some(module) = self.modules.get_mut(&module_id) {
+                let _ = module.mark_initialized();
+                if let Err(error) = module.mark_running() {
+                    tracing::warn!(
+                        module_id,
+                        "frontend activation lifecycle transition failed: {error}"
+                    );
+                }
+            }
         }
         self.sync_frontend_catalog_components();
         tracing::info!(module_id, "activated frontend module live");
@@ -1022,6 +1098,14 @@ impl Shell {
         for index in indices.into_iter().rev() {
             let surface_id = self.components[index].surface_id.clone();
             let module_id = self.components[index].component.id().to_string();
+            if let Some(module) = self.modules.get_mut(&module_id)
+                && let Err(error) = module.mark_unloaded()
+            {
+                tracing::warn!(
+                    module_id,
+                    "frontend unload lifecycle transition failed: {error}"
+                );
+            }
             self.destroy_all_child_surfaces(index);
             self.presentation_engine.destroy_surface(&surface_id);
             self.components.remove(index);
@@ -1121,21 +1205,40 @@ impl Shell {
     pub(super) fn mount_components(&mut self) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
         for runtime in &mut self.components {
-            let diagnostics = self.diagnostics.register_instance(
-                runtime.component.id().to_string(),
-                runtime.surface_id.clone(),
-            );
+            let module_id = runtime.component.id().to_string();
+            if let Some(module) = self.modules.get_mut(&module_id)
+                && let Err(error) = module.mark_loaded()
+            {
+                tracing::warn!(module_id, "frontend mount did not load module: {error}");
+            }
+            let diagnostics = self
+                .diagnostics
+                .register_instance(module_id.clone(), runtime.surface_id.clone());
             let ctx = ComponentContext {
-                component_id: runtime.component.id().to_string(),
+                component_id: module_id.clone(),
                 surface_id: runtime.surface_id.clone(),
                 diagnostics,
             };
-            requests.extend(
-                runtime
-                    .component
-                    .mount(ctx)
-                    .map_err(ShellRunError::Component)?,
-            );
+            match runtime.component.mount(ctx) {
+                Ok(component_requests) => {
+                    requests.extend(component_requests);
+                    if let Some(module) = self.modules.get_mut(&module_id) {
+                        let _ = module.mark_initialized();
+                        if let Err(error) = module.mark_running() {
+                            tracing::warn!(
+                                module_id,
+                                "frontend mount lifecycle transition failed: {error}"
+                            );
+                        }
+                    }
+                }
+                Err(error) => {
+                    if let Some(module) = self.modules.get_mut(&module_id) {
+                        let _ = module.mark_failed(error.to_string());
+                    }
+                    return Err(ShellRunError::Component(error));
+                }
+            }
         }
         // Mount first so module scripts can establish their service proxy;
         // then deliver the revisioned effective settings snapshot normally.

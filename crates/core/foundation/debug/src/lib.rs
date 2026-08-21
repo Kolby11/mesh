@@ -513,6 +513,10 @@ pub struct ModuleEntry {
     pub id: String,
     pub module_type: String,
     pub state: String,
+    pub health: String,
+    pub static_health: String,
+    pub runtime_health: String,
+    pub quarantined: bool,
     pub error_count: u32,
     pub last_error: Option<String>,
 }

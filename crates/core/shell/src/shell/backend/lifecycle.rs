@@ -1,5 +1,6 @@
 use super::super::*;
 use super::{BackendRuntimeStatus, BackendRuntimeStatusEntry};
+use mesh_core_module::manifest::ModuleType;
 
 impl Shell {
     pub(in crate::shell) fn backend_runtime_status(
@@ -18,6 +19,23 @@ impl Shell {
         provider_id: String,
         status: BackendRuntimeStatus,
         message: String,
+    ) {
+        self.record_backend_runtime_status_with_health(
+            interface,
+            provider_id,
+            status,
+            message,
+            true,
+        );
+    }
+
+    fn record_backend_runtime_status_with_health(
+        &mut self,
+        interface: String,
+        provider_id: String,
+        status: BackendRuntimeStatus,
+        message: String,
+        publish_health: bool,
     ) {
         let is_failure = matches!(
             status,
@@ -53,16 +71,202 @@ impl Shell {
             .insert(
                 provider_id.clone(),
                 BackendRuntimeStatusEntry {
-                    interface,
-                    provider_id,
+                    interface: interface.clone(),
+                    provider_id: provider_id.clone(),
                     status,
-                    message,
+                    message: message.clone(),
                     failure_count,
                 },
             );
+        self.update_module_runtime_lifecycle(&provider_id, status, &message);
+        self.publish_backend_health(&interface, &provider_id, status, &message, publish_health);
+    }
+
+    fn update_module_runtime_lifecycle(
+        &mut self,
+        provider_id: &str,
+        status: BackendRuntimeStatus,
+        message: &str,
+    ) {
+        let Some(module) = self.modules.get_mut(provider_id) else {
+            return;
+        };
+        if module.manifest.package.module_type != ModuleType::Backend {
+            return;
+        }
+        let result = match status {
+            BackendRuntimeStatus::Running => module.mark_running(),
+            BackendRuntimeStatus::PollFailed => {
+                module.mark_degraded(message.to_string());
+                Ok(())
+            }
+            BackendRuntimeStatus::Stopped => module.mark_unloaded(),
+            BackendRuntimeStatus::Quarantined => module.mark_quarantined(message.to_string()),
+            BackendRuntimeStatus::OptionalBackendUnavailable
+            | BackendRuntimeStatus::OptionalBackendInactive => {
+                module.mark_degraded(message.to_string());
+                Ok(())
+            }
+            BackendRuntimeStatus::InvalidManifest
+            | BackendRuntimeStatus::MissingCapability
+            | BackendRuntimeStatus::MissingEntrypoint
+            | BackendRuntimeStatus::MissingBinary
+            | BackendRuntimeStatus::InitFailed
+            | BackendRuntimeStatus::Failed
+            | BackendRuntimeStatus::NoActiveProvider
+            | BackendRuntimeStatus::UnmetBackendRequirement => {
+                module.mark_failed(message.to_string())
+            }
+        };
+        if let Err(error) = result {
+            tracing::debug!(
+                provider_id,
+                "module lifecycle state did not accept backend status: {error}"
+            );
+        }
+    }
+
+    /// Publish one authoritative availability transition to both ordinary
+    /// service observers and subscribers of the reserved `health` event. The
+    /// provider cache is updated before delivery, so a newly mounted runtime
+    /// and an already-mounted runtime see the same terminal state.
+    fn publish_backend_health(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        status: BackendRuntimeStatus,
+        message: &str,
+        deliver: bool,
+    ) {
+        let current_provider = self
+            .backend_runtimes
+            .get(interface)
+            .map(|slot| slot.provider_id.as_str())
+            .or_else(|| {
+                self.pending_backend_runtimes
+                    .get(interface)
+                    .map(|pending| pending.slot.provider_id.as_str())
+            });
+        let pending_is_not_active =
+            self.pending_backend_runtimes
+                .get(interface)
+                .is_some_and(|pending| {
+                    pending.slot.provider_id == provider_id
+                        && !self
+                            .backend_runtimes
+                            .get(interface)
+                            .is_some_and(|slot| slot.provider_id == provider_id)
+                });
+        if pending_is_not_active {
+            tracing::debug!(
+                interface,
+                provider_id,
+                "kept candidate provider health private until activation commit"
+            );
+            return;
+        }
+        if current_provider.is_some_and(|current| current != provider_id)
+            || current_provider.is_none()
+                && provider_id != "<none>"
+                && self
+                    .latest_service_state
+                    .get(interface)
+                    .is_some_and(|latest| latest.provider_id != provider_id)
+        {
+            tracing::debug!(
+                interface,
+                provider_id,
+                "ignored health transition from an inactive provider"
+            );
+            return;
+        }
+        let (health_state, recoverable, available) = match status {
+            BackendRuntimeStatus::Running => ("healthy", true, Some(true)),
+            BackendRuntimeStatus::PollFailed => ("degraded", true, None),
+            BackendRuntimeStatus::Quarantined => ("unavailable", false, Some(false)),
+            BackendRuntimeStatus::NoActiveProvider
+            | BackendRuntimeStatus::UnmetBackendRequirement
+            | BackendRuntimeStatus::OptionalBackendUnavailable
+            | BackendRuntimeStatus::OptionalBackendInactive
+            | BackendRuntimeStatus::InvalidManifest
+            | BackendRuntimeStatus::MissingCapability
+            | BackendRuntimeStatus::MissingEntrypoint
+            | BackendRuntimeStatus::MissingBinary
+            | BackendRuntimeStatus::InitFailed
+            | BackendRuntimeStatus::Failed
+            | BackendRuntimeStatus::Stopped => ("unavailable", true, Some(false)),
+        };
+
+        if let Some(available) = available {
+            let mut payload = self
+                .latest_service_state
+                .get(interface)
+                .map(|latest| latest.state.clone())
+                .unwrap_or_else(|| serde_json::json!({}));
+            if !payload.is_object() {
+                payload = serde_json::json!({});
+            }
+            if let Some(object) = payload.as_object_mut() {
+                object.insert("available".to_string(), serde_json::Value::Bool(available));
+                if !available {
+                    object.insert(
+                        "availability_reason".to_string(),
+                        serde_json::Value::String(message.to_string()),
+                    );
+                }
+            }
+            let event = ServiceEvent::Updated {
+                service: interface.to_string(),
+                source_module: provider_id.to_string(),
+                payload: payload.clone(),
+            };
+            self.latest_service_state.insert(
+                interface.to_string(),
+                LatestServiceState::new(interface.to_string(), provider_id.to_string(), payload),
+            );
+            if deliver {
+                match self.deliver_service_event(&event) {
+                    Ok(requests) => self.deferred_requests.extend(requests),
+                    Err(error) => tracing::warn!(
+                        interface,
+                        provider_id,
+                        "failed to deliver backend availability transition: {error}"
+                    ),
+                }
+            }
+        }
+
+        let health_event = ServiceEvent::InterfaceEvent {
+            service: interface.to_string(),
+            source_module: provider_id.to_string(),
+            name: "health".to_string(),
+            payload: serde_json::json!({
+                "interface": interface,
+                "provider_id": provider_id,
+                "state": health_state,
+                "reason": message,
+                "recoverable": recoverable,
+            }),
+        };
+        self.latest_service_health
+            .insert(interface.to_string(), health_event.clone());
+        if deliver {
+            match self.deliver_service_event(&health_event) {
+                Ok(requests) => self.deferred_requests.extend(requests),
+                Err(error) => tracing::warn!(
+                    interface,
+                    provider_id,
+                    "failed to deliver backend health transition: {error}"
+                ),
+            }
+        }
     }
 
     pub(in crate::shell) fn stop_backend_runtime(&mut self, interface: &str) {
+        self.stop_backend_runtime_with_health(interface, false);
+    }
+
+    fn stop_backend_runtime_with_health(&mut self, interface: &str, publish_health: bool) {
         self.service_handlers.remove(interface);
         if let Some(slot) = self.backend_runtimes.remove(interface) {
             slot.task.abort();
@@ -76,11 +280,12 @@ impl Shell {
                 })
                 .unwrap_or(false);
             if !terminal_failure_already_recorded {
-                self.record_backend_runtime_status(
+                self.record_backend_runtime_status_with_health(
                     slot.interface,
                     slot.provider_id,
                     BackendRuntimeStatus::Stopped,
                     "runtime stopped".to_string(),
+                    publish_health,
                 );
             }
         }
@@ -91,7 +296,12 @@ impl Shell {
         interface: String,
         slot: BackendRuntimeSlot,
     ) {
-        self.stop_backend_runtime(&interface);
+        if let Some(state) = self.backend_supervision.get_mut(&interface) {
+            state.invalidate_pending_restart();
+        }
+        // A ready replacement takes over without an observable unavailable
+        // gap between the old and new provider.
+        self.stop_backend_runtime_with_health(&interface, false);
         self.service_handlers
             .insert(interface.clone(), slot.command_tx.clone());
         self.backend_runtimes.insert(interface, slot);

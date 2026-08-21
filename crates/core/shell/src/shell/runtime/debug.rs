@@ -22,6 +22,10 @@ impl Shell {
                 id: inst.manifest.package.id.clone(),
                 module_type: format!("{:?}", inst.manifest.package.module_type).to_lowercase(),
                 state: inst.state.to_string(),
+                health: inst.health().state.to_string(),
+                static_health: inst.static_health.state.to_string(),
+                runtime_health: inst.runtime_health.state.to_string(),
+                quarantined: inst.quarantined,
                 error_count: inst.error_count,
                 last_error: inst.last_error.clone(),
             })

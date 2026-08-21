@@ -102,7 +102,7 @@ impl Shell {
     /// Provider switches use this to keep the old runtime serving until the
     /// candidate has completed its script initialization.
     pub(in crate::shell) fn start_backend_candidate(
-        &self,
+        &mut self,
         runtime: &tokio::runtime::Handle,
         tx: mpsc::UnboundedSender<ShellMessage>,
         candidate: BackendLaunchCandidate,
@@ -119,13 +119,22 @@ impl Shell {
     }
 
     pub(in crate::shell) fn start_backend_candidate_with_event_id(
-        &self,
+        &mut self,
         runtime: &tokio::runtime::Handle,
         tx: mpsc::UnboundedSender<ShellMessage>,
         candidate: BackendLaunchCandidate,
         eventfd_fd: std::os::unix::io::RawFd,
         initial_event_provider_id: String,
     ) -> BackendRuntimeSlot {
+        if let Some(module) = self.modules.get_mut(&candidate.module_id) {
+            module.clear_quarantine();
+            if let Err(error) = module.mark_loaded() {
+                tracing::debug!(
+                    module_id = candidate.module_id.as_str(),
+                    "backend candidate did not enter loaded state: {error}"
+                );
+            }
+        }
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
         let shell_tx = tx.clone();

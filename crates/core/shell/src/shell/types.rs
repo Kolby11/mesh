@@ -339,6 +339,8 @@ pub(super) enum ShellMessage {
     /// best available provider.
     BackendRestartDue {
         interface: String,
+        provider_id: String,
+        restart_generation: u64,
     },
     FilesystemChanged,
     Ipc(CoreRequest),

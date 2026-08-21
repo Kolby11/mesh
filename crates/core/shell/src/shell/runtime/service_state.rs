@@ -76,14 +76,7 @@ impl Shell {
             .is_some_and(|slot| slot.provider_id != source_module)
             || self
                 .backend_runtime_status(&interface, &source_module)
-                .is_some_and(|entry| {
-                    matches!(
-                        entry.status,
-                        BackendRuntimeStatus::InitFailed
-                            | BackendRuntimeStatus::Failed
-                            | BackendRuntimeStatus::Stopped
-                    )
-                })
+                .is_some_and(|entry| entry.status.rejects_provider_messages())
         {
             return ServiceEvent::Updated {
                 service: interface,
@@ -143,14 +136,7 @@ impl Shell {
             }
         } else if self
             .backend_runtime_status(interface.as_ref(), source_module)
-            .is_some_and(|entry| {
-                matches!(
-                    entry.status,
-                    BackendRuntimeStatus::InitFailed
-                        | BackendRuntimeStatus::Failed
-                        | BackendRuntimeStatus::Stopped
-                )
-            })
+            .is_some_and(|entry| entry.status.rejects_provider_messages())
         {
             tracing::debug!(
                 interface = interface.as_ref(),
@@ -414,19 +400,22 @@ impl Shell {
         name: String,
         payload: serde_json::Value,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        if let Some(slot) = self.backend_runtimes.get(&interface)
-            && *slot
+        let provider_is_active = self.backend_runtimes.get(&interface).is_some_and(|slot| {
+            *slot
                 .event_provider_id
                 .read()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
-                != provider_id
-        {
+                == provider_id
+        });
+        let provider_is_terminal = self
+            .backend_runtime_status(&interface, &provider_id)
+            .is_some_and(|entry| entry.status.rejects_provider_messages());
+        if !provider_is_active || provider_is_terminal {
             tracing::debug!(
                 interface,
                 provider_id,
-                active_provider = %slot.provider_id,
                 event = name,
-                "ignoring interface event from inactive provider"
+                "ignoring interface event from inactive or terminal provider"
             );
             return Ok(VecDeque::new());
         }
@@ -509,6 +498,14 @@ impl Shell {
                     source_module: latest.provider_id.clone(),
                     payload: latest.state.clone(),
                 };
+                requests.extend(self.deliver_service_event(&event)?);
+            }
+            let latest_service_health = self
+                .latest_service_health
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            for event in latest_service_health {
                 requests.extend(self.deliver_service_event(&event)?);
             }
             Ok(())

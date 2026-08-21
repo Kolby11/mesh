@@ -3,7 +3,7 @@ pub mod lifecycle;
 pub mod manifest;
 pub mod package;
 
-pub use lifecycle::{ModuleInstance, ModuleState};
+pub use lifecycle::{ModuleHealthRecord, ModuleHealthState, ModuleInstance, ModuleState};
 pub use manifest::{
     AccessibilitySection, ComponentExport, DependencyGraphError, ExportsSection,
     ExtensionPointContribution, HostedExtensionPoint, IconRequirementsSection, KeybindAction,
